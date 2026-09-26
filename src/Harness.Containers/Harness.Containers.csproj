@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Harness.Contracts\Harness.Contracts.csproj" />
+  </ItemGroup>
+
+  <!-- Note what is NOT here: no reference to Harness.Messaging. A container depends on the
+       CONTRACT for the log, never on the implementation, which is what allows the store behind it to
+       change and what keeps this project testable without a database. -->
+
+</Project>

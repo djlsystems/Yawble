@@ -1,0 +1,60 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup Label="Test">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.1" />
+    <PackageVersion Include="xunit.v3.assert" Version="4.0.1" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="4.0.1" />
+    <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.1" />
+
+    <!-- Boots the real Host in memory, including WebSocket upgrades, which CreateWebSocketClient
+         makes possible and a plain HttpClient cannot do against TestServer. -->
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+
+    <!-- A real SignalR client, for HubGroupTests against KestrelHost. TestServer's in-memory
+         sockets cannot verify a socket-level HubException refusal - see KestrelHost's own doc
+         comment - so this has to speak the actual protocol over the actual loopback port. -->
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0" />
+
+    <!-- A REAL BROWSER, for Harness.Ui.Tests. It drives the BUILT bundle served by a real Host
+         on a real socket - never `npm run dev`, and not as a preference:
+         a child started inside an agent invocation joins a job object and dies with it, so a
+         dev-server suite would work on a desktop and break the moment a member ran it. The Host
+         here is owned by the test, which is a process that is SUPPOSED to die with the run.
+
+         The base package, NOT Microsoft.Playwright.Xunit: that one brings its own fixture model,
+         and this repository has its own. Assertions come from Microsoft.Playwright.Assertions, which is
+         in here. -->
+    <PackageVersion Include="Microsoft.Playwright" Version="1.62.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Runtime">
+    <PackageVersion Include="Cronos" Version="0.13.0" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+
+    <!-- Harness.Pty's dependency. A project resolves central package versions from its OWN
+         location, so the pin has to live in this file for the build to find it. -->
+    <PackageVersion Include="Porta.Pty" Version="1.0.7" />
+
+    <!-- Microsoft.Data.Sqlite 10.0.10
+         resolves SQLitePCLRaw.lib.e_sqlite3 2.1.11 transitively, and that version carries a known
+         high-severity advisory (GHSA-2m69-gcr7-jv3q). NuGet audit findings are build errors in this
+         repository, so it is pinned forward to the patched release rather than suppressed. Drop the
+         pin once Microsoft.Data.Sqlite resolves a patched lib on its own. -->
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
+
+    <!-- PasswordHasher<T> only. This package carries no EF Core dependency, which is the whole
+         reason it is here rather than Microsoft.AspNetCore.Identity.EntityFrameworkCore: we decline
+         to own password hashing without taking on a second storage mechanism. -->
+    <PackageVersion Include="Microsoft.Extensions.Identity.Core" Version="10.0.0" />
+
+    <!-- HTTP MCP server in the host. Agents call tools here; there is no platform CLI. -->
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+
+    <!-- Renders a Markdown document for `GET .../documents/view`, with raw HTML disabled. -->
+    <PackageVersion Include="Markdig" Version="1.4.0" />
+  </ItemGroup>
+</Project>

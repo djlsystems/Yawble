@@ -1,0 +1,66 @@
+using System.Security.Cryptography;
+using System.Text;
+using Harness.Host;
+
+namespace Harness.Tests;
+
+/// <summary>
+/// A SHIPPED SCHEMA STEP IS NEVER EDITED.
+///
+/// The migrator records only a step's id, so a database that applied `auth-001` never runs an edited
+/// `auth-001` again: the edit reaches fresh volumes and silently misses every existing one. A change
+/// is a NEW step. This holds the SQL of every step that has shipped to the hash it shipped with;
+/// adding a step adds a line here, editing one fails.
+/// </summary>
+public sealed class ShippedSchemaStepsTests
+{
+    private static readonly Dictionary<string, string> Shipped = new(StringComparer.Ordinal)
+    {
+        ["messages-001"] = "405bfd0b5d7180af4cd6844c31d5d6a2e58c2cc385aaae83a5798b782e3feb9a",
+        ["auth-001"] = "c2e86a37e99a689f95c32134db882b3add91e4775c1516c759ee1758482d374d",
+        ["auth-002"] = "e1b6b1e9b3dab445585d7658667e95067126053948aaf4a0e3ebfd6f500605b4",
+        ["auth-003"] = "a632d0adfee1aae846161316f552e5d72a91a586935a7c51dc45c39d624869d5",
+        ["auth-004"] = "e2568b08eac35edae23585337a69afd7e81758164974393ccced3e509653d908",
+        ["auth-005"] = "acdc38710039bf6fdf6f0916375316cab9d8389222213da6dd064c5e5eb4d5dc",
+        ["auth-006"] = "563d0590c714b8f41c4ee044e5f10d4958c6eb25283856560968b49233c0f154",
+        ["auth-007"] = "07d2f36f8efc56eef9795b16a1a0916dc10a940e332319e13172f2850e53e852",
+        ["skill-001"] = "43d1e6d741db4f371cbc11722e5c782c62892118b1f480206a8961e28b011d0e",
+        ["skill-002"] = "c489c729453566533b3d2301a0e04b90025074284dc9b78dce8847991abcc726",
+        ["backlog-001"] = "5441f611093ed242108fe8766197adb7d17b988269749b63a05362ee410afdf3",
+    };
+
+    [Fact]
+    public void A_shipped_step_is_never_edited()
+    {
+        var drift = new List<string>();
+
+        foreach (var step in SchemaModules.All)
+        {
+            var hash = Hash(step.Sql);
+
+            if (!Shipped.TryGetValue(step.Id, out var pinned))
+            {
+                drift.Add($"[\"{step.Id}\"] = \"{hash}\",  // new step: add this line");
+            }
+            else if (pinned != hash)
+            {
+                drift.Add($"{step.Id} was edited after it shipped (was {pinned}, now {hash}). "
+                    + "Revert it and add a new step instead.");
+            }
+        }
+
+        Assert.True(drift.Count == 0, string.Join(Environment.NewLine, drift));
+    }
+
+    [Fact]
+    public void Every_pinned_step_is_still_handed_to_the_migrator()
+    {
+        var ids = SchemaModules.All.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+
+        Assert.All(Shipped.Keys, id => Assert.Contains(id, ids));
+    }
+
+    // Line endings normalised so a checkout's autocrlf cannot read as an edit.
+    private static string Hash(string sql) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sql.Replace("\r\n", "\n"))));
+}

@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- This project references NOTHING, and that is the rule the whole structure rests on. Every
+       feature module depends on this assembly; no feature module depends on another. A package
+       reference added here becomes a version every future module must agree on, which is exactly
+       the coupling a plugin boundary would otherwise be introduced to remove -->
+
+</Project>

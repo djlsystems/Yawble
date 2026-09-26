@@ -1,0 +1,268 @@
+// @vitest-environment happy-dom
+//
+// SKILLS. One table of two kinds: Custom by default, built-ins behind "Show built-in" and
+// opened read-only. A new skill must choose its roles (member by default), its name follows the
+// skill store's rule, and the server's refusal sentence is shown as written.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { listSkillsPage, createSkill, updateSkill, deleteSkill } = vi.hoisted(() => ({
+  listSkillsPage: vi.fn(),
+  createSkill: vi.fn(),
+  updateSkill: vi.fn(),
+  deleteSkill: vi.fn(),
+}));
+
+vi.mock('../../api/client', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listSkillsPage,
+  createSkill,
+  updateSkill,
+  deleteSkill,
+}));
+
+import SkillsDialog from '../SkillsDialog.vue';
+import type { SkillKindFilter, SkillRecord } from '../../api/types';
+import { flushPromises } from '@vue/test-utils';
+import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { blur, button, field, hasError, isDisabled, settle, type } from '../../test/formProbe';
+
+/** QVirtualScroll lays out its slice on a 35ms debounce, so a row is on the page only after it. */
+async function layout() {
+  await flushPromises();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await flushPromises();
+}
+
+async function mountSkills() {
+  const wrapper = await mountDialog(SkillsDialog);
+  await layout();
+  return wrapper;
+}
+
+const custom: SkillRecord = {
+  id: 20,
+  name: 'code-review',
+  description: 'Reviewing a diff',
+  roles: ['member'],
+  kind: 'custom',
+  body: 'Read the diff.',
+  updatedAt: '2026-09-20T10:00:00Z',
+  updatedBy: 'kofi@example.com',
+};
+
+const builtIn: SkillRecord = {
+  id: 3,
+  name: 'worktrees',
+  description: 'Cutting a tree',
+  roles: ['member'],
+  kind: 'builtin',
+  body: 'Built-in body',
+  updatedAt: null,
+  updatedBy: null,
+};
+
+beforeEach(() => {
+  listSkillsPage.mockReset();
+  listSkillsPage.mockImplementation(async (query: { kind: SkillKindFilter }) =>
+    query.kind === 'custom' ? [custom] : [custom, builtIn],
+  );
+  createSkill.mockReset();
+  createSkill.mockResolvedValue(custom);
+  updateSkill.mockReset();
+  updateSkill.mockResolvedValue(custom);
+  deleteSkill.mockReset();
+  deleteSkill.mockResolvedValue(undefined);
+});
+
+afterEach(resetBody);
+
+function headers(): string[] {
+  return [...document.body.querySelectorAll('thead th')].map((th) => th.textContent?.trim() ?? '');
+}
+
+function row(name: string): HTMLElement {
+  const found = document.body.querySelector<HTMLElement>(`tr[data-skill="${name}"]`);
+  if (!found) throw new Error(`no row for ${name}`);
+  return found;
+}
+
+function hasButton(label: string): boolean {
+  try {
+    button(label);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function toggleBuiltIn() {
+  const toggle = [...document.body.querySelectorAll<HTMLElement>('.q-toggle')]
+    .find((candidate) => candidate.textContent?.includes('Show built-in'));
+  if (!toggle) throw new Error('no Show built-in toggle');
+  toggle.click();
+  await layout();
+}
+
+async function openCreate() {
+  const wrapper = await mountSkills();
+  button('Add a skill').click();
+  await settle();
+  return wrapper;
+}
+
+describe('SkillsDialog table, mounted', () => {
+  it('is a table of Name, Description, Roles, Kind and Last modified', async () => {
+    const wrapper = await mountSkills();
+
+    expect(headers()).toEqual(['Name', 'Description', 'Roles', 'Kind', 'Last modified']);
+    const cells = [...row('code-review').querySelectorAll('td')].map((td) => td.textContent?.trim());
+    expect(cells[0]).toBe('code-review');
+    expect(cells[1]).toBe('Reviewing a diff');
+    expect(cells[2]).toBe('Member');
+    expect(cells[3]).toBe('Custom');
+    expect(cells[4]).toContain('by kofi@example.com');
+
+    wrapper.unmount();
+  });
+
+  it('asks for Custom skills by default, through the cursor', async () => {
+    const wrapper = await mountSkills();
+
+    expect(listSkillsPage).toHaveBeenCalled();
+    const [query, before, take] = listSkillsPage.mock.calls[0]!;
+    expect(query).toMatchObject({ kind: 'custom' });
+    expect(before).toBeUndefined();
+    expect(take).toBe(50);
+    expect(bodyText()).not.toContain('worktrees');
+
+    wrapper.unmount();
+  });
+
+  it('shows built-ins when asked, and a built-in opens read-only', async () => {
+    const wrapper = await mountSkills();
+
+    await toggleBuiltIn();
+
+    expect(listSkillsPage.mock.calls.at(-1)![0]).toMatchObject({ kind: 'all' });
+    expect(row('worktrees').textContent).toContain('Built-in');
+
+    row('worktrees').click();
+    await settle();
+
+    expect(bodyText()).toContain('cannot be edited');
+    expect(hasButton('Save')).toBe(false);
+    expect(hasButton('Delete')).toBe(false);
+    expect(field('Name').hasAttribute('readonly')).toBe(true);
+    expect(field('Body').hasAttribute('readonly')).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('offers no Scope, Team, gated or drift controls', async () => {
+    const wrapper = await openCreate();
+
+    expect(bodyText()).not.toContain('Scope');
+    expect(bodyText()).not.toContain('Team');
+    expect(bodyText()).not.toMatch(/gated/i);
+    expect(bodyText()).not.toContain('differs from this build');
+    expect(hasButton('Reindex')).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('opens a custom skill for editing, with Delete', async () => {
+    const wrapper = await mountSkills();
+
+    row('code-review').click();
+    await settle();
+
+    expect(hasButton('Save')).toBe(true);
+    await type('Description', 'Reviewing a diff carefully');
+    button('Save').click();
+    await settle();
+
+    expect(updateSkill).toHaveBeenCalledWith('code-review', {
+      name: 'code-review',
+      description: 'Reviewing a diff carefully',
+      roles: ['member'],
+      body: 'Read the diff.',
+    });
+
+    wrapper.unmount();
+  });
+
+  it('deletes a custom skill', async () => {
+    const wrapper = await mountSkills();
+
+    row('code-review').click();
+    await settle();
+    button('Delete').click();
+    await settle();
+
+    expect(deleteSkill).toHaveBeenCalledWith('code-review');
+
+    wrapper.unmount();
+  });
+});
+
+describe('SkillsDialog editor, mounted', () => {
+  it('disables Save while the form is empty', async () => {
+    const wrapper = await openCreate();
+
+    expect(isDisabled('Save')).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('creates a Custom skill for members unless told otherwise', async () => {
+    const wrapper = await openCreate();
+
+    await type('Name', 'release-notes');
+    await type('Description', 'Writing release notes');
+    expect(isDisabled('Save')).toBe(false);
+
+    button('Save').click();
+    await settle();
+
+    expect(createSkill).toHaveBeenCalledWith({
+      name: 'release-notes',
+      description: 'Writing release notes',
+      roles: ['member'],
+      body: '',
+    });
+
+    wrapper.unmount();
+  });
+
+  it('refuses a name the skill store refuses, under the field', async () => {
+    const wrapper = await openCreate();
+
+    await type('Name', 'Code_Review');
+    await blur('Name');
+    await type('Description', 'Reviewing a diff');
+
+    expect(hasError('Name')).toBe(true);
+    expect(bodyText()).toContain('Skill names use lowercase letters');
+    expect(isDisabled('Save')).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it("shows the server's sentence and marks the name when it answers 409", async () => {
+    createSkill.mockRejectedValue(
+      Object.assign(new Error("'worktrees' is a built-in skill; choose another name."), { status: 409 }),
+    );
+    const wrapper = await openCreate();
+
+    await type('Name', 'worktrees');
+    await type('Description', 'Mine');
+    button('Save').click();
+    await settle();
+
+    expect(createSkill).toHaveBeenCalledTimes(1);
+    expect(hasError('Name')).toBe(true);
+    expect(document.body.querySelector('.q-banner')?.textContent).toContain('is a built-in skill');
+
+    wrapper.unmount();
+  });
+});

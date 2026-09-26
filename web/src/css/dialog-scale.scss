@@ -1,0 +1,30 @@
+// THE DIALOG SCALE. Every dialog card carries exactly one of these four classes and sets no width
+// of its own. The sizes are `--os-dialog-sm/md/lg/xl` (26/34/46/72rem), defined with the other
+// tokens in `app.scss`; this file only applies them. No fallbacks: a second copy of the numbers
+// here would drift from the tokens.
+//
+// Global rather than scoped because it is one rule for every dialog, and its own file rather than
+// `app.scss` so the tokens and their use can move independently.
+//
+// `.q-dialog__inner > ` is load-bearing. Quasar caps a minimized dialog at 560px from 600px up with
+// `.q-dialog__inner--minimized > div`, which outranks a bare class: without the parent here every
+// lg and xl dialog would silently stop at 560px.
+.q-dialog__inner > .os-dialog-sm,
+.q-dialog__inner > .os-dialog-md,
+.q-dialog__inner > .os-dialog-lg,
+.q-dialog__inner > .os-dialog-xl {
+  max-width: calc(100vw - 32px);
+}
+
+.q-dialog__inner > .os-dialog-sm { width: var(--os-dialog-sm); }
+.q-dialog__inner > .os-dialog-md { width: var(--os-dialog-md); }
+.q-dialog__inner > .os-dialog-lg { width: var(--os-dialog-lg); }
+.q-dialog__inner > .os-dialog-xl { width: var(--os-dialog-xl); }
+
+// Quasar pads a minimized dialog 24px a side, which is 48px against the 32px the cap above leaves.
+// On a phone the card would overhang its own padding; 16px a side makes the two agree.
+@media (max-width: 599.98px) {
+  .q-dialog__inner--minimized {
+    padding: 16px;
+  }
+}

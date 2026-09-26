@@ -1,0 +1,47 @@
+// The palette, and the typefaces Quasar itself reaches for.
+//
+// THE ACCENT IS THE LOGO'S OWN COLOUR (`public/logo-light.png`), rather than the scaffold's
+// Material Blue default, so the interface agrees with its own mark.
+//
+// `#e83b00` is the value measured from the logo artwork. `app.scss` hands it on as
+// `--os-primary`; set it here and nowhere else.
+
+$primary   : #e83b00;
+
+// A muted slate for anything that is STATE rather than an action. It is deliberately quiet: the
+// accent above is loud enough that a second saturated hue beside it would leave nothing dominant,
+// and this app's surfaces are dense - a board of cards, an activity feed, three list dialogs.
+$secondary : #5b6470;
+
+// Kept close to the accent rather than complementary. `accent` is used for occasional emphasis, and
+// a genuinely contrasting hue would be a second brand colour by accident.
+$accent    : #b8300a;
+
+// Quasar's own dark surfaces, set to the dark tokens' surface and paper in `app.scss`, so a Quasar
+// component that paints itself `dark` and a component that reads `--os-surface` are the same colour.
+$dark      : #1b1613;
+$dark-page : #14110f;
+
+// SEMANTIC COLOUR IS NOT THE ACCENT, and that separation is load-bearing here rather than a
+// convention. The accent is a hot vermilion and `negative` is a red, so they sit close enough to be
+// confused - which matters because `negative` marks a container that FAILED. It is pushed to a
+// deeper crimson so a failed card and a running one cannot be mistaken for each other at a glance,
+// and `positive` is desaturated to match the register rather than shouting back.
+//
+// `negative` leans toward crimson-magenta, so failed still separates from the measured
+// vermilion on a dark ground as well as a light one.
+$positive  : #2e8b57;
+$negative  : #b8123f;
+$info      : #3b6ea5;
+$warning   : #c98a12;
+
+// The stacks Quasar composes into `$typography-font-family`. Plex is self-hosted through
+// @fontsource - see quasar.config.ts's own note on why a font CDN is the wrong answer for a
+// local-first tool - and every fallback here is a face that already exists on the platform, so a
+// missing download degrades to something readable rather than to Times.
+$typography-font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+// Not a Quasar variable - declared here so `app.scss` and any component can reach one spelling of
+// it. THE MONO FACE IS NOT DECORATION: it marks a value the machine addresses, and the rule it
+// serves is written out in app.scss.
+$mono-font-family: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;

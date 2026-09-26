@@ -1,0 +1,55 @@
+{
+  "name": "harness-web",
+  "version": "0.0.1",
+  "author": "DJL Systems, Inc.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "quasar dev",
+    "build": "quasar build",
+    "typecheck": "vue-tsc --noEmit",
+    "postinstall": "quasar prepare --silent",
+    "test": "vitest run",
+    "icons:subset": "node scripts/subset-icons.mjs"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@microsoft/signalr": "^10.0.11",
+    "@quasar/extras": "^2.0.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "pinia": "^4.0.2",
+    "quasar": "^2.24.0",
+    "vue": "^3.5.22",
+    "vue-router": "^5.0.6"
+  },
+  "devDependencies": {
+    "@quasar/app-vite": "^3.5.0",
+    "@quasar/quasar-app-extension-testing-unit-vitest": "^3.0.0",
+    "@types/node": "^22.19.11",
+    "@vue/test-utils": "^2.5.1",
+    "autoprefixer": "^10.4.27",
+    "happy-dom": "^20.14.5",
+    "harfbuzzjs": "^1.6.2",
+    "postcss": "^8.5.8",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.3",
+    "wawoff2": "^2.0.1"
+  },
+  "keywords": [
+    "quasar",
+    "quasar-app",
+    "quasar-cli",
+    "quasar-app-vite",
+    "vite",
+    "vue",
+    "vuejs"
+  ],
+  "engines": {
+    "node": ">= 26 || ^24 || ^22.12"
+  },
+  "productName": "Yawble",
+  "description": "A harness and core for agent teams"
+}

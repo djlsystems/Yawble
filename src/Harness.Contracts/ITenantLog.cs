@@ -1,0 +1,282 @@
+namespace Harness.Contracts;
+
+/// <summary>One administrative act. <paramref name="ActorEmail"/> and <paramref name="SubjectName"/>
+/// are DENORMALISED copies, not joins - the whole point of this record is to survive the account or
+/// the team it names.</summary>
+public sealed record TenantEvent(
+    long Seq,
+    DateTimeOffset OccurredAt,
+    string? ActorId,
+    string? ActorEmail,
+    string Action,
+    string? Subject,
+    string? SubjectName,
+    string? Detail);
+
+/// <summary>One page of the tenant log, and how many rows there are in total.</summary>
+public sealed record TenantLogPage(IReadOnlyList<TenantEvent> Events, long Total);
+
+/// <summary>
+/// The verbs. Constants rather than free strings, because a log filtered or read by a human is a log
+/// whose vocabulary has to be stable - a stray <c>team.delete</c> beside <c>team.deleted</c> is two
+/// answers to one question, and nothing would ever fail.
+/// </summary>
+public static class TenantActions
+{
+    public const string SignedIn = "user.signed-in";
+    public const string SignedOut = "user.signed-out";
+    public const string UserCreated = "user.created";
+    public const string UserChanged = "user.changed";
+    public const string UserDeleted = "user.deleted";
+    public const string PasswordReset = "user.password-reset";
+
+    /// <summary>A person changed an instance-wide setting. Subject is the setting's name;
+    /// detail carries <c>setting</c>, <c>old</c> and <c>new</c>.</summary>
+    public const string TenantSettingChanged = "tenant.settingChanged";
+
+    public const string TeamCreated = "team.created";
+    public const string TeamRelabelled = "team.renamed";
+    public const string TeamDeleted = "team.deleted";
+    public const string TeamPaused = "team.paused";
+    public const string TeamResumed = "team.resumed";
+
+    /// <summary>A person changed what this team may spend on ONE workflow.</summary>
+    public const string TeamBudgetChanged = "team.budgetChanged";
+
+    /// <summary>A team's substrate was reset under its Agent Containers. Its own verb rather than a
+    /// flavour of a change, because it is the one act short of deletion that can permanently remove
+    /// message rows - and an audit asking "who wiped this team's history" has to find it by name.
+    /// </summary>
+    public const string TeamReset = "team.reset";
+
+    /// <summary>
+    /// A team was created carrying another team's configuration. Its own verb rather than a
+    /// <c>team.created</c> with a detail field, because the question an audit asks is "where did
+    /// this team's settings come from" - and a row that only says "created" cannot answer it. The
+    /// detail names the SOURCE, which outlives the source's own deletion for the reason every
+    /// subject on this table is denormalised.
+    /// </summary>
+    public const string TeamCloned = "team.cloned";
+    public const string ConciergeChanged = "team.concierge-changed";
+
+    /// <summary>Which Agent a team's NEW members run. Its own verb rather than folded into a rename,
+    /// because it is its own act and the log is read to answer "who changed what".</summary>
+    public const string TeamMemberAgentChanged = "team.member-agent-changed";
+
+    public const string TeamMemberPromptChanged = "team.member-prompt-changed";
+
+    /// <summary>
+    /// The backlog's own acts. THE ITEM IS THE SPEC, so creating, editing and deleting one are
+    /// administrative acts on the tenant's work rather than work themselves - which is what puts
+    /// them here rather than on the message log. Nothing subscribes to a tenant event and nothing
+    /// wakes from one.
+    ///
+    /// A REORDER IS DELIBERATELY NOT AUDITED. It is not a change to what the work IS, it happens
+    /// many times in a sitting, and a table every person reads is not improved by a hundred
+    /// rows saying somebody dragged something. The same call switching team is already recorded as
+    /// not being a server action.
+    /// </summary>
+    public const string BacklogItemCreated = "backlog.item-created";
+
+    public const string BacklogItemEdited = "backlog.item-edited";
+    public const string BacklogItemArchived = "backlog.item-archived";
+    public const string BacklogItemRestored = "backlog.item-restored";
+
+    /// <summary>Its own verb rather than a flavour of an edit, for the reason <c>TeamReset</c> is:
+    /// it is the one backlog act that permanently removes something, and an audit asking "where did
+    /// B000H go" has to find it by name.</summary>
+    public const string BacklogItemDeleted = "backlog.item-deleted";
+
+    /// <summary>An item was handed to a team. The SEQ of the row it wrote on the message log is the
+    /// workflow's correlation root, so this is the administrative half of an act whose causal half
+    /// lives on the other log entirely.</summary>
+    public const string BacklogItemDispatched = "backlog.item-dispatched";
+
+    public const string MemberAdded = "member.added";
+    public const string MemberChanged = "member.changed";
+    public const string MemberDeleted = "member.deleted";
+
+    public const string AgentsSaved = "agents.saved";
+
+    /// <summary>A custom skill was created, changed or deleted. Built-ins are never written.</summary>
+    public const string SkillCreated = "skill.created";
+    public const string SkillChanged = "skill.changed";
+    public const string SkillDeleted = "skill.deleted";
+
+    /// <summary>A person deleted a document, a folder, or a gone team's whole documents folder
+    /// Written BEFORE the delete, which does not happen when this row cannot be.</summary>
+    public const string DocumentsDeleted = "documents.deleted";
+
+    /// <summary>A team's additional instructions changed.</summary>
+    public const string TeamInstructionsChanged = "team.instructions-changed";
+
+    /// <summary>A person put the Agent catalog back to this build's built-in seed. Carries
+    /// counts and nothing else - what moved, what broke, how many - because a Prompt is words
+    /// somebody wrote and this table is readable by every person and kept forever.</summary>
+    public const string AgentsResetToSeed = "agents.reset-to-seed";
+
+    public const string ScheduleCreated = "schedule.created";
+    public const string ScheduleChanged = "schedule.changed";
+    public const string ScheduleDeleted = "schedule.deleted";
+    public const string ScheduleFired = "schedule.fired";
+    public const string ScheduleSkipped = "schedule.skipped";
+    public const string ScheduleMissed = "schedule.missed";
+    public const string ScheduleMemberMissing = "schedule.member-missing";
+
+    /// <summary>A person minted a credential for themselves. The row carries the key's id, its
+    /// label and its prefix - never the credential, which is the one thing this log must never
+    /// hold.</summary>
+    public const string KeyMinted = "key.minted";
+
+    public const string KeyRevoked = "key.revoked";
+
+    public const string SweepRunningWithoutProgress = "sweep.running-no-progress";
+    public const string SweepPendingNeverTerminal = "sweep.pending-never-terminal";
+    public const string SweepQuietTeam = "sweep.quiet-team";
+    public const string SweepRunningWithoutProgressCleared = "sweep.running-no-progress-cleared";
+    public const string SweepPendingNeverTerminalCleared = "sweep.pending-never-terminal-cleared";
+    public const string SweepQuietTeamCleared = "sweep.quiet-team-cleared";
+
+    /// <summary>
+    /// A team declared its workflow complete while its clone still holds commits that are not on
+    /// its own `origin/main` tracking ref. The LOCAL half only: the tracking ref is updated BY a
+    /// successful push, so being ahead of it is already conclusive, and asking the network instead
+    /// would put `git ls-remote` and its failure modes inside a background sweep -- a detector that
+    /// reports a finding because GitHub was briefly unreachable is one nobody trusts.
+    /// </summary>
+    public const string SweepWrapUpNotPushed = "sweep.wrap-up-not-pushed";
+    public const string SweepWrapUpNotPushedCleared = "sweep.wrap-up-not-pushed-cleared";
+
+    /// <summary>
+    /// Repository maintenance actions: bring clone current, merge to main, and cleanup worktrees.
+    /// Detail JSON: { "repo": "...", "sha": "...", "refused": bool, "reason": string | null }
+    /// </summary>
+    public const string RepoBringCurrent = "repo.bring-current";
+    public const string RepoMergeToMain = "repo.merge-to-main";
+    public const string RepoCleanupWorktrees = "repo.cleanup-worktrees";
+    public const string RepoFetch = "repo.fetch";
+    public const string RepoRebase = "repo.rebase";
+    public const string RepoPush = "repo.push";
+
+    /// <summary>A person set or cleared a repository's default branch in Team settings.</summary>
+    public const string RepoDefaultBranchSet = "repo.default-branch-set";
+
+    /// <summary>A person set a repository's contributor settings in Team settings.</summary>
+    public const string RepoContributorSet = "repo.contributor-set";
+
+    /// <summary>A person pressed Open pull request in the Git dialog: opened, linked or refused.</summary>
+    public const string RepoPullRequestOpen = "repo.pull-request-open";
+
+    /// <summary>A person asked GitHub to fork an upstream for a team repository.</summary>
+    public const string RepoFork = "repo.fork";
+
+    /// <summary>A person asked the team's Manager to bring main current after a rebase would conflict.</summary>
+    public const string RepoAskTeam = "repo.ask-team";
+
+    /// <summary>
+    /// The team branch was deleted from origin - refused unless it was already an ancestor of
+    /// origin/main, since that is the only thing standing between this action and losing work. The
+    /// only destructive repository action in this file; see <c>RepoEndpoints.DeleteRemoteBranchAsync</c>.
+    /// </summary>
+    public const string RepoDeleteRemoteBranch = "repo.delete-remote-branch";
+
+    /// <summary>
+    /// A `tenant_agents` row became an ordinary team, in the schema step that converts them. Written by that step's SQL as the literal `tenant-agent.converted` rather than through
+    /// <see cref="ITenantLog"/> - a migration has no <c>ITenantLog</c> and no actor - so this
+    /// constant is what keeps the verb in the vocabulary and is what the tests read it back by.
+    ///
+    /// IT IS THE ONLY RECORD OF A NARROWING. A row with `all_teams = 0` carries a per-team
+    /// allowlist, which is not supported: it becomes an ordinary team that reaches only itself, and
+    /// this row's detail names the teams the allowlist reached. Silently widening it instead would
+    /// be the worst outcome, and a narrowing nobody is told about is the second worst.
+    /// </summary>
+    public const string TenantAgentConverted = "tenant-agent.converted";
+
+    // ONLY ACTIONS SOMETHING WRITES ARE LISTED HERE. A tenant-log action nobody writes is a row type
+    // that can never appear. Rows carrying a verb not listed here still read: this table is
+    // append-only and the verbs in it can outlive the code that wrote them, which is exactly why
+    // they are strings rather than an enum.
+}
+
+/// <summary>
+/// The tenant log: who did what, administratively.
+///
+/// NOT <see cref="IMessageLog"/>, and the separation is deliberate. That one is the causal stream
+/// Agent Containers publish to and subscribe from; every type in it is <c>container.*</c>, every row
+/// carries a correlation and a cause, and a manager can be woken by one. Nothing subscribes to this,
+/// nothing wakes on it, and it has no correlation - an administrative act is not work.
+///
+/// APPEND-ONLY, and it outlives its subjects: the row saying a team was deleted has to survive the
+/// team, and the row saying an account was removed has to survive the account. There is no delete on
+/// this interface for the same reason there is none on the message log.
+///
+/// <b>Never record a secret here.</b> Every person can read it and it is kept forever, which
+/// makes it the worst place in the system for a credential, a password hash, or an Agent
+/// definition's <c>env</c>.
+/// </summary>
+public interface ITenantLog
+{
+    /// <summary>
+    /// Records one act. Takes the actor's EMAIL as well as their id so the row still reads after the
+    /// account is gone.
+    /// </summary>
+    Task WriteAsync(
+        string? actorId,
+        string? actorEmail,
+        string action,
+        string? subject = null,
+        string? subjectName = null,
+        string? detail = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// The most recent row for one (action, subject) pair, or null when there is none.
+    ///
+    /// DELIBERATELY GENERAL rather than a feature-shaped lookup. This log records administrative acts
+    /// of many kinds, and one feature's query living on everyone's interface would invite the next
+    /// feature that wants "the latest X about Y" to add a second.
+    ///
+    /// NULL IS AN ANSWER, not an error: nothing has been recorded for that pair.
+    ///
+    /// MOST RECENT WINS. A repeated act writes a new row and the newer one is the one read back.
+    /// Rows are never updated or removed - this log exists to answer questions about things that
+    /// are gone.
+    /// </summary>
+    Task<TenantEvent?> FindLatestAsync(
+        string action,
+        string subject,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// The most recent row for each (action, subject) pair in <paramref name="actions"/>.
+    ///
+    /// DELIBERATELY GENERAL for the same reason as <see cref="FindLatestAsync"/>: this is "latest
+    /// by pair" as a log operation, not a feature-shaped read. Taking a set keeps callers from
+    /// looping the singular and repeating one query shape N times.
+    ///
+    /// Subject MUST be non-null. Rows without a subject answer a different question ("something
+    /// happened"), and mixing them here would collapse distinct acts onto one null key.
+    ///
+    /// Empty actions returns empty and does not hit storage. "No actions asked for" is a complete
+    /// answer, not an error.
+    /// </summary>
+    Task<IReadOnlyList<TenantEvent>> FindLatestBySubjectAsync(
+        IReadOnlyCollection<string> actions,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// One page, most recent first: rows with seq below <paramref name="before"/>, or from the
+    /// newest when it is null, with the TOTAL beside it as a caption.
+    /// </summary>
+    /// <remarks>
+    /// A SEQ CURSOR, not an offset. Rows are only ever APPENDED and this reads newest-first,
+    /// so under an offset anything written while somebody is scrolling shifts every older row
+    /// one place back and the seam between two pages shows a row twice. A cursor is stable
+    /// against that, and an infinite list never needed "how many pages". The next page's cursor is
+    /// the last row's seq. <paramref name="take"/> is clamped to 1..<see cref="MaxTake"/>.
+    /// </remarks>
+    Task<TenantLogPage> ReadAsync(long? before = null, int take = 50, CancellationToken ct = default);
+
+    /// <summary>The most rows one <see cref="ReadAsync"/> answers.</summary>
+    public const int MaxTake = 200;
+}

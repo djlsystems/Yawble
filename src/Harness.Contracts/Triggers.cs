@@ -1,0 +1,153 @@
+namespace Harness.Contracts;
+
+/// <summary>A durable trigger row. Only platform-neutral primitives cross this boundary.</summary>
+public sealed record TriggerRow(
+    string Id,
+    string Team,
+    string Container,
+    string Name,
+    string Instruction,
+    string Kind,
+    string? Expression,
+    string? Timezone,
+    int? IntervalSeconds,
+    DateTimeOffset? FireAt,
+    bool IdleOnly,
+    bool Enabled,
+    DateTimeOffset? NextDueAt,
+    DateTimeOffset? LastFiredAt,
+    string? LastOutcome,
+    long? LastSeq,
+    int MissedCount,
+    DateTimeOffset CreatedAt,
+    string CreatedBy,
+
+    /// <summary>Which event type fires this trigger. NULL for a clock-driven one.</summary>
+    string? EventType = null,
+
+    /// <summary>
+    /// The filter, evaluated BEFORE the wake is enqueued. NULL means every message of that type.
+    /// Before, not after, and that is the whole reason it exists: a wake costs an agent invocation
+    /// and a filter costs nothing, so the container decides whether to spend and the agent decides
+    /// what to do with it.
+    /// </summary>
+    string? Filter = null,
+
+    /// <summary>`documents`, or `root:&lt;file-browser root name&gt;`. NULL unless the kind is
+    /// folderChange - and the same for every watch field below.</summary>
+    string? WatchRoot = null,
+
+    /// <summary>The watched folder, relative to <see cref="WatchRoot"/>. Empty is the root itself.</summary>
+    string? WatchPath = null,
+
+    /// <summary>Optional wildcard narrowing which files count. NULL means every file.</summary>
+    string? WatchGlob = null,
+    int? PollSeconds = null,
+    int? QuietSeconds = null,
+    int? MinIntervalSeconds = null,
+    DateTimeOffset? LastPollAt = null,
+    int? LastPollMs = null,
+    int? LastPollEntries = null,
+
+    /// <summary>A sentence when the last poll could not list the folder; NULL when it could.</summary>
+    string? LastPollError = null,
+
+    /// <summary>When this watch last PUBLISHED `file.changed`. <see cref="LastFiredAt"/> is when
+    /// that event last woke the member, which the event path records.</summary>
+    DateTimeOffset? LastChangeAt = null,
+    string? LastFingerprint = null);
+
+/// <summary>
+/// What a folder watch remembers between polls that the trigger row does not show: the listing the
+/// last fingerprint was taken from (so a change can say WHICH files moved), and a change that is
+/// still inside its quiet period.
+/// </summary>
+public sealed record FolderWatchState(
+    string? Listing,
+    string? PendingFingerprint,
+    DateTimeOffset? PendingSince);
+
+/// <summary>One poll's outcome, written by <see cref="ITriggerStore.RecordPollAsync"/> alone.</summary>
+public sealed record FolderPollRecord(
+    DateTimeOffset PolledAt,
+    int ElapsedMs,
+    int? Entries,
+    string? Error,
+    DateTimeOffset? NextDueAt,
+    string? Fingerprint,
+    string? Listing,
+    string? PendingFingerprint,
+    DateTimeOffset? PendingSince,
+    DateTimeOffset? ChangeAt);
+
+public interface ITriggerStore
+{
+    Task SaveAsync(TriggerRow row, CancellationToken ct = default);
+    Task<IReadOnlyList<TriggerRow>> ListForTeamAsync(string team, CancellationToken ct = default);
+    Task<TriggerRow?> FindAsync(string id, CancellationToken ct = default);
+    Task<IReadOnlyList<TriggerRow>> DueAsync(DateTimeOffset now, CancellationToken ct = default);
+
+    /// <summary>
+    /// The soonest moment any enabled trigger is due, or null when none is armed.
+    ///
+    /// What lets the runner SLEEP UNTIL something is due rather than waking on a fixed tick and
+    /// asking. A polling sweep can only be as accurate as its own period - a ten-second trigger
+    /// under a fifteen-second tick fires every fifteen and records the rest as missed, which is
+    /// honest and useless. Waiting for this instant instead makes the interval a person typed the
+    /// interval they get.
+    ///
+    /// Cheaper than polling as well as more accurate: it wakes when there is something to do
+    /// rather than several thousand times a day to find nothing. Indexed by
+    /// `ix_triggers_enabled_next_due_at`, which the due query already relies on.
+    /// </summary>
+    Task<DateTimeOffset?> EarliestDueAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Records ONE run outcome by touching only outcome columns. A whole-row re-save here would race
+    /// a concurrent edit and write stale values back over columns that had not changed.
+    /// </summary>
+    Task RecordOutcomeAsync(
+        string id,
+        DateTimeOffset? firedAt,
+        DateTimeOffset? nextDueAt,
+        string? outcome,
+        long? seq,
+        int missed,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Records an event-driven fire of a trigger that keeps its own schedule - a folder watch, whose
+    /// next_due_at is its next POLL. Touches only last_fired_at, last_outcome and last_seq; clearing
+    /// next_due_at here, as <see cref="RecordOutcomeAsync"/> does for a plain event trigger, would
+    /// stop the watch from ever being polled again.
+    /// </summary>
+    Task RecordFireAsync(
+        string id, DateTimeOffset firedAt, string outcome, long seq, CancellationToken ct = default);
+
+    Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default);
+    Task DeleteAsync(string id, CancellationToken ct = default);
+    Task<int> DeleteForTeamAsync(string team, CancellationToken ct = default);
+    Task<int> DeleteForContainerAsync(
+        string team, string container, CancellationToken ct = default);
+
+    /// <summary>What a per-member dialog reads: one container's triggers. Folds case, matching
+    /// `container`'s COLLATE NOCASE. Also what the effective-subscription derivation reads -
+    /// <c>EffectiveSubscriptions.EffectiveTypesAsync</c> calls this per container rather than
+    /// scanning every enabled event trigger in the store, since it only ever needs one container's
+    /// contribution at a time.</summary>
+    Task<IReadOnlyList<TriggerRow>> ListForContainerAsync(
+        string team, string container, CancellationToken ct = default);
+
+    /// <summary>How many rows of this kind exist, enabled or not - the per-instance watch cap.</summary>
+    Task<int> CountKindAsync(string kind, CancellationToken ct = default);
+
+    Task<FolderWatchState> WatchStateAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records one folder poll by touching only poll columns, for the reason
+    /// <see cref="RecordOutcomeAsync"/> is narrow. A NULL <see cref="FolderPollRecord.Fingerprint"/>,
+    /// <see cref="FolderPollRecord.Listing"/> or <see cref="FolderPollRecord.ChangeAt"/> leaves the
+    /// stored value alone: a poll that could not list must not forget the baseline.
+    /// </summary>
+    Task RecordPollAsync(string id, FolderPollRecord poll, CancellationToken ct = default);
+}

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Harness.Pty</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Porta.Pty" />
+    <ProjectReference Include="..\Harness.Pty.Abstractions\Harness.Pty.Abstractions.csproj" />
+    <ProjectReference Include="..\Harness.Streaming\Harness.Streaming.csproj" />
+  </ItemGroup>
+
+
+  <!-- The PTY contract left Harness.Core for Harness.Pty.Abstractions. MSBuild emits the
+       global using, so no source file needed a new using line. -->
+  <ItemGroup>
+    <Using Include="Harness.Streaming" />
+    <Using Include="Harness.Pty" />
+  </ItemGroup>
+
+</Project>

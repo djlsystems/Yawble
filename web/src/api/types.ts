@@ -1,0 +1,2086 @@
+/**
+ * The Host's API contract, as the browser sees it.
+ *
+ * Declared here rather than generated, and kept honest the same way the CLI's
+ * copies are: these shapes are exercised against the real API every time the
+ * board renders, and a drift shows up immediately rather than silently.
+ */
+
+export type ContainerState = 'Idle' | 'Running'
+
+export interface ContainerSnapshot {
+  /** The team this container belongs to. Identity is the PAIR (team, id) — ids are not
+   *  unique on their own, and matching on id alone lands one team's snapshot on another's card. */
+  team: TeamId
+
+  /** The IDENTIFIER. Half of the pair, and what every event type and path is built from.
+   *  Branded: see {@link MemberId} for the defect that made it so. */
+  id: MemberId
+
+  /**
+   * What a person calls this member - the LABEL. Equal to `id` for a member nobody gave a separate
+   * name, which is what makes confusing the two easy to miss. Render this; address with `id`.
+   *
+   * Deliberately a plain `string`: it is not an identifier, and the point of branding `id` is
+   * that this cannot be passed where one belongs.
+   */
+  name: string
+
+  agent: string
+  state: ContainerState
+  queueDepth: number
+  ceiling: number
+  subscribes: string[]
+
+  /** The workflow this container is currently working on. Null when idle. */
+  currentCorrelation: number | null
+
+  /**
+   * The log's head when this container was created. Anything at or below it belongs to whatever
+   * came before and is not this container's business — the feed filters by it, for the same reason
+   * the ledger does.
+   */
+  sinceSeq: number
+
+  /**
+   * The Agent this container names, when the catalog has no such Agent — null when it resolves.
+   * Reachable because the catalog is a file that is not restored with the database: an Agent can be
+   * removed out from under a container that already exists.
+   */
+  missingAgent?: string | null
+
+  /** This team's ROOT FOLDER, when the Host could not reach it at startup — `null` when it is
+   *  there. A team can be placed on another volume or a share, and a machine that reboots with that
+   *  drive unplugged has a team whose files are simply not present.
+   *
+   *  Unlike the two marks above there is nothing on a settings screen that fixes it: a team's root
+   *  has no setter, so the recovery is reconnecting the folder and restarting the Host. The member
+   *  REFUSES to run meanwhile — an agent with no workspace would otherwise run in whatever
+   *  directory the Host itself was started from. */
+  unreachableRoot?: string | null
+
+  /**
+   * Why this container stopped without finishing — `null` when it did not.
+   *
+   * Set when the container publishes `container.blocked` and cleared by its next wake, so it
+   * OUTLIVES the run it belongs to. That is the point: a member that gave up and one that
+   * delivered are both idle with exit code 0, and without this the only way to tell them apart
+   * would be to read the message log.
+   *
+   * Not a `ContainerState`, and not derived from the feed either — a card holds a SLICE of
+   * messages, so a member that narrated its run would scroll its own blocked row out of the window
+   * and the mark would come and go.
+   */
+  blocked?: string | null
+
+  /**
+   * Why the PLATFORM did not complete this member's last run — `null` when it did.
+   *
+   * Shaped exactly like `blocked` above and set the same way: written where `container.failed` is
+   * published, cleared by the next wake on the line beside it, pushed rather than merely written,
+   * and never derived client-side from the feed. Read that field's documentation before changing
+   * either.
+   *
+   * DIFFERENT FROM `blocked` IN WHO IS SPEAKING. `blocked` is the AGENT saying its run finished
+   * and it is giving up on the work; this is the PLATFORM saying the run did not finish at all — a
+   * launch error, a non-zero exit, a host restart mid-flight.
+   *
+   * Without it, a run that failed would leave a snapshot indistinguishable from a run that
+   * succeeded - both end `Idle` - and a team whose every run failed would render as healthy idle
+   * cards with nothing to do.
+   *
+   * WHEN THIS AND `blocked` ARE BOTH SET THE CARD SAYS FAILED — a run can leave both, and the
+   * ranking is `failed` › `blocked` › `needsDecision`, the same order the tab chip uses. The two
+   * surfaces must agree or a chip and the card beneath it disagree about one member.
+   */
+  failed?: string | null
+
+  /**
+   * What this container stopped to ASK — `null` when it is not waiting on anybody.
+   *
+   * Shaped exactly like `blocked` above and set the same way: written where `container.needs-decision`
+   * is published, cleared by the next wake on the line beside it, pushed rather than merely written.
+   * Read that field's documentation before changing either.
+   *
+   * THE POINT OF IT IS THAT IT IS NOT A FAILURE. `blocked` says the agent gave up and `failed` says
+   * the platform did not finish a run; this says a run ended WELL and the work cannot continue
+   * without a person. A card carrying it is not a card to go and investigate — it is a card with a
+   * question on it, addressed to whoever is reading the board.
+   *
+   * Without it, a manager that stopped on purpose to ask questions could only publish
+   * `container.completed` with exit code 0 — and `completed` is the worst of the three to be wrong
+   * about, since the seeded `recovery` skill reads it as "that step is DONE, dispatch the step
+   * AFTER it".
+   */
+  needsDecision?: string | null
+
+  /**
+   * WHAT THIS MEMBER LAST HANDED BACK — the words on its most recent `agentContainer.handback`, or
+   * `null` when it has never handed anything back.
+   *
+   * NOT SHAPED LIKE THE THREE ABOVE, and that is the decision rather than an oversight. `blocked`,
+   * `failed` and `needsDecision` are MARKS OF TROUBLE, each cleared at the member's next wake
+   * because a warning that outlives the job it warned about shows a team in trouble that is not.
+   * A DELIVERY DOES NOT GO STALE: this member really did hand that back, and it stays true after it
+   * is given something else to do. Cleared on the next wake it would vanish exactly when it matters
+   * — a hand-back's whole purpose is to wake somebody who then sends more work, so the reply would
+   * take the record of what it was replying to with it.
+   *
+   * So it is a LAST-X FIELD, replaced by the next hand-back and never cleared, which is why every
+   * reader words it `last handback` rather than as a present-tense condition: it can appear beside
+   * a member that is Running something else entirely.
+   *
+   * IT IS NOT A {@link ContainerMark}. Nobody has to do anything about a card that was handed back,
+   * and the three-way ranking `failed` › `blocked` › `needsDecision` is a ranking of things that
+   * need attention. See `containerMark` for the rest of that argument.
+   */
+  handedBack?: string | null
+
+  /** The tag this member was hired under, or null when none was named. */
+  hiredFor?: string | null
+
+  /**
+   * WHETHER THIS MEMBER CAN BE WATCHED: its agent's preset has a `liveView` the Host can
+   * read. True whether the member is running or idle - an idle member's earlier runs are still
+   * there to read - and the card's eye follows it. False, or absent, shows no
+   * eye rather than one that opens onto "no live view".
+   */
+  watchable?: boolean
+
+  /** Presence of a chosen Agent when this snapshot was created or patched: present on the write
+   *  response if a chosen Agent did not resolve at the time. This is a WARNING - the write SUCCEEDED. */
+  unresolvedAgents?: UnresolvedAgent[]
+
+  /**
+   * WHAT KIND of failure `failed` was — `quota`, `rate`, `transport`, `agent-fault`, `timeout`,
+   * `interrupted` or `unknown` — and `null` when this member's last run did not fail.
+   *
+   * A SECOND VALUE ON ONE MARK, not a second mark. It is set and cleared with `failed` on the same
+   * lines, because a card wearing a class from one run beside a reason from another would be worse
+   * than a card with no class at all. Read `failed` before changing either.
+   *
+   * MAY BE ABSENT, and then the card renders the reason alone.
+   */
+  failureClass?: string | null
+
+  /**
+   * WHEN THE PLATFORM WILL RESUME THIS MEMBER'S WORKFLOW BY ITSELF, as an ISO-8601 instant — `null`
+   * when it will not, which is the ordinary case and every class but `quota` and `rate`.
+   *
+   * VISIBLE IS A REQUIREMENT rather than polish: a silent
+   * automatic retry is how a quota failure becomes a spend failure, and this is the field a person
+   * reads to see one coming. The server WITHDRAWS it — sets it back to null — the moment the bound
+   * is spent or the member moves on, so a card never promises a resume nothing is going to fire.
+   */
+  resumeAt?: string | null
+
+  /**
+   * TRUE WHILE THIS MEMBER'S CLAIM ON A WIP SLOT IS WAITING - it has work to start and the
+   * instance-wide limit is full. Waiting, never failed: nothing is refused, the
+   * run starts when a slot is released. Absent is not held.
+   */
+  held?: boolean
+}
+
+/**
+ * The STORED row behind a member, as `GET /api/teams/{team}/containers/{name}` answers it - not
+ * `ContainerSnapshot`, deliberately: that travels on every SignalR push. What a member is TOLD is
+ * not part of it: the prompt is chosen by role from the build.
+ */
+export interface MemberDetail {
+  team: TeamId
+  id: string
+  name: string
+}
+
+/**
+ * A team's IDENTIFIER, distinct from its name at the type level.
+ *
+ * Both are strings, and that is exactly the problem this solves: passing a team's NAME where the
+ * identifier belongs works for every team whose name EQUALS its id - which is every team until
+ * somebody renames it - and then 404s, or selects nothing for a name with a space in it. A fixture
+ * whose name defaults to its id cannot catch that.
+ *
+ * The brand is compile-time only — it does not exist at runtime and costs nothing on the wire. A
+ * plain string cannot be passed where a `TeamId` is wanted, so the mistake becomes a type error at
+ * the call site instead of a 404 in front of somebody.
+ *
+ * Use {@link asTeamId} at the edges where a raw string genuinely IS an identifier: a value read back
+ * from storage, or one that arrived in a route. Nowhere else.
+ */
+export type TeamId = string & { readonly __brand: 'TeamId' }
+
+/** Asserts that a raw string is a team identifier. Only for values arriving from outside the app —
+ *  storage, a route, a URL. Never to quiet a type error at an ordinary call site: there, the error is
+ *  telling you a name reached something that wanted an id. */
+export const asTeamId = (value: string): TeamId => value as TeamId
+
+/**
+ * THE KEY A DOCUMENTS ROUTE IS ADDRESSED WITH, which is NOT a team identifier.
+ *
+ * See {@link DocumentsFolder.folder}. Branded for {@link TeamId}'s reason and after the same shape
+ * of defect: for the live folder of a live team the two strings are equal, so passing the wrong one
+ * works on every folder anybody would reach for first and fails only on a retired one - where it
+ * does not 404, it opens the successor team's documents.
+ */
+export type DocumentsFolderKey = string & { readonly __brand: 'DocumentsFolderKey' }
+
+/** Asserts that a raw string is a documents folder key. Only for a value that arrived from the
+ *  server already being one - never to quiet a type error where a `TeamId` reached it, which is
+ *  the error doing its job. */
+export const asDocumentsFolderKey = (value: string): DocumentsFolderKey =>
+  value as DocumentsFolderKey
+
+/**
+ * A MEMBER'S IDENTIFIER, branded for the reason {@link TeamId} is, one level down.
+ *
+ * A container has two names too: `ContainerSnapshot.id` is the identifier every route and event
+ * type is built from, and `ContainerSnapshot.name` is the LABEL a person reads. Passing the label
+ * to a route - `Researcher Rhea` producing `/containers/Researcher%20Rhea/stop` - is refused by
+ * `ContainerId.IsLegalName` for the space.
+ *
+ * THE MISTAKE HIDES THE WAY THE TEAM ONE DOES. A member's label EQUALS its id until somebody gives
+ * it a different one, and the seeded `Manager` never gets one - so a label-addressed call works on
+ * the member anyone would try first, and fails for every hired member, whose label carries a
+ * space by the naming rule. Most fixtures build members whose label is their id.
+ *
+ * It is `MemberId` and not `ContainerId` on purpose: C#'s `ContainerId` is the QUALIFIED pair
+ * `Team/Name`, and this is only ever the bare second half. The endpoints and the UI both say
+ * member - `getMember`, `deleteMember`, the Members tab - so the word that travels is the word
+ * used here.
+ *
+ * Compile-time only. It does not exist at runtime and costs nothing on the wire; what it buys is
+ * that passing a label where an identifier belongs is a type error at the call site, and CI runs
+ * `npm run typecheck`, so the gate is real rather than a local courtesy.
+ */
+export type MemberId = string & { readonly __brand: 'MemberId' }
+
+/** Asserts that a raw string is a member identifier. Only for values arriving from outside the app
+ *  - the API, storage, a route. Never to quiet a type error at an ordinary call site: there, the
+ *  error is telling you a LABEL reached something that wanted an identifier. */
+export const asMemberId = (value: string): MemberId => value as MemberId
+
+/**
+ * One of your own API keys. There is no `credential` field and there never can be: only a SHA-256
+ * hash is stored, so the value existed once, in the response to the mint that created it.
+ */
+export interface ApiKey {
+  id: string
+  label: string | null
+  prefix: string
+  createdAt: string
+  lastUsedAt: string | null
+}
+
+/** The mint response, and the ONLY shape that carries a credential. */
+export interface MintedKey {
+  id: string
+  label: string
+  prefix: string
+  createdAt: string
+  credential: string
+}
+
+/**
+ * A roster row. There is no team list on it: every key reaches every team its owner does, and
+ * every person reaches every team, so a list here would be right today and wrong the moment
+ * somebody creates a team. There is no tier on the owner either; every person is an administrator.
+ */
+export interface TenantApiKey extends ApiKey {
+  owner: { id: string; email: string | null }
+}
+
+/** What a team deletion actually removed. `failures` is the half worth rendering: a directory that
+ *  could not be deleted usually means a file still held by a child that has not finished exiting,
+ *  and the team is gone either way. */
+export interface TeamDeleted {
+  team: string
+  containers: number
+  pendingDeliveries: number
+  schedules?: number
+  directories: string[]
+  failures: string[]
+
+  /**
+   * The team's documents, WHICH THIS DELETION KEPT. Said out loud rather than left to be noticed,
+   * because a team is deleted as soon as its work is merged - exactly when its reports become the
+   * only record of how that work was checked.
+   *
+   * A path, not a boolean, so the sentence shown can name the folder a person can go and open.
+   * Null only when the deletion could not establish where they are, which is the same condition
+   * that stops it removing the root at all.
+   */
+  documentsKept: string | null
+}
+
+/**
+ * One team documents folder that exists on disk, from `GET /api/documents`.
+ *
+ * **THE FOLDERS, NOT THE TEAMS.** A document outlives the team that wrote it, so this list is
+ * strictly larger than the list of teams and the difference is the work that would otherwise have
+ * been lost with them.
+ */
+export interface DocumentsFolder {
+  /**
+   * ADDRESS WITH THIS. Its name on disk, and the value to put in `/api/teams/{team}/documents` to
+   * browse it. For a live team this IS the team identifier; for a retired folder it is not, and
+   * never can be.
+   *
+   * BRANDED for the reason {@link TeamId} is branded, one level out: the two strings are EQUAL for every folder anybody would try first, so getting
+   * it wrong works until the day it silently does not. Addressing a retired folder by `team`
+   * reaches the SUCCESSOR's documents - a 200, the wrong files, and nothing saying so.
+   */
+  folder: DocumentsFolderKey
+
+  /** RENDER THIS, never address with it. The team whose documents these are - it survives the
+   * retirement suffix, so a folder is never shown anonymously. */
+  team: TeamId
+
+  /** What that team is called, for a team the registry may never have heard of. */
+  label: string
+
+  /**
+   * Whether this is the LIVE folder of a team that still exists. False for a retired folder
+   * whatever the team list says: a folder is retired BECAUSE a later team took its identifier, so
+   * a team of that name exists by construction and is a different team.
+   */
+  exists: boolean
+
+  /** Whether a later team of the same id has claimed the name, moving this folder aside. A retired
+   * folder is reachable from the Documents screen by any signed-in person. */
+  retired: boolean
+
+  /** Immediate children, excluding the platform's own marker. -1 when the Host could not read the
+   * folder, which is said rather than hidden. */
+  entries: number
+
+  modifiedAt: string
+}
+
+/** What a clone carried, and what it could not. The team exists either way. */
+export interface TeamCloned {
+  team: Team
+  repos: number
+  envKeys: number
+  members: number
+  failures: string[]
+}
+
+/**
+ * What a reset is being asked to do.
+ *
+ * Every flag is OPTIONAL, and absent means false for all of them EXCEPT `forgetHistory`, whose
+ * server-side default is TRUE — naming members and saying nothing else is a reset. So the reset
+ * nobody thought carefully about is the one that only moves floors, which is the reversible half;
+ * `purge` is the one that destroys something an audit could have used.
+ */
+export interface TeamResetRequest {
+  members: string[]
+  forgetHistory?: boolean
+  purge?: boolean
+  clearWorkspaces?: boolean
+  clearTranscripts?: boolean
+  clearSharedDocuments?: boolean
+}
+
+/**
+ * What a reset actually did.
+ *
+ * `retained` is not a failure: a message another team's surviving row cites cannot be purged
+ * without destroying that row's causation. `failures` names a directory that could not be emptied —
+ * usually a file still held by a child that has not finished exiting — and the team is reset either
+ * way, so both are worth rendering and neither is an error.
+ */
+export interface TeamWasReset {
+  team: string
+  floor: number
+  floored: string[]
+  purged: number
+  retained: number
+  cleared: string[]
+  failures: string[]
+}
+
+export type TriggerKindWire = 'cron' | 'every' | 'once' | 'event' | 'folderChange'
+
+export interface TeamTrigger {
+  id: string
+  team: TeamId
+  container: string
+  name: string
+  instruction: string
+  kind: TriggerKindWire
+  expression: string | null
+  timezone: string | null
+  intervalSeconds: number | null
+  fireAt: string | null
+  idleOnly: boolean
+  enabled: boolean
+  nextDueAt: string | null
+  lastFiredAt: string | null
+  lastOutcome: string | null
+  lastSeq: number | null
+  missedCount: number
+  createdAt: string
+  createdBy: string
+
+  /** Which event type fires this trigger. Null for a clock-driven one. */
+  eventType: string | null
+
+  /** `field op value`, evaluated before the wake is enqueued. Null means every message of that
+   *  type. */
+  filter: string | null
+
+  /**
+   * The folder-change fields. Null for every other kind. OPTIONAL ON THE CLIENT ONLY, so a row
+   * that omits them still reads.
+   *
+   * `watchRoot` is `documents` or `root:<file-browser root name>`; `watchPath` is relative to it,
+   * and `""` is the root itself. A folder trigger's `eventType` is always `file.changed`, set by the
+   * server; `lastFiredAt` is when that event last WOKE the member, `lastChangeAt` when the trigger
+   * last PUBLISHED it.
+   */
+  watchRoot?: string | null
+  watchPath?: string | null
+  watchGlob?: string | null
+  pollSeconds?: number | null
+  quietSeconds?: number | null
+  minIntervalSeconds?: number | null
+
+  /** When the folder was last listed, how long that took in milliseconds, how many entries it saw,
+   *  and the sentence when it could not list. A network share is slow to list; the row shows this so
+   *  a person can see it. */
+  lastPollAt?: string | null
+  lastPollMs?: number | null
+  lastPollEntries?: number | null
+  lastPollError?: string | null
+  lastChangeAt?: string | null
+}
+
+export interface CreateTriggerRequest {
+  name?: string | null
+  container?: string | null
+  instruction?: string | null
+  kind?: TriggerKindWire | null
+  expression?: string | null
+  timezone?: string | null
+  intervalSeconds?: number | null
+  fireAt?: string | null
+  idleOnly?: boolean | null
+  enabled?: boolean | null
+  nextDueAt?: string | null
+  eventType?: string | null
+  filter?: string | null
+  watchRoot?: string | null
+  watchPath?: string | null
+  watchGlob?: string | null
+  pollSeconds?: number | null
+  quietSeconds?: number | null
+  minIntervalSeconds?: number | null
+}
+
+export interface UpdateTriggerRequest {
+  name?: string | null
+  container?: string | null
+  instruction?: string | null
+  kind?: TriggerKindWire | null
+  expression?: string | null
+  timezone?: string | null
+  intervalSeconds?: number | null
+  fireAt?: string | null
+  idleOnly?: boolean | null
+  enabled?: boolean | null
+  nextDueAt?: string | null
+  eventType?: string | null
+  filter?: string | null
+  watchRoot?: string | null
+  watchPath?: string | null
+  watchGlob?: string | null
+  pollSeconds?: number | null
+  quietSeconds?: number | null
+  minIntervalSeconds?: number | null
+}
+
+/**
+ * One field an event type's payload carries, from `GET /api/events`. `List` is a JSON array of
+ * strings (`file.changed`'s `changed`); a filter or an `{event.*}` token reads it as its raw JSON
+ * text, so only `contains` is a useful filter on one.
+ */
+export interface EventFieldDefinition {
+  name: string
+  kind: 'String' | 'Integer' | 'Boolean' | 'List'
+  summary: string
+}
+
+/**
+ * One event type this platform can publish, from `GET /api/events` - the catalog a trigger picker
+ * is built from. `summary` is the ONE source of human wording for what this event means; a picker
+ * or a rendered sentence reads it from here rather than carrying a second, hand-written copy.
+ */
+export interface EventDefinition {
+  type: string
+  publisher: 'Platform' | 'Agent' | 'Person'
+  highVolume: boolean
+  inLedger: boolean
+  fields: EventFieldDefinition[]
+  summary: string
+}
+
+/**
+ * What deleting ONE member removed. Its team survives, so this names the member as well as the team
+ * — and carries the member's LABEL beside its identifier, because the identifier is the half nobody
+ * is ever shown.
+ */
+export interface MemberDeleted {
+  team: string
+  member: string
+  label: string
+  pendingDeliveries: number
+  schedules?: number
+  directories: string[]
+  failures: string[]
+}
+
+/** One page of the tenant log, with the total beside it so a grid can say "page 3 of 47". */
+export interface TenantLogPage {
+  events: TenantEvent[]
+  total: number
+}
+
+/** One administrative act. `actorEmail` and `subjectName` are stored ON the row rather than joined,
+ *  so an entry still reads after the account or team it names has been deleted — which is most of
+ *  the point of the log. */
+export interface TenantEvent {
+  seq: number
+  occurredAt: string
+  actorId: string | null
+  actorEmail: string | null
+  action: string
+  subject: string | null
+  subjectName: string | null
+  detail: string | null
+}
+
+/**
+ * THE THIRD STORE, AS THE BROWSER SEES IT.
+ *
+ * `messages` is the causal stream and `tenant_events` is administrative acts; a diagnostic row is
+ * neither. Nobody DID these, which is why no row names an actor, and nothing reacts to them, which
+ * is why nothing here subscribes. The question it answers is "what was this instance doing when it
+ * went wrong", and the reader is a person looking at Admin › Diagnostics after the fact.
+ */
+
+/** How loud one row is. THREE VALUES AND NO MORE — a scale nobody can hold in their head is one
+ *  every writer picks from at random, and this store is read by filtering on exactly this column.
+ *  Sent as the NAME, never the number: the host serialises enums as names on both transports. */
+export type DiagnosticSeverity = 'Error' | 'Warning' | 'Info'
+
+/**
+ * One diagnostic row.
+ *
+ * FOUR FIELDS ARE FIRST-CLASS RATHER THAN BURIED IN `detail` — `kind`, `severity`, `route` and
+ * `exceptionType` — because they are what the screen FILTERS on, and a filter that has to parse
+ * JSON is one no screen will offer.
+ *
+ * `route` is the TEMPLATE (`/api/teams/{team}/pause`), never the raw URL: a template carries no
+ * query string and no path value, which is where a credential pasted into a URL would be.
+ */
+export interface DiagnosticEvent {
+  seq: number
+  occurredAt: string
+  severity: DiagnosticSeverity
+  kind: string
+  source: string | null
+  route: string | null
+  status: number | null
+  exceptionType: string | null
+  message: string | null
+
+  /** Whatever else the kind carries, as JSON, redacted at the write. */
+  detail: string | null
+}
+
+/** One page of the diagnostics log, and how many rows MATCH THE FILTER — not how many rows there
+ *  are. A grid paging a filtered read needs the filtered count. */
+export interface DiagnosticsPage {
+  events: DiagnosticEvent[]
+  total: number
+}
+
+/**
+ * What the screen is asking for. Every field is optional and absent means "do not narrow on this".
+ *
+ * `search` is matched case-insensitively against `message`, `detail`, `route` and `exceptionType`,
+ * with `%` and `_` taken literally. It deliberately does NOT reach `kind` or `severity`: those have
+ * filters of their own, and a box that also matched them would make the typed filter and the typed
+ * search disagree about the same word.
+ */
+export interface DiagnosticsFilter {
+  /** From the CLOSED vocabulary the screen offers as a list. A kind outside it is refused by the
+   *  server rather than matching nothing, because an empty page is this screen's most misleading
+   *  answer. */
+  kinds?: string[]
+  severities?: DiagnosticSeverity[]
+  from?: string
+  to?: string
+  search?: string
+}
+
+/**
+ * A page of the log with the answer to "why is this empty" beside it.
+ *
+ * THE TWO TRAVEL TOGETHER BECAUSE THE SCREEN CANNOT RENDER EITHER ALONE. An empty page has three
+ * meanings and `hasAny` is the single fact that tells them apart:
+ *
+ * - `hasAny === false` — nothing was ever captured. On a host that writes its startup facts at
+ *   every boot, that is itself a fault.
+ * - `hasAny === true` with no rows — the store is working and this filter matched nothing. Nothing
+ *   went wrong.
+ * - `hasAny === null` — the store could not be read. `(unknown)` is a real state in this product,
+ *   and rendering it as "empty" would tell the reader a broken instance is a healthy one.
+ */
+export interface DiagnosticsView {
+  page: DiagnosticsPage
+  hasAny: boolean | null
+
+  /** The closed kind vocabulary, SERVED rather than copied — the screen's kind filter is built from
+   *  this and never from a list maintained here. A second hand-kept copy drifts from the first;
+   *  `/api/events` serves the trigger picker's vocabulary the same way. */
+  kinds: string[]
+}
+
+/**
+ * One container start and the version each agent CLI reported at it. `null` is a CLI
+ * that was not installed at that start. Recorded onto the data volume by the start script, so the
+ * history follows the volume; a host started outside the container records nothing.
+ */
+export interface CliVersionsAtStart {
+  at: string
+  versions: Record<string, string | null>
+}
+
+export interface Team {
+  /**
+   * The IDENTIFIER. Keys the documents folder on disk and half of every container's identity, so
+   * it is what every call, path and event type is built from — and it never changes.
+   */
+  id: TeamId
+
+  /**
+   * What a person reads. Equal to `id` until the team is relabelled, and only ever the name moves.
+   * Render this; address with `id`. Getting it backwards means a relabelled team's Concierge
+   * binds to a team that does not exist.
+   */
+  name: string
+
+  /**
+   * Which Agent preset the tenant-wide Concierge launches. Changed through
+   * `PUT /api/concierge`, and only ever an INTERACTIVE preset — a headless one has no
+   * command that can be typed at, so it would open a terminal that dies immediately.
+   *
+   * `null` when nobody has chosen one: the launcher then picks an installed, signed-in preset,
+   * which `GET /api/concierge` names under `effective`. Never render this raw.
+   */
+  concierge: string | null
+
+  /**
+   * Which Agent presets this team's NEW members may run, in ORDER.
+   *
+   * The order is load-bearing: when multiple entries match a requested tag, earlier entries win the
+   * tie. A team with no entries has chosen nothing and cannot hire.
+   */
+  memberAgents: string[] | null
+
+  /**
+   * Words a person wrote for this team, APPENDED after the built-in role prompt for its Manager and
+   * members under a heading of their own. Never a replacement for it: the role prompt comes from
+   * the build and no person chooses it. `null` or empty means nothing is appended.
+   */
+  additionalInstructions: string | null
+
+  /**
+   * WHERE THIS TEAM'S FILES ARE — the resolved absolute team folder, whether the team was placed or
+   * left in the default location. Read-only: there is deliberately no route that moves an existing
+   * team's root, because that means relocating the whole tree and repairing git
+   * worktrees.
+   *
+   * `null` FOR A MACHINE PRINCIPAL, and only `GET /api/overview` fills it at all — an absolute
+   * path on the Host's own filesystem is not an agent's business. Every person reads it. Render it
+   * only when it is there; its absence is "you may not see this" and never "this team has no
+   * folder".
+   */
+  root: string | null
+
+  /** The ordered Git repository URLs configured for this team. First entry is primary. */
+  repos?: string[] | null
+
+  /**
+   * Tokens this team may spend on ONE workflow, input and output together - the team's STORED
+   * CHOICE, and never what is in force. For that, read {@link effectiveWorkflowBudget}.
+   *
+   * THREE STATES, AND THE DIALOGS ARE THE ONLY READERS OF THEM. `null` means this team has chosen
+   * NOTHING and runs on the instance's own `WorkflowSpendLimit`; `0` means it explicitly chose
+   * UNLIMITED; anything above 0 is the figure a person typed. 0 and null are NOT the same answer
+   * here, which is the one thing easiest to get wrong: storing 0 as null would, under the rule
+   * below, silently turn "unlimited" into the instance figure.
+   *
+   * Not the same as the instance-wide `WorkflowSpendLimit` backstop, which has no screen on
+   * purpose: exactly ONE of the two applies. A team that has chosen a figure runs on that figure,
+   * ABOVE the instance's own if that is what was typed - a bound a team could only lower is not
+   * offered, because a field that silently refuses what a person typed is a worse lie than a
+   * number they can change. The instance figure applies only to a team that has chosen nothing.
+   *
+   * OPTIONAL ON THE CLIENT ONLY: absent means "the Host did not say", which is not the same as
+   * `null`.
+   */
+  budgetTokens?: number | null
+
+  /**
+   * WHAT IS ACTUALLY IN FORCE for one workflow on this team, resolved by the SERVER from
+   * {@link budgetTokens} and the instance figure. `null` MEANS UNLIMITED and 0 never appears.
+   *
+   * THE BROWSER MUST NOT RE-RESOLVE THIS, and `lib/teamBudget.ts` reads only this field. A second
+   * resolver in the browser can drift from the pump's, and then a team is stopped by a ceiling
+   * that appears on no screen while its tile displays a percentage of a bound that is not
+   * operating. A bar that reassures is worse than no bar.
+   *
+   * OPTIONAL ON THE CLIENT ONLY, for {@link budgetTokens}'s reason. Absent is a Host with
+   * nothing to say, where `null` is the Host saying UNLIMITED.
+   */
+  effectiveWorkflowBudget?: number | null
+  /**
+   * Each configured repository's default branch, in list order. `branch` is what the host
+   * uses (`setByPerson`, else `fromRemote`), null when not known.
+   */
+  defaultBranches?: TeamRepoDefaultBranch[] | null
+  /**
+   * Each configured repository's contributor settings, in list order. A repository with an
+   * `upstreamUrl` is in contributor mode: its own URL is the fork.
+   */
+  contributors?: TeamRepoContributor[] | null
+
+  /**
+   * This team is paused: new work stays queued and the next queued batch does not start until
+   * somebody resumes it.
+   *
+   * Optional: an absent field reads as unpaused rather than faulting.
+   */
+  paused?: boolean
+
+  /** Agents that could not be resolved when this team was created or updated: present on the
+   *  write response if a chosen Agent did not resolve at the time. This is a WARNING - the write SUCCEEDED. */
+  unresolvedAgents?: UnresolvedAgent[]
+
+  containers: ContainerSnapshot[]
+}
+
+/** Which agents a skill is offered to. `any` is every role. */
+export type SkillRole = 'concierge' | 'manager' | 'member' | 'any'
+
+/** Built-in skills come from the build and are read-only; custom ones are a person's. */
+export type SkillKind = 'builtin' | 'custom'
+
+/** Which kinds `GET /api/skills` lists. The route's default is `custom`. */
+export type SkillKindFilter = SkillKind | 'all'
+
+export interface SkillRecord {
+  /** The keyset cursor `?before=` pages by - see `listSkillsPage`. Never shown. */
+  id: number
+  name: string
+  description: string
+  roles: SkillRole[]
+  kind: SkillKind
+  body: string
+
+  /** ISO-8601, and who by. Both null for a built-in, which only a build changes. */
+  updatedAt: string | null
+  updatedBy: string | null
+}
+
+/** What a create or an edit of a custom skill sends. A built-in is never sent. */
+export interface SkillDraft {
+  name: string
+  description: string
+  roles: SkillRole[]
+  body: string
+}
+
+
+
+
+
+
+
+/**
+ * One entry in a `DirectoryListing`, a directory or a file. Folder mode renders files disabled
+ * rather than hidden, so a person can see a folder is not empty even when nothing in it is
+ * choosable.
+ */
+export interface HostEntry {
+  name: string
+  type: 'dir' | 'file'
+}
+
+/** The write flags of the root CONTAINING a listed path — whether New Folder or Upload will do
+ *  anything here, known before a person tries either. */
+export interface HostPermissions {
+  allowCreate: boolean
+  allowUpdate: boolean
+  allowDelete: boolean
+}
+
+/**
+ * Answers `GET /api/fs/browse` — the Host's own filesystem, files and directories, bounded to the
+ * configured allowlist (`GET /api/fs/roots`). Backs the folder picker for `POST /api/teams`'s
+ * `root` field and `HostPathPicker.vue` generally; a browser has no other way to name a path on the
+ * machine the Host runs on.
+ */
+export interface DirectoryListing {
+  path: string
+
+  /** `null` when `path` is itself the top of its root — an "up" affordance built on this must hide
+   *  rather than offer a click the server will refuse. A non-null value here is guaranteed itself
+   *  browsable; the filesystem's own parent is suppressed to `null` when it sits outside every
+   *  configured root. */
+  parent: string | null
+
+  permissions: HostPermissions
+  entries: HostEntry[]
+
+  /** Whether the server's cap bit. A shortened listing that looks complete is the same defect as a
+   *  200 with `entries: []` for a folder that could not be read, so it is SAID rather than left to
+   *  be inferred from a count against a constant the client does not have. */
+  truncated?: boolean
+
+  /** How many subdirectories there really are, cap or no cap. */
+  total?: number
+}
+
+/** One entry in `GET /api/fs/roots` — a folder the picker may open, and what it may do inside it. */
+export interface FileSystemRoot {
+  name: string
+  path: string
+
+  /** Whether this root IS the instance's own data folder — what a blank "Place team in" box
+   *  actually resolves to. Answered by the SERVER, once, because the client's only other handle was
+   *  `roots[0]`, and that is the instance root only while it survives normalisation:
+   *  `--DataRoot=\\?\C:\foo` drops it, index nought becomes the operator's first configured root,
+   *  and New Team then previews a folder the team will not go in. */
+  isInstance: boolean
+
+  allowCreate: boolean
+  allowUpdate: boolean
+  allowDelete: boolean
+}
+
+/** What `POST .../triggers/test-folder` asks: the folder a folder-change trigger would watch. */
+export interface FolderTestRequest {
+  watchRoot: string
+  watchPath: string
+  watchGlob: string | null
+}
+
+/** One file the folder test saw. Names and sizes only - never contents. */
+export interface FolderTestEntry {
+  path: string
+  size: number
+  modifiedAt: string
+}
+
+/**
+ * What the folder test saw, and how long the listing took. ALWAYS a 200 for a team that exists: a
+ * folder the server will not watch or cannot list is `ok: false` with the sentence in `refusal`
+ * and no entries - not a thrown error.
+ */
+export interface FolderTestResult {
+  ok: boolean
+  refusal: string | null
+
+  /** What was listed, for display: `documents/<path>` or `<root name>/<path>`. Null when the folder
+   *  was refused before it could be resolved (a root or path the server will not watch). */
+  folder: string | null
+
+  /** Every file the watch sees, after the ignore list and the glob. */
+  count: number
+
+  /** The first 200, sorted by path, each relative to the ROOT; `truncated` says there were more. */
+  entries: FolderTestEntry[]
+  truncated: boolean
+
+  elapsedMs: number
+}
+
+/** One root a folder trigger may watch, from `GET .../triggers/watch-roots`: `documents` first,
+ *  then every file-browser root carrying `allowWatch`. */
+export interface WatchRootOption {
+  value: string
+  label: string
+}
+
+/** Answers `GET /api/fs/roots`. Empty only when every root was dropped at startup — a device path,
+ *  or one that trims to nothing once normalised. **Not** a root that has merely gone away: nothing
+ *  probes the filesystem when the roots are built, and a root that is unreachable is WARNED ABOUT
+ *  AND KEPT (a share that comes back must not need a Host restart), so it is still listed here and
+ *  refuses at the moment it is opened — 404 for absent, 423 for present-but-unreadable. This
+ *  comment said such a root was dropped, which it never was.
+ *
+ *  The picker must say so rather than render a blank list, the same rule the server follows in
+ *  refusing to answer 200 with `entries: []` for a folder it could not read. */
+export interface RootListing {
+  roots: FileSystemRoot[]
+}
+
+export interface Overview {
+  teams: Team[]
+  managerName: MemberId
+
+  /**
+   * The ceiling no team can raise, in tokens, for ONE workflow - the instance's own
+   * `WorkflowSpendLimit`.
+   *
+   * INSTANCE-WIDE, so it rides this payload once rather than being repeated per team. It is not
+   * settable from the product and must not become so; it is here so it is not INVISIBLE, which is
+   * a different thing.
+   *
+   * OPTIONAL ON THE CLIENT ONLY: absent means "the Host did not say", which reads the same as no
+   * ceiling.
+   */
+  workflowSpendLimit?: number | null
+
+  /**
+   * The sweep findings that are LIVE right now, one row per (team, kind).
+   *
+   * The board's view of the detector's verdict. This field provides visibility into teams that
+   * may be in stuck states, and is used by the board surface to inform its displays.
+   *
+   * Empty array when nothing is found, never null. OPTIONAL ON THE CLIENT ONLY: absent and empty
+   * alike mean "no finding".
+   */
+  activeFindings?: ActiveFinding[]
+}
+
+/**
+ * One live sweep finding, flattened to the two facts the board needs: whose it is, and what it is.
+ *
+ * `kind` is one of `RunningWithoutProgress`, `PendingAcceptedWithoutTerminal`, `QuietTeam` or
+ * `WrapUpNotPushed`. Typed as a plain string rather than a union on purpose: a Host that grows a
+ * new finding must not make this client fail to parse the ones it already understands, and the one
+ * consumer asks only whether the list is empty.
+ */
+export interface ActiveFinding {
+  team: string
+  kind: string
+}
+
+/**
+ * Team token in/out totals from the message log, not from the board's twenty-message feed.
+ *
+ * `available` is false when every completed/failed run on the team predates capture (no
+ * tokensIn/tokensOut keys). A true zero — no runs at all — is available with tokensIn/tokensOut 0.
+ * `partial` means some runs on this team have no usage.
+ */
+export interface TeamTokenTotals {
+  available: boolean
+  /** Uncached input only. Cache reads are {@link tokensCachedIn} and are not in here. */
+  tokensIn: number
+  tokensOut: number
+  tokensCachedIn: number
+  tokensCacheCreation: number
+  /** Cache reads at 1/10, cache writes at 5/4, a combined total as reported. Summed on the server. */
+  tokensBillable: number
+  partial: boolean
+  runsWithUsage: number
+  runsWithoutUsage: number
+  missing: string | null
+  members: MemberTokenTotals[]
+}
+
+/** Budget information for one workflow. */
+export interface WorkflowSpend {
+  /** Sum of all measured tokens on the workflow. */
+  tokensSpent: number
+  /** Completed or failed runs whose usage was measured. */
+  runsWithMeasuredUsage: number
+  /** Completed or failed runs that had no measured usage. */
+  runsWithoutUsage: number
+}
+
+/**
+ * How long this team's current — or last — workflow has been going, from `GET
+ * /api/teams/{team}/workflow`.
+ *
+ * A LOG PROJECTION, sibling to `TeamTokenTotals` and fetched the same way. It crosses HTTP only:
+ * `ContainerSnapshot` is what rides every SignalR frame, and this must never be added to it.
+ *
+ * ELAPSED IS NOT ON THIS PAYLOAD, deliberately. `startedAt` and `serverNow` are, and the client
+ * subtracts them and ticks the result every second with no further traffic — a server-computed
+ * integer would need polling to move.
+ */
+export interface TeamWorkflowTiming {
+  /** False for a team that has never run. Render an em dash, never `0m`. */
+  available: boolean
+
+  /** The seq of the message that began this workflow. */
+  correlation: number | null
+
+  /**
+   * What the LOG says: `Failed`, `Blocked`, `Awaiting`, `Completed`, `Closed`, `Paused`,
+   * `Undeclared` or `Running`.
+   *
+   * `Paused` IS DERIVED FROM {@link pausedAt}, ON THE SERVER, IN ONE PLACE - the same pairing
+   * `blockedBy`/`Blocked` and `awaitingFrom`/`Awaiting` already have. The client maps the word and
+   * never re-derives it, or two surfaces end up answering the same question separately.
+   *
+   * A STRING and not a union of the tile's own words. `Running` here does NOT mean a member is
+   * running — the log cannot see a roster. It means the workflow is open and no member's last
+   * terminal fact says anything louder. `workflowTiming` in `lib/teamKpis.ts` adds the half that
+   * needs live containers, and RUNNING ranks first there.
+   */
+  state: string | null
+
+  /** When the workflow's ROOT was published. Elapsed is measured from here, not from its last row. */
+  startedAt: string | null
+
+  /** When its last row was published, or null while it is open — which is the ordinary case. */
+  endedAt: string | null
+
+  /** The server's clock at the moment this was read. See `workflowClockOffset` in the store. */
+  serverNow: string
+
+  /** Per-member run time SUMMED. It legitimately EXCEEDS elapsed; never add or divide the two. */
+  executionSeconds: number
+
+  /** Some runs here could not be measured — `runsUnfinished` above zero. */
+  partial: boolean
+
+  runsCounted: number
+
+  /** Runs that started with no terminal partner. Unknown, never zero and never "still running". */
+  runsUnfinished: number
+
+  /** The member that gave up, when a member's last terminal fact here is `container.blocked`. */
+  blockedBy: string | null
+
+  /** How many `container.failed` rows this workflow holds. A count of RUNS, not of members. */
+  runsFailed: number
+
+  /** Members whose LAST terminal fact here is `container.failed`, in publication order. */
+  failedMembers: string[]
+
+  /** What the log does not carry, in words. Null when it carries enough. */
+  missing: string | null
+
+  members: MemberExecution[]
+
+  /**
+   * The newest row in this workflow, however published — present even while it is open, which
+   * `endedAt` deliberately is not. It is what `StalledBadgeGrace` is measured against, so the
+   * grace period stays a single constant living here rather than a second one on the server.
+   */
+  lastActivityAt: string | null
+
+  /** The member waiting on a person, when its last terminal fact here is `container.needs-decision`. */
+  awaitingFrom: string | null
+
+  /** The subject of the instruction that began this workflow — read from the root message, never
+   *  re-derived client-side. Null when the root is not an addressed instruction or carries no
+   *  subject; `workflowsTile` falls back to a `Workflow #<correlation>` label only then. */
+  subject: string | null
+
+  /** Total measured workflow spend, or null when this workflow has no completed or failed runs. */
+  spend?: WorkflowSpend | null
+
+  /**
+   * WHEN THIS WORKFLOW WAS PAUSED, and NULL MEANS NOT PAUSED. The single source of truth for the
+   * state: present-means-paused rather than a `bool` beside a timestamp, so the two cannot
+   * disagree.
+   *
+   * IT IS A WORKFLOW PAUSE, NOT A TEAM ONE. `Team.paused` stops a whole team; this stops ONE
+   * correlation and leaves that team's other open workflows running. A team with three workflows
+   * must not lose all three because one spent its budget.
+   *
+   * `endedAt` STAYS NULL while this is set. A paused workflow is OPEN - `workflowOpen` tests
+   * `endedAt === null`, and a paused workflow that dropped out of the open list would be one
+   * nobody could find.
+   */
+  pausedAt: string | null
+
+  /** Why, in the sentence the server wrote. Null when not paused. */
+  pausedReason: string | null
+
+  /** The figure that was in force when it paused, so a reader can be told what stopped it without
+   *  the browser re-resolving which of the team's number and the instance's applied. Null when not
+   *  paused, and null when a pause did not say. */
+  pausedLimit: number | null
+
+  /**
+   * THE SAME MEASUREMENT AS {@link spend}, COUNTED SINCE THE LAST NUDGE — and **the figure the
+   * budget bar measures**, because it is the figure the server's own guard decides on.
+   *
+   * TWO QUESTIONS, TWO FIELDS. `spend` is `GetWorkflowSpendAsync`, the WHOLE workflow, which never
+   * comes down; the pump's over-budget check is `GetSpendSinceNudgeAsync`, whose window resets at
+   * every nudge. Drawing the bar from the cumulative one would leave a workflow that had been nudged —
+   * or resumed — reading `> limit` while the server was letting it run, which is a display
+   * contradicting the decision it is about. `spend` cannot simply BECOME the window:
+   * `BacklogExecutionRecord` reads it for what a backlog item cost, which is genuinely a
+   * whole-workflow question.
+   *
+   * NULL UNDER EXACTLY THE CONDITION `spend` IS — no completed or failed runs — so the two appear
+   * and disappear together. **Absent is a different thing again**: the Host said nothing, and `spendAgainstBudget` falls back to `spend` so it goes on drawing a bar.
+   */
+  spendSinceNudge?: WorkflowSpend | null
+}
+
+export interface MemberExecution {
+  member: string
+  runs: number
+
+  /** Null when none of this member's runs has a partner — never zero. */
+  executionSeconds: number | null
+  unfinished: number
+}
+
+/**
+ * One team's workflow projection inside the rollup. `team` is the IDENTIFIER.
+ *
+ * `openWorkflows` is the plural sibling of `workflow` - named apart, never `workflows`, so the two
+ * cannot be mistaken for one another at a call site (`Harness.Contracts/Workflow.cs`'s
+ * `TeamRollupRow` documents the same reasoning server-side). It is what lets the Teams table and
+ * the tab strip answer "what is this team doing" for every team the rollup names, not only the one
+ * that happens to be active - see `pullRollup` in `stores/console.ts`.
+ */
+export interface TeamRollupRow {
+  team: string
+  workflow: TeamWorkflowTiming
+  openWorkflows: TeamWorkflows
+}
+
+/**
+ * EVERY WORKFLOW A TEAM HAS RUN, OPEN AND CLOSED ALIKE AND NEWEST FIRST, and one span over the open
+ * ones, from `GET /api/teams/{team}/workflows`. Mirrors `TeamWorkflows` in
+ * `Harness.Contracts/Workflow.cs`.
+ *
+ * `openCount`, `totalCount` and `earliestStartedAt` are UNCAPPED; `workflows` is capped at fifty
+ * entries so the tile stays cheap to fetch.
+ *
+ * THE TRUNCATION SIGNAL IS `workflows.length < totalCount`, NEVER `openCount`. A team with nothing
+ * open reads `openCount: 0` while the list still carries rows, and since the list carries closed
+ * workflows too there is no reading of `openCount` that can answer "is this list complete" at all.
+ *
+ * `earliestStartedAt` IS THE SPAN'S START AND NEVER A SUM: three workflows covering the same ten
+ * minutes summed reads as thirty, a number larger than the time that has actually passed.
+ */
+export interface TeamWorkflows {
+  /** False for a team that has never run. Render an em dash, never `0`. */
+  available: boolean
+
+  /**
+   * How many workflows this team holds OPEN, uncapped — not the length of `workflows`, which now
+   * carries closed ones too. Allowed to grow: an undeclared workflow stays open, and this number is
+   * what makes that visible. STILL MEANS OPEN: {@link totalCount} was added beside it rather than
+   * redefining it, so the tile's own count line is unaffected.
+   */
+  openCount: number
+
+  /**
+   * How many workflows this team has run IN TOTAL since its floor, open and closed alike, uncapped.
+   * THE FIELD THE TRUNCATION LINE COUNTS AGAINST — see this interface's own documentation.
+   */
+  totalCount: number
+
+  /** When the OLDEST open workflow began — the start of the span. Null when none are open. */
+  earliestStartedAt: string | null
+
+  /** The server's clock when this was read. */
+  serverNow: string
+
+  /** One entry per workflow, newest first — OPEN AND CLOSED ALIKE. Capped at fifty: compare its
+   *  length against `totalCount`, never against `openCount`, to tell truncation. */
+  workflows: TeamWorkflowTiming[]
+
+  /** What the log does not carry, in words a person can act on. Null when it carries enough. */
+  missing: string | null
+}
+
+/**
+ * Every reachable team's workflow projection.
+ *
+ * It carries NOTHING but timings: names and containers come from `/api/overview`, which the
+ * store already holds. A second source for a team's name is a second answer waiting to disagree.
+ */
+export interface TeamRollup {
+  teams: TeamRollupRow[]
+}
+
+export interface MemberTokenTotals {
+  member: string
+  /** Current Agent for this member, empty when the member is no longer on the roster. */
+  brand: string
+  tokensIn: number | null
+  tokensOut: number | null
+
+  /** Whether this member's current Agent carries a usage format at all. False means it reports
+   *  none and never will; null means the Agent could not be resolved, which is not the same claim. */
+  brandReportsUsage?: boolean | null
+
+  /** Completed and failed rows this member has on the log above the team's floor. 0 means it has
+   *  never finished a run, which is why it has no numbers - a different state from having none. */
+  runs?: number
+
+  /** What this member's runs cost where its Agent reports ONE figure and no in/out split (codex).
+   *  Null for a brand that splits, and null for one that reports nothing at all. */
+  tokensTotal?: number | null
+
+  /** Null when no run of this member reported an in/out split. */
+  tokensCachedIn?: number | null
+  tokensCacheCreation?: number | null
+
+  /** Null when no run of this member reported a split or a combined total. */
+  tokensBillable?: number | null
+}
+
+export interface Message {
+  seq: number
+  type: string
+
+  /** JSON, opaque to the transport. See `summarise` for how it is read. */
+  payload: string
+
+  /**
+   * Who published it — a QUALIFIED container id (`Team/Name`), a Concierge, or the
+   * host. A container's identity is the pair, so a bare name is not one: two teams
+   * can each hold a `Manager`. This is what Console Cards bucket a card's activity on.
+   */
+  source: string
+
+  correlationId: number
+  causationSeq: number | null
+  depth: number
+  occurredAt: string
+}
+
+/** How one Agent preset is launched. A preset carries exactly one — a Team Member is always
+ *  Headless and the Concierge is always Interactive, so there is no command/interactive pair to
+ *  choose between. */
+export interface AgentLaunch {
+  fileName: string
+  arguments: string[]
+  systemPromptArguments?: string[] | null
+
+  /**
+   * A conventional instructions file the Agent reads from its working directory — `AGENTS.md` for
+   * codex, copilot and grok, none of which accepts a system prompt on the command line.
+   *
+   * DECLARED HERE BECAUSE OMITTING IT DESTROYS DATA. A TypeScript interface is compile-time only,
+   * so an undeclared field survives every GET at runtime and is dropped only when `AgentEditDialog`
+   * REBUILDS the launch object from its own fields — and `PUT /api/agents` replaces the catalog
+   * wholesale, so the loss is permanent. Losing this field removes the ONLY way such a preset
+   * receives a system prompt, and the member then runs knowing neither its name nor its team.
+   *
+   * EXACTLY ONE MECHANISM PER PRESET: a `claude` preset uses `systemPromptArguments` above and must
+   * NOT also carry this, or the same text is handed over twice and billed twice on every run.
+   */
+  instructionsFile?: string | null
+
+  /** The usage payload this launch reports, or null where usage is unknown for this preset. */
+  usageFormat?: string | null
+
+  /**
+   * Whether this launch runs a LANGUAGE MODEL. False marks an ordinary program — a build script, a
+   * CI tool — which an Agent Container can host and wake exactly like any other: it is then not
+   * billed, not probed for CLI use, and may subscribe to high-volume events a model preset must not.
+   *
+   * OPTIONAL AND `undefined` READS AS `true`, matching `Harness.Host.AgentLaunch`'s constructor
+   * default — a catalog entry without the key is a model. THE SAME RULE AS `instructionsFile`
+   * APPLIES: if `AgentEditDialog` saved a launch with the key absent, `System.Text.Json` would fill
+   * in the constructor default of `true` and silently turn a `languageModel: false` program into a
+   * billed, probed, firehose-eligible model. `launchFromDialogState` always writes an explicit
+   * value; this stays optional only for a caller that does not set the field.
+   */
+  languageModel?: boolean
+}
+
+/** Which of the two worlds a preset belongs to — Headless for a member woken by a message,
+ *  Interactive for a team's Concierge session. Matches `Harness.Host.AgentMode`, serialised as a
+ *  name rather than a number (`JsonStringEnumConverter`, `Program.cs`). */
+export type AgentMode = 'Headless' | 'Interactive'
+
+/**
+ * One Agent preset, as `GET /api/agents` answers it. ONE shape, because every person is an
+ * administrator: `launch`, `systemPrompt` and `env` are populated for every human reader, and a
+ * machine principal is refused rather than handed a redacted copy. The optional fields below are
+ * optional because a catalog written by hand may omit them, not because a reader may be denied
+ * them. A preset serves exactly one `mode`.
+ */
+export interface Agent {
+  name: string
+  mode: AgentMode
+  launch?: AgentLaunch | null
+  env?: Record<string, string> | null
+  tags?: string[] | null
+
+  /** How long one run of this Agent may take, in seconds, before the platform stops it and reports
+   *  the member as failed. `null` means UNBOUNDED, which is the default — a number invented by the
+   *  platform would cut off real work on an instance
+   *  whose owner never asked for one. Ignored for an Interactive preset: a terminal has no run to
+   *  bound, and the idle reaper ends unattended sessions. */
+  timeoutSeconds?: number | null
+
+  /**
+   * Kept out of every screen a person chooses from — `echo` and `shell`, the two test fixtures the
+   * suites launch and no operator should ever be offered.
+   *
+   * ABSENT MEANS VISIBLE. A catalog written by hand may carry no key, so read it
+   * as `!agent.hidden` and never `agent.hidden === false`.
+   *
+   * NOT a permission and not a redaction. `GET /api/agents` returns a hidden preset flagged, and it must:
+   * `PUT /api/agents` replaces the catalog wholesale, so the editor cannot send back an entry it
+   * never received. Filter with `visibleAgents` at RENDER; never filter the list you submit.
+   */
+  hidden?: boolean
+
+  /**
+   * Where a person goes to install this Agent's CLI, when the probe reports its command is not on
+   * this machine's PATH. Optional, and ABSENCE IS AN ORDINARY STATE — the guidance degrades to the
+   * same sentence with no link, and nothing is ever constructed to fill the gap.
+   *
+   * DECLARED HERE FOR THE REASON `instructionsFile` IS. `AgentEditDialog`
+   * REBUILDS the definition it saves (`rebuildAgentDefinition`) and `PUT /api/agents` replaces the
+   * catalog wholesale, so a field the form does not carry is a field the next edit silently
+   * deletes. That already happened once and cost three presets their only means of receiving a
+   * system prompt. It matters more here than it looks: `LoadOrSeed` never merges, so the Agents
+   * screen is the ONLY way this field ever reaches an existing instance — a dialog that dropped it
+   * would make the feature unreachable on precisely the tenants that need it.
+   */
+  install?: AgentInstall | null
+
+  /**
+   * TRUE FOR A PRESET THE BUILD SHIPS (claude, codex, copilot, grok and their headless forms). It is
+   * listed read-only: every route refuses to edit or delete it. A person's own presets are false.
+   * Optional because a preset a person is still writing has not been answered for yet.
+   */
+  builtIn?: boolean
+
+  /**
+   * TRUE WHEN A BUILT-IN'S `tags` ARE THE OPERATOR'S, from the tenant setting `agents.tags`,
+   * rather than the build's. Not a field of the preset: a save that sends it back writes nothing.
+   */
+  tagsFromOperator?: boolean
+
+  /** The tags a built-in carries in the build, shown beside the operator's. Null for a custom preset. */
+  buildTags?: string[] | null
+}
+
+/** Where to get the CLI a preset launches. Data in the catalog, never a table in code. */
+export interface AgentInstall {
+  url: string
+  hint?: string | null
+}
+
+/**
+ * What the probe answers for one preset, as `GET /api/agents` returns it in `installations` —
+ * beside the catalog rather than inside it.
+ *
+ * THAT SEPARATION IS NOT PRESENTATION. `PUT /api/agents` replaces the catalog wholesale from a body
+ * `AgentsDialog` composes out of what `GET` handed it, so anything that reads like part of a
+ * definition is something a save tries to write back into `agents.json`. This is a MEASUREMENT of
+ * the machine, not configuration.
+ *
+ * HUMAN-ONLY, like the route. It names commands and says where they resolved on the Host's disk,
+ * which is not an agent's business.
+ */
+export interface AgentInstallation {
+  /** The preset this describes, matched against `Agent.name` without regard to case. */
+  agent: string
+
+  /** The command it launches. Several presets share one, and the probe answers about the COMMAND. */
+  command: string
+
+  /**
+   * NULL when the command resolves, and `AgentNotInstalled` when it does not.
+   *
+   * A STRING, never an enum: the enum crosses two serialisers as a name and this side compares the
+   * string. It is a DIFFERENT fact from a container's `missingAgent`, which means the catalog has
+   * no such entry — that one is fixed on the Agents screen, this one in a terminal.
+   */
+  state: string | null
+
+  /** Where the command resolved to, or null. */
+  resolvedPath: string | null
+
+  /** Whether any team is on this preset. The screen lists every preset; the badge counts these. */
+  referenced: boolean
+
+  /** What a person is told — that a command of this name does or does not resolve on this
+   *  machine's PATH, and NOT that it runs, is current, or is authenticated. */
+  message: string
+
+  /** The preset's own install guidance, or null. Never composed. */
+  install?: AgentInstall | null
+}
+
+/**
+ * Whether one preset's CLI is installed AND signed in, as `GET /api/agents/auth` measured it.
+ *
+ * A MEASUREMENT, like `AgentInstallation`, and held beside the catalog for the same reason: nothing
+ * here may be folded into an `Agent` and written back by the wholesale save.
+ *
+ * `authenticated` IS A TRI-STATE. `true` and `false` are answers; `null` means the probe could not
+ * ask - a CLI with no way to report, or a probe that did not run - and must render as NOT MEASURED,
+ * never as a failure. Collapsing it to a boolean turns every unmeasured preset into a false alarm,
+ * which teaches people to ignore the one that is real.
+ */
+export interface AgentAuthReport {
+  /** The preset this describes, matched against `Agent.name` without regard to case. */
+  agent: string
+
+  /** The command it launches. */
+  command: string
+
+  /** Whether the command resolves at all. An uninstalled CLI cannot be signed in. */
+  installed: boolean
+
+  /** Signed in, signed out, or not measured. */
+  authenticated: boolean | null
+
+  /** The probe's own sentence - what it ran and what it saw. Shown verbatim when `false`. */
+  detail: string
+
+  /**
+   * Whether a team's member, a team's hiring allowlist or the Concierge uses this preset. Only a
+   * referenced preset is worth a sign-in warning: an unused, never-signed-in CLI is information on
+   * the Agents screen, not a problem on every page.
+   */
+  referenced: boolean
+}
+
+/** What `GET /api/agents` answers. Launch definitions only: the prompt an agent is told is chosen by
+ *  its role from the build, so the catalog carries no Prompts. */
+export interface Catalog {
+  agents: Agent[]
+
+  /**
+   * Whether each preset's command is on this machine at all. OPTIONAL because a server that does
+   * not probe may omit it, and a client that treated its absence as "everything is fine" would be
+   * making a claim nothing checked; the library reads an absent entry as `unknown` instead.
+   */
+  installations?: AgentInstallation[]
+}
+
+/**
+ * Presets a person may be OFFERED for a given mode: a member is always Headless, a team's
+ * Concierge always Interactive. Works on either shape `GET /api/agents` answers, because
+ * `mode` rides both.
+ *
+ * HIDDEN PRESETS ARE DROPPED HERE, which is what makes hiding whole rather than half-applied. Every
+ * caller of this is a picker building options - `AddMemberDialog`, `CreateTeamDialog`,
+ * `TenantSettingsDialog`, `MemberSettingsDialog`, `TeamSettingsDialog` - and none of them uses it
+ * to build a body, so filtering here reaches all of them and reaches nothing that is submitted.
+ *
+ * The list a screen SUBMITS must never be filtered: `PUT /api/agents` replaces the catalog
+ * wholesale, so a dialog that submits what it rendered deletes every hidden preset. `AgentsDialog`
+ * keeps its own complete ref for exactly that reason and filters into a separate computed.
+ */
+export const agentsForMode = (agents: Agent[], mode: AgentMode) =>
+  agents.filter((a) => a.mode === mode && !a.hidden)
+
+/**
+ * Whether a container is its team's manager — matching `TeamRegistry.IsManager`'s own rule:
+ * case-insensitively against the container's IDENTIFIER, never its editable label, so renaming a
+ * manager's display name does not stop this from applying (`ContainerId` equality is itself
+ * case-insensitive, for the same reason). `managerName` is `Overview`'s own `managerName` field —
+ * the one seeded manager identifier for the whole tenant — read from the caller rather than
+ * hard-coded here a second time. A manager's prompt cannot be overridden
+ * (`ManagerPromptCannotBeOverriddenException`), which is what `MemberSettingsDialog` uses this to
+ * decide whether to show a control for at all.
+ */
+export const isManagerContainer = (id: MemberId, managerName: MemberId) =>
+  id.toLowerCase() === managerName.toLowerCase()
+
+/** Prerequisites for the Repos section — git and gh. */
+export interface Prerequisite {
+  /** The executable that was resolved: "git" or "gh". */
+  command: string
+  /** PathSearch.Find answered non-null. */
+  resolves: boolean
+  /** Wording like "git was not found on this machine's PATH." */
+  message: string
+  /** Closed set: "platform" | "agents". git → "platform". gh → "agents". */
+  usedBy: 'platform' | 'agents'
+}
+
+/** An Agent that could not be resolved. */
+export interface UnresolvedAgent {
+  /** The preset name (catalog spelling). */
+  agent: string
+  /** AgentLaunch.FileName that did not resolve. */
+  command: string
+  /** AgentInstallProbe message. */
+  message: string
+}
+
+/** Status of a worktree in a repo clone. */
+export interface WorktreeStatus {
+  /** Absolute path git reported. */
+  path: string
+  /** Branch name without refs/heads/, or null if detached. */
+  branch: string | null
+  /** 40-character HEAD sha, or null if git did not report one. */
+  sha: string | null
+  /** Inferred member name if path matches expected pattern, null otherwise. */
+  member: string | null
+  /** Commits on this worktree not in local main, or null if unknown. */
+  aheadMain: number | null
+  /** Commits on local main not in this worktree, or null if unknown. */
+  behindMain: number | null
+  /**
+   * Commits on this worktree's branch whose CHANGE is not on origin/main, counted by patch-id
+   * (`git cherry`), or null when it could not be measured — a detached HEAD, or a cherry that
+   * failed. `aheadMain` is sha ancestry, so a rebased worktree reads ahead while every one
+   * of its changes is already upstream. Conservative by construction: a commit whose patch was
+   * modified during integration still counts as outstanding.
+   */
+  commitsNotOnMain: number | null
+  /**
+   * The card this tree is for — the key in `wt_<Member>_<key>`: a card id, or
+   * `w<correlation>` for an instruction that named no card. Null for any other tree.
+   */
+  card?: string | null
+  /**
+   * Whether the tree's card (or workflow) is still open, so clean-up leaves it. Null or absent
+   * when the Host did not say.
+   */
+  open?: boolean | null
+  /** Bytes the tree takes on disk, or null when not measured. */
+  sizeBytes?: number | null
+}
+
+/** One repository's default branch, as Team settings shows and edits it. */
+export interface TeamRepoDefaultBranch {
+  repo: string
+  /** The branch the host uses, or null when not known. */
+  branch: string | null
+  /** What origin's HEAD named on the last clone or successful Fetch. */
+  fromRemote: string | null
+  /** A person's choice; kept across Fetches until cleared. */
+  setByPerson: string | null
+}
+
+/** One repository's contributor settings, as Team settings shows and edits them. */
+export interface TeamRepoContributor {
+  repo: string
+  /** The original project. Null is an owned repository; set, the repository's URL is the fork. */
+  upstreamUrl: string | null
+  /** The account the fork belongs to. */
+  forkOwner: string | null
+  /** Sign off commits (DCO): the clone's commit-msg hook adds Signed-off-by. */
+  dcoSignOff: boolean
+  /** A person's note that the upstream project's CLA is signed. A record, never a signature. */
+  claSignedNote: string | null
+}
+
+/** Status of a repository clone and its team branch. */
+export interface RepoStatus {
+  /** Repository name. */
+  name: string
+  /** Absolute path of repos/{name}/main, null for a machine principal. */
+  clonePath: string | null
+  /** 40-character sha of local main, or null if clone/ref is missing. */
+  mainSha: string | null
+  /** Commits on local main not in origin/main, or null if unknown. */
+  mainAhead: number | null
+  /** Commits on origin/main not in local main, or null if unknown. */
+  mainBehind: number | null
+  /** Working tree of the main clone has uncommitted changes. */
+  dirty: boolean
+  /** Checked-out branch of the clone named main, or 'detached'. Null if unknown. */
+  headCheckout: string | null
+  /** Team branch name. */
+  teamBranch: string
+  /** 40-character sha of local team/{id}, or null if ref does not exist. */
+  teamSha: string | null
+  /** true = on origin, false = not on origin, null = unknown. */
+  teamPushed: boolean | null
+  /** The ref that answered teamPushed: team/{id}, origin/team/{id}, or null when unanswered. */
+  teamPushedFrom: string | null
+  /**
+   * true = the team's work is on main; false = ANCESTRY SAID NO, which is not by itself a settled
+   * "not merged"; null = unknown.
+   *
+   * FALSE IS NOT A VERDICT ON ITS OWN. Ancestry alone answers false for a branch that was rebased, squashed
+   * or cherry-picked reads false here while every one of its changes is already upstream. It
+   * becomes a settled "not merged" only once CONTENT has also been measured - that is
+   * `teamCommitsNotOnMain` answering a non-zero count. Until then `mergeState` in
+   * `lib/repoStatus.ts` answers `unknown` and the card says so, which is the BEHAVIOUR and not an
+   * oversight: reading false as "definitely not merged" is the defect this field's readers exist
+   * to stop.
+   *
+   * TRUE FOR BOTH MECHANISMS, WHICH IS WHY IT CANNOT BE THE ONLY FIELD. It covers ancestry and
+   * also work whose shas were rewritten and whose changes are all upstream.
+   * `teamMergedToMainBy` is what tells the two apart, and `mergeState` is the only place either
+   * is read.
+   */
+  teamMergedToMain: boolean | null
+  /**
+   * HOW merged-ness was established, and the field every sentence about integration is derived
+   * from.
+   *
+   * 'ancestry' - the team commits are reachable from main.
+   * 'content'  - the team shas were rewritten, but every change is already on main. THE WORK IS
+   *              MERGED, and the wording must say so plainly rather than implying a failure.
+   * null/absent - NOT MERGED **OR** NOT MEASURED. Never read as "definitely not merged": that is
+   *              the mistake this whole card exists to stop, and it is the same rule
+   *              `teamCommitsNotOnMain` and `cloneMainOnTeamBranch` already carry.
+   *
+   * OPTIONAL ON PURPOSE. A status read that omits the field is `undefined` here, which must behave exactly like null rather than throwing or convicting.
+   */
+  teamMergedToMainBy?: 'ancestry' | 'content' | null
+  /**
+   * true = the clone's local main is reachable from the team ref, so commits on it are already
+   * on the team branch; false = they are not; null = not measured (no team ref, or origin never
+   * checked). Null is NOT false: false accuses, and the banner says so out loud.
+   */
+  cloneMainOnTeamBranch: boolean | null
+  /**
+   * How many commits on the team branch carry changes `origin/main` does not have, by PATCH-ID
+   * rather than by sha - so work integrated with a cherry-pick counts as present. `0` means every
+   * change is already upstream, possibly under different commits. `null` is NOT MEASURED and must
+   * never be read as `0`.
+   */
+  teamCommitsNotOnMain: number | null
+  /** ISO-8601 UTC of last fetch, or null if FETCH_HEAD is absent. */
+  originCheckedAt: string | null
+  /** Result of git ls-remote --exit-code, or null if not checked. */
+  originReachable: boolean | null
+  /** Git's error message if originReachable is false. */
+  originUnreachableReason: string | null
+  /** Worktrees in this clone (excluding main clone). */
+  worktrees: WorktreeStatus[]
+  /**
+   * The repository's default branch — what every `main` / `origin/main` on this record
+   * means. Null when it is NOT KNOWN: every main-relative field is null then too, and the actions
+   * refuse. Never read a missing value as `main`.
+   */
+  defaultBranch?: string | null
+  /**
+   * Where `defaultBranch` came from: `person` (Team settings), `remote` (origin's HEAD), or null
+   * (not known). A plain string: the icon-name scan reads every quoted lowercase literal.
+   */
+  defaultBranchSource?: string | null
+  /**The clone's origin remote, credential removed. The fork, in contributor mode. */
+  originUrl?: string | null
+  /**
+   *The clone's upstream remote in contributor mode, credential removed; null when owned.
+   * When set, `mainAhead` / `mainBehind` are against `upstream/<defaultBranch>`.
+   */
+  upstreamUrl?: string | null
+  /**The fork's account in contributor mode: the head owner of a pull request. Null when owned. */
+  forkOwner?: string | null
+  /**"Sign off commits (DCO)": Open pull request refuses a commit without Signed-off-by. */
+  dcoSignOff?: boolean
+  /**A person's note that the upstream's CLA is signed, shown beside Open pull request. */
+  claSignedNote?: string | null
+  /**The pull request recorded for the team branch, as GitHub last described it. */
+  pullRequest?: RepoPullRequestStatus | null
+}
+
+/**
+ *The recorded pull request: GitHub's last answer and when it was read, and what it means
+ * now. `landing` is `unknown` when GitHub could not be asked this time; `unknownReason` says why.
+ */
+export interface RepoPullRequestStatus {
+  url: string
+  number: number
+  /** GitHub's last answer: open, closed (without merging) or merged. A plain string on purpose. */
+  state: string
+  /** ISO-8601 UTC of that answer. */
+  readAt: string
+  /** in-review, declined, landed or unknown. */
+  landing: string
+  unknownReason: string | null
+}
+
+/**What Open pull request starts with: GET .../pull-request-draft. */
+export interface PullRequestDraft {
+  title: string
+  body: string
+  citation: string | null
+  workflow: number | null
+}
+
+/**What Fork it for me answers. */
+export interface ForkResult {
+  forkUrl: string
+  forkOwner: string
+  upstreamUrl: string
+}
+
+/** Response to GET /api/teams/{team}/repo-status. */
+export interface TeamRepoStatus {
+  /**
+   * TWO NAMED FIELDS, BECAUSE THAT IS WHAT THE SERVER SENDS.
+   *
+   * `Contracts/RepoStatus.cs` sends `Git` and `Gh` as named properties, not an array. `json<T>()`
+   * CASTS rather than checks, so a declared shape that does not mirror the record is `undefined`
+   * at runtime and nothing anywhere says so: the whole Repos panel then renders "Not found on this
+   * machine" with an empty message after it.
+   *
+   * A `find` over an array is a string lookup for something that already has a name. The shape
+   * here must mirror the record, and `repoPanel` in `lib/repoStatus.ts` is the single place that
+   * reads it.
+   */
+  git: Prerequisite
+  gh: Prerequisite
+  /** Repos and their status, one per team.repos entry. */
+  repos: RepoStatus[]
+}
+
+/**
+ * What every one of the seven repo actions answers: fetch, bring-current, rebase, push,
+ * merge-to-main, delete-remote-branch and cleanup-worktrees.
+ *
+ * `status` IS WHY THIS EXISTS. The server composes it AFTER the git work, so a card repaints from
+ * the response rather than firing a second request to ask what the first one just changed - and the
+ * two answers cannot disagree in the window between them. This interface was declared here and in
+ * `Contracts/RepoStatus.cs` and CONSTRUCTED BY NOBODY: every handler answered its own anonymous
+ * object, so `status` was `undefined` at runtime on all seven while `client.ts` typed them all as
+ * this. A record identical on both sides of the wire and populated by nobody passes a parity test
+ * cleanly, which is why `RepoEndpointsTests.Every_repo_action_returns_the_status_it_produced`
+ * asserts the property set off a LIVE response, in both directions.
+ *
+ * `success` IS NOT REDUNDANT WITH THE HTTP STATUS. The fetch route answers 200 when origin is
+ * unreachable - a fact about the network, reported rather than refused - so this flag is the only
+ * thing separating "fetched" from "could not reach origin". The reason travels in
+ * `status.originReachable` and `status.originUnreachableReason`, not in fields of its own.
+ */
+export interface RepoActionResult {
+  /** Repository name, derived from the URL rather than echoed from the caller's spelling. */
+  repo: string
+  /** Post-action status, composed by the server after the git work. */
+  status: RepoStatus
+  /** One sentence a person can read. */
+  message: string
+  /** Whether the action did what it set out to do. False on a reported unreachable origin. */
+  success: boolean
+}
+
+/**
+ * The tenant-wide Concierge: which Agent runs it. What it is told is the built-in Concierge prompt,
+ * chosen by role and never by a person.
+ */
+export interface ConciergeSettings {
+  /** `null` when nobody has chosen one: the launcher picks an installed, signed-in preset - `effective.agent` names it. */
+  agent: string | null
+  /** What the launcher will actually run after defaults, and whether it can. OPTIONAL: absent
+   *  means "not known", never "fine". */
+  effective?: ConciergeEffective
+}
+
+/**
+ * The Concierge the NEXT launch will start: the stored choice where there is one, the server's
+ * default where there is not, and the auth probe's verdict on that agent: the pre-flight.
+ *
+ * `agent` NULL means nothing installed can run it, and the panel does not open a socket.
+ * `agentSource` says where it came from, so a default can be SAID rather than passed off as a choice.
+ */
+export interface ConciergeEffective {
+  agent: string | null
+  agentSource: 'chosen' | 'default'
+  auth: ConciergeAgentAuth
+}
+
+/** The probe's verdict on the effective agent. `detail` is the probe's own sentence, if any. */
+export interface ConciergeAgentAuth {
+  installed: boolean
+  signedIn: boolean
+  detail: string | null
+}
+
+/**
+ * One backlog item AS THE WIRE CARRIES IT, which is deliberately not the row the server stores.
+ *
+ * NAMED `...View` BECAUSE THE TWO SHAPES REALLY DIFFER, and `AgentLaunchWireParityTests` is what
+ * made that explicit: a same-name C#/TypeScript pair must have IDENTICAL properties, which is the
+ * protection that caught `AgentLaunch.LanguageModel` being silently dropped by a dialog. Sharing the
+ * name here would have bought a false pair - `position` is deliberately never sent, and `teamName`
+ * and `teamGone` are computed at render and exist in no row. Two different things wearing one name
+ * is what the test refuses, and correctly.
+ *
+ * `id` IS RENDERED `B000H` (Crockford base 32, padded - see `itemLabel`), and the `#` COLUMN IS
+ * SOMETHING ELSE ENTIRELY. The id never changes and is
+ * never reused; the position index renumbers as things move and is computed here, client-side, from
+ * the returned order. The server never sends it - two bare integers on one row, one of which
+ * renumbers under you, is the confusion the prefix exists to prevent.
+ */
+export interface BacklogItemView {
+  id: number
+
+  /** The team this item is VISIBLE to, or null for the tenant's own. Not where it runs. */
+  team: string | null
+
+  /** What that team is called, or null when it is gone or there is no team. */
+  teamName: string | null
+
+  /** The linked team no longer exists. The screen says so. */
+  teamGone: boolean
+
+  title: string
+
+  /** The spec itself, as markdown. Harness is the store of record for it. */
+  body: string
+
+  /**
+   * `pending`, `ready`, `declared` or `implemented` - see `BacklogStates` in `lib/backlog.ts`.
+   *
+   * WHAT SOMEBODY SAID, AND NOTHING ELSE. A person is the authority on `pending`, `ready` and
+   * `implemented`; the platform writes `declared` and only `declared`, from
+   * `OnWorkflowCompletedAsync` when a Manager declares a dispatched workflow complete.
+   *
+   * A DECLARATION STOPS AT `declared`. Writing `implemented` would make one word carry two
+   * claims - "an agent says it is done" and "the work is in the product" - with people reading it
+   * as the second, while the only copy of the work might be unpushed in one team's clone.
+   *
+   * WHERE THE WORK ACTUALLY IS IS {@link BacklogItemView.landed}, WHICH IS A DIFFERENT FIELD ON
+   * PURPOSE. Two facts, two fields: what was SAID and what the repository SHOWS. They compose -
+   * "declared, pushed" and "declared, local" are different situations and a reader needs both
+   * words to tell them apart - so nothing here folds the second into the first.
+   */
+  state: string
+
+  /** The SECOND axis, independent of state. Null means it is in the backlog. */
+  archivedAt: string | null
+
+  createdAt: string
+  updatedAt: string
+  createdBy: string
+
+  /**
+   * The item's CURRENT dispatch while its workflow is still OPEN, or null.
+   *
+   * DERIVED BY THE SERVER, from what the platform already holds: the last dispatch record and
+   * whether its correlation has a terminal row nothing has woken since - the same predicate the
+   * Teams table's open-workflow count uses. Nothing new is stored, the team link is NOT rewritten
+   * and there is no third item state; this names who is WORKING the item, which is a different
+   * fact from `team`, which names who may SEE it.
+   *
+   * Null means "not in flight" on the list and the detail, which compute it. A create or edit
+   * response answers null without asking, and the screen reloads the list after every write.
+   */
+  inFlight: BacklogInFlight | null
+
+  /**
+   * The team the CURRENT dispatch went to, WHETHER OR NOT ITS WORKFLOW IS STILL OPEN - what the
+   * Team column shows. Null, or absent, when the item was never dispatched.
+   *
+   * OPTIONAL BECAUSE THE SERVER DOES NOT SEND IT YET, and the client is written to take it the
+   * moment it does. `BacklogEndpoints.Render` already has the latest dispatch in hand on the list
+   * path; `inFlight` is derived from the same record but is DROPPED once the correlation closes,
+   * so it answers this question only while somebody is still working. Until the field lands, an
+   * item dispatched and finished renders an EMPTY Team cell rather than a wrong one - see
+   * `dispatchedTeamId`, which is the one place that decides.
+   */
+  dispatchedTeam?: string | null
+
+  /** That team's name. The dispatch record keeps it even after the team is deleted. */
+  dispatchedTeamName?: string | null
+
+  /**
+   * WHERE THE WORK ACTUALLY IS, as opposed to what anybody said about it. Null when there is no
+   * landing to report.
+   *
+   * DERIVED BY THE SERVER AND STORED NOWHERE - the same discipline `inFlight` follows, and the
+   * whole point of the field. It is computed from the dispatch record plus the repository status
+   * the platform already knows how to compute, so nothing new is written and nothing can go stale.
+   *
+   * IT IS NOT A STATE. {@link BacklogItemView.state} is what a person or a Manager SAID; this is
+   * what the repository SHOWS, and folding the two into one word would make one word carry
+   * two claims. An item can be `declared` and `local`, `declared` and `landed`, or `implemented` and
+   * `unknown`, and every one of those is a real, different situation.
+   *
+   * NULL IS NOT `unknown`. Null means there is no landing question to answer - an item no dispatch
+   * has ever touched - and renders nothing at all, exactly as `inFlight: null` does.
+   * `landed.state === 'unknown'` means the question WAS asked and could not be answered, and that
+   * renders as its own visible reading. *Nobody has said* and *it is not done* are different
+   * facts and the screen must not substitute one for the other.
+   *
+   * OPTIONAL BECAUSE THE SERVER MAY NOT SEND IT. Until `BacklogEndpoints.Render` does, every row
+   * answers `undefined` and the screen draws no mark - an absence,
+   * not a wrong answer.
+   */
+  landed?: BacklogLanded | null
+}
+
+/**
+ * WHAT THE REPOSITORY SHOWS ABOUT ONE ITEM'S WORK. See `BacklogItemView.landed`.
+ *
+ * FOUR READINGS AND THE LAST ONE IS LOAD-BEARING. `landed`, `pushed` and `local` are answers
+ * somebody computed; `unknown` is the absence of one, and it is a value here rather than a null so
+ * that "we looked and cannot tell" stays on the screen instead of vanishing into the same blank as
+ * "there was nothing to look at".
+ */
+export interface BacklogLanded {
+  /**
+   * `landed`, `pushed`, `local` or `unknown` - see `LandedStates` in `lib/backlog.ts`, which
+   * carries the client's copy of this vocabulary and the words each one renders as.
+   *
+   * A STRING RATHER THAN A UNION, for the reason `BacklogExecutionStats.outcome` is one: the
+   * server may grow a fifth reading before this client does, and `landedMark` reads anything it
+   * does not recognise as `unknown` - never as a negative, which would have an old client assert
+   * something nobody measured.
+   */
+  state: string
+
+  /**
+   * The team whose clone was ASKED - the team the current dispatch went to, which is the same team
+   * {@link dispatchedTeamId} resolves and the Team column already shows.
+   *
+   * IT PAIRS WITH {@link BacklogInFlight.teamId} AND DIFFERS FROM IT IN ONE WAY THAT MATTERS: that
+   * one names a team that necessarily still exists, because an open workflow is running in it.
+   * This one may name a team that has been DELETED - and that is not an error, it is the first
+   * `unknown` the server derives, because the clone went with the team and nobody on that machine
+   * can answer the question any more.
+   *
+   * NOT DRAWN ON THE SCREEN, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT. The row already
+   * carries this team in its Team column, under the NAME rather than the id, and the server writes
+   * `detail` naming the repository and branch it actually looked at. A second, less readable copy
+   * beside the mark would say nothing the row does not already say. It is on the wire because the
+   * server sends it and parity is the whole point of these types; the screen is free not to use it.
+   */
+  teamId: string
+
+  /**
+   * ONE SHORT SENTENCE A PERSON CAN READ - which branch, which remote, how far behind. Composed by
+   * the server, rendered in the mark's long form, and never parsed here.
+   */
+  detail: string
+
+  /**
+   *In contributor mode the answer is GitHub's, about the recorded pull request, and this is
+   * when GitHub last gave it (ISO-8601). Null or absent for an answer read from the clone.
+   */
+  readAt?: string | null
+}
+
+/** Where a backlog item is being worked right now. See `BacklogItemView.inFlight`. */
+export interface BacklogInFlight {
+  teamId: string
+
+  /** The team's CURRENT label. The team exists, or this would be null on the item. */
+  teamName: string
+
+  /** The workflow - the `#1402` a dispatch notification names and `harness` takes. */
+  correlation: number
+
+  /**
+   * Whether a member of that team is Running under this workflow AT THIS MOMENT. An open workflow
+   * with nobody running is an ordinary shape - a Manager that has not declared yet - and the two
+   * are shown differently because a person deciding whether to intervene wants to know which.
+   */
+  running: boolean
+}
+
+/** What one dispatch of an item did, derived from the log or frozen at archive. */
+export interface BacklogExecutionStats {
+  correlation: number
+  members: string[]
+  instructions: number
+
+  /** `completed`, `failed`, or `unknown` - which is a real state, not a guess. */
+  outcome: string
+
+  tokens: number
+  runsWithUsage: number
+
+  /** THE NUMBER THAT STOPS THE TOTAL LYING BY OMISSION. Rendered beside it, never dropped. */
+  runsWithoutUsage: number
+
+  /** Null when the workflow has not finished. NULL IS "NOT MEASURED" AND IS NOT ZERO. */
+  elapsedSeconds: number | null
+}
+
+export interface BacklogDispatchView {
+  id: number
+  teamId: string
+  teamName: string
+  correlation: number
+  dispatchedAt: string
+  dispatchedBy: string
+  frozenAt: string | null
+  teamGone: boolean
+}
+
+/** One slot holder or waiter on the instance-wide WIP ledger, as `GET /api/wip` names it. */
+export interface WipHold {
+  team: string
+  member: string
+  since: string
+}
+
+/**
+ * `GET /api/wip`: the one instance-wide count of running agent processes. `max` of 0 is no limit.
+ * `waiting` is in the order the ledger admits it.
+ */
+export interface WipView {
+  max: number
+  running: WipHold[]
+  waiting: WipHold[]
+}
+
+/** Where a tenant setting's value came from: a row somebody saved, or the deployment's file. */
+export type TenantSettingSource = 'row' | 'appsettings'
+
+/**
+ * One instance-wide setting, `GET /api/tenant/settings`.
+ *
+ * `value` and `default` are whatever the setting holds - a number, a duration string, a lane map -
+ * so they are `unknown` here and `lib/tenantSettings.ts` is the one place that reads them.
+ */
+export interface TenantSetting {
+  name: string
+  value: unknown
+  default: unknown
+  source: TenantSettingSource
+  /** Null for a value read from appsettings: nobody changed it. */
+  updatedAt: string | null
+  updatedBy: string | null
+  description: string
+}
+
+/**
+ * One file-browser root. A DEPLOYMENT setting, never settable from the product: it rides the
+ * settings list read-only as `fileBrowser.roots.<name>`, and `note` says the container must also
+ * mount the path.
+ */
+export interface TenantRoot {
+  name: string
+  path: string
+  note: string
+}
+
+/** The whole dialog's read: every setting, and the file-browser roots, which are not settable. */
+export interface TenantSettings {
+  settings: TenantSetting[]
+  roots: TenantRoot[]
+}
+
+/** How a finished run ended, as `GET .../runs` words it. */
+export type RunOutcome = 'completed' | 'handedBack' | 'blocked' | 'failed'
+
+/** One finished run of one member, from the terminal row that closed it. */
+export interface MemberRun {
+  /** The terminal row's seq: the run's address for `runs/{seq}/transcript`. */
+  seq: number
+  /** The workflow the run worked on, or null when it had none. */
+  workflow: number | null
+  /** Null when the run's start row is not in the log; so then is `durationMs`. */
+  startedAt: string | null
+  endedAt: string
+  durationMs: number | null
+  outcome: RunOutcome
+}
+
+/** One page of `GET .../runs`: newest first, and the cursor for the next older page or null. */
+export interface MemberRunsPage {
+  runs: MemberRun[]
+  nextBefore: number | null
+}

@@ -1,0 +1,15 @@
+bin/
+obj/
+wwwroot/
+web/node_modules/
+web/dist/
+web/.quasar/
+data/
+*.user
+appsettings.Production.json
+.env
+TestResults/
+.vs/
+
+# Plan execution scratch (superpowers ledgers and briefs)
+.superpowers/

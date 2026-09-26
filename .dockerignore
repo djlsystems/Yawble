@@ -1,0 +1,14 @@
+**/.git
+**/bin
+**/obj
+**/node_modules
+web/dist
+**/.vs
+data
+docs
+TestResults
+*.user
+.env
+src/Harness.Host/appsettings.Production.json
+.claude
+cli

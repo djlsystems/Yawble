@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Harness.Contracts/Harness.Contracts.csproj" />
+    <Project Path="src/Harness.Messaging/Harness.Messaging.csproj" />
+    <Project Path="src/Harness.Identity/Harness.Identity.csproj" />
+    <Project Path="src/Harness.Backlog/Harness.Backlog.csproj" />
+    <Project Path="src/Harness.Kanban/Harness.Kanban.csproj" />
+    <Project Path="src/Harness.Skills/Harness.Skills.csproj" />
+    <Project Path="src/Harness.Streaming/Harness.Streaming.csproj" />
+    <Project Path="src/Harness.Containers/Harness.Containers.csproj" />
+    <Project Path="src/Harness.Pty.Abstractions/Harness.Pty.Abstractions.csproj" />
+    <Project Path="src/Harness.Pty/Harness.Pty.csproj" />
+    <Project Path="src/Harness.Host/Harness.Host.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Harness.Tests/Harness.Tests.csproj" />
+  </Folder>
+</Solution>

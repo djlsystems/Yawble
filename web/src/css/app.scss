@@ -1,0 +1,581 @@
+// app global css
+
+// ---------------------------------------------------------------------------------------------
+// THE TOKENS. Every colour the console paints is one of these, so a theme is one block below.
+//
+// Quasar hands out `--q-primary` and friends but nothing for the greys, so a component that
+// wanted one would hard-code an `rgba(0, 0, 0, .87)` and go on looking like the scaffold whatever
+// the palette says. These exist so a component can ask
+// for ink rather than guess at it.
+//
+// BIASED WARM, hue in the twenties, rather than pure grey. A pure neutral beside a vermilion accent
+// reads as unrelated to it; these read as the same family desaturated, which is what makes the
+// accent look chosen rather than dropped in.
+//
+// The brand values are MEASURED from `public/logo-light.png` rather than chosen: the accent, the
+// wordmark's near-black as light ink, and the front door's ground as dark paper. Everything else is
+// derived from those.
+//
+// Declared as CSS properties, not SCSS variables, because every `<style>` block in this project is
+// plain CSS - the convention is worth keeping, and a token you cannot reach from a component is not
+// a token. And because a custom property is resolved at paint time, which is the whole reason the
+// dark block below can re-theme a running console by toggling one class on <body>.
+//
+// ONE `:root` BLOCK FOR LIGHT AND ONE `body.body--dark` BLOCK FOR DARK. `body--dark` is the class
+// Quasar's Dark plugin toggles; the store in `stores/display.ts` is what calls it. A token that is
+// the same in both themes (the accent, the dialog widths) is declared once, here, and not repeated.
+:root {
+  --os-primary: #{$primary};
+  --os-primary-hover: #ff5a1f;
+
+  --os-ink: #20211c;
+  --os-ink-muted: #5c5750;
+  --os-ink-faint: #8a847c;
+
+  // `--os-muted` is a second spelling four components reach for. An alias rather than a
+  // rename across those files, so both resolve to one value and cannot drift.
+  --os-muted: var(--os-ink-muted);
+
+  --os-paper: #faf8f5;
+
+  // THE SURFACE A CARD OR A TABLE SITS ON, above `--os-chrome`. Two tones and not one: the row
+  // hover in the Teams table is `--os-chrome`, so a table painted the same colour would have a
+  // hover that does nothing.
+  --os-surface: #ffffff;
+  --os-chrome: #f4f1ec;
+  --os-rule: #e4dfd8;
+  --os-rule-strong: #d5cec5;
+
+  // The mono face as a property, for the places that cannot reach the SCSS variable: an
+  // `input-style` binding, a component `<style>` block. One spelling, declared in
+  // quasar.variables.scss.
+  --os-mono: #{$mono-font-family};
+
+  // State as ink. The semantic Quasar colours, so a token and a `color="positive"` agree; the dark
+  // block lifts them because the same hue that reads on paper sinks into a dark ground.
+  --os-ok: var(--q-positive);
+  --os-warn: var(--q-warning);
+  --os-error: var(--q-negative);
+  --os-info: var(--q-info);
+
+  // WARNING AS TEXT, not as an edge or a fill. `--q-warning` is 2.95:1 on white, which fails AA for
+  // small type, so text that has to read amber takes this darker amber instead: 5.93:1 on
+  // `--os-surface`, 5.26:1 on `--os-chrome`. Dark lifts it to `--os-warn`.
+  --os-warn-ink: #8a5a00;
+
+  // PALE GROUNDS for a banner or a chip, one per state, replacing Quasar's `bg-*-1` classes - which
+  // are fixed light pastels and paint a white-hot box on a dark page.
+  --os-tint-ok: #e8f4ed;
+  --os-tint-warn: #fbf2e0;
+  --os-tint-error: #fae8ed;
+  --os-tint-info: #e8eff7;
+
+  // No Concierge terminal tokens: the terminal keeps xterm's own colours, which the agent's CLI
+  // draws for, whatever the console theme.
+
+  // THE DIALOG SCALE. Four widths, not a number per component. A dialog still caps itself at
+  // `calc(100vw - 32px)` so none of these can scroll a phone sideways.
+  --os-dialog-sm: 26rem;
+  --os-dialog-md: 34rem;
+  --os-dialog-lg: 46rem;
+  --os-dialog-xl: 72rem;
+
+  // THE KANBAN PALETTE, word to colour. `lib/kanban.ts` keeps the WORD (the server's template owns
+  // which word a card wears); this is the only place the word becomes a colour. An accent for the
+  // card's edge and a tint for its ground, per word - see `.os-kanban-*` below.
+  --os-kanban-slate: #546e7a;
+  --os-kanban-blue: #1e88e5;
+  --os-kanban-amber: #ef6c00;
+  --os-kanban-orange: #f4511e;
+  --os-kanban-red: #c62828;
+  --os-kanban-teal: #00897b;
+  --os-kanban-green: #2e7d32;
+
+  --os-kanban-slate-tint: #f6f7f8;
+  --os-kanban-blue-tint: #f1f7fd;
+  --os-kanban-amber-tint: #fdf5ec;
+  --os-kanban-orange-tint: #fdf3f0;
+  --os-kanban-red-tint: #fdf1f1;
+  --os-kanban-teal-tint: #eff8f6;
+  --os-kanban-green-tint: #f1f8f1;
+}
+
+// The dark theme. Only what differs from light is here.
+//
+// Paper and surface are the front door's own ground and card; the front door reads these tokens
+// rather than keeping a copy.
+body.body--dark {
+  --os-ink: #ece7e3;
+  --os-ink-muted: #b3aaa3;
+  --os-ink-faint: #8a7f77;
+
+  --os-paper: #14110f;
+  --os-surface: #1b1613;
+  --os-chrome: #221c18;
+  --os-rule: #2a231e;
+  --os-rule-strong: #3a312a;
+
+  --os-ok: #5cb884;
+  --os-warn: #e0a83a;
+  --os-error: #ec5a7f;
+  --os-info: #7ea6d6;
+  --os-warn-ink: var(--os-warn);
+
+  --os-tint-ok: #16261c;
+  --os-tint-warn: #2b2213;
+  --os-tint-error: #2e1419;
+  --os-tint-info: #152131;
+
+
+  // Accents hold; a coloured edge reads on either ground. The tints are each accent at about a
+  // sixth over the dark surface, so the card stays a card rather than a pastel slab.
+  --os-kanban-slate-tint: #242423;
+  --os-kanban-blue-tint: #1b2835;
+  --os-kanban-amber-tint: #3d2410;
+  --os-kanban-orange-tint: #3e1f15;
+  --os-kanban-red-tint: #361916;
+  --os-kanban-teal-tint: #172824;
+  --os-kanban-green-tint: #1e2618;
+}
+
+// The page itself takes the tokens, so a theme change repaints everything that has no ground of
+// its own. Quasar's Dark plugin sets its own body colours from `$dark-page`; these win on source
+// order and say the same thing.
+body {
+  background: var(--os-paper);
+  color: var(--os-ink);
+}
+
+// ---------------------------------------------------------------------------------------------
+// A KANBAN COLOUR WORD, AS A CLASS. `KanbanCard` and `KanbanCardPanel` put `os-kanban-<word>` on
+// their root and paint from the two properties it sets, so a card's colour is chosen here and
+// nowhere else:
+//
+//     border-left-color: var(--os-kanban-accent);
+//     background: var(--os-kanban-tint);
+//
+// The word list is `KanbanColours` in `lib/kanban.ts`; a word added there needs a line here, and
+// `kanban-palette.spec.ts` fails until it has one.
+.os-kanban-slate {
+  --os-kanban-accent: var(--os-kanban-slate);
+  --os-kanban-tint: var(--os-kanban-slate-tint);
+}
+
+.os-kanban-blue {
+  --os-kanban-accent: var(--os-kanban-blue);
+  --os-kanban-tint: var(--os-kanban-blue-tint);
+}
+
+.os-kanban-amber {
+  --os-kanban-accent: var(--os-kanban-amber);
+  --os-kanban-tint: var(--os-kanban-amber-tint);
+}
+
+.os-kanban-orange {
+  --os-kanban-accent: var(--os-kanban-orange);
+  --os-kanban-tint: var(--os-kanban-orange-tint);
+}
+
+.os-kanban-red {
+  --os-kanban-accent: var(--os-kanban-red);
+  --os-kanban-tint: var(--os-kanban-red-tint);
+}
+
+.os-kanban-teal {
+  --os-kanban-accent: var(--os-kanban-teal);
+  --os-kanban-tint: var(--os-kanban-teal-tint);
+}
+
+.os-kanban-green {
+  --os-kanban-accent: var(--os-kanban-green);
+  --os-kanban-tint: var(--os-kanban-green-tint);
+}
+
+// ---------------------------------------------------------------------------------------------
+// IDENTIFIERS ARE SET IN MONO. NAMES ARE SET IN SANS.
+//
+// This is the one typographic rule in the app, and it does work rather than decoration. The
+// most-repeated defect class in this codebase is confusing two names for one thing: a team's id
+// against the name a person reads (three call sites, found from a screenshot, missed by a hundred
+// and thirty-six green tests because every fixture built a team whose name EQUALLED its id); a
+// member's identifier against its editable label; an Agent against a Prompt; the Console against
+// the Concierge.
+//
+// Setting machine-addressable values in a visibly different face puts that distinction on screen
+// permanently, in a product whose own history says people get it wrong. It also stops the
+// Concierge panel being a visual outlier - the terminal is already mono, and the rest of
+// the interface simply agrees with it about what a machine value looks like.
+//
+// WHAT TAKES IT: Agent and Prompt names, container identifiers, seq and workflow numbers, exit
+// codes, queue depths, {tokens}, paths.
+// WHAT DOES NOT: team names, member labels, prose, buttons, hints - anything a person wrote or
+// reads as English.
+//
+// `tabular-nums` rides along because these values appear in columns - a feed of workflow numbers, a
+// queue depth beside another - and proportional digits make a column of them ragged.
+.mono {
+  font-family: $mono-font-family;
+  font-variant-numeric: tabular-nums;
+
+  // Plex Mono runs slightly wider than Plex Sans at the same size, so a mono span set inline in a
+  // sans sentence reads as a size jump rather than a change of voice. This is the correction, and
+  // it is measured against the pair rather than guessed - do not carry it to another face.
+  font-size: 0.94em;
+  letter-spacing: -0.01em;
+}
+
+.container-running-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  animation: container-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes container-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
+/* An animation that never stops is exactly the kind a person who asked for less motion meant.
+   The dot stays - it is a state indicator, not decoration - and simply holds still. */
+@media (prefers-reduced-motion: reduce) {
+  .container-running-dot {
+    animation: none;
+  }
+}
+
+// THE TEAM STATUS CHIP, and it is GLOBAL because two components read it: the tab strip in
+// IndexPage.vue and the Status column in TeamsView.vue.
+//
+// Not scoped to the page: a scoped rule reaches only the component that declares it, so the
+// table's chips would render uncoloured - or, worse, the palette would exist twice and one screen
+// would start calling an undeclared team amber while the other called it indigo. Eight colours that
+// mean eight states are one fact, and this is the one place it is stored.
+//
+// SPACING IS NOT HERE. `margin-left` belongs to whatever the chip sits beside, which differs
+// between a cramped tab and a table cell, so each caller keeps its own.
+.console-tab-status {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* The dot takes the chip's colour, so the state is said once and shown twice. */
+.console-tab-status .container-running-dot {
+  background: currentColor;
+}
+
+.console-tab-status--misconfigured {
+  color: #8d6e63;
+}
+
+.console-tab-status--failed {
+  color: #a4133c;
+}
+
+.console-tab-status--blocked {
+  color: #ef6c00;
+}
+
+.console-tab-status--paused {
+  color: #00838f;
+}
+
+.console-tab-status--running {
+  color: #43a047;
+}
+
+.console-tab-status--queued {
+  color: #546e7a;
+}
+
+/* HELD BEHIND THE WIP LIMIT. Amber-brown: about to work, not stopped and not failed. */
+.console-tab-status--waiting,
+.console-tab-status--waiting-for-a-slot {
+  color: #b26a00;
+}
+
+/* UNDECLARED IS NOT AN ERROR STATE AND IS NOT COLOURED AS ONE. Indigo rather than the negative red
+   `failed` wears or the orange `blocked` wears: nothing has gone wrong here, the runs succeeded
+   and the work stopped anyway, and a chip that reads as a fault sends somebody to look for a
+   failure that is not there. Distinctly not `idle`'s faint grey either - a team nobody is going
+   to move is a fact, not an absence. */
+.console-tab-status--undeclared {
+  color: #5c6bc0;
+}
+
+.console-tab-status--idle {
+  color: var(--os-ink-faint);
+}
+
+// THE WORKFLOWS COLUMN AND THE TAB CHIP ALSO INTERPOLATE A `WorkflowState` WORD INTO THIS SAME
+// CLASS FAMILY (via `chipStateClass` in `teamKpis.ts`), which is a wider vocabulary than the eight
+// `TeamStatus` words above - `failed`, `blocked`, `running`, `undeclared`, `paused` and
+// `misconfigured`
+// already exist as selectors and are shared as-is. The three below are the ones that vocabulary adds
+// and `vue-tsc` cannot see any of this, because the class name is built at runtime - the same
+// hazard this file's own comment on the `.console-tab-status` block already warns about.
+
+/* AWAITING is the one state that describes the platform working exactly as intended, so it wears
+   the same blue `workflowTiming`'s `info` tone uses elsewhere in this app, never a warning colour. */
+.console-tab-status--awaiting {
+  color: #1976d2;
+}
+
+/* NO RESULT sits beside `blocked` in loudness (see `RowLoudness`'s own comment) but is quieter, and
+   `blocked` already owns the orange above - so this is `workflowTiming`'s `warn` tone's own shade
+   rather than a second orange next to it. */
+.console-tab-status--no-result {
+  color: #b8860b;
+}
+
+/* COMPLETED carries no news - the same reason `workflowTiming` gives it `tone: 'none'` - so it wears
+   the same faint grey as `idle` rather than a colour of its own. */
+.console-tab-status--completed {
+  color: var(--os-ink-faint);
+}
+
+/* CLOSED is a person having ended a workflow - terminal news and no alarm, exactly like COMPLETED -
+   so it wears COMPLETED's own faint grey rather than a colour of its own. The WORD is what keeps
+   the two apart on screen (a declared delivery is not an administrative close); the colour has no
+   second fact to carry. */
+.console-tab-status--closed {
+  color: var(--os-ink-faint);
+}
+
+/* NONE is a chip that exists but ranked nothing - an empty tile, or an UNDECLARED row still inside
+   its grace period - and is a different fact from `idle`'s "nothing is open at all", so it gets its
+   own faint entry rather than reusing that selector. */
+.console-tab-status--none {
+  color: var(--os-ink-faint);
+}
+
+/* THE SAME CHIPS ON A DARK GROUND. The light shades above are deep on purpose, to read on paper,
+   and that same depth sinks into a dark ground - so the ones that would go unreadable take the
+   lifted state tokens or a lighter step of their own hue. Same hue per state: a person who learnt
+   the chip on one theme should not have to learn it again on the other. */
+body.body--dark {
+  .console-tab-status--misconfigured {
+    color: #bcaaa4;
+  }
+
+  .console-tab-status--failed {
+    color: var(--os-error);
+  }
+
+  .console-tab-status--paused {
+    color: #4dd0e1;
+  }
+
+  .console-tab-status--running {
+    color: var(--os-ok);
+  }
+
+  .console-tab-status--queued {
+    color: #90a4ae;
+  }
+
+  .console-tab-status--waiting,
+  .console-tab-status--waiting-for-a-slot {
+    color: #ffb74d;
+  }
+
+  .console-tab-status--undeclared {
+    color: #9fa8da;
+  }
+
+  .console-tab-status--awaiting {
+    color: var(--os-info);
+  }
+
+  .console-tab-status--no-result {
+    color: var(--os-warn);
+  }
+}
+
+// The Concierge settings dialog, above the Concierge itself.
+//
+// GLOBAL rather than scoped, and that is forced: a QDialog teleports to <body>, so it is not a
+// descendant of the component that declares it and no scoped rule - `:deep()` included - can reach
+// it. The class is put on TenantSettingsDialog, which the panel's gear opens over it.
+//
+// The number is not arbitrary. `.concierge-shell` is `position: fixed; z-index: 7000`, and
+// a Quasar dialog computes 6000 - so the settings dialog opened FROM the panel rendered behind the
+// terminal. It opened correctly every time, mounted, fetched the catalog and answered every check;
+// `document.elementFromPoint` at the middle of its card returned `xterm-screen`. Nothing threw and
+// nothing logged, and it read as a button that does nothing.
+//
+// So: above 7000, and if the shell's z-index ever moves, this moves with it.
+//
+// It is used TWICE, and the second one is easy to miss: the dialog root, and the Agent select's
+// POPUP MENU, which is a separate teleported element with its own z-index of 6000. Lifting the
+// dialog and not the menu gives a dropdown that opens with all five presets in it and paints
+// behind the terminal - the select even renders as expanded, with nothing under it. Any other
+// popup added inside this dialog (a menu, a tooltip, a date picker) needs the same class.
+//
+// Equal specificity with Quasar's own `.q-menu`, so this wins on source order rather than weight;
+// verified in the browser (6000 -> 7100) rather than assumed, because a losing rule here is
+// invisible in exactly the same way a missing one is.
+.concierge-settings {
+  z-index: 7100;
+}
+
+// The Agent picker in the Concierge's own TOOLBAR, and the third instance of the rule above rather
+// than a new one: the shell is 7000, a `.q-menu` computes 6000, and this select lives INSIDE the
+// shell rather than inside a dialog - so it needs the lift on its own account and gets no help from
+// `.concierge-settings`.
+//
+// Same failure if it is missing, and it is the one that does not look like a z-index fault: the
+// select renders as EXPANDED with nothing beneath it, which reads as "there is only one preset".
+//
+// Global for the reason both rules above are: a QSelect's popup teleports to <body>, so no scoped
+// rule in the panel - `:deep()` included - can reach it, and the class has to be handed to Quasar
+// through `popup-content-class`.
+.concierge-agent-menu {
+  z-index: 7100;
+}
+
+// The host folder picker (`HostPathPicker.vue`), above EVERYTHING else that opens a QDialog in this
+// app - including `.concierge-settings` above, since this component is reusable and one of
+// its callers is that very dialog's own prompt editor. Same forced-global reasoning as that rule: a
+// QDialog teleports to <body>, so no scoped rule - `:deep()` included - can reach it, and the class
+// has to be put on the dialog by the component itself.
+//
+// 7200 rather than reasoning about which ancestor happens to be fixed-position wherever this is
+// opened from: a picker that only sometimes needs lifting is a component whose z-index correctness
+// depends on where it is used, which is exactly the kind of fact this codebase has already lost
+// track of twice (the vernacular-rename bug and the Concierge settings bug this file
+// already records). Any menu or popup this component ever grows (a select's dropdown, a tooltip)
+// needs the SAME class, applied via `popup-content-class` - a separate teleported element with its
+// own z-index, exactly like the Agent select's menu next to `.concierge-settings` above.
+.host-path-picker {
+  z-index: 7200;
+}
+
+// `TriggerEditDialog`'s five QSelects, above `.q-menu`'s own default of 6000.
+//
+// A NO-OP today, deliberately defined anyway: `TriggersDialog` opens from an ordinary
+// `ContainerCard` on the board, not from inside the Concierge's fixed-z-index shell, so Quasar's
+// default stacking already puts each select's popup above the dialog beneath it. Left undefined,
+// `popup-content-class="triggers-popup"` on those selects would point at a rule that does not
+// exist - a trap for the next reader, and the one that turns live the moment this dialog is ever opened
+// from inside a panel: the documented "dropdown paints behind and reads as having one option" bug.
+//
+// Small on purpose - this dialog does not need to beat `.concierge-shell` today - but same
+// mechanism as the two rules above: equal specificity with `.q-menu`, so it wins on SOURCE ORDER
+// (this file loads after Quasar's) rather than weight.
+.triggers-popup {
+  z-index: 6100;
+}
+
+// `RepoCard`'s delete confirmation, which opens from INSIDE the Git dialog - a QDialog on top of a
+// QDialog, both computing 6000.
+//
+// IT WORKS TODAY WITHOUT THIS, and that is the reason to write it down rather than to leave it out.
+// The confirmation is appended to <body> after the Git dialog, so at equal z-index it wins on source
+// order - which is a fact about the ORDER THINGS HAPPENED, not about the design. Stated explicitly,
+// it stops depending on that.
+//
+// 7100 rather than 6100 because the thing it guards is DESTRUCTIVE. The Git dialog opens from the
+// ribbon today and never from inside `.concierge-shell` (7000), so the lower number would do; if
+// that ever changes, a confirmation for the only action in this product that deletes something on a
+// remote is the last dialog that should discover it is invisible. A destructive confirmation that
+// does not paint reads as a button that does nothing, so the person clicks again.
+//
+// Global for the reason every rule above it is: a QDialog teleports to <body>, so no scoped rule -
+// `:deep()` included - can reach it, and the class has to be put on the dialog by the component.
+.repo-confirm {
+  z-index: 7100;
+}
+
+/*
+ * A field's hint FLOWS instead of floating over whatever follows it.
+ *
+ * Quasar reserves exactly ONE line beneath a field (`.q-field--with-bottom` adds a fixed
+ * `padding-bottom`) and draws the hint into that reserve with `position: absolute`. A hint that
+ * fits is fine; a hint that WRAPS overflows the reserve and is painted on top of the next control -
+ * and every settings dialog in this app has long hints, because every one of them explains what
+ * its fields mean rather than labelling them and hoping.
+ *
+ * Global rather than per-dialog: any dialog with a long hint needs it, including the next one
+ * somebody writes. Making the bottom static costs the fixed
+ * reserve, so the padding goes with it - keeping both would leave a gap under every short hint.
+ *
+ * Scoped to dialogs deliberately. Inline forms elsewhere (the login card) size themselves against
+ * that reserve, and there is no reason to move them.
+ */
+.q-dialog {
+  .q-field--with-bottom {
+    padding-bottom: 0;
+  }
+
+  .q-field__bottom {
+    position: static;
+
+    /* BOTH, because killing only the first is not enough. Quasar's bottom slot is
+       `.q-field__bottom--animated`, which carries
+       `position: absolute` AND `transform: translateY(100%)`. Put back in flow with the transform
+       left on, the hint reserves its space and then paints one line BELOW it - so a gap opens where
+       the hint should be and the hint itself lands across the next field's floating label. That
+       reads as two overlapping sentences rather than as a positioning fault. */
+    transform: none;
+    padding: 4px 12px 0;
+
+    /* The reserve also gave the row a minimum height; without it a field with no hint at all would
+       jump upward relative to one beside it that has. */
+    min-height: 0;
+  }
+}
+
+/*
+ * A TABBED DIALOG KEEPS ONE HEIGHT WHATEVER TAB IS SHOWING.
+ *
+ * Four dialogs carry tabs - Team settings, User profile, Agents, Concierge. Sized to whichever panel
+ * is open, moving from General to Members would re-lay the whole card out: the tab strip you just
+ * clicked jumps under the pointer, the buttons move, and the dialog re-centres itself on the backdrop.
+ *
+ * `min-height` IS ONLY HALF A BOUND: the card never gets SMALLER than the floor but grows without
+ * limit past it. A floor is not a fixed height; the tall panel is the one that moves everything.
+ *
+ * SO: `height`, not `min-height`, and the panel scrolls inside it. The height is a per-dialog
+ * custom property rather than one number here - Agents lists a catalog and Profile holds three
+ * fields, and forcing those to the same size would mean empty space in one and a scrollbar in the
+ * other for no reason. What is shared is the RULE that a dialog has one height.
+ *
+ * `max-height` IS VIEWPORT-RELATIVE so a fixed height cannot push a dialog off a laptop screen. The
+ * reserve is for the header, the tab strip and the actions row, which sit outside this box.
+ *
+ * `min-height: 0` ON THE PANEL IS LOAD-BEARING - the same rule the board's cards carry. A flex
+ * child defaults to `min-height: auto` and refuses to shrink below its content, so `overflow-y`
+ * here is not what makes it scroll: this is what lets it.
+ */
+.os-tab-panels {
+  height: var(--os-tab-panels-height, 24rem);
+  max-height: calc(100vh - 15rem);
+
+  .q-tab-panel {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
+// ICONS STAY INVISIBLE, AND INSIDE THEIR BOX, UNTIL THEIR FONT HAS LOADED. An icon is a word
+// ("groups") that the Symbols font turns into a glyph; before the font arrives the word itself
+// would show and spill across its neighbours. `lib/iconsReady.ts` adds the class, with a timeout.
+html:not(.icons-ready) .material-symbols-outlined {
+  color: transparent !important;
+  overflow: hidden;
+}

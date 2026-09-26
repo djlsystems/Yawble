@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Harness.Contracts\Harness.Contracts.csproj" />
+  </ItemGroup>
+
+  <!-- Microsoft.Data.Sqlite rather than EF Core. The schema is three tables that will not grow much,
+       the queries are hand-written and cheap to read, and an ORM plus a migration pipeline is a lot
+       of ceremony to carry for that. The cost is that a second provider (SQL Server) would be a
+       rewrite of this project rather than a configuration change - acceptable precisely because
+       IMessageLog is what the rest of the system depends on, so replacing what is behind it is a
+       contained job. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" />
+  </ItemGroup>
+
+</Project>

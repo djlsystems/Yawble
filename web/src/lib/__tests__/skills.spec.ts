@@ -1,0 +1,54 @@
+import { describe, expect, it } from 'vitest'
+import {
+  DefaultSkillRoles,
+  isReadOnlySkill,
+  kindLabel,
+  lastModified,
+  normaliseRoles,
+  rolesLabel,
+} from '../skills'
+
+describe('skill roles', () => {
+  it('defaults a new skill to member', () => {
+    expect(DefaultSkillRoles).toEqual(['member'])
+  })
+
+  it('reads any as every role, whatever else was picked', () => {
+    expect(normaliseRoles(['member', 'any'])).toEqual(['any'])
+    expect(rolesLabel(['manager', 'any'])).toBe('Any')
+  })
+
+  it('orders the roles the same way every time', () => {
+    expect(normaliseRoles(['member', 'concierge'])).toEqual(['concierge', 'member'])
+    expect(rolesLabel(['manager', 'member'])).toBe('Manager, Member')
+  })
+})
+
+describe('skill kinds', () => {
+  it('labels the two kinds', () => {
+    expect(kindLabel('builtin')).toBe('Built-in')
+    expect(kindLabel('custom')).toBe('Custom')
+  })
+
+  it('makes a built-in read-only and a custom skill editable', () => {
+    expect(isReadOnlySkill({ kind: 'builtin' })).toBe(true)
+    expect(isReadOnlySkill({ kind: 'custom' })).toBe(false)
+  })
+})
+
+describe('lastModified', () => {
+  const format = (iso: string) => `at ${iso}`
+
+  it('says when and by whom', () => {
+    expect(lastModified({ kind: 'custom', updatedAt: 'T1', updatedBy: 'ines@example.com' }, format))
+      .toBe('at T1 by ines@example.com')
+  })
+
+  it('says when alone when nobody is named', () => {
+    expect(lastModified({ kind: 'custom', updatedAt: 'T1', updatedBy: null }, format)).toBe('at T1')
+  })
+
+  it('says a built-in changed with the build rather than leaving a blank', () => {
+    expect(lastModified({ kind: 'builtin', updatedAt: null, updatedBy: null }, format)).toBe('With this build')
+  })
+})

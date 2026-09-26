@@ -1,0 +1,261 @@
+using System.ComponentModel;
+using System.Text.Json;
+using System.Text;
+using Harness.Containers;
+using Harness.Contracts;
+using Harness.Host.Auth;
+
+namespace Harness.Host;
+
+/// <summary>
+/// <c>GET /api/teams/{team}/members/{member}/live</c>: what a running member's agent is
+/// doing, one readable line per transcript event, as it happens. <c>.../runs</c> lists the
+/// member's finished runs that recorded a transcript, and <c>.../runs/{seq}/transcript</c> renders
+/// one whole. None of them writes to the database or the message log.
+/// </summary>
+public static class LiveViewEndpoints
+{
+    public static void Map(WebApplication app)
+    {
+        // HUMANS ONLY. Raw agent output can hold whatever the agent printed or read, file contents
+        // included, and no agent needs to watch another.
+        app.MapGet("/api/teams/{team}/members/{member}/live", WatchAsync)
+            .WithTags("Members")
+            .HumansOnly()
+            .WithSummary("Watch a running member's agent")
+            .WithDescription(
+                "Streams the current run's transcript as `text/plain; charset=utf-8`, one display "
+                + "line per event ending in a newline: from the start of the run, then each new "
+                + "line as the agent writes it. The response ends when the run ends.\n\n"
+                + "Each line is `<when>` TAB `<line>`: `<when>` is the event's time in UTC "
+                + "(`2026-09-26T13:34:41.454Z`), empty when the event names none.\n\n"
+                + "Lines are at most 240 characters and end with `…` when clipped: `Read <path>`, "
+                + "`Bash: <command>`, `MCP: <tool>`, `<Tool>: <short input>`, the assistant's "
+                + "text, a tool result's first line and size (`<first line> (<n> bytes)`), "
+                + "`User: <first line>` and `Attachment: <name or first line>`. A line that does "
+                + "not parse is shown raw.\n\n"
+                + "404 with a sentence when the member is not running. 200 with "
+                + "`{ \"live\": false, \"reason\": \"...\" }` as JSON when its agent has no live "
+                + "view, or its transcript was not found within 30 seconds of launch. For an agent "
+                + "whose transcript is found after launch, the response starts once it is found; "
+                + "until then the dialog says it is waiting for the agent to start its session.\n\n"
+                + "Writes nothing: not the database, not the message log.\n\n"
+                + "**A person's action; no machine principal.**");
+
+        app.MapGet("/api/teams/{team}/members/{member}/runs", RunsAsync)
+            .WithTags("Members")
+            .HumansOnly()
+            .WithSummary("A member's earlier runs")
+            .WithDescription(
+                "This member's finished runs that recorded the agent's own transcript, newest first, "
+                + $"{RunsPage} at a time: `{{ \"runs\": [ {{ \"seq\", \"workflow\", \"startedAt\", "
+                + "\"endedAt\", \"durationMs\", \"outcome\" } ], \"nextBefore\" }`. `seq` is the run's "
+                + "terminal row, `workflow` its correlation, `outcome` one of `completed`, "
+                + "`handedBack`, `blocked` and `failed`. `startedAt` and `durationMs` are null when the "
+                + "run's start is not in the log. Pass `nextBefore` as `before` for the next page; it "
+                + "is null on the last.\n\n"
+                + "Runs from before transcripts were recorded are not listed.\n\n"
+                + "Writes nothing.\n\n"
+                + "**A person's action; no machine principal.**");
+
+        app.MapGet("/api/teams/{team}/members/{member}/runs/{seq:long}/transcript", RunTranscriptAsync)
+            .WithTags("Members")
+            .HumansOnly()
+            .WithSummary("One earlier run's transcript")
+            .WithDescription(
+                "The whole transcript of one of this member's finished runs, as "
+                + "`text/plain; charset=utf-8`, in the live route's form: one `<when>` TAB `<line>` "
+                + "per step, from the start of the file to its end. It is read once, not followed.\n\n"
+                + $"410 with `{Gone}` when the file is no longer on disk. 500 with a sentence saying "
+                + "why when it is there but cannot be read (e.g. permission denied). 404 when `seq` is not one "
+                + "of this member's runs.\n\n"
+                + "Writes nothing.\n\n"
+                + "**A person's action; no machine principal.**");
+    }
+
+    /// <summary>How many runs one page of <c>runs</c> holds.</summary>
+    public const int RunsPage = 20;
+
+    /// <summary>What <c>runs/{seq}/transcript</c> answers when the agent's file is gone.</summary>
+    public const string Gone = "This run's transcript is no longer on disk.";
+
+    /// <summary>What <c>runs/{seq}/transcript</c> answers when the file is there but cannot be read, e.g. permission denied.</summary>
+    public static string Unreadable(string why) => $"This run's transcript is on disk but could not be read: {why}";
+
+    private static async Task<IResult> WatchAsync(
+        [Description(Describe.Team)] string team,
+        [Description("The member to watch, as addressed in its route.")] string member,
+        HttpContext context, TeamRegistry teams, ContainerHost host, LiveRuns live, AgentLaunchUser runAs,
+        CancellationToken ct)
+    {
+        if (teams.ExistingName(team) is not { } stored)
+        {
+            return Results.NotFound(new { error = $"No team '{team}'." });
+        }
+
+        // The FOUND container, never the caller's spelling.
+        if (!ContainerId.IsLegalName(member) || host.Find(new ContainerId(stored, member)) is not { } container)
+        {
+            return Results.NotFound(new { error = $"No member '{member}'." });
+        }
+
+        if (live.Find(container.Id) is not { } run)
+        {
+            return Results.NotFound(new { error = $"{container.Id.Name} is not running." });
+        }
+
+        // A transcript the agent names itself is looked for after launch; the response
+        // starts once it is found.
+        var transcript = run.Transcript ?? await run.Located.WaitAsync(ct);
+
+        if (transcript is null)
+        {
+            return Results.Ok(new { live = false, reason = run.Reason });
+        }
+
+        var format = run.Format ?? LiveView.ClaudeJsonl;
+
+        if (LiveTranscriptReader.Refusal(runAs) is { } refusal)
+        {
+            return Results.Ok(new { live = false, reason = refusal });
+        }
+
+        var response = context.Response;
+        response.StatusCode = StatusCodes.Status200OK;
+        response.ContentType = "text/plain; charset=utf-8";
+        response.Headers.CacheControl = "no-store";
+        response.Headers["X-Accel-Buffering"] = "no";
+
+        await response.StartAsync(ct);
+
+        try
+        {
+            await foreach (var raw in LiveTranscriptReader.LinesAsync(transcript, runAs, run.Ended, ct))
+            {
+                // Every line of one event carries that event's time, or an empty one.
+                var text = TranscriptLines.Wire(format, raw);
+                if (text.Length == 0) continue;
+
+                await response.WriteAsync(text, Encoding.UTF8, ct);
+                await response.Body.FlushAsync(ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The watcher left. Nothing to say to nobody.
+        }
+
+        return Results.Empty;
+    }
+
+    private static async Task<IResult> RunsAsync(
+        [Description(Describe.Team)] string team,
+        [Description("The member, as addressed in its route.")] string member,
+        [Description("Only runs whose seq is below this; the previous page's `nextBefore`.")] long? before,
+        TeamRegistry teams, IMessageLog log, CancellationToken ct)
+    {
+        if (await FindMemberAsync(teams, team, member, ct) is not { } found) return NoMember(team, member);
+
+        var page = await log.ReadRunsAsync(
+            new ContainerId(found.Team, found.Name), found.FloorSeq, before ?? long.MaxValue, RunsPage + 1, ct);
+
+        var runs = page.Take(RunsPage).Select(run => new
+        {
+            seq = run.Terminal.Seq,
+            workflow = run.Terminal.CorrelationId,
+            startedAt = run.StartedAt,
+            endedAt = run.Terminal.OccurredAt,
+            durationMs = run.StartedAt is { } started
+                ? (long?)(run.Terminal.OccurredAt - started).TotalMilliseconds
+                : null,
+            outcome = Outcome(run),
+        }).ToList();
+
+        return Results.Ok(new
+        {
+            runs,
+            nextBefore = page.Count > RunsPage ? runs[^1].seq : (long?)null,
+        });
+    }
+
+    private static async Task<IResult> RunTranscriptAsync(
+        [Description(Describe.Team)] string team,
+        [Description("The member, as addressed in its route.")] string member,
+        [Description("The run's seq, as `runs` lists it.")] long seq,
+        TeamRegistry teams, IMessageLog log, AgentLaunchUser runAs, CancellationToken ct)
+    {
+        if (await FindMemberAsync(teams, team, member, ct) is not { } found) return NoMember(team, member);
+
+        var id = new ContainerId(found.Team, found.Name);
+        var runs = seq == long.MaxValue ? [] : await log.ReadRunsAsync(id, found.FloorSeq, seq + 1, 1, ct);
+
+        if (runs is not [{ } run] || run.Terminal.Seq != seq
+            || Field(run.Terminal.Payload, PayloadFields.AgentTranscript) is not { } path)
+        {
+            return Results.NotFound(new { error = $"{seq} is not one of {id.Name}'s runs." });
+        }
+
+        var format = Field(run.Terminal.Payload, PayloadFields.AgentTranscriptFormat) ?? LiveView.ClaudeJsonl;
+
+        if (LiveTranscriptReader.Refusal(runAs) is { } refusal)
+        {
+            return Results.Problem(refusal, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        var read = await AgentFiles.ReadAllAsync(path, runAs, ct);
+        if (read.Unreadable is { } why)
+        {
+            return Results.Text(Unreadable(why), "text/plain; charset=utf-8", Encoding.UTF8, StatusCodes.Status500InternalServerError);
+        }
+
+        if (read.Text is not { } text)
+        {
+            return Results.Text(Gone, "text/plain; charset=utf-8", Encoding.UTF8, StatusCodes.Status410Gone);
+        }
+
+        var body = new StringBuilder();
+        foreach (var raw in text.Split('\n')) body.Append(TranscriptLines.Wire(format, raw));
+
+        return Results.Text(body.ToString(), "text/plain; charset=utf-8", Encoding.UTF8);
+    }
+
+    /// <summary>How a run ended, in the words the dialog shows: a failure, then a block, then a hand-back.</summary>
+    private static string Outcome(RunRow run)
+    {
+        if (run.Terminal.Type == MessageTypes.Failed) return "failed";
+        if (run.Blocked) return "blocked";
+
+        return Bool(run.Terminal.Payload, PayloadFields.HandedBack) ? "handedBack" : "completed";
+    }
+
+    private static async Task<PersistedMember?> FindMemberAsync(TeamRegistry teams, string team, string member, CancellationToken ct)
+    {
+        if (!ContainerId.IsLegalName(member)) return null;
+
+        try
+        {
+            return await teams.MemberAsync(team, member, ct);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static IResult NoMember(string team, string member) =>
+        Results.NotFound(new { error = $"No member '{member}' in team '{team}'." });
+
+    private static string? Field(string payload, string name)
+    {
+        using var document = JsonDocument.Parse(payload);
+        return document.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private static bool Bool(string payload, string name)
+    {
+        using var document = JsonDocument.Parse(payload);
+        return document.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+    }
+}

@@ -1,0 +1,103 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Harness.Contracts\Harness.Contracts.csproj" />
+    <ProjectReference Include="..\Harness.Messaging\Harness.Messaging.csproj" />
+    <ProjectReference Include="..\Harness.Containers\Harness.Containers.csproj" />
+    <ProjectReference Include="..\Harness.Identity\Harness.Identity.csproj" />
+    <ProjectReference Include="..\Harness.Skills\Harness.Skills.csproj" />
+    <ProjectReference Include="..\Harness.Kanban\Harness.Kanban.csproj" />
+    <ProjectReference Include="..\Harness.Backlog\Harness.Backlog.csproj" />
+  </ItemGroup>
+
+  <!-- The API reference. Versionless by rule: central package management resolves these from
+       Directory.Packages.props, and a PackageReference without a matching PackageVersion there is a
+       build error rather than a silent float. -->
+  <ItemGroup>
+    <PackageReference Include="Cronos" />
+    <PackageReference Include="Markdig" />
+  </ItemGroup>
+
+  <!-- The host is the ONLY project that references more than the contract. Composition lives here
+       and nowhere else, which is what keeps every feature module independent of the others. -->
+
+  <!-- A plain sibling reference. Harness.Pty resolves its packages under this repository's
+       Directory.Packages.props, which is why Porta.Pty's pin lives there. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Harness.Pty\Harness.Pty.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Harness.Pty" />
+  </ItemGroup>
+
+  <!-- Agents reach this host through the MCP server mapped in Program.cs.
+       ModelContextProtocol.AspNetCore is referenced only here: composition lives in the host. -->
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="auth-probes.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- THE VERSION, FROM THE GIT TAG AND NOWHERE ELSE. `scripts/version.mjs` holds the rule;
+       this asks it, unless the build was handed the answer: a container build has no .git, so the
+       Containerfile passes HARNESS_VERSION and HARNESS_COMMIT in as build args, which MSBuild reads
+       as properties. With neither, the build still succeeds and says 0.0.0+unknown.
+
+       The informational version is the string as-is. The numeric AssemblyVersion and FileVersion
+       are its release part without padding (2026.09.23.1 -> 2026.9.23.1), which fits .NET's 16-bit
+       fields; a dev build shares its last release's number and differs in the informational one.
+       The SDK's own `+<sha>` suffix is off: the commit is its own attribute, and a second `+` would
+       make the string something version.mjs never prints. -->
+  <PropertyGroup>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <Target Name="StampHarnessVersion" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo" Condition="'$(HarnessVersionStamped)' != 'true'">
+    <PropertyGroup>
+      <HarnessVersion>$(HARNESS_VERSION)</HarnessVersion>
+      <HarnessCommit>$(HARNESS_COMMIT)</HarnessCommit>
+      <HarnessVersionScript>$(MSBuildThisFileDirectory)../../scripts/version.mjs</HarnessVersionScript>
+    </PropertyGroup>
+
+    <Exec Condition="'$(HarnessVersion)' == ''" Command="node &quot;$(HarnessVersionScript)&quot;" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low" EchoOff="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="HarnessVersionFromGit" />
+      <Output TaskParameter="ExitCode" PropertyName="HarnessVersionExit" />
+    </Exec>
+    <Exec Condition="'$(HarnessVersion)' == '' and '$(HarnessVersionExit)' == '0'" Command="node &quot;$(HarnessVersionScript)&quot; --commit" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low" EchoOff="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="HarnessCommit" />
+    </Exec>
+
+    <PropertyGroup>
+      <HarnessVersion Condition="'$(HarnessVersion)' == '' and '$(HarnessVersionExit)' == '0'">$(HarnessVersionFromGit.Trim())</HarnessVersion>
+      <HarnessVersion Condition="'$(HarnessVersion)' == ''">0.0.0+unknown</HarnessVersion>
+      <HarnessCommit Condition="'$(HarnessCommit)' == ''">unknown</HarnessCommit>
+      <HarnessBuiltAt>$(HARNESS_BUILT_AT)</HarnessBuiltAt>
+      <HarnessBuiltAt Condition="'$(HarnessBuiltAt)' == ''">$([System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))</HarnessBuiltAt>
+
+      <HarnessNumericVersion>$([System.Text.RegularExpressions.Regex]::Replace('$(HarnessVersion)', '\+.*$', ''))</HarnessNumericVersion>
+      <HarnessNumericVersion>$([System.Text.RegularExpressions.Regex]::Replace('$(HarnessNumericVersion)', '(^|\.)0+(\d)', '$1$2'))</HarnessNumericVersion>
+      <HarnessNumericVersion Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(HarnessNumericVersion)', '^\d+\.\d+\.\d+\.\d+$'))">0.0.0.0</HarnessNumericVersion>
+
+      <Version>$(HarnessNumericVersion)</Version>
+      <AssemblyVersion>$(HarnessNumericVersion)</AssemblyVersion>
+      <FileVersion>$(HarnessNumericVersion)</FileVersion>
+      <InformationalVersion>$(HarnessVersion)</InformationalVersion>
+      <HarnessVersionStamped>true</HarnessVersionStamped>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>HarnessCommit</_Parameter1>
+        <_Parameter2>$(HarnessCommit)</_Parameter2>
+      </AssemblyAttribute>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>HarnessBuiltAt</_Parameter1>
+        <_Parameter2>$(HarnessBuiltAt)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
+
+</Project>

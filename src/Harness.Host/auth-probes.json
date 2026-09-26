@@ -1,0 +1,20 @@
+{
+  "claude": {
+    "credentialVariable": "ANTHROPIC_API_KEY",
+    "credentialFiles": [".claude/.credentials.json"],
+    "statusArguments": ["auth", "status"]
+  },
+  "codex": {
+    "credentialVariable": "OPENAI_API_KEY",
+    "credentialFiles": [".codex/auth.json"],
+    "statusArguments": ["login", "status"]
+  },
+  "copilot": {
+    "credentialVariable": "GH_TOKEN",
+    "credentialFiles": [".copilot/config.json"]
+  },
+  "grok": {
+    "credentialVariable": "XAI_API_KEY",
+    "credentialFiles": [".grok/auth.json"]
+  }
+}
