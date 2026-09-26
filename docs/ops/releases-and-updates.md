@@ -35,7 +35,7 @@ scripts\release.ps1
 
 What it does:
 
-1. Refuses unless the checkout is on `main`, clean, and at the commit `origin` has for `main`, and unless `go` and `sh` are on PATH (the CLI in `cli/` is built with them).
+1. Refuses unless the checkout is on `main`, clean, and at the commit `origin` has for `main`, and unless `go` and `sh` are on PATH (the CLI in `cli/` is built with them). On Windows, `sh` comes with Git: put `C:\Program Files\Git\bin` on PATH in the shell that runs the release. It also refuses when the Podman machine cannot run linux/arm64 images, and prints the command that registers the emulator; that registration lasts until the machine restarts, so the first release after a restart needs it again.
 2. Runs the web suite here (`npm ci`, `npm test` in `web/`). Then it copies the commit into the container as a git bundle, clones it into `/tmp/release-<stamp>` with `TMPDIR` set inside that folder, builds `tests/Harness.Tests` and runs the test dll directly. The folder is removed afterwards. Then `go vet` and `go test` in `cli/`. A failure in any suite stops the release.
 3. Reads the `v*` tags on origin and takes today's next `yyyy.mm.dd.N`, starting at 1. Today is the local date of the machine it runs on.
 4. Makes the annotated tag locally and builds the image from a temporary worktree at that tag, with `--build-arg HARNESS_VERSION=<version>` (no `v`) and `--build-arg HARNESS_COMMIT=<full sha of the tag commit>`, the same names `dev-up.ps1` passes. The Containerfile turns those into the `org.opencontainers.image.version` and `.revision` labels; the script adds only `org.opencontainers.image.source`. A failed build deletes the local tag, so nothing has been published yet.
@@ -44,7 +44,7 @@ What it does:
 
 **One version number, one repository.** Image and CLI are always released together at the same `v<yyyy.mm.dd.N>`: the web portal shows that tag beside the logo (the full build version, commit and build time on hover), and `yawble version` prints the same tag.
 
-The package's visibility is a separate setting on GitHub, under the package's settings. To fetch a private image:
+The `yawble` package on ghcr.io is public, so anyone can pull it. Its visibility is a separate setting from the repository's, under the package's settings on GitHub. For a private fork's package, sign the engine in first:
 
 ```powershell
 gh auth token | podman login ghcr.io -u <github user> --password-stdin

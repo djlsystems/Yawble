@@ -6,8 +6,8 @@
 #
 # $env:YAWBLE_VERSION = 'v2026.09.24.1' pins a release; $env:YAWBLE_INSTALL_DIR overrides the folder.
 #
-# While the repository is private, set $env:GH_TOKEN (or $env:GITHUB_TOKEN) to a token with the
-# repo scope, and fetch this script with it too:
+# No token is needed. Installing from a private fork: set $env:GH_TOKEN (or $env:GITHUB_TOKEN) to
+# a token with the repo scope, and fetch this script with it too:
 #
 #   $env:GH_TOKEN = '...'
 #   irm -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1 | iex
@@ -44,7 +44,7 @@ if ($token) {
     try {
         $latest = Invoke-RestMethod -Uri "$api/repos/$repo/releases/latest" -UseBasicParsing -Headers @{ 'User-Agent' = 'yawble-install' }
     } catch {
-        throw "yawble: could not read the latest release of $repo (a private repository needs GH_TOKEN)"
+        throw "yawble: could not read the latest release of $repo (check the network connection; a private fork also needs GH_TOKEN)"
     }
     $version = $latest.tag_name
     if (-not $version) { throw "yawble: could not read the latest release of $repo" }

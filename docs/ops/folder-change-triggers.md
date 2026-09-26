@@ -28,13 +28,13 @@ Nothing to set up. In the member's **Triggers** dialog, choose **Add trigger**, 
 
 The container sees only what is passed into it. A network share takes three steps.
 
-### 1. Mount the share on the Windows host
+### 1. Mount the share on the computer
 
-Make the share available on the Windows machine that runs Podman: map it to a drive letter, or mount it at a local folder. Open it in Explorer to confirm the files are there before continuing.
+Make the share available on the computer that runs the container engine: on Windows, map it to a drive letter or mount it at a local folder; on macOS or Linux, mount it at a local folder. Open it to confirm the files are there before continuing.
 
 ### 2. Pass it into the container with `podman run -v`
 
-The container needs a `-v <host path>:<container path>` mount for the share, for example `-v S:\scans:/mnt/scans`. **`yawble up` does not add extra mounts yet**: it starts the container with the data volume only. Until yawble has a setting for extra mounts, a share cannot be passed in, and steps 2 onward depend on that.
+The container needs a `-v <host path>:<container path>` mount for the share, for example `-v S:\scans:/mnt/scans`. **`yawble up` starts the container with the data volume only and has no setting for extra mounts**, so a share cannot be passed in through `yawble` today, and steps 2 onward depend on that mount.
 
 Once the mount is in place, check the files are visible from inside it:
 

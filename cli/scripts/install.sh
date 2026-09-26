@@ -6,8 +6,8 @@
 #
 # YAWBLE_VERSION=v2026.09.24.1 pins a release; YAWBLE_INSTALL_DIR overrides ~/.local/bin.
 #
-# While the repository is private, set GH_TOKEN (or GITHUB_TOKEN) to a token with the repo scope,
-# and fetch this script with it too:
+# No token is needed. Installing from a private fork: set GH_TOKEN (or GITHUB_TOKEN) to a token
+# with the repo scope, and fetch this script with it too:
 #
 #   export GH_TOKEN=...
 #   curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
@@ -64,7 +64,7 @@ else
     version="v${YAWBLE_VERSION#v}"
   else
     version=$(curl -fsSL "$api/repos/$repo/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
-    [ -n "$version" ] || { echo "yawble: could not read the latest release of $repo (a private repository needs GH_TOKEN)" >&2; exit 1; }
+    [ -n "$version" ] || { echo "yawble: could not read the latest release of $repo (check the network connection; a private fork also needs GH_TOKEN)" >&2; exit 1; }
   fi
 fi
 bare="${version#v}"

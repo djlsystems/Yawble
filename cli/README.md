@@ -4,8 +4,6 @@ The operator CLI for [Yawble](https://github.com/djlsystems/Yawble): install the
 
 ## Install
 
-Once this repository is public (until then, see "While the repository is private" below):
-
 ```sh
 curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh    # Linux, macOS
 ```
@@ -14,35 +12,8 @@ curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/
 irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1 | iex          # Windows
 ```
 
-### While the repository is private
-
-Set `GH_TOKEN` (or `GITHUB_TOKEN`) to a GitHub token with the **`repo`** scope (for the script and
-the release assets) and **`read:packages`** (for pulling the image from ghcr.io; `write:packages`
-includes it), and fetch the script with the same token:
-
-```sh
-export GH_TOKEN=...      # or: export GH_TOKEN=$(gh auth token)
-curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh
-yawble up
-```
-
-```powershell
-$env:GH_TOKEN = '...'    # or: $env:GH_TOKEN = gh auth token
-irm -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1 | iex
-yawble up
-```
-
-With a token the scripts and `yawble update --cli` read the release through the GitHub API (the
-only place a private repository serves its assets), and `yawble up` and `yawble update` log the
-engine in to ghcr.io (`podman login ghcr.io --password-stdin`, the token on stdin) before pulling
-from it. The token goes to api.github.com and ghcr.io only: the redirect from an asset to its
-storage URL is followed without it, and no other registry is sent it. It is never printed or put
-on a command line. The engine keeps the ghcr.io login in its own auth file; `podman logout
-ghcr.io` removes it.
-
-Once the repository is public **and** the `yawble` package on ghcr.io is set to Public (a
-separate setting on the package's page; making the repository public does not change it), none of
-this is needed: unset the token and the one-liners above work as written.
+No GitHub account or token is needed. (Installing from a private fork instead is covered in
+[docs/ops/cli-releases-and-install.md](../docs/ops/cli-releases-and-install.md).)
 
 Each script places the binary (`~/.local/bin`, or `%LOCALAPPDATA%\Programs\yawble` and your user Path on Windows), verifies its checksum, and stops. Then:
 
@@ -50,9 +21,9 @@ Each script places the binary (`~/.local/bin`, or `%LOCALAPPDATA%\Programs\yawbl
 yawble up
 ```
 
-`up` installs no container engine. It uses what is installed: Podman or Docker, asking which when both are (Podman is recommended; the answer is saved as `engine` in yawble's config, and `yawble config set engine` changes it; `--yes` takes Podman). Before it creates anything it checks the port: when another program holds it (8080 by default), `up` offers the next free one and saves your answer as `port`. With neither, it stops and says where to get one: Podman Desktop (recommended, free for everyone) or Docker Desktop on macOS and Windows, Podman or Docker Engine on Linux, then run `yawble up` again; the install scripts end with the same advice. Podman on Windows needs WSL, and `up` says how to install it (at the computer, then restart) before creating the machine. macOS is Apple silicon only; on a Mac, `install.sh` adds `~/.local/bin` to `~/.zprofile`. With Docker, the limits come from `docker info`. On macOS and Windows it creates the Podman machine (rootless) if there is none, starts it if it is stopped, and offers to make a rootful one rootless, because a rootful machine on Windows never answers on localhost. `--yes` answers every question; without a terminal and without `--yes`, a question is a refusal that names the flag. On Windows, if the WSL virtual machine has less memory than the container limit, `up` says what to put in `.wslconfig` and continues. The Linux path has been run for real in a fresh Ubuntu 24.04 WSL distro: `up --yes` refreshed apt, installed Podman 4.9, created the volume and pod, brought the Host to health, and the board answered on Windows localhost; `doctor` passed and `uninstall --data --yes` left nothing. On Windows a whole first install has been run on a fresh Windows 11 VM (install script, winget Podman, WSL, machine creation and start, image pull, first start, board on localhost); making a rootful machine rootless is pinned by tests of the exact Podman command sequence and has not been run live. The macOS path is implemented from the same tables and is not yet verified on a Mac. On macOS and Windows the container's default memory is half the Podman machine's, capped at 12 GB, and its CPUs the machine's, capped at 8; a new Mac machine is created with half the Mac's RAM, capped at 12 GB.
+`up` installs no container engine. It uses what is installed: Podman or Docker, asking which when both are (Podman is recommended; the answer is saved as `engine` in yawble's config, and `yawble config set engine` changes it; `--yes` takes Podman). Before it creates anything it checks the port: when another program holds it (8080 by default), `up` offers the next free one and saves your answer as `port`. With neither, it stops and says where to get one: Podman Desktop (recommended, free for everyone) or Docker Desktop on macOS and Windows, Podman or Docker Engine on Linux, then run `yawble up` again; the install scripts end with the same advice. Podman on Windows needs WSL, and `up` says how to install it (at the computer, then restart) before creating the machine. macOS is Apple silicon only; on a Mac, `install.sh` adds `~/.local/bin` to `~/.zprofile`. With Docker, the limits come from `docker info`. On macOS and Windows it creates the Podman machine (rootless) if there is none, starts it if it is stopped, and offers to make a rootful one rootless, because a rootful machine on Windows never answers on localhost. `--yes` answers every question; without a terminal and without `--yes`, a question is a refusal that names the flag. On Windows, if the WSL virtual machine has less memory than the container limit, `up` says what to put in `.wslconfig` and continues. First installs have been run end to end on Linux (Ubuntu 24.04), on Windows 11 with Podman, and on macOS with both Podman and Docker. On macOS and Windows the container's default memory is half the Podman machine's, capped at 12 GB, and its CPUs the machine's, capped at 8; a new Mac machine is created with half the Mac's RAM, capped at 12 GB.
 
-Until a release exists, build from source:
+To build from source instead:
 
 ```sh
 go build ./cmd/yawble
@@ -63,8 +34,8 @@ A source build says `no image pinned` in `yawble version`: a release pins the ex
 ## Commands
 
 ```
-yawble up                 install the engine if missing, pull the image, create the volume, start. Idempotent.
-yawble down               stop the instance. The volume is kept.
+yawble up                 check the engine, machine and port, pull the image, create the volume, start. Idempotent.
+yawble down               stop the instance and free its port. The volume is kept.
 yawble status             running or not, URL, versions, tunnel URL, one line per agent
 yawble doctor [--fix]     every check, pass or fail with the fix spelled out. Exit 1 on any failure.
 yawble update             a newer yawble when there is one, then the instance onto its image. --cli / --instance do one half.
@@ -80,7 +51,7 @@ yawble version
 
 Tab completion for a shell is there but not listed in `yawble --help`: `yawble completion powershell | Out-String | Invoke-Expression` turns it on in PowerShell (add that line to `$PROFILE` to keep it), and `yawble completion --help` shows bash, zsh and fish.
 
-This build has the whole list above. The engine is the one configured, else the one installed (asked when both are); `config set engine podman|docker` sets it. The Docker implementation is pinned by tests of its exact command lines and has not been run against a real Docker here.
+The engine is the one configured, else the one installed (asked when both are); `config set engine podman|docker` sets it.
 
 ## Secrets: GitHub and API keys
 
@@ -119,7 +90,7 @@ yawble up
 
 Conventions: `--json` on `status`, `doctor`, `agents`, `config get` and `version`; exit 0 on success, 1 when the thing failed, 2 when the invocation was wrong; `YAWBLE_*` environment variables override the config file; no prompts when stdin is not a terminal; no colour.
 
-`doctor` prints one line per check. The verdict words are `ok`, `warn`, `FAIL` and `skip`; `skip` means the check could not be measured (a stopped instance has no health to check) and is not a failure. Exit 1 when anything FAILs. The in-container half runs the Host's own `--doctor` switch through `podman exec`, so those checks are computed by the platform and only rendered here. `--fix` starts a stopped Podman machine, creates a missing data volume and starts a stopped container; it never removes anything. After starting a machine it checks again and stops there, so a second `--fix` may be needed for the container.
+`doctor` prints one line per check. The verdict words are `ok`, `warn`, `FAIL` and `skip`; `skip` means the check could not be measured (a stopped instance has no health to check) and is not a failure. Exit 1 when anything FAILs. The in-container half runs the Host's own `--doctor` switch through `podman exec` (or `docker exec`), so those checks are computed by the platform and only rendered here. `--fix` starts a stopped Podman machine (with Podman as the engine), creates a missing data volume and starts a stopped container; it never removes anything. After starting a machine it checks again and stops there, so a second `--fix` may be needed for the container.
 
 ```
 ok    machine        podman-machine-default, 10 CPUs, 15688 MB
@@ -142,13 +113,13 @@ warn  agents         claude signed in · codex NOT signed in · copilot not meas
                      fix: yawble agents
 ```
 
-The first four rows exist only on macOS and Windows, where Podman runs in a machine; on Linux the list starts at `engine`.
+The first four rows appear only with Podman on macOS and Windows, where it runs in a machine; on Linux, and with Docker, the list starts at `engine`.
 
 ## Where things live
 
 - Settings: `~/.config/yawble/config.toml` on Linux, `~/Library/Application Support/yawble` on macOS, `%APPDATA%\yawble` on Windows. `yawble config` reads and writes it.
 - Provider keys the instance should receive: a file named `env` beside the config, one `NAME=value` per line, passed to the container at `up`.
-- Everything else is state the container engine holds: pod `yawble`, volume `yawble-data` mounted at `/data`, container `yawble`.
+- Everything else is state the container engine holds: pod `yawble` (a network of that name with Docker), volume `yawble-data` mounted at `/data`, container `yawble`.
 
 ## Releasing
 

@@ -35,7 +35,7 @@ type Release struct {
 }
 
 // Latest asks the releases API for the latest release and picks this target's archive. With a
-// token (GH_TOKEN, for a private repository) the request carries it and the assets are read at
+// token (GH_TOKEN, only for a private fork) the request carries it and the assets are read at
 // their API URLs, the only ones a private repository serves; without one nothing changes.
 func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goarch string) (Release, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/repos/"+Repository+"/releases/latest", nil)
@@ -54,7 +54,7 @@ func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goar
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		if token == "" {
-			return Release{}, fmt.Errorf("reading the latest release: GitHub answered %s (a private repository needs a token: set GH_TOKEN to one with the repo scope)", resp.Status)
+			return Release{}, fmt.Errorf("reading the latest release: GitHub answered %s (check the network connection; a private fork also needs GH_TOKEN with the repo scope)", resp.Status)
 		}
 		return Release{}, fmt.Errorf("reading the latest release: GitHub answered %s with GH_TOKEN set (does the token have the repo scope and access to %s?)", resp.Status, Repository)
 	}

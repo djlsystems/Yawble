@@ -55,7 +55,7 @@ The first visit creates the admin account. Then give agents their credentials, e
 signing in to an agent CLI from the Concierge terminal or with API keys:
 
 ```sh
-yawble github                           # GH_TOKEN for cloning, pushing and pull requests
+yawble github                           # only if your teams use GitHub: clone, push, pull requests
 yawble secret set ANTHROPIC_API_KEY     # or OPENAI_API_KEY, XAI_API_KEY; the value is prompted for
 yawble up                               # applies the change
 ```

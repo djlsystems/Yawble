@@ -2,6 +2,8 @@
 
 Operations notes for the container described in the root `README.md`: the container `yawble` that `yawble up` runs, its image (`<image>` below; `yawble status` names it), and the volume `yawble-data` mounted at `/data`.
 
+The commands below use `podman`. With Docker, `docker` takes the same arguments for `exec`, `stop`, `start`, `run` and `volume rm`/`create`; Docker has no `volume export` or `volume import`, so the full-volume export below is Podman-only.
+
 ## What is backed up, and how
 
 There are two kinds of backup, and they cover different things.

@@ -1,34 +1,16 @@
-# Quasar App (harness-web)
+# Yawble web app
 
-## Install the dependencies
+The board, the Concierge terminal and every dialog in Yawble: a Vue 3 and Quasar single-page
+app. The Host serves the production build; in development it talks to a running Host.
 
-```bash
-pnpm install
-# or: yarn/npm/bun install
+```sh
+npm ci              # install the dependencies
+npm run dev         # dev server with hot reload (quasar dev)
+npm test            # the unit and component tests (vitest)
+npm run typecheck   # vue-tsc
+npm run build       # production build (quasar build)
 ```
 
-### Start the app in development mode (HMR, error reporting, etc.)
-
-```bash
-quasar dev
-```
-
-### Build the app for production
-
-```bash
-quasar build
-```
-
-### Regenerate the icon font after adding an icon
-The app serves a subset of Material Symbols Outlined holding only the icons it uses
-(`src/assets/fonts/material-symbols-outlined-subset.woff2`, ~100 KB instead of ~4 MB). After adding
-an icon name, or upgrading `@quasar/extras` or `quasar`, rewrite it and commit the result:
-```bash
-npm run icons:subset
-```
-`src/lib/__tests__/icon-names.spec.ts` fails, naming the icon, until you do. Which names go in and
-why is in `scripts/icon-font.mjs`.
-
-### Customize the configuration
-
-See [Configuring quasar.config.js](https://v2.quasar.dev/quasar-cli-vite/quasar-config-file).
+The brand appears in `src/presentation/product.ts` and the `productName` in `package.json`, and
+nowhere else; `BrandLeakTests` in the .NET suite checks that. How the app fits with the Host:
+[../docs/architecture.md](../docs/architecture.md).
