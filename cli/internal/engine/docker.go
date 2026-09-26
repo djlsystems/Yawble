@@ -82,6 +82,11 @@ func (d docker) CreatePod(ctx context.Context, name string, _, _ int) error {
 	return err
 }
 
+// StopPod and PodRunning: a Docker network runs no process and holds no port.
+func (docker) StopPod(context.Context, string) error { return nil }
+
+func (docker) PodRunning(context.Context, string) (bool, error) { return false, nil }
+
 func (d docker) RemovePod(ctx context.Context, name string) error {
 	_, err := d.run(ctx, "network", "rm", name)
 	return err

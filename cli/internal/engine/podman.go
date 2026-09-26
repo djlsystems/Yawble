@@ -110,6 +110,41 @@ func (p podman) PodCurrent(ctx context.Context, name string) (bool, error) {
 	return strings.TrimSpace(out.Stdout) == podLayoutIPv4, nil
 }
 
+// StopPod stops the pod's infra container, the one that holds the published port. Not `podman pod
+// stop`: measured on Podman 6.0.2, that leaves the infra running when the member container has
+// already exited, and the pod stays Degraded with the port held. Starting the member container
+// later starts the infra again.
+func (p podman) StopPod(ctx context.Context, name string) error {
+	if running, err := p.PodRunning(ctx, name); err != nil || !running {
+		return err
+	}
+	out, err := p.run(ctx, "pod", "inspect", name, "--format", "{{.InfraContainerID}}")
+	if err != nil {
+		return err
+	}
+	if infra := strings.TrimSpace(out.Stdout); infra != "" {
+		_, err = p.run(ctx, "stop", infra)
+		return err
+	}
+	_, err = p.run(ctx, "pod", "stop", name)
+	return err
+}
+
+// PodRunning reads the pod's state: Running, or Degraded while a member container is stopped and
+// the infra still holds the port. A missing pod is not running.
+func (p podman) PodRunning(ctx context.Context, name string) (bool, error) {
+	exists, err := p.PodExists(ctx, name)
+	if err != nil || !exists {
+		return false, err
+	}
+	out, err := p.run(ctx, "pod", "inspect", name, "--format", "{{.State}}")
+	if err != nil {
+		return false, err
+	}
+	state := strings.ToLower(strings.TrimSpace(out.Stdout))
+	return state == "running" || state == "degraded", nil
+}
+
 func (p podman) RemovePod(ctx context.Context, name string) error {
 	_, err := p.run(ctx, "pod", "rm", "-f", name)
 	return err

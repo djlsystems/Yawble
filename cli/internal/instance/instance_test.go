@@ -280,7 +280,7 @@ func TestDownStopsTheTunnelSidecarTooAndUpStartsItAgain(t *testing.T) {
 	s := engine.NewScripted()
 	s.On(inspect, engine.Result{Stdout: "running|" + img + "|" + label(settings()) + "\n"})
 	s.On(tunnelInspect, engine.Result{Stdout: "running|docker.io/cloudflare/cloudflared:latest|\n"})
-	if err := instance.Down(context.Background(), engine.NewPodman(s), &bytes.Buffer{}); err != nil {
+	if err := instance.Down(context.Background(), engine.NewPodman(s), 8080, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	c := strings.Join(s.Calls, "\n")
@@ -365,7 +365,7 @@ func TestDownStopsARunningContainerAndLeavesTheRest(t *testing.T) {
 	s := engine.NewScripted()
 	s.On("podman container inspect", engine.Result{Stdout: "running|" + img + "|" + label(settings()) + "\n"})
 	var out bytes.Buffer
-	if err := instance.Down(context.Background(), engine.NewPodman(s), &out); err != nil {
+	if err := instance.Down(context.Background(), engine.NewPodman(s), 8080, &out); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(s.Calls, "\n")

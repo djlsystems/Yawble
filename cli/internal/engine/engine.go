@@ -58,6 +58,12 @@ type Engine interface {
 	PodExists(ctx context.Context, name string) (bool, error)
 	CreatePod(ctx context.Context, name string, hostPort, containerPort int) error
 	RemovePod(ctx context.Context, name string) error
+	// StopPod stops a pod, and with it the infra container that holds the published port. A
+	// missing pod is not an error. A Docker network runs nothing, so there it does nothing.
+	StopPod(ctx context.Context, name string) error
+	// PodRunning says whether a pod's infra container is up, holding its port. Always false on
+	// Docker, where the port belongs to the container itself.
+	PodRunning(ctx context.Context, name string) (bool, error)
 	// PodCurrent says whether an existing pod was made the way CreatePod makes one now; `up`
 	// remakes one that was not (the volume is untouched).
 	PodCurrent(ctx context.Context, name string) (bool, error)

@@ -31,7 +31,13 @@ func ensurePort(ctx context.Context, deps Deps, c config.Config, yes bool, out i
 	if free(port) {
 		return port, nil
 	}
-	if info, err := engineOf(deps, c).Inspect(ctx, instance.ContainerName); err == nil && info.State == engine.StateRunning {
+	// yawble's own: its container running, or on Podman its pod, whose infra container holds the
+	// port even while the container is stopped.
+	e := engineOf(deps, c)
+	if info, err := e.Inspect(ctx, instance.ContainerName); err == nil && info.State == engine.StateRunning {
+		return port, nil
+	}
+	if running, err := e.PodRunning(ctx, instance.PodName); err == nil && running {
 		return port, nil
 	}
 

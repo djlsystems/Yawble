@@ -235,11 +235,11 @@ func newDownCommand(deps Deps) *cobra.Command {
 		Example: "  yawble down",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			e, _, _, err := prepare(deps)
+			e, s, _, err := prepare(deps)
 			if err != nil {
 				return err
 			}
-			return instance.Down(cmd.Context(), e, cmd.OutOrStdout())
+			return instance.Down(cmd.Context(), e, s.Port, cmd.OutOrStdout())
 		},
 	}
 }

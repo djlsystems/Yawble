@@ -384,7 +384,7 @@ func stoppedError(ctx context.Context, e engine.Engine, url string) error {
 
 // Down stops the container and the tunnel sidecar in front of it, nothing else. The pod keeps
 // the port, the volume keeps the data, and `up` brings all of it back with a start.
-func Down(ctx context.Context, e engine.Engine, out io.Writer) error {
+func Down(ctx context.Context, e engine.Engine, port int, out io.Writer) error {
 	if state, err := e.ContainerState(ctx, TunnelName); err == nil && state == engine.StateRunning {
 		if err := e.Stop(ctx, TunnelName); err != nil {
 			return err
@@ -395,14 +395,30 @@ func Down(ctx context.Context, e engine.Engine, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if state != engine.StateRunning {
+	stopped := false
+	if state == engine.StateRunning {
+		if err := e.Stop(ctx, ContainerName); err != nil {
+			return err
+		}
+		stopped = true
+	}
+	// On Podman the pod's infra container publishes the port. It runs on after the container
+	// stops, holding the port, until the pod itself is stopped; `up` starts it again with the
+	// container. On Docker there is no pod and this does nothing.
+	podRunning, err := e.PodRunning(ctx, PodName)
+	if err != nil {
+		return err
+	}
+	if podRunning {
+		if err := e.StopPod(ctx, PodName); err != nil {
+			return err
+		}
+	}
+	if !stopped && !podRunning {
 		fmt.Fprintf(out, "%s is not running; nothing to stop (data volume %s kept)\n", ContainerName, VolumeName)
 		return nil
 	}
-	if err := e.Stop(ctx, ContainerName); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "stopped %s (data volume %s kept; `yawble up` starts it again)\n", ContainerName, VolumeName)
+	fmt.Fprintf(out, "stopped %s; port %d is free (data volume %s kept; `yawble up` starts it again)\n", ContainerName, port, VolumeName)
 	return nil
 }
 
