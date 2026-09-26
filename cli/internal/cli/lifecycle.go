@@ -183,6 +183,12 @@ func newUpCommand(deps Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The port, once the engine answers and before anything is created.
+			port, err := ensurePort(cmd.Context(), deps, c, yes, cmd.OutOrStdout())
+			if err != nil {
+				return err
+			}
+			c.Port = port
 			// Now the machine the container runs in is known: derive the limits from it. On Linux
 			// that is the host; on macOS and Windows the Podman machine that just came up; with
 			// Docker, what Docker says it can give (Docker Desktop's VM, or the host).
