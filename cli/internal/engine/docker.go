@@ -32,7 +32,8 @@ func (d docker) run(ctx context.Context, args ...string) (Result, error) {
 }
 
 // exists is `docker <kind> inspect <name>`: Docker has no `exists` verb, and inspect exits 1 for
-// a missing object with "No such" / "no such" on stderr. Any other failure is an error.
+// a missing object on stderr as "No such ..." or, from Docker 29 for a network, "... not found".
+// Any other failure is an error.
 func (d docker) exists(ctx context.Context, kind, name string) (bool, error) {
 	res, err := d.r.Run(ctx, "docker", kind, "inspect", name)
 	if err != nil {
@@ -41,10 +42,16 @@ func (d docker) exists(ctx context.Context, kind, name string) (bool, error) {
 	if res.ExitCode == 0 {
 		return true, nil
 	}
-	if strings.Contains(strings.ToLower(res.Stderr), "no such") {
+	if missing(res.Stderr) {
 		return false, nil
 	}
 	return false, fmt.Errorf("docker %s inspect %s: %s (exit %d)", kind, name, strings.TrimSpace(res.Stderr), res.ExitCode)
+}
+
+// missing is Docker saying the object does not exist, in either wording it uses.
+func missing(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "no such") || strings.Contains(lower, "not found")
 }
 
 func (d docker) Version(ctx context.Context) (string, error) {
@@ -91,7 +98,7 @@ func (d docker) Inspect(ctx context.Context, name string) (ContainerInfo, error)
 		return ContainerInfo{State: StateAbsent}, &NotRunnable{Err: err}
 	}
 	if res.ExitCode != 0 {
-		if strings.Contains(strings.ToLower(res.Stderr), "no such") {
+		if missing(res.Stderr) {
 			return ContainerInfo{State: StateAbsent}, nil
 		}
 		return ContainerInfo{State: StateAbsent}, fmt.Errorf("docker container inspect %s: %s (exit %d)", name, strings.TrimSpace(res.Stderr), res.ExitCode)

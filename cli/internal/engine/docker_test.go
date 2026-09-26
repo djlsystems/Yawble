@@ -47,6 +47,25 @@ func TestDockerExistenceIsAnInspectExitCode(t *testing.T) {
 	}
 }
 
+// Docker 29 says a missing network is "not found", not "no such": measured on Docker Desktop for
+// macOS, where the first `yawble up` stopped at `docker network inspect yawble` before creating it.
+func TestDockerTreatsNotFoundAsAbsentAsWellAsNoSuch(t *testing.T) {
+	s := engine.NewScripted()
+	s.On("docker network inspect yawble", engine.Result{Stderr: "Error response from daemon: network yawble not found", ExitCode: 1})
+	s.On("docker container inspect", engine.Result{Stderr: "Error response from daemon: container yawble not found", ExitCode: 1})
+	s.On("docker volume inspect other", engine.Result{Stderr: "Error response from daemon: permission denied", ExitCode: 1})
+	d := engine.NewDocker(s)
+	if ok, err := d.PodExists(context.Background(), "yawble"); ok || err != nil {
+		t.Errorf("network: %v %v", ok, err)
+	}
+	if info, err := d.Inspect(context.Background(), "yawble"); err != nil || info.State != engine.StateAbsent {
+		t.Errorf("container: %+v %v", info, err)
+	}
+	if _, err := d.VolumeExists(context.Background(), "other"); err == nil {
+		t.Error("a failure that is not a missing object must stay an error")
+	}
+}
+
 func TestDockerInspectUsesConfigImageAndTreatsNoSuchAsAbsent(t *testing.T) {
 	s := engine.NewScripted()
 	s.On("docker container inspect --format {{.State.Status}}|{{.Config.Image}}|{{index .Config.Labels \"yawble.settings\"}} yawble", engine.Result{Stdout: "running|img:1|{\"port\":8080}\n"})

@@ -67,7 +67,9 @@ func Observe(ctx context.Context, e engine.Engine, s instance.Settings, p Probes
 	if p.PortFree == nil {
 		p.PortFree = PortFree
 	}
-	if p.Runner != nil {
+	// The Podman machine only matters when Podman is the engine: with Docker, Docker Desktop runs
+	// its own VM, and a Podman machine installed beside it is not this instance's business.
+	if p.Runner != nil && e.Name() == "podman" {
 		o.Machine, o.MachineErr = machine.Inspect(ctx, p.Runner, goos)
 		if o.Machine.Applies && (o.MachineErr != nil || !o.Machine.Exists || !o.Machine.Running) {
 			return o

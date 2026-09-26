@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -312,6 +314,37 @@ func stoppedMachineScript() *engine.Scripted {
 	s.On("podman container inspect", engine.Result{Stdout: "running|" + testImage + "|" + currentLabel() + "\n"})
 	s.On(doctorExec, engine.Result{Stdout: doctorStdout})
 	return s
+}
+
+// With Docker as the engine there is no Podman machine to mind, even when Podman is installed
+// beside it: measured on a Mac with both, where `doctor --fix` started the Podman machine and
+// reported on it while the instance ran on Docker.
+func TestDoctorOnDockerNeverAsksOrStartsThePodmanMachine(t *testing.T) {
+	s := engine.NewScripted()
+	s.On(machineInspect, engine.Result{Stdout: "podman-machine-default|stopped|false|8192|6\n"})
+	s.On("docker version", engine.Result{Stdout: "29.8.0\n"})
+	s.On("docker info", engine.Result{Stdout: "8589934592|8\n"})
+	s.On("docker image inspect", engine.Result{})
+	s.On("docker volume inspect", engine.Result{})
+	s.On("docker network inspect", engine.Result{})
+	s.On("docker container inspect", engine.Result{Stderr: "Error response from daemon: container yawble not found", ExitCode: 1})
+	for _, args := range [][]string{{"doctor", "--json"}, {"doctor", "--fix", "--json"}} {
+		deps := stubbed(s)
+		deps.GOOS, deps.LookPath = "darwin", lookPath("podman", "docker")
+		deps.ConfigDir = t.TempDir()
+		if err := os.WriteFile(filepath.Join(deps.ConfigDir, "config.toml"), []byte("engine = \"docker\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, out, _ := run(t, deps, args...)
+		for _, c := range s.Calls {
+			if strings.HasPrefix(c, "podman") {
+				t.Errorf("%v asked Podman while the engine is Docker: %q", args, c)
+			}
+		}
+		if strings.Contains(out, "started the podman machine") || strings.Contains(out, "podman-machine-default") {
+			t.Errorf("%v reported the Podman machine: %s", args, out)
+		}
+	}
 }
 
 func TestDoctorOnAStoppedWindowsMachineFailsTheMachineAndFixStartsIt(t *testing.T) {
