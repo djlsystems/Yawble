@@ -1,4 +1,9 @@
-# Yawble
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="web/public/logo-dark.png">
+    <img src="web/public/logo-light.png" alt="Yawble" width="380">
+  </picture>
+</p>
 
 **Run teams of AI coding agents on your own machine.** Yawble gives every person a Concierge to
 talk to and hands the work to teams — a Manager and headless members built on the agent CLIs you
