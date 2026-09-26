@@ -275,9 +275,15 @@ public sealed class WorktreeRemovalTests : IAsyncDisposable
         var tree = paths.WorktreeFor(new ContainerId(team, member), Repo, key);
         var branch = Worktrees.BranchHint(member, key);
 
-        Assert.Equal(0, Git(clone, "worktree", "add", tree, "-b", branch).ExitCode);
+        // Git's own words on a failure, so a setup step that fails says why.
+        var added = Git(clone, "worktree", "add", tree, "-b", branch);
+        Assert.True(added.ExitCode == 0, $"git worktree add {tree}: exit {added.ExitCode}: {added.Output}");
         Commit(tree, $"{member}-{key}");
-        if (push) Assert.Equal(0, Git(tree, "push", "origin", branch).ExitCode);
+        if (push)
+        {
+            var pushed = Git(tree, "push", "origin", branch);
+            Assert.True(pushed.ExitCode == 0, $"git push {branch}: exit {pushed.ExitCode}: {pushed.Output}");
+        }
 
         return tree;
     }
