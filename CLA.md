@@ -1,7 +1,5 @@
 # Yawble Contributor License Agreement
 
-**Draft of 26 September 2026. Best-effort text prepared without a lawyer. It is not legal advice and it is not a signed instrument until you accept it as described below. Have startup counsel review it before a financing closes and before any large outside contribution is merged.**
-
 This agreement covers an individual contributor and, in the entity section, a company that owns a contribution. One text is intentional: the public repository and the CLA Assistant gist should both carry this file, unchanged.
 
 The licensee is **DJL Systems, Inc.**, a Massachusetts corporation, **and its successors and assigns** (the "Company"). A later assignment of the Yawble business to a new corporation does not require you to sign again. The new corporation inherits this agreement.
