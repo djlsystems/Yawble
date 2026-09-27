@@ -442,6 +442,19 @@ var loadedCatalog = AgentCatalogFile.BuiltIns()
     .ToList();
 var unmeasuredHeadlessPresets = Program.UnmeasuredHeadlessPresets(loadedCatalog);
 
+// THE INSTALLED PLUGINS, read from `<dataRoot>/plugins` - data, not code: nothing is compiled in and
+// nothing is registered by DI per plugin, so `POST /api/plugins/rescan` registers a new one with no
+// restart. A refused manifest is named here, once, with the field that is wrong.
+var pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"));
+PluginEndpoints.Report(pluginCatalog.Rescan(), Console.Out);
+builder.Services.AddSingleton(pluginCatalog);
+
+// A PLUGIN MEMBER'S SETTINGS: configuration and secret BINDINGS in `team_member_config`, and the values
+// resolved by logical key from the Host's own environment at each run - where `secret set` values
+// already arrive. Swapping the resolver for an encrypted store later changes nothing else.
+builder.Services.AddSingleton<ISecretStore>(new EnvironmentSecretStore());
+builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlitePluginMemberSettings(database));
+
 if (unmeasuredHeadlessPresets.Count > 0)
 {
     Console.WriteLine(
@@ -497,6 +510,31 @@ builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<IPrincipalStore>(),
     sp.GetRequiredService<AgentCatalog>()));
 
+// WHAT A MEMBER'S REPORT DOES - row, mark, card push, idle clock - written once, for the MCP routes
+// and for a plugin member's stdout alike.
+builder.Services.AddSingleton<MemberReports>();
+builder.Services.AddSingleton<IMemberReports>(sp => sp.GetRequiredService<MemberReports>());
+
+// WHAT EVERY MEMBER RUNS THROUGH. The member runtime hands its work, as data, to this; the agent
+// adapter turns it into the prompt and history an agent CLI has always been given, over the
+// IAgentRunner stack above. Tests that substitute IAgentRunner keep working because this reads it.
+//
+// ROUTED PER INVOCATION: `plugin:<id>` to the plugin runner, anything else to the agent adapter. The
+// choice is made here and nowhere in the pump.
+builder.Services.AddSingleton(sp => new AgentMemberRunner(
+    sp.GetRequiredService<IAgentRunner>(),
+    sp.GetRequiredService<IContextBuilder>()));
+builder.Services.AddSingleton(sp => new PluginMemberRunner(
+    sp.GetRequiredService<PluginCatalog>(),
+    sp.GetRequiredService<IMemberReports>(),
+    sp.GetRequiredService<RunHeartbeat>(),
+    sp.GetRequiredService<AgentLaunchUser>(),
+    sp.GetRequiredService<IPluginMemberSettingsStore>(),
+    sp.GetRequiredService<ISecretStore>()));
+builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
+    sp.GetRequiredService<AgentMemberRunner>(),
+    sp.GetRequiredService<PluginMemberRunner>()));
+
 // Constructed explicitly rather than by convention: the two artifact seams and the pending store are
 // all OPTIONAL parameters, and a container silently built without them is a container that silently
 // does not remember - and, without the third, one that silently loses accepted work on a restart.
@@ -550,7 +588,6 @@ builder.Services.AddSingleton(sp => new ContainerHost(
     sp.GetRequiredService<IMessageLog>(),
     sp.GetRequiredService<ICursors>(),
     sp.GetRequiredService<ISubscriptions>(),
-    sp.GetRequiredService<IContextBuilder>(),
     sp.GetRequiredService<ITranscriptStore>(),
     sp.GetRequiredService<IPendingDeliveries>(),
     sp.GetRequiredService<ITriggerStore>(),
@@ -664,7 +701,7 @@ builder.Services.AddSingleton(sp => new EffectiveSubscriptions(
 builder.Services.AddSingleton(sp => new TeamRegistry(
     sp.GetRequiredService<ContainerHost>(),
     sp.GetRequiredService<AgentCatalog>(),
-    sp.GetRequiredService<IAgentRunner>(),
+    sp.GetRequiredService<IMemberRunner>(),
     sp.GetRequiredService<TeamPaths>(),
     sp.GetRequiredService<ITeamStore>(),
     sp.GetRequiredService<AgentEnvironment>(),
@@ -682,7 +719,10 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
     skillDirectory: sp.GetRequiredService<SkillDirectory>(),
     // Resolved per call: the git runner reads the registry, so it cannot be built first.
     prepareClone: (contributor, clonePath, ct) =>
-        sp.GetRequiredService<ContributorClone>().ApplyAsync(clonePath, contributor, ct)));
+        sp.GetRequiredService<ContributorClone>().ApplyAsync(clonePath, contributor, ct),
+    plugins: sp.GetRequiredService<PluginCatalog>(),
+    pluginSettings: sp.GetRequiredService<IPluginMemberSettingsStore>(),
+    secrets: sp.GetRequiredService<ISecretStore>()));
 
 // The instance's git identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL, set with the operator CLI's `secret set`)
 // and the one place a clone is brought in line with its contributor settings.
@@ -1622,6 +1662,7 @@ app.MapGet("/api/auth/me", (HttpContext context) =>
 AuthEndpoints.Map(app);
 UserEndpoints.Map(app);
 AgentEndpoints.Map(app, dataRoot);
+PluginEndpoints.Map(app);
 RepoEndpoints.Map(app);
 KeyEndpoints.Map(app);
 FileSystemEndpoints.Map(app);
@@ -3702,7 +3743,12 @@ app.MapPost("/api/teams/{team}/containers", async (
             team, name,
             chosenByTag.Item1,
             request.SystemPrompt ?? "",
-            request.Subscribes ?? [], hiredFor: requestedTag, ct: ct);
+            request.Subscribes ?? [], hiredFor: requestedTag, ct: ct,
+            settings: request.Config is null && request.Secrets is null
+                ? null
+                : new PluginMemberSettings(
+                    request.Config ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+                    request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal)));
 
         // Said in the BODY as well as the header: the body is what the `member` tool hands the
         // Manager, and a substitution said only in a header is never seen by anyone who hired.
@@ -3746,6 +3792,10 @@ app.MapPost("/api/teams/{team}/containers", async (
         return Results.Conflict(new { error = $"A member called '{taken.ExistingLabel}' already exists in this team." });
     }
     catch (NoSuchAgentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (PluginSettingsException exception)
     {
         return Results.BadRequest(new { error = exception.Message });
     }
@@ -5052,8 +5102,8 @@ app.MapPost("/api/teams/{team}/containers/{name}/progress", async (
     [Description(Describe.Team)] string team,
     [Description("The member reporting. Must be the caller itself.")] string name,
     ReportProgress request,
-    HttpContext context, TeamRegistry teams, ContainerHost host, IMessageLog log,
-    RunHeartbeat heartbeat, ILoggerFactory loggers, CancellationToken ct) =>
+    HttpContext context, TeamRegistry teams, ContainerHost host, IMemberReports reports,
+    CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
@@ -5090,62 +5140,9 @@ app.MapPost("/api/teams/{team}/containers/{name}/progress", async (
     // The seq of the message being run. Correlation is inherited from causation at append time,
     // so this one value puts the report inside the workflow that produced it; passing the
     // correlation instead would head a new one.
-    var causation = container.CurrentCausation;
-    var status = request.Status.Trim();
-
-    // NULL MEANS THIS REPORT BELONGS TO NO RUN, and that is worth saying out loud rather than only
-    // being visible to somebody who thinks to compare correlation ids.
-    //
-    // It has always been legal - "a line said between runs starts its own thread rather than being
-    // lost" - and it is ALSO the signature of a real failure: a child process that outlived its
-    // invocation and is still working, while the board says the member is idle and the job looks
-    // finished. Nothing wakes a container when a shell command finishes, so whatever that child
-    // produces is never reported by anybody.
-    //
-    // For example: a Manager publishes `completed` saying "the test suite is running at the merged
-    // commit", a progress row then arrives under its OWN correlation, and when the suite finishes
-    // nobody reports the result. The seeded manager skill forbids exactly this, which is the point:
-    // a skill INSTRUCTS and cannot ENFORCE.
-    //
-    // MARKED, NEVER REFUSED. A progress call can legitimately land microseconds after its own run
-    // ends, and a guard failing closed there would refuse an honest report and lose the line. Fail
-    // in the direction that is recoverable: record it, say what it is, let a reader judge.
-    //
-    // The flag is written ONLY when true. A field that is always present and usually false is a
-    // question every reader asks once and nobody answers - the reason TeamTokenTotals carries no
-    // `Estimated`.
-    if (causation is null)
-    {
-        loggers.CreateLogger("Harness.Host.Progress").LogWarning(
-            "{Container} reported progress while idle: \"{Status}\". Its run has ended, so this "
-            + "came from a process that outlived it - and nothing will report what that process "
-            + "produces.",
-            container.Id,
-            status);
-    }
-
-    await log.AppendAsync(
-        new NewMessage(
-            MessageTypes.Progress,
-            causation is null
-                ? JsonSerializer.Serialize(new { status, whileIdle = true })
-                : JsonSerializer.Serialize(new { status }),
-            container.Id.ToString(),
-            causation),
-        ct);
-
-    // AFTER the append, and the order is the whole point. The SPA's feed has no poll: it refetches
-    // messages only when a `containerChanged` snapshot arrives. Publishing first would race - the
-    // client could fetch after the cursor and miss the row that has not landed yet, and then sit
-    // silent until the next state change. This carries no new state; it is the arrival that tells
-    // the board to look.
-    container.Republish();
-
-    // STILL ALIVE. This is what makes `TimeoutSeconds` measure silence rather than total time: the
-    // runner waiting on this member's child cannot see this call - the `progress` tool is a request
-    // of its own - so this is the only path between the two. On the FOUND container's id,
-    // like everything else on this route. It is a courtesy and cannot fail the report.
-    heartbeat.Touch(container.Id);
+    // THE EFFECTS LIVE IN MemberReports, which a plugin member's stdout reaches too: the row
+    // (flagged `whileIdle` from a process that outlived its run), the card push, the idle clock.
+    await reports.ProgressAsync(container.Id, request.Status, ct);
 
     return Results.NoContent();
 })
@@ -5229,7 +5226,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/blocked", async (
     [Description(Describe.Team)] string team,
     [Description("The member reporting. Must be the caller itself.")] string name,
     ReportBlocked request,
-    HttpContext context, TeamRegistry teams, ContainerHost host, IMessageLog log,
+    HttpContext context, TeamRegistry teams, ContainerHost host, IMemberReports reports,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -5257,38 +5254,11 @@ app.MapPost("/api/teams/{team}/containers/{name}/blocked", async (
         return Results.BadRequest(new { error = "Say why you stopped." });
     }
 
-    var reason = request.Reason.Trim();
+    // THE EFFECTS LIVE IN MemberReports: one batch item closed by its own row, or the whole run
+    // marked. An `item` that is not in this run is refused there, for every caller.
+    var outcome = await reports.BlockedAsync(container.Id, request.Reason, request.Item, ct);
 
-    if (request.Item is { } item)
-    {
-        if (!container.TryBlockItem(item, out var cause, out var error))
-        {
-            return Results.BadRequest(new { error });
-        }
-
-        await log.AppendAsync(
-            new NewMessage(
-                MessageTypes.Blocked,
-                JsonSerializer.Serialize(new { reason, item }),
-                container.Id.ToString(),
-                cause),
-            ct);
-    }
-    else
-    {
-        await log.AppendAsync(
-            new NewMessage(
-                MessageTypes.Blocked,
-                JsonSerializer.Serialize(new { reason }),
-                container.Id.ToString(),
-                container.CurrentCausation),
-            ct);
-
-        // AFTER the append, for the reason the progress route publishes after its own: the SPA's
-        // feed has no poll and refetches only when a snapshot arrives, so publishing first races
-        // the row that has not landed yet. MarkBlocked publishes, so there is no second push to add.
-        container.MarkBlocked(reason);
-    }
+    if (!outcome.Accepted) return Results.BadRequest(new { error = outcome.Refusal });
 
     return Results.NoContent();
 })
@@ -5330,7 +5300,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/handback", async (
     [Description(Describe.Team)] string team,
     [Description("The member handing back. Must be the caller itself.")] string name,
     ReportHandback request,
-    HttpContext context, TeamRegistry teams, ContainerHost host, IMessageLog log,
+    HttpContext context, TeamRegistry teams, ContainerHost host, IMemberReports reports,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -5361,20 +5331,9 @@ app.MapPost("/api/teams/{team}/containers/{name}/handback", async (
         return Results.BadRequest(new { error = "Say what you finished." });
     }
 
-    var delivered = request.Delivered.Trim();
-
-    await log.AppendAsync(
-        new NewMessage(
-            MessageTypes.Handback,
-            JsonSerializer.Serialize(new { delivered }),
-            container.Id.ToString(),
-            container.CurrentCausation),
-        ct);
-
-    // AFTER the append, for the reason the `blocked` and `progress` routes publish after theirs:
-    // the SPA's feed has no poll and refetches only when a snapshot arrives, so publishing first
-    // races a row that has not landed yet. MarkHandedBack publishes, so there is no second push.
-    container.MarkHandedBack(delivered);
+    // THE EFFECTS LIVE IN MemberReports: the row that wakes the Manager, and the last-handback
+    // words that are never cleared.
+    await reports.HandbackAsync(container.Id, request.Delivered, ct);
 
     return Results.NoContent();
 })
@@ -5400,7 +5359,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/needs-decision", async (
     [Description(Describe.Team)] string team,
     [Description("The member reporting. Must be the caller itself.")] string name,
     ReportNeedsDecision request,
-    HttpContext context, TeamRegistry teams, ContainerHost host, IMessageLog log,
+    HttpContext context, TeamRegistry teams, ContainerHost host, IMemberReports reports,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -5426,19 +5385,8 @@ app.MapPost("/api/teams/{team}/containers/{name}/needs-decision", async (
         return Results.BadRequest(new { error = "Say what decision you need." });
     }
 
-    var question = request.Question.Trim();
-
-    await log.AppendAsync(
-        new NewMessage(
-            MessageTypes.NeedsDecision,
-            JsonSerializer.Serialize(new { question }),
-            container.Id.ToString(),
-            container.CurrentCausation),
-        ct);
-
-    // AFTER the append, for the same reason the blocked route does it in this order: the board
-    // refetches messages only when a snapshot arrives.
-    container.MarkNeedsDecision(question);
+    // THE EFFECTS LIVE IN MemberReports: the row and the needs-decision mark.
+    await reports.NeedsDecisionAsync(container.Id, request.Question, ct);
 
     return Results.NoContent();
 })
@@ -6043,7 +5991,7 @@ app.MapPost("/api/teams/{team}/workflows/{correlation:long}/stop", async (
     // description below says so rather than promising more than this code does. Sub-millisecond
     // and triggered only by a person clicking Stop, so closing it needs a
     // stop-if-still-on-this-correlation check taken under the container's own lock - a new
-    // synchronisation primitive on `AgentContainer` for a race this narrow and this recoverable
+    // synchronisation primitive on `MemberRuntime` for a race this narrow and this recoverable
     // (a second click ends whatever it actually caught). Documented rather than closed, as this
     // codebase does for its other narrow, human-triggered races.
     foreach (var snapshot in host.Snapshots())
@@ -7288,7 +7236,16 @@ internal sealed record CreateContainer(
         "The message types that WAKE this member. The container holds the subscription, never the "
         + "agent - a headless agent runs and exits and cannot hold one. Beware global types: two "
         + "managers subscribed to `agentContainer.completed` wake each other without end.")]
-    string[]? Subscribes);
+    string[]? Subscribes,
+    [property: Description(
+        "A PLUGIN member's configuration: field name to value, checked against the plugin's "
+        + "manifest (`GET /api/plugins`). Refused for an Agent.")]
+    Dictionary<string, JsonElement>? Config = null,
+    [property: Description(
+        "A PLUGIN member's secret bindings: each secret its manifest names, to a LOGICAL KEY set on "
+        + "the Host with `secret set` - never a value. A required secret whose key is not set is "
+        + "refused. Refused for an Agent.")]
+    Dictionary<string, string>? Secrets = null);
 
 /// <summary>A repository's contributor settings. See the route.</summary>
 internal sealed record SetRepoContributor(

@@ -201,7 +201,7 @@ public sealed class TriggerSweep(
             ct);
     }
 
-    private async Task<bool> IsBusyAsync(AgentContainer container, CancellationToken ct)
+    private async Task<bool> IsBusyAsync(MemberRuntime container, CancellationToken ct)
     {
         var accepted = await pending.ForAsync(container.Id, ct);
         return ContainerBusy.IsBusy(container, accepted);

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The sample plugin member: a console app with no dependencies. Install it with
+       `dotnet publish -c Release -o <version-dir>/lib` - see docs/plugins.md. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>SampleEcho</AssemblyName>
+    <RootNamespace>SampleEcho</RootNamespace>
+  </PropertyGroup>
+
+</Project>

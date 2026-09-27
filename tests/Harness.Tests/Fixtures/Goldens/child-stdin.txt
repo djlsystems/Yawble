@@ -1,0 +1,10 @@
+exit=0 launchError= class= succeeded=True
+argv:golden|argv:<workspace>|
+--- stdin
+earlier history
+
+the instruction
+line two
+--- env
+HARNESS_CAUSATION=7
+TEAM_VAR=x

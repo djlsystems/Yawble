@@ -75,17 +75,27 @@ public static partial class DiagnosticRedaction
     /// </summary>
     public static string? Redact(string? text)
     {
+        var redacted = RedactWithoutLimit(text);
+        if (string.IsNullOrWhiteSpace(redacted)) return redacted;
+
+        return redacted.Length <= MaximumLength
+            ? redacted
+            : redacted[..(MaximumLength - Truncated.Length)] + Truncated;
+    }
+
+    /// <summary>
+    /// The same two rules with no ceiling on length - for text that is a run's OUTPUT rather than a
+    /// diagnostic, where cutting it off would lose the work itself.
+    /// </summary>
+    public static string? RedactWithoutLimit(string? text)
+    {
         if (string.IsNullOrWhiteSpace(text)) return text;
 
         var redacted = NamedSecret().Replace(text, match =>
             match.Groups["name"].Value + match.Groups["separator"].Value + Placeholder);
 
-        redacted = CredentialShaped().Replace(redacted, match =>
+        return CredentialShaped().Replace(redacted, match =>
             LooksRandom(match.Value) ? Placeholder : match.Value);
-
-        return redacted.Length <= MaximumLength
-            ? redacted
-            : redacted[..(MaximumLength - Truncated.Length)] + Truncated;
     }
 
     /// <summary>

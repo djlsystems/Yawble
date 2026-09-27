@@ -60,6 +60,7 @@ const wording: Record<string, string> = {
   'member.added': 'added member',
   'member.changed': 'changed member',
   'agents.saved': 'saved Agent catalog',
+  'plugins.rescanned': 'rescanned plugins',
   'key.minted': 'minted an API key',
   'key.revoked': 'revoked an API key',
 };

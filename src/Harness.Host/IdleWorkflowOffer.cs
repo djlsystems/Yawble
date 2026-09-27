@@ -170,7 +170,7 @@ public sealed class IdleWorkflowOffer(
         }
         catch (Exception error) when (!ct.IsCancellationRequested)
         {
-            // A HANDLER'S FAILURE IS NOT THIS RUN'S - `AgentContainer` says the same at its own call
+            // A HANDLER'S FAILURE IS NOT THIS RUN'S - `MemberRuntime` says the same at its own call
             // site, and a terminal row that went missing because this threw would leave a container
             // reading `running` forever. LOGGED rather than swallowed in silence: the whole subject
             // of this class is a condition nobody could otherwise see.
@@ -236,7 +236,13 @@ public sealed class IdleWorkflowOffer(
         // RE-CHECKED AT THE MOMENT OF DECIDING, as `ResumeSweep.FireAsync` does: appending an
         // instruction addressed to a container that does not exist puts a message on the log
         // nothing will ever read.
-        if (host.Find(owner) is null) return false;
+        if (host.Find(owner) is not { } declarer) return false;
+
+        // AN OFFER ONLY TO A MEMBER THAT CAN ACT ON IT. The offer asks the declarer to call
+        // `workflow_complete`, `blocked` or `needs_decision`, all of which need the Progress
+        // permit; a member that holds none - a plugin member, reporting through its own stdout -
+        // would be handed prose it cannot answer, and run it as work.
+        if (!declarer.Permits.Contains(Permits.Progress)) return false;
 
         // STILL OPEN - `WorkflowOpenSql.NotClosed`, the same predicate the board reads and the same
         // one `UNDECLARED` renders. A workflow somebody declared or closed is finished with, and

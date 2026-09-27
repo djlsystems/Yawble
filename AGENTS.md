@@ -2,7 +2,7 @@
 
 For people and coding agents working on this repository. Rules that are load-bearing, and the failure each one prevents. Most name the test that pins them; keep that test green and keep the rule true when you change the code. For what the product is and how to build it, see `README.md` and `docs/architecture.md`.
 
-The Host runs in a Linux container. An agent child starts in its own session (`setsid`), and its process group is killed when the run ends, so a detached grandchild does not outlive it. A command is resolved once with `PathSearch.Find`, and a miss is a launch failure. Pinned by `ProcessAgentRunnerLaunchTests.The_child_leads_its_own_process_group`, `ProcessAgentRunnerLaunchTests.A_detached_grandchild_does_not_outlive_the_run`, `ProcessAgentRunnerLaunchTests.A_command_not_on_PATH_is_a_launch_failure` and `PathSearchTests.A_missing_command_is_null`.
+The Host runs in a Linux container. An agent child starts in its own session (`setsid`), and its process group is killed when the run ends, so a detached grandchild does not outlive it. A command is resolved once with `PathSearch.Find`, and a miss is a launch failure. The launch lives in `ChildProcess`, which agent and plugin members share. Pinned by `ChildProcessTests`, `ProcessAgentRunnerLaunchTests.The_child_leads_its_own_process_group`, `ProcessAgentRunnerLaunchTests.A_detached_grandchild_does_not_outlive_the_run`, `ProcessAgentRunnerLaunchTests.A_command_not_on_PATH_is_a_launch_failure` and `PathSearchTests.A_missing_command_is_null`.
 
 ## Identity
 
@@ -82,6 +82,12 @@ The Host runs in a Linux container. An agent child starts in its own session (`s
 - `HARNESS_CAUSATION` is set per invocation. `tell` must send it back or the dispatch roots a new workflow. Pinned by `WorktreePerCardTests.Two_instructions_naming_two_cards_get_two_trees_and_one_without_a_card_gets_its_correlation` and `TellCausationTests.A_named_causation_is_kept`.
 - A preset's idle clock resets on `progress`, not on stdout. A spinner would hold a slot forever. Pinned by `IdleClockTests.Output_alone_does_not_hold_the_clock_open` and `IdleClockTests.Progress_resets_the_clock`.
 - Auth is probed up front (`GET /api/agents/auth`). `authenticated: null` means not measured. Pinned by `AgentAuthProbeTests.A_preset_the_probe_cannot_ask_is_not_measured`.
+
+## Members
+
+- The member runtime is generic; what it runs is behind `IMemberRunner`. `MemberRuntime` (formerly `AgentContainer`) and `ContainerHost` hand the work over as data and read a `MemberResult`. They build no prompt and no history, and they word no agent failure. `AgentMemberRunner` does all of that for agents, over the unchanged `CredentialUseRunner(ProcessAgentRunner)` stack. An agent member's rows, prompt, context, environment, persisted row and snapshot are byte-identical to the step-0 goldens. Re-record them only with `HARNESS_UPDATE_GOLDENS=1`, and only for a change meant to be visible. Pinned by `MemberGoldenTests` and `MemberRuntimeTests.The_runtime_and_the_pump_name_no_agent_seam`.
+- What a member runs is read from `team_members.agent` through `MemberRef`, and only there: a bare name is an Agent preset, `plugin:<id>` is a plugin. `MemberRunnerRouter` picks the runner per invocation. No plugin code goes in `Harness.Containers`. Rename C# types freely; never rename `agentContainer.*`, a `ContainerSnapshot` field or a route. Pinned by `PluginMemberEndToEndTests.P7_Nothing_plugin_specific_is_in_the_pump` and `PluginMemberRegistryTests`.
+- A plugin member holds no permits, no credential and no system prompt, and is never repointed across kinds. It runs through `ChildProcess` with an allowlisted environment, speaks `harness.member/1` on stdin/stdout, and reports through `MemberReports`, the same code the MCP routes run. Its secrets are logical keys, resolved from the Host environment at each run and passed only on stdin. See `docs/plugins.md`. Pinned by `PluginMemberRunnerTests`, `PluginCatalogTests` and `MemberReportsTests`.
 
 ## Admission
 

@@ -225,7 +225,7 @@ public interface IMessageLog
     ///
     /// <para>
     /// EXISTS SO A RESTART DOES NOT ERASE THEM. `ContainerSnapshot.Blocked`, `.NeedsDecision`
-    /// and `.Failed` are fields on a live `AgentContainer` and nothing writes them down, so without
+    /// and `.Failed` are fields on a live `MemberRuntime` and nothing writes them down, so without
     /// this a Host restart would take every one of them while the rows that produced them stay in the
     /// append-only log - and the team tile, a projection over that log, would report BLOCKED over a
     /// card showing an idle member with nothing to say.

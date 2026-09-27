@@ -68,7 +68,7 @@ public sealed record EventDefinition(
 /// try several field names as a fallback chain without any of the later ones ever being written, and
 /// trusting that shape would declare fields that can never appear. `agentContainer.completed` and
 /// `agentContainer.failed` share one JSON object built at exactly one call site
-/// (<c>AgentContainer.RunOneAsync</c>), so they carry IDENTICAL fields, `launchError` included on a
+/// (<c>MemberRuntime.RunOneAsync</c>), so they carry IDENTICAL fields, `launchError` included on a
 /// success and `output` included on a failure - both usually empty, neither absent.
 /// </para>
 ///

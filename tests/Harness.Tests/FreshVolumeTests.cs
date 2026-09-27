@@ -33,13 +33,13 @@ public sealed class FreshVolumeTests : IDisposable
     /// Data), never an edit. `auth-002` is `tenant_settings`; `auth-003` is the nullable Concierge
     /// agent; `auth-004` is team additional instructions; `auth-005` is the folder-trigger columns;
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
-    /// settings.
+    /// settings; `auth-008` is a plugin member's configuration and secret bindings.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "skill-001", "skill-002", "backlog-001"],
+            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "skill-001", "skill-002", "backlog-001"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -51,7 +51,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "backlog-001", "messages-001", "skill-001", "skill-002"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "backlog-001", "messages-001", "skill-001", "skill-002"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.

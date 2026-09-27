@@ -6,11 +6,14 @@ using Harness.Contracts;
 namespace Harness.Containers;
 
 /// <summary>
-/// One agent, and everything around it.
+/// One member, and everything around it: the MEMBER RUNTIME, formerly `AgentContainer`.
 ///
-/// The container is the long-lived thing; the agent is a process that runs and exits. That
-/// distinction is the whole design: a headless agent CANNOT hold a subscription, so the container
-/// holds it and enqueues an invocation when a subscribed message arrives. Nothing blocks — a manager
+/// The runtime is the long-lived thing; what it runs - an agent CLI, a plugin executable - is a
+/// process that runs and exits, reached through <see cref="IMemberRunner"/>. That distinction is the
+/// whole design: a headless process CANNOT hold a subscription, so the runtime holds it and
+/// enqueues an invocation when a subscribed message arrives. Nothing here knows what kind of member
+/// it is hosting: turning work into a prompt, reading history, and the agent's own failure words
+/// are the agent runner's. Nothing blocks — a manager
 /// is not running while a worker works, it is woken afterwards.
 ///
 /// Exactly one invocation runs at a time. Three workers finishing together produce three wakes, and
@@ -24,7 +27,7 @@ namespace Harness.Containers;
 /// actually wired - <c>pending</c> below is an optional constructor parameter, same as context and
 /// transcripts, and null means a container that goes back to silently losing accepted work.
 /// </summary>
-public sealed class AgentContainer : IAsyncDisposable
+public sealed class MemberRuntime : IAsyncDisposable
 {
     public const int DefaultCeiling = 16;
 
@@ -48,9 +51,8 @@ public sealed class AgentContainer : IAsyncDisposable
     /// </summary>
     private readonly IReadOnlySet<string> _baseSubscribes;
 
-    private readonly IAgentRunner _runner;
+    private readonly IMemberRunner _runner;
     private readonly IMessageLog _log;
-    private readonly IContextBuilder? _context;
     private readonly ITranscriptStore? _transcripts;
     private readonly IPendingDeliveries? _pending;
     /// <summary>
@@ -278,11 +280,10 @@ public sealed class AgentContainer : IAsyncDisposable
     /// </param>
     /// <param name="onRunEnding">See <see cref="_onRunEnding"/>. Optional, and null is what a
     /// fixture wants.</param>
-    public AgentContainer(
+    public MemberRuntime(
         ContainerDefinition definition,
-        IAgentRunner runner,
+        IMemberRunner runner,
         IMessageLog log,
-        IContextBuilder? context = null,
         ITranscriptStore? transcripts = null,
         IPendingDeliveries? pending = null,
         Func<ContainerId, IDisposable?>? claimStart = null,
@@ -303,7 +304,6 @@ public sealed class AgentContainer : IAsyncDisposable
         _baseSubscribes = new HashSet<string>(definition.Subscribes, StringComparer.Ordinal);
         _runner = runner;
         _log = log;
-        _context = context;
         _transcripts = transcripts;
         _pending = pending;
         _claimStart = claimStart;
@@ -363,6 +363,12 @@ public sealed class AgentContainer : IAsyncDisposable
     /// </summary>
     public string SystemPrompt => _definition.SystemPrompt;
 
+    /// <summary>What this member may cause through the platform's routes. Empty for one that holds
+    /// no credential.</summary>
+    public IReadOnlySet<string> Permits => _definition.Permits ?? NoPermits;
+
+    private static readonly IReadOnlySet<string> NoPermits = new HashSet<string>(StringComparer.Ordinal);
+
     public int Ceiling { get; }
 
     public int QueueDepth => Volatile.Read(ref _queueDepth);
@@ -381,7 +387,8 @@ public sealed class AgentContainer : IAsyncDisposable
         _definition.UnreachableRoot, _definition.HiredFor,
         UnresolvedAgents: null, FailureClass: _failureClass, ResumeAt: _resumeAt,
         HandedBack: _handedBack, Held: _held,
-        Watchable: _watchable?.Invoke(_definition.Agent) ?? false);
+        Watchable: _watchable?.Invoke(_definition.Agent) ?? false,
+        Kind: MemberRef.KindOf(_definition.Agent));
 
     /// <summary>
     /// Records that this container has stopped without finishing, and pushes it.
@@ -626,7 +633,7 @@ public sealed class AgentContainer : IAsyncDisposable
         // timing.
         //
         // Safe against a run already in flight: RunOneAsync reads `_definition` into the
-        // AgentInvocation it builds at the START of a run, before this could race it, and the swap
+        // MemberInvocation it builds at the START of a run, before this could race it, and the swap
         // above is a single atomic reference assignment either way - a run that started before this
         // call finishes against the definition it started with, exactly as the class doc promises.
         if (before != (
@@ -1102,33 +1109,6 @@ public sealed class AgentContainer : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// The instruction's own statement of where the work goes, appended after the messages: the
-    /// same paths the environment carries, and one line per repository when there are several.
-    /// </summary>
-    public static string WorktreeText(string branchHint, IReadOnlyList<RepoWorktree> trees)
-    {
-        var lines = new List<string>(trees.Count + 3) { string.Empty };
-
-        if (trees.Count == 1)
-        {
-            lines.Add(
-                $"Your worktree for this card is {trees[0].Path} (${WorktreeVariable}), cut from the "
-                + $"clone at {trees[0].ClonePath}. Create it if it does not exist, otherwise work in it.");
-        }
-        else
-        {
-            lines.Add(
-                $"Your worktrees for this card, one per repository (${WorktreeVariable} is the first). "
-                + "Create each you need if it does not exist, otherwise work in it:");
-            lines.AddRange(trees.Select(t => $"- {t.Repo}: {t.Path}, cut from the clone at {t.ClonePath}"));
-        }
-
-        lines.Add($"Suggested branch: {branchHint} (${BranchHintVariable}).");
-
-        return string.Join("\n", lines);
-    }
-
     private void BeginBatch(IReadOnlyList<Message> messages)
     {
         lock (_batchGate)
@@ -1232,8 +1212,8 @@ public sealed class AgentContainer : IAsyncDisposable
         // CREATED AT THE TOP OF THE INVOCATION, and that placement matters. The consumer loop marks
         // this container Running BEFORE calling this method, so setting `_running` any later leaves
         // a window in which the card says `running` and Stop answers "it was not running" - which
-        // is worse than a plain failure because the button reports success at doing nothing. Building the ledger context
-        // sits inside that window and is not instant.
+        // is worse than a plain failure because the button reports success at doing nothing. An
+        // agent runner building its ledger context sits inside that window and is not instant.
         using var run = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
 
         _running = run;
@@ -1245,34 +1225,33 @@ public sealed class AgentContainer : IAsyncDisposable
             Id.ToString(),
             cause));
 
-        AgentResult result;
-
-        // Built from the LEDGER, before the run. Without it an invocation would receive the system
-        // prompt and the waking message and nothing else - no history at all.
-        var context = _context is null
-            ? string.Empty
-            // `run.Token`, not `_shutdown`: a Stop during context building must take effect, and
-            // this read is not instant on a container with history.
-            : await _context.BuildAsync(Id, first, _limits, _sinceSeq, run.Token);
+        MemberResult result;
 
         var worktree = WorktreeForInvocation(first);
 
-        var prompt = worktree is null
-            ? MessageText.Of(batch)
-            : MessageText.Of(batch) + "\n" + WorktreeText(worktree.BranchHint, worktree.Trees);
-
         try
         {
+            // THE WORK AS DATA, NOT AS A PROMPT. The batch, the card's worktrees and the floor go to
+            // the runner as they are; an agent runner renders them into prose with its ledger
+            // history, a plugin runner hands them to its executable as JSON. Rendering here would
+            // be the runtime deciding every member is an agent.
             result = await _runner.RunAsync(
-                new AgentInvocation(
+                new MemberInvocation(
                     Id,
-                    _definition.SystemPrompt,
-                    prompt,
+                    _definition.Agent,
+                    batch,
                     _definition.WorkingDirectory,
                     EnvironmentFor(cause, worktree),
-                    context,
-                    _definition.Agent,
-                    _definition.UnreachableRoot),
+                    new MemberRunContext(
+                        // `_sinceSeq` is read HERE, at the start of the run, exactly as the context
+                        // build always read it: `Refloor` moving it mid-run must not change history
+                        // an invocation has already been handed.
+                        _sinceSeq,
+                        _limits,
+                        worktree?.Trees ?? [],
+                        worktree?.BranchHint,
+                        _definition.UnreachableRoot,
+                        _definition.SystemPrompt)),
                 run.Token);
         }
         catch (OperationCanceledException) when (_stoppedByHand && !_shutdown.IsCancellationRequested)
@@ -1293,13 +1272,13 @@ public sealed class AgentContainer : IAsyncDisposable
             // A runner that handles its own cancellation - ProcessAgentRunner does, so it can kill
             // the child and say why - returns a failed result instead and never reaches here. This
             // is for the ones that do not.
-            result = new AgentResult(-1, string.Empty, "This run was stopped.");
+            result = MemberResult.NotRun("This run was stopped.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // The consumer loop must outlive any single invocation, or one bad message stops every
             // later one for this container.
-            result = new AgentResult(-1, string.Empty, ex.Message);
+            result = MemberResult.NotRun(ex.Message);
         }
         finally
         {
@@ -1314,9 +1293,7 @@ public sealed class AgentContainer : IAsyncDisposable
         // successful run as stopped would report a lie about work that was actually delivered.
         if (_stoppedByHand && !result.Succeeded)
         {
-            result = new AgentResult(
-                -1,
-                string.Empty,
+            result = MemberResult.NotRun(
                 "This run was stopped from the board. Whatever it had done is not recorded.",
 
                 // `interrupted`, WHICH IS THE WORD THAT ALREADY EXISTS. A person pressing Stop cut
@@ -1324,10 +1301,10 @@ public sealed class AgentContainer : IAsyncDisposable
                 // invented twice. It never resumes automatically, which is
                 // the only behaviour a class decides and plainly the right one here: the platform
                 // must not undo a person's Stop on a timer.
-                FailureClass: FailureClasses.Interrupted,
+                FailureClasses.Interrupted,
 
-                // What the agent did before the Stop is still in its own transcript.
-                AgentTranscript: result.AgentTranscript);
+                // What the member did before the Stop is still in its own transcript.
+                result.Transcript);
         }
 
         // Written BEFORE the message is published, so a payload never references a transcript that
@@ -1360,45 +1337,22 @@ public sealed class AgentContainer : IAsyncDisposable
         //
         // The tile reads the log and the card reads the snapshot, and that is two questions rather
         // than an inconsistency: the tile asks whether this TEAM is dead, over the whole roster,
-        // and the card asks whether THIS member's last run failed. Routing one field of a live
-        // per-container record through a team-level log query would make a card's own state depend
-        // on a team-level floor.
+        // and the card asks whether THIS member's last run failed.
         //
-        // `launchError` FIRST, because it is the sentence that says what actually went wrong - the
-        // exit code is what is left when nothing else was reported.
-        // THREE ARMS, AND THE ORDER IS THE PRECEDENCE. `launchError` still comes first for the
-        // reason it always did - it is the sentence that says what actually went wrong.
-        //
-        // The middle arm is why the order matters now. A run stopped by the timeout, by Stop, or by
-        // a host restart ALSO made no CLI call, and it already carries a reason that says which of
-        // those it was. Putting `DidNothing` above them would replace a sentence that helps with one
-        // that is true and vaguer. Every one of those paths sets `LaunchError`, so the first arm
-        // covers them all and this arm only ever speaks for a run that reached the agent, came back
-        // clean, and did nothing.
-        var failure = !string.IsNullOrWhiteSpace(result.LaunchError)
-            ? result.LaunchError
-            : result.ReachedThePlatform == false
-                ? AgentResult.DidNothing
-                : $"This run did not complete. The agent exited {result.ExitCode}.";
+        // THE RUNNER'S SENTENCE, because the runner is the only layer that knows what kind of thing
+        // failed: an agent runner says "The agent exited N" or that the run never reached the
+        // platform, a plugin runner says what the plugin said. The fallback below is for a runner
+        // that failed without a sentence, and says nothing about what it was running.
+        var failure = !string.IsNullOrWhiteSpace(result.FailureReason)
+            ? result.FailureReason
+            : !string.IsNullOrWhiteSpace(result.LaunchError)
+                ? result.LaunchError
+                : $"This run did not complete (exit {result.ExitCode}).";
 
-        // THE CLASS, AND ITS PRECEDENCE IS NOT THE REASON'S. `launchError` still wins the REASON
-        // above - a timeout keeps its own sentence - and the class is decided separately, because
-        // the two answer different questions: the reason says what a person should read, the class
-        // says what the platform may do next.
-        //
-        // THREE ARMS, WIDEST LAST.
-        //
-        // 1. WHAT THE RUNNER FOUND, when it found anything. It is the only layer that saw the
-        //    provider's own words, and `FailureClasses.Timeout` and `Interrupted` reach here the
-        //    same way - set on the AgentResult by whichever layer knew.
-        // 2. `DidNothing` IS AGENT-FAULT. A run whose tools were denied exits 0 and
-        //    reaches nothing; re-running it spends again to fail the same way.
-        // 3. UNKNOWN IS THE DEFAULT, and it is a real class rather than an absent field. A failure
-        //    nobody could classify is not a guess - this product already refuses to invent a number
-        //    it does not have, and the same rule now applies to a reason. It is treated exactly as
-        //    agent-fault, so defaulting here costs nothing and claims nothing.
-        var failureClass = result.FailureClass
-            ?? (result.ReachedThePlatform == false ? FailureClasses.AgentFault : FailureClasses.Unknown);
+        // THE CLASS. What the runner found when it found anything - it is the only layer that saw
+        // the implementation's own words - and otherwise UNKNOWN, which is a real class rather than
+        // an absent field: a failure nobody could classify is not a guess.
+        var failureClass = result.FailureClass ?? FailureClasses.Unknown;
 
         // THE RUN IS OVER, HOWEVER IT ENDED, AND THIS IS THE LAST MOMENT BEFORE ANYTHING SAYS SO.
         //
@@ -1493,7 +1447,7 @@ public sealed class AgentContainer : IAsyncDisposable
                 // The agent's own transcript, on the row that carries the run, as ONE key
                 // appended to the object above and only when there is one: every other byte of the
                 // row is what it was, and a run with none carries no key at all rather than a null.
-                if (usageCountedOn is null && result.AgentTranscript is { } agentTranscript)
+                if (usageCountedOn is null && result.Transcript is { } agentTranscript)
                 {
                     payload = payload[..^1]
                         + $",\"{PayloadFields.AgentTranscript}\":{JsonSerializer.Serialize(agentTranscript.Path)}"

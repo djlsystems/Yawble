@@ -98,6 +98,10 @@ public static class TenantActions
 
     public const string AgentsSaved = "agents.saved";
 
+    /// <summary>A person re-read the installed plugins, so a plugin installed or upgraded on disk is
+    /// registered without a restart.</summary>
+    public const string PluginsRescanned = "plugins.rescanned";
+
     /// <summary>A custom skill was created, changed or deleted. Built-ins are never written.</summary>
     public const string SkillCreated = "skill.created";
     public const string SkillChanged = "skill.changed";

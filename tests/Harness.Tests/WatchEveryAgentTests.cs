@@ -485,14 +485,14 @@ public sealed class TranscriptOnTheTerminalRowTests
     {
         await using var bed = new ContainerTestBed();
         var log = bed.Store;
-        var watched = new AgentContainer(ContainerTestBed.Definition(Dev) with { Agent = "claude-headless" }, new FakeAgent(), log,
+        var watched = new MemberRuntime(ContainerTestBed.Definition(Dev) with { Agent = "claude-headless" }, new AgentMemberRunner(new FakeAgent()), log,
             watchable: agent => agent == "claude-headless");
-        var unwatched = new AgentContainer(ContainerTestBed.Definition(Dev) with { Agent = "echo" }, new FakeAgent(), log,
+        var unwatched = new MemberRuntime(ContainerTestBed.Definition(Dev) with { Agent = "echo" }, new AgentMemberRunner(new FakeAgent()), log,
             watchable: agent => agent == "claude-headless");
 
         Assert.True(watched.Snapshot().Watchable);
         Assert.False(unwatched.Snapshot().Watchable);
-        Assert.False(new AgentContainer(ContainerTestBed.Definition(Dev), new FakeAgent(), log).Snapshot().Watchable);
+        Assert.False(new MemberRuntime(ContainerTestBed.Definition(Dev), new AgentMemberRunner(new FakeAgent()), log).Snapshot().Watchable);
     }
 }
 

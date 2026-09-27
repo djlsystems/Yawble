@@ -124,7 +124,7 @@ public sealed class WorktreePerCardTests
             {
                 Environment = new Dictionary<string, string> { ["HARNESS_TEAM"] = "Alpha" },
             },
-            bed.Agent, ct);
+            bed.Runner, ct);
 
         await bed.Store.AppendAsync(new NewMessage(
             MessageTypes.InstructionFor(id), """{"instruction":"first","card":"101"}""", "console"), ct);
@@ -143,10 +143,10 @@ public sealed class WorktreePerCardTests
                 "/teams/Alpha/repos/Repo/wt_DeveloperAna_102",
                 $"/teams/Alpha/repos/Repo/wt_DeveloperAna_w{third.CorrelationId}",
             ],
-            runs.Select(r => r.Environment[AgentContainer.WorktreeVariable]));
+            runs.Select(r => r.Environment[MemberRuntime.WorktreeVariable]));
         Assert.Equal(
             ["developerana/101", "developerana/102", $"developerana/w{third.CorrelationId}"],
-            runs.Select(r => r.Environment[AgentContainer.BranchHintVariable]));
+            runs.Select(r => r.Environment[MemberRuntime.BranchHintVariable]));
 
         // The instruction says it too, as it would the clone.
         Assert.Contains("/teams/Alpha/repos/Repo/wt_DeveloperAna_101", runs[0].Prompt);
@@ -169,7 +169,7 @@ public sealed class WorktreePerCardTests
             {
                 Environment = new Dictionary<string, string> { ["HARNESS_TEAM"] = "Alpha" },
             },
-            bed.Agent, ct);
+            bed.Runner, ct);
 
         await bed.Store.AppendAsync(new NewMessage(
             MessageTypes.InstructionFor(id), """{"instruction":"first","card":"101"}""", "console"), ct);
@@ -177,15 +177,15 @@ public sealed class WorktreePerCardTests
         Assert.True(await bed.PumpUntilAsync(() => bed.Agent.RunsFor(id) == 1));
 
         var run = bed.Agent.Invocations.Single();
-        Assert.False(run.Environment.ContainsKey(AgentContainer.WorktreeVariable));
-        Assert.False(run.Environment.ContainsKey(AgentContainer.BranchHintVariable));
+        Assert.False(run.Environment.ContainsKey(MemberRuntime.WorktreeVariable));
+        Assert.False(run.Environment.ContainsKey(MemberRuntime.BranchHintVariable));
         Assert.Equal("first", run.Prompt);
     }
 
     [Fact]
     public void Several_repositories_are_each_named_in_the_instruction()
     {
-        var text = AgentContainer.WorktreeText(
+        var text = AgentMemberRunner.WorktreeText(
             "dev/101",
             [new("One", "/r/One/main", "/r/One/wt_Dev_101"), new("Two", "/r/Two/main", "/r/Two/wt_Dev_101")]);
 
@@ -241,8 +241,8 @@ public sealed class WorktreePerCardTests
             Assert.Equal(paths.WorkspaceFor(member), run.WorkingDirectory);
             Assert.Equal(
                 Path.Combine(paths.ReposFor(team), "Repo", "wt_Worker_555"),
-                run.Environment[AgentContainer.WorktreeVariable]);
-            Assert.Equal("worker/555", run.Environment[AgentContainer.BranchHintVariable]);
+                run.Environment[MemberRuntime.WorktreeVariable]);
+            Assert.Equal("worker/555", run.Environment[MemberRuntime.BranchHintVariable]);
             Assert.Contains(Path.Combine(paths.ReposFor(team), "Repo", "wt_Worker_555"), run.Prompt);
         }
         finally

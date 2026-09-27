@@ -477,8 +477,8 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
         {
             // What the served `worktrees` skill says: create it from the main clone when it does not
             // exist, otherwise work in it.
-            var tree = invocation.Environment[AgentContainer.WorktreeVariable];
-            var hint = invocation.Environment[AgentContainer.BranchHintVariable];
+            var tree = invocation.Environment[MemberRuntime.WorktreeVariable];
+            var hint = invocation.Environment[MemberRuntime.BranchHintVariable];
             var existed = Directory.Exists(tree);
 
             if (!existed)

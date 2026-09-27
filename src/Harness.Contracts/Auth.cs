@@ -49,7 +49,7 @@ public sealed record Principal(
 /// <summary>
 /// Everything a principal can cause, one per governable verb.
 ///
-/// NOT called a ceiling: `Ceiling` already means an AgentContainer's queue-depth bound in this
+/// NOT called a ceiling: `Ceiling` already means an MemberRuntime's queue-depth bound in this
 /// codebase, it is on ContainerSnapshot and it is rendered on the card. Two meanings for one word
 /// would collide exactly when someone is reasoning about a runaway.
 /// </summary>

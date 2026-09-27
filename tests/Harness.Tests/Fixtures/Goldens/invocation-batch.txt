@@ -1,0 +1,75 @@
+=== invocation
+container=alpha/dev agent=fake cwd=. unreachable=
+--- system
+You are Dev.
+--- environment
+HARNESS_BRANCH_HINT=dev/41
+HARNESS_CAUSATION=1
+HARNESS_URL=http://h
+HARNESS_WORKTREE=/r/Repo/wt_dev_41
+TEAM_VAR=1
+--- prompt
+first job
+
+Your worktree for this card is /r/Repo/wt_dev_41 ($HARNESS_WORKTREE), cut from the clone at /r/Repo/main. Create it if it does not exist, otherwise work in it.
+Suggested branch: dev/41 ($HARNESS_BRANCH_HINT).
+--- context
+
+=== invocation
+container=alpha/dev agent=fake cwd=. unreachable=
+--- system
+You are Dev.
+--- environment
+HARNESS_BRANCH_HINT=dev/42
+HARNESS_CAUSATION=4
+HARNESS_URL=http://h
+HARNESS_WORKTREE=/r/Repo/wt_dev_42
+TEAM_VAR=1
+--- prompt
+hold on
+
+Your worktree for this card is /r/Repo/wt_dev_42 ($HARNESS_WORKTREE), cut from the clone at /r/Repo/main. Create it if it does not exist, otherwise work in it.
+Suggested branch: dev/42 ($HARNESS_BRANCH_HINT).
+--- context
+Earlier in your work, oldest first:
+You were asked: first job
+dev completed its work. It reported:
+answer 1
+=== invocation
+container=alpha/dev agent=fake cwd=. unreachable=
+--- system
+You are Dev.
+--- environment
+HARNESS_BRANCH_HINT=dev/43
+HARNESS_CAUSATION=6
+HARNESS_URL=http://h
+HARNESS_WORKTREE=/r/Repo/wt_dev_43
+TEAM_VAR=1
+--- prompt
+You have 2 new messages. They arrived in this order (oldest first, newest last):
+1. [seq 6] from alpha/manager: part one
+2. [seq 7] from alpha/manager (newest): part two
+
+Your worktree for this card is /r/Repo/wt_dev_43 ($HARNESS_WORKTREE), cut from the clone at /r/Repo/main. Create it if it does not exist, otherwise work in it.
+Suggested branch: dev/43 ($HARNESS_BRANCH_HINT).
+--- context
+Earlier in your work, oldest first:
+You were asked: first job
+dev completed its work. It reported:
+answer 1
+You were asked: hold on
+=== rows
+2 agentContainer.started source=alpha/dev cause=1 corr=1
+{"trigger":"agentContainer.instruction.alpha/dev"}
+3 agentContainer.completed source=alpha/dev cause=1 corr=1
+{"exitCode":0,"output":"answer 1","outputLength":8,"transcript":"alpha/dev/1","launchError":null,"stoppedByPerson":false,"handedBack":false,"failureClass":null,"retryAfter":null,"tokensIn":null,"tokensOut":null,"tokensTotal":null,"tokensCachedIn":null,"tokensCacheCreation":null,"tokensReasoning":null,"tokensSource":null,"usageCountedOn":null}
+5 agentContainer.started source=alpha/dev cause=4 corr=1
+{"trigger":"agentContainer.instruction.alpha/dev"}
+8 agentContainer.completed source=alpha/dev cause=4 corr=1
+{"exitCode":0,"output":"answer 2","outputLength":8,"transcript":"alpha/dev/4","launchError":null,"stoppedByPerson":false,"handedBack":false,"failureClass":null,"retryAfter":null,"tokensIn":null,"tokensOut":null,"tokensTotal":null,"tokensCachedIn":null,"tokensCacheCreation":null,"tokensReasoning":null,"tokensSource":null,"usageCountedOn":null}
+9 agentContainer.started source=alpha/dev cause=6 corr=1
+{"trigger":"agentContainer.instruction.alpha/dev"}
+10 agentContainer.completed source=alpha/dev cause=6 corr=1
+{"exitCode":0,"output":"answer 3","outputLength":8,"transcript":"alpha/dev/6","launchError":null,"stoppedByPerson":false,"handedBack":false,"failureClass":null,"retryAfter":null,"tokensIn":null,"tokensOut":null,"tokensTotal":null,"tokensCachedIn":null,"tokensCacheCreation":null,"tokensReasoning":null,"tokensSource":null,"usageCountedOn":null}
+11 agentContainer.completed source=alpha/dev cause=7 corr=1
+{"exitCode":0,"output":"answer 3","outputLength":8,"transcript":"alpha/dev/6","launchError":null,"stoppedByPerson":false,"handedBack":false,"failureClass":null,"retryAfter":null,"tokensIn":null,"tokensOut":null,"tokensTotal":null,"tokensCachedIn":null,"tokensCacheCreation":null,"tokensReasoning":null,"tokensSource":null,"usageCountedOn":6}

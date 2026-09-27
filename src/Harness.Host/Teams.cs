@@ -228,6 +228,10 @@ public sealed class TeamHasNoMemberAgentException(string team)
     public string Team { get; } = team;
 }
 
+/// <summary>A plugin member's configuration or secret bindings that its manifest refuses. The
+/// sentence names the field or the key.</summary>
+public sealed class PluginSettingsException(string message) : InvalidOperationException(message);
+
 public sealed class NoSuchAgentException : InvalidOperationException
 {
     public NoSuchAgentException(string agent, IReadOnlyList<string> available)
@@ -237,6 +241,11 @@ public sealed class NoSuchAgentException : InvalidOperationException
             $"'{agent}' is not an Agent this tenant has. Available: {string.Join(", ", available)}.")
     {
     }
+
+    /// <summary>A <c>plugin:&lt;id&gt;</c> reference that cannot be hired, in the plugin's own words.
+    /// The same exception, so every route that refuses an unknown Agent refuses this the same way.</summary>
+    public static NoSuchAgentException ForPlugin(string reference, string sentence) =>
+        new(reference, [], sentence);
 
     private NoSuchAgentException(string agent, IReadOnlyList<string> available, string message)
         : base(message)
@@ -346,11 +355,14 @@ public sealed class FirehoseSubscriptionException(string type, string agent)
 /// `Program.cs` always supplies it.
 /// </param>
 public sealed class TeamRegistry(
-    ContainerHost host, AgentCatalog agents, IAgentRunner runner, TeamPaths paths,
+    ContainerHost host, AgentCatalog agents, IMemberRunner runner, TeamPaths paths,
     ITeamStore teams, AgentEnvironment environment, FileBrowserPolicy fileBrowser, IMessageLog log,
     EffectiveSubscriptions effective, IRepoClone cloner, long? workflowSpendLimit = null,
     Func<long>? workflowSpendLimitNow = null, SkillDirectory? skillDirectory = null,
-    Func<RepoContributor, string, CancellationToken, Task>? prepareClone = null)
+    Func<RepoContributor, string, CancellationToken, Task>? prepareClone = null,
+    PluginCatalog? plugins = null,
+    IPluginMemberSettingsStore? pluginSettings = null,
+    ISecretStore? secrets = null)
 {
     /// <summary>What each role is offered, for the "Available skills" list every prompt carries.
     /// A registry built without one lists the built-ins.</summary>
@@ -735,6 +747,7 @@ public sealed class TeamRegistry(
             container.Reprompt(
                 ComposePrompt(
                     id,
+                    container.Snapshot().Agent,
                     container.Snapshot().Name,
                     members.GetValueOrDefault(id.Name)?.SystemPrompt,
                     container.Environment));
@@ -1068,7 +1081,11 @@ public sealed class TeamRegistry(
                 // Looked up only to decide whether to MARK it. Nothing is cached from this: the
                 // runner resolves the command by name on every invocation, so a preset added back
                 // afterwards works on the next wake with no restart.
-                var command = agents.For(member.Agent);
+                //
+                // A PLUGIN MEMBER IS NOT A MISSING AGENT. Whether its plugin is installed is the
+                // plugin runner's question, asked on every wake, exactly as this one is.
+                var isPlugin = MemberRef.IsPlugin(member.Agent);
+                var command = isPlugin ? null : agents.For(member.Agent);
 
                 var permits = new HashSet<string>(member.Permits, StringComparer.Ordinal);
 
@@ -1081,7 +1098,9 @@ public sealed class TeamRegistry(
                 // Re-minted, never restored: a credential is stored as a SHA-256 hash and
                 // cannot be read back. MintAsync upserts on the principal id, so the old one
                 // stops working and no rows accumulate.
-                var containerEnvironment = await environment.ForContainerAsync(
+                var containerEnvironment = isPlugin
+                    ? PluginEnvironment
+                    : await environment.ForContainerAsync(
                     id, member.Agent, permits, EnvFor(member.Team), ReposFor(member.Team), ct);
 
                 // RestoreAsync, never AddAsync. AddAsync advances the cursor to the head of the log,
@@ -1092,13 +1111,13 @@ public sealed class TeamRegistry(
                     new ContainerDefinition(
                         id, member.Agent,
                         ComposePrompt(
-                            id, member.Label ?? member.Name, member.SystemPrompt,
+                            id, member.Agent, member.Label ?? member.Name, member.SystemPrompt,
                             containerEnvironment),
                         ResolveMemberWorkingDirectory(id, workspace), member.Subscribes,
                         containerEnvironment,
                         Label: member.Label,
                         Permits: permits,
-                        MissingAgent: command is null ? member.Agent : null,
+                        MissingAgent: command is null && !isPlugin ? member.Agent : null,
 
                         // Marked the same way the Agent above is, and for the same reason: the
                         // container comes back, says what it cannot reach, and refuses when
@@ -1493,7 +1512,7 @@ public sealed class TeamRegistry(
     /// dispatch to. Member deletion is the one whose omission leaves
     /// nothing to find - the team goes on living, every row is right, and the manager alone still
     /// believes it can dispatch to somebody who is gone.
-    /// <see cref="AgentContainer.Reprompt"/> exists for this, and is still the only thing in this
+    /// <see cref="MemberRuntime.Reprompt"/> exists for this, and is still the only thing in this
     /// codebase that alters a container after creation.
     ///
     /// A no-op when the manager is not there - which is the ordinary state for the instant during
@@ -1505,7 +1524,7 @@ public sealed class TeamRegistry(
 
         // No environment is built at a re-prompt the way AddContainerAsync and RestoreAsync build
         // one - there is no credential being minted here, only a rename or a roster change. Reading
-        // it back from the live container (AgentContainer.Environment) rather than
+        // it back from the live container (MemberRuntime.Environment) rather than
         // passing an empty dictionary is what keeps `{env:...}` resolving the same on every
         // re-prompt as it did at creation; an empty dictionary would resolve it once and then leave
         // it literal forever, silently. Its Agent comes from the same snapshot, for the same
@@ -1530,7 +1549,7 @@ public sealed class TeamRegistry(
 
         container.Reprompt(
             ComposePrompt(
-                manager, snapshot.Name, member?.SystemPrompt, container.Environment));
+                manager, snapshot.Agent, snapshot.Name, member?.SystemPrompt, container.Environment));
     }
 
     /// <summary>
@@ -2101,13 +2120,28 @@ public sealed class TeamRegistry(
             {
                 var member = await MemberAsync(stored, id.Name, ct);
 
+                // A PLUGIN MEMBER'S SETTINGS TRAVEL WITH IT: its configuration and the LOGICAL KEYS
+                // its secrets are bound to - never a value, which lives only in the Host's store.
+                // Re-hired without them, a plugin whose fields all default would come back working
+                // differently and report success. Where they cannot be read, the member is not
+                // re-hired at all and the failure says so.
+                PluginMemberSettings? settings = null;
+
+                if (MemberRef.IsPlugin(member.Agent, out _))
+                {
+                    settings = pluginSettings is null
+                        ? throw new InvalidOperationException(
+                            "its plugin configuration and secret bindings cannot be read on this Host, so it was not re-hired without them. Hire it again with its settings.")
+                        : await pluginSettings.ForAsync(id, ct);
+                }
+
                 // THE LABEL, so the clone's member derives the SAME identifier - `AddContainerAsync`
                 // derives from what it is given, and passing the identifier would lose a name a
                 // person typed. `member.Label` is null exactly when the two are already equal.
                 await HireMemberAsync(
                     created.Id, member.Label ?? member.Name, member.Agent,
                     member.SystemPrompt ?? "", member.Subscribes,
-                    hiredFor: member.HiredFor, ct: ct);
+                    hiredFor: member.HiredFor, ct: ct, settings: settings);
 
                 hired += 1;
             }
@@ -2183,6 +2217,10 @@ public sealed class TeamRegistry(
         {
             if (host.Find(id) is not { } container) continue;
 
+            // A plugin member's environment is its runner's, built per run; the team's variables
+            // and tokens are an agent's.
+            if (MemberRef.IsPlugin(container.Snapshot().Agent)) continue;
+
             var next = new Dictionary<string, string>(container.Environment, StringComparer.Ordinal);
             if (gitHubToken is null)
             {
@@ -2232,6 +2270,10 @@ public sealed class TeamRegistry(
         foreach (var id in _teams.GetValueOrDefault(stored) ?? [])
         {
             if (host.Find(id) is not { } container) continue;
+
+            // A plugin member's environment is its runner's, built per run; the team's variables
+            // and tokens are an agent's.
+            if (MemberRef.IsPlugin(container.Snapshot().Agent)) continue;
 
             var next = new Dictionary<string, string>(container.Environment, StringComparer.Ordinal);
 
@@ -2436,9 +2478,10 @@ public sealed class TeamRegistry(
     public Task<ContainerSnapshot> HireMemberAsync(
         string team, string label, string agent, string systemPrompt, IReadOnlyCollection<string> subscribes,
         string? hiredFor = null,
-        CancellationToken ct = default) =>
+        CancellationToken ct = default,
+        PluginMemberSettings? settings = null) =>
         AddContainerAsync(
-            team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct);
+            team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct, settings: settings);
 
     /// <summary>
     /// Adds a container called <paramref name="label"/>, deriving its identifier the same way a
@@ -2453,16 +2496,41 @@ public sealed class TeamRegistry(
         string team, string label, string agent, string systemPrompt, IReadOnlyCollection<string> subscribes,
         IReadOnlySet<string>? permits = null,
         string? hiredFor = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        PluginMemberSettings? settings = null)
     {
         if (!_teams.TryGetValue(team, out var members)) throw new InvalidOperationException($"No team '{team}'.");
 
         // FIRST, before anything is created. A refusal that has already made a directory, a
         // container or a row is a refusal that changed something, which is the failure CreateAsync's
         // ordering avoids too.
-        var command = agents.For(agent)
-            ?? throw new NoSuchAgentException(
-                agent, [.. agents.Definitions.Where(d => d.Mode == AgentMode.Headless).Select(d => d.Name)]);
+        // WHAT IT RUNS: an Agent preset, or `plugin:<id>` - see MemberRef.
+        var isPlugin = MemberRef.IsPlugin(agent, out var pluginId);
+
+        if (isPlugin && PluginRefusal(agent, pluginId!) is { } refusal)
+        {
+            throw NoSuchAgentException.ForPlugin(agent, refusal);
+        }
+
+        // CONFIGURATION IS A PLUGIN'S, checked against its manifest HERE, before anything is made,
+        // so a person hears a missing field or an unset secret at hire rather than at the first run.
+        if (!isPlugin && settings is { } agentSettings
+            && (agentSettings.Config.Count > 0 || agentSettings.Secrets.Count > 0))
+        {
+            throw new PluginSettingsException("`config` and `secrets` are for plugin members; an Agent takes its settings from its preset.");
+        }
+
+        if (isPlugin && plugins?.For(pluginId!) is { } installed
+            && PluginMemberRunner.SettingsRefusal(installed.Manifest, settings ?? PluginMemberSettings.None, secrets) is { } settingsRefusal)
+        {
+            throw new PluginSettingsException(settingsRefusal);
+        }
+
+        var command = isPlugin
+            ? null
+            : agents.For(agent)
+                ?? throw new NoSuchAgentException(
+                    agent, [.. agents.Definitions.Where(d => d.Mode == AgentMode.Headless).Select(d => d.Name)]);
 
         // A LANGUAGE MODEL MAY NOT SUBSCRIBE TO A FIREHOSE.
         //
@@ -2544,7 +2612,10 @@ public sealed class TeamRegistry(
         // This is the exception to "null permits is the default and means none". See
         // MemberProgressPermitTests for why it is affordable:
         // PermitGate makes Progress reach exactly one route out of forty.
-        var memberPermits = new HashSet<string>(
+        // A PLUGIN MEMBER HOLDS NO PERMITS AND NO CREDENTIAL. The three forced below exist so an
+        // AGENT can call its MCP tools; a plugin reports through its own stdout, which the runtime
+        // reads, so it is minted nothing and given no HARNESS_* environment at all.
+        var memberPermits = isPlugin ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(
             permits ?? (IReadOnlySet<string>)new HashSet<string>(StringComparer.Ordinal),
             StringComparer.Ordinal)
         {
@@ -2575,7 +2646,9 @@ public sealed class TeamRegistry(
         // Filling the environment is what gives a container its own credential, and so what lets a
         // manager call the platform at all - which is also why a manager's subscriptions must be
         // team-scoped. See ManagerSubscriptions below.
-        var containerEnvironment = await environment.ForContainerAsync(
+        var containerEnvironment = isPlugin
+            ? PluginEnvironment
+            : await environment.ForContainerAsync(
             id, agent, memberPermits, EnvFor(id.Team), ReposFor(id.Team), ct);
 
         // The member's own words - the role line it was hired with. Blank is stored as NOTHING
@@ -2585,7 +2658,7 @@ public sealed class TeamRegistry(
         // The COLLAPSED override, not the caller's text. Composing from what was sent while storing
         // null would make creation and the very next re-prompt produce two different texts, which is
         // the one property the single composition site exists to guarantee.
-        var composed = ComposePrompt(id, trimmed, override_, containerEnvironment);
+        var composed = ComposePrompt(id, agent, trimmed, override_, containerEnvironment);
 
         // THE CONTAINER FIRST here, unlike CreateAsync's team row. Not an oversight: the floor
         // below is read back from the container's own snapshot after host.AddAsync has assigned it,
@@ -2632,6 +2705,11 @@ public sealed class TeamRegistry(
         // a call made any earlier would find no row and compute an empty base set. This member has
         // no triggers of its own yet - it cannot, it did not exist a moment ago - but this is still
         // the one and only write of its subscriptions row; ContainerHost does not write one.
+        if (isPlugin && pluginSettings is not null)
+        {
+            await pluginSettings.SaveAsync(id, settings ?? PluginMemberSettings.None, ct);
+        }
+
         await effective.RecomputeAsync(id, ct);
 
         // AFTER the list is updated, so the roster it builds includes the member just added. Skipped
@@ -2733,13 +2811,30 @@ public sealed class TeamRegistry(
 
         var newAgent = repointed ? agent!.Trim() : member.Agent;
 
+        // NOT ACROSS KINDS. An agent member holds a credential, permits and an environment minted
+        // for an agent, and a plugin member holds none; repointing one into the other would keep
+        // the wrong set. Hiring a new member is the honest way to change what kind it is.
+        if (repointed && MemberRef.IsPlugin(newAgent) != MemberRef.IsPlugin(member.Agent))
+        {
+            throw NoSuchAgentException.ForPlugin(
+                newAgent,
+                $"'{member.Label ?? member.Name}' cannot be repointed between an Agent and a plugin. "
+                + "Hire a new member for the other kind instead.");
+        }
+
+        if (repointed && MemberRef.IsPlugin(newAgent, out var repointedPlugin)
+            && PluginRefusal(newAgent, repointedPlugin) is { } pluginRefusal)
+        {
+            throw NoSuchAgentException.ForPlugin(newAgent, pluginRefusal);
+        }
+
         // Resolved only to REFUSE, never to store: nothing caches a container's command,
         // so a repoint is one write - the row - and the runner picks the new preset up by name on
         // the next wake. Held rather than discarded: the firehose check right below reuses this
         // same lookup instead of calling `agents.For` a second time.
-        var target = agents.For(newAgent);
+        var target = MemberRef.IsPlugin(newAgent) ? null : agents.For(newAgent);
 
-        if (repointed && target is null)
+        if (repointed && target is null && !MemberRef.IsPlugin(newAgent))
         {
             throw new NoSuchAgentException(
                 newAgent,
@@ -2832,7 +2927,7 @@ public sealed class TeamRegistry(
         // to reconcile them.
         container.Reprompt(
             ComposePrompt(
-                id, trimmedLabel ?? container.Id.Name, override_,
+                id, newAgent, trimmedLabel ?? container.Id.Name, override_,
                 container.Environment),
             trimmedLabel,
             repointed ? newAgent : null);
@@ -2858,9 +2953,14 @@ public sealed class TeamRegistry(
     /// THIS container, never an empty dictionary. An empty one would resolve `{env:...}` once, at
     /// creation, and leave it literal on every later re-prompt.</param>
     private string ComposePrompt(
-        ContainerId id, string label, string? systemPrompt,
+        ContainerId id, string agent, string label, string? systemPrompt,
         IReadOnlyDictionary<string, string> environment)
     {
+        // A PLUGIN MEMBER HAS NO SYSTEM PROMPT. A role prompt is instructions to a language model;
+        // a plugin is an executable with its own protocol, and handing it one would be the
+        // registry deciding every member is an agent. Its standing instructions are empty.
+        if (MemberRef.IsPlugin(agent)) return string.Empty;
+
         // CHOSEN BY ROLE, never by a person or by the Agent it runs: the team's Manager gets
         // the Manager prompt and everyone else the Member prompt. The member's own words, the
         // team's additional instructions and the skills its role is offered are ADDED after it.
@@ -2900,6 +3000,20 @@ public sealed class TeamRegistry(
 
         return PromptTokens.Resolve(template, values, environment);
     }
+
+    /// <summary>A plugin member's definition environment: empty. See AddContainerAsync.</summary>
+    private static readonly IReadOnlyDictionary<string, string> PluginEnvironment =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Why <paramref name="reference"/> cannot be hired, or null when it can. A malformed id is
+    /// refused here; whether the plugin is installed is asked of the plugin catalog when one is
+    /// wired.
+    /// </summary>
+    private string? PluginRefusal(string reference, string pluginId) =>
+        !MemberRef.IsValidPluginId(pluginId)
+            ? $"'{reference}' is not a plugin id: use lowercase letters, digits and hyphens, as in 'plugin:sample-echo'."
+            : plugins?.RefusalFor(pluginId);
 
     /// <summary>Whether this id is its team's manager. Case-insensitive, matching ContainerId's own
     /// equality - `manager` and `Manager` are one container.</summary>

@@ -7,7 +7,7 @@ namespace Harness.Tests;
 ///
 /// Two implementations of one weighting - C# for a run, SQL for a workflow - and nothing but this
 /// keeps them together. Each shape goes through a real run, so the payload keys are the ones
-/// <c>AgentContainer</c> actually writes rather than ones a test spelled, and the figures are chosen
+/// <c>MemberRuntime</c> actually writes rather than ones a test spelled, and the figures are chosen
 /// so a changed weight or a dropped term moves the answer.
 /// </summary>
 public sealed class SpendSqlTests

@@ -8,7 +8,7 @@ namespace Harness.Host;
 /// </summary>
 internal static class ContainerBusy
 {
-    public static bool IsBusy(AgentContainer container, IReadOnlyCollection<PendingDelivery> accepted) =>
+    public static bool IsBusy(MemberRuntime container, IReadOnlyCollection<PendingDelivery> accepted) =>
         IsBusy(container.State, container.QueueDepth, accepted.Count);
 
     public static bool IsBusy(ContainerState state, int queueDepth, int acceptedCount) =>

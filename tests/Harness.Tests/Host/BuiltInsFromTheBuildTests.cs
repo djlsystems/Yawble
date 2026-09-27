@@ -279,7 +279,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         return Container(team, snapshot.Id).SystemPrompt;
     }
 
-    private AgentContainer Container(string team, string name) =>
+    private MemberRuntime Container(string team, string name) =>
         host.Services.GetRequiredService<ContainerHost>().Find(new ContainerId(team, name))
             ?? throw new InvalidOperationException($"No container {team}/{name}.");
 }

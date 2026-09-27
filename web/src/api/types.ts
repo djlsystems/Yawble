@@ -147,6 +147,13 @@ export interface ContainerSnapshot {
    */
   watchable?: boolean
 
+  /**
+   * WHAT KIND OF MEMBER THIS IS: `agent` for a coding-agent CLI, `plugin` for an installed plugin
+   * executable (its `agent` is then `plugin:<id>`). Additive; absent from an older Host, which
+   * only ever hosted agents.
+   */
+  kind?: 'agent' | 'plugin'
+
   /** Presence of a chosen Agent when this snapshot was created or patched: present on the write
    *  response if a chosen Agent did not resolve at the time. This is a WARNING - the write SUCCEEDED. */
   unresolvedAgents?: UnresolvedAgent[]
