@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 )
 
 // The Yawble head mark (the website's logo-mark.png) as Braille text: each character is a 2x4
@@ -25,11 +26,31 @@ const logoMark = `               ⢿⣆
                ⠉⠙⠢⠄⠈⠓⢄⠈⢻⡄
                         ⠃`
 
-// showLogo draws the mark, then a blank line, when a person is reading a terminal.
+// Yawble orange, #E83B00, as a 24-bit colour and as the nearest of the 256 standard colours for a
+// terminal that has no 24-bit colour (macOS Terminal among them).
+const (
+	orange24  = "\x1b[38;2;232;59;0m"
+	orange256 = "\x1b[38;5;202m"
+	reset     = "\x1b[0m"
+)
+
+// showLogo draws the mark, then a blank line, when a person is reading a terminal: in Yawble
+// orange when colour is on, and the colour ends with the mark.
 func showLogo(deps Deps, out io.Writer) {
 	if !deps.StdoutTerminal {
 		return
 	}
-	fmt.Fprintln(out, logoMark)
+	if !deps.Color {
+		fmt.Fprintln(out, logoMark)
+		fmt.Fprintln(out)
+		return
+	}
+	colour := orange256
+	if deps.Env != nil {
+		if ct := strings.ToLower(deps.Env("COLORTERM")); ct == "truecolor" || ct == "24bit" {
+			colour = orange24
+		}
+	}
+	fmt.Fprintln(out, colour+logoMark+reset)
 	fmt.Fprintln(out)
 }

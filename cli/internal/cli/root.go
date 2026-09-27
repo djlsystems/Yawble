@@ -48,6 +48,9 @@ type Deps struct {
 	// StdoutTerminal is whether stdout is a terminal someone reads, as opposed to a pipe or a
 	// file. Only then is the mark shown: `yawble version | ...` from a terminal gets none.
 	StdoutTerminal bool
+	// Color is whether the mark may be drawn in Yawble orange: a terminal, NO_COLOR unset, and on
+	// Windows a console that accepted colour sequences. Everything else the CLI prints is plain.
+	Color bool
 	// ReleaseBaseURL is the GitHub API for `update --cli`; "" means api.github.com. Executable is
 	// where this binary is (os.Executable in main). Tests point both at a fake.
 	ReleaseBaseURL string

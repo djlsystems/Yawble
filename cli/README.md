@@ -88,7 +88,7 @@ yawble up
 
 `up` opens the board in your browser when run from a terminal; `--no-browser` does not.
 
-Conventions: `--json` on `status`, `doctor`, `agents`, `config get` and `version`; exit 0 on success, 1 when the thing failed, 2 when the invocation was wrong; `YAWBLE_*` environment variables override the config file; no prompts when stdin is not a terminal; no colour.
+Conventions: `--json` on `status`, `doctor`, `agents`, `config get` and `version`; exit 0 on success, 1 when the thing failed, 2 when the invocation was wrong; `YAWBLE_*` environment variables override the config file; no prompts when stdin is not a terminal; no colour, except the Yawble mark that `yawble`, `yawble version` and `yawble up` draw in orange for a terminal (`NO_COLOR` turns the colour off; a pipe or `--json` gets no mark at all).
 
 `doctor` prints one line per check. The verdict words are `ok`, `warn`, `FAIL` and `skip`; `skip` means the check could not be measured (a stopped instance has no health to check) and is not a failure. Exit 1 when anything FAILs. The in-container half runs the Host's own `--doctor` switch through `podman exec` (or `docker exec`), so those checks are computed by the platform and only rendered here. `--fix` starts a stopped Podman machine (with Podman as the engine), creates a missing data volume and starts a stopped container; it never removes anything. After starting a machine it checks again and stops there, so a second `--fix` may be needed for the container.
 

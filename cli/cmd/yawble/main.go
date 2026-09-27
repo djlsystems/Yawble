@@ -41,6 +41,7 @@ func main() {
 		Stdin:          os.Stdin,
 		Interactive:    interactive,
 		StdoutTerminal: stdoutTerminal,
+		Color:          stdoutTerminal && os.Getenv("NO_COLOR") == "" && enableColor(),
 		ReadSecret:     readHidden,
 	}), os.Args[1:]))
 }

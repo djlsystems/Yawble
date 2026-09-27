@@ -68,3 +68,29 @@ func TestUpShowsTheMarkOnceToATerminalAndNeverToAPipe(t *testing.T) {
 		t.Errorf("a pipe got the mark: %q", out)
 	}
 }
+
+func TestTheMarkIsYawbleOrangeWhenColourIsOnAndPlainOtherwise(t *testing.T) {
+	truecolor := func(k string) string {
+		if k == "COLORTERM" {
+			return "truecolor"
+		}
+		return ""
+	}
+	_, out, _ := run(t, cli.Deps{StdoutTerminal: true, Color: true, Env: truecolor}, "version")
+	if !strings.Contains(out, "\x1b[38;2;232;59;0m") || !strings.Contains(out, "\x1b[0m") {
+		t.Errorf("24-bit terminal: %q", out)
+	}
+	_, out, _ = run(t, cli.Deps{StdoutTerminal: true, Color: true}, "version")
+	if !strings.Contains(out, "\x1b[38;5;202m") || !strings.Contains(out, "\x1b[0m") {
+		t.Errorf("256-colour terminal: %q", out)
+	}
+	_, out, _ = run(t, cli.Deps{StdoutTerminal: true}, "version")
+	if !hasMark(out) || strings.Contains(out, "\x1b[") {
+		t.Errorf("colour off: %q", out)
+	}
+	// The colour ends before the version line: nothing after the mark is orange.
+	_, out, _ = run(t, cli.Deps{StdoutTerminal: true, Color: true}, "version")
+	if i, v := strings.Index(out, "\x1b[0m"), strings.Index(out, "yawble "); i < 0 || v < i {
+		t.Errorf("the reset must come before the version line: %q", out)
+	}
+}
