@@ -186,7 +186,10 @@ public sealed class PluginMemberRunner(
             outcome.ExitCode,
             text,
             FailureReason: reason,
-            ProcessId: outcome.ProcessId);
+            ProcessId: outcome.ProcessId,
+            // A FAILURE IS NEVER QUIET, whatever the record said: ok:false, a non-zero exit, a
+            // timeout and a Stop all wake as they always did.
+            Quiet: reason is null && gathered.Result is { Quiet: true });
     }
 
     /// <summary>The request document: protocol v1's whole input, one JSON object on stdin.</summary>
@@ -414,7 +417,8 @@ public sealed class PluginMemberRunner(
                 gathered.Result = new ResultRecord(
                     record!["ok"]?.GetValueKind() == JsonValueKind.True,
                     record["output"]?.GetValueKind() == JsonValueKind.String ? (string?)record["output"] : null,
-                    record["error"]?.GetValueKind() == JsonValueKind.String ? (string?)record["error"] : null);
+                    record["error"]?.GetValueKind() == JsonValueKind.String ? (string?)record["error"] : null,
+                    record["quiet"]?.GetValueKind() == JsonValueKind.True);
                 break;
 
             case "publish":
@@ -595,7 +599,7 @@ public sealed class PluginMemberRunner(
         public readonly HashSet<string> Dropped = new(StringComparer.Ordinal);
     }
 
-    private sealed record ResultRecord(bool Ok, string? Output, string? Error);
+    private sealed record ResultRecord(bool Ok, string? Output, string? Error, bool Quiet);
 }
 
 /// <summary>A plugin member's own configuration values and secret bindings.</summary>

@@ -19,7 +19,9 @@ The instruction text is the input. Each instruction in one batch is handled in o
 - `block:<text>` - reports that item as blocked with `<text>`;
 - `fail:<text>` - fails the run with `<text>`;
 - `sleep:<seconds>` - waits, for trying Stop;
-- `publish:<type>` - also publishes an event of that type, for trying what the platform refuses.
+- `publish:<type>` - also publishes an event of that type, for trying what the platform refuses;
+- `quiet:<rest>` - finishes the run quietly (its completion wakes nobody), then reads `<rest>` as
+  any other instruction.
 
 ## What comes back
 
