@@ -116,6 +116,15 @@ public interface IMemberReports
     Task<MemberReportOutcome> NeedsDecisionAsync(ContainerId member, string question, CancellationToken ct = default);
 
     Task<MemberReportOutcome> HandbackAsync(ContainerId member, string delivered, CancellationToken ct = default);
+
+    /// <summary>
+    /// Appends an event of <paramref name="type"/> with <paramref name="payload"/> (a JSON object),
+    /// sourced as the member and caused by the message its current run is handling, so it joins
+    /// that workflow. Only a type <see cref="EventCatalog"/> knows as <see cref="EventPublisher.Plugin"/>'s
+    /// is accepted: a platform type is refused, whoever asks. Whose events a caller may publish is
+    /// the caller's check.
+    /// </summary>
+    Task<MemberReportOutcome> PublishAsync(ContainerId member, string type, string payload, CancellationToken ct = default);
 }
 
 /// <summary>What a report came to: accepted, or refused with the sentence the route answers with.</summary>

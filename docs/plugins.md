@@ -22,10 +22,9 @@ What a plugin member is **not**:
 - It is not registered in code. A plugin is a directory with a manifest, read at start and on
   rescan. Nothing is compiled in.
 
-Status: this is the local proof of concept (manifest v1, protocol `harness.member/1`). Plugin
-skills, event publishing, UI kind-awareness and manager-driven plugin hiring are reserved in the
-formats below but not implemented yet. The marketplace, downloading, signing and updating are out of
-scope.
+Status: manifest v1 and protocol `harness.member/1`, with plugin skills, published events and
+hiring by a Manager (see [Skills](#skills), [Events](#events) and [Hiring](#hiring)). The
+marketplace, downloading, signing and updating are out of scope.
 
 ## Install a plugin
 
@@ -130,7 +129,8 @@ The *Add member* dialog does not offer plugins yet. Hire them through the route 
   "timeoutSeconds": 60,
   "config":  { "mode": { "type": "string", "enum": ["upper", "reverse"], "default": "upper" } },
   "secrets": { "token": { "description": "A demo credential.", "required": false } },
-  "events":  { "publishes": [ { "type": "done", "summary": "Text was transformed." } ] },
+  "events":  { "publishes": [ { "type": "done", "summary": "Text was transformed.", "highVolume": false,
+                                "fields": [ { "name": "length", "kind": "number", "summary": "Output length." } ] } ] },
   "skills":  ["skills/sample-echo.md"]
 }
 ```
@@ -146,8 +146,8 @@ The *Add member* dialog does not offer plugins yet. Hire them through the route 
 | `timeoutSeconds` | optional | An **idle** clock: this long with no `progress` record ends the run. Default 300. |
 | `config` | optional | Name → `{type: string, number or bool; enum; default; required; description}`. Flat in v1. |
 | `secrets` | optional | Name → `{description, required}`. A `value` key is refused. |
-| `events.publishes` | optional, declared only | `type` is a suffix. The full type is `plugin.<id>.<type>`. Publishing is reserved. |
-| `skills` | optional, declared only | Files inside the plugin, in the same front-matter format as a skill. Loading them is reserved. |
+| `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `inLedger` is not read in v1: a plugin event always reaches the ledger. See [Events](#events). |
+| `skills` | optional | Files inside the plugin, in the same front-matter format as a skill. Indexed at load and on every rescan. See [Skills](#skills). |
 | `platforms` | reserved, validated | `{"linux-x64": "bin/x64/p", "linux-arm64": "bin/arm64/p"}`. When present it takes precedence over `executable.path` for this machine. |
 | `actions`, `consumes`, `health`, `signature`, `publisher`, `minHostVersion`, `permits` | reserved | Kept, and not acted on. |
 
@@ -198,7 +198,7 @@ Host still load.
 | `{"t":"needsDecision","question":"…"}` | Marks the member as waiting for a decision. |
 | `{"t":"handback","delivered":"…"}` | Hands the work back and wakes the Manager once. |
 | `{"t":"result","ok":true,"output":"…"}` | The run's result. Send exactly one, last. `ok:false` with `"error"` is a failure in those words. |
-| `{"t":"publish","type":"…","payload":{…}}` | Reserved. It is understood and not delivered, and a note says so. |
+| `{"t":"publish","type":"…","payload":{…}}` | Publishes one of the events the manifest declares. See [Events](#events). |
 
 - **Same path as agents.** The first four records go through the same code as an agent's MCP tools
   (`MemberReports`). A plugin's report and an agent's report are therefore the same row, the same
@@ -235,19 +235,109 @@ slot like any member's.
   - Keys starting `HARNESS_` and model-provider keys are refused.
   - The value reaches the plugin only on stdin, never in argv or the environment.
   - **Redaction is a net, not a guarantee.** Every text the plugin writes - its result output and
-    error, its stderr, and the text of each `progress`, `blocked`, `needsDecision` and `handback`
-    record - has each bound value replaced with `[redacted]` before it is stored or reported, and
-    then the platform's diagnostic redaction runs over it (named values such as `password=...`, and
-    credential-shaped strings). A plugin that writes a secret TRANSFORMED - reversed, encoded, cut
-    in pieces - defeats both, and the result reaches the log. Do not write secrets out at all.
+    error, its stderr, the text of each `progress`, `blocked`, `needsDecision` and `handback`
+    record, and every string in a published event's payload - has each bound value replaced with
+    `[redacted]` before it is stored or reported, and then the platform's diagnostic redaction runs
+    over it (named values such as `password=...`, and credential-shaped strings). The rules, each
+    pinned by a test in `PluginMemberRunnerTests`:
+    - **Longest value first**, so a value that is a prefix of another cannot leave the other's tail
+      behind (`Overlapping_secrets_are_redacted_longest_first`).
+    - **JSON-escaped forms too.** A line that is not a record is kept as the plugin wrote it, so a
+      value serialised with JSON escapes (the default encoder writes `+` as `\u002B`) is also
+      matched in its escaped forms (`A_secret_json_escaped_in_a_raw_line_is_redacted`).
+    - **In any case.** `DEMO-TOKEN-2026` is caught for the bound value `demo-token-2026`
+      (`A_secret_is_redacted_whatever_its_case`).
+    - **In every record** (`A_bound_secret_in_a_report_record_is_redacted_before_it_is_reported`)
+      and in a published payload (`A_declared_publish_is_appended_and_an_undeclared_one_warned_once`).
+
+    A plugin that writes a secret otherwise TRANSFORMED - reversed, base64, cut in pieces - defeats
+    all of it, and the result reaches the log. Do not write secrets out at all.
   - A bound value shorter than 4 characters cannot be redacted without mangling the text around
-    it, so it is refused: at hire if it is already set, and on every run.
+    it, so it is refused: at hire if it is already set, and on every run
+    (`A_secret_too_short_to_redact_is_refused_before_launch`).
 - **Worked example.** An Azure Storage plugin would declare `config.account`, `config.container`
   and `secrets.accountKey`. Its member would store
   `{"config": {"account": "acme", "container": "invoices"}, "secrets": {"accountKey": "ACME_STORAGE_KEY"}}`.
   The operator runs `yawble secret set ACME_STORAGE_KEY`.
 - **Swapping the store.** Only the resolver (`ISecretStore`) knows where values live. An encrypted
   store can replace it later, and no plugin or binding changes.
+
+## Skills
+
+A plugin's `skills` files tell a Manager how to use it. They are indexed whenever the plugins are
+loaded or rescanned, however the rescan is started (`PluginCatalog.Attach`).
+
+- **Kind `plugin`, locked.** Stored with the plugin id as `source` (schema step `skill-003`). A
+  person cannot edit, rename or delete one (403), and a custom skill may not take a name beginning
+  `plugin-` (409). Pinned by `PluginSkillsTests.Plugin_skills_are_replaced_per_source_and_locked`
+  and `PluginSkillDiscoveryTests.A_hired_plugins_skill_is_found_named_listed_absent_and_locked`.
+- **Names are forced.** A file naming the plugin itself (`<id>` or `plugin-<id>`) becomes
+  `plugin-<id>`; any other becomes `plugin-<id>-<name>`. A plugin cannot shadow `manager` or any
+  other skill. Pinned by `PluginSkillsTests.A_plugin_skills_name_is_forced_into_the_plugins_namespace`.
+- **Roles `manager member`** unless the file's `roles` narrows them; `any` means both, and
+  `concierge` is never offered. A file that cannot be read refuses the plugin, by name. Pinned by
+  `PluginSkillsTests.A_skill_file_narrows_its_roles_but_never_widens_them` and
+  `A_skill_file_that_cannot_be_read_refuses_the_plugin_by_name`.
+- **Replaced per plugin, in one transaction** (`ReplacePluginSkillsAsync`); an uninstalled plugin's
+  skills are removed on the next rescan. Pinned by
+  `PluginSkillDiscoveryTests.A_rescan_indexes_a_newly_installed_plugins_skill_and_drops_an_uninstalled_ones`.
+- **Never in a prompt's "Available skills"**, so a prompt does not grow with every install. A
+  Manager finds a plugin's skill three ways: its **roster** names each plugin member on its team, as
+  `Echo (plugin sample-echo: <description> - skill plugin-sample-echo)`; **`skills_search`** finds
+  every installed plugin's skill; and the **`hiring`** tool lists every installed plugin with its id,
+  one line and skill. Pinned by `PluginSkillDiscoveryTests.A_hired_plugins_skill_is_found_named_listed_absent_and_locked`.
+
+## Events
+
+A plugin publishes with a `publish` record:
+`{"t":"publish","type":"done","payload":{"length":4}}`.
+
+- **Only a declared suffix.** The type is always `plugin.<id>.<suffix>`, and `<suffix>` must be one
+  the manifest's `events.publishes` declares. The record may name the bare suffix or the full type.
+  Anything else - an undeclared suffix, another plugin's type, a platform type such as
+  `agentContainer.completed` - is dropped, with one `progress` warning row per type per run. A
+  platform type is refused a second time where every publish is appended (`MemberReports.PublishAsync`).
+  Pinned by `PluginMemberEndToEndTests.C_An_undeclared_or_forged_publish_is_dropped_with_one_warning_row`.
+- **Joins the workflow.** The row's source is the member's qualified id, so its team is the
+  member's, and its causation is the message the run is handling. Its payload is a JSON object no
+  larger than the member's `ExcerptChars` (4,000 by default), every string redacted. Pinned by
+  `PluginMemberRunnerTests.A_declared_publish_is_appended_and_an_undeclared_one_warned_once` and
+  `A_publish_over_the_members_artifact_limit_is_dropped`.
+- **Everything reads the union.** `EventCatalog.For(type)` answers the platform's types and the
+  installed plugins' (`IPluginEventRegistry`, the plugin catalog, read on each call so a rescan is
+  seen at once). Triggers and their filters, `{event.<field>}` tokens, `GET /api/events` and the
+  high-volume rule all go through it, so a plugin event declared `highVolume: true` is refused as a
+  language-model member's subscription or trigger by the existing checks. Pinned by
+  `PluginEventsTests` and
+  `PluginMemberEndToEndTests.C_A_plugins_publish_reaches_a_trigger_on_its_team_in_the_same_workflow`.
+- **sample-echo** declares `done` (field `length`) and publishes it on every run that completes.
+  `publish:<type>` in an instruction makes it publish that type too, for trying the refusals.
+
+## Hiring
+
+A person hires a plugin through `POST /api/teams/{team}/containers` with `agent: "plugin:<id>"`.
+**A Manager may hire any installed plugin onto its own team** with the `member` tool:
+`plugin` (the id the `hiring` tool lists), `config`, and `secrets`.
+
+- It is validated against the manifest exactly as a person's hire is. It is not bound by the team's
+  agent allowlist, which chooses the Agents a hire may run; a plugin runs no model.
+- **Secrets are logical keys a person has already set.** A Manager never handles a value: a binding
+  to a key that is not set on the Host, optional or not, is refused.
+- Its own team only: the route's `{team}` is checked against the Manager's credential.
+
+Pinned by `PluginManagerHiringTests`.
+
+## A workflow a person starts by telling a plugin
+
+A workflow is its owner's to declare: the member its root instruction addressed. When a person
+tells a plugin member directly, the plugin owns the workflow, and a plugin holds no permit to call
+`workflow-complete`. So **the platform declares a workflow whose owner cannot declare** (holds no
+`Progress` permit) at the first run end in it, by any member, that succeeded and leaves nothing
+working it: nobody running, nothing pending or undelivered, not paused, and no unfinished card. The
+`workflow.completed` row is the owner's, with `declaredByPlatform: true`. A failed or stopped run
+leaves the workflow open for a person. An agent owner is unchanged: it declares for itself
+(`UndeclarableWorkflows`). Pinned by
+`PluginMemberEndToEndTests.E1_A_workflow_a_person_starts_by_telling_a_plugin_ends_completed`.
 
 ## Where it is pinned
 
@@ -257,8 +347,15 @@ slot like any member's.
 - **The end-to-end proof of concept.** `PluginMemberEndToEndTests` installs and hires sample-echo on
   the real Host. It also asserts that the pump (`Harness.Containers`) has no code naming plugins.
 - **The pump stays generic, structurally.** `PumpArchitectureTests` reads the pump's compiled IL:
-  `MemberRef` is used only by `KindOf` in `MemberRuntime.Snapshot`, and a member's `Agent` is never
-  compared there.
+  `MemberRef` is used only by `KindOf` in `MemberRuntime.Snapshot`, and a member's implementation -
+  `ContainerDefinition.Agent`, `ContainerSnapshot.Agent` and `Kind`, `MemberRef.KindOf` - is
+  followed through the stack, locals, fields and return values and may only be PASSED ON (to the
+  invocation the router receives, the snapshot, the definition, a delegate the Host handed in, or
+  logging), never transformed or compared. Its self-tests prove a comparison, `ToLowerInvariant().StartsWith`,
+  `Split(':')[0] ==` and a comparison on `Snapshot().Kind` are all caught.
+- **Plugins run as `agent`.** `PluginLaunchUserTests` launches a plugin through a real user switch
+  and checks it runs as `agent` and reads its `0750` directory. Where the process cannot switch
+  users it skips, naming why; the release suite runs it as root in the product image.
 - **The pieces.** `PluginMemberRunnerTests` (protocol), `PluginCatalogTests` (manifest v1),
   `PluginMemberRegistryTests` (hire, restore, repoint), `ChildProcessTests` (the shared launcher)
   and `MemberReportsTests` (the shared report path).

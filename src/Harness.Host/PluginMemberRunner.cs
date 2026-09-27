@@ -19,7 +19,8 @@ namespace Harness.Host;
 /// member's configuration, and the secrets it binds, resolved at this moment.</item>
 /// <item>Read its stdout as JSON LINES. <c>progress</c>, <c>blocked</c>, <c>needsDecision</c> and
 /// <c>handback</c> go through <see cref="IMemberReports"/> - the very code the MCP routes run - so a
-/// plugin's report is indistinguishable from an agent's. <c>result</c> is the outcome. A line that
+/// plugin's report is indistinguishable from an agent's. <c>publish</c> appends one of the events its
+/// manifest declares (see <see cref="PublishAsync"/>). <c>result</c> is the outcome. A line that
 /// is not a record is kept as output text, never an error.</item>
 /// </list>
 ///
@@ -118,7 +119,8 @@ public sealed class PluginMemberRunner(
                 start,
                 request,
                 clock.Stopping,
-                onStdoutLine: line => OnLineAsync(invocation.Member, line, gathered, resolvedSecrets.Values, ct));
+                onStdoutLine: line => OnLineAsync(
+                    invocation.Member, manifest, invocation.Context.Limits, line, gathered, resolvedSecrets.Values, ct));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -368,7 +370,8 @@ public sealed class PluginMemberRunner(
         + "could not be kept out of what this plugin writes. Set a longer value and restart the Host.";
 
     private async Task OnLineAsync(
-        ContainerId member, string line, Gathered gathered, IEnumerable<string> secretValues, CancellationToken ct)
+        ContainerId member, PluginManifest manifest, ArtifactLimits limits, string line, Gathered gathered,
+        IEnumerable<string> secretValues, CancellationToken ct)
     {
         var trimmed = line.Trim();
 
@@ -415,15 +418,97 @@ public sealed class PluginMemberRunner(
                 break;
 
             case "publish":
-                // RESERVED in harness.member/1: the record is understood, and not yet delivered.
-                gathered.Notes.Add("a `publish` record was not delivered: publishing events is reserved in "
-                    + PluginManifest.ProtocolV1 + ".");
+                await PublishAsync(member, manifest, limits, record!, gathered, secretValues, ct);
                 break;
 
             default:
                 // NOT A RECORD, OR NOT ONE THIS VERSION KNOWS: kept as text, never an error.
                 if (gathered.Text.Length > 0) gathered.Text.Append('\n');
                 gathered.Text.Append(line);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// A <c>publish</c> record: <c>{"t":"publish","type":"&lt;suffix&gt;","payload":{...}}</c>.
+    ///
+    /// <list type="bullet">
+    /// <item>THE TYPE IS ALWAYS <c>plugin.&lt;id&gt;.&lt;suffix&gt;</c>, and only a suffix the manifest's
+    /// <c>events.publishes</c> declares. The record may name the bare suffix or the full type; anything
+    /// else - an undeclared suffix, another plugin's type, a platform type such as
+    /// <c>agentContainer.completed</c> - is DROPPED, with one warning row per type per run.</item>
+    /// <item>The SOURCE is the member and the CAUSATION the message the run is handling, stamped by
+    /// <see cref="IMemberReports.PublishAsync"/>, so the event joins the workflow.</item>
+    /// <item>The PAYLOAD is a JSON object, every string in it redacted like any other text the plugin
+    /// writes, and no larger than the member's <see cref="ArtifactLimits.ExcerptChars"/>.</item>
+    /// </list>
+    /// </summary>
+    private async Task PublishAsync(
+        ContainerId member, PluginManifest manifest, ArtifactLimits limits, JsonObject record, Gathered gathered,
+        IEnumerable<string> secretValues, CancellationToken ct)
+    {
+        var named = Words(record, "type") ?? "(no type)";
+        var own = EventCatalog.PluginType(manifest.Id, "");
+        var suffix = named.StartsWith(own, StringComparison.Ordinal) ? named[own.Length..] : named;
+
+        if (!manifest.Publishes.Any(e => e.Type == suffix))
+        {
+            await DropAsync(named, $"plugin '{manifest.Id}' declares no such event. It may publish: "
+                + (manifest.Publishes.Count == 0 ? "nothing" : string.Join(", ", manifest.Publishes.Select(e => e.Type))) + ".");
+            return;
+        }
+
+        var type = EventCatalog.PluginType(manifest.Id, suffix);
+
+        if (record["payload"] is not (null or JsonObject))
+        {
+            await DropAsync(type, "its `payload` is not a JSON object.");
+            return;
+        }
+
+        var payload = (JsonObject?)record["payload"]?.DeepClone() ?? new JsonObject();
+        RedactStrings(payload, secretValues);
+        var text = payload.ToJsonString();
+
+        if (limits.ExcerptChars > 0 && text.Length > limits.ExcerptChars)
+        {
+            await DropAsync(type, $"its payload is {text.Length} characters, over this member's limit of {limits.ExcerptChars}.");
+            return;
+        }
+
+        var outcome = await reports.PublishAsync(member, type, text, ct);
+        if (!outcome.Accepted) await DropAsync(type, outcome.Refusal ?? "it was refused.");
+
+        // ONE WARNING ROW PER TYPE PER RUN: a plugin looping on a bad publish is one line, not a flood.
+        async Task DropAsync(string what, string why)
+        {
+            if (!gathered.Dropped.Add(what)) return;
+            await reports.ProgressAsync(member, Redact($"A `publish` of `{what}` was dropped: {why}", secretValues), ct);
+        }
+    }
+
+    /// <summary>Every string value in <paramref name="node"/> through <see cref="Redact"/>, in
+    /// place, so the payload stays the JSON object it was.</summary>
+    private static void RedactStrings(JsonNode? node, IEnumerable<string> secretValues)
+    {
+        switch (node)
+        {
+            case JsonObject body:
+                foreach (var (key, child) in body.ToList())
+                {
+                    if (child is JsonValue value && value.TryGetValue<string>(out var text)) body[key] = Redact(text, secretValues);
+                    else RedactStrings(child, secretValues);
+                }
+
+                break;
+
+            case JsonArray items:
+                for (var i = 0; i < items.Count; i++)
+                {
+                    if (items[i] is JsonValue value && value.TryGetValue<string>(out var text)) items[i] = Redact(text, secretValues);
+                    else RedactStrings(items[i], secretValues);
+                }
+
                 break;
         }
     }
@@ -435,26 +520,54 @@ public sealed class PluginMemberRunner(
 
     /// <summary>
     /// EVERY TEXT A PLUGIN WRITES passes here before it is stored or reported: each bound secret value
-    /// replaced verbatim (none is shorter than <see cref="MinimumSecretLength"/>; see there), then
+    /// replaced (none is shorter than <see cref="MinimumSecretLength"/>; see there), then
     /// <see cref="DiagnosticRedaction"/>'s named-value and credential-shape rules, unbounded, since
-    /// this is output and not a diagnostic. A plugin that transforms a secret before writing it -
-    /// reversed, encoded - defeats both; that is the plugin's defect and not one this can see.
+    /// this is output and not a diagnostic. Three rules make the replacement a better net:
+    /// <list type="bullet">
+    /// <item>each value is matched in ANY CASE, so an upper-cased copy is caught;</item>
+    /// <item>each value's JSON-ESCAPED forms are matched too, because a raw line keeps a value the
+    /// way the plugin serialised it (the default encoder escapes <c>+</c>, <c>&lt;</c>, quotes);</item>
+    /// <item>the LONGEST form is replaced first, so a value that is a prefix of another cannot
+    /// leave the other's tail behind.</item>
+    /// </list>
+    /// A plugin that transforms a secret otherwise before writing it - reversed, base64 - defeats
+    /// this; that is the plugin's defect and not one this can see.
     /// </summary>
     internal static string Redact(string text, IEnumerable<string> values)
     {
-        foreach (var value in values)
+        foreach (var form in RedactedForms(values))
         {
-            text = text.Replace(value, DiagnosticRedaction.Placeholder, StringComparison.Ordinal);
+            text = text.Replace(form, DiagnosticRedaction.Placeholder, StringComparison.OrdinalIgnoreCase);
         }
 
         return DiagnosticRedaction.RedactWithoutLimit(text) ?? text;
     }
+
+    private static readonly JsonSerializerOptions Relaxed = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>Every spelling of the bound values that <see cref="Redact"/> replaces, longest first.</summary>
+    internal static IReadOnlyList<string> RedactedForms(IEnumerable<string> values) =>
+        values
+            .Where(v => v.Length >= MinimumSecretLength)
+            .SelectMany(v => new[] { v, JsonBody(v, null), JsonBody(v, Relaxed) })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(f => f.Length)
+            .ThenBy(f => f, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>A value as it appears between the quotes of a JSON string.</summary>
+    private static string JsonBody(string value, JsonSerializerOptions? options) =>
+        JsonSerializer.Serialize(value, options)[1..^1];
 
     private sealed class Gathered
     {
         public ResultRecord? Result;
         public readonly StringBuilder Text = new();
         public readonly List<string> Notes = [];
+        public readonly HashSet<string> Dropped = new(StringComparer.Ordinal);
     }
 
     private sealed record ResultRecord(bool Ok, string? Output, string? Error);

@@ -200,7 +200,43 @@ public sealed record PluginManifest(
                             return (null, "Each of `events.publishes` needs a `type`: lowercase letters, digits, hyphens and dots.");
                         }
 
-                        publishes.Add(new PluginPublishedEvent(type, Text(item, "summary") ?? ""));
+                        if (publishes.Any(e => e.Type == type))
+                        {
+                            return (null, $"`events.publishes` declares `{type}` twice.");
+                        }
+
+                        var fields = new List<EventField>();
+
+                        if (item.TryGetProperty("fields", out var fieldsElement) && fieldsElement.ValueKind != JsonValueKind.Null)
+                        {
+                            if (fieldsElement.ValueKind != JsonValueKind.Array) return (null, $"`events.publishes` `{type}`: `fields` must be an array.");
+
+                            foreach (var field in fieldsElement.EnumerateArray())
+                            {
+                                if (field.ValueKind != JsonValueKind.Object || Text(field, "name") is not { } fieldName || !IsConfigName(fieldName))
+                                {
+                                    return (null, $"`events.publishes` `{type}`: each field needs a `name`.");
+                                }
+
+                                // THE ENVELOPE FIELD is the platform's: resolved from the row's source, never the payload.
+                                if (fieldName == PayloadFields.Source)
+                                {
+                                    return (null, $"`events.publishes` `{type}`: `{PayloadFields.Source}` is the platform's own field, stamped from the member; it cannot be declared.");
+                                }
+
+                                if (FieldKind(Text(field, "kind")) is not { } kind)
+                                {
+                                    return (null, $"`events.publishes` `{type}`: field `{fieldName}` has kind '{Text(field, "kind")}'; use string, number, boolean or list.");
+                                }
+
+                                fields.Add(new EventField(fieldName, kind, Text(field, "summary") ?? ""));
+                            }
+                        }
+
+                        publishes.Add(new PluginPublishedEvent(
+                            type, Text(item, "summary") ?? "",
+                            item.TryGetProperty("highVolume", out var highVolume) && highVolume.ValueKind == JsonValueKind.True,
+                            fields));
                     }
                 }
             }
@@ -287,6 +323,16 @@ public sealed record PluginManifest(
     private static bool IsEventSuffix(string type) =>
         type.Length is > 0 and <= 64 && char.IsAsciiLetterLower(type[0])
         && type.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c is '-' or '.');
+
+    /// <summary>A declared event field's kind: <c>number</c> is an integer, as every platform count is.</summary>
+    private static EventFieldKind? FieldKind(string? kind) => kind switch
+    {
+        null or "string" => EventFieldKind.String,
+        "number" or "integer" => EventFieldKind.Integer,
+        "boolean" or "bool" => EventFieldKind.Boolean,
+        "list" => EventFieldKind.List,
+        _ => null,
+    };
 }
 
 /// <summary>One ordinary configuration field. Flat in v1: string, number or bool.</summary>
@@ -361,6 +407,19 @@ public sealed record PluginConfigField(
 /// <summary>A secret the plugin needs, by name. The manifest never holds its value.</summary>
 public sealed record PluginSecret(string Description, bool Required);
 
-/// <summary>An event the plugin declares it may publish, as a suffix of <c>plugin.&lt;id&gt;.</c>.
-/// Declared in v1; publishing is reserved.</summary>
-public sealed record PluginPublishedEvent(string Type, string Summary);
+/// <summary>An event the plugin declares it may publish, as a suffix of <c>plugin.&lt;id&gt;.</c>:
+/// the only suffixes a <c>publish</c> record may name.</summary>
+/// <param name="HighVolume">Published once per status line rather than once per run, so a
+/// language-model member may not subscribe to it - the platform's own rule, read off the union.</param>
+/// <param name="Fields">The payload fields a trigger's filter and `{event.*}` tokens may read. The
+/// envelope's <c>source</c> is always there and is never declared.</param>
+public sealed record PluginPublishedEvent(
+    string Type, string Summary, bool HighVolume = false, IReadOnlyList<EventField>? Fields = null)
+{
+    /// <summary>Its definition as <see cref="EventCatalog"/> answers it for plugin <paramref name="id"/>.
+    /// Always in the ledger: a manifest's <c>inLedger</c> is not read in v1.</summary>
+    public EventDefinition Definition(string id) => new(
+        EventCatalog.PluginType(id, Type), EventPublisher.Plugin, HighVolume, InLedger: true,
+        [EventCatalog.SourceField, .. Fields ?? []],
+        Summary);
+}

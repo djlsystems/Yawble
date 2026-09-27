@@ -449,6 +449,11 @@ var pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"));
 PluginEndpoints.Report(pluginCatalog.Rescan(), Console.Out);
 builder.Services.AddSingleton(pluginCatalog);
 
+// THE EVENTS THE INSTALLED PLUGINS DECLARE join the platform's in every lookup - triggers, filters,
+// `{event.*}` tokens, the high-volume rule, `GET /api/events` - read off the catalog on each call,
+// so a rescan is seen at once. Released when this Host stops.
+var pluginEvents = EventCatalog.Register(pluginCatalog);
+
 // A PLUGIN MEMBER'S SETTINGS: configuration and secret BINDINGS in `team_member_config`, and the values
 // resolved by logical key from the Host's own environment at each run - where `secret set` values
 // already arrive. Swapping the resolver for an encrypted store later changes nothing else.
@@ -662,6 +667,12 @@ builder.Services.AddSingleton(sp => new ContainerHost(
             activity: () => sp.GetRequiredService<GitRunner>().Activity);
 
         await sp.GetRequiredService<IdleWorkflowOffer>()
+            .OnRunEndingAsync(member, causation, succeeded, ct);
+
+        // A WORKFLOW ITS OWNER CANNOT DECLARE - a person told a plugin member directly - is
+        // declared by the platform when nothing is left working it. The offer above goes only to
+        // an owner that CAN declare, so at most one of the two acts. See `UndeclarableWorkflows`.
+        await sp.GetRequiredService<UndeclarableWorkflows>()
             .OnRunEndingAsync(member, causation, succeeded, ct);
     }));
 // A container's credential and its environment, in one place - see AgentEnvironment for why those
@@ -1051,6 +1062,7 @@ builder.Services.AddSingleton(sp => new IdleWorkflowOffer(
     // about a configured 0 and could not see a team's own per-workflow figure, so both ask
     // `TeamRegistry.EffectiveWorkflowBudgetFor`, which is the one place that resolves it.
     sp.GetRequiredService<ILogger<IdleWorkflowOffer>>()));
+builder.Services.AddSingleton<UndeclarableWorkflows>();
 if (resumeSweepEnabled)
 {
     builder.Services.AddSingleton<IHostedService>(sp => new ResumeRunner(
@@ -1133,6 +1145,7 @@ builder.Services.AddMcpServer()
     .WithTools<PlatformMcpTools>();
 
 var app = builder.Build();
+app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
 
 {
     var runAs = app.Services.GetRequiredService<AgentLaunchUser>();
@@ -1180,6 +1193,16 @@ foreach (var moved in await skills.ReplaceBuiltInsAsync(BuiltInSkills.Drafts(), 
         $"WARNING: a custom skill held a built-in skill's name and was relabelled: {moved}.");
 }
 
+// THE INSTALLED PLUGINS' SKILLS, now and after every rescan however it is started: locked rows of
+// kind `plugin`, named `plugin-<id>[-<name>]`, never in a prompt's list. See `PluginSkills`.
+await pluginCatalog.Attach(async scan =>
+{
+    foreach (var line in await PluginSkills.SyncAsync(skills, scan))
+    {
+        Console.WriteLine($"WARNING: {line}");
+    }
+});
+
 var tenantSkillMigration = await SkillMigration.RunAsync(
     [("skills", paths.TenantSkills), ("skill-drafts", paths.TenantSkillDrafts)],
     paths.SkillBackups,
@@ -1204,6 +1227,11 @@ catch (TeamRestorationFailedException exception)
 
     return;
 }
+
+// A MANAGER'S ROSTER NAMES ITS PLUGIN MEMBERS' DESCRIPTIONS AND SKILLS, so a rescan that changes
+// them re-prompts every member, the same as a skill write does. Attached after the restore, which
+// composed every prompt from the plugins already loaded.
+await pluginCatalog.Attach(_ => registry.RepromptAllAsync());
 
 // A PLACED TEAM WHOSE VOLUME IS NOT THERE. Said out loud for the reason the blocked moves above
 // are, and it is the louder of the two - but NOT an exit: exiting 1 would take every OTHER team
@@ -1954,11 +1982,13 @@ app.MapGet("/api/teams", async (
         + "A team carries two names: `name` is what a person reads, `id` is what routes use. This "
         + "route returns both.");
 
-app.MapGet("/api/events", () => Results.Ok(EventCatalog.All))
+app.MapGet("/api/events", () => Results.Ok(EventCatalog.WithPlugins()))
     .WithSummary("Every event type this platform can publish.")
     .WithDescription(
         "The catalog a trigger picker is built from. It describes the platform rather than any "
-        + "team's data, which is why it needs no permit and declares no {team}.")
+        + "team's data, which is why it needs no permit and declares no {team}. After the "
+        + "platform's own types come those the installed plugins declare, `plugin.<id>.<suffix>`, "
+        + "with `publisher` `Plugin`.")
     .NoPermitRequired();
 
 // `name` here is what a PERSON typed - free text, spaces and accents included. The identifier
@@ -2746,7 +2776,7 @@ app.MapPost("/api/teams/{team}/triggers", async (
         var subscriber = await teams.MemberAsync(stored, container, ct);
 
         if (catalog.For(subscriber.Agent) is { LanguageModel: true }
-            && EventCatalog.HighVolumeTypes.Contains(request.EventType))
+            && EventCatalog.IsHighVolume(request.EventType))
         {
             return Results.BadRequest(
                 new { error = TeamRegistry.FirehoseRefusal(request.EventType, subscriber.Agent) });
@@ -2973,7 +3003,7 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
         var subscriber = await teams.MemberAsync(stored, candidate.Container, ct);
 
         if (catalog.For(subscriber.Agent) is { LanguageModel: true }
-            && EventCatalog.HighVolumeTypes.Contains(candidate.EventType))
+            && EventCatalog.IsHighVolume(candidate.EventType))
         {
             return Results.BadRequest(
                 new { error = TeamRegistry.FirehoseRefusal(candidate.EventType, subscriber.Agent) });
@@ -3601,6 +3631,7 @@ app.MapGet("/api/teams/{team}/hiring", async (
     TeamRegistry teams,
     ITeamStore teamStore,
     AgentCatalog catalog,
+    PluginCatalog plugins,
     CancellationToken ct) =>
 {
     if (!teams.Exists(team))
@@ -3640,6 +3671,17 @@ app.MapGet("/api/teams/{team}/hiring", async (
         // The roles a hire would ask for that NO allowed agent carries: hiring for one of these
         // falls back to the first allowed agent, and the Manager should know before it asks.
         uncoveredTags = HireTags.Uncovered(rows.Select(row => row.tags)),
+
+        // THE INSTALLED PLUGINS, which a Manager may hire onto its own team with the `member`
+        // tool's `plugin`: each one's id, one line, and the skill that says how to use it
+        // (`skills_get`), whether or not it is hired anywhere.
+        plugins = plugins.Plugins.Select(p => new
+        {
+            id = p.Manifest.Id,
+            reference = MemberRef.ForPlugin(p.Manifest.Id),
+            description = p.Manifest.Description,
+            skill = PluginSkills.SkillOf(p),
+        }).ToArray(),
     });
 })
     .WithTags("Teams")
@@ -3648,13 +3690,14 @@ app.MapGet("/api/teams/{team}/hiring", async (
     .WithDescription(
         "Returns only this team's member-agent allowlist in order, each entry's tags, and the "
         + "current per-tag counts on this team, plus `uncoveredTags`: the hire roles (developer, "
-        + "tester, researcher) that no allowed agent carries.\n\n"
+        + "tester, researcher) that no allowed agent carries, and `plugins`: every plugin installed "
+        + "on this Host (id, reference, one line, and its skill's name).\n\n"
         + "This route never returns command lines, `env`, or Agents outside this team's allowlist.");
 
 app.MapPost("/api/teams/{team}/containers", async (
     [Description(Describe.Team)] string team,
     CreateContainer request, TeamRegistry teams, ITeamStore teamStore, AgentCatalog catalog,
-    TenantLogging audit, AgentInstallProbe probe, HttpContext context,
+    TenantLogging audit, AgentInstallProbe probe, HttpContext context, ISecretStore secretStore,
     CancellationToken ct) =>
 {
     // `name` is free text here too, exactly as it is for a team: the identifier is derived inside
@@ -3705,8 +3748,44 @@ app.MapPost("/api/teams/{team}/containers", async (
             throw new TeamHasNoMemberAgentException(team);
         }
 
+        var hirer = PrincipalClaims.From(context.User);
+
+        // A MANAGER MAY HIRE ANY INSTALLED PLUGIN ONTO ITS OWN TEAM (a person's decision,
+        // 2026-09-27) - the allowlist bounds which AGENTS a hire may run, a spend decision, and a
+        // plugin runs no model. It is validated against its manifest exactly as a person's hire is,
+        // in `HireMemberAsync`, and an uninstalled one is refused there. Its own team only: the
+        // route's `{team}` is TeamGate's, and a Manager's credential reaches no other team.
+        //
+        // SECRETS ARE LOGICAL KEYS A PERSON HAS ALREADY SET. A Manager never handles a value, and
+        // binding a key nobody set - optional or not - is refused, so a Manager cannot pass a value
+        // off as a key or bind one a person has not provided.
+        var managerHiresPlugin = hirer is { Kind: PrincipalKind.Container }
+            && request.Agent is { } pluginReference
+            && MemberRef.IsPlugin(pluginReference.Trim(), out _);
+
+        if (managerHiresPlugin && request.Secrets is { } bindings)
+        {
+            foreach (var (secret, key) in bindings)
+            {
+                if (EnvironmentSecretStore.Refusal(key) is { } keyRefusal)
+                {
+                    return Results.BadRequest(new { error = keyRefusal });
+                }
+
+                if (secretStore.TryGet(key) is null)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = $"The key `{key}` bound for `{secret}` is not set on this Host. A Manager binds only "
+                            + "logical keys a person has already set (`secret set <KEY>`), never a value.",
+                    });
+                }
+            }
+        }
+
         if (request.Agent is { } named
-            && PrincipalClaims.From(context.User)
+            && !managerHiresPlugin
+            && hirer
                 is
                 {
                     Kind: PrincipalKind.Container
@@ -5545,44 +5624,15 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
     await publisher.PublishAsync(
         stored, teams.ReposFor(stored), container.Id, container.CurrentCausation, ct);
 
-    // Which cards' trees this declaration settles, read BEFORE the row below moves every
-    // card to Done - a loose end the declaration `dropped` is still open work, and keeps its tree.
-    var settledKeys = await WorktreeRemoval.SettledKeysAsync(kanban, stored, correlation, container.Id.Name);
-
-    var declaration = await log.AppendAsync(
-        new NewMessage(
-            MessageTypes.WorkflowCompleted,
-            JsonSerializer.Serialize(looseEnds.Count == 0
-                ? new { delivered = request.Delivered.Trim(), dropped = (string?)null, looseEnds = (IReadOnlyList<string>?)null }
-                : new { delivered = request.Delivered.Trim(), dropped, looseEnds = (IReadOnlyList<string>?)looseEnds }),
-            container.Id.ToString(),
-            container.CurrentCausation),
-        ct);
-
-    // A COMPLETED WORKFLOW MOVES ITS BACKLOG ITEM TO `declared`, ONCE - a Manager's CLAIM, not a
-    // landing. The rule, and why it is a method rather than four lines here, are on
-    // BacklogExecutionRecord.OnWorkflowCompletedAsync.
-    //
-    // THE SNAPSHOTS ARE READ HERE AND NOW, after the busy check above, so the guard inside sees the
-    // team as it is at the instant of the declaration.
-    await BacklogExecutionRecord.OnWorkflowCompletedAsync(
-        declaration.CorrelationId, backlog, log, host.Snapshots(), ct);
-
-    // THE SETTLED CARDS' TREES GO, for every member and every repository - after the
-    // publish above put their branches on origin, and never forced: a tree that refuses stays on
-    // disk and is named on the team feed. Nothing here can undo the declaration, so a failure is
-    // logged rather than returned.
-    try
-    {
-        await worktrees.RemoveKeysAsync(
-            paths, stored, teams.ReposFor(stored), settledKeys, container.CurrentCausation, ct);
-    }
-    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-        or InvalidOperationException or System.ComponentModel.Win32Exception or OperationCanceledException)
-    {
-        loggers.CreateLogger("WorktreeRemoval").LogWarning(
-            ex, "Removing the settled worktrees of workflow {Correlation} on {Team} failed.", correlation, stored);
-    }
+    // THE ROW, ITS BACKLOG ITEM AND ITS SETTLED TREES: one sequence, shared with the platform's
+    // declaration for a member that cannot declare (`UndeclarableWorkflows`).
+    await WorkflowDeclaration.AppendAsync(
+        stored, correlation, container.Id, container.CurrentCausation,
+        JsonSerializer.Serialize(looseEnds.Count == 0
+            ? new { delivered = request.Delivered.Trim(), dropped = (string?)null, looseEnds = (IReadOnlyList<string>?)null }
+            : new { delivered = request.Delivered.Trim(), dropped, looseEnds = (IReadOnlyList<string>?)looseEnds }),
+        log, backlog, host, kanban, worktrees, paths, teams.ReposFor(stored),
+        loggers.CreateLogger("WorktreeRemoval"), ct);
 
     return Results.NoContent();
 })
@@ -6920,7 +6970,7 @@ public partial class Program
             .SelectMany(t => t.Containers.Select(c => (Team: t.Name, Container: c)))
             .Where(entry => byName.GetValueOrDefault(entry.Container.Agent) is { Launch.LanguageModel: true })
             .SelectMany(entry => entry.Container.Subscribes
-                .Where(EventCatalog.HighVolumeTypes.Contains)
+                .Where(EventCatalog.IsHighVolume)
                 .Select(type => (entry.Team, entry.Container, Type: type)))
             .OrderBy(entry => entry.Team, StringComparer.OrdinalIgnoreCase)
             .ThenBy(entry => entry.Container.Name, StringComparer.OrdinalIgnoreCase)

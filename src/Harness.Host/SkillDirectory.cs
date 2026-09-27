@@ -9,6 +9,12 @@ namespace Harness.Host;
 /// "Available skills" list cannot wait on the database. This holds the built-ins from the build
 /// from the moment it exists, and the custom skills from the last <see cref="RefreshAsync"/>, which
 /// runs at start and after every custom skill write.
+///
+/// <para>
+/// <b>NEVER A PLUGIN'S SKILL.</b> Every installed plugin ships one, and listing them would grow every
+/// prompt with every install. A plugin's skill is found by its Manager's roster (for the plugins on
+/// its team), by <c>skills_search</c>, and by the <c>hiring</c> tool - never here.
+/// </para>
 /// </summary>
 public sealed class SkillDirectory
 {
@@ -35,7 +41,7 @@ public sealed class SkillDirectory
         while (true)
         {
             var page = await store.ListAsync(SkillKindFilter.All, null, null, before, 200, ct);
-            entries.AddRange(page.Select(s => new Entry(s.Name, s.Description, s.Roles)));
+            entries.AddRange(page.Where(s => s.Kind != SkillKind.Plugin).Select(s => new Entry(s.Name, s.Description, s.Roles)));
             if (page.Count < 200) break;
             before = page[^1].Id;
         }

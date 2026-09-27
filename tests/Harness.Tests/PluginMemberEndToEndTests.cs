@@ -167,6 +167,8 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
 
     private static JsonElement Payload(Message row) => JsonDocument.Parse(row.Payload).RootElement.Clone();
 
+    private static string Status(Message progress) => Payload(progress).GetProperty("status").GetString() ?? "";
+
     /// <summary>The member's snapshot as the BROWSER reads it: from its team on `GET /api/teams`.</summary>
     private async Task<JsonElement> SnapshotAsync(ContainerId who)
     {
@@ -331,6 +333,126 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
         Assert.Single(
             await Services.GetRequiredService<IMessageLog>().ReadAfterAsync(0, [MessageTypes.Started], int.MaxValue, Ct),
             m => m.Source == Echo.ToString());
+    }
+
+    /// <summary>
+    /// E1 (part 1 live test): a workflow a person starts by telling a plugin directly is the
+    /// plugin's to declare, and a plugin holds no credential to declare with - so it stayed open
+    /// forever, and the Manager was refused. The platform now declares it on the owner's behalf
+    /// when a run in it ends successfully and nothing is left working it. No agent is involved:
+    /// the declaration is written before the Manager is even woken by the plugin's result.
+    /// </summary>
+    [Fact]
+    public async Task E1_A_workflow_a_person_starts_by_telling_a_plugin_ends_completed()
+    {
+        var log = Services.GetRequiredService<IMessageLog>();
+        var row = await TellAndAwaitAsync(Echo, "abc");
+        Assert.Equal(MessageTypes.Completed, row.Type);
+        var correlation = row.CorrelationId;
+
+        Message? declared = null;
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (declared is null && DateTime.UtcNow < deadline)
+        {
+            declared = (await log.ReadCorrelationAsync(correlation, Ct)).FirstOrDefault(m => m.Type == MessageTypes.WorkflowCompleted);
+            if (declared is null) await Task.Delay(50, Ct);
+        }
+
+        Assert.NotNull(declared);
+        Assert.Equal(Echo.ToString(), declared.Source);
+        Assert.True(Payload(declared).GetProperty(UndeclarableWorkflows.DeclaredByPlatformField).GetBoolean());
+        Assert.Empty(await log.OpenWorkflowsAmongAsync([correlation], Ct));
+
+        // NO AGENT DECLARED IT: nothing the Manager did under this workflow comes before it.
+        var thread = await log.ReadCorrelationAsync(correlation, Ct);
+        Assert.DoesNotContain(thread, m => m.Seq < declared.Seq && m.Source == Manager.ToString());
+    }
+
+    private async Task<Message> AwaitRowAsync(string type, Func<Message, bool> match, string what)
+    {
+        var log = Services.GetRequiredService<IMessageLog>();
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            if ((await log.ReadAfterAsync(0, [type], int.MaxValue, Ct)).FirstOrDefault(match) is { } row) return row;
+            await Task.Delay(50, Ct);
+        }
+
+        throw new TimeoutException($"No row: {what}.");
+    }
+
+    /// <summary>
+    /// STEP 9: a plugin's `publish` is a real event. sample-echo declares `done` and publishes it on
+    /// every run that completes; a trigger on the agent member Dev, on the same team, fires on it -
+    /// inside the SAME workflow, with `{event.length}` read off the payload the manifest declared.
+    /// </summary>
+    [Fact]
+    public async Task C_A_plugins_publish_reaches_a_trigger_on_its_team_in_the_same_workflow()
+    {
+        var trigger = await _person.PostAsJsonAsync($"/api/teams/{_team}/triggers", new
+        {
+            name = "After echo",
+            kind = "event",
+            container = "Dev",
+            eventType = "plugin.sample-echo.done",
+            filter = "source eq " + Echo,
+            instruction = "Echo wrote {event.length} characters.",
+        }, Ct);
+        Assert.True(trigger.IsSuccessStatusCode, await trigger.Content.ReadAsStringAsync(Ct));
+
+        var row = await TellAndAwaitAsync(Echo, "abcd");
+        Assert.Equal(MessageTypes.Completed, row.Type);
+
+        var published = await AwaitRowAsync("plugin.sample-echo.done", _ => true, "the plugin's event");
+        Assert.Equal(Echo.ToString(), published.Source);
+        Assert.Equal(row.CorrelationId, published.CorrelationId);
+        Assert.Equal(row.CausationSeq, published.CausationSeq);
+        var length = Payload(row).GetProperty("output").GetString()!.Length;
+        Assert.Equal(length, Payload(published).GetProperty("length").GetInt32());
+
+        var fired = await AwaitRowAsync(MessageTypes.InstructionFor(Dev), m => m.CausationSeq == published.Seq, "the trigger's instruction");
+        Assert.Equal(row.CorrelationId, fired.CorrelationId);
+        Assert.Equal($"Echo wrote {length} characters.", Payload(fired).GetProperty("instruction").GetString());
+
+        var ran = await NextTerminalAsync(Dev, 0);
+        Assert.Equal(MessageTypes.Completed, ran.Type);
+        Assert.Equal(row.CorrelationId, ran.CorrelationId);
+
+        // Listed beside the platform's own events.
+        using var events = JsonDocument.Parse(await _person.GetStringAsync("/api/events", Ct));
+        Assert.Contains(events.RootElement.EnumerateArray(), e => e.GetProperty("type").GetString() == "plugin.sample-echo.done");
+    }
+
+    /// <summary>
+    /// STEP 9's refusals: an undeclared suffix is dropped with ONE warning row, and neither a
+    /// platform type nor another plugin's can be forged - the only rows of those types are the
+    /// platform's own.
+    /// </summary>
+    [Fact]
+    public async Task C_An_undeclared_or_forged_publish_is_dropped_with_one_warning_row()
+    {
+        var log = Services.GetRequiredService<IMessageLog>();
+
+        var undeclared = await TellAndAwaitAsync(Echo, "publish:nope");
+        Assert.Equal(MessageTypes.Completed, undeclared.Type);
+
+        var forged = await TellAndAwaitAsync(Echo, "publish:agentContainer.completed");
+        Assert.Equal(MessageTypes.Completed, forged.Type);
+
+        var other = await TellAndAwaitAsync(Echo, "publish:plugin.other-plugin.done");
+        Assert.Equal(MessageTypes.Completed, other.Type);
+
+        var rows = await log.ReadAfterAsync(
+            0, [MessageTypes.Progress, MessageTypes.Completed, "plugin.sample-echo.nope", "plugin.other-plugin.done"], int.MaxValue, Ct);
+
+        Assert.DoesNotContain(rows, m => m.Type is "plugin.sample-echo.nope" or "plugin.other-plugin.done");
+        Assert.Single(rows, m => m.Source == Echo.ToString() && m.Type == MessageTypes.Progress && Status(m).Contains("`nope` was dropped", StringComparison.Ordinal));
+        Assert.Single(rows, m => m.Source == Echo.ToString() && m.Type == MessageTypes.Progress && Status(m).Contains("`agentContainer.completed` was dropped", StringComparison.Ordinal));
+        Assert.Single(rows, m => m.Source == Echo.ToString() && m.Type == MessageTypes.Progress && Status(m).Contains("`plugin.other-plugin.done` was dropped", StringComparison.Ordinal));
+
+        // The only `completed` rows from Echo are its three runs' own.
+        Assert.Equal(3, rows.Count(m => m.Source == Echo.ToString() && m.Type == MessageTypes.Completed));
     }
 
     [Fact]

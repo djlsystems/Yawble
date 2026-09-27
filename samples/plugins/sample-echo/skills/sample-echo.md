@@ -18,9 +18,12 @@ The instruction text is the input. Each instruction in one batch is handled in o
 - `handback:<text>` - hands `<text>` back, then transforms it;
 - `block:<text>` - reports that item as blocked with `<text>`;
 - `fail:<text>` - fails the run with `<text>`;
-- `sleep:<seconds>` - waits, for trying Stop.
+- `sleep:<seconds>` - waits, for trying Stop;
+- `publish:<type>` - also publishes an event of that type, for trying what the platform refuses.
 
 ## What comes back
 
 `output` is the transformed lines, one per instruction, and `token length N` when the member has a
-`token` secret bound. Nothing else is produced; the plugin publishes no events yet.
+`token` secret bound. Each run that completes also publishes `plugin.sample-echo.done`, carrying
+`length` (the output's length), in the same workflow: a trigger on that type can wake another
+member with `{event.length}`.

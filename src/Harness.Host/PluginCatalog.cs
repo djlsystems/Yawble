@@ -25,11 +25,17 @@ namespace Harness.Host;
 /// A manifest that is wrong is REFUSED BY NAME, with the field, in <see cref="Refused"/> - never
 /// half-loaded.
 /// </summary>
-public sealed class PluginCatalog(string root)
+public sealed class PluginCatalog(string root) : IPluginEventRegistry
 {
     public const string ActiveFile = "active";
 
     private volatile PluginScan _scan = new([], []);
+
+    /// <summary>What must follow every load and rescan - the plugins' skills and events. Held here
+    /// so it runs however a rescan starts: a person's route, a CLI install, anything else.</summary>
+    private readonly List<Func<PluginScan, Task>> _followers = [];
+
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <summary>Where plugins are installed on this Host.</summary>
     public string Root => root;
@@ -38,16 +44,76 @@ public sealed class PluginCatalog(string root)
 
     public IReadOnlyList<PluginRefused> Refused => _scan.Refused;
 
+    /// <summary>
+    /// A plugin event's definition, or null: <c>plugin.&lt;id&gt;.&lt;suffix&gt;</c> where plugin
+    /// <c>&lt;id&gt;</c> is installed and its manifest declares <c>&lt;suffix&gt;</c>. Read off the
+    /// current scan on every call, so a rescan is seen at once. See <see cref="EventCatalog.For"/>.
+    /// </summary>
+    /// <remarks>EXPLICIT, so <see cref="For(string)"/> keeps answering an installed plugin by id.</remarks>
+    EventDefinition? IPluginEventRegistry.For(string type) => _scan.Events.GetValueOrDefault(type);
+
+    /// <summary>Every event the installed plugins declare.</summary>
+    public IReadOnlyList<EventDefinition> Events => [.. _scan.Events.Values];
+
     /// <summary>The installed plugin <paramref name="id"/>, or null.</summary>
     public InstalledPlugin? For(string id) =>
         _scan.Plugins.FirstOrDefault(p => string.Equals(p.Manifest.Id, id, StringComparison.Ordinal));
 
-    /// <summary>Reads the tree again and replaces the answer.</summary>
-    public PluginScan Rescan()
+    /// <summary>Reads the tree again, replaces the answer, and runs every follower on it.</summary>
+    public PluginScan Rescan() => RescanAsync().GetAwaiter().GetResult();
+
+    /// <inheritdoc cref="Rescan"/>
+    public async Task<PluginScan> RescanAsync(CancellationToken ct = default)
     {
-        var scan = Scan(root);
-        _scan = scan;
-        return scan;
+        await _gate.WaitAsync(ct);
+
+        try
+        {
+            var scan = Scan(root);
+            _scan = scan;
+            await FollowAsync(_followers, scan);
+            return scan;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="follower"/> on what is loaded NOW, and after every later rescan - so
+    /// whatever the plugins register (their skills, their events) is registered at load and kept in
+    /// step with the tree, whichever way a rescan is started.
+    /// </summary>
+    public async Task Attach(Func<PluginScan, Task> follower)
+    {
+        await _gate.WaitAsync();
+
+        try
+        {
+            _followers.Add(follower);
+            await FollowAsync([follower], _scan);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static async Task FollowAsync(IEnumerable<Func<PluginScan, Task>> followers, PluginScan scan)
+    {
+        foreach (var follower in followers)
+        {
+            try
+            {
+                await follower(scan);
+            }
+            catch (Exception error)
+            {
+                // A follower's failure is not the scan's: the catalog is already replaced.
+                Console.WriteLine($"WARNING: registering the installed plugins failed: {error.Message}");
+            }
+        }
     }
 
     /// <summary>Why <c>plugin:&lt;id&gt;</c> cannot be hired here, or null when it can.</summary>
@@ -163,7 +229,10 @@ public sealed class PluginCatalog(string root)
             }
         }
 
-        return (new InstalledPlugin(manifest, directory, executable), null);
+        var (skills, skillRefusal) = PluginSkills.Read(manifest, directory);
+        if (skillRefusal is not null) return (null, skillRefusal);
+
+        return (new InstalledPlugin(manifest, directory, executable) { Skills = skills }, null);
     }
 
     /// <summary>The full path of <paramref name="relative"/> under <paramref name="directory"/>,
@@ -206,9 +275,20 @@ public sealed class PluginCatalog(string root)
 
 /// <summary>One installed, valid plugin: its manifest, its version directory, and the executable
 /// this machine runs, resolved and checked.</summary>
-public sealed record InstalledPlugin(PluginManifest Manifest, string Directory, string Executable);
+public sealed record InstalledPlugin(PluginManifest Manifest, string Directory, string Executable)
+{
+    /// <summary>Its skills as they are indexed: read from its files, names forced
+    /// (<see cref="PluginSkills"/>).</summary>
+    public IReadOnlyList<SkillDraft> Skills { get; init; } = [];
+}
 
 /// <summary>A plugin directory that was not loaded, and why, in one sentence.</summary>
 public sealed record PluginRefused(string Id, string Path, string Reason);
 
-public sealed record PluginScan(IReadOnlyList<InstalledPlugin> Plugins, IReadOnlyList<PluginRefused> Refused);
+public sealed record PluginScan(IReadOnlyList<InstalledPlugin> Plugins, IReadOnlyList<PluginRefused> Refused)
+{
+    /// <summary>Every event the plugins declare, by full type.</summary>
+    public IReadOnlyDictionary<string, EventDefinition> Events { get; } = Plugins
+        .SelectMany(p => p.Manifest.Publishes.Select(e => e.Definition(p.Manifest.Id)))
+        .ToDictionary(e => e.Type, StringComparer.Ordinal);
+}

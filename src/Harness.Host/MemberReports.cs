@@ -138,6 +138,32 @@ public sealed class MemberReports(
         return MemberReportOutcome.Ok;
     }
 
+    public async Task<MemberReportOutcome> PublishAsync(ContainerId member, string type, string payload, CancellationToken ct = default)
+    {
+        if (host.Find(member) is not { } container) return NoSuchMember(member);
+
+        // NEVER A PLATFORM TYPE, whoever asks: only a type an installed plugin declares.
+        if (EventCatalog.For(type) is not { Publisher: EventPublisher.Plugin })
+        {
+            return MemberReportOutcome.Refused($"`{type}` is not an event an installed plugin declares, so it was not published.", 400);
+        }
+
+        // An event belongs to the run that published it: a process that outlived its run has no
+        // workflow to join, and an event rooting a workflow of its own would be the member deciding
+        // that for itself.
+        if (container.CurrentCausation is not { } causation)
+        {
+            return MemberReportOutcome.Refused($"'{member.Name}' is not running, so `{type}` was not published.");
+        }
+
+        await log.AppendAsync(new NewMessage(type, payload, container.Id.ToString(), causation), ct);
+
+        // A DELIBERATE ACT resets the idle clock - see RunHeartbeat.
+        heartbeat.Touch(container.Id);
+
+        return MemberReportOutcome.Ok;
+    }
+
     private static MemberReportOutcome NoSuchMember(ContainerId member) =>
         MemberReportOutcome.Refused($"No member '{member.Name}'.", 404);
 }

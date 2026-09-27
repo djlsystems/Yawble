@@ -11,6 +11,24 @@ public enum EventPublisher
 
     /// <summary>A person, through the SPA. The only rows on the log a human publishes directly.</summary>
     Person,
+
+    /// <summary>An installed plugin, through a <c>publish</c> record: only a type its manifest
+    /// declares, always <c>plugin.&lt;id&gt;.&lt;suffix&gt;</c>, stamped with the member as its source.</summary>
+    Plugin,
+}
+
+/// <summary>
+/// THE EVENTS INSTALLED PLUGINS DECLARE, beside the platform's own. Every type is
+/// <c>plugin.&lt;id&gt;.&lt;suffix&gt;</c> (<see cref="EventCatalog.PluginType"/>), so none can be a
+/// platform type or another plugin's. Read on every lookup, never copied, so a rescan is seen at once.
+/// </summary>
+public interface IPluginEventRegistry
+{
+    /// <summary>The definition of a plugin event type, or null.</summary>
+    EventDefinition? For(string type);
+
+    /// <summary>Every plugin event type installed now.</summary>
+    IReadOnlyList<EventDefinition> Events { get; }
 }
 
 /// <summary>`List` is a JSON array of strings - `file.changed`'s `changed`. A filter or an
@@ -99,6 +117,9 @@ public static class EventCatalog
     private static readonly EventField Source =
         new(PayloadFields.Source, EventFieldKind.String,
             "What published this event: the agent container, a person, or the schedule or trigger that fired it.");
+
+    /// <summary>The envelope field, for a plugin event's definition: every event declares it.</summary>
+    public static EventField SourceField => Source;
 
     private static readonly EventField CardId =
         new(PayloadFields.CardId, EventFieldKind.String, "Which card.");
@@ -485,12 +506,66 @@ public static class EventCatalog
         All.ToDictionary(e => e.Type, StringComparer.Ordinal);
 
     /// <summary>
-    /// The definition for a type, or NULL.
+    /// The definition for a type, or NULL - a platform type, or one an installed plugin declares.
     ///
     /// NULL RATHER THAN A FALLBACK, which is `AgentCatalog.For`'s rule and exists for the same
     /// reason: a defaulting lookup makes a typo resolve to something plausible, so a misconfigured
     /// subscription looks healthy. A caller that cannot proceed without a definition must say so.
+    ///
+    /// ONE LOOKUP FOR BOTH, so triggers, their filters, `{event.*}` tokens and the high-volume rule
+    /// read plugin events exactly as they read the platform's. A platform type always wins: a plugin
+    /// type is <c>plugin.&lt;id&gt;.&lt;suffix&gt;</c> and cannot collide with one.
     /// </summary>
-    public static EventDefinition? For(string type) =>
-        ByType.TryGetValue(type, out var found) ? found : null;
+    public static EventDefinition? For(string type)
+    {
+        if (ByType.TryGetValue(type, out var found)) return found;
+        if (!type.StartsWith(PluginPrefix, StringComparison.Ordinal)) return null;
+
+        foreach (var registry in _plugins)
+        {
+            if (registry.For(type) is { } declared) return declared;
+        }
+
+        return null;
+    }
+
+    /// <summary>Every type <see cref="For"/> answers: the platform's (<see cref="All"/>), then every
+    /// installed plugin's. What `GET /api/events` lists.</summary>
+    public static IReadOnlyList<EventDefinition> WithPlugins() =>
+        [.. All, .. _plugins.SelectMany(r => r.Events).DistinctBy(e => e.Type)];
+
+    /// <summary>
+    /// Whether a type is published once per status line - the rule that keeps a language-model
+    /// member from subscribing to a firehose. The union's answer, so a plugin event declared
+    /// <c>highVolume</c> is refused exactly as `agentContainer.progress` is.
+    /// </summary>
+    public static bool IsHighVolume(string type) => For(type)?.HighVolume == true;
+
+    /// <summary>Every plugin event type begins with this.</summary>
+    public const string PluginPrefix = "plugin.";
+
+    /// <summary>The full type of plugin <paramref name="id"/>'s event <paramref name="suffix"/>.</summary>
+    public static string PluginType(string id, string suffix) => $"{PluginPrefix}{id}.{suffix}";
+
+    private static volatile IPluginEventRegistry[] _plugins = [];
+    private static readonly object Registering = new();
+
+    /// <summary>
+    /// Adds the installed plugins' events to every lookup until the returned handle is disposed.
+    /// A Host registers its plugin catalog once at start; a process holding several Hosts (the test
+    /// suite) holds several, each answering only for the plugins its own catalog has installed.
+    /// </summary>
+    public static IDisposable Register(IPluginEventRegistry registry)
+    {
+        lock (Registering) _plugins = [.. _plugins, registry];
+        return new Registration(registry);
+    }
+
+    private sealed class Registration(IPluginEventRegistry registry) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (Registering) _plugins = [.. _plugins.Where(r => !ReferenceEquals(r, registry))];
+        }
+    }
 }

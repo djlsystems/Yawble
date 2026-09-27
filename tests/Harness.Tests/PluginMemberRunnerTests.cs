@@ -19,8 +19,12 @@ public sealed class PluginMemberRunnerTests : IDisposable
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    /// <summary>The fixture's declared events join the catalog for the test, as a Host's do.</summary>
+    private readonly List<IDisposable> _registrations = [];
+
     public void Dispose()
     {
+        foreach (var registration in _registrations) registration.Dispose();
         try { Directory.Delete(_dataRoot, recursive: true); }
         catch (IOException) { }
     }
@@ -44,6 +48,7 @@ public sealed class PluginMemberRunnerTests : IDisposable
         var catalog = new PluginCatalog(PluginInstall.PluginsRoot(_dataRoot));
         catalog.Rescan();
         Assert.NotNull(catalog.For("fixture"));
+        _registrations.Add(EventCatalog.Register(catalog));
 
         var bed = new ContainerTestBed();
         var heartbeat = new RunHeartbeat();
@@ -304,6 +309,136 @@ public sealed class PluginMemberRunnerTests : IDisposable
         Assert.DoesNotContain("hunter2", row.Payload, StringComparison.Ordinal);
         Assert.Contains("password=[redacted]", Output(row));
         Assert.Equal("token: [redacted]", member.Snapshot().Failed);
+    }
+
+    private static readonly Action<JsonObject> DeclaresTick = m => m["events"] = JsonNode.Parse(
+        """{"publishes":[{"type":"tick","summary":"A tick.","fields":[{"name":"n","kind":"number"},{"name":"note"}]}]}""");
+
+    /// <summary>C: a declared event is appended as the member, in the run's workflow, every string in
+    /// its payload redacted; the same undeclared type twice is ONE warning row.</summary>
+    [Fact]
+    public async Task A_declared_publish_is_appended_and_an_undeclared_one_warned_once()
+    {
+        var (bed, _, row) = await RunAsync(
+            """
+            cat >/dev/null
+            echo '{"t":"publish","type":"tick","payload":{"n":2,"note":"has s3cr3tvalue in it"}}'
+            echo '{"t":"publish","type":"plugin.fixture.tick","payload":{"n":3}}'
+            echo '{"t":"publish","type":"tock"}'
+            echo '{"t":"publish","type":"tock"}'
+            echo '{"t":"publish","type":"agentContainer.completed","payload":{}}'
+            echo '{"t":"result","ok":true,"output":"done"}'
+            """,
+            manifest: m =>
+            {
+                DeclaresTick(m);
+                m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}""");
+            },
+            settings: new Settings(new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "s3cr3tvalue" }));
+        await using var _ = bed;
+
+        var ticks = await bed.OfTypeAsync("plugin.fixture.tick");
+        Assert.Equal(2, ticks.Count);
+        Assert.All(ticks, t => Assert.Equal("alpha/plug", t.Source));
+        Assert.All(ticks, t => Assert.Equal(row.CausationSeq, t.CausationSeq));
+        Assert.Equal("""{"n":2,"note":"has [redacted] in it"}""", ticks[0].Payload);
+
+        var warnings = (await bed.OfTypeAsync(MessageTypes.Progress)).Select(p => JsonDocument.Parse(p.Payload).RootElement.GetProperty("status").GetString()).ToList();
+        Assert.Single(warnings, w => w!.Contains("`tock` was dropped", StringComparison.Ordinal));
+        Assert.Single(warnings, w => w!.Contains("`agentContainer.completed` was dropped", StringComparison.Ordinal));
+        Assert.Single(await bed.OfTypeAsync(MessageTypes.Completed));
+    }
+
+    [Fact]
+    public async Task A_publish_over_the_members_artifact_limit_is_dropped()
+    {
+        var big = new string('x', ArtifactLimits.Default.ExcerptChars + 10);
+        var (bed, _, _) = await RunAsync(
+            $$$"""
+            cat >/dev/null
+            echo '{"t":"publish","type":"tick","payload":{"note":"{{{big}}}"}}'
+            echo '{"t":"result","ok":true,"output":"done"}'
+            """,
+            manifest: DeclaresTick);
+        await using var _ = bed;
+
+        Assert.Empty(await bed.OfTypeAsync("plugin.fixture.tick"));
+        Assert.Contains(await bed.OfTypeAsync(MessageTypes.Progress),
+            p => JsonDocument.Parse(p.Payload).RootElement.GetProperty("status").GetString()!.Contains("over this member's limit", StringComparison.Ordinal));
+    }
+
+    private static Settings TwoTokens() => new(new PluginMemberSettings(
+        new Dictionary<string, JsonElement>(),
+        new Dictionary<string, string> { ["a"] = "FIXTURE_A", ["b"] = "FIXTURE_B" }));
+
+    /// <summary>A1 (R2-1): when one bound value is a prefix of another, the longer is replaced
+    /// first, so no tail of it survives - in a report record and in the result alike.</summary>
+    [Fact]
+    public async Task Overlapping_secrets_are_redacted_longest_first()
+    {
+        var (bed, member, row) = await RunAsync(
+            """
+            cat >/dev/null
+            echo '{"t":"handback","delivered":"x abcd1234WXYZ y"}'
+            echo '{"t":"result","ok":true,"output":"abcd1234WXYZ"}'
+            """,
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"a":{"required":true},"b":{"required":true}}"""),
+            settings: TwoTokens(),
+            secrets: new Secrets(new() { ["FIXTURE_A"] = "abcd1234", ["FIXTURE_B"] = "abcd1234WXYZ" }));
+        await using var _ = bed;
+
+        Assert.Equal("x [redacted] y", member.Snapshot().HandedBack);
+        Assert.Equal("[redacted]", Output(row));
+        Assert.DoesNotContain(await bed.Store.ReadAfterAsync(0, [MessageTypes.Handback, MessageTypes.Completed], int.MaxValue, Ct),
+            r => r.Payload.Contains("WXYZ", StringComparison.Ordinal));
+    }
+
+    /// <summary>A2 (R2-2): a raw line keeps a value as the plugin serialised it, and the default
+    /// JSON encoder writes <c>+</c> as <c>\u002B</c> - that form is redacted too.</summary>
+    [Fact]
+    public async Task A_secret_json_escaped_in_a_raw_line_is_redacted()
+    {
+        var (bed, _, row) = await RunAsync(
+            """
+            cat >/dev/null
+            cat <<'EOF'
+            {"t":"note","v":"tok\u002Ben-value"}
+            plain tok+en-value
+            EOF
+            echo '{"t":"result","ok":true,"output":"done"}'
+            """,
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}"""),
+            settings: new Settings(new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "tok+en-value" }));
+        await using var _ = bed;
+
+        var output = Output(row);
+        Assert.Contains("""{"t":"note","v":"[redacted]"}""", output);
+        Assert.Contains("plain [redacted]", output);
+        Assert.DoesNotContain("en-value", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>E4: a value written in another case - an <c>upper</c> transform - is still matched.</summary>
+    [Fact]
+    public async Task A_secret_is_redacted_whatever_its_case()
+    {
+        var (bed, member, row) = await RunAsync(
+            """
+            cat >/dev/null
+            echo '{"t":"progress","status":"sent Demo-Token-2026"}'
+            echo '{"t":"result","ok":true,"output":"DEMO-TOKEN-2026"}'
+            """,
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}"""),
+            settings: new Settings(new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "demo-token-2026" }));
+        await using var _ = bed;
+
+        Assert.Equal("[redacted]", Output(row));
+        Assert.Equal("""{"status":"sent [redacted]"}""", Assert.Single(await bed.OfTypeAsync(MessageTypes.Progress)).Payload);
     }
 
     [Fact]

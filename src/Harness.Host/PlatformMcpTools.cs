@@ -200,6 +200,8 @@ public sealed partial class PlatformMcpTools(
     [McpServerTool(Name = "hiring"), Description(
         "The mix you read before a hire: this team's allowed agents, their tags, and how many "
         + "members already carry each tag. uncoveredTags lists the roles no allowed agent carries. "
+        + "plugins lists the plugins installed on this Host - each id, one line, and the skill "
+        + "(skills_get) that says how to use it - which the member tool can hire with `plugin`. "
         + "This is harness hiring. Do not GET the hiring URL yourself.")]
     public async Task<string> Hiring(
         [Description("Team id. Required for a Concierge. Omit for a member of a team.")] string? team = null,
@@ -220,6 +222,10 @@ public sealed partial class PlatformMcpTools(
         + "they run. The reply's id is who you tell; the spaced name is what the board shows. "
         + "When the reply carries hiringNotice, no allowed agent had your tag and it says who was "
         + "hired instead. "
+        + "To hire an installed PLUGIN instead of an agent, pass `plugin` with its id from the "
+        + "hiring tool, its `config` fields, and `secrets` binding each secret it names to a "
+        + "LOGICAL KEY a person has already set on this Host - never a value. Read the plugin's "
+        + "skill (skills_get) first. "
         + "Do not POST /api/teams/.../containers yourself.")]
     public async Task<string> Hire(
         [Description("The name a person would write, for example Developer Rowan.")] string name,
@@ -230,10 +236,43 @@ public sealed partial class PlatformMcpTools(
             "Who they are, as a role, not the task they are about to do. Added after the built-in "
             + "Member prompt. Omit for none.")]
         string? prompt = null,
+        [Description("An installed plugin's id, as the hiring tool lists it, to hire that plugin. Omit for an agent.")]
+        string? plugin = null,
+        [Description("A plugin's configuration: field name to value, as its manifest declares them. Only with `plugin`.")]
+        Dictionary<string, System.Text.Json.JsonElement>? config = null,
+        [Description(
+            "A plugin's secret bindings: each secret it names, to a LOGICAL KEY already set on this "
+            + "Host (for example MAILER_TOKEN). Never a secret's value. Only with `plugin`.")]
+        Dictionary<string, string>? secrets = null,
         CancellationToken cancellationToken = default)
     {
         var resolved = await TeamAsync(team, cancellationToken);
         if (resolved is null) return "Refused: name a team. A Concierge has no default team.";
+
+        if (string.IsNullOrWhiteSpace(plugin))
+        {
+            if (config is not null || secrets is not null)
+            {
+                return "Refused: `config` and `secrets` belong to a plugin member. Pass `plugin` too, or leave them out.";
+            }
+
+            return await SendAsync(
+                HttpMethod.Post,
+                $"/api/teams/{Uri.EscapeDataString(resolved)}/containers",
+                new
+                {
+                    name,
+                    @for = string.IsNullOrWhiteSpace(@for) ? null : @for.Trim(),
+                    systemPrompt = string.IsNullOrWhiteSpace(prompt) ? null : prompt.Trim(),
+                },
+                cancellationToken);
+        }
+
+        // A PLUGIN RUNS NO MODEL: it reads no prompt and is not chosen by a work tag.
+        if (!string.IsNullOrWhiteSpace(prompt) || !string.IsNullOrWhiteSpace(@for))
+        {
+            return "Refused: a plugin member has no prompt and no work tag. Leave `prompt` and `for` out.";
+        }
 
         return await SendAsync(
             HttpMethod.Post,
@@ -241,8 +280,9 @@ public sealed partial class PlatformMcpTools(
             new
             {
                 name,
-                @for = string.IsNullOrWhiteSpace(@for) ? null : @for.Trim(),
-                systemPrompt = string.IsNullOrWhiteSpace(prompt) ? null : prompt.Trim(),
+                agent = MemberRef.ForPlugin(plugin.Trim()),
+                config,
+                secrets,
             },
             cancellationToken);
     }

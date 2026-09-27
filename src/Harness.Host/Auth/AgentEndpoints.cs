@@ -402,7 +402,7 @@ public static class AgentEndpoints
 
             foreach (var type in holds)
             {
-                if (EventCatalog.HighVolumeTypes.Contains(type))
+                if (EventCatalog.IsHighVolume(type))
                 {
                     var team = labels.GetValueOrDefault(holder.Team, holder.Team);
 

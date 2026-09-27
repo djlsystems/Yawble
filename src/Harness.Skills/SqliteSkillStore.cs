@@ -6,7 +6,8 @@ using Harness.Contracts;
 namespace Harness.Skills;
 
 /// <summary>
-/// The skill index. Built-in rows are rebuilt from the build on every start and are never written
+/// The skill index. Built-in rows are rebuilt from the build on every start and plugin rows from
+/// each installed plugin whenever the plugins are loaded or rescanned, and neither is written
 /// otherwise; custom rows are the person's and exist only here.
 /// </summary>
 public sealed class SqliteSkillStore : ISkillStore
@@ -75,6 +76,77 @@ public sealed class SqliteSkillStore : ISkillStore
         return moved;
     }
 
+    public async Task<IReadOnlyList<string>> ReplacePluginSkillsAsync(
+        string source, IReadOnlyList<SkillDraft> drafts, DateTimeOffset at, CancellationToken ct = default)
+    {
+        var said = new List<string>();
+        var stamp = Stamp(at);
+
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var clear = connection.CreateCommand())
+        {
+            clear.Transaction = transaction;
+            clear.CommandText = "DELETE FROM skills WHERE kind = 'plugin' AND source = $source";
+            clear.Parameters.AddWithValue("$source", source);
+            await clear.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var draft in drafts.OrderByDescending(s => s.Name, StringComparer.Ordinal))
+        {
+            var skill = Validate(draft);
+
+            if (!PluginSkillNames.Belongs(skill.Name, source))
+            {
+                throw new ArgumentException(
+                    $"'{skill.Name}' is not a name plugin '{source}' may ship: it must be {PluginSkillNames.Main(source)} or begin {PluginSkillNames.Main(source)}-.");
+            }
+
+            switch (await KindOfAsync(connection, transaction, skill.Name, ct))
+            {
+                case "custom":
+                    // The plugin wins its own namespace, and nothing the person wrote is lost.
+                    var free = await FreeNameAsync(connection, transaction, $"{skill.Name}-custom", ct);
+
+                    await using (var rename = connection.CreateCommand())
+                    {
+                        rename.Transaction = transaction;
+                        rename.CommandText = "UPDATE skills SET name = $to WHERE name = $from";
+                        rename.Parameters.AddWithValue("$from", skill.Name);
+                        rename.Parameters.AddWithValue("$to", free);
+                        await rename.ExecuteNonQueryAsync(ct);
+                    }
+
+                    said.Add($"a custom skill held plugin '{source}''s skill name and was relabelled: {skill.Name} -> {free}.");
+                    break;
+
+                case "builtin" or "plugin":
+                    // `plugin-a-b` is plugin `a`'s skill `b` AND plugin `a-b`'s own: the first to
+                    // hold it keeps it.
+                    said.Add($"plugin '{source}''s skill {skill.Name} was not indexed: another skill already holds that name.");
+                    continue;
+            }
+
+            await InsertAsync(connection, transaction, skill, "plugin", stamp, null, ct, source);
+        }
+
+        await transaction.CommitAsync(ct);
+        return said;
+    }
+
+    public async Task<IReadOnlyList<string>> PluginSourcesAsync(CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT source FROM skills WHERE kind = 'plugin' ORDER BY source";
+
+        var sources = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) sources.Add(reader.GetString(0));
+        return sources;
+    }
+
     public async Task<IReadOnlyList<Skill>> ListAsync(
         SkillKindFilter kind,
         string? query,
@@ -94,7 +166,12 @@ public sealed class SqliteSkillStore : ISkillStore
         if (kind != SkillKindFilter.All)
         {
             where.Add("s.kind = $kind");
-            command.Parameters.AddWithValue("$kind", kind == SkillKindFilter.BuiltIn ? "builtin" : "custom");
+            command.Parameters.AddWithValue("$kind", kind switch
+            {
+                SkillKindFilter.BuiltIn => "builtin",
+                SkillKindFilter.Plugin => "plugin",
+                _ => "custom",
+            });
         }
 
         if (fts is not null)
@@ -111,7 +188,7 @@ public sealed class SqliteSkillStore : ISkillStore
 
         command.CommandText =
             $"""
-            SELECT s.id, s.name, s.description, s.roles, s.kind, s.body, s.updated_at, s.updated_by
+            SELECT s.id, s.name, s.description, s.roles, s.kind, s.body, s.updated_at, s.updated_by, s.source
             FROM skills s
             {(where.Count == 0 ? "" : "WHERE " + string.Join(" AND ", where))}
             ORDER BY s.id DESC
@@ -140,7 +217,7 @@ public sealed class SqliteSkillStore : ISkillStore
         await using var command = connection.CreateCommand();
         command.CommandText =
             """
-            SELECT id, name, description, roles, kind, body, updated_at, updated_by
+            SELECT id, name, description, roles, kind, body, updated_at, updated_by, source
             FROM skills WHERE name = $name
             """;
         command.Parameters.AddWithValue("$name", name);
@@ -152,6 +229,7 @@ public sealed class SqliteSkillStore : ISkillStore
     public async Task<Skill> CreateCustomAsync(SkillDraft draft, string? by, CancellationToken ct = default)
     {
         var clean = Validate(draft);
+        RefuseReserved(clean.Name);
 
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -187,10 +265,14 @@ public sealed class SqliteSkillStore : ISkillStore
                 throw new SkillRefusedException(
                     $"'{name}' is a built-in skill. Built-in skills change only with the product, "
                     + "so it cannot be edited or relabelled here.");
+            case "plugin":
+                throw new SkillRefusedException(PluginSkillNames.Locked(name, "edited or relabelled"));
         }
 
         if (!string.Equals(name, clean.Name, StringComparison.OrdinalIgnoreCase))
         {
+            RefuseReserved(clean.Name);
+
             switch (await KindOfAsync(connection, transaction, clean.Name, ct))
             {
                 case "builtin":
@@ -240,6 +322,8 @@ public sealed class SqliteSkillStore : ISkillStore
                 throw new SkillRefusedException(
                     $"'{name}' is a built-in skill. Built-in skills change only with the product, "
                     + "so it cannot be deleted.");
+            case "plugin":
+                throw new SkillRefusedException(PluginSkillNames.Locked(name, "deleted"));
         }
 
         await using (var delete = connection.CreateCommand())
@@ -279,17 +363,29 @@ public sealed class SqliteSkillStore : ISkillStore
         return new SkillDraft(name, description, SkillRoles.Normalise(draft.Roles), body);
     }
 
+    /// <summary>A custom skill may not take a name in the plugins' namespace, installed or not.</summary>
+    private static void RefuseReserved(string name)
+    {
+        if (PluginSkillNames.IsReserved(name))
+        {
+            throw new SkillRefusedException(
+                $"'{name}' begins '{PluginSkillNames.Prefix}', which is reserved for the skills installed plugins ship. "
+                + "A custom skill needs a name of its own.");
+        }
+    }
+
     private static async Task InsertAsync(
         SqliteConnection connection, SqliteTransaction transaction, SkillDraft skill, string kind,
-        string at, string? by, CancellationToken ct)
+        string at, string? by, CancellationToken ct, string? source = null)
     {
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText =
             """
-            INSERT INTO skills (name, kind, description, roles, body, updated_at, updated_by)
-            VALUES ($name, $kind, $description, $roles, $body, $at, $by)
+            INSERT INTO skills (name, kind, description, roles, body, updated_at, updated_by, source)
+            VALUES ($name, $kind, $description, $roles, $body, $at, $by, $source)
             """;
+        insert.Parameters.AddWithValue("$source", (object?)source ?? DBNull.Value);
         insert.Parameters.AddWithValue("$name", skill.Name);
         insert.Parameters.AddWithValue("$kind", kind);
         insert.Parameters.AddWithValue("$description", skill.Description);
@@ -330,10 +426,16 @@ public sealed class SqliteSkillStore : ISkillStore
             reader.GetString(1),
             reader.GetString(2),
             reader.GetString(3).Split(' ', StringSplitOptions.RemoveEmptyEntries),
-            reader.GetString(4) == "builtin" ? SkillKind.BuiltIn : SkillKind.Custom,
+            reader.GetString(4) switch
+            {
+                "builtin" => SkillKind.BuiltIn,
+                "plugin" => SkillKind.Plugin,
+                _ => SkillKind.Custom,
+            },
             reader.GetString(5),
             DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
-            reader.IsDBNull(7) ? null : reader.GetString(7));
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.IsDBNull(8) ? null : reader.GetString(8));
 
     private static string Stamp(DateTimeOffset at) => at.ToString("O", CultureInfo.InvariantCulture);
 

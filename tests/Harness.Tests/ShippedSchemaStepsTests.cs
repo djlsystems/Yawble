@@ -27,6 +27,7 @@ public sealed class ShippedSchemaStepsTests
         ["auth-008"] = "5b8fea9abcdfb0991c75cdc16e6bee6647f4afd3800901742596e341b6c37267",
         ["skill-001"] = "43d1e6d741db4f371cbc11722e5c782c62892118b1f480206a8961e28b011d0e",
         ["skill-002"] = "c489c729453566533b3d2301a0e04b90025074284dc9b78dce8847991abcc726",
+        ["skill-003"] = "c5b39099b5250853f952d26dca3479df8edf54cc9a7e24a71baffb2660c390b6",
         ["backlog-001"] = "5441f611093ed242108fe8766197adb7d17b988269749b63a05362ee410afdf3",
     };
 
