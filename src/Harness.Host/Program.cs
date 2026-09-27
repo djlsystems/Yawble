@@ -505,9 +505,14 @@ builder.Services.AddSingleton<IMemberReports>(sp => sp.GetRequiredService<Member
 // WHAT EVERY MEMBER RUNS THROUGH. The member runtime hands its work, as data, to this; the agent
 // adapter turns it into the prompt and history an agent CLI has always been given, over the
 // IAgentRunner stack above. Tests that substitute IAgentRunner keep working because this reads it.
-builder.Services.AddSingleton<IMemberRunner>(sp => new AgentMemberRunner(
+//
+// ROUTED PER INVOCATION: `plugin:<id>` to the plugin runner, anything else to the agent adapter. The
+// choice is made here and nowhere in the pump.
+builder.Services.AddSingleton(sp => new AgentMemberRunner(
     sp.GetRequiredService<IAgentRunner>(),
     sp.GetRequiredService<IContextBuilder>()));
+builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
+    sp.GetRequiredService<AgentMemberRunner>()));
 
 // Constructed explicitly rather than by convention: the two artifact seams and the pending store are
 // all OPTIONAL parameters, and a container silently built without them is a container that silently

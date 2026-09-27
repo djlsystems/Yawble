@@ -98,7 +98,7 @@ public sealed class HostAgentRunnerTests(HostFixture host) : IClassFixture<HostF
     public void Agent_members_run_through_the_adapter_over_that_same_decorator()
     {
         var members = host.Services.GetRequiredService<IMemberRunner>();
-        var agent = Assert.IsType<AgentMemberRunner>(members);
+        var agent = Assert.IsType<MemberRunnerRouter>(members).Agents;
 
         Assert.IsType<CredentialUseRunner>(agent.Agent);
     }

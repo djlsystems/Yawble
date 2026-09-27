@@ -349,5 +349,18 @@ public sealed class MemberGoldenTests
         return JsonSerializer.Serialize(kept);
     }
 
-    internal static readonly IReadOnlySet<string> AddedSinceStepZero = new HashSet<string>(StringComparer.Ordinal);
+    internal static readonly IReadOnlySet<string> AddedSinceStepZero = new HashSet<string>(StringComparer.Ordinal)
+    {
+        // Step 4: what kind of member this is. Its own value for an agent is pinned below.
+        "kind",
+    };
+
+    [Fact]
+    public async Task An_agent_members_added_kind_is_agent()
+    {
+        await using var bed = new ContainerTestBed();
+        var member = await bed.AddAsync(Dev);
+
+        Assert.Contains("\"kind\":\"agent\"", JsonSerializer.Serialize(member.Snapshot(), JsonSerializerOptions.Web), StringComparison.Ordinal);
+    }
 }

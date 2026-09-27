@@ -604,7 +604,19 @@ public sealed record ContainerSnapshot(
     /// open its earlier runs; false shows no eye at all, rather than one that opens onto "no live
     /// view". Decided from the member's agent, where the snapshot is made.
     /// </summary>
-    bool Watchable = false);
+    bool Watchable = false,
+
+    /// <summary>
+    /// WHAT KIND OF MEMBER THIS IS: <c>agent</c> for a coding-agent CLI, <c>plugin</c> for an
+    /// installed plugin executable - read from <see cref="Agent"/> through <c>MemberRef</c>, so it
+    /// cannot disagree with what the member runs.
+    ///
+    /// ADDITIVE, AND THE ONLY FIELD THE MEMBER REFACTOR ADDED: every field above keeps its name
+    /// and its value for an agent member, which the step-0 golden in MemberGoldenTests pins. A
+    /// STRING rather than an enum for the reason every mark here is one: the SPA compares it as a
+    /// string.
+    /// </summary>
+    string Kind = MemberRef.AgentKind);
 
 /// <summary>
 /// A chosen Agent that did not resolve on this machine's PATH.

@@ -381,7 +381,8 @@ public sealed class MemberRuntime : IAsyncDisposable
         _definition.UnreachableRoot, _definition.HiredFor,
         UnresolvedAgents: null, FailureClass: _failureClass, ResumeAt: _resumeAt,
         HandedBack: _handedBack, Held: _held,
-        Watchable: _watchable?.Invoke(_definition.Agent) ?? false);
+        Watchable: _watchable?.Invoke(_definition.Agent) ?? false,
+        Kind: MemberRef.KindOf(_definition.Agent));
 
     /// <summary>
     /// Records that this container has stopped without finishing, and pushes it.
