@@ -60,6 +60,46 @@ func TestUninstallWithoutDataRemovesEverythingButTheVolume(t *testing.T) {
 	}
 }
 
+// After a restart the Podman machine is stopped, and an uninstall refused with "the engine cannot
+// be asked" (measured on the Windows VM, 2026-09-26). It starts the machine, then removes.
+func TestUninstallStartsAStoppedPodmanMachineFirst(t *testing.T) {
+	s := uninstallScript()
+	s.On("wsl --status", engine.Result{})
+	s.OnSequence(machineInspect,
+		engine.Result{Stdout: "podman-machine-default|stopped|false|2048|10\n"},
+		engine.Result{Stdout: "podman-machine-default|stopped|false|2048|10\n"},
+		engine.Result{Stdout: "podman-machine-default|running|false|2048|10\n"},
+	)
+	s.On("wsl -d podman-machine-default -e free -m", engine.Result{Stdout: "Mem: 15688 1 1\n"})
+	deps := stubbed(s)
+	deps.GOOS = "windows"
+	code, out, errOut := run(t, deps, "uninstall", "--yes")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	c := strings.Join(s.Calls, "\n")
+	start, remove := strings.Index(c, "podman machine start"), strings.Index(c, "podman rm -f yawble")
+	if start < 0 || remove < start {
+		t.Errorf("the machine must be started before anything is removed:\n%s", c)
+	}
+}
+
+// A person who says no does not have their machine started.
+func TestUninstallDeclinedDoesNotStartTheMachine(t *testing.T) {
+	s := uninstallScript()
+	s.On("wsl --status", engine.Result{})
+	s.On(machineInspect, engine.Result{Stdout: "podman-machine-default|stopped|false|2048|10\n"})
+	deps := stubbed(s)
+	deps.GOOS = "windows"
+	deps.Interactive, deps.Stdin = true, strings.NewReader("n\n")
+	if code, out, errOut := run(t, deps, "uninstall"); code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if c := strings.Join(s.Calls, "\n"); strings.Contains(c, "machine start") {
+		t.Errorf("started the machine for a no:\n%s", c)
+	}
+}
+
 // The settings folder holds the saved API keys and tunnel credentials: an uninstall that left
 // them on disk would not be one.
 func TestUninstallRemovesTheSettingsFolderWithItsSecrets(t *testing.T) {

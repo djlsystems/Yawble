@@ -76,6 +76,11 @@ func newUninstallCommand(deps Deps) *cobra.Command {
 					fmt.Fprintf(out, "--data needs the word delete typed at a terminal, or --yes together with --data; the volume %s is kept\n", instance.VolumeName)
 				}
 			}
+			// A stopped Podman machine answers nothing, so nothing could be removed. It is
+			// started only now, after the yes, never for a person who declined.
+			if err := startStoppedMachine(cmd, deps); err != nil {
+				return err
+			}
 			if err := instance.Uninstall(cmd.Context(), e, s.Image, removeData, out); err != nil {
 				return err
 			}
