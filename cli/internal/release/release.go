@@ -38,10 +38,11 @@ type Release struct {
 // Latest reads the newest release and picks this target's archive. Newest is the highest version
 // among the listed releases, pre-releases included: GitHub's own "latest" never is a pre-release,
 // and its list is not in release order (measured: a regular release listed before a later
-// pre-release). A draft (listed only to the owner) is skipped. With a
+// pre-release). A draft (listed only to the owner) is skipped, and with stable so is every
+// pre-release: the "stable" channel takes the highest regular release. With a
 // token (GH_TOKEN, only for a private fork) the request carries it and the assets are read at
 // their API URLs, the only ones a private repository serves; without one nothing changes.
-func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goarch string) (Release, error) {
+func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goarch string, stable bool) (Release, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/repos/"+Repository+"/releases?per_page=100", nil)
 	if err != nil {
 		return Release{}, err
@@ -63,9 +64,10 @@ func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goar
 		return Release{}, fmt.Errorf("reading the latest release: GitHub answered %s with GH_TOKEN set (does the token have the repo scope and access to %s?)", resp.Status, Repository)
 	}
 	type listed struct {
-		Tag    string `json:"tag_name"`
-		Draft  bool   `json:"draft"`
-		Assets []struct {
+		Tag        string `json:"tag_name"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
+		Assets     []struct {
 			Name   string `json:"name"`
 			URL    string `json:"browser_download_url"`
 			APIURL string `json:"url"`
@@ -77,11 +79,14 @@ func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goar
 	}
 	var body listed
 	for _, r := range releases {
-		if !r.Draft && (body.Tag == "" || newer(r.Tag, body.Tag)) {
+		if !r.Draft && !(stable && r.Prerelease) && (body.Tag == "" || newer(r.Tag, body.Tag)) {
 			body = r
 		}
 	}
 	if body.Tag == "" {
+		if stable && len(releases) > 0 {
+			return Release{}, fmt.Errorf("reading the latest release: %s has no regular release yet, only pre-releases (the stable channel skips them; yawble config set channel latest takes them)", Repository)
+		}
 		return Release{}, fmt.Errorf("reading the latest release: %s has no release yet", Repository)
 	}
 	rel := Release{Tag: body.Tag}

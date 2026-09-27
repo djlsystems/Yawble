@@ -134,7 +134,12 @@ func updateCLI(cmd *cobra.Command, deps Deps) (string, error) {
 	if executable == nil {
 		executable = os.Executable
 	}
-	rel, err := release.Latest(cmd.Context(), deps.HTTP, base, githubToken(deps), goos, runtime.GOARCH)
+	// The channel: "stable" (config or YAWBLE_CHANNEL) skips pre-releases; the default takes them.
+	c, err := loadConfig(deps)
+	if err != nil {
+		return "", err
+	}
+	rel, err := release.Latest(cmd.Context(), deps.HTTP, base, githubToken(deps), goos, runtime.GOARCH, c.Channel == "stable")
 	if err != nil {
 		return "", err
 	}

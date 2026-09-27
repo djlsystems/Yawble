@@ -24,13 +24,16 @@ type Config struct {
 	CPUs       int    `toml:"cpus" json:"cpus"`
 	MaxRunning int    `toml:"maxRunning" json:"maxRunning"`
 	Image      string `toml:"image" json:"image"`
+	// Channel is which releases `update` takes: "latest" (the default, empty here) is the highest
+	// version, pre-releases included; "stable" is the highest regular release.
+	Channel string `toml:"channel,omitempty" json:"channel"`
 	// GitHubAsked records that the first `up` asked whether teams will use GitHub, so it asks
 	// once. Not a `config set` key: `yawble github` asks again whenever a person wants.
 	GitHubAsked bool `toml:"githubAsked,omitempty" json:"-"`
 }
 
 // Keys are the names `config get` and `config set` accept, in the order they are listed.
-var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image"}
+var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image", "channel"}
 
 const FileName = "config.toml"
 
@@ -50,6 +53,7 @@ var envNames = map[string]string{
 	"cpus":       "YAWBLE_CPUS",
 	"maxRunning": "YAWBLE_MAX_RUNNING",
 	"image":      "YAWBLE_IMAGE",
+	"channel":    "YAWBLE_CHANNEL",
 }
 
 // Load reads the file if it exists, then applies YAWBLE_* overrides. A missing file is the zero
@@ -125,6 +129,11 @@ func (c Config) Get(key string) (string, error) {
 		return strconv.Itoa(c.MaxRunning), nil
 	case "image":
 		return c.Image, nil
+	case "channel":
+		if c.Channel == "" {
+			return "latest", nil
+		}
+		return c.Channel, nil
 	}
 	return "", unknownKey(key)
 }
@@ -171,6 +180,14 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("image must be one reference like ghcr.io/djlsystems/yawble:2026.09.24.1, not %q", value)
 		}
 		c.Image = value
+	case "channel":
+		if value != "" && value != "latest" && value != "stable" {
+			return fmt.Errorf("channel must be latest (the newest release, pre-releases included) or stable (the newest regular release), not %q", value)
+		}
+		if value == "latest" {
+			value = "" // the default; the file stays quiet about it
+		}
+		c.Channel = value
 	default:
 		return unknownKey(key)
 	}
@@ -187,6 +204,7 @@ func (c *Config) validate() error {
 		{"cpus", strconv.Itoa(c.CPUs)},
 		{"maxRunning", strconv.Itoa(c.MaxRunning)},
 		{"image", c.Image},
+		{"channel", c.Channel},
 	}
 	if c.Port != 0 {
 		checks = append(checks, struct{ key, value string }{"port", strconv.Itoa(c.Port)})

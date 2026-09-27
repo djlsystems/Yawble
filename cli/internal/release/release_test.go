@@ -60,14 +60,14 @@ func fakeRelease(t *testing.T, tag, goos, goarch string, content []byte, corrupt
 
 func TestLatestReadsTheTagAndTheTwoAssetsForThisTarget(t *testing.T) {
 	server := fakeRelease(t, "v0.2.0", "linux", "amd64", []byte("bin"), false)
-	rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64")
+	rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rel.Tag != "v0.2.0" || !strings.HasSuffix(rel.AssetURL, "yawble_0.2.0_linux_amd64.tar.gz") || !strings.HasSuffix(rel.ChecksumsURL, "checksums.txt") {
 		t.Errorf("%+v", rel)
 	}
-	if _, err := release.Latest(context.Background(), server.Client(), server.URL, "", "plan9", "mips"); err == nil || !strings.Contains(err.Error(), "plan9/mips") {
+	if _, err := release.Latest(context.Background(), server.Client(), server.URL, "", "plan9", "mips", false); err == nil || !strings.Contains(err.Error(), "plan9/mips") {
 		t.Errorf("a target with no asset: %v", err)
 	}
 }
@@ -83,7 +83,7 @@ func TestInstallReplacesTheBinaryAfterVerifyingTheChecksum(t *testing.T) {
 		if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		rel, _ := release.Latest(context.Background(), server.Client(), server.URL, "", goos, "amd64")
+		rel, _ := release.Latest(context.Background(), server.Client(), server.URL, "", goos, "amd64", false)
 		if err := release.Install(context.Background(), server.Client(), rel, "", target, goos); err != nil {
 			t.Fatalf("%s: %v", goos, err)
 		}
@@ -100,7 +100,7 @@ func TestAChecksumMismatchReplacesNothing(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "yawble")
 	_ = os.WriteFile(target, []byte("old"), 0o755)
-	rel, _ := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64")
+	rel, _ := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64", false)
 	err := release.Install(context.Background(), server.Client(), rel, "", target, "linux")
 	if err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("err %v", err)
@@ -133,7 +133,7 @@ func TestLatestIsTheNewestReleaseAPreReleaseIncludedAndNeverADraft(t *testing.T)
 	server = httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64")
+	rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64", false)
 	if err != nil || rel.Tag != "v0.3.0" {
 		t.Errorf("want the pre-release v0.3.0 (v0.4.0 is a draft), got %q %v", rel.Tag, err)
 	}
@@ -146,7 +146,7 @@ func TestLatestWithNoReleaseAtAllSaysSo(t *testing.T) {
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	if _, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64"); err == nil || !strings.Contains(err.Error(), "no release") {
+	if _, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64", false); err == nil || !strings.Contains(err.Error(), "no release") {
 		t.Errorf("err %v", err)
 	}
 }
@@ -168,8 +168,36 @@ func TestLatestIsTheHighestVersionNotTheFirstListed(t *testing.T) {
 	server = httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64")
+	rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64", false)
 	if err != nil || rel.Tag != "v2026.09.26.10" {
 		t.Errorf("want v2026.09.26.10 (.10 beats .9 and .6, and .5 was listed first), got %q %v", rel.Tag, err)
+	}
+}
+
+func TestTheStableChannelTakesTheHighestRegularReleaseAndSaysWhenThereIsNone(t *testing.T) {
+	mux := http.NewServeMux()
+	var server *httptest.Server
+	body := ""
+	entry := func(tag string, pre bool) string {
+		name := "yawble_" + strings.TrimPrefix(tag, "v") + "_linux_amd64.tar.gz"
+		return `{"tag_name":"` + tag + `","prerelease":` + map[bool]string{true: "true", false: "false"}[pre] + `,"assets":[` +
+			`{"name":"` + name + `","browser_download_url":"` + server.URL + `/dl/` + name + `"},` +
+			`{"name":"checksums.txt","browser_download_url":"` + server.URL + `/dl/checksums.txt"}]}`
+	}
+	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	body = "[" + entry("v2026.09.26.6", true) + "," + entry("v2026.09.26.5", false) + "," + entry("v2026.09.26.4", false) + "]"
+	if rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64", true); err != nil || rel.Tag != "v2026.09.26.5" {
+		t.Errorf("stable: want v2026.09.26.5, got %q %v", rel.Tag, err)
+	}
+	if rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64", false); err != nil || rel.Tag != "v2026.09.26.6" {
+		t.Errorf("latest: want v2026.09.26.6, got %q %v", rel.Tag, err)
+	}
+
+	body = "[" + entry("v2026.09.26.6", true) + "]"
+	if _, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64", true); err == nil || !strings.Contains(err.Error(), "no regular release") {
+		t.Errorf("only pre-releases on stable: %v", err)
 	}
 }

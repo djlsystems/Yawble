@@ -257,3 +257,32 @@ func TestUpdateInstanceNeverLooksForARelease(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The stable channel, from config or YAWBLE_CHANNEL, skips pre-releases; with only pre-releases
+// published it says so and replaces nothing.
+func TestUpdateCliOnTheStableChannelSkipsPreReleases(t *testing.T) {
+	buildinfo.Version = "v0.1.0"
+	t.Cleanup(func() { buildinfo.Version = "dev" })
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name":"v0.2.0","prerelease":true,"assets":[]}]`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "yawble")
+	_ = os.WriteFile(exe, []byte("the old yawble"), 0o755)
+	deps := stubbed(engine.NewScripted())
+	deps.HTTP, deps.ReleaseBaseURL, deps.GOOS = server.Client(), server.URL, "linux"
+	deps.Executable = func() (string, error) { return exe, nil }
+	env := map[string]string{"YAWBLE_IMAGE": testImage, "YAWBLE_CHANNEL": "stable"}
+	deps.Env = func(k string) string { return env[k] }
+
+	code, out, errOut := run(t, deps, "update", "--cli")
+	if code == 0 || !strings.Contains(out+errOut, "no regular release") {
+		t.Errorf("exit %d out %q err %q", code, out, errOut)
+	}
+	if got, _ := os.ReadFile(exe); string(got) != "the old yawble" {
+		t.Errorf("the binary was replaced: %q", got)
+	}
+}

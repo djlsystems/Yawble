@@ -5,6 +5,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh
 #
 # YAWBLE_VERSION=v2026.09.24.1 pins a release; YAWBLE_INSTALL_DIR overrides ~/.local/bin.
+# YAWBLE_CHANNEL=stable takes the newest regular release, skipping pre-releases, and saves that
+# choice so `yawble update` keeps to it; the default takes the newest release of either kind.
 #
 # No token is needed. Installing from a private fork: set GH_TOKEN (or GITHUB_TOKEN) to a token
 # with the repo scope, and fetch this script with it too:
@@ -43,11 +45,20 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# newest_tag: from a releases list on stdin, the highest v<yyyy.mm.dd.N> tag, pre-releases
-# included. GitHub's own "latest" never is a pre-release, and its list is not in release order, so
-# the tags are sorted here, part by part as numbers (.10 after .9).
+# newest_tag: from a releases list on stdin, the highest v<yyyy.mm.dd.N> tag that is not a draft,
+# pre-releases included unless YAWBLE_CHANNEL=stable. GitHub's own "latest" never is a pre-release,
+# and its list is not in release order, so the tags are sorted here, part by part as numbers (.10
+# after .9). Within one release the API lists tag_name, then draft, then prerelease.
+case "${YAWBLE_CHANNEL:-latest}" in
+  latest|stable) ;;
+  *) echo "yawble: YAWBLE_CHANNEL must be latest or stable, not ${YAWBLE_CHANNEL}" >&2; exit 2 ;;
+esac
 newest_tag() {
-  tr ',' '\n' | sed -n 's/.*"tag_name": *"v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' \
+  tr ',' '\n' | awk -v stable="$([ "${YAWBLE_CHANNEL:-}" = stable ] && echo 1)" '
+    /"tag_name":/   { t = $0; sub(/.*"tag_name": *"v/, "", t); sub(/".*/, "", t); d = 0; next }
+    /"draft":/      { d = ($0 ~ /true/); next }
+    /"prerelease":/ { if (t != "" && !d && !(stable && $0 ~ /true/)) print t; t = "" }' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
     | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -n 1 | sed 's/^/v/'
 }
 
@@ -62,7 +73,7 @@ if [ -n "$token" ]; then
     version=$(curl -fsSL -H @"$tmp/auth" -H "Accept: application/vnd.github+json" -H "User-Agent: yawble-install" \
       "$api/repos/$repo/releases?per_page=100" | newest_tag) \
       || { echo "yawble: could not read the releases of $repo with GH_TOKEN set (does the token have the repo scope?)" >&2; exit 1; }
-    [ -n "$version" ] || { echo "yawble: $repo has no release yet" >&2; exit 1; }
+    [ -n "$version" ] || { echo "yawble: $repo has no ${YAWBLE_CHANNEL:+$YAWBLE_CHANNEL }release yet" >&2; exit 1; }
   fi
   curl -fsSL -H @"$tmp/auth" -H "Accept: application/vnd.github+json" -H "User-Agent: yawble-install" \
     -o "$tmp/release.json" "$api/repos/$repo/releases/tags/$version" \
@@ -72,8 +83,13 @@ else
     # With or without the leading v; the tag has it.
     version="v${YAWBLE_VERSION#v}"
   else
-    version=$(curl -fsSL "$api/repos/$repo/releases?per_page=100" | newest_tag)
-    [ -n "$version" ] || { echo "yawble: could not read the latest release of $repo (check the network connection; a private fork also needs GH_TOKEN)" >&2; exit 1; }
+    list=$(curl -fsSL "$api/repos/$repo/releases?per_page=100") \
+      || { echo "yawble: could not read the releases of $repo (check the network connection; a private fork also needs GH_TOKEN)" >&2; exit 1; }
+    version=$(printf '%s' "$list" | newest_tag)
+    if [ -z "$version" ] && [ "${YAWBLE_CHANNEL:-}" = stable ]; then
+      echo "yawble: $repo has no regular release yet, only pre-releases; run without YAWBLE_CHANNEL=stable to take the newest" >&2; exit 1
+    fi
+    [ -n "$version" ] || { echo "yawble: $repo has no release yet" >&2; exit 1; }
   fi
 fi
 bare="${version#v}"
@@ -125,6 +141,10 @@ mkdir -p "$dir"
 tar -xzf "$tmp/$asset" -C "$tmp" yawble
 install -m 0755 "$tmp/yawble" "$dir/yawble"
 echo "Installed $dir/yawble ($("$dir/yawble" version | head -n 1))"
+# The channel travels with the install, so `yawble update` keeps to the same kind of release.
+if [ "${YAWBLE_CHANNEL:-}" = stable ]; then
+  "$dir/yawble" config set channel stable >/dev/null && echo "Channel: stable (yawble update takes regular releases only; yawble config set channel latest undoes it)"
+fi
 
 case ":$PATH:" in
   *":$dir:"*) ;;
