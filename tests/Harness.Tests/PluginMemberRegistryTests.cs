@@ -119,6 +119,37 @@ public sealed class PluginMemberRegistryTests : IAsyncLifetime
         Assert.Empty((await store.ForAsync(id, Ct)).Secrets);
     }
 
+    /// <summary>D2: a plugin member whose settings cannot be carried into a clone - here its required
+    /// secret is no longer set on this Host - is named in the clone's failures, never re-hired
+    /// silently without them.</summary>
+    [Fact]
+    public async Task A_plugin_member_a_clone_cannot_rehire_with_its_settings_is_reported()
+    {
+        const string key = "PLUGIN_REG_CLONE_TOKEN";
+        PluginInstall.Write(_dataRoot, "needs-token", manifest: PluginInstall.Manifest("needs-token",
+            edit: m => m["secrets"] = System.Text.Json.Nodes.JsonNode.Parse("""{"token":{"required":true}}""")));
+        _factory.Services.GetRequiredService<PluginCatalog>().Rescan();
+
+        var team = await TeamAsync();
+        Environment.SetEnvironmentVariable(key, "long-enough-value");
+        try
+        {
+            await Registry.AddContainerAsync(team, "Tok", "plugin:needs-token", "", [], ct: Ct,
+                settings: new PluginMemberSettings(
+                    new Dictionary<string, System.Text.Json.JsonElement>(),
+                    new Dictionary<string, string> { ["token"] = key }));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(key, null);
+        }
+
+        var clone = await Registry.CloneAsync(team, "MixedClone", Ct);
+
+        Assert.Contains(clone.Failures, f => f.StartsWith("Tok:", StringComparison.Ordinal) && f.Contains(key, StringComparison.Ordinal));
+        Assert.Null(_factory.Services.GetRequiredService<ContainerHost>().Find(new ContainerId(clone.Team.Id, "Tok")));
+    }
+
     [Fact]
     public async Task Configuration_is_refused_for_an_agent_member()
     {

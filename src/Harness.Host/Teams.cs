@@ -2120,13 +2120,28 @@ public sealed class TeamRegistry(
             {
                 var member = await MemberAsync(stored, id.Name, ct);
 
+                // A PLUGIN MEMBER'S SETTINGS TRAVEL WITH IT: its configuration and the LOGICAL KEYS
+                // its secrets are bound to - never a value, which lives only in the Host's store.
+                // Re-hired without them, a plugin whose fields all default would come back working
+                // differently and report success. Where they cannot be read, the member is not
+                // re-hired at all and the failure says so.
+                PluginMemberSettings? settings = null;
+
+                if (MemberRef.IsPlugin(member.Agent, out _))
+                {
+                    settings = pluginSettings is null
+                        ? throw new InvalidOperationException(
+                            "its plugin configuration and secret bindings cannot be read on this Host, so it was not re-hired without them. Hire it again with its settings.")
+                        : await pluginSettings.ForAsync(id, ct);
+                }
+
                 // THE LABEL, so the clone's member derives the SAME identifier - `AddContainerAsync`
                 // derives from what it is given, and passing the identifier would lose a name a
                 // person typed. `member.Label` is null exactly when the two are already equal.
                 await HireMemberAsync(
                     created.Id, member.Label ?? member.Name, member.Agent,
                     member.SystemPrompt ?? "", member.Subscribes,
-                    hiredFor: member.HiredFor, ct: ct);
+                    hiredFor: member.HiredFor, ct: ct, settings: settings);
 
                 hired += 1;
             }

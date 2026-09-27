@@ -360,6 +360,41 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// D2 (card 621 verification): a CLONE of the team re-hires the plugin member WITH its
+    /// configuration and its secret bindings - logical keys, never values - so the clone's Echo
+    /// reverses, as the source's does, and still reaches its secret. Before, it came back
+    /// upper-casing with no secret, and the clone reported no failure.
+    /// </summary>
+    [Fact]
+    public async Task A_cloned_team_keeps_the_plugin_members_configuration_and_secret_bindings()
+    {
+        var clone = await _person.PostAsJsonAsync($"/api/teams/{_team}/clone", new { name = "MixedClone" }, Ct);
+        var body = await clone.Content.ReadAsStringAsync(Ct);
+        Assert.True(clone.IsSuccessStatusCode, body);
+
+        using var result = JsonDocument.Parse(body);
+        Assert.Empty(result.RootElement.GetProperty("failures").EnumerateArray());
+        var cloned = result.RootElement.GetProperty("team").GetProperty("id").GetString()!;
+
+        var settings = await Services.GetRequiredService<IPluginMemberSettingsStore>().ForAsync(new ContainerId(cloned, "Echo"), Ct);
+        Assert.Equal("reverse", settings.Config["mode"].GetString());
+        Assert.Equal(TokenKey, settings.Secrets["token"]);
+
+        var saved = _team;
+        _team = cloned;
+        try
+        {
+            var row = await TellAndAwaitAsync(new ContainerId(cloned, "Echo"), "abc");
+            Assert.Equal(MessageTypes.Completed, row.Type);
+            Assert.Equal("cba\ntoken length 8", Payload(row).GetProperty("output").GetString());
+        }
+        finally
+        {
+            _team = saved;
+        }
+    }
+
+    /// <summary>
     /// 7. THE PUMP KNOWS NOTHING ABOUT PLUGINS, mechanically. Harness.Containers - the pump
     /// (ContainerHost) and the member runtime - has no code that names a plugin, and cannot: it
     /// does not reference the assembly the plugin runner lives in. The only branch between the two
