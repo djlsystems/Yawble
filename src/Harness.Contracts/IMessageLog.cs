@@ -145,6 +145,16 @@ public interface IMessageLog
         ContainerId container, long sinceSeq, long beforeSeq, int max, CancellationToken ct = default);
 
     /// <summary>
+    /// <see cref="ReadRunsAsync(ContainerId, long, long, int, CancellationToken)"/>, choosing which
+    /// runs: <see cref="RunsWith.Transcript"/> is that method; <see cref="RunsWith.AnyRun"/> is every
+    /// finished run, one row per run - the terminal row that carries the run (no
+    /// <c>usageCountedOn</c>), not one per batched message. A plugin member's runs record no
+    /// transcript, so they are read this way.
+    /// </summary>
+    Task<IReadOnlyList<RunRow>> ReadRunsAsync(
+        ContainerId container, long sinceSeq, long beforeSeq, int max, RunsWith which, CancellationToken ct = default);
+
+    /// <summary>
     /// How long this team's newest workflow has been going, and how much run time went into it.
     ///
     /// A projection, exactly as <see cref="SumUsageForTeamAsync"/> is, and a FOURTH READER of
@@ -450,8 +460,17 @@ public interface ISubscriptions
     Task<int> ClearTeamAsync(string team, CancellationToken ct = default);
 }
 
+public enum RunsWith
+{
+    /// <summary>Only runs that recorded the agent's own transcript.</summary>
+    Transcript,
+
+    /// <summary>Every finished run, transcript or not.</summary>
+    AnyRun,
+}
+
 /// <summary>
-/// One finished run, as <see cref="IMessageLog.ReadRunsAsync"/> reads it: the terminal row
+/// One finished run, as <see cref="IMessageLog.ReadRunsAsync(ContainerId, long, long, int, CancellationToken)"/> reads it: the terminal row
 /// that closed it, when the run started (its `started` row, null when none is found), and whether
 /// it published `blocked` between the two.
 /// </summary>
