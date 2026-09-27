@@ -1454,6 +1454,13 @@ public sealed class MemberRuntime : IAsyncDisposable
                         + $",\"{PayloadFields.AgentTranscriptFormat}\":{JsonSerializer.Serialize(agentTranscript.Format)}}}";
                 }
 
+                // A QUIET RUN, the same way: one key, only when true, so every other row is byte for
+                // byte what it was. The pump wakes nobody on it; see PayloadFields.Quiet.
+                if (result.Succeeded && result.Quiet)
+                {
+                    payload = payload[..^1] + $",\"{PayloadFields.Quiet}\":true}}";
+                }
+
                 await SafeAppendAsync(new NewMessage(
                     result.Succeeded ? MessageTypes.Completed : MessageTypes.Failed,
                     payload,

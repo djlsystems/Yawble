@@ -32,6 +32,15 @@ public static class PayloadFields
     public const string HandedBack = "handedBack";
 
     /// <summary>
+    /// On a `completed` row: true when the run ended with a plugin result record marked
+    /// <c>quiet</c> - nothing happened that anyone needs to be woken for. The row is written, shown
+    /// and counted as any other; the pump wakes no subscriber on it (`ContainerHost.PumpOnceAsync`).
+    /// Absent on every other row, and never on a `failed` row: a failure always wakes. What the run
+    /// published, and a hand-back in it, wake on their own rows as usual.
+    /// </summary>
+    public const string Quiet = "quiet";
+
+    /// <summary>
     /// On a `completed` or `failed` row that closes a delivery its run shared with others: the
     /// causation seq of the row in the same batch that carries the run's token figures. This row
     /// carries none, and the spend queries skip it, so a run is billed once however many deliveries

@@ -600,9 +600,16 @@ public sealed class ContainerHost : IAsyncDisposable
                 // refused because the first run's completion is still a pending delivery. The completion says whether its run handed back
                 // (PayloadFields.HandedBack); a subscriber that ALSO holds `handback` is passed
                 // over on it. One that holds only `completed` still wakes: it was never told.
-                var alreadyWoken = string.Equals(message.Type, MessageTypes.Completed, StringComparison.Ordinal)
-                    && types.Contains(MessageTypes.Handback)
-                    && CompletionHandedBack(message.Payload);
+                //
+                // A QUIET RUN WAKES NOBODY ON ITS COMPLETION. A member polling on a schedule finishes
+                // `quiet` when it found nothing; its `completed` row is still written and shown, but
+                // every subscriber that would be woken by it is woken only because it is a
+                // `completed` row, so all are passed over. A failure is never quiet, and what the run
+                // published or handed back wakes on its own row. See PayloadFields.Quiet.
+                var isCompleted = string.Equals(message.Type, MessageTypes.Completed, StringComparison.Ordinal);
+                var alreadyWoken = isCompleted
+                    && ((types.Contains(MessageTypes.Handback) && CompletionSays(message.Payload, PayloadFields.HandedBack))
+                        || CompletionSays(message.Payload, PayloadFields.Quiet));
 
                 if (!alreadyWoken
                     && !string.Equals(message.Source, container.Id.ToString(), StringComparison.OrdinalIgnoreCase)
@@ -730,15 +737,16 @@ public sealed class ContainerHost : IAsyncDisposable
 
     public bool IsPaused(string team) => _pausedTeams.ContainsKey(team);
 
-    /// <summary>Whether a `completed` row says its run had already handed back. A payload that
+    /// <summary>Whether a `completed` row carries <paramref name="field"/> as true
+    /// (<see cref="PayloadFields.HandedBack"/>, <see cref="PayloadFields.Quiet"/>). A payload that
     /// does not parse, or predates the field, answers false: the wake happens, which is the
     /// behaviour before the field existed.</summary>
-    private static bool CompletionHandedBack(string payload)
+    private static bool CompletionSays(string payload, string field)
     {
         try
         {
             using var document = JsonDocument.Parse(payload);
-            return document.RootElement.TryGetProperty(PayloadFields.HandedBack, out var value)
+            return document.RootElement.TryGetProperty(field, out var value)
                 && value.ValueKind == JsonValueKind.True;
         }
         catch (JsonException)

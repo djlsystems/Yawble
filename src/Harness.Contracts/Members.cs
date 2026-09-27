@@ -79,6 +79,9 @@ public sealed record MemberRunContext(
 /// measured" and is written as absent keys, never zeros.</param>
 /// <param name="Transcript">A session transcript the implementation wrote, recorded on the row
 /// for a person to read later.</param>
+/// <param name="Quiet">A successful run that found nothing anyone needs to be woken for: its
+/// `completed` row is written as usual, marked <see cref="PayloadFields.Quiet"/>, and wakes no
+/// subscriber. Ignored on a failure, which always wakes. Only a plugin's result record sets it.</param>
 public sealed record MemberResult(
     bool Succeeded,
     int ExitCode,
@@ -89,7 +92,8 @@ public sealed record MemberResult(
     DateTimeOffset? RetryAfter = null,
     int? ProcessId = null,
     InvocationUsage? Usage = null,
-    RunTranscript? Transcript = null)
+    RunTranscript? Transcript = null,
+    bool Quiet = false)
 {
     /// <summary>A run that did not begin or was cut off: the sentence is both the launch error
     /// and the reason.</summary>

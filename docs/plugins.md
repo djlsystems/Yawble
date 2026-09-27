@@ -278,7 +278,7 @@ Host still load.
 | `{"t":"blocked","reason":"…"}` | Marks the member blocked. With `"item": n` (1-based) only that batch item is blocked. |
 | `{"t":"needsDecision","question":"…"}` | Marks the member as waiting for a decision. |
 | `{"t":"handback","delivered":"…"}` | Hands the work back and wakes the Manager once. |
-| `{"t":"result","ok":true,"output":"…"}` | The run's result. Send exactly one, last. `ok:false` with `"error"` is a failure in those words. |
+| `{"t":"result","ok":true,"output":"…"}` | The run's result. Send exactly one, last. `ok:false` with `"error"` is a failure in those words. Add `"quiet":true` to finish without waking anyone; see [Quiet runs](#quiet-runs). |
 | `{"t":"publish","type":"…","payload":{…}}` | Publishes one of the events the manifest declares. See [Events](#events). |
 
 - **Same path as agents.** The first four records go through the same code as an agent's MCP tools
@@ -287,6 +287,28 @@ Host still load.
 - **Other lines.** A line that is not a record is kept as output text and is never treated as an
   error.
 - **stderr.** It is appended to the output.
+
+### Quiet runs
+
+`{"t":"result","ok":true,"output":"…","quiet":true}` says the run found nothing
+anyone needs to be woken for. It is for a plugin that polls on a schedule: without it, every run's
+`completed` row wakes the Manager, a paid model run, to learn that nothing happened.
+
+- **The run is still recorded.** Its `agentContainer.completed` row is written as usual, marked
+  `"quiet": true`, and the card, the run history and the feed show it.
+- **Nobody is woken by that row.** The pump passes over every subscriber on it, the same way it
+  passes over a Manager on a `completed` row marked `handedBack`.
+- **What quiet does not suppress:**
+  - A failure: `ok:false`, a non-zero exit, a timeout or a Stop. A failure is never quiet, whatever
+    the record says, and wakes as always.
+  - An event the run published. Its triggers fire as usual, so "publish one event per new item,
+    finish quiet" is the polling pattern.
+  - A hand-back in the run. It wakes the Manager on its own row.
+- **The workflow still ends.** A quiet run in a workflow the plugin owns ends that workflow the same
+  way a non-quiet one does.
+- **Optional.** A plugin that never sends `quiet` behaves exactly as before.
+
+Pinned by `PluginQuietRunTests`.
 
 **Outcome.**
 

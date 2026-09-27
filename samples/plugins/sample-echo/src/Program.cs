@@ -15,6 +15,8 @@ using System.Text.Json.Nodes;
 //   handback:<words>  the words are handed back, then transformed like any other
 //   sleep:<seconds>   waits, to exercise Stop and the idle clock
 //   publish:<type>    also publishes an event of that type - for trying what the Host refuses
+//   quiet:<rest>      the run's result is marked quiet (wakes nobody on completion); <rest> is
+//                     then read as any other instruction, so `quiet:fail:x` is a quiet failure
 // The same input always gives the same output.
 
 var request = JsonNode.Parse(Console.In.ReadToEnd()) ?? new JsonObject();
@@ -24,14 +26,17 @@ var mode = (string?)request["config"]?["mode"] ?? "upper";
 Emit(new JsonObject { ["t"] = "progress", ["status"] = $"transforming {work.Count} message(s) ({mode})" });
 
 var results = new List<string>();
+var quiet = false;
 
 for (var i = 0; i < work.Count; i++)
 {
     var text = (string?)work[i]?["instruction"] ?? work[i]?["payload"]?.ToJsonString() ?? "";
 
+    if (Take(ref text, "quiet:")) quiet = true;
+
     if (Take(ref text, "fail:"))
     {
-        Emit(new JsonObject { ["t"] = "result", ["ok"] = false, ["error"] = $"asked to fail: {text}" });
+        Emit(new JsonObject { ["t"] = "result", ["ok"] = false, ["error"] = $"asked to fail: {text}", ["quiet"] = quiet });
         return 1;
     }
 
@@ -68,7 +73,7 @@ if ((string?)request["secrets"]?["token"] is { } token)
 
 var output = string.Join("\n", results);
 Emit(new JsonObject { ["t"] = "publish", ["type"] = "done", ["payload"] = new JsonObject { ["length"] = output.Length } });
-Emit(new JsonObject { ["t"] = "result", ["ok"] = true, ["output"] = output });
+Emit(new JsonObject { ["t"] = "result", ["ok"] = true, ["output"] = output, ["quiet"] = quiet });
 return 0;
 
 static bool Take(ref string text, string prefix)
