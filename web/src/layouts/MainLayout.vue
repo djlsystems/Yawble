@@ -8,6 +8,7 @@ import { useKanbanStore } from '../stores/kanban';
 import type { TeamId } from '../api/types';
 import { useSessionStore } from '../stores/session';
 import { useDisplayStore } from '../stores/display';
+import { useTerminalDisplayStore } from '../stores/terminalDisplay';
 import { ThemeChoices, type Theme } from '../lib/theme';
 import ProfileDialog from '../components/ProfileDialog.vue';
 import BoardDisplayDialog from '../components/BoardDisplayDialog.vue';
@@ -131,9 +132,20 @@ const conciergeActiveTeam = computed(() => board.activeWorkTeam ?? null);
 const conciergeSessionTeam = computed<TeamId | null>(() => conciergeLaunchTeam.value ?? board.activeWorkTeam?.id ?? null);
 const conciergeSessionTeamName = computed(() => conciergeLaunchTeamName.value ?? board.activeWorkTeam?.name);
 
-function openConcierge() {
-  conciergeOpen.value = true;
+/** The bubble opens the Concierge and, pressed again, minimises it: one control, both ways. */
+function toggleConcierge() {
+  conciergeOpen.value = !conciergeOpen.value;
 }
+
+/**
+ * THE BUBBLE STAYS REACHABLE WHILE THE PANEL IS OPEN, or it could not close it. A windowed panel
+ * leaves the corner free, so the bubble is lifted above the panel's shell (z-index 7000). A full
+ * screen panel (maximised, or a phone) covers the corner and has its own minimise button; the
+ * bubble is hidden there rather than drawn over the terminal's last line.
+ */
+const terminalDisplay = useTerminalDisplayStore();
+const conciergeFullScreen = computed(() => terminalDisplay.maximised || $q.screen.lt.sm);
+const conciergeFabShown = computed(() => !(conciergeOpen.value && conciergeFullScreen.value));
 
 watch(conciergeOpen, (isOpen) => {
   if (isOpen) {
@@ -405,11 +417,18 @@ async function signOut() {
          instance is exactly when you want to ask the Concierge for a team. The original
          UAT complaint was a door to nothing when there were zero teams; the guard tested
          whether one was active, which is a different state. -->
-    <q-page-sticky position="bottom-right" :offset="[18, 18]">
+    <q-page-sticky v-show="conciergeFabShown" position="bottom-right" :offset="[18, 18]" class="concierge-fab-dock">
       <!-- The brand orange rather than Quasar's primary blue: this is the door into the
            product's own surface, and the stock primary reads as a control borrowed from
            somewhere else. Same value as the landing page and the sign-in button. -->
-      <q-btn fab icon="terminal" class="concierge-fab" @click="openConcierge">
+      <q-btn
+        fab
+        icon="terminal"
+        class="concierge-fab"
+        :aria-label="conciergeOpen ? 'Minimize the Concierge' : 'Open the Concierge'"
+        :aria-expanded="conciergeOpen"
+        @click="toggleConcierge"
+      >
         <!-- Anchored to the LEFT of the button, and not allowed to wrap. The default places a
              tooltip above-centre, which for a button pinned to the bottom-right corner lands it
              against the viewport edge: it wrapped to two lines and was then clipped by the
@@ -421,7 +440,7 @@ async function signOut() {
           :offset="[10, 0]"
           class="text-no-wrap"
         >
-          Open the Concierge
+          {{ conciergeOpen ? 'Minimize the Concierge' : 'Open the Concierge' }}
         </q-tooltip>
       </q-btn>
     </q-page-sticky>
@@ -530,6 +549,11 @@ async function signOut() {
 .ribbon-menu-drawer {
   background: var(--os-chrome);
   color: var(--os-ink-muted);
+}
+
+/* Above the Concierge shell (7000), so a windowed panel can be minimised from the bubble. */
+.concierge-fab-dock {
+  z-index: 7001;
 }
 
 .concierge-fab {

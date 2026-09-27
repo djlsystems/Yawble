@@ -61,6 +61,7 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 import MainLayout from '../MainLayout.vue';
 import { useConsoleStore } from '../../stores/console';
 import { useKanbanStore } from '../../stores/kanban';
+import { useTerminalDisplayStore } from '../../stores/terminalDisplay';
 import ConciergePanel from '../../components/ConciergePanel.vue';
 import RibbonBar from '../../components/RibbonBar.vue';
 import { Ribbon, needsActiveWorkTeam } from '../../lib/ribbon';
@@ -199,6 +200,43 @@ describe('the Concierge panel, mounted in the real shell', () => {
     await clickTheConciergeFab(wrapper);
 
     expect(connectConcierge).toHaveBeenCalledTimes(1);
+
+    wrapper.unmount();
+  });
+});
+
+describe('the Concierge bubble is a toggle', () => {
+  const dock = () => document.body.querySelector('.concierge-fab-dock') as HTMLElement | null;
+
+  it('opens the panel on the first press and minimizes it on the second', async () => {
+    const wrapper = await mountShellWithActiveTeam();
+    const panel = wrapper.findComponent(ConciergePanel);
+
+    await clickTheConciergeFab(wrapper);
+    expect(panel.props('modelValue')).toBe(true);
+    expect(wrapper.find('.concierge-fab').attributes('aria-label')).toBe('Minimize the Concierge');
+
+    await clickTheConciergeFab(wrapper);
+    expect(panel.props('modelValue')).toBe(false);
+    expect(wrapper.find('.concierge-fab').attributes('aria-label')).toBe('Open the Concierge');
+
+    wrapper.unmount();
+  });
+
+  it('stays visible beside a windowed panel, and is hidden while the panel is maximized', async () => {
+    const wrapper = await mountShellWithActiveTeam();
+
+    await clickTheConciergeFab(wrapper);
+    expect(dock()?.style.display).not.toBe('none');
+
+    useTerminalDisplayStore().maximised = true;
+    await flushPromises();
+    expect(dock()?.style.display).toBe('none');
+
+    // Minimized from the panel's own control: the bubble comes back to open it again.
+    await wrapper.findComponent(ConciergePanel).vm.$emit('update:modelValue', false);
+    await flushPromises();
+    expect(dock()?.style.display).not.toBe('none');
 
     wrapper.unmount();
   });
