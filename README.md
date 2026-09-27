@@ -5,6 +5,8 @@
   </picture>
 </p>
 
+<p align="center"><strong>Yawble — Teams of agents, moving with you.</strong></p>
+
 **Run teams of AI coding agents on your own machine.** Yawble gives every person a Concierge to
 talk to and hands the work to teams — a Manager and headless members built on the agent CLIs you
 already use (Claude Code, Codex, GitHub Copilot CLI, Grok). Everything runs in one container you
