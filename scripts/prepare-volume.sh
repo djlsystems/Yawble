@@ -18,6 +18,11 @@
 # the doctor say launches are allowed. Nothing is pre-created for it: the host writes it at every
 # start (a .tmp then a rename) into the data root, which agent cannot write, with umask 0007, so it
 # lands harness:harness 660 and this pass makes it 600 at the next start.
+# plugins is the host's and readable by agent, which runs every plugin: harness:agent all the way
+# down, directories 0750, files 0640 with a plugin's executable 0750 - the execute bits a file has
+# are kept, and group write, other and setuid/setgid are taken away. An agent that could write here
+# could replace the program a plugin member runs, or ask the host to rescan. It is created when
+# missing, so the operator CLI's `plugin install` has somewhere to copy to.
 # Every other top-level entry - teams, documents, agent-home, npm-global, bin, the tool caches, the
 # Concierge's workspaces - is agent:agent, with directories group-writable and setgid and files
 # group read-write, so what the host creates there (it runs with umask 0007) stays in group agent
@@ -82,6 +87,14 @@ own_host() { # path
   find "$1" ! -type d ! -type l ! -perm 600 -print -exec chmod 600 {} +
 }
 
+own_plugins() { # path
+  set_owner "$1" "$host_uid" "$agent_gid"
+  find "$1" -type d ! -perm 750 -print -exec chmod u=rwx,g=rx,o=,ug-s {} +
+  # .rescan and .rescan-report.json are the operator CLI's request and the host's answer; the answer
+  # names members of every team and stays the host's alone, so their modes are left as written.
+  find "$1" ! -type d ! -type l ! -name '.rescan*' \( -perm /6027 -o ! -perm -640 \) -print -exec chmod u+rw,g+r,g-w,o=,ug-s {} +
+}
+
 own_agent() { # path
   set_owner "$1" "$agent_uid" "$agent_gid"
   if [ "$1" = "$root/agent-home" ]; then own_agent_home "$1"; return; fi
@@ -134,10 +147,14 @@ ownership() {
       [ "$(stat -c '%u:%g' "$root")" = "$host_uid:$agent_gid" ] || { "$chown_cmd" "$host_uid:$agent_gid" "$root"; echo "$root"; }
       [ "$(stat -c '%a' "$root")" = 750 ] || { chmod u=rwx,g=rx,o=,ug-s "$root"; echo "$root"; }
 
+      [ -e "$root/plugins" ] || [ -L "$root/plugins" ] || { mkdir "$root/plugins"; echo "$root/plugins"; }
+
       for path in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         [ -e "$path" ] || [ -L "$path" ] || continue
         name=$(basename "$path")
-        if is_host_entry "$name"; then own_host "$path"; else own_agent "$path"; fi
+        if is_host_entry "$name"; then own_host "$path"
+        elif [ "$name" = plugins ]; then own_plugins "$path"
+        else own_agent "$path"; fi
       done
 
       extra_roots | while IFS= read -r path; do

@@ -57,6 +57,7 @@ yawble agents             per agent: installed, signed in, and how to sign in if
 yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
 yawble config get|set     port, engine, memory, cpus, running limit, image
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
+yawble plugin install <folder> [--force] | list | remove <id> [--version <v>]   plugins members can be hired on; see below
 yawble github             guided GitHub token setup: the gh login or a pasted fine-grained token, checked with GitHub
 yawble uninstall          removes the instance and yawble's settings. The volume only with --data and a typed confirmation.
 yawble version
@@ -65,6 +66,18 @@ yawble version
 Tab completion for a shell is there but not listed in `yawble --help`: `yawble completion powershell | Out-String | Invoke-Expression` turns it on in PowerShell (add that line to `$PROFILE` to keep it), and `yawble completion --help` shows bash, zsh and fish.
 
 The engine is the one configured, else the one installed (asked when both are); `config set engine podman|docker` sets it.
+
+## Plugins
+
+A plugin is a program a team member runs instead of an agent CLI (`docs/plugins.md` at the repository root). Build one version into a folder outside the repository, then:
+
+```
+yawble plugin install ~/plugins-build/sample-echo/0.1.0
+```
+
+That is the whole install. The manifest is checked with the Host's rules before anything is copied, and a bad field is named. The folder is copied to `/data/plugins/<id>/<version>/` through the engine, `/data/plugins` is created if it is missing, and ownership and modes are set: `harness:agent`, directories `0750`, files `0640`, and the manifest's executable `0750`. The executable bit is set even when the folder came from Windows without one. `active` is pointed at the version, and earlier versions are kept. The Host then rescans with no restart and no API key, and the command prints its verdict: installed, or refused with the reason. An existing version is refused unless `--force` is given.
+
+`yawble plugin list` shows each version, active or not, and installed or refused (`--json` too). `yawble plugin remove <id>` asks first (`--yes` answers) and refuses while a member is hired on the plugin, naming the members. `--version <v>` removes one kept version; the active one cannot be removed while others are kept.
 
 ## Secrets: GitHub and API keys
 

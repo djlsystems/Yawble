@@ -29,7 +29,45 @@ scope.
 
 ## Install a plugin
 
-Plugins live under `<dataRoot>/plugins`. In the container image the data root is `/data`.
+Install a built plugin version with the operator CLI:
+
+```sh
+yawble plugin install <folder>
+```
+
+`<folder>` is one built version of a plugin: it holds `plugin.json` and everything the manifest names.
+That is the whole install. There is no copy, `chown`, `chmod` or rescan to do by hand, and no restart.
+The command:
+
+1. **Checks the manifest before anything is copied.** It uses the Host's rules (below) and names the
+   field that is wrong. It also checks that the executable and every skill are files inside the
+   folder after symlinks are resolved. It does not require an execute bit, because step 3 sets one.
+2. **Copies the folder into the running instance** at `/data/plugins/<id>/<version>/`, through the
+   instance's engine (Podman or Docker, `podman cp` / `docker cp`). It creates `/data/plugins` if it
+   is missing. An existing `<id>/<version>` is refused unless you pass `--force`.
+3. **Sets ownership and modes, whatever they were on your computer.** Everything becomes
+   `harness:agent`, with directories `0750`, files `0640`, and the manifest's executable (and every
+   `platforms` entry) `0750`. A folder copied from Windows has no execute bit, and without this step
+   the Host refuses the plugin with "chmod +x it".
+4. **Writes `active`** naming that version, so installing a new version switches to it. Earlier version
+   directories are kept, for going back: `yawble plugin install <older folder> --force`.
+5. **Has the Host rescan, and prints the Host's verdict**: installed, or refused with its reason (exit 1).
+
+`yawble plugin list` shows every version on the volume, whether it is active, and what the Host made
+of it. `yawble plugin remove <id> [--version <v>]` removes a plugin or one kept version. It asks first
+(`--yes` answers), and it refuses while a member is hired on the plugin, naming the members.
+
+**How the Host is told, without a person's key.** The CLI writes a nonce to `/data/plugins/.rescan`
+through the engine, as root in the container. The Host (`PluginRescanRequests`) looks for that file
+once a second. When it finds one, it calls the same `PluginCatalog.Rescan` that `POST /api/plugins/rescan`
+calls. It then writes what it now holds, with that nonce, to `/data/plugins/.rescan-report.json`: installed
+plugins, refused directories with the reason, and the members hired on each plugin. The CLI reads that
+report back. Only the Host user and root can write in `/data/plugins` (`harness:agent 0750`), so an
+agent cannot ask for a rescan. The report names members of every team, so the Host writes it `0600`.
+An image from before this command does not answer. The CLI says so after 20 seconds, and a restart
+(`yawble down`, `yawble up`) loads the files it has already put in place.
+
+The layout the Host reads, whatever put it there:
 
 ```
 plugins/<id>/<version>/plugin.json   the manifest
@@ -43,13 +81,15 @@ plugins/<id>/active                  one line: the version in use
   directory uses that version.
 - **Where the executable may live.** It must resolve inside its version directory after symlinks
   are resolved, and it must be executable.
-- **Ownership.** Install plugins owned by the Host user and readable and executable by the `agent`
-  group, and never writable by `agent`. A member must not be able to replace a plugin's files.
+- **Ownership.** Plugins are owned by the Host user and readable and executable by the `agent` group,
+  never writable by `agent`. A member must not be able to replace a plugin's files. The container's
+  entrypoint (`scripts/prepare-volume.sh`) creates `/data/plugins` as `harness:agent 0750` and
+  re-applies these modes at every start, keeping each file's execute bits.
 
-The Host prints one line per installed plugin at start. It also prints one line per refused
-directory, naming the field that is wrong. `GET /api/plugins` lists the same thing. After you
-install or upgrade a plugin, a person runs `POST /api/plugins/rescan` or restarts the Host. A member
-already pointing at the plugin runs the new version on its next wake.
+The Host prints one line per installed plugin at start and at every rescan. It also prints one line
+per refused directory, naming the field that is wrong. `GET /api/plugins` lists the same thing. A
+person can still rescan with `POST /api/plugins/rescan`. A member already pointing at the plugin runs
+the new version on its next wake.
 
 ### Example: sample-echo
 
@@ -57,30 +97,52 @@ already pointing at the plugin runs the new version on its next wake.
 reverses each instruction's text. It is a .NET console app with no dependencies, and its launcher
 runs it with `dotnet`, which the image guarantees.
 
-Run the build block **from the repository root**. The sample's project takes its target framework
-from the repository's build properties, so a copy of `samples/` built anywhere else fails with
-`NETSDK1013`.
+Run the build **from the repository root**. The sample's project takes its target framework from
+the repository's build properties, so a copy of `samples/` built anywhere else fails with
+`NETSDK1013`. The build writes to a folder **outside** the repository, so it leaves nothing untracked.
 
 ```sh
-# From the repository root: build and lay out version 0.1.0.
-V=out/sample-echo/0.1.0
-dotnet publish samples/plugins/sample-echo/src -c Release -o "$V/lib"
-cp samples/plugins/sample-echo/plugin.json samples/plugins/sample-echo/sample-echo "$V/"
-cp -r samples/plugins/sample-echo/skills "$V/"
-echo 0.1.0 > out/sample-echo/active
-
-# Put it on the volume, owned by the Host user and readable (not writable) by `agent`.
-# NOT YET VERIFIED: these two lines have not been run against a real container.
-podman cp out/sample-echo yawble:/data/plugins/
-podman exec -u 0 yawble sh -c 'chown -R harness:agent /data/plugins && chmod -R u=rwX,g=rX,o= /data/plugins'
+# From the repository root: build version 0.1.0 outside the repository, then install it.
+B=~/plugins-build/sample-echo/0.1.0
+dotnet publish samples/plugins/sample-echo/src -c Release -o "$B/lib"
+cp samples/plugins/sample-echo/plugin.json samples/plugins/sample-echo/sample-echo "$B/"
+cp -r samples/plugins/sample-echo/skills "$B/"
+yawble plugin install "$B"
 ```
 
-The two `podman` lines are the intended install onto a running container, but nobody has run them
-yet. The layout they produce, `/data/plugins/sample-echo/0.1.0/...` owned `harness:agent` with mode
-`u=rwX,g=rX,o=`, is what the Host expects, whatever way it gets there.
+On Windows, in PowerShell:
 
-Then register it without a restart: a person calls `POST /api/plugins/rescan`, or the Host is
-restarted.
+```powershell
+# From the repository root.
+$B = "$HOME\plugins-build\sample-echo\0.1.0"
+dotnet publish samples/plugins/sample-echo/src -c Release -o "$B\lib"
+Copy-Item samples/plugins/sample-echo/plugin.json, samples/plugins/sample-echo/sample-echo $B
+Copy-Item -Recurse samples/plugins/sample-echo/skills $B
+yawble plugin install $B
+```
+
+It prints the Host's verdict:
+
+```
+copied sample-echo 0.1.0 to /data/plugins/sample-echo/0.1.0 and made it the active version
+the Host reports sample-echo 0.1.0 installed; hire it as plugin:sample-echo
+```
+
+What has been verified, and what has not:
+
+- **Verified here, on Linux.** The build above, with the launcher's execute bit removed as a Windows
+  copy leaves it, then the real `yawble` binary. The `podman` it ran was a stand-in script that ran
+  each `exec` locally, mapped `/data` to a temporary data root, and turned `cp` into a local copy. The
+  Host was a real one, started on that data root with no `plugins` directory. `plugin install`
+  created `plugins/`, set the modes above (the launcher `0750`), wrote `active`, and printed "the Host
+  reports sample-echo 0.1.0 installed" about a second later, with no restart and no key. A repeat was
+  refused without `--force`, and `--force` replaced it. A second version became active with the first
+  kept. `plugin list` and each `plugin remove` refusal behaved as described, and a broken manifest
+  was refused by field before anything was copied.
+- **Not verified.** A real Podman or Docker, a real container, the image's `harness` and `agent` users
+  (`chown` was a stub), and a build made on Windows. In particular, not yet run: what
+  `podman cp`/`docker cp` do with a folder from a Windows host, and a hired sample-echo running after
+  this install on a real instance.
 
 ### Hire it into a team
 
@@ -262,3 +324,10 @@ slot like any member's.
 - **The pieces.** `PluginMemberRunnerTests` (protocol), `PluginCatalogTests` (manifest v1),
   `PluginMemberRegistryTests` (hire, restore, repoint), `ChildProcessTests` (the shared launcher)
   and `MemberReportsTests` (the shared report path).
+- **The install.** `cli/internal/cli/plugin_test.go` pins each `yawble plugin` command and each
+  refusal against a scripted engine, including an install from a folder whose launcher has no execute
+  bit. It also runs the container scripts under a real `sh`: the modes, a setgid parent, `active`, and
+  a kept version. `cli/internal/plugin` pins the manifest rules against the sample.
+  `PluginRescanRequestTests` shows a plugin installed after start is listed with no restart, and pins
+  the report's refusals, its hired members and its `0600` mode. `PrepareVolumeTests` pins
+  `/data/plugins` as `harness:agent 0750`, created when missing.

@@ -120,6 +120,11 @@ func (d docker) Exec(ctx context.Context, name string, args ...string) (Result, 
 	return d.run(ctx, append([]string{"exec", name}, args...)...)
 }
 
+func (d docker) CopyTo(ctx context.Context, name, src, dst string) error {
+	_, err := d.run(ctx, "cp", src, name+":"+dst)
+	return err
+}
+
 func (d docker) Run(ctx context.Context, s RunSpec) error {
 	args := []string{"run", "-d", "--name", s.Name, "--network", s.Pod}
 	if s.HostPort > 0 && s.ContainerPort > 0 {

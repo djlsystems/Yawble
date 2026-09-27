@@ -240,3 +240,24 @@ func TestRemovingAnImageThatIsAManifestListRemovesTheList(t *testing.T) {
 		t.Errorf("another failure must fail, without a manifest rm: err %v calls %q", err, s.Calls)
 	}
 }
+
+func TestCopyToCopiesAFolderIntoTheContainer(t *testing.T) {
+	s := engine.NewScripted()
+	if err := engine.NewPodman(s).CopyTo(context.Background(), "yawble", "/home/d/build/0.1.0", "/data/plugins/x/.incoming-0.1.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.NewDocker(s).CopyTo(context.Background(), "yawble", `C:\build\0.1.0`, "/data/plugins/x/.incoming-0.1.0"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"podman cp /home/d/build/0.1.0 yawble:/data/plugins/x/.incoming-0.1.0",
+		`docker cp C:\build\0.1.0 yawble:/data/plugins/x/.incoming-0.1.0`,
+	}
+	if strings.Join(s.Calls, "\n") != strings.Join(want, "\n") {
+		t.Errorf("calls %q", s.Calls)
+	}
+	s.On("podman cp", engine.Result{Stderr: "Error: no such container", ExitCode: 125})
+	if err := engine.NewPodman(s).CopyTo(context.Background(), "gone", "/a", "/b"); err == nil || !strings.Contains(err.Error(), "no such container") {
+		t.Errorf("err %v", err)
+	}
+}

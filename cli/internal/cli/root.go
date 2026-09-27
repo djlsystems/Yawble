@@ -109,7 +109,7 @@ func NewRoot(deps Deps) *cobra.Command {
 	root.AddCommand(
 		newUpCommand(deps), newDownCommand(deps), newStatusCommand(deps), newLogsCommand(deps),
 		newDoctorCommand(deps), newAgentsCommand(deps), newUpdateCommand(deps), newRemoteCommand(deps),
-		newUninstallCommand(deps), newConfigCommand(deps), newSecretCommand(deps), newGitHubCommand(deps), newVersionCommand(deps),
+		newUninstallCommand(deps), newConfigCommand(deps), newSecretCommand(deps), newGitHubCommand(deps), newPluginCommand(deps), newVersionCommand(deps),
 	)
 	return root
 }
