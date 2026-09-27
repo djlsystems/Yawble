@@ -12,13 +12,21 @@ curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/
 irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1 | iex          # Windows
 ```
 
+These install the newest **regular** release. To take the newest release, a pre-release included:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh -s -- --prerelease
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1))) -Prerelease
+```
+
+While Yawble publishes pre-releases only, the plain form says no release is available and prints
+the `--prerelease` form to run instead.
+
 No GitHub account or token is needed. (Installing from a private fork instead is covered in
 [docs/ops/cli-releases-and-install.md](../docs/ops/cli-releases-and-install.md).)
-
-The scripts install the newest release, a pre-release included when it is the newest. To take the
-newest **regular** release instead, set `YAWBLE_CHANNEL=stable` first
-(`$env:YAWBLE_CHANNEL = 'stable'` in PowerShell); the choice is saved, so `yawble update` keeps to
-regular releases. `yawble config set channel latest` goes back to the default.
 
 Each script places the binary (`~/.local/bin`, or `%LOCALAPPDATA%\Programs\yawble` and your user Path on Windows), verifies its checksum, and stops. Then:
 
@@ -47,7 +55,7 @@ yawble update             a newer yawble when there is one, then the instance on
 yawble logs [-f]          the container log
 yawble agents             per agent: installed, signed in, and how to sign in if not
 yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
-yawble config get|set     port, engine, memory, cpus, running limit, image, channel (latest or stable)
+yawble config get|set     port, engine, memory, cpus, running limit, image
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
 yawble github             guided GitHub token setup: the gh login or a pasted fine-grained token, checked with GitHub
 yawble uninstall          removes the instance and yawble's settings. The volume only with --data and a typed confirmation.

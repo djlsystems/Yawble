@@ -16,7 +16,7 @@ import (
 )
 
 func newUpdateCommand(deps Deps) *cobra.Command {
-	var cliOnly, instanceOnly bool
+	var cliOnly, instanceOnly, prerelease bool
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update yawble and the instance together; --cli or --instance does one half",
@@ -26,35 +26,38 @@ func newUpdateCommand(deps Deps) *cobra.Command {
 			"When this yawble is the latest, or the release cannot be read, it moves the instance to the " +
 			"image this yawble pins. Moving the instance recreates the container on the same volume, so " +
 			"nothing is lost; the Host migrates its database on start. --cli replaces yawble only; " +
-			"--instance moves the instance only and never looks for a release.",
-		Example: "  yawble update\n  yawble update --cli\n  yawble update --instance",
+			"--instance moves the instance only and never looks for a release. It takes the newest " +
+			"regular release; --prerelease takes the newest release, a pre-release included. It never " +
+			"moves to an older yawble than this one.",
+		Example: "  yawble update\n  yawble update --prerelease\n  yawble update --cli\n  yawble update --instance",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			switch {
 			case cliOnly && instanceOnly:
 				return UsageError{"--cli and --instance each do one half; a plain `yawble update` does both"}
 			case cliOnly:
-				_, err := updateCLI(cmd, deps)
+				_, err := updateCLI(cmd, deps, prerelease)
 				return err
 			case instanceOnly:
 				return updateInstance(cmd, deps)
 			}
-			return updateBoth(cmd, deps)
+			return updateBoth(cmd, deps, prerelease)
 		},
 	}
 	cmd.Flags().BoolVar(&cliOnly, "cli", false, "replace yawble itself, not the instance")
 	cmd.Flags().BoolVar(&instanceOnly, "instance", false, "move the instance to the image this yawble pins; do not look for a newer yawble")
+	cmd.Flags().BoolVar(&prerelease, "prerelease", false, "take the newest release, a pre-release included; without it only regular releases are taken")
 	return cmd
 }
 
 // updateBoth is a plain `update`. A development build is never replaced by a release; a release
 // that cannot be read is said and does not stop the instance moving.
-func updateBoth(cmd *cobra.Command, deps Deps) error {
+func updateBoth(cmd *cobra.Command, deps Deps, prerelease bool) error {
 	if buildinfo.Version == "dev" {
 		fmt.Fprintln(cmd.ErrOrStderr(), "note: this is a development build of yawble; it is not replaced by a release (yawble update --cli does that)")
 		return updateInstance(cmd, deps)
 	}
-	exe, err := updateCLI(cmd, deps)
+	exe, err := updateCLI(cmd, deps, prerelease)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "note: could not look for a newer yawble (%v); moving the instance to the image this yawble pins\n", err)
 		return updateInstance(cmd, deps)
@@ -118,9 +121,9 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 	return instance.Up(cmd.Context(), e, s, healthChecker(deps.HTTP), out)
 }
 
-// updateCLI replaces this binary with the latest release. It answers the path of the binary it
-// installed, or "" when this is already the latest.
-func updateCLI(cmd *cobra.Command, deps Deps) (string, error) {
+// updateCLI replaces this binary with the newest release (a pre-release only with prerelease). It
+// answers the path of the binary it installed, or "" when there is nothing newer.
+func updateCLI(cmd *cobra.Command, deps Deps, prerelease bool) (string, error) {
 	out := cmd.OutOrStdout()
 	goos := deps.GOOS
 	if goos == "" {
@@ -134,17 +137,21 @@ func updateCLI(cmd *cobra.Command, deps Deps) (string, error) {
 	if executable == nil {
 		executable = os.Executable
 	}
-	// The channel: "stable" (config or YAWBLE_CHANNEL) skips pre-releases; the default takes them.
-	c, err := loadConfig(deps)
-	if err != nil {
-		return "", err
-	}
-	rel, err := release.Latest(cmd.Context(), deps.HTTP, base, githubToken(deps), goos, runtime.GOARCH, c.Channel == "stable")
+	rel, err := release.Latest(cmd.Context(), deps.HTTP, base, githubToken(deps), goos, runtime.GOARCH, prerelease)
 	if err != nil {
 		return "", err
 	}
 	if rel.Tag == buildinfo.Version {
 		fmt.Fprintf(out, "yawble %s is already the latest release\n", rel.Tag)
+		return "", nil
+	}
+	// Never backwards: a pre-release installed with --prerelease is newer than the newest regular
+	// release, and a plain update must not replace it with that older one.
+	if release.IsNewer(buildinfo.Version, rel.Tag) {
+		fmt.Fprintf(out, "yawble %s is newer than the newest %srelease, %s; nothing to update\n", buildinfo.Version, map[bool]string{true: "", false: "regular "}[prerelease], rel.Tag)
+		if !prerelease {
+			fmt.Fprintln(out, "(yawble update --prerelease takes newer pre-releases)")
+		}
 		return "", nil
 	}
 	exe, err := executable()

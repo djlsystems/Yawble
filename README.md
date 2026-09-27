@@ -37,15 +37,19 @@ control, with a web board to watch, steer and review the work.
 You need Podman (recommended) or Docker. `yawble up` tells you where to get one if neither is
 installed.
 
-Install the operator CLI:
+Install the operator CLI. Yawble is published as pre-releases for now, so the install asks for
+the newest pre-release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh    # Linux, macOS (Apple silicon)
+curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh -s -- --prerelease    # Linux, macOS (Apple silicon)
 ```
 
 ```powershell
-irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1 | iex          # Windows
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1))) -Prerelease    # Windows
 ```
+
+Without `--prerelease` (`-Prerelease`) the scripts install the newest regular release, and say so
+when there is none yet.
 
 Start an instance and open the board at <http://localhost:8080>:
 

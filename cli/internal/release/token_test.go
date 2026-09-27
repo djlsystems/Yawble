@@ -92,7 +92,7 @@ func newPrivateRelease(t *testing.T, tag string, content []byte) *privateRelease
 func TestWithATokenAPrivateReleaseIsReadThroughTheAPIAndTheTokenStaysOffTheStorageHost(t *testing.T) {
 	p := newPrivateRelease(t, "v0.3.0", []byte("private yawble"))
 	ctx := context.Background()
-	rel, err := release.Latest(ctx, http.DefaultClient, p.api.URL, token, "linux", "amd64", false)
+	rel, err := release.Latest(ctx, http.DefaultClient, p.api.URL, token, "linux", "amd64", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestWithATokenAPrivateReleaseIsReadThroughTheAPIAndTheTokenStaysOffTheStora
 
 func TestWithoutATokenAPrivateReleaseIsRefusedNamingTheToken(t *testing.T) {
 	p := newPrivateRelease(t, "v0.3.0", []byte("x"))
-	_, err := release.Latest(context.Background(), http.DefaultClient, p.api.URL, "", "linux", "amd64", false)
+	_, err := release.Latest(context.Background(), http.DefaultClient, p.api.URL, "", "linux", "amd64", true)
 	if err == nil || !strings.Contains(err.Error(), "GH_TOKEN") {
 		t.Fatalf("err %v", err)
 	}
@@ -127,7 +127,7 @@ func TestWithoutATokenNoAuthorizationIsSent(t *testing.T) {
 		}
 		return http.DefaultTransport.RoundTrip(r)
 	})}
-	rel, err := release.Latest(context.Background(), client, server.URL, "", "linux", "amd64", false)
+	rel, err := release.Latest(context.Background(), client, server.URL, "", "linux", "amd64", true)
 	if err != nil {
 		t.Fatal(err)
 	}

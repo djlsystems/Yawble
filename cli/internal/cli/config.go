@@ -14,7 +14,7 @@ import (
 func newConfigCommand(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Read or change yawble's own settings (engine, port, memory, cpus, maxRunning, image, channel)",
+		Short: "Read or change yawble's own settings (engine, port, memory, cpus, maxRunning, image)",
 	}
 	var asJSON bool
 	get := &cobra.Command{

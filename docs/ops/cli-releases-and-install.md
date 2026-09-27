@@ -41,13 +41,25 @@ curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/
 irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1 | iex          # Windows
 ```
 
-Each script reads this repository's newest Release (the highest version, pre-releases included;
-GitHub's own "latest" never is a pre-release, so it is not asked; with `YAWBLE_CHANNEL=stable`,
-the highest regular release, a choice the script saves as yawble's `channel` setting so that
-`yawble update` keeps to it), downloads the matching archive and
+Each script reads this repository's releases list and takes the highest regular release (the
+list is not in release order, so the versions are compared; drafts are skipped). With
+`--prerelease` it takes the highest release, a pre-release included:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh -s -- --prerelease
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1))) -Prerelease
+```
+
+`irm | iex` cannot pass a switch, which is why the PowerShell form runs the script as a script
+block. With no regular release published, the plain form says no release is available and prints
+the `--prerelease` form. The script downloads the matching archive and
 `checksums.txt`, verifies the checksum, and places the binary (`~/.local/bin`, or
 `%LOCALAPPDATA%\Programs\yawble` plus the user Path on Windows). `yawble update --cli` reads the
-same newest Release.
+same list the same way (`yawble update --prerelease` for pre-releases), and never moves to a
+version older than the one running.
 
 ### A private fork or package
 

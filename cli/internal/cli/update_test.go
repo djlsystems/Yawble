@@ -258,31 +258,85 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// The stable channel, from config or YAWBLE_CHANNEL, skips pre-releases; with only pre-releases
-// published it says so and replaces nothing.
-func TestUpdateCliOnTheStableChannelSkipsPreReleases(t *testing.T) {
+// releaseList serves a releases list: each entry a tag and whether it is a pre-release, with this
+// target's archive and checksums at /dl/, so the one chosen can actually be installed.
+func releaseList(t *testing.T, bin []byte, entries ...struct {
+	tag string
+	pre bool
+}) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	var server *httptest.Server
+	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
+		parts := []string{}
+		for _, e := range entries {
+			name := "yawble_" + strings.TrimPrefix(e.tag, "v") + "_linux_amd64.tar.gz"
+			parts = append(parts, `{"tag_name":"`+e.tag+`","prerelease":`+map[bool]string{true: "true", false: "false"}[e.pre]+
+				`,"assets":[{"name":"`+name+`","browser_download_url":"`+server.URL+`/dl/`+name+`"},`+
+				`{"name":"checksums.txt","browser_download_url":"`+server.URL+`/dl/checksums.txt"}]}`)
+		}
+		_, _ = w.Write([]byte("[" + strings.Join(parts, ",") + "]"))
+	})
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// By default only regular releases are taken: with nothing but pre-releases, update says so and
+// replaces nothing, and names --prerelease.
+func TestUpdateCliTakesOnlyRegularReleasesUnlessAskedForPreReleases(t *testing.T) {
 	buildinfo.Version = "v0.1.0"
 	t.Cleanup(func() { buildinfo.Version = "dev" })
-	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`[{"tag_name":"v0.2.0","prerelease":true,"assets":[]}]`))
-	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
+	server := releaseList(t, []byte("new"), struct {
+		tag string
+		pre bool
+	}{"v0.2.0", true})
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "yawble")
 	_ = os.WriteFile(exe, []byte("the old yawble"), 0o755)
 	deps := stubbed(engine.NewScripted())
 	deps.HTTP, deps.ReleaseBaseURL, deps.GOOS = server.Client(), server.URL, "linux"
 	deps.Executable = func() (string, error) { return exe, nil }
-	env := map[string]string{"YAWBLE_IMAGE": testImage, "YAWBLE_CHANNEL": "stable"}
-	deps.Env = func(k string) string { return env[k] }
 
 	code, out, errOut := run(t, deps, "update", "--cli")
-	if code == 0 || !strings.Contains(out+errOut, "no regular release") {
+	if code == 0 || !strings.Contains(out+errOut, "no release is available") || !strings.Contains(out+errOut, "--prerelease") {
 		t.Errorf("exit %d out %q err %q", code, out, errOut)
 	}
 	if got, _ := os.ReadFile(exe); string(got) != "the old yawble" {
-		t.Errorf("the binary was replaced: %q", got)
+		t.Errorf("replaced without --prerelease: %q", got)
+	}
+
+	// --prerelease takes it (the fake serves no archive bytes, so the download itself then fails).
+	_, out, errOut = run(t, deps, "update", "--cli", "--prerelease")
+	if !strings.Contains(out, "v0.1.0 -> v0.2.0") {
+		t.Errorf("--prerelease: exit %d out %q err %q", code, out, errOut)
+	}
+}
+
+// Never backwards: a pre-release installed with --prerelease is newer than the newest regular
+// release, and a plain update leaves it alone.
+func TestUpdateCliNeverMovesToAnOlderRelease(t *testing.T) {
+	buildinfo.Version = "v0.3.0"
+	t.Cleanup(func() { buildinfo.Version = "dev" })
+	server := releaseList(t, []byte("new"), struct {
+		tag string
+		pre bool
+	}{"v0.3.0", true}, struct {
+		tag string
+		pre bool
+	}{"v0.2.0", false})
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "yawble")
+	_ = os.WriteFile(exe, []byte("the pre-release yawble"), 0o755)
+	deps := stubbed(engine.NewScripted())
+	deps.HTTP, deps.ReleaseBaseURL, deps.GOOS = server.Client(), server.URL, "linux"
+	deps.Executable = func() (string, error) { return exe, nil }
+
+	code, out, errOut := run(t, deps, "update", "--cli")
+	if code != 0 || !strings.Contains(out, "newer than the newest regular release") {
+		t.Errorf("exit %d out %q err %q", code, out, errOut)
+	}
+	if got, _ := os.ReadFile(exe); string(got) != "the pre-release yawble" {
+		t.Errorf("moved backwards: %q", got)
 	}
 }

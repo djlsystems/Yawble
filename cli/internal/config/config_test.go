@@ -117,26 +117,3 @@ func TestSaveRoundTrips(t *testing.T) {
 		t.Errorf("got %+v err %v", got, err)
 	}
 }
-
-func TestChannelIsLatestByDefaultAndStableWhenChosen(t *testing.T) {
-	var c config.Config
-	if got, _ := c.Get("channel"); got != "latest" {
-		t.Errorf("default channel %q", got)
-	}
-	if err := c.Set("channel", "stable"); err != nil || c.Channel != "stable" {
-		t.Errorf("stable: %v %q", err, c.Channel)
-	}
-	if err := c.Set("channel", "beta"); err == nil || !strings.Contains(err.Error(), "latest") || !strings.Contains(err.Error(), "stable") {
-		t.Errorf("beta was accepted: %v", err)
-	}
-	dir := t.TempDir()
-	env := func(k string) string {
-		if k == "YAWBLE_CHANNEL" {
-			return "stable"
-		}
-		return ""
-	}
-	if loaded, _, err := config.Load(dir, env); err != nil || loaded.Channel != "stable" {
-		t.Errorf("YAWBLE_CHANNEL: %v %q", err, loaded.Channel)
-	}
-}

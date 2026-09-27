@@ -5,8 +5,10 @@
 #   irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1 | iex
 #
 # $env:YAWBLE_VERSION = 'v2026.09.24.1' pins a release; $env:YAWBLE_INSTALL_DIR overrides the folder.
-# $env:YAWBLE_CHANNEL = 'stable' takes the newest regular release, skipping pre-releases, and saves
-# that choice so `yawble update` keeps to it; the default takes the newest release of either kind.
+# It installs the newest regular release. -Prerelease takes the newest release, a pre-release
+# included; `irm | iex` cannot pass a switch, so that form runs the script as a script block:
+#
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1))) -Prerelease
 #
 # No token is needed. Installing from a private fork: set $env:GH_TOKEN (or $env:GITHUB_TOKEN) to
 # a token with the repo scope, and fetch this script with it too:
@@ -17,6 +19,7 @@
 # With a token the release is read through the GitHub API, the only place a private repository
 # serves its assets. The token is sent to api.github.com only: the asset's redirect to storage is
 # followed here, by a request that does not carry it. It is never printed.
+param([switch]$Prerelease)
 $ErrorActionPreference = 'Stop'
 
 $repo = 'djlsystems/Yawble'
@@ -30,16 +33,12 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
     default { throw "yawble: unsupported architecture $($env:PROCESSOR_ARCHITECTURE)" }
 }
 
-# Get-Newest: from a releases list, the highest v<yyyy.mm.dd.N> release that is not a draft,
-# pre-releases included. GitHub's own "latest" never is a pre-release, and its list is not in release
+# Get-Newest: from a releases list, the highest v<yyyy.mm.dd.N> release that is not a draft and,
+# without -Prerelease, not a pre-release. GitHub's list is not in release
 # order, so the versions are compared here (.10 after .9). The list is held in a variable by the
 # caller: piped straight on, Invoke-RestMethod hands the whole JSON array down as one object.
-$stable = $env:YAWBLE_CHANNEL -eq 'stable'
-if ($env:YAWBLE_CHANNEL -and $env:YAWBLE_CHANNEL -notin @('latest', 'stable')) {
-    throw "yawble: YAWBLE_CHANNEL must be latest or stable, not $($env:YAWBLE_CHANNEL)"
-}
 function Get-Newest($list) {
-    $list | Where-Object { -not $_.draft -and -not ($stable -and $_.prerelease) -and $_.tag_name -match '^v\d+\.\d+\.\d+\.\d+$' } |
+    $list | Where-Object { -not $_.draft -and ($Prerelease -or -not $_.prerelease) -and $_.tag_name -match '^v\d+\.\d+\.\d+\.\d+$' } |
         Sort-Object { [version]$_.tag_name.TrimStart('v') } -Descending | Select-Object -First 1
 }
 
@@ -64,7 +63,9 @@ if ($token) {
         throw "yawble: could not read the latest release of $repo (check the network connection; a private fork also needs GH_TOKEN)"
     }
     $version = $latest.tag_name
-    if (-not $version -and $stable) { throw "yawble: $repo has no regular release yet, only pre-releases; run without YAWBLE_CHANNEL=stable to take the newest" }
+    if (-not $version -and -not $Prerelease) {
+        throw "yawble: no release is available yet. Only pre-releases are published; to install the newest one:`n  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1))) -Prerelease"
+    }
     if (-not $version) { throw "yawble: could not read the latest release of $repo" }
 }
 $bare = $version.TrimStart('v')
@@ -148,11 +149,6 @@ if (-not ($entries -contains $dir.TrimEnd('\'))) {
 if (-not (($env:Path -split ';') -contains $dir)) { $env:Path = "$env:Path;$dir" }
 
 & (Join-Path $dir 'yawble.exe') version | Select-Object -First 1
-# The channel travels with the install, so `yawble update` keeps to the same kind of release.
-if ($stable) {
-    & (Join-Path $dir 'yawble.exe') config set channel stable | Out-Null
-    Write-Host 'Channel: stable (yawble update takes regular releases only; yawble config set channel latest undoes it)'
-}
 
 # A CONTAINER ENGINE FIRST. yawble installs none: it uses Podman or Docker. With
 # neither installed, say where to get one - Podman recommended - and to run `yawble up` after.
