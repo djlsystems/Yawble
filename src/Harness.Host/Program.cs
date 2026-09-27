@@ -518,8 +518,14 @@ builder.Services.AddSingleton<IMemberReports>(sp => sp.GetRequiredService<Member
 builder.Services.AddSingleton(sp => new AgentMemberRunner(
     sp.GetRequiredService<IAgentRunner>(),
     sp.GetRequiredService<IContextBuilder>()));
+builder.Services.AddSingleton(sp => new PluginMemberRunner(
+    sp.GetRequiredService<PluginCatalog>(),
+    sp.GetRequiredService<IMemberReports>(),
+    sp.GetRequiredService<RunHeartbeat>(),
+    sp.GetRequiredService<AgentLaunchUser>()));
 builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
-    sp.GetRequiredService<AgentMemberRunner>()));
+    sp.GetRequiredService<AgentMemberRunner>(),
+    sp.GetRequiredService<PluginMemberRunner>()));
 
 // Constructed explicitly rather than by convention: the two artifact seams and the pending store are
 // all OPTIONAL parameters, and a container silently built without them is a container that silently
