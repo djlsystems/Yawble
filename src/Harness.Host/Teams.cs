@@ -355,7 +355,8 @@ public sealed class TeamRegistry(
     ITeamStore teams, AgentEnvironment environment, FileBrowserPolicy fileBrowser, IMessageLog log,
     EffectiveSubscriptions effective, IRepoClone cloner, long? workflowSpendLimit = null,
     Func<long>? workflowSpendLimitNow = null, SkillDirectory? skillDirectory = null,
-    Func<RepoContributor, string, CancellationToken, Task>? prepareClone = null)
+    Func<RepoContributor, string, CancellationToken, Task>? prepareClone = null,
+    PluginCatalog? plugins = null)
 {
     /// <summary>What each role is offered, for the "Available skills" list every prompt carries.
     /// A registry built without one lists the built-ins.</summary>
@@ -2970,7 +2971,7 @@ public sealed class TeamRegistry(
     private string? PluginRefusal(string reference, string pluginId) =>
         !MemberRef.IsValidPluginId(pluginId)
             ? $"'{reference}' is not a plugin id: use lowercase letters, digits and hyphens, as in 'plugin:sample-echo'."
-            : null;
+            : plugins?.RefusalFor(pluginId);
 
     /// <summary>Whether this id is its team's manager. Case-insensitive, matching ContainerId's own
     /// equality - `manager` and `Manager` are one container.</summary>

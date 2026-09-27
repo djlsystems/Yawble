@@ -442,6 +442,13 @@ var loadedCatalog = AgentCatalogFile.BuiltIns()
     .ToList();
 var unmeasuredHeadlessPresets = Program.UnmeasuredHeadlessPresets(loadedCatalog);
 
+// THE INSTALLED PLUGINS, read from `<dataRoot>/plugins` - data, not code: nothing is compiled in and
+// nothing is registered by DI per plugin, so `POST /api/plugins/rescan` registers a new one with no
+// restart. A refused manifest is named here, once, with the field that is wrong.
+var pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"));
+PluginEndpoints.Report(pluginCatalog.Rescan(), Console.Out);
+builder.Services.AddSingleton(pluginCatalog);
+
 if (unmeasuredHeadlessPresets.Count > 0)
 {
     Console.WriteLine(
@@ -698,7 +705,8 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
     skillDirectory: sp.GetRequiredService<SkillDirectory>(),
     // Resolved per call: the git runner reads the registry, so it cannot be built first.
     prepareClone: (contributor, clonePath, ct) =>
-        sp.GetRequiredService<ContributorClone>().ApplyAsync(clonePath, contributor, ct)));
+        sp.GetRequiredService<ContributorClone>().ApplyAsync(clonePath, contributor, ct),
+    plugins: sp.GetRequiredService<PluginCatalog>()));
 
 // The instance's git identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL, set with the operator CLI's `secret set`)
 // and the one place a clone is brought in line with its contributor settings.
@@ -1638,6 +1646,7 @@ app.MapGet("/api/auth/me", (HttpContext context) =>
 AuthEndpoints.Map(app);
 UserEndpoints.Map(app);
 AgentEndpoints.Map(app, dataRoot);
+PluginEndpoints.Map(app);
 RepoEndpoints.Map(app);
 KeyEndpoints.Map(app);
 FileSystemEndpoints.Map(app);

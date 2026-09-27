@@ -29,6 +29,8 @@ public sealed class PluginMemberRegistryTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         Directory.CreateDirectory(_dataRoot);
+        PluginInstall.Write(_dataRoot, "sample-echo");
+        PluginInstall.Write(_dataRoot, "other-echo");
         _factory = Start();
         return ValueTask.CompletedTask;
     }
@@ -82,6 +84,17 @@ public sealed class PluginMemberRegistryTests : IAsyncLifetime
 
         Assert.Contains("is not a plugin id", refused.Message);
         Assert.Null(_factory.Services.GetRequiredService<ContainerHost>().Find(new ContainerId(team, "Bad")));
+    }
+
+    [Fact]
+    public async Task A_plugin_that_is_not_installed_is_refused_by_name()
+    {
+        var team = await TeamAsync();
+
+        var refused = await Assert.ThrowsAsync<NoSuchAgentException>(() =>
+            Registry.AddContainerAsync(team, "Ghost", "plugin:no-such-plugin", "", [], ct: Ct));
+
+        Assert.Contains("'plugin:no-such-plugin' is not installed on this Host", refused.Message);
     }
 
     [Fact]
