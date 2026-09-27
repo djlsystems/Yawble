@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -530,11 +531,38 @@ public sealed class PluginMemberRunner(
 
             case JsonValue scalar:
                 var json = scalar.ToJsonString();
-                if (Redact(json, secretValues) != json) return "a number in its payload matches a secret.";
+                if (Redact(json, secretValues) != json || EqualsASecretNumber(scalar, secretValues))
+                {
+                    return "a number in its payload matches a secret.";
+                }
+
                 break;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// R1-c: the text match above misses a secret NUMBER written another way - <c>2.0261234e7</c> for
+    /// <c>20261234</c> - which a subscriber reads as the same value. So a number is also compared by
+    /// value, as <see cref="decimal"/>, with each bound secret that parses as one (and its negation,
+    /// which the text match would also catch as <c>-20261234</c>). A number outside decimal's range
+    /// cannot equal a secret that is inside it.
+    /// </summary>
+    private static bool EqualsASecretNumber(JsonValue scalar, IEnumerable<string> secretValues)
+    {
+        if (scalar.GetValueKind() != JsonValueKind.Number || !scalar.TryGetValue<decimal>(out var value)) return false;
+
+        foreach (var secret in secretValues)
+        {
+            if (decimal.TryParse(secret, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
+                && decimal.Abs(value) == decimal.Abs(number))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string? Words(JsonObject record, string field) =>

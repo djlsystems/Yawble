@@ -507,6 +507,39 @@ public sealed class PluginMemberRunnerTests : IDisposable
             p => p.Payload.Contains("a number in its payload matches a secret", StringComparison.Ordinal));
     }
 
+    /// <summary>R1-c (part 2 round 2): the same number in another notation - an exponent, a
+    /// trailing zero - is the same value to a subscriber, so it is refused as R1 is.</summary>
+    [Theory]
+    [InlineData("2.0261234e7")]
+    [InlineData("20261234.0")]
+    [InlineData("-2.0261234E+7")]
+    public async Task A_number_equal_in_value_to_a_secret_refuses_the_publish(string number)
+    {
+        var (bed, _, _) = await RunAsync(
+            $$$"""
+            cat >/dev/null
+            echo '{"t":"publish","type":"tick","payload":{"n":{{{number}}}}}'
+            echo '{"t":"publish","type":"tick","payload":{"n":2.0261235e7}}'
+            echo '{"t":"result","ok":true,"output":"done"}'
+            """,
+            manifest: m =>
+            {
+                DeclaresTick(m);
+                m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}""");
+            },
+            settings: new Settings(new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "20261234" }));
+        await using var _ = bed;
+
+        // Only the other number is published; the secret's value never reaches a row.
+        Assert.Equal("""{"n":2.0261235e7}""", Assert.Single(await bed.OfTypeAsync("plugin.fixture.tick")).Payload);
+        Assert.Single(await bed.OfTypeAsync(MessageTypes.Progress),
+            p => p.Payload.Contains("a number in its payload matches a secret", StringComparison.Ordinal));
+        var rows = await bed.Store.ReadAfterAsync(0, EveryRunType, int.MaxValue, Ct);
+        Assert.DoesNotContain(rows, r => r.Payload.Contains(number, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>R2 (round 2): PHP and some Java encoders write <c>/</c> as <c>\/</c>; that form
     /// of a bound value is redacted too.</summary>
     [Fact]

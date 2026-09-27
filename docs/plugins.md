@@ -337,7 +337,9 @@ slot like any member's.
       JSON text that would be, is **dropped**, not rewritten, with one `progress` warning row that
       names neither. Renaming a key or turning a number into `[redacted]` would silently change the
       shape a trigger or `{event.*}` token reads (`A_secret_as_a_publish_key_or_number_refuses_the_publish`,
-      `A_number_matching_a_secret_refuses_the_publish`).
+      `A_number_matching_a_secret_refuses_the_publish`). For a secret that is itself a number, a
+      payload number is also compared by VALUE, so `2.0261234e7` for `20261234` is refused the same
+      way (`A_number_equal_in_value_to_a_secret_refuses_the_publish`).
 
     A plugin that writes a secret otherwise TRANSFORMED - reversed, base64, cut in pieces - defeats
     all of it, and the result reaches the log. Do not write secrets out at all.
