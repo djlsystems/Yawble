@@ -28,7 +28,11 @@ namespace Harness.Tests;
 /// DENY-LIST, because a definition is legitimately handed everywhere: it may not reach anything that
 /// reads it whole - <c>ToString</c>, <c>Equals</c>, <c>GetHashCode</c>, <c>PrintMembers</c>,
 /// <c>Deconstruct</c>, the equality operators, string formatting or interpolation, JSON, reflection,
-/// or logging.</item>
+/// or logging. Nor may it be WIDENED past that list (part 2 round 2, P1-b): handed to a parameter not
+/// declared as a <see cref="ContainerDefinition"/> - <c>object</c>, a generic <c>T</c>, a collection's
+/// <c>Add</c> - or stored in an array, where BCL code or a helper reads it whole out of sight. The
+/// hand-offs stay allowed: a record of Harness.Contracts (the invocation the router receives, the
+/// snapshot, a <c>with</c>), and a delegate the Host handed in.</item>
 /// </list>
 ///
 /// Lambdas, local functions and async state machines are attributed to the method that wrote them,
@@ -81,6 +85,10 @@ public sealed class PumpArchitectureTests
     [InlineData(nameof(SerialisesTheDefinition))]
     [InlineData(nameof(InterpolatesTheDefinition))]
     [InlineData(nameof(DeconstructsTheDefinition))]
+    [InlineData(nameof(ComparesTheDefinitionInsideAnArray))]
+    [InlineData(nameof(ComparesTheDefinitionInsideAHashSet))]
+    [InlineData(nameof(ReadsTheDefinitionThroughAnObjectParameter))]
+    [InlineData(nameof(FormatsTheDefinitionThroughAFactory))]
     public void The_scan_catches_a_violation(string probe)
     {
         var method = typeof(PumpArchitectureTests).GetMethod(probe, BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -99,7 +107,7 @@ public sealed class PumpArchitectureTests
     {
         var printMembers = typeof(ContainerDefinition).GetMethod("PrintMembers", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
-        Assert.False(ImplementationFlow.Definitions.PassesOn(printMembers));
+        Assert.False(ImplementationFlow.Definitions.PassesOn(printMembers, -1));
     }
 
     [Fact]
@@ -163,6 +171,23 @@ public sealed class PumpArchitectureTests
         return agent.Length == 3;
     }
 
+    // P1-b (part 2 verification, round 2): the whole record read inside BCL code, or behind a
+    // parameter that is not typed as a definition, where the deny-list by callee never looked.
+    private static bool ComparesTheDefinitionInsideAnArray(ContainerDefinition definition) =>
+        Enumerable.Contains(new[] { definition }, definition with { Agent = "x" });
+
+    private static bool ComparesTheDefinitionInsideAHashSet(ContainerDefinition definition) =>
+        new HashSet<ContainerDefinition> { definition }.Contains(definition with { Agent = "x" });
+
+    private static bool ReadsTheDefinitionThroughAnObjectParameter(ContainerDefinition definition) =>
+        TextOf(definition).Contains("pl" + "ugin:", StringComparison.Ordinal);
+
+    private static string TextOf(object value) => value.ToString()!;
+
+    private static bool FormatsTheDefinitionThroughAFactory(ContainerDefinition definition) =>
+        System.Runtime.CompilerServices.FormattableStringFactory.Create("{0}", definition).ToString()
+            .Contains("pl" + "ugin:", StringComparison.Ordinal);
+
     private static ContainerDefinition PassesItOn(ContainerDefinition definition, ILogger log, Func<string, bool> watchable, string? agent)
     {
         log.LogInformation("member {Agent}", definition.Agent);
@@ -222,23 +247,62 @@ public sealed class PumpArchitectureTests
             Func<MethodBase, bool> IsSource,
             Func<FieldInfo, bool> FieldIsSource,
             Func<ParameterInfo, bool> ParameterIsSource,
-            Func<MethodBase, bool> PassesOn,
-            bool DecidesInIl);
+            Func<MethodBase, int, bool> PassesOn,
+            bool DecidesInIl,
+            bool MayStoreInAnArray);
 
         /// <summary>A member's implementation: the Agent, the snapshot's Agent and Kind, <c>KindOf</c>.
         /// An ALLOW-LIST of consumers, and any IL decision on it is a violation.</summary>
         public static readonly Rules Implementations = new(
-            "implementation", target => Sources.Contains(target), _ => false, _ => false, PassesOn, DecidesInIl: true);
+            "implementation", target => Sources.Contains(target), _ => false, _ => false, (target, _) => PassesOn(target),
+            DecidesInIl: true, MayStoreInAnArray: true);
 
         /// <summary>A whole <see cref="ContainerDefinition"/>. A DENY-LIST of consumers that read it
-        /// whole; IL on it (a null check) decides nothing about its kind.</summary>
+        /// whole, and no widening past it (P1-b); IL on it (a null check) decides nothing about its kind.</summary>
         public static readonly Rules Definitions = new(
             "definition",
             target => target is MethodInfo { ReturnType: var type } && type == typeof(ContainerDefinition),
             field => field.FieldType == typeof(ContainerDefinition),
             parameter => parameter.ParameterType == typeof(ContainerDefinition),
-            target => !ReadsADefinitionWhole(target),
-            DecidesInIl: false);
+            AcceptsADefinition,
+            DecidesInIl: false,
+            MayStoreInAnArray: false);
+
+        /// <summary>Whether a definition may be handed to <paramref name="target"/> at
+        /// <paramref name="slot"/> (its parameter's position, or -1 for <c>this</c>).</summary>
+        private static bool AcceptsADefinition(MethodBase target, int slot)
+        {
+            if (ReadsADefinitionWhole(target)) return false;
+
+            var type = target.DeclaringType;
+
+            // The hand-offs: a record of the contracts carrying it on (the invocation the router
+            // receives, the snapshot, a `with`), and a delegate the Host handed the pump.
+            if (type?.Assembly == typeof(ContainerDefinition).Assembly && type != typeof(MemberRef)
+                && (target is ConstructorInfo || target.Name.StartsWith("set_", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+
+            if (type is not null && typeof(Delegate).IsAssignableFrom(type) && target.Name == nameof(Action.Invoke)) return true;
+
+            // Its own members, called on it.
+            if (slot < 0) return type == typeof(ContainerDefinition);
+
+            // Anywhere else only as a definition, and as DECLARED: `HashSet<ContainerDefinition>.Add`
+            // takes a `T`, which reads it whole through Equals and GetHashCode.
+            var declared = Declared(target).GetParameters()[slot].ParameterType;
+            if (declared.IsByRef) declared = declared.GetElementType()!;
+
+            return declared == typeof(ContainerDefinition);
+        }
+
+        /// <summary>The method as written - on its open generic type, before its type arguments.</summary>
+        private static MethodBase Declared(MethodBase target)
+        {
+            try { return target.Module.ResolveMethod(target.MetadataToken) ?? target; }
+            catch (ArgumentException) { return target; }
+        }
 
         private static readonly HashSet<string> WholeReads =
         [
@@ -482,14 +546,21 @@ public sealed class PumpArchitectureTests
                 var parameters = target.GetParameters().Length;
                 var popped = parameters + (target.IsStatic || name == "newobj" ? 0 : 1);
                 var carried = false;
+                var refused = false;
 
-                for (var i = 0; i < popped; i++) carried |= Pop();
+                // Popped last argument first; the last pop of an instance call is `this` (slot -1).
+                for (var i = 0; i < popped; i++)
+                {
+                    if (!Pop()) continue;
+                    carried = true;
+                    if (!_rules.PassesOn(target, parameters - 1 - i)) refused = true;
+                }
 
                 if (target == Sources[0] || target == Sources[1] || target == Sources[2]) Reads += 1;
 
                 if (carried)
                 {
-                    if (_rules.PassesOn(target)) PassedTo.Add(target);
+                    if (!refused) PassedTo.Add(target);
                     else Violation(method, $"hands a member's {_rules.Noun} to {target.DeclaringType?.Name}.{target.Name}.");
                 }
 
@@ -508,7 +579,13 @@ public sealed class PumpArchitectureTests
 
                 var passesThrough = name is "castclass" or "isinst" or "box" or "unbox.any" || name.StartsWith("ldelem", StringComparison.Ordinal);
 
-                if (carried && name.StartsWith("stelem", StringComparison.Ordinal) && stack.Count > 0)
+                if (carried && name.StartsWith("stelem", StringComparison.Ordinal) && !_rules.MayStoreInAnArray)
+                {
+                    // An array hands it to whatever reads the array - `Enumerable.Contains`, a
+                    // `params object[]` formatter - out of this scan's sight.
+                    Violation(method, $"stores a member's {_rules.Noun} in an array.");
+                }
+                else if (carried && name.StartsWith("stelem", StringComparison.Ordinal) && stack.Count > 0)
                 {
                     // `newarr; dup; ldc; <value>; stelem` - an argument array. The copy `dup` left
                     // below is the array, and it carries the value from here on.
