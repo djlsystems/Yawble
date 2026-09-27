@@ -340,3 +340,32 @@ func TestUpdateCliNeverMovesToAnOlderRelease(t *testing.T) {
 		t.Errorf("moved backwards: %q", got)
 	}
 }
+
+// After a restart the Podman machine is stopped; update starts it rather than failing on the
+// engine's refused connection (measured on the Windows VM, 2026-09-26).
+func TestUpdateStartsAStoppedPodmanMachineFirst(t *testing.T) {
+	pinBuild(t)
+	s := engine.NewScripted()
+	s.On("wsl --status", engine.Result{})
+	s.OnSequence(machineInspect,
+		engine.Result{Stdout: "podman-machine-default|stopped|false|2048|10\n"},
+		engine.Result{Stdout: "podman-machine-default|running|false|2048|10\n"},
+	)
+	s.On("wsl -d podman-machine-default -e free -m", engine.Result{Stdout: "Mem: 15688 1 1\n"})
+	s.On("podman container inspect", engine.Result{Stdout: "running|" + pinned + "|" + labelFor(pinned) + "\n"})
+	deps := stubbed(s)
+	deps.GOOS = "windows"
+	deps.Env = func(string) string { return "" }
+	code, out, errOut := run(t, deps, "update", "--instance")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	c := strings.Join(s.Calls, "\n")
+	start, inspect := strings.Index(c, "podman machine start"), strings.Index(c, "podman container inspect")
+	if start < 0 || inspect < start {
+		t.Errorf("the machine must be started before the engine is asked:\n%s", c)
+	}
+	if !strings.Contains(out, "starting the podman machine") {
+		t.Errorf("out %q", out)
+	}
+}

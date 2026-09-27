@@ -12,6 +12,7 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/buildinfo"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/instance"
+	"github.com/djlsystems/yawble/cli/internal/machine"
 	"github.com/djlsystems/yawble/cli/internal/release"
 )
 
@@ -96,6 +97,9 @@ func runInTerminal(path string, args ...string) (int, error) {
 }
 
 func updateInstance(cmd *cobra.Command, deps Deps) error {
+	if err := startStoppedMachine(cmd, deps); err != nil {
+		return err
+	}
 	e, s, notes, err := prepare(deps)
 	if err != nil {
 		return err
@@ -119,6 +123,30 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 		fmt.Fprintln(cmd.ErrOrStderr(), "note:", n)
 	}
 	return instance.Up(cmd.Context(), e, s, healthChecker(deps.HTTP), out)
+}
+
+// startStoppedMachine starts a Podman machine that exists and is stopped, as `up` and
+// `doctor --fix` do: after a restart the machine is stopped, and update would otherwise fail on
+// the engine's refused connection (measured on the Windows VM, 2026-09-26). Creating or
+// re-rooting a machine stays `up`'s to offer.
+func startStoppedMachine(cmd *cobra.Command, deps Deps) error {
+	c, err := loadConfig(deps)
+	if err != nil {
+		return err
+	}
+	if engineOf(deps, c).Name() != "podman" {
+		return nil
+	}
+	goos := deps.GOOS
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	info, err := machine.Inspect(cmd.Context(), runnerOf(deps), goos)
+	if err != nil || !info.Applies || !info.Exists || info.Running {
+		return nil // nothing to start; the engine's own error says what is wrong
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "starting the podman machine")
+	return machine.Start(cmd.Context(), runnerOf(deps))
 }
 
 // updateCLI replaces this binary with the newest release (a pre-release only with prerelease). It
