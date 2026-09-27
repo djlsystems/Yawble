@@ -26,6 +26,17 @@ const logoMark = `               ⢿⣆
                ⠉⠙⠢⠄⠈⠓⢄⠈⢻⡄
                         ⠃`
 
+// welcome is what `yawble` with no arguments says under the mark: the tagline and where to go next.
+const welcome = `Yawble — Teams of agents, moving with you.
+
+Usage:
+  yawble <command> [flags]
+
+Get started:    yawble up
+All commands:   yawble --help
+Help on one:    yawble <command> --help
+`
+
 // Yawble orange, #E83B00, as a 24-bit colour and as the nearest of the 256 standard colours for a
 // terminal that has no 24-bit colour (macOS Terminal among them).
 const (

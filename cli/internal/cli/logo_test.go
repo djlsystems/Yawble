@@ -34,13 +34,30 @@ func TestVersionShowsTheMarkOnlyToATerminal(t *testing.T) {
 	}
 }
 
-func TestYawbleWithNoArgumentsShowsTheMarkAndTheCommands(t *testing.T) {
+// No arguments: the mark, the tagline and where to go next; the full command list is --help's.
+func TestYawbleWithNoArgumentsShowsTheMarkTheTaglineAndWhereToGetHelp(t *testing.T) {
 	code, out, _ := run(t, cli.Deps{StdoutTerminal: true})
-	if code != 0 || !hasMark(out) || !strings.Contains(out, "Available Commands") {
-		t.Errorf("exit %d out %q", code, out)
+	if code != 0 || !hasMark(out) {
+		t.Fatalf("exit %d out %q", code, out)
 	}
-	if _, out, _ := run(t, cli.Deps{}); hasMark(out) || !strings.Contains(out, "Available Commands") {
+	for _, want := range []string{"Yawble — Teams of agents, moving with you.", "yawble <command> [flags]", "yawble up", "yawble --help", "yawble <command> --help"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %q", want, out)
+		}
+	}
+	if strings.Contains(out, "Available Commands") {
+		t.Errorf("the command list belongs to --help: %q", out)
+	}
+
+	// A pipe: the same words, no mark.
+	if _, out, _ := run(t, cli.Deps{}); hasMark(out) || !strings.Contains(out, "Teams of agents, moving with you.") {
 		t.Errorf("a pipe: %q", out)
+	}
+	// --help and -h still list every command.
+	for _, flag := range []string{"--help", "-h"} {
+		if _, out, _ := run(t, cli.Deps{StdoutTerminal: true}, flag); !strings.Contains(out, "Available Commands") {
+			t.Errorf("%s: %q", flag, out)
+		}
 	}
 }
 

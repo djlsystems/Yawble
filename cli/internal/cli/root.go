@@ -82,18 +82,21 @@ func NewRoot(deps Deps) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "yawble",
 		Short:         "Run a Yawble instance: install, start, diagnose, update, expose",
-		Long:          "yawble is the operator CLI for a Yawble instance. It installs the container engine, pulls the image, starts and updates the instance, diagnoses it, and puts it on the internet. Agents never touch it.",
+		Long:          "yawble is the operator CLI for a Yawble instance. It runs the instance on Podman or Docker, pulls the image, starts and updates the instance, diagnoses it, and puts it on the internet. Agents never touch it.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// Cobra's `completion` (Tab completion scripts for a shell) works but is not listed:
 		// most people never need it, and the README says how to turn it on.
 		CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
-		// No arguments shows the mark and the commands. NoArgs keeps a mistyped command an
-		// invocation error rather than a run of this.
+		// No arguments: the mark, the tagline and where to go next. The whole command list is
+		// --help's, so the first thing a person sees is short. NoArgs keeps a mistyped command
+		// an invocation error rather than a run of this.
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			showLogo(deps, cmd.OutOrStdout())
-			return cmd.Help()
+			out := cmd.OutOrStdout()
+			showLogo(deps, out)
+			fmt.Fprint(out, welcome)
+			return nil
 		},
 	}
 	root.SetOut(deps.Stdout)
