@@ -31,6 +31,12 @@ public sealed class PluginCatalog(string root)
 
     private volatile PluginScan _scan = new([], []);
 
+    /// <summary>What must follow every load and rescan - the plugins' skills and events. Held here
+    /// so it runs however a rescan starts: a person's route, a CLI install, anything else.</summary>
+    private readonly List<Func<PluginScan, Task>> _followers = [];
+
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
     /// <summary>Where plugins are installed on this Host.</summary>
     public string Root => root;
 
@@ -42,12 +48,61 @@ public sealed class PluginCatalog(string root)
     public InstalledPlugin? For(string id) =>
         _scan.Plugins.FirstOrDefault(p => string.Equals(p.Manifest.Id, id, StringComparison.Ordinal));
 
-    /// <summary>Reads the tree again and replaces the answer.</summary>
-    public PluginScan Rescan()
+    /// <summary>Reads the tree again, replaces the answer, and runs every follower on it.</summary>
+    public PluginScan Rescan() => RescanAsync().GetAwaiter().GetResult();
+
+    /// <inheritdoc cref="Rescan"/>
+    public async Task<PluginScan> RescanAsync(CancellationToken ct = default)
     {
-        var scan = Scan(root);
-        _scan = scan;
-        return scan;
+        await _gate.WaitAsync(ct);
+
+        try
+        {
+            var scan = Scan(root);
+            _scan = scan;
+            await FollowAsync(_followers, scan);
+            return scan;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="follower"/> on what is loaded NOW, and after every later rescan - so
+    /// whatever the plugins register (their skills, their events) is registered at load and kept in
+    /// step with the tree, whichever way a rescan is started.
+    /// </summary>
+    public async Task Attach(Func<PluginScan, Task> follower)
+    {
+        await _gate.WaitAsync();
+
+        try
+        {
+            _followers.Add(follower);
+            await FollowAsync([follower], _scan);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static async Task FollowAsync(IEnumerable<Func<PluginScan, Task>> followers, PluginScan scan)
+    {
+        foreach (var follower in followers)
+        {
+            try
+            {
+                await follower(scan);
+            }
+            catch (Exception error)
+            {
+                // A follower's failure is not the scan's: the catalog is already replaced.
+                Console.WriteLine($"WARNING: registering the installed plugins failed: {error.Message}");
+            }
+        }
     }
 
     /// <summary>Why <c>plugin:&lt;id&gt;</c> cannot be hired here, or null when it can.</summary>
@@ -163,7 +218,10 @@ public sealed class PluginCatalog(string root)
             }
         }
 
-        return (new InstalledPlugin(manifest, directory, executable), null);
+        var (skills, skillRefusal) = PluginSkills.Read(manifest, directory);
+        if (skillRefusal is not null) return (null, skillRefusal);
+
+        return (new InstalledPlugin(manifest, directory, executable) { Skills = skills }, null);
     }
 
     /// <summary>The full path of <paramref name="relative"/> under <paramref name="directory"/>,
@@ -206,7 +264,12 @@ public sealed class PluginCatalog(string root)
 
 /// <summary>One installed, valid plugin: its manifest, its version directory, and the executable
 /// this machine runs, resolved and checked.</summary>
-public sealed record InstalledPlugin(PluginManifest Manifest, string Directory, string Executable);
+public sealed record InstalledPlugin(PluginManifest Manifest, string Directory, string Executable)
+{
+    /// <summary>Its skills as they are indexed: read from its files, names forced
+    /// (<see cref="PluginSkills"/>).</summary>
+    public IReadOnlyList<SkillDraft> Skills { get; init; } = [];
+}
 
 /// <summary>A plugin directory that was not loaded, and why, in one sentence.</summary>
 public sealed record PluginRefused(string Id, string Path, string Reason);

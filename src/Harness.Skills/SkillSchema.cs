@@ -101,5 +101,56 @@ public static class SkillSchema
               VALUES (new.id, new.name, new.description, new.body);
             END;
             """),
+
+        // PLUGIN SKILLS: a third kind, `plugin`, and the id of the plugin that ships the row in
+        // `source` (null for every other kind). A CHECK cannot be altered in SQLite, so the table
+        // is rebuilt here, every row and id kept, and the full-text index rebuilt from it.
+        new MigrationStep(
+            "skill-003",
+            """
+            DROP TRIGGER IF EXISTS skills_ai;
+            DROP TRIGGER IF EXISTS skills_ad;
+            DROP TRIGGER IF EXISTS skills_au;
+
+            CREATE TABLE skills_rebuilt (
+                id           INTEGER PRIMARY KEY,
+                name         TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                kind         TEXT NOT NULL CHECK (kind IN ('builtin', 'custom', 'plugin')),
+                description  TEXT NOT NULL,
+                roles        TEXT NOT NULL,
+                body         TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                updated_by   TEXT,
+                source       TEXT NULL,
+                CHECK ((kind = 'plugin') = (source IS NOT NULL))
+            );
+
+            INSERT INTO skills_rebuilt (id, name, kind, description, roles, body, updated_at, updated_by, source)
+            SELECT id, name, kind, description, roles, body, updated_at, updated_by, NULL FROM skills;
+
+            DROP TABLE skills;
+            ALTER TABLE skills_rebuilt RENAME TO skills;
+
+            CREATE INDEX skills_source ON skills(source) WHERE source IS NOT NULL;
+
+            CREATE TRIGGER skills_ai AFTER INSERT ON skills BEGIN
+              INSERT INTO skills_fts(rowid, name, description, body)
+              VALUES (new.id, new.name, new.description, new.body);
+            END;
+
+            CREATE TRIGGER skills_ad AFTER DELETE ON skills BEGIN
+              INSERT INTO skills_fts(skills_fts, rowid, name, description, body)
+              VALUES('delete', old.id, old.name, old.description, old.body);
+            END;
+
+            CREATE TRIGGER skills_au AFTER UPDATE ON skills BEGIN
+              INSERT INTO skills_fts(skills_fts, rowid, name, description, body)
+              VALUES('delete', old.id, old.name, old.description, old.body);
+              INSERT INTO skills_fts(rowid, name, description, body)
+              VALUES (new.id, new.name, new.description, new.body);
+            END;
+
+            INSERT INTO skills_fts(skills_fts) VALUES('rebuild');
+            """),
     ];
 }

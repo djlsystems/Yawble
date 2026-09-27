@@ -1187,6 +1187,16 @@ foreach (var moved in await skills.ReplaceBuiltInsAsync(BuiltInSkills.Drafts(), 
         $"WARNING: a custom skill held a built-in skill's name and was relabelled: {moved}.");
 }
 
+// THE INSTALLED PLUGINS' SKILLS, now and after every rescan however it is started: locked rows of
+// kind `plugin`, named `plugin-<id>[-<name>]`, never in a prompt's list. See `PluginSkills`.
+await pluginCatalog.Attach(async scan =>
+{
+    foreach (var line in await PluginSkills.SyncAsync(skills, scan))
+    {
+        Console.WriteLine($"WARNING: {line}");
+    }
+});
+
 var tenantSkillMigration = await SkillMigration.RunAsync(
     [("skills", paths.TenantSkills), ("skill-drafts", paths.TenantSkillDrafts)],
     paths.SkillBackups,
@@ -1211,6 +1221,11 @@ catch (TeamRestorationFailedException exception)
 
     return;
 }
+
+// A MANAGER'S ROSTER NAMES ITS PLUGIN MEMBERS' DESCRIPTIONS AND SKILLS, so a rescan that changes
+// them re-prompts every member, the same as a skill write does. Attached after the restore, which
+// composed every prompt from the plugins already loaded.
+await pluginCatalog.Attach(_ => registry.RepromptAllAsync());
 
 // A PLACED TEAM WHOSE VOLUME IS NOT THERE. Said out loud for the reason the blocked moves above
 // are, and it is the louder of the two - but NOT an exit: exiting 1 would take every OTHER team
@@ -3608,6 +3623,7 @@ app.MapGet("/api/teams/{team}/hiring", async (
     TeamRegistry teams,
     ITeamStore teamStore,
     AgentCatalog catalog,
+    PluginCatalog plugins,
     CancellationToken ct) =>
 {
     if (!teams.Exists(team))
@@ -3647,6 +3663,17 @@ app.MapGet("/api/teams/{team}/hiring", async (
         // The roles a hire would ask for that NO allowed agent carries: hiring for one of these
         // falls back to the first allowed agent, and the Manager should know before it asks.
         uncoveredTags = HireTags.Uncovered(rows.Select(row => row.tags)),
+
+        // THE INSTALLED PLUGINS, which a Manager may hire onto its own team with the `member`
+        // tool's `plugin`: each one's id, one line, and the skill that says how to use it
+        // (`skills_get`), whether or not it is hired anywhere.
+        plugins = plugins.Plugins.Select(p => new
+        {
+            id = p.Manifest.Id,
+            reference = MemberRef.ForPlugin(p.Manifest.Id),
+            description = p.Manifest.Description,
+            skill = PluginSkills.SkillOf(p),
+        }).ToArray(),
     });
 })
     .WithTags("Teams")
@@ -3655,7 +3682,8 @@ app.MapGet("/api/teams/{team}/hiring", async (
     .WithDescription(
         "Returns only this team's member-agent allowlist in order, each entry's tags, and the "
         + "current per-tag counts on this team, plus `uncoveredTags`: the hire roles (developer, "
-        + "tester, researcher) that no allowed agent carries.\n\n"
+        + "tester, researcher) that no allowed agent carries, and `plugins`: every plugin installed "
+        + "on this Host (id, reference, one line, and its skill's name).\n\n"
         + "This route never returns command lines, `env`, or Agents outside this team's allowlist.");
 
 app.MapPost("/api/teams/{team}/containers", async (

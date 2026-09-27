@@ -200,6 +200,8 @@ public sealed partial class PlatformMcpTools(
     [McpServerTool(Name = "hiring"), Description(
         "The mix you read before a hire: this team's allowed agents, their tags, and how many "
         + "members already carry each tag. uncoveredTags lists the roles no allowed agent carries. "
+        + "plugins lists the plugins installed on this Host - each id, one line, and the skill "
+        + "(skills_get) that says how to use it - which the member tool can hire with `plugin`. "
         + "This is harness hiring. Do not GET the hiring URL yourself.")]
     public async Task<string> Hiring(
         [Description("Team id. Required for a Concierge. Omit for a member of a team.")] string? team = null,

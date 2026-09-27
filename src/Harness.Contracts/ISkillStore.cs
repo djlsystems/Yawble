@@ -3,12 +3,15 @@ namespace Harness.Contracts;
 /// <summary>
 /// Where a skill comes from. A built-in is compiled into the host and indexed read-only on every
 /// start; a custom skill is the person's, created and edited in the Skills dialog and stored only in
-/// the database.
+/// the database; a plugin skill ships with an installed plugin, is indexed read-only whenever the
+/// plugins are loaded or rescanned, and is named <c>plugin-&lt;id&gt;</c> or
+/// <c>plugin-&lt;id&gt;-&lt;name&gt;</c>.
 /// </summary>
 public enum SkillKind
 {
     BuiltIn,
     Custom,
+    Plugin,
 }
 
 /// <summary>Which kinds a listing returns. The Skills dialog shows Custom by default.</summary>
@@ -17,6 +20,7 @@ public enum SkillKindFilter
     Custom,
     BuiltIn,
     All,
+    Plugin,
 }
 
 /// <summary>
@@ -73,6 +77,7 @@ public static class SkillRoles
 /// on every start, because its row is rebuilt from the build.</param>
 /// <param name="UpdatedBy">Who last wrote a custom skill; null for a built-in, which only a code
 /// change writes.</param>
+/// <param name="Source">The id of the plugin that ships a plugin skill; null for every other kind.</param>
 public sealed record Skill(
     long Id,
     string Name,
@@ -81,7 +86,52 @@ public sealed record Skill(
     SkillKind Kind,
     string Body,
     DateTimeOffset UpdatedAt,
-    string? UpdatedBy);
+    string? UpdatedBy,
+    string? Source = null)
+{
+    /// <summary>
+    /// Whether a person may edit, rename or delete it: only a custom skill. A built-in changes with
+    /// the product and a plugin skill with its plugin, and neither name may be taken by a custom one.
+    /// </summary>
+    public bool IsLocked => Kind != SkillKind.Custom;
+}
+
+/// <summary>The skill names a plugin may ship, and nothing else may take.</summary>
+public static class PluginSkillNames
+{
+    public const string Prefix = "plugin-";
+
+    /// <summary>The plugin's own skill: <c>plugin-&lt;id&gt;</c>.</summary>
+    public static string Main(string pluginId) => Prefix + pluginId;
+
+    /// <summary>
+    /// The name a plugin skill is stored under, whatever its file says: <c>plugin-&lt;id&gt;</c>
+    /// when the file names the plugin itself (<c>&lt;id&gt;</c> or <c>plugin-&lt;id&gt;</c>), and
+    /// <c>plugin-&lt;id&gt;-&lt;name&gt;</c> otherwise - so a plugin cannot shadow a built-in or
+    /// another plugin's main skill by what it writes.
+    /// </summary>
+    public static string Forced(string pluginId, string declared)
+    {
+        var name = declared.Trim().ToLowerInvariant();
+        var main = Main(pluginId);
+
+        if (name == pluginId || name == main) return main;
+        if (name.StartsWith(main + "-", StringComparison.Ordinal)) name = name[(main.Length + 1)..];
+
+        return $"{main}-{name}";
+    }
+
+    /// <summary>The sentence for a person trying to change a plugin's skill.</summary>
+    public static string Locked(string name, string verb) =>
+        $"'{name}' is a plugin's skill. It changes only with its plugin, so it cannot be {verb}.";
+
+    /// <summary>Whether <paramref name="name"/> is in the namespace reserved for plugin skills.</summary>
+    public static bool IsReserved(string name) => name.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether <paramref name="name"/> is one plugin <paramref name="pluginId"/> may ship.</summary>
+    public static bool Belongs(string name, string pluginId) =>
+        name == Main(pluginId) || name.StartsWith(Main(pluginId) + "-", StringComparison.Ordinal);
+}
 
 /// <summary>What a person writes for a custom skill.</summary>
 public sealed record SkillDraft(
@@ -102,6 +152,20 @@ public interface ISkillStore
     /// </summary>
     Task<IReadOnlyList<string>> ReplaceBuiltInsAsync(
         IReadOnlyList<SkillDraft> builtIns, DateTimeOffset builtAt, CancellationToken ct = default);
+
+    /// <summary>
+    /// Replaces every skill plugin <paramref name="source"/> ships with <paramref name="drafts"/>,
+    /// in one transaction - deleted and inserted per source, as <see cref="ReplaceBuiltInsAsync"/>
+    /// does for the build. Empty removes them. Each name must be one the plugin may ship
+    /// (<see cref="PluginSkillNames.Belongs"/>). A custom skill holding such a name is moved out of
+    /// the way, as for a built-in; a name another plugin already holds is not taken. Returns one
+    /// sentence per skill moved or not taken.
+    /// </summary>
+    Task<IReadOnlyList<string>> ReplacePluginSkillsAsync(
+        string source, IReadOnlyList<SkillDraft> drafts, DateTimeOffset at, CancellationToken ct = default);
+
+    /// <summary>Every plugin id that has skills in the index.</summary>
+    Task<IReadOnlyList<string>> PluginSourcesAsync(CancellationToken ct = default);
 
     /// <summary>
     /// One page, newest row first: rows with an id below <paramref name="before"/> (all when null),

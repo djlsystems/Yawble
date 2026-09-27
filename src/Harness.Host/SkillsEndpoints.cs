@@ -84,7 +84,7 @@ public static class SkillsEndpoints
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/skills", async (
-            [Description("`custom` (default), `builtin` or `all`.")] string? kind,
+            [Description("`custom` (default), `builtin`, `plugin` or `all`.")] string? kind,
             [Description("Full-text search over name, description and body. Omit to list.")] string? q,
             [Description("Rows with an id below this; omit for the first page.")] long? before,
             [Description("Rows per page: default 50, at most 200.")] int? take,
@@ -93,7 +93,7 @@ public static class SkillsEndpoints
         {
             if (!TryParseKind(kind, out var filter))
             {
-                return Results.BadRequest(new { error = "kind must be one of: custom, builtin, all." });
+                return Results.BadRequest(new { error = "kind must be one of: custom, builtin, plugin, all." });
             }
 
             var rows = await skills.ListAsync(filter, q, null, before, take ?? 50, ct);
@@ -105,8 +105,8 @@ public static class SkillsEndpoints
             .WithDescription(
                 "Newest row first, keyed by `id`: pass the last row's `id` as `before` for the next "
                 + "page. Custom skills by default. Each row carries `name`, `description`, `roles`, "
-                + "`kind` (`builtin` or `custom`), `body`, `updatedAt` and `updatedBy` (null for a "
-                + "built-in).");
+                + "`kind` (`builtin`, `custom` or `plugin`), `body`, `updatedAt`, `updatedBy` (null for a "
+                + "built-in or a plugin's skill) and `source` (the plugin id of a plugin's skill, else null).");
 
         app.MapGet("/api/skills/{name}", async (
             [Description("The skill's name.")] string name, ISkillStore skills, CancellationToken ct) =>
@@ -140,7 +140,7 @@ public static class SkillsEndpoints
             .WithSummary("Create a custom skill")
             .WithDescription(
                 "`roles` is required. 201 with the skill; 409 when the name is a built-in skill's or "
-                + "another custom skill's; 400 for an illegal name, a missing description, body or "
+                + "another custom skill's, or begins `plugin-`; 400 for an illegal name, a missing description, body or "
                 + "role, or an unknown role.");
 
         app.MapPut("/api/skills/{name}", async (
@@ -148,15 +148,15 @@ public static class SkillsEndpoints
             SkillWrite request, HttpContext context, ISkillStore skills, SkillDirectory directory,
             TeamRegistry teams, TenantLogging audit, CancellationToken ct) =>
         {
-            if (BuiltInSkills.IsBuiltIn(name))
-            {
-                return Refused(name, "edited or relabelled");
-            }
-
             var existing = await skills.GetAsync(name, ct);
             if (existing is null)
             {
                 return Results.NotFound(new { error = $"There is no custom skill named '{name}'." });
+            }
+
+            if (existing.IsLocked)
+            {
+                return Refused(existing, "edited or relabelled");
             }
 
             Skill? updated;
@@ -197,17 +197,18 @@ public static class SkillsEndpoints
             .WithSummary("Edit or rename a custom skill")
             .WithDescription(
                 "Any field left out keeps its value; a different `name` renames the skill. 200 with "
-                + "the skill; 403 for a built-in skill, which changes only with the product; 404 when "
-                + "there is no such custom skill; 409 when the new name is taken.");
+                + "the skill; 403 for a built-in skill, which changes only with the product, or a "
+                + "plugin's skill, which changes only with its plugin; 404 when there is no such custom "
+                + "skill; 409 when the new name is taken or begins `plugin-`.");
 
         app.MapDelete("/api/skills/{name}", async (
             [Description("The custom skill to delete.")] string name,
             HttpContext context, ISkillStore skills, SkillDirectory directory, TeamRegistry teams,
             TenantLogging audit, CancellationToken ct) =>
         {
-            if (BuiltInSkills.IsBuiltIn(name))
+            if (await skills.GetAsync(name, ct) is { IsLocked: true } locked)
             {
-                return Refused(name, "deleted");
+                return Refused(locked, "deleted");
             }
 
             if (!await skills.DeleteCustomAsync(name, ct))
@@ -223,7 +224,7 @@ public static class SkillsEndpoints
             .WithTags(Area)
             .HumansOnly()
             .WithSummary("Delete a custom skill")
-            .WithDescription("204; 403 for a built-in skill; 404 when there is no such custom skill.");
+            .WithDescription("204; 403 for a built-in skill or a plugin's skill; 404 when there is no such custom skill.");
 
         app.MapGet("/api/me/skills", async (
             [Description("Words to search for. Omit to list every skill offered to you.")] string? q,
@@ -299,18 +300,29 @@ public static class SkillsEndpoints
         skill.Name,
         skill.Description,
         skill.Roles,
-        kind = skill.Kind == SkillKind.BuiltIn ? "builtin" : "custom",
+        kind = KindName(skill.Kind),
         skill.Body,
         skill.UpdatedAt,
         skill.UpdatedBy,
+        skill.Source,
     };
 
-    private static IResult Refused(string name, string verb) =>
+    public static string KindName(SkillKind kind) => kind switch
+    {
+        SkillKind.BuiltIn => "builtin",
+        SkillKind.Plugin => "plugin",
+        _ => "custom",
+    };
+
+    /// <summary>403 for a LOCKED skill - a built-in or a plugin's - naming which it is.</summary>
+    private static IResult Refused(Skill skill, string verb) =>
         Results.Json(
             new
             {
-                error = $"'{name}' is a built-in skill. Built-in skills change only with the product, "
-                    + $"so it cannot be {verb}.",
+                error = skill.Kind == SkillKind.Plugin
+                    ? PluginSkillNames.Locked(skill.Name, verb)
+                    : $"'{skill.Name}' is a built-in skill. Built-in skills change only with the product, "
+                        + $"so it cannot be {verb}.",
             },
             statusCode: StatusCodes.Status403Forbidden);
 
@@ -337,6 +349,9 @@ public static class SkillsEndpoints
                 return true;
             case "all":
                 kind = SkillKindFilter.All;
+                return true;
+            case "plugin":
+                kind = SkillKindFilter.Plugin;
                 return true;
             default:
                 kind = default;

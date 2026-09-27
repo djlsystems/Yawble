@@ -1563,10 +1563,33 @@ public sealed class TeamRegistry(
         _teams.TryGetValue(team, out var members)
             ? [.. members
                 .Where(m => !string.Equals(m.Name, DefaultManagerName, StringComparison.OrdinalIgnoreCase))
-                .Select(m => LabelForContainer(m) is var label && string.Equals(label, m.Name, StringComparison.Ordinal)
-                    ? m.Name
-                    : $"{m.Name} (called \"{label}\")")]
+                .Select(RosterEntry)]
             : [];
+
+    /// <summary>
+    /// One member as its Manager's roster names it: the identifier, then in parentheses what else
+    /// the Manager needs - the label when it differs, and for a PLUGIN member what it is and the
+    /// skill that says how to use it, which is how a Manager learns of the plugins on its own team
+    /// and nothing else: <c>Mailer (plugin sample-echo: transforms text - skill plugin-sample-echo)</c>.
+    /// </summary>
+    private string RosterEntry(ContainerId member)
+    {
+        var snapshot = host.Find(member)?.Snapshot();
+        var label = snapshot?.Name ?? member.Name;
+        var notes = new List<string>();
+
+        if (!string.Equals(label, member.Name, StringComparison.Ordinal)) notes.Add($"called \"{label}\"");
+
+        if (snapshot is not null && MemberRef.IsPlugin(snapshot.Agent, out var pluginId))
+        {
+            notes.Add(plugins?.For(pluginId) is { } plugin
+                ? $"plugin {pluginId}: {plugin.Manifest.Description.Trim().TrimEnd('.')}"
+                    + (PluginSkills.SkillOf(plugin) is { } skill ? $" - skill {skill}" : "")
+                : $"plugin {pluginId}: not installed");
+        }
+
+        return notes.Count == 0 ? member.Name : $"{member.Name} ({string.Join("; ", notes)})";
+    }
 
     public bool Exists(string team) => _teams.ContainsKey(team);
 
