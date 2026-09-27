@@ -602,9 +602,7 @@ public sealed class MemberRuntime : IAsyncDisposable
         // The EFFECTIVE name, not the raw Label: null there means "the identifier", so comparing
         // Label alone reports a change when a caller passes back the very name it just read off a
         // snapshot - which is exactly what a caller that re-prompts without renaming does.
-        var before = (
-            _definition.Label ?? _definition.Id.Name, _definition.Agent,
-            _definition.MissingAgent);
+        var before = (_definition.Label ?? _definition.Id.Name, _definition.MissingAgent);
 
         _definition = _definition with
         {
@@ -636,9 +634,11 @@ public sealed class MemberRuntime : IAsyncDisposable
         // MemberInvocation it builds at the START of a run, before this could race it, and the swap
         // above is a single atomic reference assignment either way - a run that started before this
         // call finishes against the definition it started with, exactly as the class doc promises.
-        if (before != (
-            _definition.Label ?? _definition.Id.Name, _definition.Agent,
-            _definition.MissingAgent))
+        //
+        // A REPOINT is `agent` itself, never a comparison of the old Agent with the new: the pump
+        // passes a member's implementation on and never compares it (PumpArchitectureTests), and
+        // the Host passes `agent` only when it has already decided the member was repointed.
+        if (agent is not null || before != (_definition.Label ?? _definition.Id.Name, _definition.MissingAgent))
         {
             Publish();
         }

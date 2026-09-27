@@ -2,19 +2,27 @@ using System.Reflection;
 using System.Reflection.Emit;
 using Harness.Containers;
 using Harness.Contracts;
+using Microsoft.Extensions.Logging;
 
 namespace Harness.Tests;
 
 /// <summary>
-/// P7 MADE STRUCTURAL (card 621 verification, F1). <see cref="PluginMemberEndToEndTests.P7_Nothing_plugin_specific_is_in_the_pump"/>
+/// P7 MADE STRUCTURAL (card 621 verification, F1; hardened for R2-F1). <see cref="PluginMemberEndToEndTests.P7_Nothing_plugin_specific_is_in_the_pump"/>
 /// scans the words of Harness.Containers; this reads its COMPILED IL, so a kind check cannot hide
 /// behind a name that does not say "plugin":
 ///
 /// <list type="number">
 /// <item><see cref="MemberRef"/> is called from exactly one place in the assembly - <c>KindOf</c>,
 /// in <see cref="MemberRuntime.Snapshot"/>, which labels the snapshot and decides nothing.</item>
-/// <item>A value read from <see cref="ContainerDefinition.Agent"/> is never handed to a comparison:
-/// the runtime and the pump pass a member's implementation along and never branch on it.</item>
+/// <item>A member's implementation is only ever PASSED ON, by an ALLOW-LIST. The value of
+/// <see cref="ContainerDefinition.Agent"/>, of <see cref="ContainerSnapshot.Agent"/> and
+/// <see cref="ContainerSnapshot.Kind"/>, and of <see cref="MemberRef.KindOf"/> is followed through
+/// the stack, locals, fields, closures, state machines and return values, and the only things
+/// allowed to consume it are: a record of Harness.Contracts that carries it (the snapshot, the
+/// invocation the router receives, the definition), a delegate the Host handed in, <c>KindOf</c>
+/// itself, and logging. Anything else - a comparison, a branch, a string method such as
+/// <c>ToLowerInvariant</c> or <c>Split</c>, a tuple, a helper of the pump's own - is a violation,
+/// so a transform in between cannot launder the value into a comparison.</item>
 /// </list>
 ///
 /// Lambdas, local functions and async state machines are attributed to the method that wrote them,
@@ -23,15 +31,6 @@ namespace Harness.Tests;
 public sealed class PumpArchitectureTests
 {
     private static readonly Assembly Pump = typeof(MemberRuntime).Assembly;
-
-    /// <summary>What a comparison on a string compiles to - `==`, `is "x"`, a `switch` (which hashes
-    /// first), and the ordinal and prefix helpers.</summary>
-    private static readonly HashSet<string> Comparisons = new(StringComparer.Ordinal)
-    {
-        "op_Equality", "op_Inequality", "Equals", "Compare", "CompareOrdinal", "CompareTo",
-        "StartsWith", "EndsWith", "Contains", "IndexOf", "GetHashCode", "ComputeStringHash",
-        "SequenceEqual",
-    };
 
     [Fact]
     public void MemberRef_is_used_in_the_pump_only_by_KindOf_in_Snapshot()
@@ -46,56 +45,85 @@ public sealed class PumpArchitectureTests
     }
 
     [Fact]
-    public void The_pump_never_compares_a_members_Agent()
+    public void The_pump_only_passes_a_members_implementation_on()
     {
-        var getter = typeof(ContainerDefinition).GetProperty(nameof(ContainerDefinition.Agent))!.GetMethod!;
-        var reads = 0;
+        var scan = ImplementationFlow.Scan(Methods(Pump));
 
-        foreach (var method in Methods())
-        {
-            var calls = CallsIn(method).ToList();
+        Assert.Empty(scan.Violations);
 
-            for (var i = 0; i < calls.Count; i++)
-            {
-                if (calls[i] != getter) continue;
-                reads += 1;
+        // The scan must be seeing the IL at all: the runtime reads Agent to hand it to the router
+        // and the snapshot, and each of those is an allowed consumption.
+        Assert.True(scan.Reads > 0, "no read of a member's implementation was found - the IL scan is not seeing the pump");
+        Assert.Contains(scan.PassedTo, t => t.DeclaringType == typeof(MemberInvocation));
+        Assert.Contains(scan.PassedTo, t => t.DeclaringType == typeof(ContainerSnapshot));
+    }
 
-                // THE NEXT CALL IS WHAT CONSUMES THE VALUE: a load of a literal or a local between
-                // them is not a call, so `definition.Agent == "x"` is get_Agent then op_Equality.
-                if (i + 1 < calls.Count && Comparisons.Contains(calls[i + 1].Name))
-                {
-                    Assert.Fail($"{Owner(method)} compares ContainerDefinition.Agent with {calls[i + 1].DeclaringType?.Name}.{calls[i + 1].Name}.");
-                }
-            }
-        }
+    /// <summary>THE SCAN CATCHES WHAT IT IS MEANT TO FORBID: the plain comparison, and the three
+    /// evasions the round 2 verification wrote past the previous "next call" rule.</summary>
+    [Theory]
+    [InlineData(nameof(ComparesAnAgent))]
+    [InlineData(nameof(LowerCasesThenStartsWith))]
+    [InlineData(nameof(SplitsThenCompares))]
+    [InlineData(nameof(ComparesTheSnapshotsKind))]
+    [InlineData(nameof(ComparesThroughALocalAndAHelper))]
+    public void The_scan_catches_a_violation(string probe)
+    {
+        var method = typeof(PumpArchitectureTests).GetMethod(probe, BindingFlags.NonPublic | BindingFlags.Static)!;
 
-        // The scan must be seeing the IL at all: the runtime reads Agent to pass it on.
-        Assert.True(reads > 0, "no read of ContainerDefinition.Agent was found - the IL scan is not seeing the pump");
+        var scan = ImplementationFlow.Scan([method]);
+
+        Assert.NotEmpty(scan.Violations);
     }
 
     [Fact]
-    public void The_scan_catches_a_comparison_it_is_meant_to_forbid()
+    public void The_scan_allows_passing_the_implementation_on()
     {
-        var calls = CallsIn(typeof(PumpArchitectureTests).GetMethod(nameof(ComparesAnAgent), BindingFlags.NonPublic | BindingFlags.Static)!).ToList();
-        var getter = typeof(ContainerDefinition).GetProperty(nameof(ContainerDefinition.Agent))!.GetMethod!;
+        var method = typeof(PumpArchitectureTests).GetMethod(nameof(PassesItOn), BindingFlags.NonPublic | BindingFlags.Static)!;
 
-        var at = calls.IndexOf(getter);
-        Assert.True(at >= 0 && Comparisons.Contains(calls[at + 1].Name));
+        var scan = ImplementationFlow.Scan([method]);
+
+        Assert.Empty(scan.Violations);
+        Assert.True(scan.Reads > 0);
     }
 
     private static bool ComparesAnAgent(ContainerDefinition definition) => definition.Agent == "x";
 
+    private static bool LowerCasesThenStartsWith(ContainerDefinition definition) =>
+        definition.Agent.ToLowerInvariant().StartsWith("p" + "lugin:", StringComparison.Ordinal);
+
+    private static bool SplitsThenCompares(ContainerDefinition definition) => definition.Agent.Split(':')[0] == "pl" + "ugin";
+
+    private static bool ComparesTheSnapshotsKind(MemberRuntime member) => member.Snapshot().Kind?.ToString() == "pl" + "ugin";
+
+    private static bool ComparesThroughALocalAndAHelper(ContainerDefinition definition)
+    {
+        var kept = definition.Agent;
+        Console.Out.Flush();
+        return Same(kept);
+    }
+
+    private static bool Same(string value) => value.Length == 3;
+
+    private static ContainerDefinition PassesItOn(ContainerDefinition definition, ILogger log, Func<string, bool> watchable, string? agent)
+    {
+        log.LogInformation("member {Agent}", definition.Agent);
+        _ = watchable(definition.Agent);
+        return definition with { Agent = agent ?? definition.Agent };
+    }
+
     private sealed record Call(string Owner, MethodBase Target);
 
     private static IEnumerable<Call> Calls() =>
-        Methods().SelectMany(method => CallsIn(method).Select(target => new Call(Owner(method), target)));
+        Methods(Pump).SelectMany(method => Il.Decode(method)
+            .Where(i => i.Method is not null)
+            .Select(i => new Call(Owner(method), i.Method!)));
 
-    private static IEnumerable<MethodBase> Methods()
+    private static IEnumerable<MethodBase> Methods(Assembly assembly)
     {
         const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
             | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
-        foreach (var type in Pump.GetTypes())
+        foreach (var type in assembly.GetTypes())
         {
             foreach (var method in type.GetMethods(all)) yield return method;
             foreach (var constructor in type.GetConstructors(all)) yield return constructor;
@@ -103,7 +131,7 @@ public sealed class PumpArchitectureTests
     }
 
     /// <summary>`MemberRuntime.Snapshot` for a method, a lambda in it, or its state machine.</summary>
-    private static string Owner(MethodBase method)
+    internal static string Owner(MethodBase method)
     {
         var type = method.DeclaringType!;
         var name = method.Name;
@@ -121,51 +149,379 @@ public sealed class PumpArchitectureTests
         return $"{type.Name}.{name}";
     }
 
-    private static readonly Dictionary<short, OpCode> OpCodesByValue = typeof(OpCodes)
-        .GetFields(BindingFlags.Public | BindingFlags.Static)
-        .Select(f => (OpCode)f.GetValue(null)!)
-        .ToDictionary(o => o.Value);
-
-    /// <summary>Every method a body calls, loads or constructs, in IL order.</summary>
-    private static IEnumerable<MethodBase> CallsIn(MethodBase method)
+    /// <summary>
+    /// WHERE A MEMBER'S IMPLEMENTATION GOES. An abstract interpretation of each method's IL over its
+    /// control flow, with one bit per stack slot - "this value is, or was taken from, a member's
+    /// implementation" - carried through locals and arguments (per method), and through fields and
+    /// return values (across the whole scan, to a fixed point).
+    /// </summary>
+    private sealed class ImplementationFlow
     {
-        if (method.GetMethodBody()?.GetILAsByteArray() is not { } il) yield break;
+        /// <summary>Where the value comes from.</summary>
+        private static readonly MethodBase[] Sources =
+        [
+            typeof(ContainerDefinition).GetProperty(nameof(ContainerDefinition.Agent))!.GetMethod!,
+            typeof(ContainerSnapshot).GetProperty(nameof(ContainerSnapshot.Agent))!.GetMethod!,
+            typeof(ContainerSnapshot).GetProperty(nameof(ContainerSnapshot.Kind))!.GetMethod!,
+            typeof(MemberRef).GetMethod(nameof(MemberRef.KindOf))!,
+        ];
 
-        var i = 0;
-
-        while (i < il.Length)
+        /// <summary>Whether <paramref name="target"/> may be handed the value. Its result is the
+        /// value again only for <c>KindOf</c>, which is a source.</summary>
+        private static bool PassesOn(MethodBase target)
         {
-            short value = il[i] == 0xFE ? (short)(0xFE00 | il[++i]) : il[i];
-            i += 1;
-            var op = OpCodesByValue[value];
+            var type = target.DeclaringType;
 
-            if (op.OperandType == OperandType.InlineMethod)
+            // A record of the contracts carrying it on: the snapshot, the invocation the router is
+            // handed, the definition (a `with` is its clone and an init setter).
+            if (type?.Assembly == typeof(ContainerDefinition).Assembly && type != typeof(MemberRef)
+                && (target is ConstructorInfo || target.Name.StartsWith("set_", StringComparison.Ordinal)))
             {
-                var token = BitConverter.ToInt32(il, i);
-                MethodBase? target = null;
-
-                try
-                {
-                    target = method.Module.ResolveMethod(token,
-                        method.DeclaringType?.IsGenericType == true ? method.DeclaringType.GetGenericArguments() : null,
-                        method.IsGenericMethod ? method.GetGenericArguments() : null);
-                }
-                catch (ArgumentException)
-                {
-                }
-
-                if (target is not null) yield return target;
+                return true;
             }
 
-            i += op.OperandType switch
+            if (target == Sources[3]) return true;
+
+            // A delegate the Host handed the pump - the decision is the Host's.
+            if (type is not null && typeof(Delegate).IsAssignableFrom(type) && target.Name == nameof(Action.Invoke)) return true;
+
+            // Logging.
+            return type == typeof(LoggerExtensions) || type == typeof(ILogger);
+        }
+
+        public int Reads { get; private set; }
+
+        public List<string> Violations { get; } = [];
+
+        public HashSet<MethodBase> PassedTo { get; } = [];
+
+        private readonly HashSet<(Guid, int)> _fields;
+        private readonly HashSet<(Guid, int)> _returning;
+
+        private ImplementationFlow(IEnumerable<(Guid, int)> fields, IEnumerable<(Guid, int)> returning)
+        {
+            _fields = [.. fields];
+            _returning = [.. returning];
+        }
+
+        private static (Guid, int) Key(MemberInfo member) => (member.Module.ModuleVersionId, member.MetadataToken);
+
+        public static ImplementationFlow Scan(IEnumerable<MethodBase> methods)
+        {
+            var list = methods.Where(m => m.GetMethodBody() is not null).ToList();
+            var decoded = list.ToDictionary(m => m, Il.Decode);
+            var flow = new ImplementationFlow([], []);
+
+            // FIXED POINT: a field written with the value, or a method returning it, is a source in
+            // every method, including those already walked - so walk again until nothing is learned.
+            while (true)
             {
-                OperandType.InlineNone => 0,
-                OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar => 1,
-                OperandType.InlineVar => 2,
-                OperandType.InlineI8 or OperandType.InlineR => 8,
-                OperandType.InlineSwitch => 4 + (4 * BitConverter.ToInt32(il, i)),
-                _ => 4,
+                var next = new ImplementationFlow(flow._fields, flow._returning);
+
+                foreach (var method in list) next.Interpret(method, decoded[method]);
+
+                if (next._fields.SetEquals(flow._fields) && next._returning.SetEquals(flow._returning)) return next;
+
+                flow = next;
+            }
+        }
+
+        private bool IsSource(MethodBase target) =>
+            Sources.Contains(target) || _returning.Contains(Key(target));
+
+        private void Violation(MethodBase method, string what)
+        {
+            var line = $"{Owner(method)} {what}";
+            if (!Violations.Contains(line)) Violations.Add(line);
+        }
+
+        private void Interpret(MethodBase method, IReadOnlyList<Il.Instruction> code)
+        {
+            var at = new Dictionary<int, int>();
+            for (var i = 0; i < code.Count; i++) at[code[i].Offset] = i;
+
+            var body = method.GetMethodBody()!;
+            var locals = new HashSet<int>();
+            var args = new HashSet<int>();
+
+            // Locals and arguments are FLOW-INSENSITIVE: once holding the value, always. Repeat the
+            // walk until that set stops growing.
+            while (true)
+            {
+                var (localsBefore, argsBefore) = (locals.Count, args.Count);
+                var entry = new Dictionary<int, bool[]> { [0] = [] };
+
+                foreach (var clause in body.ExceptionHandlingClauses)
+                {
+                    entry[clause.HandlerOffset] = clause.Flags is ExceptionHandlingClauseOptions.Clause or ExceptionHandlingClauseOptions.Filter ? [false] : [];
+                    if (clause.Flags == ExceptionHandlingClauseOptions.Filter) entry[clause.FilterOffset] = [false];
+                }
+
+                var states = new Dictionary<int, bool[]>();
+                var work = new Stack<int>();
+
+                foreach (var (offset, stack) in entry)
+                {
+                    states[at[offset]] = stack;
+                    work.Push(at[offset]);
+                }
+
+                while (work.Count > 0)
+                {
+                    var index = work.Pop();
+                    var stack = new List<bool>(states[index]);
+                    var instruction = code[index];
+
+                    foreach (var next in Step(method, instruction, stack, locals, args, at))
+                    {
+                        if (next >= code.Count) continue;
+
+                        if (!states.TryGetValue(next, out var known))
+                        {
+                            states[next] = [.. stack];
+                            work.Push(next);
+                        }
+                        else
+                        {
+                            if (known.Length != stack.Count)
+                            {
+                                throw new InvalidOperationException($"{Owner(method)}: stack depth differs at IL_{code[next].Offset:x4}.");
+                            }
+
+                            var merged = known.Zip(stack, (a, b) => a || b).ToArray();
+                            if (!merged.SequenceEqual(known))
+                            {
+                                states[next] = merged;
+                                work.Push(next);
+                            }
+                        }
+                    }
+                }
+
+                if (locals.Count == localsBefore && args.Count == argsBefore) return;
+            }
+        }
+
+        /// <summary>One instruction's effect on the stack, and the instructions that can follow it.</summary>
+        private IEnumerable<int> Step(
+            MethodBase method, Il.Instruction instruction, List<bool> stack,
+            HashSet<int> locals, HashSet<int> args, Dictionary<int, int> at)
+        {
+            var op = instruction.OpCode;
+            var name = op.Name!;
+
+            bool Pop()
+            {
+                var value = stack[^1];
+                stack.RemoveAt(stack.Count - 1);
+                return value;
+            }
+
+            void Push(bool value) => stack.Add(value);
+
+            if (name.StartsWith("ldloca", StringComparison.Ordinal))
+            {
+                Push(locals.Contains(instruction.Index));
+            }
+            else if (name.StartsWith("ldloc", StringComparison.Ordinal))
+            {
+                Push(locals.Contains(instruction.Index));
+            }
+            else if (name.StartsWith("stloc", StringComparison.Ordinal))
+            {
+                if (Pop()) locals.Add(instruction.Index);
+            }
+            else if (name.StartsWith("ldarg", StringComparison.Ordinal))
+            {
+                Push(args.Contains(instruction.Index));
+            }
+            else if (name.StartsWith("starg", StringComparison.Ordinal))
+            {
+                if (Pop()) args.Add(instruction.Index);
+            }
+            else if (instruction.Field is { } field && name is "ldfld" or "ldflda" or "ldsfld" or "ldsflda")
+            {
+                if (name.StartsWith("ldfld", StringComparison.Ordinal)) Pop();
+                Push(_fields.Contains(Key(field)));
+            }
+            else if (instruction.Field is { } stored && name is "stfld" or "stsfld")
+            {
+                if (Pop()) _fields.Add(Key(stored));
+                if (name == "stfld") Pop();
+            }
+            else if (name == "dup")
+            {
+                var top = stack[^1];
+                Push(top);
+            }
+            else if (name == "ret")
+            {
+                if (method is MethodInfo { ReturnType: var returns } && returns != typeof(void) && Pop())
+                {
+                    _returning.Add(Key(method));
+                }
+            }
+            else if (instruction.Method is { } target && name is "call" or "callvirt" or "newobj")
+            {
+                var parameters = target.GetParameters().Length;
+                var popped = parameters + (target.IsStatic || name == "newobj" ? 0 : 1);
+                var carried = false;
+
+                for (var i = 0; i < popped; i++) carried |= Pop();
+
+                if (target == Sources[0] || target == Sources[1] || target == Sources[2]) Reads += 1;
+
+                if (carried)
+                {
+                    if (PassesOn(target)) PassedTo.Add(target);
+                    else Violation(method, $"hands a member's implementation to {target.DeclaringType?.Name}.{target.Name}.");
+                }
+
+                var returns = name == "newobj" || (target is MethodInfo info && info.ReturnType != typeof(void));
+                if (returns) Push(IsSource(target));
+            }
+            else if (name is "calli" or "jmp")
+            {
+                throw new NotSupportedException($"{Owner(method)}: {name} is not interpreted.");
+            }
+            else
+            {
+                var pops = PopCount(op);
+                var carried = false;
+                for (var i = 0; i < pops; i++) carried |= Pop();
+
+                var passesThrough = name is "castclass" or "isinst" or "box" or "unbox.any" || name.StartsWith("ldelem", StringComparison.Ordinal);
+
+                if (carried && name.StartsWith("stelem", StringComparison.Ordinal) && stack.Count > 0)
+                {
+                    // `newarr; dup; ldc; <value>; stelem` - an argument array. The copy `dup` left
+                    // below is the array, and it carries the value from here on.
+                    stack[^1] = true;
+                }
+                else if (carried && !passesThrough && name != "pop")
+                {
+                    // Deciding on it (a branch, `ceq`), or storing it where this cannot follow.
+                    Violation(method, $"uses a member's implementation in `{name}`.");
+                }
+
+                for (var i = 0; i < PushCount(op); i++) Push(carried && passesThrough);
+            }
+
+            // Where control goes next.
+            if (name is "leave" or "leave.s") stack.Clear();
+
+            return op.FlowControl switch
+            {
+                FlowControl.Return or FlowControl.Throw => [],
+                FlowControl.Branch => instruction.Targets.Select(t => at[t]),
+                FlowControl.Cond_Branch => instruction.Targets.Select(t => at[t]).Append(at.GetValueOrDefault(instruction.Next, int.MaxValue)),
+                _ when name is "endfinally" or "endfilter" => [],
+                _ => [at.GetValueOrDefault(instruction.Next, int.MaxValue)],
             };
         }
+
+        private static int PopCount(OpCode op) => op.StackBehaviourPop switch
+        {
+            StackBehaviour.Pop0 => 0,
+            StackBehaviour.Varpop => throw new NotSupportedException(op.Name),
+            var behaviour => behaviour.ToString().Split('_').Length,
+        };
+
+        private static int PushCount(OpCode op) => op.StackBehaviourPush switch
+        {
+            StackBehaviour.Push0 => 0,
+            StackBehaviour.Push1_push1 => 2,
+            StackBehaviour.Varpush => throw new NotSupportedException(op.Name),
+            _ => 1,
+        };
+    }
+
+    /// <summary>A minimal IL decoder: each instruction with the operand this scan needs.</summary>
+    private static class Il
+    {
+        public sealed record Instruction(
+            int Offset, int Next, OpCode OpCode, MethodBase? Method, FieldInfo? Field, int Index, IReadOnlyList<int> Targets);
+
+        private static readonly Dictionary<short, OpCode> OpCodesByValue = typeof(OpCodes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Select(f => (OpCode)f.GetValue(null)!)
+            .ToDictionary(o => o.Value);
+
+        public static IReadOnlyList<Instruction> Decode(MethodBase method)
+        {
+            if (method.GetMethodBody()?.GetILAsByteArray() is not { } il) return [];
+
+            var typeArguments = method.DeclaringType?.IsGenericType == true ? method.DeclaringType.GetGenericArguments() : null;
+            var methodArguments = method.IsGenericMethod ? method.GetGenericArguments() : null;
+
+            var list = new List<Instruction>();
+            var i = 0;
+
+            while (i < il.Length)
+            {
+                var offset = i;
+                short value = il[i] == 0xFE ? (short)(0xFE00 | il[++i]) : il[i];
+                i += 1;
+                var op = OpCodesByValue[value];
+
+                MethodBase? target = null;
+                FieldInfo? field = null;
+                var index = ImplicitIndex(op);
+                var targets = new List<int>();
+
+                var size = op.OperandType switch
+                {
+                    OperandType.InlineNone => 0,
+                    OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar => 1,
+                    OperandType.InlineVar => 2,
+                    OperandType.InlineI8 or OperandType.InlineR => 8,
+                    OperandType.InlineSwitch => 4 + (4 * BitConverter.ToInt32(il, i)),
+                    _ => 4,
+                };
+
+                var next = i + size;
+
+                switch (op.OperandType)
+                {
+                    case OperandType.InlineMethod:
+                        try { target = method.Module.ResolveMethod(BitConverter.ToInt32(il, i), typeArguments, methodArguments); }
+                        catch (ArgumentException) { }
+                        break;
+                    case OperandType.InlineField:
+                        try { field = method.Module.ResolveField(BitConverter.ToInt32(il, i), typeArguments, methodArguments); }
+                        catch (ArgumentException) { }
+                        break;
+                    case OperandType.ShortInlineVar:
+                        index = il[i];
+                        break;
+                    case OperandType.InlineVar:
+                        index = BitConverter.ToUInt16(il, i);
+                        break;
+                    case OperandType.ShortInlineBrTarget:
+                        targets.Add(next + (sbyte)il[i]);
+                        break;
+                    case OperandType.InlineBrTarget:
+                        targets.Add(next + BitConverter.ToInt32(il, i));
+                        break;
+                    case OperandType.InlineSwitch:
+                        var count = BitConverter.ToInt32(il, i);
+                        for (var k = 0; k < count; k++) targets.Add(next + BitConverter.ToInt32(il, i + 4 + (4 * k)));
+                        break;
+                }
+
+                list.Add(new Instruction(offset, next, op, target, field, index, targets));
+                i = next;
+            }
+
+            return list;
+        }
+
+        /// <summary>The index of `ldloc.2`, `stloc.0`, `ldarg.3` and their kin, which carry no operand.</summary>
+        private static int ImplicitIndex(OpCode op) =>
+            op.Name is { } name && name.Length > 2 && name[^2] == '.' && char.IsAsciiDigit(name[^1])
+                && (name.StartsWith("ldloc", StringComparison.Ordinal) || name.StartsWith("stloc", StringComparison.Ordinal)
+                    || name.StartsWith("ldarg", StringComparison.Ordinal))
+                ? name[^1] - '0'
+                : -1;
     }
 }
