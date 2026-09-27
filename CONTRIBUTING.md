@@ -10,6 +10,11 @@ can be merged. The CLA Assistant check asks you to sign it on your first pull re
 that it recognises you. If you contribute on behalf of a company, the entity section of the
 agreement applies as well.
 
+To read and sign it before you open a pull request, sign in with GitHub at
+<https://cla-assistant.io/djlsystems/Yawble>. What you sign there is [CLA.md](CLA.md): CLA
+Assistant shows it from a [gist](https://gist.github.com/djlsystems/5bcd4668621fa03ae28cc7548d5f0e64)
+that is kept identical to that file, and any change to one is made to the other.
+
 You keep the copyright in your contribution. The agreement grants DJL Systems, Inc. and its
 successors a license to it, including the right to offer it under other terms. A
 `Signed-off-by` line (DCO) is not a substitute for the CLA.
