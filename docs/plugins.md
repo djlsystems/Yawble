@@ -191,8 +191,10 @@ Content-Type: application/json
   failed mark, not on the run's row. There is no transcript, so `runs/{seq}/transcript` answers 404.
   A run that blocked every item it was given writes no completed or failed row. It is listed from its
   last `blocked` row with `outcome: blocked`, `output` null and `reason` set to that row's reason, and
-  the card's history opens it onto `Blocked: <reason>`. An agent member's listing is unchanged: such
-  an agent run recorded no transcript, so there is nothing to open.
+  the card's history opens it onto `Blocked: <reason>`. While the member is running, an item its
+  current run has already blocked is not listed: the run is not over, and it is listed once it is
+  (`An_item_blocked_by_a_run_still_working_is_not_listed_as_a_finished_run`). An agent member's
+  listing is unchanged: such an agent run recorded no transcript, so there is nothing to open.
 - **Team KPI card.** On a team whose every member is a plugin, the Tokens tile reads `none` with no
   advice about usage capture, and the workflow tile draws no budget line or bar.
 
@@ -359,7 +361,9 @@ slot like any member's.
       JSON text that would be, is **dropped**, not rewritten, with one `progress` warning row that
       names neither. Renaming a key or turning a number into `[redacted]` would silently change the
       shape a trigger or `{event.*}` token reads (`A_secret_as_a_publish_key_or_number_refuses_the_publish`,
-      `A_number_matching_a_secret_refuses_the_publish`).
+      `A_number_matching_a_secret_refuses_the_publish`). For a secret that is itself a number, a
+      payload number is also compared by VALUE, so `2.0261234e7` for `20261234` is refused the same
+      way (`A_number_equal_in_value_to_a_secret_refuses_the_publish`).
 
     A plugin that writes a secret otherwise TRANSFORMED - reversed, base64, cut in pieces - defeats
     all of it, and the result reaches the log. Do not write secrets out at all.

@@ -371,6 +371,11 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // item `blocked` - one with no completed, failed or other `blocked` after it before the
         // member's next `started` - and that row stands as its terminal. RunsWith.Transcript leaves
         // it out: the run recorded no transcript, so there is nothing to open.
+        //
+        // Such a row is also what an item blocked by a run STILL WORKING looks like: the run's own
+        // terminal has not landed yet (E5-c). Only the runtime knows whether the run is over, so a
+        // `blocked` terminal with no `started` after it - one in the member's latest run - comes back
+        // marked InLatestRun, for the caller to hold back while the member is running.
         var blockedEnd = which == RunsWith.AnyRun
             ? $"""
                OR (t.type = $blocked
@@ -391,7 +396,9 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                     t.type = $blocked OR EXISTS (SELECT 1 FROM messages b
                             WHERE b.source = t.source AND b.type = $blocked
                               AND b.seq < t.seq AND b.seq > COALESCE(s.seq, $since)
-                              AND json_extract(b.payload, '$.item') IS NULL)
+                              AND json_extract(b.payload, '$.item') IS NULL),
+                    t.type = $blocked AND NOT EXISTS (SELECT 1 FROM messages y
+                            WHERE y.source = t.source AND y.type = $started AND y.seq > t.seq)
              FROM messages t
              LEFT JOIN messages s ON s.seq = (
                  SELECT MAX(x.seq) FROM messages x
@@ -434,7 +441,8 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             runs.Add(new RunRow(
                 terminal,
                 reader.IsDBNull(8) ? null : MessageRows.ReadStamp(reader.GetString(8)),
-                reader.GetInt64(9) != 0));
+                reader.GetInt64(9) != 0,
+                reader.GetInt64(10) != 0));
         }
 
         return runs;

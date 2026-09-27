@@ -475,5 +475,9 @@ public enum RunsWith
 /// that closed it, when the run started (its `started` row, null when none is found), and whether
 /// it published `blocked` between the two. A run that blocked every item has a `blocked` terminal
 /// (<see cref="RunsWith.AnyRun"/> only), and is Blocked.
+///
+/// <paramref name="InLatestRun"/> is set on such a <c>blocked</c> terminal when no <c>started</c>
+/// follows it. The log alone cannot tell that run from one still working whose own completed row
+/// has not landed yet, so a caller that knows the member is running holds it back.
 /// </summary>
-public sealed record RunRow(Message Terminal, DateTimeOffset? StartedAt, bool Blocked);
+public sealed record RunRow(Message Terminal, DateTimeOffset? StartedAt, bool Blocked, bool InLatestRun = false);

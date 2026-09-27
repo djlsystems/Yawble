@@ -238,6 +238,38 @@ public sealed class PluginMemberRunsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task An_item_blocked_by_a_run_still_working_is_not_listed_as_a_finished_run()
+    {
+        // E5-c (part 2 round 2): the second run takes a batch of two - it blocks the first item at
+        // once and is still sleeping on the second. Its `blocked` row has nothing after it yet, so
+        // it looked like the terminal of a run that blocked every item.
+        await TellAsync(Echo, "sleep:1");
+        await AwaitStateAsync(Echo, ContainerState.Running);
+
+        var first = Assert.Single(await Services.GetRequiredService<IMessageLog>()
+            .ReadAfterAsync(0, [MessageTypes.InstructionFor(Echo)], int.MaxValue, Ct));
+        await TellAsync(Echo, "block:later", first.Seq);
+        await TellAsync(Echo, "sleep:4", first.Seq);
+
+        await AwaitBlockedRowAsync(Echo);
+        Assert.Equal(ContainerState.Running, Services.GetRequiredService<ContainerHost>().Find(Echo)!.State);
+
+        var running = await RunsAsync(Echo);
+
+        Assert.Equal("completed", Assert.Single(running).GetProperty("outcome").GetString());
+
+        // Settled, it is one completed run (the blocked item writes no terminal row of its own), as
+        // A_run_that_blocked_one_item_and_completed_another_is_listed_once_as_completed pins.
+        await AwaitTerminalRowsAsync(Echo, 2);
+        await AwaitStateAsync(Echo, ContainerState.Idle);
+
+        var settled = await RunsAsync(Echo);
+
+        Assert.Equal(2, settled.Length);
+        Assert.All(settled, run => Assert.Equal("completed", run.GetProperty("outcome").GetString()));
+    }
+
+    [Fact]
     public async Task An_agent_members_listing_is_unchanged_and_a_plugin_run_has_no_transcript()
     {
         // The fake agent records no transcript, so its run is not listed - as before.
