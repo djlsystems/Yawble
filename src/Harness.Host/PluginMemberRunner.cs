@@ -42,6 +42,14 @@ public sealed class PluginMemberRunner(
 
     public const string CausationVariable = "HARNESS_CAUSATION";
 
+    /// <summary>
+    /// The shortest secret VALUE a plugin is handed. Every text a plugin writes has each bound value
+    /// replaced before it is stored, and a value shorter than this cannot be replaced without
+    /// destroying the text around it - so it is REFUSED, at hire when it is already set and on every
+    /// run, rather than passed through unredacted.
+    /// </summary>
+    public const int MinimumSecretLength = 4;
+
     public async Task<MemberResult> RunAsync(MemberInvocation invocation, CancellationToken ct = default)
     {
         if (invocation.Context.UnreachableRoot is { Length: > 0 } unreachable)
@@ -110,7 +118,7 @@ public sealed class PluginMemberRunner(
                 start,
                 request,
                 clock.Stopping,
-                onStdoutLine: line => OnLineAsync(invocation.Member, line, gathered, ct));
+                onStdoutLine: line => OnLineAsync(invocation.Member, line, gathered, resolvedSecrets.Values, ct));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -301,6 +309,11 @@ public sealed class PluginMemberRunner(
             }
 
             if (EnvironmentSecretStore.Refusal(key) is { } keyRefusal) return keyRefusal;
+
+            if (secrets?.TryGet(key) is { Length: < MinimumSecretLength })
+            {
+                return ShortSecret(key, name);
+            }
         }
 
         foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required))
@@ -330,6 +343,11 @@ public sealed class PluginMemberRunner(
             var key = bound.Secrets.GetValueOrDefault(name);
             var value = key is null || secrets is null ? null : secrets.TryGet(key);
 
+            if (value is { Length: < MinimumSecretLength })
+            {
+                return (resolved, ShortSecret(key!, name));
+            }
+
             if (value is not null)
             {
                 resolved[name] = value;
@@ -345,7 +363,12 @@ public sealed class PluginMemberRunner(
         return (resolved, null);
     }
 
-    private async Task OnLineAsync(ContainerId member, string line, Gathered gathered, CancellationToken ct)
+    private static string ShortSecret(string key, string name) =>
+        $"The secret `{key}` bound for `{name}` is shorter than {MinimumSecretLength} characters, so it "
+        + "could not be kept out of what this plugin writes. Set a longer value and restart the Host.";
+
+    private async Task OnLineAsync(
+        ContainerId member, string line, Gathered gathered, IEnumerable<string> secretValues, CancellationToken ct)
     {
         var trimmed = line.Trim();
 
@@ -367,21 +390,21 @@ public sealed class PluginMemberRunner(
         switch (record?["t"]?.GetValueKind() == JsonValueKind.String ? (string?)record["t"] : null)
         {
             case "progress" when Words(record!, "status") is { } status:
-                await reports.ProgressAsync(member, status, ct);
+                await reports.ProgressAsync(member, Redact(status, secretValues), ct);
                 break;
 
             case "blocked" when Words(record!, "reason") is { } reason:
                 int? item = record!["item"] is JsonValue number && number.TryGetValue<int>(out var index) ? index : null;
-                var outcome = await reports.BlockedAsync(member, reason, item, ct);
+                var outcome = await reports.BlockedAsync(member, Redact(reason, secretValues), item, ct);
                 if (!outcome.Accepted) gathered.Notes.Add($"blocked record refused: {outcome.Refusal}");
                 break;
 
             case "needsDecision" when Words(record!, "question") is { } question:
-                await reports.NeedsDecisionAsync(member, question, ct);
+                await reports.NeedsDecisionAsync(member, Redact(question, secretValues), ct);
                 break;
 
             case "handback" when Words(record!, "delivered") is { } delivered:
-                await reports.HandbackAsync(member, delivered, ct);
+                await reports.HandbackAsync(member, Redact(delivered, secretValues), ct);
                 break;
 
             case "result":
@@ -410,14 +433,21 @@ public sealed class PluginMemberRunner(
             ? text
             : null;
 
-    private static string Redact(string text, IEnumerable<string> values)
+    /// <summary>
+    /// EVERY TEXT A PLUGIN WRITES passes here before it is stored or reported: each bound secret value
+    /// replaced verbatim (none is shorter than <see cref="MinimumSecretLength"/>; see there), then
+    /// <see cref="DiagnosticRedaction"/>'s named-value and credential-shape rules, unbounded, since
+    /// this is output and not a diagnostic. A plugin that transforms a secret before writing it -
+    /// reversed, encoded - defeats both; that is the plugin's defect and not one this can see.
+    /// </summary>
+    internal static string Redact(string text, IEnumerable<string> values)
     {
         foreach (var value in values)
         {
-            if (value.Length >= 4) text = text.Replace(value, "[redacted]", StringComparison.Ordinal);
+            text = text.Replace(value, DiagnosticRedaction.Placeholder, StringComparison.Ordinal);
         }
 
-        return text;
+        return DiagnosticRedaction.RedactWithoutLimit(text) ?? text;
     }
 
     private sealed class Gathered

@@ -249,6 +249,96 @@ public sealed class PluginMemberRunnerTests : IDisposable
         Assert.DoesNotContain(value, await File.ReadAllTextAsync(Path.Combine(_dataRoot, "argv.txt"), Ct), StringComparison.Ordinal);
     }
 
+    /// <summary>D1 (card 621 verification): a bound secret written into a REPORT record - not only
+    /// the result - must not reach the ledger, the snapshot or the Manager it wakes.</summary>
+    [Theory]
+    [InlineData("progress", "status")]
+    [InlineData("blocked", "reason")]
+    [InlineData("needsDecision", "question")]
+    [InlineData("handback", "delivered")]
+    public async Task A_bound_secret_in_a_report_record_is_redacted_before_it_is_reported(string record, string field)
+    {
+        const string value = "s3cr3tvalue";
+        var settings = new Settings(new PluginMemberSettings(
+            new Dictionary<string, JsonElement>(),
+            new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" }));
+
+        var (bed, member, _) = await RunAsync(
+            $$"""
+            cat >/dev/null
+            echo '{"t":"{{record}}","{{field}}":"leaked s3cr3tvalue here"}'
+            echo '{"t":"result","ok":true,"output":"done"}'
+            """,
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}"""),
+            settings: settings,
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = value }));
+        await using var _ = bed;
+
+        var rows = await bed.Store.ReadAfterAsync(0,
+            [MessageTypes.Progress, MessageTypes.Blocked, MessageTypes.NeedsDecision, MessageTypes.Handback, MessageTypes.Completed, MessageTypes.Failed],
+            int.MaxValue, Ct);
+        Assert.Contains(rows, r => r.Payload.Contains("leaked [redacted] here", StringComparison.Ordinal));
+        Assert.DoesNotContain(rows, r => r.Payload.Contains(value, StringComparison.Ordinal));
+
+        var snapshot = member.Snapshot();
+        Assert.DoesNotContain(value, JsonSerializer.Serialize(snapshot), StringComparison.Ordinal);
+        if (record == "handback") Assert.Equal("leaked [redacted] here", snapshot.HandedBack);
+        if (record == "needsDecision") Assert.Equal("leaked [redacted] here", snapshot.NeedsDecision);
+        if (record == "blocked") Assert.Equal("leaked [redacted] here", snapshot.Blocked);
+    }
+
+    [Fact]
+    public async Task Diagnostic_redaction_covers_the_output_the_error_and_stderr()
+    {
+        const string shaped = "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb7dEf0";
+        var (bed, member, row) = await RunAsync(
+            $$"""
+            cat >/dev/null
+            echo 'password=hunter2' >&2
+            echo '{"t":"result","ok":false,"output":"key {{shaped}}","error":"token: xyzzy-plugh"}'
+            """);
+        await using var _ = bed;
+
+        Assert.Equal(MessageTypes.Failed, row.Type);
+        Assert.DoesNotContain(shaped, row.Payload, StringComparison.Ordinal);
+        Assert.DoesNotContain("hunter2", row.Payload, StringComparison.Ordinal);
+        Assert.Contains("password=[redacted]", Output(row));
+        Assert.Equal("token: [redacted]", member.Snapshot().Failed);
+    }
+
+    [Fact]
+    public async Task A_secret_too_short_to_redact_is_refused_before_launch()
+    {
+        var settings = new Settings(new PluginMemberSettings(
+            new Dictionary<string, JsonElement>(),
+            new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" }));
+
+        var (bed, member, _) = await RunAsync(
+            "touch ran.txt; cat >/dev/null",
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":false}}"""),
+            settings: settings, secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "abc" }));
+        await using var _ = bed;
+
+        Assert.Contains($"shorter than {PluginMemberRunner.MinimumSecretLength} characters", member.Snapshot().Failed);
+        Assert.False(File.Exists(Path.Combine(_dataRoot, "ran.txt")));
+    }
+
+    [Fact]
+    public void A_secret_too_short_to_redact_is_refused_at_hire_when_it_is_already_set()
+    {
+        PluginInstall.Write(_dataRoot, "fixture", manifest: PluginInstall.Manifest("fixture",
+            edit: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":false}}""")));
+        var catalog = new PluginCatalog(PluginInstall.PluginsRoot(_dataRoot));
+        catalog.Rescan();
+
+        var refusal = PluginMemberRunner.SettingsRefusal(
+            catalog.For("fixture")!.Manifest,
+            new PluginMemberSettings(new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "SHORT_ONE" }),
+            new Secrets(new() { ["SHORT_ONE"] = "abc" }));
+
+        Assert.Contains("shorter than", refusal);
+    }
+
     [Fact]
     public async Task A_required_secret_that_is_not_set_is_refused_before_launch()
     {
