@@ -47,9 +47,9 @@ case "$arch" in
   aarch64|arm64) arch=arm64 ;;
   *) echo "yawble: unsupported architecture $arch" >&2; exit 1 ;;
 esac
-# macOS is supported on Apple silicon only.
+# macOS: Apple silicon only for now; Intel Macs are not tested yet.
 if [ "$os" = darwin ] && [ "$arch" != arm64 ]; then
-  echo "yawble: Macs with Apple silicon (M1 or later) only; this Mac has an Intel processor" >&2
+  echo "yawble: Intel Macs are not tested yet, so yawble runs on Apple silicon (M1 or later) only for now; this Mac has an Intel processor" >&2
   exit 1
 fi
 

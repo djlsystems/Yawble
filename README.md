@@ -52,7 +52,7 @@ control, with a web board to watch, steer and review the work.
 
 ### macOS
 
-- Apple silicon (M1 or later). Intel Macs are not supported.
+- Apple silicon (M1 or later). Intel Macs are not tested yet.
 - **Docker or Podman.** Install [Podman Desktop](https://podman-desktop.io) (recommended) or
   [Docker Desktop](https://www.docker.com/products/docker-desktop/) and take the defaults.
 

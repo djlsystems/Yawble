@@ -60,14 +60,14 @@ func chooseEngine(deps Deps, c config.Config, yes bool, out io.Writer) (string, 
 }
 
 // supportedPlatform refuses what yawble does not support, before anything else `up` does or says:
-// macOS on Apple silicon only, whichever engine is installed.
+// macOS on Apple silicon only for now, whichever engine is installed: Intel Macs are not tested yet.
 func supportedPlatform(deps Deps) error {
 	goarch := deps.GOARCH
 	if goarch == "" {
 		goarch = runtime.GOARCH
 	}
 	if goosOf(deps) == "darwin" && goarch != "arm64" {
-		return errors.New("yawble supports Macs with Apple silicon (M1 or later) only; this Mac has an Intel processor")
+		return errors.New("Intel Macs are not tested yet, so yawble runs on Apple silicon (M1 or later) only for now; this Mac has an Intel processor")
 	}
 	return nil
 }

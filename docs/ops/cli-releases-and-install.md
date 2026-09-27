@@ -29,7 +29,7 @@ yawble_<version>_linux_arm64.tar.gz     yawble_<version>_darwin_arm64.tar.gz    
 checksums.txt                           (sha256, one line per asset)
 ```
 
-macOS is Apple silicon only: no `darwin_amd64` archive is built, and `install.sh` refuses an Intel Mac.
+macOS is Apple silicon only for now, because Intel Macs are not tested yet: no `darwin_amd64` archive is built, and `install.sh` and `yawble up` refuse an Intel Mac.
 
 ## Installing
 
