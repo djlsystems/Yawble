@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/djlsystems/yawble/cli/internal/buildinfo"
 	"github.com/djlsystems/yawble/cli/internal/cli"
 )
 
@@ -36,6 +37,8 @@ func TestVersionShowsTheMarkOnlyToATerminal(t *testing.T) {
 
 // No arguments: the mark, the tagline and where to go next; the full command list is --help's.
 func TestYawbleWithNoArgumentsShowsTheMarkTheTaglineAndWhereToGetHelp(t *testing.T) {
+	buildinfo.Version = "v2026.09.26.8"
+	t.Cleanup(func() { buildinfo.Version = "dev" })
 	code, out, _ := run(t, cli.Deps{StdoutTerminal: true})
 	if code != 0 || !hasMark(out) {
 		t.Fatalf("exit %d out %q", code, out)
@@ -47,6 +50,10 @@ func TestYawbleWithNoArgumentsShowsTheMarkTheTaglineAndWhereToGetHelp(t *testing
 	}
 	if strings.Contains(out, "Available Commands") {
 		t.Errorf("the command list belongs to --help: %q", out)
+	}
+	// The version sits on the line under the tagline.
+	if !strings.Contains(out, "Teams of agents, moving with you.\nv2026.09.26.8\n") {
+		t.Errorf("the version belongs under the tagline: %q", out)
 	}
 
 	// A pipe: the same words, no mark.

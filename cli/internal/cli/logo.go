@@ -26,8 +26,10 @@ const logoMark = `               ⢿⣆
                ⠉⠙⠢⠄⠈⠓⢄⠈⢻⡄
                         ⠃`
 
-// welcome is what `yawble` with no arguments says under the mark: the tagline and where to go next.
+// welcome is what `yawble` with no arguments says under the mark: the tagline, this binary's
+// version (the %s) and where to go next.
 const welcome = `Yawble — Teams of agents, moving with you.
+%s
 
 Usage:
   yawble <command> [flags]

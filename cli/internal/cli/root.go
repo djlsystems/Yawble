@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/djlsystems/yawble/cli/internal/buildinfo"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 )
 
@@ -95,7 +96,11 @@ func NewRoot(deps Deps) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 			showLogo(deps, out)
-			fmt.Fprint(out, welcome)
+			version := buildinfo.Version
+			if version == "dev" {
+				version = "development build"
+			}
+			fmt.Fprintf(out, welcome, version)
 			return nil
 		},
 	}
