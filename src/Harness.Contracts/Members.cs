@@ -109,7 +109,7 @@ public sealed record RunTranscript(string Path, string Format);
 /// </summary>
 public interface IMemberReports
 {
-    Task ProgressAsync(ContainerId member, string status, CancellationToken ct = default);
+    Task<MemberReportOutcome> ProgressAsync(ContainerId member, string status, CancellationToken ct = default);
 
     Task<MemberReportOutcome> BlockedAsync(ContainerId member, string reason, int? item = null, CancellationToken ct = default);
 
