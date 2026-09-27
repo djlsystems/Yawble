@@ -277,7 +277,12 @@ public sealed class MemberGoldenTests
             var text = $"exit={result.ExitCode} launchError={result.LaunchError} class={result.FailureClass} succeeded={result.Succeeded}\n"
                 + result.Output.Replace(workspace, "<workspace>", StringComparison.Ordinal);
 
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"/tmp/os-[0-9a-f]{32}\.prompt\.txt", "<promptfile>");
+            // The runner writes the prompt file under Path.GetTempPath(), which honours TMPDIR: the
+            // release runs this suite with TMPDIR in a scratch folder, not /tmp.
+            text = System.Text.RegularExpressions.Regex.Replace(
+                text,
+                System.Text.RegularExpressions.Regex.Escape(Path.GetTempPath()) + @"os-[0-9a-f]{32}\.prompt\.txt",
+                "<promptfile>");
 
             Golden.Match($"child-{form}", text + "\n");
         }
