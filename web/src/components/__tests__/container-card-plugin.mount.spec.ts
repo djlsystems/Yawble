@@ -41,6 +41,11 @@ const runs: MemberRunsPage = {
       durationMs: 2000, outcome: 'completed', output: 'olleh',
     },
     {
+      // Every item blocked: no completed row, so the run is its last `blocked` row, with its reason.
+      seq: 36, workflow: 35, startedAt: '2026-09-27T09:30:00Z', endedAt: '2026-09-27T09:30:01Z',
+      durationMs: 1000, outcome: 'blocked', output: null, reason: 'no creds',
+    },
+    {
       seq: 30, workflow: 29, startedAt: '2026-09-27T09:00:00Z', endedAt: '2026-09-27T09:00:01Z',
       durationMs: 1000, outcome: 'failed', output: null,
     },
@@ -127,7 +132,7 @@ describe('the member card for a plugin', () => {
 
     expect(bodyText()).toContain('Runs of Echo');
     expect(bodyText()).not.toContain('Not running');
-    expect(document.body.querySelectorAll('.earlier-run')).toHaveLength(2);
+    expect(document.body.querySelectorAll('.earlier-run')).toHaveLength(3);
 
     (document.body.querySelector('.earlier-run[data-seq="42"]') as HTMLElement).click();
     await flushPromises();
@@ -148,6 +153,22 @@ describe('the member card for a plugin', () => {
     await flushPromises();
 
     expect(bodyText()).toContain('This run reported no output.');
+  });
+
+  it('lists a run that ended blocked, and opens it onto its reason', async () => {
+    const wrapper = await mountCard(plugin());
+
+    await wrapper.find(history).trigger('click');
+    await flushPromises();
+
+    const row = document.body.querySelector('.earlier-run[data-seq="36"]') as HTMLElement;
+    expect(row.querySelector('.earlier-run-outcome')?.getAttribute('data-outcome')).toBe('blocked');
+
+    row.click();
+    await flushPromises();
+
+    expect(document.body.querySelector('.run-reason')?.textContent).toBe('Blocked: no creds');
+    expect(bodyText()).not.toContain('This run reported no output.');
   });
 
   it('offers no history button on an agent member', async () => {

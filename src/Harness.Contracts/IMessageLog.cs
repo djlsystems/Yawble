@@ -465,13 +465,15 @@ public enum RunsWith
     /// <summary>Only runs that recorded the agent's own transcript.</summary>
     Transcript,
 
-    /// <summary>Every finished run, transcript or not.</summary>
+    /// <summary>Every finished run, transcript or not - including one that blocked every item of
+    /// its batch, whose last item <c>blocked</c> row stands as its terminal.</summary>
     AnyRun,
 }
 
 /// <summary>
 /// One finished run, as <see cref="IMessageLog.ReadRunsAsync(ContainerId, long, long, int, CancellationToken)"/> reads it: the terminal row
 /// that closed it, when the run started (its `started` row, null when none is found), and whether
-/// it published `blocked` between the two.
+/// it published `blocked` between the two. A run that blocked every item has a `blocked` terminal
+/// (<see cref="RunsWith.AnyRun"/> only), and is Blocked.
 /// </summary>
 public sealed record RunRow(Message Terminal, DateTimeOffset? StartedAt, bool Blocked);

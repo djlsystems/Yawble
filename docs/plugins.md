@@ -189,6 +189,10 @@ Content-Type: application/json
   member, one per run (not one per batched message), newest first. Each run carries `output`: its
   result output, or a failure's launch error. The plugin's own failure sentence is on the card's
   failed mark, not on the run's row. There is no transcript, so `runs/{seq}/transcript` answers 404.
+  A run that blocked every item it was given writes no completed or failed row. It is listed from its
+  last `blocked` row with `outcome: blocked`, `output` null and `reason` set to that row's reason, and
+  the card's history opens it onto `Blocked: <reason>`. An agent member's listing is unchanged: such
+  an agent run recorded no transcript, so there is nothing to open.
 - **Team KPI card.** On a team whose every member is a plugin, the Tokens tile reads `none` with no
   advice about usage capture, and the workflow tile draws no budget line or bar.
 

@@ -365,11 +365,30 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // `blocked` it published lies between the two. Only the run form counts: a `blocked` naming an
         // `item` blocks one card, not the run. Both are subqueries on the same source so the cap stays
         // after the filter, for ReadMemberBeforeAsync's reason.
+        //
+        // A run that blocked EVERY item of its batch writes no completed or failed row: each item's
+        // `blocked` closed its delivery instead. For RunsWith.AnyRun such a run ends at its last
+        // item `blocked` - one with no completed, failed or other `blocked` after it before the
+        // member's next `started` - and that row stands as its terminal. RunsWith.Transcript leaves
+        // it out: the run recorded no transcript, so there is nothing to open.
+        var blockedEnd = which == RunsWith.AnyRun
+            ? $"""
+               OR (t.type = $blocked
+                   AND json_extract(t.payload, '$.{PayloadFields.Item}') IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM messages n
+                                   WHERE n.source = t.source AND n.seq > t.seq
+                                     AND n.type IN ($completed, $failed, $blocked)
+                                     AND n.seq < COALESCE((SELECT MIN(y.seq) FROM messages y
+                                                           WHERE y.source = t.source AND y.type = $started
+                                                             AND y.seq > t.seq), 9223372036854775807)))
+               """
+            : "";
+
         command.CommandText =
             $"""
              SELECT {Prefixed("t")},
                     s.occurred_at,
-                    EXISTS (SELECT 1 FROM messages b
+                    t.type = $blocked OR EXISTS (SELECT 1 FROM messages b
                             WHERE b.source = t.source AND b.type = $blocked
                               AND b.seq < t.seq AND b.seq > COALESCE(s.seq, $since)
                               AND json_extract(b.payload, '$.item') IS NULL)
@@ -379,10 +398,11 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                  WHERE x.source = t.source AND x.type = $started AND x.seq < t.seq AND x.seq > $since)
              WHERE t.seq > $since AND t.seq < $before
                AND t.source = $source COLLATE NOCASE
-               AND t.type IN ($completed, $failed)
-               AND {(which == RunsWith.Transcript
-                   ? $"json_extract(t.payload, '$.{PayloadFields.AgentTranscript}') IS NOT NULL"
-                   : $"json_extract(t.payload, '$.{PayloadFields.UsageCountedOn}') IS NULL")}
+               AND ((t.type IN ($completed, $failed)
+                     AND {(which == RunsWith.Transcript
+                         ? $"json_extract(t.payload, '$.{PayloadFields.AgentTranscript}') IS NOT NULL"
+                         : $"json_extract(t.payload, '$.{PayloadFields.UsageCountedOn}') IS NULL")})
+                    {blockedEnd})
              ORDER BY t.seq DESC
              LIMIT $max
              """;
