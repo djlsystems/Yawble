@@ -340,7 +340,9 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
     /// plugin's to declare, and a plugin holds no credential to declare with - so it stayed open
     /// forever, and the Manager was refused. The platform now declares it on the owner's behalf
     /// when a run in it ends successfully and nothing is left working it. No agent is involved:
-    /// the declaration is written before the Manager is even woken by the plugin's result.
+    /// the one declaration is the platform's. The plugin's result still wakes the Manager, as it
+    /// always did, and that wake races the declaration (its `started` row may come first on a busy
+    /// machine), so the test pins who declared, not the order of the rows.
     /// </summary>
     [Fact]
     public async Task E1_A_workflow_a_person_starts_by_telling_a_plugin_ends_completed()
@@ -363,9 +365,9 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
         Assert.True(Payload(declared).GetProperty(UndeclarableWorkflows.DeclaredByPlatformField).GetBoolean());
         Assert.Empty(await log.OpenWorkflowsAmongAsync([correlation], Ct));
 
-        // NO AGENT DECLARED IT: nothing the Manager did under this workflow comes before it.
+        // NO AGENT DECLARED IT: the workflow's one declaration is the platform's, on Echo's behalf.
         var thread = await log.ReadCorrelationAsync(correlation, Ct);
-        Assert.DoesNotContain(thread, m => m.Seq < declared.Seq && m.Source == Manager.ToString());
+        Assert.Equal(declared.Seq, Assert.Single(thread, m => m.Type == MessageTypes.WorkflowCompleted).Seq);
     }
 
     private async Task<Message> AwaitRowAsync(string type, Func<Message, bool> match, string what)
