@@ -28,15 +28,21 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
     default { throw "yawble: unsupported architecture $($env:PROCESSOR_ARCHITECTURE)" }
 }
 
+# Get-Newest: from a releases list, the highest v<yyyy.mm.dd.N> release that is not a draft,
+# pre-releases included. GitHub's own "latest" never is a pre-release, and its list is not in release
+# order, so the versions are compared here (.10 after .9). The list is held in a variable by the
+# caller: piped straight on, Invoke-RestMethod hands the whole JSON array down as one object.
+function Get-Newest($list) {
+    $list | Where-Object { -not $_.draft -and $_.tag_name -match '^v\d+\.\d+\.\d+\.\d+$' } |
+        Sort-Object { [version]$_.tag_name.TrimStart('v') } -Descending | Select-Object -First 1
+}
+
 $release = $null
 if ($token) {
-    # The newest release, pre-releases included: GitHub's "latest" never is a pre-release.
-    $releaseUrl = if ($env:YAWBLE_VERSION) { "$api/repos/$repo/releases/tags/v" + $env:YAWBLE_VERSION.TrimStart('v') } else { "$api/repos/$repo/releases?per_page=20" }
+    $releaseUrl = if ($env:YAWBLE_VERSION) { "$api/repos/$repo/releases/tags/v" + $env:YAWBLE_VERSION.TrimStart('v') } else { "$api/repos/$repo/releases?per_page=100" }
     try {
         $answer = Invoke-RestMethod -Uri $releaseUrl -UseBasicParsing -Headers @{ 'User-Agent' = 'yawble-install'; 'Authorization' = "Bearer $token" }
-        # Held in a variable first: piped straight on, Invoke-RestMethod hands the whole JSON array
-        # down as one object (PowerShell 5.1 and 7 alike), and the filter would see all of it at once.
-        $release = if ($env:YAWBLE_VERSION) { $answer } else { $answer | Where-Object { -not $_.draft } | Select-Object -First 1 }
+        $release = if ($env:YAWBLE_VERSION) { $answer } else { Get-Newest $answer }
     } catch {
         throw "yawble: could not read the release of $repo with GH_TOKEN set (does the token have the repo scope?)"
     }
@@ -46,9 +52,8 @@ if ($token) {
     $version = 'v' + $env:YAWBLE_VERSION.TrimStart('v')
 } else {
     try {
-        # The newest release, pre-releases included: GitHub's "latest" never is a pre-release.
-        $list = Invoke-RestMethod -Uri "$api/repos/$repo/releases?per_page=20" -UseBasicParsing -Headers @{ 'User-Agent' = 'yawble-install' }
-        $latest = $list | Where-Object { -not $_.draft } | Select-Object -First 1
+        $list = Invoke-RestMethod -Uri "$api/repos/$repo/releases?per_page=100" -UseBasicParsing -Headers @{ 'User-Agent' = 'yawble-install' }
+        $latest = Get-Newest $list
     } catch {
         throw "yawble: could not read the latest release of $repo (check the network connection; a private fork also needs GH_TOKEN)"
     }

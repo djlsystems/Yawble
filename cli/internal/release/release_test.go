@@ -150,3 +150,26 @@ func TestLatestWithNoReleaseAtAllSaysSo(t *testing.T) {
 		t.Errorf("err %v", err)
 	}
 }
+
+// GitHub does not list releases newest first: measured with a regular v2026.09.26.5 and a later
+// pre-release v2026.09.26.6, it returned .5 first. The newest is the highest version, whatever the order.
+func TestLatestIsTheHighestVersionNotTheFirstListed(t *testing.T) {
+	mux := http.NewServeMux()
+	var server *httptest.Server
+	entry := func(tag string, pre bool) string {
+		name := "yawble_" + strings.TrimPrefix(tag, "v") + "_linux_amd64.tar.gz"
+		return `{"tag_name":"` + tag + `","prerelease":` + map[bool]string{true: "true", false: "false"}[pre] + `,"assets":[` +
+			`{"name":"` + name + `","browser_download_url":"` + server.URL + `/dl/` + name + `"},` +
+			`{"name":"checksums.txt","browser_download_url":"` + server.URL + `/dl/checksums.txt"}]}`
+	}
+	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[" + entry("v2026.09.26.5", false) + "," + entry("v2026.09.26.10", true) + "," + entry("v2026.09.26.6", true) + "]"))
+	})
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64")
+	if err != nil || rel.Tag != "v2026.09.26.10" {
+		t.Errorf("want v2026.09.26.10 (.10 beats .9 and .6, and .5 was listed first), got %q %v", rel.Tag, err)
+	}
+}

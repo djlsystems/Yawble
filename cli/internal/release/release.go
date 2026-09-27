@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -34,13 +35,14 @@ type Release struct {
 	ChecksumsURL string
 }
 
-// Latest reads the newest release and picks this target's archive. Newest means the first of the
-// releases list, which runs newest first and includes pre-releases; GitHub's own "latest" never is
-// a pre-release, so it is not asked. A draft (listed only to the owner) is skipped. With a
+// Latest reads the newest release and picks this target's archive. Newest is the highest version
+// among the listed releases, pre-releases included: GitHub's own "latest" never is a pre-release,
+// and its list is not in release order (measured: a regular release listed before a later
+// pre-release). A draft (listed only to the owner) is skipped. With a
 // token (GH_TOKEN, only for a private fork) the request carries it and the assets are read at
 // their API URLs, the only ones a private repository serves; without one nothing changes.
 func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goarch string) (Release, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/repos/"+Repository+"/releases?per_page=20", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/repos/"+Repository+"/releases?per_page=100", nil)
 	if err != nil {
 		return Release{}, err
 	}
@@ -75,9 +77,8 @@ func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goar
 	}
 	var body listed
 	for _, r := range releases {
-		if !r.Draft {
+		if !r.Draft && (body.Tag == "" || newer(r.Tag, body.Tag)) {
 			body = r
-			break
 		}
 	}
 	if body.Tag == "" {
@@ -285,4 +286,32 @@ func extract(archive []byte, goos string) ([]byte, error) {
 			return io.ReadAll(tr)
 		}
 	}
+}
+
+// newer says whether tag a is a later release than tag b. Tags are v<yyyy.mm.dd.N>: compared part
+// by part as numbers, so .10 is after .9. A tag that is not in that form sorts before every one that is.
+func newer(a, b string) bool {
+	pa, pb := versionParts(a), versionParts(b)
+	for i := range pa {
+		if pa[i] != pb[i] {
+			return pa[i] > pb[i]
+		}
+	}
+	return false
+}
+
+func versionParts(tag string) [4]int {
+	var parts [4]int
+	fields := strings.Split(strings.TrimPrefix(tag, "v"), ".")
+	if len(fields) != 4 {
+		return [4]int{-1, -1, -1, -1}
+	}
+	for i, f := range fields {
+		n, err := strconv.Atoi(f)
+		if err != nil {
+			return [4]int{-1, -1, -1, -1}
+		}
+		parts[i] = n
+	}
+	return parts
 }

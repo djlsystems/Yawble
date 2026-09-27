@@ -43,29 +43,36 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+# newest_tag: from a releases list on stdin, the highest v<yyyy.mm.dd.N> tag, pre-releases
+# included. GitHub's own "latest" never is a pre-release, and its list is not in release order, so
+# the tags are sorted here, part by part as numbers (.10 after .9).
+newest_tag() {
+  tr ',' '\n' | sed -n 's/.*"tag_name": *"v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' \
+    | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -n 1 | sed 's/^/v/'
+}
+
 if [ -n "$token" ]; then
   # A header file, not -H "...$token": a command line is readable by every process on the machine.
   # mktemp -d made the folder 0700. Nothing here reads stdin: when piped, stdin is this script.
   ( umask 077; printf 'Authorization: Bearer %s\n' "$token" > "$tmp/auth" )
 
   if [ -n "${YAWBLE_VERSION:-}" ]; then
-    release_url="$api/repos/$repo/releases/tags/v${YAWBLE_VERSION#v}"
+    version="v${YAWBLE_VERSION#v}"
   else
-    # The newest release, pre-releases included: GitHub's "latest" never is a pre-release.
-    release_url="$api/repos/$repo/releases?per_page=1"
+    version=$(curl -fsSL -H @"$tmp/auth" -H "Accept: application/vnd.github+json" -H "User-Agent: yawble-install" \
+      "$api/repos/$repo/releases?per_page=100" | newest_tag) \
+      || { echo "yawble: could not read the releases of $repo with GH_TOKEN set (does the token have the repo scope?)" >&2; exit 1; }
+    [ -n "$version" ] || { echo "yawble: $repo has no release yet" >&2; exit 1; }
   fi
   curl -fsSL -H @"$tmp/auth" -H "Accept: application/vnd.github+json" -H "User-Agent: yawble-install" \
-    -o "$tmp/release.json" "$release_url" \
-    || { echo "yawble: could not read the release of $repo with GH_TOKEN set (does the token have the repo scope?)" >&2; exit 1; }
-  version=$(tr ',' '\n' < "$tmp/release.json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
-  [ -n "$version" ] || { echo "yawble: could not read the release of $repo" >&2; exit 1; }
+    -o "$tmp/release.json" "$api/repos/$repo/releases/tags/$version" \
+    || { echo "yawble: could not read the release $version of $repo with GH_TOKEN set (does the token have the repo scope?)" >&2; exit 1; }
 else
   if [ -n "${YAWBLE_VERSION:-}" ]; then
     # With or without the leading v; the tag has it.
     version="v${YAWBLE_VERSION#v}"
   else
-    # The newest release, pre-releases included: GitHub's "latest" never is a pre-release.
-    version=$(curl -fsSL "$api/repos/$repo/releases?per_page=1" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
+    version=$(curl -fsSL "$api/repos/$repo/releases?per_page=100" | newest_tag)
     [ -n "$version" ] || { echo "yawble: could not read the latest release of $repo (check the network connection; a private fork also needs GH_TOKEN)" >&2; exit 1; }
   fi
 fi
