@@ -23,7 +23,14 @@
   },
   "events": {
     "publishes": [
-      { "type": "done", "summary": "Text was transformed. Declared only: publishing is reserved in harness.member/1." }
+      {
+        "type": "done",
+        "summary": "Text was transformed. Published once per run that completes.",
+        "highVolume": false,
+        "fields": [
+          { "name": "length", "kind": "number", "summary": "The length of the transformed output." }
+        ]
+      }
     ]
   },
   "skills": ["skills/sample-echo.md"],

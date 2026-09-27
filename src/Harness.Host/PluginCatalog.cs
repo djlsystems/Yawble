@@ -25,7 +25,7 @@ namespace Harness.Host;
 /// A manifest that is wrong is REFUSED BY NAME, with the field, in <see cref="Refused"/> - never
 /// half-loaded.
 /// </summary>
-public sealed class PluginCatalog(string root)
+public sealed class PluginCatalog(string root) : IPluginEventRegistry
 {
     public const string ActiveFile = "active";
 
@@ -43,6 +43,17 @@ public sealed class PluginCatalog(string root)
     public IReadOnlyList<InstalledPlugin> Plugins => _scan.Plugins;
 
     public IReadOnlyList<PluginRefused> Refused => _scan.Refused;
+
+    /// <summary>
+    /// A plugin event's definition, or null: <c>plugin.&lt;id&gt;.&lt;suffix&gt;</c> where plugin
+    /// <c>&lt;id&gt;</c> is installed and its manifest declares <c>&lt;suffix&gt;</c>. Read off the
+    /// current scan on every call, so a rescan is seen at once. See <see cref="EventCatalog.For"/>.
+    /// </summary>
+    /// <remarks>EXPLICIT, so <see cref="For(string)"/> keeps answering an installed plugin by id.</remarks>
+    EventDefinition? IPluginEventRegistry.For(string type) => _scan.Events.GetValueOrDefault(type);
+
+    /// <summary>Every event the installed plugins declare.</summary>
+    public IReadOnlyList<EventDefinition> Events => [.. _scan.Events.Values];
 
     /// <summary>The installed plugin <paramref name="id"/>, or null.</summary>
     public InstalledPlugin? For(string id) =>
@@ -274,4 +285,10 @@ public sealed record InstalledPlugin(PluginManifest Manifest, string Directory, 
 /// <summary>A plugin directory that was not loaded, and why, in one sentence.</summary>
 public sealed record PluginRefused(string Id, string Path, string Reason);
 
-public sealed record PluginScan(IReadOnlyList<InstalledPlugin> Plugins, IReadOnlyList<PluginRefused> Refused);
+public sealed record PluginScan(IReadOnlyList<InstalledPlugin> Plugins, IReadOnlyList<PluginRefused> Refused)
+{
+    /// <summary>Every event the plugins declare, by full type.</summary>
+    public IReadOnlyDictionary<string, EventDefinition> Events { get; } = Plugins
+        .SelectMany(p => p.Manifest.Publishes.Select(e => e.Definition(p.Manifest.Id)))
+        .ToDictionary(e => e.Type, StringComparer.Ordinal);
+}

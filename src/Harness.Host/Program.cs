@@ -449,6 +449,11 @@ var pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"));
 PluginEndpoints.Report(pluginCatalog.Rescan(), Console.Out);
 builder.Services.AddSingleton(pluginCatalog);
 
+// THE EVENTS THE INSTALLED PLUGINS DECLARE join the platform's in every lookup - triggers, filters,
+// `{event.*}` tokens, the high-volume rule, `GET /api/events` - read off the catalog on each call,
+// so a rescan is seen at once. Released when this Host stops.
+var pluginEvents = EventCatalog.Register(pluginCatalog);
+
 // A PLUGIN MEMBER'S SETTINGS: configuration and secret BINDINGS in `team_member_config`, and the values
 // resolved by logical key from the Host's own environment at each run - where `secret set` values
 // already arrive. Swapping the resolver for an encrypted store later changes nothing else.
@@ -1140,6 +1145,7 @@ builder.Services.AddMcpServer()
     .WithTools<PlatformMcpTools>();
 
 var app = builder.Build();
+app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
 
 {
     var runAs = app.Services.GetRequiredService<AgentLaunchUser>();
@@ -1976,11 +1982,13 @@ app.MapGet("/api/teams", async (
         + "A team carries two names: `name` is what a person reads, `id` is what routes use. This "
         + "route returns both.");
 
-app.MapGet("/api/events", () => Results.Ok(EventCatalog.All))
+app.MapGet("/api/events", () => Results.Ok(EventCatalog.WithPlugins()))
     .WithSummary("Every event type this platform can publish.")
     .WithDescription(
         "The catalog a trigger picker is built from. It describes the platform rather than any "
-        + "team's data, which is why it needs no permit and declares no {team}.")
+        + "team's data, which is why it needs no permit and declares no {team}. After the "
+        + "platform's own types come those the installed plugins declare, `plugin.<id>.<suffix>`, "
+        + "with `publisher` `Plugin`.")
     .NoPermitRequired();
 
 // `name` here is what a PERSON typed - free text, spaces and accents included. The identifier
@@ -2768,7 +2776,7 @@ app.MapPost("/api/teams/{team}/triggers", async (
         var subscriber = await teams.MemberAsync(stored, container, ct);
 
         if (catalog.For(subscriber.Agent) is { LanguageModel: true }
-            && EventCatalog.HighVolumeTypes.Contains(request.EventType))
+            && EventCatalog.IsHighVolume(request.EventType))
         {
             return Results.BadRequest(
                 new { error = TeamRegistry.FirehoseRefusal(request.EventType, subscriber.Agent) });
@@ -2995,7 +3003,7 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
         var subscriber = await teams.MemberAsync(stored, candidate.Container, ct);
 
         if (catalog.For(subscriber.Agent) is { LanguageModel: true }
-            && EventCatalog.HighVolumeTypes.Contains(candidate.EventType))
+            && EventCatalog.IsHighVolume(candidate.EventType))
         {
             return Results.BadRequest(
                 new { error = TeamRegistry.FirehoseRefusal(candidate.EventType, subscriber.Agent) });
@@ -6962,7 +6970,7 @@ public partial class Program
             .SelectMany(t => t.Containers.Select(c => (Team: t.Name, Container: c)))
             .Where(entry => byName.GetValueOrDefault(entry.Container.Agent) is { Launch.LanguageModel: true })
             .SelectMany(entry => entry.Container.Subscribes
-                .Where(EventCatalog.HighVolumeTypes.Contains)
+                .Where(EventCatalog.IsHighVolume)
                 .Select(type => (entry.Team, entry.Container, Type: type)))
             .OrderBy(entry => entry.Team, StringComparer.OrdinalIgnoreCase)
             .ThenBy(entry => entry.Container.Name, StringComparer.OrdinalIgnoreCase)

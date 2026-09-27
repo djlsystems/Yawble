@@ -318,7 +318,7 @@ public sealed class TeamRestorationFailedException(string team, Exception inner)
 
 /// <summary>
 /// A container whose Agent is a LANGUAGE MODEL tried to hold a subscription that is published once
-/// per status line rather than once per run - see <see cref="EventCatalog.HighVolumeTypes"/> and
+/// per status line rather than once per run - see <see cref="EventCatalog.IsHighVolume"/> and
 /// <see cref="TeamRegistry.FirehoseRefusal"/> for the reasoning and the exact wording.
 ///
 /// Its own type rather than a bare <see cref="ArgumentException"/>, matching every other refusal
@@ -2469,7 +2469,7 @@ public sealed class TeamRegistry(
 
     /// <summary>
     /// <see cref="ManagerSubscriptions"/>, exposed ONLY so a test can assert the seeded Manager
-    /// never holds a <see cref="EventCatalog.HighVolumeTypes"/> entry - the one subscription set
+    /// never holds a <see cref="EventCatalog.IsHighVolume"/> entry - the one subscription set
     /// this platform writes for itself, and the one the firehose rule would be most embarrassing to
     /// break. Forwards to the private list rather than the test holding a second copy of it: two
     /// stores of one fact is how they drift.
@@ -2573,7 +2573,7 @@ public sealed class TeamRegistry(
         {
             foreach (var type in subscribes)
             {
-                if (EventCatalog.HighVolumeTypes.Contains(type))
+                if (EventCatalog.IsHighVolume(type))
                 {
                     throw new FirehoseSubscriptionException(type, agent);
                 }
@@ -2866,7 +2866,7 @@ public sealed class TeamRegistry(
 
         // A REPOINT CAN MAKE A LEGAL PAIR ILLEGAL, which `AddContainerAsync`'s check cannot see: the
         // subscription was written when the member ran a program, and nothing looks at it again.
-        // One of four sites that must agree - see `EventCatalog.HighVolumeTypes` and
+        // One of four sites that must agree - see `EventCatalog.IsHighVolume` and
         // `TeamRegistry.FirehoseRefusal`.
         //
         // Gated on `repointed` DELIBERATELY: the stored pair is not guaranteed to have been legal
@@ -2888,7 +2888,7 @@ public sealed class TeamRegistry(
 
             foreach (var type in holds)
             {
-                if (EventCatalog.HighVolumeTypes.Contains(type))
+                if (EventCatalog.IsHighVolume(type))
                 {
                     throw new FirehoseSubscriptionException(type, newAgent);
                 }
