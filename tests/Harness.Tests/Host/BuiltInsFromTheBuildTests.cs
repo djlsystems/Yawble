@@ -163,6 +163,56 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.Contains("manager role", await refused.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The authoring-plugins skill is for designing a plugin and writing its spec, which the Concierge
+    /// and the Manager do; a Member building one reads the repository's docs instead.
+    /// </summary>
+    [Fact]
+    public async Task The_plugin_authoring_skill_is_offered_to_the_concierge_and_manager_and_refused_to_a_member()
+    {
+        const string Name = "authoring-plugins";
+        var skill = BuiltInSkills.Find(Name)!;
+        Assert.Equal([SkillRoles.Concierge, SkillRoles.Manager], skill.Roles);
+
+        // `plugin-` is the namespace plugin skills are forced into; a built-in there could collide
+        // with an installed plugin's skill (a plugin with id `authoring` would ship `plugin-authoring`).
+        Assert.DoesNotContain(BuiltInSkills.All, s => s.Name.StartsWith("plugin-", StringComparison.Ordinal));
+
+        var principals = host.Services.GetRequiredService<IPrincipalStore>();
+        var person = await host.Services.GetRequiredService<IUserStore>().FindAsync("person@example.test", Ct);
+        var conciergeKey = await principals.MintAsync(
+            ConciergeLaunchFactory.PrincipalId(person!.Id), PrincipalKind.TenantConcierge, null,
+            ConciergeLaunchFactory.ConciergePermits, ownerUserId: person.Id, ct: Ct);
+        var managerKey = await principals.MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+
+        foreach (var key in new[] { conciergeKey, managerKey })
+        {
+            using var caller = host.Container(key);
+
+            var got = await caller.GetAsync($"/api/me/skills/{Name}", Ct);
+            Assert.Equal(HttpStatusCode.OK, got.StatusCode);
+
+            var found = await caller.GetFromJsonAsync<JsonElement[]>("/api/me/skills?q=plugin", Ct);
+            Assert.Contains(Name, found!.Select(r => r.GetProperty("name").GetString()));
+        }
+
+        using var member = host.Container(host.AlphaContainerKey);
+        var refused = await member.GetAsync($"/api/me/skills/{Name}", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Contains("not offered to the member role", await refused.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+
+        var searched = await member.GetFromJsonAsync<JsonElement[]>("/api/me/skills?q=plugin", Ct);
+        Assert.DoesNotContain(Name, searched!.Select(r => r.GetProperty("name").GetString()));
+
+        // Listed in the Manager's prompt by name and description, never by body.
+        var manager = Container(host.Alpha, TeamRegistry.DefaultManagerName).SystemPrompt;
+        Assert.Contains($"- `{Name}` - {skill.Description}", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("## 8. The house rule for plugins that act outward", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain($"- `{Name}` - ", await NewMemberPromptAsync("Plumber", "Fixes pipes."), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_custom_member_skill_is_found_by_search_and_listed_in_a_new_members_prompt()
     {
