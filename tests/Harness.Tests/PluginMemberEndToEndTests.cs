@@ -333,6 +333,39 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
             m => m.Source == Echo.ToString());
     }
 
+    /// <summary>
+    /// E1 (part 1 live test): a workflow a person starts by telling a plugin directly is the
+    /// plugin's to declare, and a plugin holds no credential to declare with - so it stayed open
+    /// forever, and the Manager was refused. The platform now declares it on the owner's behalf
+    /// when a run in it ends successfully and nothing is left working it. No agent is involved:
+    /// the declaration is written before the Manager is even woken by the plugin's result.
+    /// </summary>
+    [Fact]
+    public async Task E1_A_workflow_a_person_starts_by_telling_a_plugin_ends_completed()
+    {
+        var log = Services.GetRequiredService<IMessageLog>();
+        var row = await TellAndAwaitAsync(Echo, "abc");
+        Assert.Equal(MessageTypes.Completed, row.Type);
+        var correlation = row.CorrelationId;
+
+        Message? declared = null;
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (declared is null && DateTime.UtcNow < deadline)
+        {
+            declared = (await log.ReadCorrelationAsync(correlation, Ct)).FirstOrDefault(m => m.Type == MessageTypes.WorkflowCompleted);
+            if (declared is null) await Task.Delay(50, Ct);
+        }
+
+        Assert.NotNull(declared);
+        Assert.Equal(Echo.ToString(), declared.Source);
+        Assert.True(Payload(declared).GetProperty(UndeclarableWorkflows.DeclaredByPlatformField).GetBoolean());
+        Assert.Empty(await log.OpenWorkflowsAmongAsync([correlation], Ct));
+
+        // NO AGENT DECLARED IT: nothing the Manager did under this workflow comes before it.
+        var thread = await log.ReadCorrelationAsync(correlation, Ct);
+        Assert.DoesNotContain(thread, m => m.Seq < declared.Seq && m.Source == Manager.ToString());
+    }
+
     [Fact]
     public async Task A_plugin_failure_is_a_failed_run_with_the_plugins_own_words()
     {

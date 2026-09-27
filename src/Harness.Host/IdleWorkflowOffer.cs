@@ -432,7 +432,14 @@ public sealed class IdleWorkflowOffer(
     /// eventually see delivered.
     /// </para>
     /// </summary>
-    private async Task<bool> UndeliveredAsync(
+    private Task<bool> UndeliveredAsync(
+        string team, IReadOnlyList<Message> thread, CancellationToken ct) =>
+        UndeliveredAsync(host, subscriptions, cursors, diagnostics, team, thread, ct);
+
+    /// <summary>The same question for a caller holding its own collaborators -
+    /// <see cref="UndeclarableWorkflows"/> asks it at the same moment, for the same reason.</summary>
+    internal static async Task<bool> UndeliveredAsync(
+        ContainerHost host, ISubscriptions subscriptions, ICursors cursors, ILogger? diagnostics,
         string team, IReadOnlyList<Message> thread, CancellationToken ct)
     {
         foreach (var snapshot in host.Snapshots().Where(s =>

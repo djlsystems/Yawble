@@ -663,6 +663,12 @@ builder.Services.AddSingleton(sp => new ContainerHost(
 
         await sp.GetRequiredService<IdleWorkflowOffer>()
             .OnRunEndingAsync(member, causation, succeeded, ct);
+
+        // A WORKFLOW ITS OWNER CANNOT DECLARE - a person told a plugin member directly - is
+        // declared by the platform when nothing is left working it. The offer above goes only to
+        // an owner that CAN declare, so at most one of the two acts. See `UndeclarableWorkflows`.
+        await sp.GetRequiredService<UndeclarableWorkflows>()
+            .OnRunEndingAsync(member, causation, succeeded, ct);
     }));
 // A container's credential and its environment, in one place - see AgentEnvironment for why those
 // two belong together rather than either side of the registry.
@@ -1051,6 +1057,7 @@ builder.Services.AddSingleton(sp => new IdleWorkflowOffer(
     // about a configured 0 and could not see a team's own per-workflow figure, so both ask
     // `TeamRegistry.EffectiveWorkflowBudgetFor`, which is the one place that resolves it.
     sp.GetRequiredService<ILogger<IdleWorkflowOffer>>()));
+builder.Services.AddSingleton<UndeclarableWorkflows>();
 if (resumeSweepEnabled)
 {
     builder.Services.AddSingleton<IHostedService>(sp => new ResumeRunner(
@@ -5545,44 +5552,15 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
     await publisher.PublishAsync(
         stored, teams.ReposFor(stored), container.Id, container.CurrentCausation, ct);
 
-    // Which cards' trees this declaration settles, read BEFORE the row below moves every
-    // card to Done - a loose end the declaration `dropped` is still open work, and keeps its tree.
-    var settledKeys = await WorktreeRemoval.SettledKeysAsync(kanban, stored, correlation, container.Id.Name);
-
-    var declaration = await log.AppendAsync(
-        new NewMessage(
-            MessageTypes.WorkflowCompleted,
-            JsonSerializer.Serialize(looseEnds.Count == 0
-                ? new { delivered = request.Delivered.Trim(), dropped = (string?)null, looseEnds = (IReadOnlyList<string>?)null }
-                : new { delivered = request.Delivered.Trim(), dropped, looseEnds = (IReadOnlyList<string>?)looseEnds }),
-            container.Id.ToString(),
-            container.CurrentCausation),
-        ct);
-
-    // A COMPLETED WORKFLOW MOVES ITS BACKLOG ITEM TO `declared`, ONCE - a Manager's CLAIM, not a
-    // landing. The rule, and why it is a method rather than four lines here, are on
-    // BacklogExecutionRecord.OnWorkflowCompletedAsync.
-    //
-    // THE SNAPSHOTS ARE READ HERE AND NOW, after the busy check above, so the guard inside sees the
-    // team as it is at the instant of the declaration.
-    await BacklogExecutionRecord.OnWorkflowCompletedAsync(
-        declaration.CorrelationId, backlog, log, host.Snapshots(), ct);
-
-    // THE SETTLED CARDS' TREES GO, for every member and every repository - after the
-    // publish above put their branches on origin, and never forced: a tree that refuses stays on
-    // disk and is named on the team feed. Nothing here can undo the declaration, so a failure is
-    // logged rather than returned.
-    try
-    {
-        await worktrees.RemoveKeysAsync(
-            paths, stored, teams.ReposFor(stored), settledKeys, container.CurrentCausation, ct);
-    }
-    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-        or InvalidOperationException or System.ComponentModel.Win32Exception or OperationCanceledException)
-    {
-        loggers.CreateLogger("WorktreeRemoval").LogWarning(
-            ex, "Removing the settled worktrees of workflow {Correlation} on {Team} failed.", correlation, stored);
-    }
+    // THE ROW, ITS BACKLOG ITEM AND ITS SETTLED TREES: one sequence, shared with the platform's
+    // declaration for a member that cannot declare (`UndeclarableWorkflows`).
+    await WorkflowDeclaration.AppendAsync(
+        stored, correlation, container.Id, container.CurrentCausation,
+        JsonSerializer.Serialize(looseEnds.Count == 0
+            ? new { delivered = request.Delivered.Trim(), dropped = (string?)null, looseEnds = (IReadOnlyList<string>?)null }
+            : new { delivered = request.Delivered.Trim(), dropped, looseEnds = (IReadOnlyList<string>?)looseEnds }),
+        log, backlog, host, kanban, worktrees, paths, teams.ReposFor(stored),
+        loggers.CreateLogger("WorktreeRemoval"), ct);
 
     return Results.NoContent();
 })
