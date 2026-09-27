@@ -306,6 +306,78 @@ public sealed class PluginMemberRunnerTests : IDisposable
         Assert.Equal("token: [redacted]", member.Snapshot().Failed);
     }
 
+    private static Settings TwoTokens() => new(new PluginMemberSettings(
+        new Dictionary<string, JsonElement>(),
+        new Dictionary<string, string> { ["a"] = "FIXTURE_A", ["b"] = "FIXTURE_B" }));
+
+    /// <summary>A1 (R2-1): when one bound value is a prefix of another, the longer is replaced
+    /// first, so no tail of it survives - in a report record and in the result alike.</summary>
+    [Fact]
+    public async Task Overlapping_secrets_are_redacted_longest_first()
+    {
+        var (bed, member, row) = await RunAsync(
+            """
+            cat >/dev/null
+            echo '{"t":"handback","delivered":"x abcd1234WXYZ y"}'
+            echo '{"t":"result","ok":true,"output":"abcd1234WXYZ"}'
+            """,
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"a":{"required":true},"b":{"required":true}}"""),
+            settings: TwoTokens(),
+            secrets: new Secrets(new() { ["FIXTURE_A"] = "abcd1234", ["FIXTURE_B"] = "abcd1234WXYZ" }));
+        await using var _ = bed;
+
+        Assert.Equal("x [redacted] y", member.Snapshot().HandedBack);
+        Assert.Equal("[redacted]", Output(row));
+        Assert.DoesNotContain(await bed.Store.ReadAfterAsync(0, [MessageTypes.Handback, MessageTypes.Completed], int.MaxValue, Ct),
+            r => r.Payload.Contains("WXYZ", StringComparison.Ordinal));
+    }
+
+    /// <summary>A2 (R2-2): a raw line keeps a value as the plugin serialised it, and the default
+    /// JSON encoder writes <c>+</c> as <c>\u002B</c> - that form is redacted too.</summary>
+    [Fact]
+    public async Task A_secret_json_escaped_in_a_raw_line_is_redacted()
+    {
+        var (bed, _, row) = await RunAsync(
+            """
+            cat >/dev/null
+            cat <<'EOF'
+            {"t":"note","v":"tok\u002Ben-value"}
+            plain tok+en-value
+            EOF
+            echo '{"t":"result","ok":true,"output":"done"}'
+            """,
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}"""),
+            settings: new Settings(new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "tok+en-value" }));
+        await using var _ = bed;
+
+        var output = Output(row);
+        Assert.Contains("""{"t":"note","v":"[redacted]"}""", output);
+        Assert.Contains("plain [redacted]", output);
+        Assert.DoesNotContain("en-value", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>E4: a value written in another case - an <c>upper</c> transform - is still matched.</summary>
+    [Fact]
+    public async Task A_secret_is_redacted_whatever_its_case()
+    {
+        var (bed, member, row) = await RunAsync(
+            """
+            cat >/dev/null
+            echo '{"t":"progress","status":"sent Demo-Token-2026"}'
+            echo '{"t":"result","ok":true,"output":"DEMO-TOKEN-2026"}'
+            """,
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}"""),
+            settings: new Settings(new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "demo-token-2026" }));
+        await using var _ = bed;
+
+        Assert.Equal("[redacted]", Output(row));
+        Assert.Equal("""{"status":"sent [redacted]"}""", Assert.Single(await bed.OfTypeAsync(MessageTypes.Progress)).Payload);
+    }
+
     [Fact]
     public async Task A_secret_too_short_to_redact_is_refused_before_launch()
     {
