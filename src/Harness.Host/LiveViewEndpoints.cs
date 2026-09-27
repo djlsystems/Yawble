@@ -49,11 +49,15 @@ public static class LiveViewEndpoints
             .WithDescription(
                 "This member's finished runs that recorded the agent's own transcript, newest first, "
                 + $"{RunsPage} at a time: `{{ \"runs\": [ {{ \"seq\", \"workflow\", \"startedAt\", "
-                + "\"endedAt\", \"durationMs\", \"outcome\" } ], \"nextBefore\" }`. `seq` is the run's "
+                + "\"endedAt\", \"durationMs\", \"outcome\", \"output\" } ], \"nextBefore\" }`. `seq` is the run's "
                 + "terminal row, `workflow` its correlation, `outcome` one of `completed`, "
                 + "`handedBack`, `blocked` and `failed`. `startedAt` and `durationMs` are null when the "
                 + "run's start is not in the log. Pass `nextBefore` as `before` for the next page; it "
                 + "is null on the last.\n\n"
+                + "A PLUGIN member (`kind: plugin`) records no transcript, so every one of its finished "
+                + "runs is listed, one per run, and `output` is what the run reported: its result "
+                + "output, or for a failure the launch error or output. `output` is null for an agent "
+                + "member's runs; read the transcript instead.\n\n"
                 + "Runs from before transcripts were recorded are not listed.\n\n"
                 + "Writes nothing.\n\n"
                 + "**A person's action; no machine principal.**");
@@ -156,8 +160,12 @@ public static class LiveViewEndpoints
     {
         if (await FindMemberAsync(teams, team, member, ct) is not { } found) return NoMember(team, member);
 
+        // A plugin's run has no transcript to open, so its runs are read whole and carry their output.
+        var plugin = MemberRef.IsPlugin(found.Agent);
+
         var page = await log.ReadRunsAsync(
-            new ContainerId(found.Team, found.Name), found.FloorSeq, before ?? long.MaxValue, RunsPage + 1, ct);
+            new ContainerId(found.Team, found.Name), found.FloorSeq, before ?? long.MaxValue, RunsPage + 1,
+            plugin ? RunsWith.AnyRun : RunsWith.Transcript, ct);
 
         var runs = page.Take(RunsPage).Select(run => new
         {
@@ -169,6 +177,7 @@ public static class LiveViewEndpoints
                 ? (long?)(run.Terminal.OccurredAt - started).TotalMilliseconds
                 : null,
             outcome = Outcome(run),
+            output = plugin ? RunOutput(run.Terminal.Payload) : null,
         }).ToList();
 
         return Results.Ok(new
@@ -244,6 +253,13 @@ public static class LiveViewEndpoints
 
     private static IResult NoMember(string team, string member) =>
         Results.NotFound(new { error = $"No member '{member}' in team '{team}'." });
+
+    /// <summary>What a run reported: a launch error first, as the failure row's own text reads it, then its output.</summary>
+    private static string? RunOutput(string payload)
+    {
+        using var document = JsonDocument.Parse(payload);
+        return FailurePayloadText.FirstNonEmpty(document.RootElement, PayloadFields.LaunchError, PayloadFields.Output);
+    }
 
     private static string? Field(string payload, string name)
     {

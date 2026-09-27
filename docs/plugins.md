@@ -113,7 +113,22 @@ Content-Type: application/json
   - Repointing a member between an Agent and a plugin. Hire a new member instead: an agent member's
     credential and environment must not survive into a plugin member.
 
-The *Add member* dialog does not offer plugins yet. Hire them through the route above.
+### In the web UI
+
+- **Add member.** The dialog offers each installed plugin (from `GET /api/plugins`) after the Agent
+  presets. Choosing one shows its manifest's `config` fields as inputs, prefilled with their
+  defaults, and each of its `secrets` by name: what a person types there is the logical key, never a
+  value. The hire goes through the route above. An empty optional field or an unnamed optional
+  secret is left out of the request.
+- **Member card.** A `kind: plugin` card shows no live view, no tokens and no spend. It names the
+  plugin instead of an Agent and words its failures without provider or spend terms. Its history
+  button lists its earlier runs, and each run opens to what it reported.
+- **Earlier runs.** `GET /api/teams/{team}/members/{member}/runs` lists every finished run of a plugin
+  member, one per run (not one per batched message), newest first. Each run carries `output`: its
+  result output, or a failure's launch error. The plugin's own failure sentence is on the card's
+  failed mark, not on the run's row. There is no transcript, so `runs/{seq}/transcript` answers 404.
+- **Team KPI card.** On a team whose every member is a plugin, the Tokens tile reads `none` with no
+  advice about usage capture, and the workflow tile draws no budget line or bar.
 
 ## Manifest v1 (`plugin.json`)
 
@@ -356,6 +371,9 @@ leaves the workflow open for a person. An agent owner is unchanged: it declares 
 - **Plugins run as `agent`.** `PluginLaunchUserTests` launches a plugin through a real user switch
   and checks it runs as `agent` and reads its `0750` directory. Where the process cannot switch
   users it skips, naming why; the release suite runs it as root in the product image.
+- **The web UI and the runs route.** `PluginMemberRunsTests` (runs listed with their output, one per
+  run), and the web mount specs `add-member-plugin`, `container-card-plugin` and
+  `team-kpi-plugin-only`.
 - **The pieces.** `PluginMemberRunnerTests` (protocol), `PluginCatalogTests` (manifest v1),
   `PluginMemberRegistryTests` (hire, restore, repoint), `ChildProcessTests` (the shared launcher)
   and `MemberReportsTests` (the shared report path).

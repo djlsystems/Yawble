@@ -47,7 +47,12 @@ export function resumesAutomatically(failureClass: string | null | undefined): b
  * NULL IS THE LOAD-BEARING ANSWER: every caller renders nothing at all for it, which is how rows
  * without a class keep their meaning.
  */
-export function failureClassWords(failureClass: string | null | undefined): string | null {
+export function failureClassWords(
+  failureClass: string | null | undefined,
+  kind?: 'agent' | 'plugin',
+): string | null {
+  if (kind === 'plugin') return pluginFailureWords(failureClass)
+
   switch (failureClass) {
     case FailureClasses.Quota:
       return 'the provider says a budget is spent, so nothing is wrong with this run'
@@ -69,12 +74,44 @@ export function failureClassWords(failureClass: string | null | undefined): stri
 }
 
 /**
+ * THE SAME CLASSES, SAID OF A PLUGIN. A plugin runs no model and reports no usage, so it has no
+ * provider to blame and no spend to repeat: the provider and spend words above would send a person
+ * looking for a bill that does not exist. A class this build does not know is `null`, as above.
+ */
+function pluginFailureWords(failureClass: string | null | undefined): string | null {
+  switch (failureClass) {
+    case FailureClasses.Quota:
+      return 'a limit the plugin depends on is used up'
+    case FailureClasses.Rate:
+      return 'the plugin was refused for sending too much too fast'
+    case FailureClasses.Transport:
+      return 'the network failed, so how far this run got is not known'
+    case FailureClasses.AgentFault:
+      return 'the plugin itself failed, so re-running it would likely fail the same way'
+    case FailureClasses.Timeout:
+      return 'the idle clock fired'
+    case FailureClasses.Interrupted:
+      return 'the run was cut off before it finished'
+    case FailureClasses.Unknown:
+      return 'nothing could say why, so this is not resumed'
+    default:
+      return null
+  }
+}
+
+/**
  * A short badge label for the class — `quota`, `rate`, and so on — or `null` when there is nothing
  * to badge. The bare value, because the server's spelling already reads as a label and inventing a
  * prettier one is a second store of the same word.
  */
-export function failureClassLabel(failureClass: string | null | undefined): string | null {
-  return failureClassWords(failureClass) === null ? null : (failureClass as string)
+export function failureClassLabel(
+  failureClass: string | null | undefined,
+  kind?: 'agent' | 'plugin',
+): string | null {
+  if (failureClassWords(failureClass, kind) === null) return null
+
+  // A plugin is not an agent: its own fault is badged as the plugin's.
+  return kind === 'plugin' && failureClass === FailureClasses.AgentFault ? 'plugin-fault' : (failureClass as string)
 }
 
 /**

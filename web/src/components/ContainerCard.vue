@@ -57,6 +57,20 @@ watch(triggersOpen, (showing) => {
 const running = computed(() => props.snapshot.state === 'Running');
 
 /**
+ * A PLUGIN MEMBER runs no model: it has no tokens, no spend and no transcript to watch. Its card
+ * shows no eye and says its failures without provider or spend words; its earlier runs, each with
+ * what it reported, open from a history button instead. Absent `kind` is an agent, from an older Host.
+ */
+const isPlugin = computed(() => props.snapshot.kind === 'plugin');
+
+/** What this member runs, as the card's second line names it: the plugin id, or the Agent. */
+const runsWhat = computed(() =>
+  isPlugin.value
+    ? { word: 'plugin', name: props.snapshot.agent.replace(/^plugin:/, '') }
+    : { word: 'agent', name: props.snapshot.agent },
+);
+
+/**
  * The way into `LiveViewDialog`, offered whenever the member is `watchable`, running
  * or idle: the dialog shows the run in flight, or "Not running", above the member's earlier runs.
  * It is left open when the run ends, because it says so itself and keeps the lines; closing it is
@@ -157,6 +171,7 @@ async function stop() {
     :member="snapshot.id"
     :name="snapshot.name"
     :running="running"
+    :plugin="isPlugin"
   />
 
   <q-card flat bordered class="container-window">
@@ -190,7 +205,7 @@ async function stop() {
              still there to read. A member whose agent has no live view shows none, rather than an
              eye that opens onto "no live view". -->
         <q-btn
-          v-if="snapshot.watchable"
+          v-if="snapshot.watchable && !isPlugin"
           flat
           dense
           round
@@ -200,6 +215,19 @@ async function stop() {
           @click="watchOpen = true"
         >
           <q-tooltip>{{ running ? 'Watch this run and earlier ones' : 'Earlier runs' }}</q-tooltip>
+        </q-btn>
+        <!-- A PLUGIN HAS NO LIVE VIEW, but it has earlier runs, each with what it reported. -->
+        <q-btn
+          v-if="isPlugin"
+          flat
+          dense
+          round
+          size="sm"
+          icon="history"
+          aria-label="Earlier runs"
+          @click="watchOpen = true"
+        >
+          <q-tooltip>Earlier runs</q-tooltip>
         </q-btn>
 
         <template v-if="running">
@@ -262,7 +290,7 @@ async function stop() {
       <div v-if="stopError" class="os-body text-warning q-mt-xs">{{ stopError }}</div>
 
       <div class="text-caption os-text-muted q-mt-xs">
-        agent <span class="mono text-weight-medium">{{ snapshot.agent }}</span>
+        {{ runsWhat.word }} <span class="mono text-weight-medium">{{ runsWhat.name }}</span>
         · queue
         <span :class="atCeiling ? 'text-warning text-weight-bold' : 'text-weight-medium'">
           <span class="mono">{{ snapshot.queueDepth }}/{{ snapshot.ceiling }}</span>
@@ -337,17 +365,17 @@ async function stop() {
       <div v-if="mark?.kind === 'failed'" class="q-mt-xs">
         <q-badge color="negative" label="run failed" />
         <q-badge
-          v-if="failureClassLabel(mark.failureClass) !== null"
+          v-if="failureClassLabel(mark.failureClass, snapshot.kind) !== null"
           color="grey-8"
           class="q-ml-xs"
-          :label="failureClassLabel(mark.failureClass) ?? ''"
+          :label="failureClassLabel(mark.failureClass, snapshot.kind) ?? ''"
         />
         <div class="text-caption os-text-muted q-mt-xs">{{ mark.reason }}</div>
         <div
-          v-if="failureClassWords(mark.failureClass) !== null"
+          v-if="failureClassWords(mark.failureClass, snapshot.kind) !== null"
           class="text-caption os-text-muted q-mt-xs"
         >
-          {{ failureClassWords(mark.failureClass) }}
+          {{ failureClassWords(mark.failureClass, snapshot.kind) }}
         </div>
 
         <!-- THE PLATFORM IS GOING TO SPEND MONEY, AND SAYS SO BEFORE IT DOES. Visible is a

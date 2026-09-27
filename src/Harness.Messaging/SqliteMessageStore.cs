@@ -350,7 +350,11 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     }
 
     public async Task<IReadOnlyList<RunRow>> ReadRunsAsync(
-        ContainerId container, long sinceSeq, long beforeSeq, int max, CancellationToken ct = default)
+        ContainerId container, long sinceSeq, long beforeSeq, int max, CancellationToken ct = default) =>
+        await ReadRunsAsync(container, sinceSeq, beforeSeq, max, RunsWith.Transcript, ct);
+
+    public async Task<IReadOnlyList<RunRow>> ReadRunsAsync(
+        ContainerId container, long sinceSeq, long beforeSeq, int max, RunsWith which, CancellationToken ct = default)
     {
         if (max <= 0) return [];
 
@@ -376,7 +380,9 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
              WHERE t.seq > $since AND t.seq < $before
                AND t.source = $source COLLATE NOCASE
                AND t.type IN ($completed, $failed)
-               AND json_extract(t.payload, '$.{PayloadFields.AgentTranscript}') IS NOT NULL
+               AND {(which == RunsWith.Transcript
+                   ? $"json_extract(t.payload, '$.{PayloadFields.AgentTranscript}') IS NOT NULL"
+                   : $"json_extract(t.payload, '$.{PayloadFields.UsageCountedOn}') IS NULL")}
              ORDER BY t.seq DESC
              LIMIT $max
              """;

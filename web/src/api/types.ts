@@ -2084,10 +2084,55 @@ export interface MemberRun {
   endedAt: string
   durationMs: number | null
   outcome: RunOutcome
+  /**
+   * What the run reported, for a PLUGIN member's run: its output, or a failure's launch error. A
+   * plugin run has no transcript to open, so this is its record. Null for an agent member's runs,
+   * and absent from an older Host.
+   */
+  output?: string | null
 }
 
 /** One page of `GET .../runs`: newest first, and the cursor for the next older page or null. */
 export interface MemberRunsPage {
   runs: MemberRun[]
   nextBefore: number | null
+}
+
+/** One configuration field a plugin's manifest declares, as `GET /api/plugins` lists it. */
+export interface PluginConfigField {
+  type: 'string' | 'number' | 'bool'
+  description?: string | null
+  required: boolean
+  default?: string | number | boolean | null
+  enum?: string[] | null
+}
+
+/** One secret a plugin's manifest names. Its NAME only: no route ever carries a value. */
+export interface PluginSecretField {
+  description?: string | null
+  required: boolean
+}
+
+/** An installed plugin a person can hire, as `GET /api/plugins` lists it. */
+export interface InstalledPlugin {
+  id: string
+  /** `plugin:<id>`: what a member hired on it names as its Agent. */
+  reference: string
+  name: string
+  description: string
+  version: string
+  config: Record<string, PluginConfigField>
+  secrets: Record<string, PluginSecretField>
+}
+
+/** `GET /api/plugins`: the installed plugins, and the directories that were not loaded. */
+export interface PluginList {
+  plugins: InstalledPlugin[]
+  refused: { id: string; reason: string }[]
+}
+
+/** A plugin member's settings on hire: config values, and each secret bound to a LOGICAL KEY. */
+export interface PluginHire {
+  config: Record<string, string | number | boolean>
+  secrets: Record<string, string>
 }

@@ -1,14 +1,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { addMember, listCatalog } from '../api/client';
-import { agentsForMode, type Agent } from '../api/types';
+import { addMember, listCatalog, listPlugins } from '../api/client';
+import { agentsForMode, type Agent, type InstalledPlugin } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
 import { useAgentInstallations } from '../lib/useAgentInstallations';
 import { MAXIMUM_LABEL_LENGTH, memberName, required } from '../lib/rules';
 import { passes, refusalStatus, submitOnEnter } from '../lib/forms';
 import type { TeamId } from '../api/types';
+import {
+  initialConfig,
+  initialSecrets,
+  missingRequired,
+  pluginHire,
+  type PluginFieldValues,
+} from '../lib/pluginHire';
 
 /**
  * Adds a member to a team.
@@ -24,6 +31,12 @@ import type { TeamId } from '../api/types';
  *
  * Nor is there a prompt: a member is told the built-in Member prompt, chosen by role, plus the team's
  * Additional instructions.
+ *
+ * INSTALLED PLUGINS ARE OFFERED BESIDE THE PRESETS, by their `plugin:<id>` reference, from
+ * `GET /api/plugins`. Choosing one shows its manifest's config fields as inputs and its secrets BY
+ * NAME: what a person types for a secret is the LOGICAL KEY set with `secret set`, never a value, and
+ * no route ever answers one. The hire goes through the same route as an Agent's. A person may name
+ * any installed plugin, as they may name any preset; the team's allowlist bounds machine callers.
  */
 const emit = defineEmits<{ added: [] }>();
 
@@ -52,7 +65,10 @@ const valid = computed(
   () =>
     passes(name.value, nameRules) &&
     passes(agent.value, agentRules) &&
-    allowlistIncludes(props.memberAgents, agent.value ?? ''),
+    (plugin.value
+      // The server refuses every hire on a team with an empty allowlist, a plugin's included.
+      ? normalizeAllowlist(props.memberAgents).length > 0 && pluginMissing.value.length === 0
+      : allowlistIncludes(props.memberAgents, agent.value ?? '')),
 );
 
 /**
@@ -74,6 +90,43 @@ const agent = ref<string | null>(null);
 /** The full preset objects behind `agents` above - kept so a picker can show what it needs to,
  *  which a plain name list cannot. */
 const presets = ref<Agent[]>([]);
+
+/** The installed plugins, offered after the presets. Empty when none is installed or the list failed. */
+const plugins = ref<InstalledPlugin[]>([]);
+
+/** The plugin chosen, when the choice is a plugin's reference; null for an Agent. */
+const plugin = computed(() => plugins.value.find((entry) => entry.reference === agent.value) ?? null);
+
+/** Presets first, as before, then each installed plugin by reference. */
+const options = computed(() => [...agents.value, ...plugins.value.map((entry) => entry.reference)]);
+
+/** A plugin reads by its name in the picker; a preset by its own. */
+function optionLabel(option: string) {
+  const entry = plugins.value.find((candidate) => candidate.reference === option);
+  return entry ? `${entry.name} (plugin)` : option;
+}
+
+/** The chosen plugin's config values and secret keys, reset to its manifest whenever the choice changes. */
+const pluginConfig = ref<PluginFieldValues>({});
+const pluginSecrets = ref<Record<string, string>>({});
+
+watch(plugin, (chosen) => {
+  pluginConfig.value = chosen ? initialConfig(chosen) : {};
+  pluginSecrets.value = chosen ? initialSecrets(chosen) : {};
+});
+
+const pluginMissing = computed(() =>
+  plugin.value ? missingRequired(plugin.value, pluginConfig.value, pluginSecrets.value) : [],
+);
+
+async function loadPlugins() {
+  try {
+    plugins.value = (await listPlugins()).plugins ?? [];
+  } catch {
+    // Nothing to offer rather than a fault: the Agent presets still work.
+    plugins.value = [];
+  }
+}
 
 async function loadAgents() {
   try {
@@ -106,7 +159,7 @@ watch(open, (showing) => {
   error.value = '';
   errorStatus.value = undefined;
   loaded.value = false;
-  void loadAgents().finally(() => {
+  void Promise.all([loadAgents(), loadPlugins()]).finally(() => {
     loaded.value = true;
   });
 });
@@ -122,7 +175,7 @@ const agentProblem = computed(() => {
   if (normalizeAllowlist(props.memberAgents).length === 0) {
     return 'This team has an empty allowlist, so hiring cannot proceed until Team settings adds at least one Agent.';
   }
-  if (loaded.value && agents.value.length === 0) {
+  if (loaded.value && agents.value.length === 0 && plugins.value.length === 0) {
     return 'No Agent on this team\'s allowlist is in the catalog. Add one in Agents or change Team settings.';
   }
   return null;
@@ -151,11 +204,14 @@ async function submit() {
   refusedName.value = name.value.trim();
 
   try {
-    const created = await addMember(
-      props.team,
-      name.value.trim(),
-      agent.value!,
-    );
+    const created = plugin.value
+      ? await addMember(
+          props.team,
+          name.value.trim(),
+          agent.value!,
+          pluginHire(plugin.value, pluginConfig.value, pluginSecrets.value),
+        )
+      : await addMember(props.team, name.value.trim(), agent.value!);
 
     name.value = '';
     open.value = false;
@@ -199,8 +255,8 @@ async function submit() {
       <q-card-section>
         <div class="os-dialog-title">Add member</div>
         <div class="text-caption os-text-muted">
-          A member is an Agent Container on {{ teamName }}. It is headless — it owns one agent and is
-          woken by messages addressed to it.
+          A member is an Agent Container on {{ teamName }}. It is headless — it owns one agent, or one
+          installed plugin, and is woken by messages addressed to it.
         </div>
       </q-card-section>
 
@@ -221,7 +277,8 @@ async function submit() {
 
         <q-select
           v-model="agent"
-          :options="agents"
+          :options="options"
+          :option-label="optionLabel"
           outlined
           dense
           label="Agent"
@@ -249,7 +306,55 @@ async function submit() {
           </span>
         </div>
 
-        <div class="text-caption os-text-muted">
+        <!-- THE CHOSEN PLUGIN'S MANIFEST, AS INPUTS. Config fields by type; secrets by NAME, each
+             asking for the logical key a person set with `secret set`. No value is ever shown,
+             because no route carries one. -->
+        <div v-if="plugin" class="plugin-hire q-gutter-sm" data-plugin-hire>
+          <div class="text-caption os-text-muted">{{ plugin.description }}</div>
+
+          <template v-for="(field, key) in plugin.config" :key="`config-${key}`">
+            <q-toggle
+              v-if="field.type === 'bool'"
+              v-model="pluginConfig[key]"
+              dense
+              :label="String(key)"
+            />
+            <q-select
+              v-else-if="field.enum && field.enum.length > 0"
+              v-model="pluginConfig[key]"
+              :options="field.enum"
+              outlined
+              dense
+              :label="String(key)"
+              :hint="field.description || undefined"
+            />
+            <q-input
+              v-else
+              :model-value="String(pluginConfig[key] ?? '')"
+              @update:model-value="(value) => (pluginConfig[key] = value === null ? '' : String(value))"
+              outlined
+              dense
+              :type="field.type === 'number' ? 'number' : 'text'"
+              :label="String(key)"
+              :hint="field.description || undefined"
+              :error="pluginMissing.includes(String(key)) ? true : undefined"
+            />
+          </template>
+
+          <template v-for="(secret, key) in plugin.secrets" :key="`secret-${key}`">
+            <q-input
+              v-model="pluginSecrets[key]"
+              outlined
+              dense
+              :label="`Secret ${key}: key name`"
+              :hint="`${secret.description ? secret.description + ' ' : ''}The name of a key set with secret set, never its value.${secret.required ? '' : ' Optional.'}`"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </template>
+        </div>
+
+        <div v-if="!plugin" class="text-caption os-text-muted">
           What a member is told comes with this build, by its role, followed by the team's Additional
           instructions.
         </div>

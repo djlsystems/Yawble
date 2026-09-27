@@ -176,6 +176,16 @@ const tokensOpen = ref(false);
 const tokens = computed(() => tokenUsageFromTotals(props.usage));
 
 /**
+ * A TEAM WHOSE EVERY MEMBER IS A PLUGIN runs no model, so there is no usage to capture and no spend
+ * to bound. The Tokens tile then says `none` quietly instead of `unavailable` with advice about
+ * usage capture, and the workflow tile draws no budget line or bar: both would describe a fault on
+ * a team that has none. An empty roster is not plugin-only.
+ */
+const pluginOnly = computed(
+  () => props.containers.length > 0 && props.containers.every((member) => member.kind === 'plugin'),
+);
+
+/**
  * The limit line under the WORKFLOW tile, or null when nothing bounds this workflow.
  *
  * ON THE WORKFLOW TILE AND NOT THE TOKENS TILE, which is a matter of meaning, not placement.
@@ -253,7 +263,7 @@ const effectiveWorkflowBudget = computed<number | null>(() =>
 const budget = computed(() => {
   const spend = soleOpenSpend.value;
 
-  if (spend === null) return null;
+  if (spend === null || pluginOnly.value) return null;
 
   return budgetLine(spend.spent, effectiveWorkflowBudget.value);
 });
@@ -271,7 +281,7 @@ const budget = computed(() => {
 const budgetBarState = computed(() => {
   const spend = soleOpenSpend.value;
 
-  if (spend === null) return null;
+  if (spend === null || pluginOnly.value) return null;
 
   return budgetBar(spend.spent, effectiveWorkflowBudget.value);
 });
@@ -634,6 +644,7 @@ function showThread(row: WorkflowRow) {
         </div>
         <div class="team-kpi-claim">{{ tokens.claim }}</div>
       </template>
+      <div v-else-if="pluginOnly" class="team-kpi-value team-kpi-unavailable team-kpi-none">none</div>
       <div v-else class="team-kpi-value team-kpi-unavailable">unavailable</div>
       <q-tooltip>Tokens consumed — click for the breakdown</q-tooltip>
     </button>
@@ -1040,6 +1051,10 @@ function showThread(row: WorkflowRow) {
             </div>
           </div>
         </div>
+      </q-card-section>
+
+      <q-card-section v-else-if="pluginOnly" class="os-body os-text-muted team-kpi-plugin-only">
+        Every member of this team is a plugin. Plugins run no model, so this team uses no tokens.
       </q-card-section>
 
       <q-card-section v-else>

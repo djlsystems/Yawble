@@ -31,6 +31,9 @@ import { runDuration, runOutcomeLabel, runStartedText, runStartedTitle } from '.
  * before it can be read, and for one still starting it is the truth. When the stream
  * ends the dialog says the run ended and keeps every line until it is closed. A transcript that is
  * no longer on disk (410) shows the server's sentence in place of its lines.
+ *
+ * A PLUGIN MEMBER (`plugin`) has no live view and no transcript: the dialog is its earlier runs
+ * alone, and a run opens onto what it reported (the route's `output`), not a transcript.
  */
 const props = withDefaults(
   defineProps<{
@@ -39,8 +42,10 @@ const props = withDefaults(
     name: string;
     /** Whether the member has a run in flight. Idle opens onto "Not running" without asking `/live`. */
     running?: boolean;
+    /** A plugin member: earlier runs only, each opening onto its output. Never asks `/live`. */
+    plugin?: boolean;
   }>(),
-  { running: true },
+  { running: true, plugin: false },
 );
 
 const open = defineModel<boolean>({ required: true });
@@ -165,6 +170,10 @@ async function openRun(run: MemberRun) {
   selected.value = run;
   transcript.value = [];
   transcriptReason.value = '';
+
+  // A plugin's run is its output, already in the list: nothing to fetch.
+  if (props.plugin) return;
+
   transcriptLoading.value = true;
 
   try {
@@ -195,7 +204,7 @@ const hiddenNotes = computed(
 );
 
 function begin() {
-  if (props.running) void watchRun();
+  if (props.running && !props.plugin) void watchRun();
   else {
     stop();
     phase.value = 'idle';
@@ -224,7 +233,7 @@ watch(
   () => props.running,
   (now, before) => {
     if (!open.value) return;
-    if (now && !before && phase.value !== 'connecting' && phase.value !== 'streaming') void watchRun();
+    if (now && !before && !props.plugin && phase.value !== 'connecting' && phase.value !== 'streaming') void watchRun();
     if (!now && before) void loadRuns(false);
   },
 );
@@ -236,7 +245,7 @@ onBeforeUnmount(end);
   <q-dialog v-model="open">
     <q-card class="os-dialog-lg live-view-card">
       <q-card-section class="row items-center q-pb-none">
-        <div class="os-dialog-title ellipsis">Watching {{ name }}</div>
+        <div class="os-dialog-title ellipsis">{{ plugin ? `Runs of ${name}` : `Watching ${name}` }}</div>
         <q-space />
         <q-toggle
           v-if="hasLines"
@@ -249,7 +258,10 @@ onBeforeUnmount(end);
         <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
       </q-card-section>
 
-      <q-card-section v-if="phase === 'idle'" class="os-body os-text-muted live-view-idle">
+      <!-- A plugin has no live section: nothing above its earlier runs. -->
+      <template v-if="plugin"></template>
+
+      <q-card-section v-else-if="phase === 'idle'" class="os-body os-text-muted live-view-idle">
         Not running
       </q-card-section>
 
@@ -279,7 +291,7 @@ onBeforeUnmount(end);
         </div>
       </q-card-section>
 
-      <q-separator />
+      <q-separator v-if="!plugin" />
 
       <q-card-section class="earlier-runs">
         <div class="row items-center no-wrap q-mb-xs">
@@ -302,7 +314,12 @@ onBeforeUnmount(end);
           </div>
         </div>
 
-        <template v-if="selected">
+        <template v-if="selected && plugin">
+          <div v-if="selected.output" class="live-view-lines run-output">{{ selected.output }}</div>
+          <div v-else class="os-body os-text-muted run-output-none">This run reported no output.</div>
+        </template>
+
+        <template v-else-if="selected">
           <div v-if="transcriptLoading" class="row items-center q-gutter-sm os-body os-text-muted">
             <q-spinner size="1.2em" />
             <span>Reading the transcript…</span>
@@ -375,6 +392,14 @@ onBeforeUnmount(end);
 </template>
 
 <style scoped>
+/* A plugin run's output: its own words, verbatim, wrapped rather than cut. */
+.run-output {
+  padding: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--os-mono);
+}
+
 .live-view-lines {
   height: min(36vh, 340px);
   overflow-y: auto;
