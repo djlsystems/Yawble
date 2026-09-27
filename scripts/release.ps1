@@ -14,6 +14,10 @@ param(
     [switch]$DryRun,
     # Publish the GitHub Release as a pre-release. Ask the owner which it is before every release.
     [switch]$Prerelease,
+    # Build the image from scratch: no cached layers, and the base images pulled again. The cache
+    # keeps the toolchain layers between releases, so its operating-system packages age; run with
+    # -NoCache now and then (monthly, or for a security fix) to take the current ones.
+    [switch]$NoCache,
     # The running container the Linux .NET suite is run in.
     [string]$Container = 'yawble'
 )
@@ -63,14 +67,23 @@ if (-not $DryRun) {
 # too: it is the one prerequisite that is not a credential.
 $platforms = 'linux/amd64,linux/arm64'
 $foreign = if ((podman info --format '{{.Host.Arch}}').Trim() -eq 'arm64') { 'linux/amd64' } else { 'linux/arm64' }
-$emulated = & { $ErrorActionPreference = 'Continue'; podman run --rm --platform $foreign docker.io/library/alpine uname -m 2>&1 | Out-String }
-if ($LASTEXITCODE -ne 0 -or $emulated -notmatch 'aarch64|x86_64') {
-    throw @"
-Refusing: no emulator for $foreign is registered, so the multi-arch image cannot be built here.
-Register one in the Podman machine (it lasts until the machine restarts):
+function Test-Emulation {
+    $answer = & { $ErrorActionPreference = 'Continue'; podman run --rm --platform $foreign docker.io/library/alpine uname -m 2>&1 | Out-String }
+    return ($LASTEXITCODE -eq 0 -and $answer -match 'aarch64|x86_64')
+}
+if (-not (Test-Emulation)) {
+    # The registration lasts until the Podman machine restarts, so the first release after a restart
+    # needs it again. It is made here rather than asked for; a failure still stops the release.
+    Write-Host "Registering the $foreign emulator in the Podman machine (it lasts until the machine restarts)"
+    & { $ErrorActionPreference = 'Continue'; podman machine ssh -- sudo podman run --rm --privileged docker.io/multiarch/qemu-user-static --reset -p yes 2>&1 } | Out-Null
+    if (-not (Test-Emulation)) {
+        throw @"
+Refusing: no emulator for $foreign is registered, so the multi-arch image cannot be built here, and
+registering one did not work. Register it by hand in the Podman machine:
     podman machine ssh -- sudo podman run --rm --privileged docker.io/multiarch/qemu-user-static --reset -p yes
 On Linux without a machine, run the same podman command with sudo on the host.
 "@
+    }
 }
 
 # 2a. Web suite, here.
@@ -155,6 +168,7 @@ try {
     $build = @(
         'build', '--format', 'docker',
         '--platform', $platforms,
+        $(if ($NoCache) { @('--no-cache', '--pull=always') } else { @() }),
         '--manifest', "${image}:$version",
         '--build-arg', "HARNESS_VERSION=$version",
         '--build-arg', "HARNESS_COMMIT=$head",

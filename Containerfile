@@ -40,12 +40,11 @@ COPY --from=web /src/web/dist/spa/ src/Harness.Host/wwwroot/
 RUN dotnet publish src/Harness.Host/Harness.Host.csproj -c Release -o /out --no-self-contained -a "$TARGETARCH"
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
-ARG HARNESS_VERSION
-ARG HARNESS_COMMIT
 # amd64 or arm64. The Node and Go tarballs below name an architecture; everything else picks its own.
 ARG TARGETARCH
-LABEL org.opencontainers.image.version="${HARNESS_VERSION}" \
-      org.opencontainers.image.revision="${HARNESS_COMMIT}"
+# THE VERSION IS DECLARED AT THE END OF THIS STAGE, NOT HERE. A build reuses cached layers only up to
+# the first instruction that changed, and the version changes every release: declared here, it made
+# every release reinstall the whole toolchain below, twice, the arm64 half under emulation.
 # Tools an agent can assume are already on PATH. The coding CLIs (claude, codex,
 # copilot, grok) are not in this list: the entrypoint installs those onto /data
 # because they change often. This layer is the ordinary toolchain.
@@ -119,8 +118,7 @@ RUN chmod +x /opt/harness/container-entrypoint.sh /opt/harness/ensure-agent-clis
 # /data/bin and the rest; a name it drops there must never shadow find, git, setpriv or setsid for
 # root or the host. The entrypoint runs its root steps on the system folders alone.
 # HOME stays agent-home here, for what does not come through the entrypoint: a person's
-# `podman exec` CLI login (docs/architecture/implementation.md) and `--doctor`'s sign-in check read
-# it. The entrypoint's root section overrides it with /root, because agent-home is agent's and
+# `podman exec` CLI login and `--doctor`'s sign-in check read it. The entrypoint's root section overrides it with /root, because agent-home is agent's and
 # root must read no config from it; the CLI install and the host get agent-home back explicitly.
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080 \
     HARNESS_DATA_ROOT=/data \
@@ -144,8 +142,13 @@ EXPOSE 8080
 # delivery pump has stopped turning. Loopback, so it asks the Host and not the published port.
 # The long start period is the first boot, which installs the agent CLIs onto /data before the Host
 # listens; a success ends it early. Podman keeps HEALTHCHECK only in the docker image format, which
-# is why scripts/podman-up.ps1 builds with --format docker - the default OCI format drops it with a
-# warning and the container never reports health at all.
+# is why scripts/dev-up.ps1 and scripts/release.ps1 build with --format docker - the default OCI
+# format drops it with a warning and the container never reports health at all.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=3 \
     CMD curl -fsS -o /dev/null http://127.0.0.1:8080/healthz || exit 1
 ENTRYPOINT ["/entrypoint.sh"]
+# The version, last: it changes every release, and nothing above may depend on it.
+ARG HARNESS_VERSION
+ARG HARNESS_COMMIT
+LABEL org.opencontainers.image.version="${HARNESS_VERSION}" \
+      org.opencontainers.image.revision="${HARNESS_COMMIT}"

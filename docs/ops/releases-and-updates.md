@@ -32,13 +32,16 @@ git pull --ff-only
 scripts\release.ps1 -DryRun   # both suites, then names the version; publishes nothing
 scripts\release.ps1                # a regular release
 scripts\release.ps1 -Prerelease    # the same, published as a pre-release
+scripts\release.ps1 -NoCache       # rebuild the image from scratch, base images pulled again
 ```
 
-A pre-release is still what the installers and `yawble update` install: they take the newest release, pre-releases included. Only GitHub's own "Latest" label skips pre-releases.
+A pre-release is still what the installers and `yawble update` install: they take the highest version, pre-releases included. Only GitHub's own "Latest" label skips pre-releases, which is also why the repository's Releases sidebar shows a tag count, not the release, when every release is a pre-release.
+
+The image build reuses cached layers: the toolchain in the Containerfile's final stage is built once and reused until it changes, and the version label comes last so that a new version changes nothing above it. The cost is that the image's operating-system packages age between rebuilds; run with `-NoCache` now and then (monthly, or for a security fix).
 
 What it does:
 
-1. Refuses unless the checkout is on `main`, clean, and at the commit `origin` has for `main`, and unless `go` and `sh` are on PATH (the CLI in `cli/` is built with them). On Windows, `sh` comes with Git: put `C:\Program Files\Git\bin` on PATH in the shell that runs the release. It also refuses when the Podman machine cannot run linux/arm64 images, and prints the command that registers the emulator; that registration lasts until the machine restarts, so the first release after a restart needs it again.
+1. Refuses unless the checkout is on `main`, clean, and at the commit `origin` has for `main`, and unless `go` and `sh` are on PATH (the CLI in `cli/` is built with them). On Windows, `sh` comes with Git: put `C:\Program Files\Git\bin` on PATH in the shell that runs the release. When the Podman machine cannot run linux/arm64 images, it registers the emulator itself (the registration lasts until the machine restarts), and refuses, naming the command, only if that does not work.
 2. Runs the web suite here (`npm ci`, `npm test` in `web/`). Then it copies the commit into the container as a git bundle, clones it into `/tmp/release-<stamp>` with `TMPDIR` set inside that folder, builds `tests/Harness.Tests` and runs the test dll directly. The folder is removed afterwards. Then `go vet` and `go test` in `cli/`. A failure in any suite stops the release.
 3. Reads the `v*` tags on origin and takes today's next `yyyy.mm.dd.N`, starting at 1. Today is the local date of the machine it runs on.
 4. Makes the annotated tag locally and builds the image from a temporary worktree at that tag, with `--build-arg HARNESS_VERSION=<version>` (no `v`) and `--build-arg HARNESS_COMMIT=<full sha of the tag commit>`, the same names `dev-up.ps1` passes. The Containerfile turns those into the `org.opencontainers.image.version` and `.revision` labels; the script adds only `org.opencontainers.image.source`. A failed build deletes the local tag, so nothing has been published yet.
