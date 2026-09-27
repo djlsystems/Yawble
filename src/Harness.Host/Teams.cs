@@ -228,6 +228,10 @@ public sealed class TeamHasNoMemberAgentException(string team)
     public string Team { get; } = team;
 }
 
+/// <summary>A plugin member's configuration or secret bindings that its manifest refuses. The
+/// sentence names the field or the key.</summary>
+public sealed class PluginSettingsException(string message) : InvalidOperationException(message);
+
 public sealed class NoSuchAgentException : InvalidOperationException
 {
     public NoSuchAgentException(string agent, IReadOnlyList<string> available)
@@ -356,7 +360,9 @@ public sealed class TeamRegistry(
     EffectiveSubscriptions effective, IRepoClone cloner, long? workflowSpendLimit = null,
     Func<long>? workflowSpendLimitNow = null, SkillDirectory? skillDirectory = null,
     Func<RepoContributor, string, CancellationToken, Task>? prepareClone = null,
-    PluginCatalog? plugins = null)
+    PluginCatalog? plugins = null,
+    IPluginMemberSettingsStore? pluginSettings = null,
+    ISecretStore? secrets = null)
 {
     /// <summary>What each role is offered, for the "Available skills" list every prompt carries.
     /// A registry built without one lists the built-ins.</summary>
@@ -2457,9 +2463,10 @@ public sealed class TeamRegistry(
     public Task<ContainerSnapshot> HireMemberAsync(
         string team, string label, string agent, string systemPrompt, IReadOnlyCollection<string> subscribes,
         string? hiredFor = null,
-        CancellationToken ct = default) =>
+        CancellationToken ct = default,
+        PluginMemberSettings? settings = null) =>
         AddContainerAsync(
-            team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct);
+            team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct, settings: settings);
 
     /// <summary>
     /// Adds a container called <paramref name="label"/>, deriving its identifier the same way a
@@ -2474,7 +2481,8 @@ public sealed class TeamRegistry(
         string team, string label, string agent, string systemPrompt, IReadOnlyCollection<string> subscribes,
         IReadOnlySet<string>? permits = null,
         string? hiredFor = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        PluginMemberSettings? settings = null)
     {
         if (!_teams.TryGetValue(team, out var members)) throw new InvalidOperationException($"No team '{team}'.");
 
@@ -2487,6 +2495,20 @@ public sealed class TeamRegistry(
         if (isPlugin && PluginRefusal(agent, pluginId!) is { } refusal)
         {
             throw NoSuchAgentException.ForPlugin(agent, refusal);
+        }
+
+        // CONFIGURATION IS A PLUGIN'S, checked against its manifest HERE, before anything is made,
+        // so a person hears a missing field or an unset secret at hire rather than at the first run.
+        if (!isPlugin && settings is { } agentSettings
+            && (agentSettings.Config.Count > 0 || agentSettings.Secrets.Count > 0))
+        {
+            throw new PluginSettingsException("`config` and `secrets` are for plugin members; an Agent takes its settings from its preset.");
+        }
+
+        if (isPlugin && plugins?.For(pluginId!) is { } installed
+            && PluginMemberRunner.SettingsRefusal(installed.Manifest, settings ?? PluginMemberSettings.None, secrets) is { } settingsRefusal)
+        {
+            throw new PluginSettingsException(settingsRefusal);
         }
 
         var command = isPlugin
@@ -2668,6 +2690,11 @@ public sealed class TeamRegistry(
         // a call made any earlier would find no row and compute an empty base set. This member has
         // no triggers of its own yet - it cannot, it did not exist a moment ago - but this is still
         // the one and only write of its subscriptions row; ContainerHost does not write one.
+        if (isPlugin && pluginSettings is not null)
+        {
+            await pluginSettings.SaveAsync(id, settings ?? PluginMemberSettings.None, ct);
+        }
+
         await effective.RecomputeAsync(id, ct);
 
         // AFTER the list is updated, so the roster it builds includes the member just added. Skipped

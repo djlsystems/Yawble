@@ -296,5 +296,22 @@ public static class AuthSchema
                 PRIMARY KEY (team, repo)
             );
             """),
+
+        // A PLUGIN member's own settings, beside its `team_members` row and dying with it.
+        // `config_json` holds ordinary configuration, checked against the plugin's manifest at
+        // hire. `secrets_json` maps each secret the manifest names to a LOGICAL KEY - never a value:
+        // the value is resolved from the Host at each run. An agent member has no row.
+        new MigrationStep(
+            "auth-008",
+            """
+            CREATE TABLE team_member_config (
+                team         TEXT NOT NULL COLLATE NOCASE,
+                name         TEXT NOT NULL COLLATE NOCASE,
+                config_json  TEXT NOT NULL DEFAULT '{}',
+                secrets_json TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (team, name),
+                FOREIGN KEY (team, name) REFERENCES team_members(team, name) ON DELETE CASCADE
+            );
+            """),
     ];
 }

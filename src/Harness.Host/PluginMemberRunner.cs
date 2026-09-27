@@ -273,6 +273,52 @@ public sealed class PluginMemberRunner(
         return (config, null);
     }
 
+    /// <summary>
+    /// Why <paramref name="settings"/> cannot be saved for a member of <paramref name="manifest"/>,
+    /// or null - checked at hire so a person hears it then, and not from the first run. Every
+    /// field must be one the manifest declares and of its type; every secret binding must name a
+    /// declared secret and a usable logical key; a required secret must be bound and set NOW.
+    /// </summary>
+    public static string? SettingsRefusal(PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets)
+    {
+        foreach (var name in settings.Config.Keys)
+        {
+            if (!manifest.Config.ContainsKey(name))
+            {
+                return $"`{name}` is not a configuration field of plugin '{manifest.Id}'. It has: "
+                    + (manifest.Config.Count == 0 ? "none" : string.Join(", ", manifest.Config.Keys)) + ".";
+            }
+        }
+
+        if (EffectiveConfig(manifest, settings).Refusal is { } configRefusal) return configRefusal;
+
+        foreach (var (name, key) in settings.Secrets)
+        {
+            if (!manifest.Secrets.ContainsKey(name))
+            {
+                return $"`{name}` is not a secret plugin '{manifest.Id}' names. It names: "
+                    + (manifest.Secrets.Count == 0 ? "none" : string.Join(", ", manifest.Secrets.Keys)) + ".";
+            }
+
+            if (EnvironmentSecretStore.Refusal(key) is { } keyRefusal) return keyRefusal;
+        }
+
+        foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required))
+        {
+            if (!settings.Secrets.TryGetValue(name, out var key))
+            {
+                return $"Plugin '{manifest.Id}' requires the secret `{name}`: bind it to a logical key, as in \"secrets\": {{\"{name}\": \"MY_KEY\"}}.";
+            }
+
+            if (secrets?.TryGet(key) is null)
+            {
+                return $"The secret `{key}` bound for `{name}` is not set on this Host. Set it with `secret set {key}` and restart the Host.";
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Each bound secret resolved by its logical key NOW, never earlier and never stored.</summary>
     private (IReadOnlyDictionary<string, string> Secrets, string? Refusal) ResolveSecrets(
         PluginManifest manifest, PluginMemberSettings bound)

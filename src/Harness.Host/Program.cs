@@ -449,6 +449,12 @@ var pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"));
 PluginEndpoints.Report(pluginCatalog.Rescan(), Console.Out);
 builder.Services.AddSingleton(pluginCatalog);
 
+// A PLUGIN MEMBER'S SETTINGS: configuration and secret BINDINGS in `team_member_config`, and the values
+// resolved by logical key from the Host's own environment at each run - where `secret set` values
+// already arrive. Swapping the resolver for an encrypted store later changes nothing else.
+builder.Services.AddSingleton<ISecretStore>(new EnvironmentSecretStore());
+builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlitePluginMemberSettings(database));
+
 if (unmeasuredHeadlessPresets.Count > 0)
 {
     Console.WriteLine(
@@ -522,7 +528,9 @@ builder.Services.AddSingleton(sp => new PluginMemberRunner(
     sp.GetRequiredService<PluginCatalog>(),
     sp.GetRequiredService<IMemberReports>(),
     sp.GetRequiredService<RunHeartbeat>(),
-    sp.GetRequiredService<AgentLaunchUser>()));
+    sp.GetRequiredService<AgentLaunchUser>(),
+    sp.GetRequiredService<IPluginMemberSettingsStore>(),
+    sp.GetRequiredService<ISecretStore>()));
 builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
     sp.GetRequiredService<AgentMemberRunner>(),
     sp.GetRequiredService<PluginMemberRunner>()));
@@ -712,7 +720,9 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
     // Resolved per call: the git runner reads the registry, so it cannot be built first.
     prepareClone: (contributor, clonePath, ct) =>
         sp.GetRequiredService<ContributorClone>().ApplyAsync(clonePath, contributor, ct),
-    plugins: sp.GetRequiredService<PluginCatalog>()));
+    plugins: sp.GetRequiredService<PluginCatalog>(),
+    pluginSettings: sp.GetRequiredService<IPluginMemberSettingsStore>(),
+    secrets: sp.GetRequiredService<ISecretStore>()));
 
 // The instance's git identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL, set with the operator CLI's `secret set`)
 // and the one place a clone is brought in line with its contributor settings.
@@ -3733,7 +3743,12 @@ app.MapPost("/api/teams/{team}/containers", async (
             team, name,
             chosenByTag.Item1,
             request.SystemPrompt ?? "",
-            request.Subscribes ?? [], hiredFor: requestedTag, ct: ct);
+            request.Subscribes ?? [], hiredFor: requestedTag, ct: ct,
+            settings: request.Config is null && request.Secrets is null
+                ? null
+                : new PluginMemberSettings(
+                    request.Config ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+                    request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal)));
 
         // Said in the BODY as well as the header: the body is what the `member` tool hands the
         // Manager, and a substitution said only in a header is never seen by anyone who hired.
@@ -3777,6 +3792,10 @@ app.MapPost("/api/teams/{team}/containers", async (
         return Results.Conflict(new { error = $"A member called '{taken.ExistingLabel}' already exists in this team." });
     }
     catch (NoSuchAgentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (PluginSettingsException exception)
     {
         return Results.BadRequest(new { error = exception.Message });
     }
@@ -7217,7 +7236,16 @@ internal sealed record CreateContainer(
         "The message types that WAKE this member. The container holds the subscription, never the "
         + "agent - a headless agent runs and exits and cannot hold one. Beware global types: two "
         + "managers subscribed to `agentContainer.completed` wake each other without end.")]
-    string[]? Subscribes);
+    string[]? Subscribes,
+    [property: Description(
+        "A PLUGIN member's configuration: field name to value, checked against the plugin's "
+        + "manifest (`GET /api/plugins`). Refused for an Agent.")]
+    Dictionary<string, JsonElement>? Config = null,
+    [property: Description(
+        "A PLUGIN member's secret bindings: each secret its manifest names, to a LOGICAL KEY set on "
+        + "the Host with `secret set` - never a value. A required secret whose key is not set is "
+        + "refused. Refused for an Agent.")]
+    Dictionary<string, string>? Secrets = null);
 
 /// <summary>A repository's contributor settings. See the route.</summary>
 internal sealed record SetRepoContributor(

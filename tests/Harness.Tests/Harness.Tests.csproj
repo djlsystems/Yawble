@@ -28,4 +28,11 @@
     <ProjectReference Include="..\..\src\Harness.Host\Harness.Host.csproj" />
   </ItemGroup>
 
+  <!-- The sample plugin member, BUILT with the tests but not referenced by them: PluginMemberEndToEndTests
+       installs its output into a temporary data root and hires it, exactly as an operator would. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\samples\plugins\sample-echo\src\SampleEcho.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
 </Project>

@@ -98,6 +98,40 @@ public sealed class PluginMemberRegistryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_plugin_members_settings_are_saved_as_keys_and_die_with_the_member()
+    {
+        var team = await TeamAsync();
+        var id = new ContainerId(team, "Echo");
+
+        await Registry.AddContainerAsync(team, "Echo", "plugin:sample-echo", "", [], ct: Ct,
+            settings: new PluginMemberSettings(
+                new Dictionary<string, System.Text.Json.JsonElement>(),
+                new Dictionary<string, string>()));
+
+        var store = _factory.Services.GetRequiredService<IPluginMemberSettingsStore>();
+        await store.SaveAsync(id, new PluginMemberSettings(
+            new Dictionary<string, System.Text.Json.JsonElement>(),
+            new Dictionary<string, string> { ["token"] = "SOME_KEY" }), Ct);
+        Assert.Equal("SOME_KEY", (await store.ForAsync(id, Ct)).Secrets["token"]);
+
+        await _factory.Services.GetRequiredService<ITeamStore>().DeleteMemberAsync(team, "Echo", Ct);
+
+        Assert.Empty((await store.ForAsync(id, Ct)).Secrets);
+    }
+
+    [Fact]
+    public async Task Configuration_is_refused_for_an_agent_member()
+    {
+        var team = await TeamAsync();
+
+        await Assert.ThrowsAsync<PluginSettingsException>(() =>
+            Registry.AddContainerAsync(team, "Dev", "claude-headless", "", [], ct: Ct,
+                settings: new PluginMemberSettings(
+                    new Dictionary<string, System.Text.Json.JsonElement> { ["mode"] = System.Text.Json.JsonDocument.Parse("\"x\"").RootElement },
+                    new Dictionary<string, string>())));
+    }
+
+    [Fact]
     public async Task A_member_is_not_repointed_across_kinds()
     {
         var team = await TeamAsync();

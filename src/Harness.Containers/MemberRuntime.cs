@@ -363,6 +363,12 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// </summary>
     public string SystemPrompt => _definition.SystemPrompt;
 
+    /// <summary>What this member may cause through the platform's routes. Empty for one that holds
+    /// no credential.</summary>
+    public IReadOnlySet<string> Permits => _definition.Permits ?? NoPermits;
+
+    private static readonly IReadOnlySet<string> NoPermits = new HashSet<string>(StringComparer.Ordinal);
+
     public int Ceiling { get; }
 
     public int QueueDepth => Volatile.Read(ref _queueDepth);

@@ -1,0 +1,4 @@
+#!/bin/sh
+# The plugin's executable, as its manifest names it. A framework-dependent .NET build runs
+# unchanged on x64 and arm64, so one launcher serves both; `dotnet` is guaranteed in the image.
+exec dotnet "$(dirname "$0")/lib/SampleEcho.dll" "$@"
