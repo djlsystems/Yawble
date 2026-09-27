@@ -111,7 +111,9 @@ func TestUpOnARootfulMachineWithYesMakesItRootless(t *testing.T) {
 	}
 }
 
-func TestUpOnARootfulMachineDeclinedContinuesWithAWarning(t *testing.T) {
+// On Windows a rootful machine never answers on localhost: a no stops before anything is pulled or
+// created, rather than waiting the whole health timeout for an instance nobody can reach.
+func TestUpOnARootfulWindowsMachineDeclinedStopsAndCreatesNothing(t *testing.T) {
 	s := upScript()
 	s.On("wsl --status", engine.Result{})
 	s.On("podman machine inspect", engine.Result{Stdout: "podman-machine-default|running|true|2048|10\n"})
@@ -120,10 +122,30 @@ func TestUpOnARootfulMachineDeclinedContinuesWithAWarning(t *testing.T) {
 	deps.GOOS, deps.LookPath, deps.Interactive = "windows", lookPath("podman"), true
 	deps.Stdin = strings.NewReader("n\n")
 	code, out, errOut := run(t, deps, "up")
+	if code != 1 || !strings.Contains(errOut, "never answers on localhost") || !strings.Contains(errOut, "Nothing has been created") {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	for _, c := range s.Calls {
+		for _, verb := range []string{"machine set", "pull", "podman run", "volume create", "pod create", "podman start"} {
+			if strings.Contains(c, verb) {
+				t.Errorf("a no must change nothing, ran %q", c)
+			}
+		}
+	}
+}
+
+// On macOS a rootful machine works; a no carries on with the note.
+func TestUpOnARootfulMacMachineDeclinedContinuesWithANote(t *testing.T) {
+	s := upScript()
+	s.On("podman machine inspect", engine.Result{Stdout: "podman-machine-default|running|true|8192|4\n"})
+	deps := stubbed(s)
+	deps.GOOS, deps.LookPath, deps.Interactive = "darwin", lookPath("podman"), true
+	deps.Stdin = strings.NewReader("n\n")
+	code, out, errOut := run(t, deps, "up")
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
-	if strings.Contains(calls(s), "machine set") || !strings.Contains(errOut+out, "rootful") {
+	if strings.Contains(calls(s), "machine set") || !strings.Contains(errOut, "stays rootful") || !strings.Contains(calls(s), "podman start") {
 		t.Errorf("calls %q out %q err %q", s.Calls, out, errOut)
 	}
 }

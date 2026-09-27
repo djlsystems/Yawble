@@ -117,8 +117,12 @@ func preflight(ctx context.Context, deps Deps, yes bool, engineName string, memo
 				return info, err
 			}
 			info.Rootful = false
+		} else if goos == "windows" {
+			// A no on Windows is an install nobody can reach: going on would pull, start, and then
+			// wait the whole health timeout for a localhost that never answers, and blame the logs.
+			return info, errRootfulOnWindows
 		} else {
-			fmt.Fprintln(errOut, "note: the machine stays rootful; `yawble doctor` will keep saying so"+map[bool]string{true: ", and on Windows http://localhost will not answer", false: ""}[goos == "windows"])
+			fmt.Fprintln(errOut, "note: the machine stays rootful; `yawble doctor` will keep saying so")
 		}
 	}
 
@@ -141,6 +145,12 @@ var errWSLMissing = errors.New("WSL is not installed, and Podman runs its machin
 	"  1. Sitting at the computer (not over a remote session), right-click Start, open Terminal (Admin), and run:  wsl --install --no-distribution\n" +
 	"  2. Restart Windows.\n" +
 	"  3. Open PowerShell and run:  yawble up")
+
+// errRootfulOnWindows is a no to making a Windows machine rootless. It stops `up` before anything
+// is pulled or created.
+var errRootfulOnWindows = errors.New("the Podman machine stays rootful, and on Windows a rootful machine never answers on localhost, so Yawble would not be reachable. Nothing has been created.\n" +
+	"  Run yawble up again and answer yes, or make it rootless yourself:\n" +
+	"  podman machine stop; podman machine set --rootful=false; podman machine start")
 
 // containerMemoryMB is the limit `up` will ask for, from the settings' podman size string.
 func containerMemoryMB(size string) int { return doctor.ContainerMemoryMB(size) }
