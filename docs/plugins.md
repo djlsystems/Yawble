@@ -321,11 +321,19 @@ slot like any member's.
       behind (`Overlapping_secrets_are_redacted_longest_first`).
     - **JSON-escaped forms too.** A line that is not a record is kept as the plugin wrote it, so a
       value serialised with JSON escapes (the default encoder writes `+` as `\u002B`) is also
-      matched in its escaped forms (`A_secret_json_escaped_in_a_raw_line_is_redacted`).
+      matched in its escaped forms (`A_secret_json_escaped_in_a_raw_line_is_redacted`), including
+      `/` written as `\/`, as PHP and some Java encoders do
+      (`A_secret_with_an_escaped_solidus_in_a_raw_line_is_redacted`).
     - **In any case.** `DEMO-TOKEN-2026` is caught for the bound value `demo-token-2026`
       (`A_secret_is_redacted_whatever_its_case`).
     - **In every record** (`A_bound_secret_in_a_report_record_is_redacted_before_it_is_reported`)
       and in a published payload (`A_declared_publish_is_appended_and_an_undeclared_one_warned_once`).
+    - **A payload's keys and numbers refuse the publish.** A published payload whose property name,
+      at any depth, would be changed by redaction, or whose number (or `true`/`false`/`null`) has
+      JSON text that would be, is **dropped**, not rewritten, with one `progress` warning row that
+      names neither. Renaming a key or turning a number into `[redacted]` would silently change the
+      shape a trigger or `{event.*}` token reads (`A_secret_as_a_publish_key_or_number_refuses_the_publish`,
+      `A_number_matching_a_secret_refuses_the_publish`).
 
     A plugin that writes a secret otherwise TRANSFORMED - reversed, base64, cut in pieces - defeats
     all of it, and the result reaches the log. Do not write secrets out at all.
@@ -377,7 +385,8 @@ A plugin publishes with a `publish` record:
   Pinned by `PluginMemberEndToEndTests.C_An_undeclared_or_forged_publish_is_dropped_with_one_warning_row`.
 - **Joins the workflow.** The row's source is the member's qualified id, so its team is the
   member's, and its causation is the message the run is handling. Its payload is a JSON object no
-  larger than the member's `ExcerptChars` (4,000 by default), every string redacted. Pinned by
+  larger than the member's `ExcerptChars` (4,000 by default), every string redacted; a key or a
+  number that holds a secret drops the publish (see Secrets above). Pinned by
   `PluginMemberRunnerTests.A_declared_publish_is_appended_and_an_undeclared_one_warned_once` and
   `A_publish_over_the_members_artifact_limit_is_dropped`.
 - **Everything reads the union.** `EventCatalog.For(type)` answers the platform's types and the
@@ -398,8 +407,17 @@ A person hires a plugin through `POST /api/teams/{team}/containers` with `agent:
 
 - It is validated against the manifest exactly as a person's hire is. It is not bound by the team's
   agent allowlist, which chooses the Agents a hire may run; a plugin runs no model.
-- **Secrets are logical keys a person has already set.** A Manager never handles a value: a binding
-  to a key that is not set on the Host, optional or not, is refused.
+- **Secrets are logical keys a person has already set and bound on this team.** A Manager never
+  handles a value, and it may bind only a key that a person's hire has already bound on a member
+  of its own team, and that is still set on the Host. Anything else, optional or not, is refused
+  with a reason that names the key and no value. That includes `PATH`, `HOSTNAME` or any other
+  variable the Host happens to carry, a key set on the Host that no person has bound here, and one
+  bound only on another team. So the first member that uses a new key is hired by a person. Being
+  "set on the Host" is not enough on its own: the secret store is the Host's whole environment,
+  and the Host cannot see which names `secret set` wrote, because that list lives in the
+  operator's env file outside the container. A person's binding is a deliberate choice for this
+  team. A Manager cannot grow the set, and firing the last member that bound a key removes the key
+  from it. Pinned by `PluginManagerHiringTests.A_manager_binds_only_keys_a_person_has_bound_on_its_team`.
 - Its own team only: the route's `{team}` is checked against the Manager's credential.
 
 Pinned by `PluginManagerHiringTests`.
@@ -429,7 +447,13 @@ leaves the workflow open for a person. An agent owner is unchanged: it declares 
   followed through the stack, locals, fields and return values and may only be PASSED ON (to the
   invocation the router receives, the snapshot, the definition, a delegate the Host handed in, or
   logging), never transformed or compared. Its self-tests prove a comparison, `ToLowerInvariant().StartsWith`,
-  `Split(':')[0] ==` and a comparison on `Snapshot().Kind` are all caught.
+  `Split(':')[0] ==` and a comparison on `Snapshot().Kind` are all caught. The whole
+  `ContainerDefinition` carries the Agent too, so it is followed the same way, but checked against a
+  deny-list. It may not reach `ToString`, `Equals` (the instance method or `object.Equals`),
+  `GetHashCode`, `PrintMembers`, `Deconstruct`, the equality operators, string formatting or
+  interpolation, `System.Text.Json`, reflection, or logging. Each of those has a self-test in
+  `The_scan_catches_a_violation`, and `PrintMembers` has `The_definition_rules_forbid_PrintMembers`.
+  A read of another field, such as `Environment.Count`, is a capability, and it is allowed.
 - **Plugins run as `agent`.** `PluginLaunchUserTests` launches a plugin through a real user switch
   and checks it runs as `agent` and reads its `0750` directory. Where the process cannot switch
   users it skips, naming why; the release suite runs it as root in the product image.

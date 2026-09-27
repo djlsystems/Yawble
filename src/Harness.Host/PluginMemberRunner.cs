@@ -467,7 +467,12 @@ public sealed class PluginMemberRunner(
         }
 
         var payload = (JsonObject?)record["payload"]?.DeepClone() ?? new JsonObject();
-        RedactStrings(payload, secretValues);
+        if (RedactPayload(payload, secretValues) is { } refusal)
+        {
+            await DropAsync(type, refusal);
+            return;
+        }
+
         var text = payload.ToJsonString();
 
         if (limits.ExcerptChars > 0 && text.Length > limits.ExcerptChars)
@@ -487,17 +492,29 @@ public sealed class PluginMemberRunner(
         }
     }
 
-    /// <summary>Every string value in <paramref name="node"/> through <see cref="Redact"/>, in
-    /// place, so the payload stays the JSON object it was.</summary>
-    private static void RedactStrings(JsonNode? node, IEnumerable<string> secretValues)
+    /// <summary>
+    /// Every string value in <paramref name="node"/> through <see cref="Redact"/>, in place, so the
+    /// payload stays the JSON object it was - or why the publish is REFUSED instead:
+    /// <list type="bullet">
+    /// <item>a PROPERTY NAME that <see cref="Redact"/> would change. Renaming a key to the
+    /// placeholder would change what triggers and <c>{event.*}</c> tokens read, and could collide
+    /// with a sibling, so the publish is dropped rather than quietly reshaped;</item>
+    /// <item>a NUMBER (or <c>true</c>/<c>false</c>/<c>null</c>) whose JSON text <see cref="Redact"/>
+    /// would change. Replacing it with the placeholder would change its JSON type under a
+    /// subscriber, so it is refused the same way.</item>
+    /// </list>
+    /// The reason names neither the key nor the value.
+    /// </summary>
+    private static string? RedactPayload(JsonNode? node, IEnumerable<string> secretValues)
     {
         switch (node)
         {
             case JsonObject body:
                 foreach (var (key, child) in body.ToList())
                 {
+                    if (Redact(key, secretValues) != key) return "a property name in its payload holds a secret.";
                     if (child is JsonValue value && value.TryGetValue<string>(out var text)) body[key] = Redact(text, secretValues);
-                    else RedactStrings(child, secretValues);
+                    else if (RedactPayload(child, secretValues) is { } refusal) return refusal;
                 }
 
                 break;
@@ -506,11 +523,18 @@ public sealed class PluginMemberRunner(
                 for (var i = 0; i < items.Count; i++)
                 {
                     if (items[i] is JsonValue value && value.TryGetValue<string>(out var text)) items[i] = Redact(text, secretValues);
-                    else RedactStrings(items[i], secretValues);
+                    else if (RedactPayload(items[i], secretValues) is { } refusal) return refusal;
                 }
 
                 break;
+
+            case JsonValue scalar:
+                var json = scalar.ToJsonString();
+                if (Redact(json, secretValues) != json) return "a number in its payload matches a secret.";
+                break;
         }
+
+        return null;
     }
 
     private static string? Words(JsonObject record, string field) =>
@@ -526,7 +550,8 @@ public sealed class PluginMemberRunner(
     /// <list type="bullet">
     /// <item>each value is matched in ANY CASE, so an upper-cased copy is caught;</item>
     /// <item>each value's JSON-ESCAPED forms are matched too, because a raw line keeps a value the
-    /// way the plugin serialised it (the default encoder escapes <c>+</c>, <c>&lt;</c>, quotes);</item>
+    /// way the plugin serialised it (the default encoder escapes <c>+</c>, <c>&lt;</c>, quotes; other
+    /// encoders - PHP, some Java ones - also write <c>/</c> as <c>\/</c>);</item>
     /// <item>the LONGEST form is replaced first, so a value that is a prefix of another cannot
     /// leave the other's tail behind.</item>
     /// </list>
@@ -552,7 +577,7 @@ public sealed class PluginMemberRunner(
     internal static IReadOnlyList<string> RedactedForms(IEnumerable<string> values) =>
         values
             .Where(v => v.Length >= MinimumSecretLength)
-            .SelectMany(v => new[] { v, JsonBody(v, null), JsonBody(v, Relaxed) })
+            .SelectMany(v => new[] { v, JsonBody(v, null), JsonBody(v, Relaxed), JsonBody(v, Relaxed).Replace("/", "\\/", StringComparison.Ordinal) })
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(f => f.Length)
             .ThenBy(f => f, StringComparer.Ordinal)

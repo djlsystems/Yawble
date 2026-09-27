@@ -23,6 +23,12 @@ namespace Harness.Tests;
 /// itself, and logging. Anything else - a comparison, a branch, a string method such as
 /// <c>ToLowerInvariant</c> or <c>Split</c>, a tuple, a helper of the pump's own - is a violation,
 /// so a transform in between cannot launder the value into a comparison.</item>
+/// <item>The WHOLE <see cref="ContainerDefinition"/> carries the Agent too (round 2, P1), so it is
+/// followed the same way - from any parameter, field or call result of that type - but by a
+/// DENY-LIST, because a definition is legitimately handed everywhere: it may not reach anything that
+/// reads it whole - <c>ToString</c>, <c>Equals</c>, <c>GetHashCode</c>, <c>PrintMembers</c>,
+/// <c>Deconstruct</c>, the equality operators, string formatting or interpolation, JSON, reflection,
+/// or logging.</item>
 /// </list>
 ///
 /// Lambdas, local functions and async state machines are attributed to the method that wrote them,
@@ -50,6 +56,7 @@ public sealed class PumpArchitectureTests
         var scan = ImplementationFlow.Scan(Methods(Pump));
 
         Assert.Empty(scan.Violations);
+        Assert.Empty(ImplementationFlow.Scan(Methods(Pump), ImplementationFlow.Definitions).Violations);
 
         // The scan must be seeing the IL at all: the runtime reads Agent to hand it to the router
         // and the snapshot, and each of those is an allowed consumption.
@@ -66,13 +73,33 @@ public sealed class PumpArchitectureTests
     [InlineData(nameof(SplitsThenCompares))]
     [InlineData(nameof(ComparesTheSnapshotsKind))]
     [InlineData(nameof(ComparesThroughALocalAndAHelper))]
+    [InlineData(nameof(ReadsTheDefinitionsText))]
+    [InlineData(nameof(ComparesTheDefinitionWithAClone))]
+    [InlineData(nameof(ComparesTheDefinitionThroughObjectEquals))]
+    [InlineData(nameof(ComparesTheDefinitionsHash))]
+    [InlineData(nameof(ReadsTheDefinitionsMembersByReflection))]
+    [InlineData(nameof(SerialisesTheDefinition))]
+    [InlineData(nameof(InterpolatesTheDefinition))]
+    [InlineData(nameof(DeconstructsTheDefinition))]
     public void The_scan_catches_a_violation(string probe)
     {
         var method = typeof(PumpArchitectureTests).GetMethod(probe, BindingFlags.NonPublic | BindingFlags.Static)!;
 
-        var scan = ImplementationFlow.Scan([method]);
+        var violations = ImplementationFlow.Scan([method]).Violations
+            .Concat(ImplementationFlow.Scan([method], ImplementationFlow.Definitions).Violations);
 
-        Assert.NotEmpty(scan.Violations);
+        Assert.NotEmpty(violations);
+    }
+
+    /// <summary>The record is sealed, so nothing outside it can call its private <c>PrintMembers</c>
+    /// directly (a reflection call is <see cref="ReadsTheDefinitionsMembersByReflection"/>); the
+    /// rule is pinned on the method itself.</summary>
+    [Fact]
+    public void The_definition_rules_forbid_PrintMembers()
+    {
+        var printMembers = typeof(ContainerDefinition).GetMethod("PrintMembers", BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+        Assert.False(ImplementationFlow.Definitions.PassesOn(printMembers));
     }
 
     [Fact]
@@ -84,6 +111,7 @@ public sealed class PumpArchitectureTests
 
         Assert.Empty(scan.Violations);
         Assert.True(scan.Reads > 0);
+        Assert.Empty(ImplementationFlow.Scan([method], ImplementationFlow.Definitions).Violations);
     }
 
     private static bool ComparesAnAgent(ContainerDefinition definition) => definition.Agent == "x";
@@ -103,6 +131,37 @@ public sealed class PumpArchitectureTests
     }
 
     private static bool Same(string value) => value.Length == 3;
+
+    // P1 (round 2): the WHOLE record read past the Agent's getter carries the kind with it.
+    private static bool ReadsTheDefinitionsText(ContainerDefinition definition) =>
+        definition.ToString().Contains("pl" + "ugin:", StringComparison.Ordinal);
+
+    private static bool ComparesTheDefinitionWithAClone(ContainerDefinition definition) =>
+        definition.Equals(definition with { Agent = "x" });
+
+    private static bool ComparesTheDefinitionThroughObjectEquals(ContainerDefinition definition) =>
+        Equals(definition, definition with { Agent = "x" });
+
+    private static bool ComparesTheDefinitionsHash(ContainerDefinition definition) =>
+        definition.GetHashCode() == (definition with { Agent = "x" }).GetHashCode();
+
+    /// <summary>The record is sealed, so its <c>PrintMembers</c> is private and reachable only by
+    /// reflection - which is what this does.</summary>
+    private static object? ReadsTheDefinitionsMembersByReflection(ContainerDefinition definition) =>
+        typeof(ContainerDefinition).GetMethod("PrintMembers", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(definition, [new System.Text.StringBuilder()]);
+
+    private static bool SerialisesTheDefinition(ContainerDefinition definition) =>
+        System.Text.Json.JsonSerializer.Serialize(definition).Contains("pl" + "ugin:", StringComparison.Ordinal);
+
+    private static bool InterpolatesTheDefinition(ContainerDefinition definition) =>
+        $"{definition}".Contains("pl" + "ugin:", StringComparison.Ordinal);
+
+    private static bool DeconstructsTheDefinition(ContainerDefinition definition)
+    {
+        definition.Deconstruct(out _, out var agent, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+        return agent.Length == 3;
+    }
 
     private static ContainerDefinition PassesItOn(ContainerDefinition definition, ILogger log, Func<string, bool> watchable, string? agent)
     {
@@ -157,6 +216,50 @@ public sealed class PumpArchitectureTests
     /// </summary>
     private sealed class ImplementationFlow
     {
+        /// <summary>What one scan follows: where the value comes from, and what may consume it.</summary>
+        public sealed record Rules(
+            string Noun,
+            Func<MethodBase, bool> IsSource,
+            Func<FieldInfo, bool> FieldIsSource,
+            Func<ParameterInfo, bool> ParameterIsSource,
+            Func<MethodBase, bool> PassesOn,
+            bool DecidesInIl);
+
+        /// <summary>A member's implementation: the Agent, the snapshot's Agent and Kind, <c>KindOf</c>.
+        /// An ALLOW-LIST of consumers, and any IL decision on it is a violation.</summary>
+        public static readonly Rules Implementations = new(
+            "implementation", target => Sources.Contains(target), _ => false, _ => false, PassesOn, DecidesInIl: true);
+
+        /// <summary>A whole <see cref="ContainerDefinition"/>. A DENY-LIST of consumers that read it
+        /// whole; IL on it (a null check) decides nothing about its kind.</summary>
+        public static readonly Rules Definitions = new(
+            "definition",
+            target => target is MethodInfo { ReturnType: var type } && type == typeof(ContainerDefinition),
+            field => field.FieldType == typeof(ContainerDefinition),
+            parameter => parameter.ParameterType == typeof(ContainerDefinition),
+            target => !ReadsADefinitionWhole(target),
+            DecidesInIl: false);
+
+        private static readonly HashSet<string> WholeReads =
+        [
+            nameof(ToString), nameof(Equals), nameof(GetHashCode), "PrintMembers", "Deconstruct",
+            nameof(ReferenceEquals), "op_Equality", "op_Inequality",
+        ];
+
+        private static bool ReadsADefinitionWhole(MethodBase target)
+        {
+            var type = target.DeclaringType;
+            var space = type?.Namespace ?? "";
+
+            return WholeReads.Contains(target.Name)
+                || space.StartsWith("System.Text.Json", StringComparison.Ordinal)
+                || space.StartsWith("System.Reflection", StringComparison.Ordinal)
+                || type == typeof(System.Text.StringBuilder)
+                || type == typeof(System.Runtime.CompilerServices.DefaultInterpolatedStringHandler)
+                || (type == typeof(string) && target.Name is nameof(string.Concat) or nameof(string.Format) or nameof(string.Join))
+                || type == typeof(LoggerExtensions) || type == typeof(ILogger);
+        }
+
         /// <summary>Where the value comes from.</summary>
         private static readonly MethodBase[] Sources =
         [
@@ -189,6 +292,8 @@ public sealed class PumpArchitectureTests
             return type == typeof(LoggerExtensions) || type == typeof(ILogger);
         }
 
+        private readonly Rules _rules;
+
         public int Reads { get; private set; }
 
         public List<string> Violations { get; } = [];
@@ -198,25 +303,27 @@ public sealed class PumpArchitectureTests
         private readonly HashSet<(Guid, int)> _fields;
         private readonly HashSet<(Guid, int)> _returning;
 
-        private ImplementationFlow(IEnumerable<(Guid, int)> fields, IEnumerable<(Guid, int)> returning)
+        private ImplementationFlow(Rules rules, IEnumerable<(Guid, int)> fields, IEnumerable<(Guid, int)> returning)
         {
+            _rules = rules;
             _fields = [.. fields];
             _returning = [.. returning];
         }
 
         private static (Guid, int) Key(MemberInfo member) => (member.Module.ModuleVersionId, member.MetadataToken);
 
-        public static ImplementationFlow Scan(IEnumerable<MethodBase> methods)
+        public static ImplementationFlow Scan(IEnumerable<MethodBase> methods, Rules? rules = null)
         {
+            rules ??= Implementations;
             var list = methods.Where(m => m.GetMethodBody() is not null).ToList();
             var decoded = list.ToDictionary(m => m, Il.Decode);
-            var flow = new ImplementationFlow([], []);
+            var flow = new ImplementationFlow(rules, [], []);
 
             // FIXED POINT: a field written with the value, or a method returning it, is a source in
             // every method, including those already walked - so walk again until nothing is learned.
             while (true)
             {
-                var next = new ImplementationFlow(flow._fields, flow._returning);
+                var next = new ImplementationFlow(rules, flow._fields, flow._returning);
 
                 foreach (var method in list) next.Interpret(method, decoded[method]);
 
@@ -227,7 +334,16 @@ public sealed class PumpArchitectureTests
         }
 
         private bool IsSource(MethodBase target) =>
-            Sources.Contains(target) || _returning.Contains(Key(target));
+            _rules.IsSource(target) || _returning.Contains(Key(target));
+
+        /// <summary>`ldarg n` of a parameter the rules name as a source (never `this`: the pump
+        /// declares none of the contracts' records).</summary>
+        private bool ArgumentIsSource(MethodBase method, int index)
+        {
+            var position = method.IsStatic ? index : index - 1;
+            var parameters = method.GetParameters();
+            return position >= 0 && position < parameters.Length && _rules.ParameterIsSource(parameters[position]);
+        }
 
         private void Violation(MethodBase method, string what)
         {
@@ -333,7 +449,7 @@ public sealed class PumpArchitectureTests
             }
             else if (name.StartsWith("ldarg", StringComparison.Ordinal))
             {
-                Push(args.Contains(instruction.Index));
+                Push(args.Contains(instruction.Index) || ArgumentIsSource(method, instruction.Index));
             }
             else if (name.StartsWith("starg", StringComparison.Ordinal))
             {
@@ -342,7 +458,7 @@ public sealed class PumpArchitectureTests
             else if (instruction.Field is { } field && name is "ldfld" or "ldflda" or "ldsfld" or "ldsflda")
             {
                 if (name.StartsWith("ldfld", StringComparison.Ordinal)) Pop();
-                Push(_fields.Contains(Key(field)));
+                Push(_fields.Contains(Key(field)) || _rules.FieldIsSource(field));
             }
             else if (instruction.Field is { } stored && name is "stfld" or "stsfld")
             {
@@ -373,8 +489,8 @@ public sealed class PumpArchitectureTests
 
                 if (carried)
                 {
-                    if (PassesOn(target)) PassedTo.Add(target);
-                    else Violation(method, $"hands a member's implementation to {target.DeclaringType?.Name}.{target.Name}.");
+                    if (_rules.PassesOn(target)) PassedTo.Add(target);
+                    else Violation(method, $"hands a member's {_rules.Noun} to {target.DeclaringType?.Name}.{target.Name}.");
                 }
 
                 var returns = name == "newobj" || (target is MethodInfo info && info.ReturnType != typeof(void));
@@ -398,10 +514,10 @@ public sealed class PumpArchitectureTests
                     // below is the array, and it carries the value from here on.
                     stack[^1] = true;
                 }
-                else if (carried && !passesThrough && name != "pop")
+                else if (carried && !passesThrough && name != "pop" && _rules.DecidesInIl)
                 {
                     // Deciding on it (a branch, `ceq`), or storing it where this cannot follow.
-                    Violation(method, $"uses a member's implementation in `{name}`.");
+                    Violation(method, $"uses a member's {_rules.Noun} in `{name}`.");
                 }
 
                 for (var i = 0; i < PushCount(op); i++) Push(carried && passesThrough);

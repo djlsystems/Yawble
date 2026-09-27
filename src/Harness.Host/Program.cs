@@ -3700,7 +3700,7 @@ app.MapPost("/api/teams/{team}/containers", async (
     [Description(Describe.Team)] string team,
     CreateContainer request, TeamRegistry teams, ITeamStore teamStore, AgentCatalog catalog,
     TenantLogging audit, AgentInstallProbe probe, HttpContext context, ISecretStore secretStore,
-    CancellationToken ct) =>
+    IPluginMemberSettingsStore pluginSettings, CancellationToken ct) =>
 {
     // `name` is free text here too, exactly as it is for a team: the identifier is derived inside
     // TeamRegistry and never asked for. A member called "Data Ingest" is `DataIngest` on disk.
@@ -3758,15 +3758,23 @@ app.MapPost("/api/teams/{team}/containers", async (
         // in `HireMemberAsync`, and an uninstalled one is refused there. Its own team only: the
         // route's `{team}` is TeamGate's, and a Manager's credential reaches no other team.
         //
-        // SECRETS ARE LOGICAL KEYS A PERSON HAS ALREADY SET. A Manager never handles a value, and
-        // binding a key nobody set - optional or not - is refused, so a Manager cannot pass a value
-        // off as a key or bind one a person has not provided.
+        // SECRETS ARE LOGICAL KEYS A PERSON HAS ALREADY BOUND ON THIS TEAM (round 2, M1). A Manager
+        // never handles a value, and it may bind only a key some PERSON's hire already bound on its
+        // own team - optional or not. "Set on this Host" is not the test: the secret store is the
+        // Host's whole environment, so that would hand a plugin PATH, HOSTNAME or any operator
+        // variable, and the Host cannot tell which names `secret set` wrote (that list lives in the
+        // operator's env file, outside the container). A person's binding is a deliberate choice
+        // for this team, which is the decision the person made. The set only grows by a person's
+        // hire, because a Manager can bind nothing outside it; firing the last member that bound a
+        // key takes it out again. The refusal names the key the Manager sent, never a value.
         var managerHiresPlugin = hirer is { Kind: PrincipalKind.Container }
             && request.Agent is { } pluginReference
             && MemberRef.IsPlugin(pluginReference.Trim(), out _);
 
-        if (managerHiresPlugin && request.Secrets is { } bindings)
+        if (managerHiresPlugin && request.Secrets is { Count: > 0 } bindings)
         {
+            var bound = await pluginSettings.KeysBoundOnAsync(team, ct);
+
             foreach (var (secret, key) in bindings)
             {
                 if (EnvironmentSecretStore.Refusal(key) is { } keyRefusal)
@@ -3774,12 +3782,14 @@ app.MapPost("/api/teams/{team}/containers", async (
                     return Results.BadRequest(new { error = keyRefusal });
                 }
 
-                if (secretStore.TryGet(key) is null)
+                if (!bound.Contains(key) || secretStore.TryGet(key) is null)
                 {
                     return Results.BadRequest(new
                     {
-                        error = $"The key `{key}` bound for `{secret}` is not set on this Host. A Manager binds only "
-                            + "logical keys a person has already set (`secret set <KEY>`), never a value.",
+                        error = $"The key `{key}` bound for `{secret}` is not one a person has bound on this team. "
+                            + "A Manager binds only logical keys a person has already set (`secret set <KEY>`) and "
+                            + "bound on a member of this team, never a value. Ask a person to hire the first member "
+                            + "that uses it.",
                     });
                 }
             }

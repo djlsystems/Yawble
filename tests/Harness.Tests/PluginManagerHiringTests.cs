@@ -86,9 +86,51 @@ public sealed class PluginManagerHiringTests : IAsyncLifetime
     private static Dictionary<string, JsonElement> Config(string mode) =>
         new() { ["mode"] = JsonSerializer.SerializeToElement(mode) };
 
+    /// <summary>A PERSON's hire binding <paramref name="key"/> on <paramref name="team"/> - the
+    /// only way a key becomes one a Manager may bind there.</summary>
+    private Task PersonBindsAsync(string team, string key) =>
+        Services.GetRequiredService<TeamRegistry>().HireMemberAsync(
+            team, $"Bound{Guid.NewGuid():N}"[..12], "plugin:sample-echo", "", [], ct: Ct,
+            settings: new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = key }));
+
+    /// <summary>
+    /// M1 (round 2): a Manager binds only a key a PERSON has already bound on its own team. A Host
+    /// variable (PATH), and a key set on the Host but bound by no person here - or only on another
+    /// team - are refused with a reason that names no value.
+    /// </summary>
+    [Fact]
+    public async Task A_manager_binds_only_keys_a_person_has_bound_on_its_team()
+    {
+        var tools = ManagerTools(await ManagerKeyAsync());
+        var pathValue = Environment.GetEnvironmentVariable("PATH")!;
+
+        var path = await tools.Hire("Echo2", plugin: "sample-echo", secrets: new() { ["token"] = "PATH" }, cancellationToken: Ct);
+        Assert.StartsWith("HTTP 400", path);
+        Assert.Contains("`PATH`", path);
+        Assert.Contains("not one a person has bound on this team", path);
+        Assert.DoesNotContain(pathValue, path, StringComparison.Ordinal);
+
+        // Set on the Host, but no person has bound it here yet - only on another team.
+        await PersonBindsAsync(_other, TokenKey);
+        var unbound = await tools.Hire("Echo3", plugin: "sample-echo", secrets: new() { ["token"] = TokenKey }, cancellationToken: Ct);
+        Assert.StartsWith("HTTP 400", unbound);
+        Assert.DoesNotContain("set-by-a-person", unbound, StringComparison.Ordinal);
+
+        // Once a person has bound it on this team, the Manager may bind it too.
+        await PersonBindsAsync(_team, TokenKey);
+        Assert.StartsWith("HTTP 200", await tools.Hire("Echo4", plugin: "sample-echo", secrets: new() { ["token"] = TokenKey }, cancellationToken: Ct));
+
+        var host = Services.GetRequiredService<Harness.Containers.ContainerHost>();
+        Assert.Null(host.Find(new ContainerId(_team, "Echo2")));
+        Assert.Null(host.Find(new ContainerId(_team, "Echo3")));
+        Assert.NotNull(host.Find(new ContainerId(_team, "Echo4")));
+    }
+
     [Fact]
     public async Task A_manager_hires_an_installed_plugin_onto_its_own_team_with_logical_keys()
     {
+        await PersonBindsAsync(_team, TokenKey);
         var tools = ManagerTools(await ManagerKeyAsync());
 
         var hired = await tools.Hire("Echo", plugin: "sample-echo", config: Config("reverse"),
@@ -125,7 +167,7 @@ public sealed class PluginManagerHiringTests : IAsyncLifetime
         // A key nobody set - or a value passed off as a key - is refused.
         var unset = await tools.Hire("Echo3", plugin: "sample-echo", secrets: new() { ["token"] = "NOBODY_SET_THIS_KEY" }, cancellationToken: Ct);
         Assert.StartsWith("HTTP 400", unset);
-        Assert.Contains("not set on this Host", unset);
+        Assert.Contains("not one a person has bound on this team", unset);
 
         var value = await tools.Hire("Echo4", plugin: "sample-echo", secrets: new() { ["token"] = "hunter2 is my password" }, cancellationToken: Ct);
         Assert.StartsWith("HTTP 400", value);

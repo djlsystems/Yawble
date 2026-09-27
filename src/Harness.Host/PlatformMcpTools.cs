@@ -224,7 +224,8 @@ public sealed partial class PlatformMcpTools(
         + "hired instead. "
         + "To hire an installed PLUGIN instead of an agent, pass `plugin` with its id from the "
         + "hiring tool, its `config` fields, and `secrets` binding each secret it names to a "
-        + "LOGICAL KEY a person has already set on this Host - never a value. Read the plugin's "
+        + "LOGICAL KEY a person has already bound on a member of your team - never a value. "
+        + "Read the plugin's "
         + "skill (skills_get) first. "
         + "Do not POST /api/teams/.../containers yourself.")]
     public async Task<string> Hire(
@@ -241,8 +242,8 @@ public sealed partial class PlatformMcpTools(
         [Description("A plugin's configuration: field name to value, as its manifest declares them. Only with `plugin`.")]
         Dictionary<string, System.Text.Json.JsonElement>? config = null,
         [Description(
-            "A plugin's secret bindings: each secret it names, to a LOGICAL KEY already set on this "
-            + "Host (for example MAILER_TOKEN). Never a secret's value. Only with `plugin`.")]
+            "A plugin's secret bindings: each secret it names, to a LOGICAL KEY a person has already "
+            + "bound on your team (for example MAILER_TOKEN). Never a secret's value. Only with `plugin`.")]
         Dictionary<string, string>? secrets = null,
         CancellationToken cancellationToken = default)
     {

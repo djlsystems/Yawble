@@ -68,6 +68,12 @@ public sealed class PluginMemberRunnerTests : IDisposable
         return (bed, member, row);
     }
 
+    private static readonly string[] EveryRunType =
+    [
+        MessageTypes.Started, MessageTypes.Progress, MessageTypes.Handback, MessageTypes.Completed,
+        MessageTypes.Failed, MessageTypes.Blocked, "plugin.fixture.tick",
+    ];
+
     private static string Output(Message row) => JsonDocument.Parse(row.Payload).RootElement.GetProperty("output").GetString()!;
 
     [Fact]
@@ -439,6 +445,90 @@ public sealed class PluginMemberRunnerTests : IDisposable
 
         Assert.Equal("[redacted]", Output(row));
         Assert.Equal("""{"status":"sent [redacted]"}""", Assert.Single(await bed.OfTypeAsync(MessageTypes.Progress)).Payload);
+    }
+
+    /// <summary>R1 (round 2): a secret used as a payload PROPERTY NAME, at any depth and in any
+    /// case, or as a NUMBER whose text matches a bound value, refuses the publish with one warning
+    /// row that names neither. A clean publish of the same type still lands.</summary>
+    [Fact]
+    public async Task A_secret_as_a_publish_key_or_number_refuses_the_publish()
+    {
+        var (bed, _, _) = await RunAsync(
+            """
+            cat >/dev/null
+            echo '{"t":"publish","type":"tick","payload":{"s3cr3tvalue":1}}'
+            echo '{"t":"publish","type":"tick","payload":{"n":{"S3CR3TVALUE":2}}}'
+            echo '{"t":"publish","type":"tick","payload":{"n":[20261234]}}'
+            echo '{"t":"publish","type":"tick","payload":{"n":2}}'
+            echo '{"t":"result","ok":true,"output":"done"}'
+            """,
+            manifest: m =>
+            {
+                DeclaresTick(m);
+                m["secrets"] = JsonNode.Parse("""{"a":{"required":true},"b":{"required":true}}""");
+            },
+            settings: TwoTokens(),
+            secrets: new Secrets(new() { ["FIXTURE_A"] = "s3cr3tvalue", ["FIXTURE_B"] = "20261234" }));
+        await using var _ = bed;
+
+        Assert.Equal("""{"n":2}""", Assert.Single(await bed.OfTypeAsync("plugin.fixture.tick")).Payload);
+        var warning = Assert.Single(await bed.OfTypeAsync(MessageTypes.Progress),
+            p => p.Payload.Contains("was dropped", StringComparison.Ordinal));
+        Assert.Contains("a property name in its payload holds a secret", warning.Payload);
+
+        var rows = await bed.Store.ReadAfterAsync(0, EveryRunType, int.MaxValue, Ct);
+        Assert.DoesNotContain(rows, r => r.Payload.Contains("s3cr3tvalue", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(rows, r => r.Payload.Contains("20261234", StringComparison.Ordinal));
+    }
+
+    /// <summary>R1 (round 2): the number rule on its own - refused, not rewritten, so a
+    /// subscriber never sees a number turn into a string.</summary>
+    [Fact]
+    public async Task A_number_matching_a_secret_refuses_the_publish()
+    {
+        var (bed, _, _) = await RunAsync(
+            """
+            cat >/dev/null
+            echo '{"t":"publish","type":"tick","payload":{"n":20261234}}'
+            echo '{"t":"result","ok":true,"output":"done"}'
+            """,
+            manifest: m =>
+            {
+                DeclaresTick(m);
+                m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}""");
+            },
+            settings: new Settings(new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "20261234" }));
+        await using var _ = bed;
+
+        Assert.Empty(await bed.OfTypeAsync("plugin.fixture.tick"));
+        Assert.Single(await bed.OfTypeAsync(MessageTypes.Progress),
+            p => p.Payload.Contains("a number in its payload matches a secret", StringComparison.Ordinal));
+    }
+
+    /// <summary>R2 (round 2): PHP and some Java encoders write <c>/</c> as <c>\/</c>; that form
+    /// of a bound value is redacted too.</summary>
+    [Fact]
+    public async Task A_secret_with_an_escaped_solidus_in_a_raw_line_is_redacted()
+    {
+        var (bed, _, row) = await RunAsync(
+            """
+            cat >/dev/null
+            cat <<'EOF'
+            {"t":"note","v":"abcd\/efgh"}
+            EOF
+            echo '{"t":"result","ok":true,"output":"done"}'
+            """,
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}"""),
+            settings: new Settings(new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "abcd/efgh" }));
+        await using var _ = bed;
+
+        Assert.Contains("""{"t":"note","v":"[redacted]"}""", Output(row));
+        Assert.DoesNotContain(await bed.Store.ReadAfterAsync(0, EveryRunType, int.MaxValue, Ct),
+            r => r.Payload.Contains("efgh", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

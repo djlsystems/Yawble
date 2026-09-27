@@ -9,6 +9,10 @@ namespace Harness.Host;
 public interface IPluginMemberSettingsStore : IPluginMemberSettings
 {
     Task SaveAsync(ContainerId member, PluginMemberSettings settings, CancellationToken ct = default);
+
+    /// <summary>Every logical key bound by a member currently on <paramref name="team"/> - the keys a
+    /// person has already bound there, which is all a Manager may bind (see the hire route).</summary>
+    Task<IReadOnlySet<string>> KeysBoundOnAsync(string team, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -56,6 +60,23 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
         command.Parameters.AddWithValue("$config", JsonSerializer.Serialize(settings.Config));
         command.Parameters.AddWithValue("$secrets", JsonSerializer.Serialize(settings.Secrets));
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlySet<string>> KeysBoundOnAsync(string team, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT secrets_json FROM team_member_config WHERE team = $team";
+        command.Parameters.AddWithValue("$team", team);
+
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            keys.UnionWith((JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(0)) ?? []).Values);
+        }
+
+        return keys;
     }
 
     private SqliteConnection Open()
