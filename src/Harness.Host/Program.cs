@@ -497,6 +497,13 @@ builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<IPrincipalStore>(),
     sp.GetRequiredService<AgentCatalog>()));
 
+// WHAT EVERY MEMBER RUNS THROUGH. The member runtime hands its work, as data, to this; the agent
+// adapter turns it into the prompt and history an agent CLI has always been given, over the
+// IAgentRunner stack above. Tests that substitute IAgentRunner keep working because this reads it.
+builder.Services.AddSingleton<IMemberRunner>(sp => new AgentMemberRunner(
+    sp.GetRequiredService<IAgentRunner>(),
+    sp.GetRequiredService<IContextBuilder>()));
+
 // Constructed explicitly rather than by convention: the two artifact seams and the pending store are
 // all OPTIONAL parameters, and a container silently built without them is a container that silently
 // does not remember - and, without the third, one that silently loses accepted work on a restart.
@@ -550,7 +557,6 @@ builder.Services.AddSingleton(sp => new ContainerHost(
     sp.GetRequiredService<IMessageLog>(),
     sp.GetRequiredService<ICursors>(),
     sp.GetRequiredService<ISubscriptions>(),
-    sp.GetRequiredService<IContextBuilder>(),
     sp.GetRequiredService<ITranscriptStore>(),
     sp.GetRequiredService<IPendingDeliveries>(),
     sp.GetRequiredService<ITriggerStore>(),
@@ -664,7 +670,7 @@ builder.Services.AddSingleton(sp => new EffectiveSubscriptions(
 builder.Services.AddSingleton(sp => new TeamRegistry(
     sp.GetRequiredService<ContainerHost>(),
     sp.GetRequiredService<AgentCatalog>(),
-    sp.GetRequiredService<IAgentRunner>(),
+    sp.GetRequiredService<IMemberRunner>(),
     sp.GetRequiredService<TeamPaths>(),
     sp.GetRequiredService<ITeamStore>(),
     sp.GetRequiredService<AgentEnvironment>(),
@@ -6043,7 +6049,7 @@ app.MapPost("/api/teams/{team}/workflows/{correlation:long}/stop", async (
     // description below says so rather than promising more than this code does. Sub-millisecond
     // and triggered only by a person clicking Stop, so closing it needs a
     // stop-if-still-on-this-correlation check taken under the container's own lock - a new
-    // synchronisation primitive on `AgentContainer` for a race this narrow and this recoverable
+    // synchronisation primitive on `MemberRuntime` for a race this narrow and this recoverable
     // (a second click ends whatever it actually caught). Documented rather than closed, as this
     // codebase does for its other narrow, human-triggered races.
     foreach (var snapshot in host.Snapshots())

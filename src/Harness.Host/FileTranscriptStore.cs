@@ -49,7 +49,7 @@ public sealed class FileTranscriptStore(TeamPaths paths) : ITranscriptStore
         // `..`, or a character invalid in a file name - so this composes two safe segments rather
         // than re-checking one unsafe string. The qualified form CANNOT be a single segment: `/` is
         // the qualifier, and a guard on the whole string would reject it as an invalid file-name
-        // character while AgentContainer swallowed the exception, so a qualified container would
+        // character while MemberRuntime swallowed the exception, so a qualified container would
         // write nothing at all.
         return Path.Combine(paths.TranscriptsFor(container), $"{causeSeq}.txt");
     }

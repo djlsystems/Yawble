@@ -346,7 +346,7 @@ public sealed class FirehoseSubscriptionException(string type, string agent)
 /// `Program.cs` always supplies it.
 /// </param>
 public sealed class TeamRegistry(
-    ContainerHost host, AgentCatalog agents, IAgentRunner runner, TeamPaths paths,
+    ContainerHost host, AgentCatalog agents, IMemberRunner runner, TeamPaths paths,
     ITeamStore teams, AgentEnvironment environment, FileBrowserPolicy fileBrowser, IMessageLog log,
     EffectiveSubscriptions effective, IRepoClone cloner, long? workflowSpendLimit = null,
     Func<long>? workflowSpendLimitNow = null, SkillDirectory? skillDirectory = null,
@@ -1493,7 +1493,7 @@ public sealed class TeamRegistry(
     /// dispatch to. Member deletion is the one whose omission leaves
     /// nothing to find - the team goes on living, every row is right, and the manager alone still
     /// believes it can dispatch to somebody who is gone.
-    /// <see cref="AgentContainer.Reprompt"/> exists for this, and is still the only thing in this
+    /// <see cref="MemberRuntime.Reprompt"/> exists for this, and is still the only thing in this
     /// codebase that alters a container after creation.
     ///
     /// A no-op when the manager is not there - which is the ordinary state for the instant during
@@ -1505,7 +1505,7 @@ public sealed class TeamRegistry(
 
         // No environment is built at a re-prompt the way AddContainerAsync and RestoreAsync build
         // one - there is no credential being minted here, only a rename or a roster change. Reading
-        // it back from the live container (AgentContainer.Environment) rather than
+        // it back from the live container (MemberRuntime.Environment) rather than
         // passing an empty dictionary is what keeps `{env:...}` resolving the same on every
         // re-prompt as it did at creation; an empty dictionary would resolve it once and then leave
         // it literal forever, silently. Its Agent comes from the same snapshot, for the same

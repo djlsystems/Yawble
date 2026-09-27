@@ -1482,7 +1482,7 @@ export function workflowsTile(
     //
     // `ContainerSnapshot.currentCorrelation` is what makes the filter possible — `ContainerCard.vue`
     // already reads it per-member — and it settles QUEUED for free rather than needing a second
-    // rule: `AgentContainer.ConsumeAsync` sets `_currentCorrelation` in the SAME statement as
+    // rule: `MemberRuntime.ConsumeAsync` sets `_currentCorrelation` in the SAME statement as
     // `State = Running` and clears it in the same statement as `State = Idle`, so every container
     // that survives this filter already has `state === 'Running'` by construction. The `queued`
     // half of `workflowTiming`'s `live` check has nothing left to add on a filtered list.

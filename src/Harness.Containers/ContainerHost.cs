@@ -42,11 +42,10 @@ public sealed class ContainerHost : IAsyncDisposable
     // ContainerId carries its own case-insensitive equality - see ContainerId.Equals - so this needs
     // no comparer. A container's identity IS the pair: it is what the addressed-instruction type is
     // built from and what the ledger filters on.
-    private readonly ConcurrentDictionary<ContainerId, AgentContainer> _containers = new();
+    private readonly ConcurrentDictionary<ContainerId, MemberRuntime> _containers = new();
     private readonly IMessageLog _log;
     private readonly ICursors _cursors;
     private readonly ISubscriptions _subscriptions;
-    private readonly IContextBuilder? _context;
     private readonly ITranscriptStore? _transcripts;
     private readonly IPendingDeliveries? _pending;
     private readonly ITriggerStore? _triggers;
@@ -55,12 +54,12 @@ public sealed class ContainerHost : IAsyncDisposable
     /// <summary>
     /// HANDED TO EVERY CONTAINER THIS HOST CREATES, and called by this class itself for the one
     /// terminal row a container is not alive to publish - see
-    /// <see cref="AgentContainer"/>'s own field of the same name for what it is and why it runs
+    /// <see cref="MemberRuntime"/>'s own field of the same name for what it is and why it runs
     /// BEFORE the row rather than after.
     ///
     /// <para>
     /// The two callers are the two writers of `agentContainer.completed`/`agentContainer.failed`,
-    /// and there are exactly two: <c>AgentContainer.RunOneAsync</c> for a run this process saw end,
+    /// and there are exactly two: <c>MemberRuntime.RunOneAsync</c> for a run this process saw end,
     /// and <see cref="ResumePendingAsync"/> for one a RESTART cut short. A restart ends a run
     /// just as a spend limit and a kill do, so a seam wired only to the first would be absent in a
     /// third of the cases it exists for.
@@ -125,18 +124,16 @@ public sealed class ContainerHost : IAsyncDisposable
     private readonly Func<string, CancellationToken, ValueTask<long?>>? _effectiveWorkflowBudget;
 
     /// <summary>A member's tree for one card, per repository - see
-    /// <c>AgentContainer</c>'s field of the same name. Null means no worktree variables.</summary>
+    /// <c>MemberRuntime</c>'s field of the same name. Null means no worktree variables.</summary>
     private readonly Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? _worktrees;
 
     /// <summary>Handed to every container, for <see cref="ContainerSnapshot.Watchable"/>.</summary>
     private readonly Func<string, bool>? _watchable;
 
 
-    /// <param name="context">Handed to every container this host creates. Null gives containers no
-    /// memory, which is what they had before the three artifacts existed.</param>
     /// <param name="transcripts">Handed to every container this host creates.</param>
     /// <param name="pending">Handed to every container this host creates. Null means a container
-    /// that silently loses accepted work on a restart - see AgentContainer's own doc comment.</param>
+    /// that silently loses accepted work on a restart - see MemberRuntime's own doc comment.</param>
     /// <param name="triggers">Read on EVERY delivery, in <see cref="ResolveDeliveryAsync"/> - never
     /// cached on the container. Null means the pump cannot see event triggers at all, which is only
     /// correct for a fixture nothing drives them through: every message then reaches this container
@@ -172,7 +169,6 @@ public sealed class ContainerHost : IAsyncDisposable
         IMessageLog log,
         ICursors cursors,
         ISubscriptions subscriptions,
-        IContextBuilder? context = null,
         ITranscriptStore? transcripts = null,
         IPendingDeliveries? pending = null,
         ITriggerStore? triggers = null,
@@ -194,7 +190,6 @@ public sealed class ContainerHost : IAsyncDisposable
         _log = log;
         _cursors = cursors;
         _subscriptions = subscriptions;
-        _context = context;
         _transcripts = transcripts;
         _pending = pending;
         _triggers = triggers;
@@ -214,12 +209,12 @@ public sealed class ContainerHost : IAsyncDisposable
             .OrderBy(s => s.Team, StringComparer.Ordinal)
             .ThenBy(s => s.Id, StringComparer.Ordinal)];
 
-    public AgentContainer? Find(ContainerId id) => _containers.GetValueOrDefault(id);
+    public MemberRuntime? Find(ContainerId id) => _containers.GetValueOrDefault(id);
 
     /// <summary>
     /// Hands a LIVE container the effective subscription set <c>EffectiveSubscriptions.RecomputeAsync</c>
     /// just persisted, so the in-memory snapshot a browser is already looking at agrees with the
-    /// database. See <see cref="AgentContainer.Resubscribe"/> for why this is the fifth thing that
+    /// database. See <see cref="MemberRuntime.Resubscribe"/> for why this is the fifth thing that
     /// changes a container after creation and for the set-comparison that keeps it from publishing
     /// on every recompute.
     ///
@@ -240,8 +235,8 @@ public sealed class ContainerHost : IAsyncDisposable
     /// anything directly would be unreachable, and making that an opt-in someone can forget is a
     /// worse default than making it structural.
     /// </summary>
-    public async Task<AgentContainer> AddAsync(
-        ContainerDefinition definition, IAgentRunner runner, CancellationToken ct = default) =>
+    public async Task<MemberRuntime> AddAsync(
+        ContainerDefinition definition, IMemberRunner runner, CancellationToken ct = default) =>
         await RegisterAsync(definition, runner, await _log.HighestSeqAsync(ct), advanceCursor: true, ct);
 
     /// <summary>
@@ -256,13 +251,13 @@ public sealed class ContainerHost : IAsyncDisposable
     /// restored container's effective set is recomputed and pushed to it separately, through
     /// <see cref="Resubscribe"/>, once this method returns.
     /// </summary>
-    public Task<AgentContainer> RestoreAsync(
-        ContainerDefinition definition, IAgentRunner runner, long floorSeq,
+    public Task<MemberRuntime> RestoreAsync(
+        ContainerDefinition definition, IMemberRunner runner, long floorSeq,
         CancellationToken ct = default) =>
         RegisterAsync(definition, runner, floorSeq, advanceCursor: false, ct);
 
-    private async Task<AgentContainer> RegisterAsync(
-        ContainerDefinition definition, IAgentRunner runner, long floorSeq, bool advanceCursor,
+    private async Task<MemberRuntime> RegisterAsync(
+        ContainerDefinition definition, IMemberRunner runner, long floorSeq, bool advanceCursor,
         CancellationToken ct)
     {
         // Refused, not overwritten. `_containers[id] = container` would silently replace the first
@@ -315,8 +310,8 @@ public sealed class ContainerHost : IAsyncDisposable
         // cursor it already has is authoritative.
         if (advanceCursor) await _cursors.AdvanceAsync(definition.Id, floorSeq, ct);
 
-        var container = new AgentContainer(
-            definition with { Subscribes = types }, runner, _log, _context, _transcripts,
+        var container = new MemberRuntime(
+            definition with { Subscribes = types }, runner, _log, _transcripts,
             pending: _pending, claimStart: TryClaimStart, sinceSeq: floorSeq,
             onRunEnding: _onRunEnding, claimSignal: ClaimSignal, claimWithdraw: WithdrawClaim, worktrees: _worktrees,
             watchable: _watchable);
@@ -348,7 +343,7 @@ public sealed class ContainerHost : IAsyncDisposable
     ///
     /// Called ONCE, after every container has been restored and before the pump starts. Its two
     /// halves answer different questions: work that never started is still owed and is re-offered
-    /// through <see cref="AgentContainer.OfferAsync"/> — the ceiling applies exactly as it would at
+    /// through <see cref="MemberRuntime.OfferAsync"/> — the ceiling applies exactly as it would at
     /// any other moment, so a queue at capacity refuses a resumed delivery out loud rather than
     /// silently admitting it. Work that HAD started cannot be re-run, because nothing knows how far
     /// into it the agent got, so it is reported instead — as `container.failed`, not a new type, so
@@ -418,7 +413,7 @@ public sealed class ContainerHost : IAsyncDisposable
                     // terminal transition of a run the previous process was in the middle of, and
                     // its work is sitting in the team's clone exactly as a killed run's is, so a restart
                     // is treated like a spend limit or a kill. Above the append and
-                    // guarded, for the reasons `AgentContainer` states at its own call site.
+                    // guarded, for the reasons `MemberRuntime` states at its own call site.
                     if (_onRunEnding is not null)
                     {
                         try
@@ -672,7 +667,7 @@ public sealed class ContainerHost : IAsyncDisposable
                         // recorded from its own clock-driven pass, not this one.
                         if (resolution.FiredTrigger is { } trigger && _triggers is not null)
                         {
-                            // Best effort, the same shape AgentContainer uses for a transcript
+                            // Best effort, the same shape MemberRuntime uses for a transcript
                             // write: the member has already been woken, so a failure to record
                             // this trigger's OWN outcome must not undo that - the worst case is
                             // the dialog keeps saying "never fired" for a trigger that plainly
@@ -889,7 +884,7 @@ public sealed class ContainerHost : IAsyncDisposable
     /// to one member's failures must not quietly stop it hearing every other member's. Losing a
     /// delivery it already had is the class of bug this codebase spends the most effort preventing;
     /// it is worse than the alternative (a member woken more often than a filter's wording alone
-    /// suggests - visible, and arguable on its own terms). <see cref="AgentContainer.HasBaseSubscription"/>
+    /// suggests - visible, and arguable on its own terms). <see cref="MemberRuntime.HasBaseSubscription"/>
     /// answers this from memory, so the common case never reaches a store at all.
     ///
     /// Only once the base set says no does a trigger get to say yes: a type reaches a container's
@@ -909,7 +904,7 @@ public sealed class ContainerHost : IAsyncDisposable
     /// needs that identity to record the trigger's own outcome, and nothing else in this method's
     /// three "deliver unchanged" arms is a fire at all.
     /// </summary>
-    private async Task<DeliveryResolution> ResolveDeliveryAsync(AgentContainer container, Message message, CancellationToken ct)
+    private async Task<DeliveryResolution> ResolveDeliveryAsync(MemberRuntime container, Message message, CancellationToken ct)
     {
         if (container.HasBaseSubscription(message.Type)) return new DeliveryResolution(message, null);
 
@@ -1074,7 +1069,7 @@ public sealed class ContainerHost : IAsyncDisposable
     /// </para>
     /// </summary>
     private async Task<bool> OverBudgetAsync(
-        Message message, AgentContainer container, CancellationToken ct)
+        Message message, MemberRuntime container, CancellationToken ct)
     {
         if (message.CorrelationId <= 0) return false;
 
@@ -1190,7 +1185,7 @@ public sealed class ContainerHost : IAsyncDisposable
     /// </para>
     /// </summary>
     private async Task PauseWorkflowAsync(
-        Message message, AgentContainer container, string reason, long bound,
+        Message message, MemberRuntime container, string reason, long bound,
         WorkflowSpend spend, bool fromTeam, CancellationToken ct)
     {
         try

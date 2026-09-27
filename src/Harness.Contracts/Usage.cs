@@ -105,7 +105,7 @@ public sealed record InvocationUsage
 /// One container's usage as summed from completed/failed payloads on the log.
 ///
 /// A PROJECTION, not a second store. The payload written by
-/// <c>AgentContainer.RunOneAsync</c> is the record. Rows that predate capture (no
+/// <c>MemberRuntime.RunOneAsync</c> is the record. Rows that predate capture (no
 /// <c>tokensIn</c>/<c>tokensOut</c> keys) are counted in <see cref="RunsWithoutUsage"/>
 /// rather than summed as zeros, so a dashboard cannot paint invented spend.
 /// </summary>
@@ -213,7 +213,7 @@ public sealed record MemberTokenTotals(
 /// <summary>
 /// One workflow's total spend as summed from completed/failed payloads on the log.
 ///
-/// A PROJECTION, not a second store. The payload written by <c>AgentContainer.RunOneAsync</c>
+/// A PROJECTION, not a second store. The payload written by <c>MemberRuntime.RunOneAsync</c>
 /// is the record. This is what a workflow spend limit reads to decide whether to refuse a dispatch.
 ///
 /// Unmeasured spend never convicts: a workflow with zero measured runs will have RunsWithMeasuredUsage = 0,

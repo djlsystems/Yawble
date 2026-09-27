@@ -52,7 +52,7 @@ public sealed class EffectiveSubscriptions(
         // lands here, and the pump starts using the new set immediately - but the card a person
         // already has open goes on showing the subscriptions this container was CREATED with, which
         // is the state every reader of that card trusts. See ContainerHost.Resubscribe and
-        // AgentContainer.Resubscribe for the set comparison that keeps this from publishing on
+        // MemberRuntime.Resubscribe for the set comparison that keeps this from publishing on
         // every recompute, including one that changed nothing.
         containers.Resubscribe(container, effective);
 

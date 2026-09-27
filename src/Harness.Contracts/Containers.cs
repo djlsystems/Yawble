@@ -421,7 +421,7 @@ public sealed record ContainerSnapshot(
     /// idle is what a container that finished perfectly also is. Dying at the next wake is what
     /// stops a container that has been given new work from wearing a mark about the last job.
     ///
-    /// THIS IS NOT the two-stores mistake `AgentContainer.Republish`'s comment warns about. That
+    /// THIS IS NOT the two-stores mistake `MemberRuntime.Republish`'s comment warns about. That
     /// comment is right about a STREAM: a status line every few seconds, copied into a field beside
     /// the log, is two stores of one fact and the shape that produced the per-container command map
     /// this codebase deleted. This is one terminal fact per run, and it is the container's own
@@ -451,7 +451,7 @@ public sealed record ContainerSnapshot(
     /// while `Blocked` is the AGENT reporting that its run completed fine and it is giving up.
     ///
     /// Set where `container.failed` is published, which is BOTH publishers: the arm of
-    /// <c>AgentContainer.RunOneAsync</c> that chooses `Failed` over `Completed`, and
+    /// <c>MemberRuntime.RunOneAsync</c> that chooses `Failed` over `Completed`, and
     /// <c>ContainerHost.ResumePendingAsync</c> for a run the Host was restarted out from under.
     /// Cleared at the NEXT WAKE, on the line beside where `Blocked` and `NeedsDecision` are
     /// cleared - deliberately adjacent so the three cannot drift apart.
@@ -556,7 +556,7 @@ public sealed record ContainerSnapshot(
     /// DELIBERATELY NOT SHAPED LIKE <see cref="Blocked"/>, <see cref="Failed"/> AND
     /// <see cref="NeedsDecision"/>, and this is the one place the hand-back is most likely to be got wrong.
     /// Those three are MARKS OF TROUBLE with a self-expiring lifecycle: each is cleared at the NEXT
-    /// WAKE, on adjacent lines in <c>AgentContainer.RunOneAsync</c>, because - in that method's own
+    /// WAKE, on adjacent lines in <c>MemberRuntime.RunOneAsync</c>, because - in that method's own
     /// words - "what makes a mark a lie is not the run ending, it is this container being given
     /// something else to do". A warning that outlived the job it warned about would show a team in
     /// trouble that is not.
@@ -569,7 +569,7 @@ public sealed record ContainerSnapshot(
     /// gone MOST RELIABLY in the case it exists for, because a hand-back's whole purpose is to wake
     /// somebody who then gives this member more work.
     ///
-    /// SO IT IS A LAST-X FIELD, not a mark: written by <c>AgentContainer.MarkHandedBack</c>,
+    /// SO IT IS A LAST-X FIELD, not a mark: written by <c>MemberRuntime.MarkHandedBack</c>,
     /// replaced only by the next hand-back, and never cleared. That is why every reader words it as
     /// `last handback` rather than as a present-tense condition - it is accurate beside a member
     /// that is Running something new, where "handed back" alone would not be.

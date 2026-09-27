@@ -20,7 +20,7 @@ namespace Harness.Host;
 /// <remarks>
 /// <paramref name="diagnostics"/> is OPTIONAL and null means a runner that records nothing, which
 /// is the shape every other seam in this codebase uses for an artifact store - see
-/// `AgentContainer`'s transcript and ledger. It is optional so the specs that construct this class
+/// `MemberRuntime`'s transcript and ledger. It is optional so the specs that construct this class
 /// by hand do not each have to supply one, and because a diagnostics store is an observer: a runner
 /// without one must go on running agents exactly as it did.
 ///

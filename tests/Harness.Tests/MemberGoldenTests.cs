@@ -17,7 +17,7 @@ namespace Harness.Tests;
 /// an agent member's terminal rows, the invocation it is handed, the child's argv/stdin/environment,
 /// the persisted member row and the snapshot JSON. A step that changes one byte of any of them
 /// changed what an existing team sees. Re-record only for a change that is MEANT to be visible, with
-/// <c>YAWBLE_UPDATE_GOLDENS=1</c>, and say so in the commit.
+/// <c>HARNESS_UPDATE_GOLDENS=1</c>, and say so in the commit.
 /// </summary>
 internal static class Golden
 {
@@ -26,14 +26,14 @@ internal static class Golden
         var path = Path.Combine(Path.GetDirectoryName(caller)!, "Fixtures", "Goldens", name + ".txt");
         actual = actual.Replace("\r\n", "\n", StringComparison.Ordinal);
 
-        if (Environment.GetEnvironmentVariable("YAWBLE_UPDATE_GOLDENS") == "1")
+        if (Environment.GetEnvironmentVariable("HARNESS_UPDATE_GOLDENS") == "1")
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, actual);
             return;
         }
 
-        Assert.True(File.Exists(path), $"No golden at {path}. Record it once with YAWBLE_UPDATE_GOLDENS=1.");
+        Assert.True(File.Exists(path), $"No golden at {path}. Record it once with HARNESS_UPDATE_GOLDENS=1.");
         Assert.Equal(File.ReadAllText(path), actual);
     }
 }
@@ -112,7 +112,7 @@ public sealed class MemberGoldenTests
 
         // A runner that honours cancellation the way a fake does: by throwing.
         var cancelling = new CancellingAgent(bed.Agent, started);
-        var container = await bed.Host.AddAsync(ContainerTestBed.Definition(Dev), cancelling, Ct);
+        var container = await bed.Host.AddAsync(ContainerTestBed.Definition(Dev), bed.AsMember(cancelling), Ct);
 
         await bed.Store.AppendAsync(new NewMessage(
             MessageTypes.InstructionFor(Dev), """{"instruction":"go"}""", "console"), Ct);
@@ -164,7 +164,7 @@ public sealed class MemberGoldenTests
                 SystemPrompt = "You are Dev.",
                 Environment = new Dictionary<string, string> { ["HARNESS_URL"] = "http://h", ["TEAM_VAR"] = "1" },
             },
-            bed.Agent, Ct);
+            bed.Runner, Ct);
 
         // Run 1: history for the ledger.
         var first = await bed.Store.AppendAsync(new NewMessage(

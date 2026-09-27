@@ -170,7 +170,7 @@ public sealed class IdleWorkflowOffer(
         }
         catch (Exception error) when (!ct.IsCancellationRequested)
         {
-            // A HANDLER'S FAILURE IS NOT THIS RUN'S - `AgentContainer` says the same at its own call
+            // A HANDLER'S FAILURE IS NOT THIS RUN'S - `MemberRuntime` says the same at its own call
             // site, and a terminal row that went missing because this threw would leave a container
             // reading `running` forever. LOGGED rather than swallowed in silence: the whole subject
             // of this class is a condition nobody could otherwise see.

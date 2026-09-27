@@ -48,7 +48,7 @@ public sealed class DocumentsRetentionTests : IAsyncDisposable
 
         _documents = new TeamDocuments(paths);
         _host = new ContainerHost(
-            store, store, store, new LedgerContextBuilder(new SqliteLedger(database)),
+            store, store, store,
             new InMemoryTranscriptStore(), pending, triggers);
 
         var catalog = new AgentCatalog(
@@ -56,7 +56,7 @@ public sealed class DocumentsRetentionTests : IAsyncDisposable
         var effective = new EffectiveSubscriptions(teamStore, triggers, store, _host);
 
         _teams = new TeamRegistry(
-            _host, catalog, new FakeAgent(), paths, teamStore,
+            _host, catalog, new AgentMemberRunner(new FakeAgent()), paths, teamStore,
             new AgentEnvironment(principals, catalog, "http://127.0.0.1:1", _documents),
             new FileBrowserPolicy([new FileBrowserRoot("data", _dataRoot, AllowCreate: true)]),
             store, effective, new RepoClone(git, enabled: false));

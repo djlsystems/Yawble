@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Harness.Containers;
 using Harness.Contracts;
+using Harness.Host;
 using Harness.Messaging;
 
 namespace Harness.Tests;
@@ -49,9 +50,12 @@ public sealed class ContainerTestBed : IAsyncDisposable
 
         Store = new SqliteMessageStore(database);
 
+        Context = new LedgerContextBuilder(new SqliteLedger(database));
+        Runner = new AgentMemberRunner(Agent, Context);
+
         ContainerHost host = null!;
         host = new ContainerHost(
-            Store, Store, Store, new LedgerContextBuilder(new SqliteLedger(database)),
+            Store, Store, Store,
             new InMemoryTranscriptStore(),
             triggers: triggers,
             onRegistered: (id, ct) => Store.SetAsync(id, host.Find(id)!.Snapshot().Subscribes, ct),
@@ -67,12 +71,22 @@ public sealed class ContainerTestBed : IAsyncDisposable
 
     public FakeAgent Agent { get; } = new();
 
+    /// <summary>The ledger history an agent member is handed, as Program.cs wires it.</summary>
+    public IContextBuilder Context { get; }
+
+    /// <summary><see cref="Agent"/> as an agent MEMBER: the adapter that renders the prompt and
+    /// history from the batch, exactly as the Host composes it.</summary>
+    public AgentMemberRunner Runner { get; }
+
+    /// <summary>Any agent runner as a member, with this bed's ledger history.</summary>
+    public AgentMemberRunner AsMember(IAgentRunner agent) => new(agent, Context);
+
     public static ContainerDefinition Definition(ContainerId id, string[]? subscribes = null) =>
         new(id, "fake", SystemPrompt: "", WorkingDirectory: ".",
             Subscribes: subscribes ?? [], Environment: new Dictionary<string, string>());
 
-    public Task<AgentContainer> AddAsync(ContainerId id, string[]? subscribes = null) =>
-        Host.AddAsync(Definition(id, subscribes), Agent);
+    public Task<MemberRuntime> AddAsync(ContainerId id, string[]? subscribes = null) =>
+        Host.AddAsync(Definition(id, subscribes), Runner);
 
     public async Task<bool> PumpUntilAsync(Func<bool> until, int attempts = 100)
     {
