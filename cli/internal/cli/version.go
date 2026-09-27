@@ -25,6 +25,7 @@ func newVersionCommand(deps Deps) *cobra.Command {
 				})
 			}
 			out := cmd.OutOrStdout()
+			showLogo(deps, out)
 			fmt.Fprintf(out, "yawble %s", buildinfo.Version)
 			if buildinfo.Commit != "" {
 				fmt.Fprintf(out, " (%s)", buildinfo.Commit)

@@ -27,15 +27,21 @@ func main() {
 	if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
 		interactive = true
 	}
+	// A terminal on stdout is what the mark is drawn for; a pipe or a file gets plain text.
+	stdoutTerminal := false
+	if info, err := os.Stdout.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+		stdoutTerminal = true
+	}
 	os.Exit(cli.Execute(cli.NewRoot(cli.Deps{
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-		Env:         os.Getenv,
-		ConfigDir:   filepath.Join(dir, "yawble"),
-		LookPath:    exec.LookPath,
-		Stdin:       os.Stdin,
-		Interactive: interactive,
-		ReadSecret:  readHidden,
+		Stdout:         os.Stdout,
+		Stderr:         os.Stderr,
+		Env:            os.Getenv,
+		ConfigDir:      filepath.Join(dir, "yawble"),
+		LookPath:       exec.LookPath,
+		Stdin:          os.Stdin,
+		Interactive:    interactive,
+		StdoutTerminal: stdoutTerminal,
+		ReadSecret:     readHidden,
 	}), os.Args[1:]))
 }
 

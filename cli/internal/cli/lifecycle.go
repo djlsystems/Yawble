@@ -157,6 +157,7 @@ func newUpCommand(deps Deps) *cobra.Command {
 		Example: "  yawble up\n  yawble up --yes    # answer every question yes (Podman when both are installed, machine changes)",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			showLogo(deps, cmd.OutOrStdout())
 			c, err := loadConfig(deps)
 			if err != nil {
 				return err

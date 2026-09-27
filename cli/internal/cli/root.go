@@ -45,6 +45,9 @@ type Deps struct {
 	// refusal naming --yes.
 	Stdin       io.Reader
 	Interactive bool
+	// StdoutTerminal is whether stdout is a terminal someone reads, as opposed to a pipe or a
+	// file. Only then is the mark shown: `yawble version | ...` from a terminal gets none.
+	StdoutTerminal bool
 	// ReleaseBaseURL is the GitHub API for `update --cli`; "" means api.github.com. Executable is
 	// where this binary is (os.Executable in main). Tests point both at a fake.
 	ReleaseBaseURL string
@@ -82,6 +85,13 @@ func NewRoot(deps Deps) *cobra.Command {
 		// Cobra's `completion` (Tab completion scripts for a shell) works but is not listed:
 		// most people never need it, and the README says how to turn it on.
 		CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
+		// No arguments shows the mark and the commands. NoArgs keeps a mistyped command an
+		// invocation error rather than a run of this.
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			showLogo(deps, cmd.OutOrStdout())
+			return cmd.Help()
+		},
 	}
 	root.SetOut(deps.Stdout)
 	root.SetErr(deps.Stderr)
