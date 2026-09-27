@@ -400,3 +400,34 @@ func TestDoctorWhenTheHostsDoctorCrashesFailsAndExitsOne(t *testing.T) {
 		t.Errorf("instance %s %q %q", v, detail, fix)
 	}
 }
+
+// Step 10 (D): a plugin member or a preset that runs no model has no sign-in, so it is never the
+// reason the agents row warns. Only codex, a model agent, is NOT signed in here.
+func TestDoctorDoesNotReportAPluginOrANonModelPresetAsNotSignedIn(t *testing.T) {
+	s := runningScript()
+	withOthers := strings.Replace(doctorStdout, `"authenticated":true,"detail":"saved login","credentialVariable":"ANTHROPIC_API_KEY"}`,
+		`"authenticated":true,"detail":"saved login","credentialVariable":"ANTHROPIC_API_KEY"},`+
+			`{"agent":"plugin:sample-echo","kind":"plugin","installed":true,"version":null,"authenticated":false,"detail":"no sign-in"},`+
+			`{"agent":"echo","languageModel":false,"installed":true,"version":null,"authenticated":false,"detail":"no model"}`, 1)
+	s.On(doctorExec, engine.Result{Stdout: withOthers})
+	code, out, errOut := run(t, stubbed(s), "doctor")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if !strings.Contains(out, "claude signed in · codex NOT signed in") {
+		t.Errorf("the agents row is not the two model agents:\n%s", out)
+	}
+	for _, unwanted := range []string{"sample-echo", "echo NOT", "echo not"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("output reports %q as an agent:\n%s", unwanted, out)
+		}
+	}
+
+	// With only the plugin and the non-model preset wrong, nothing warns.
+	s2 := runningScript()
+	s2.On(doctorExec, engine.Result{Stdout: strings.Replace(withOthers, `"authenticated":false,"detail":"exit 1"`, `"authenticated":true,"detail":"ok"`, 1)})
+	_, out, _ = run(t, stubbed(s2), "doctor")
+	if strings.Contains(out, "warn  agents") || strings.Contains(out, "NOT signed in") {
+		t.Errorf("a plugin or a non-model preset made the agents row warn:\n%s", out)
+	}
+}

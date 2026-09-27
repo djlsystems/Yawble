@@ -168,6 +168,63 @@ public sealed class PrepareVolumeTests : IDisposable
     }
 
     [Fact]
+    public void A_missing_plugins_directory_is_created_for_harness_and_readable_by_agent()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+
+        var output = Run("ownership");
+
+        Assert.True(Directory.Exists(Path.Combine(_data, "plugins")), output);
+        Assert.Equal("10001:10002", ChownedPaths()[Path.Combine(_data, "plugins")]);
+        Assert.Equal("750", Mode("plugins"));
+    }
+
+    [Fact]
+    public void An_installed_plugin_is_harness_agent_with_its_executable_kept_and_nothing_writable_by_agent()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        var version = Path.Combine(_data, "plugins", "sample-echo", "0.1.0");
+        Directory.CreateDirectory(Path.Combine(version, "lib"));
+        File.WriteAllText(Path.Combine(version, "plugin.json"), "{}");
+        File.WriteAllText(Path.Combine(version, "sample-echo"), "#!/bin/sh\n");
+        File.WriteAllText(Path.Combine(version, "lib", "SampleEcho.dll"), "x");
+        File.WriteAllText(Path.Combine(_data, "plugins", "sample-echo", "active"), "0.1.0\n");
+        File.SetUnixFileMode(Path.Combine(version, "plugin.json"), (UnixFileMode)Convert.ToInt32("666", 8));
+        File.SetUnixFileMode(Path.Combine(version, "sample-echo"), (UnixFileMode)Convert.ToInt32("4777", 8));
+        File.SetUnixFileMode(Path.Combine(version, "lib"), (UnixFileMode)Convert.ToInt32("2777", 8));
+        File.SetUnixFileMode(Path.Combine(version, "lib", "SampleEcho.dll"), (UnixFileMode)Convert.ToInt32("600", 8));
+        File.WriteAllText(Path.Combine(_data, "plugins", ".rescan-report.json"), "{}");
+        File.SetUnixFileMode(Path.Combine(_data, "plugins", ".rescan-report.json"), (UnixFileMode)Convert.ToInt32("600", 8));
+
+        var output = Run("ownership");
+
+        var chowned = ChownedPaths();
+        foreach (var path in new[] { "plugins", "plugins/sample-echo/0.1.0/lib/SampleEcho.dll", "plugins/sample-echo/active" })
+        {
+            Assert.True(chowned.TryGetValue(Path.Combine(_data, path), out var owner), $"{path} was not handed over. {output}");
+            Assert.Equal("10001:10002", owner);
+        }
+
+        Assert.Equal("750", Mode("plugins"));
+        Assert.Equal("750", Mode("plugins/sample-echo"));
+        Assert.Equal("750", Mode("plugins/sample-echo/0.1.0/lib"));
+        Assert.Equal("640", Mode("plugins/sample-echo/0.1.0/plugin.json"));
+        Assert.Equal("640", Mode("plugins/sample-echo/0.1.0/lib/SampleEcho.dll"));
+        Assert.Equal("640", Mode("plugins/sample-echo/active"));
+        // The host's rescan answer names members of every team: it stays the host's alone.
+        Assert.Equal("600", Mode("plugins/.rescan-report.json"));
+        // The launcher keeps its execute bits and loses setuid and the write bits.
+        Assert.Equal("750", Mode("plugins/sample-echo/0.1.0/sample-echo"));
+
+        // And a second start, as this process's own ids, finds nothing more to change.
+        Assert.Contains("ownership set: 0 change(s)", Run("ownership", new Dictionary<string, string>
+        {
+            ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
+            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
+        }));
+    }
+
+    [Fact]
     public void A_second_start_changes_nothing()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");

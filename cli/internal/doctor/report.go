@@ -50,6 +50,18 @@ type Agent struct {
 	Authenticated      *bool   `json:"authenticated"`
 	Detail             string  `json:"detail"`
 	CredentialVariable *string `json:"credentialVariable"`
+	// Kind and LanguageModel are the Host's own words for what a member runs (MemberRef.KindOf,
+	// AgentLaunch.LanguageModel). The Host's report lists the auth-probes.json commands today, every
+	// one a model agent, and sends neither; an entry that says it is a plugin or runs no model has
+	// no sign-in, and is dropped when the report is read.
+	Kind          string `json:"kind,omitempty"`
+	LanguageModel *bool  `json:"languageModel,omitempty"`
+}
+
+// IsModelAgent is an entry that signs in to a model provider: no kind or kind "agent", and not
+// marked as running no model.
+func (a Agent) IsModelAgent() bool {
+	return (a.Kind == "" || a.Kind == "agent") && (a.LanguageModel == nil || *a.LanguageModel)
 }
 
 // ErrNoReport is stdout with no JSON object on its last line: the Host in the image does not
@@ -72,6 +84,15 @@ func ParseHostReport(stdout string) (HostReport, error) {
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			return r, fmt.Errorf("the instance's doctor report could not be read: %w", err)
 		}
+		// `yawble agents` lists agents only, and the doctor's agents row counts only them: a plugin
+		// member or a non-model preset is never "NOT signed in".
+		agents := r.Agents[:0]
+		for _, a := range r.Agents {
+			if a.IsModelAgent() {
+				agents = append(agents, a)
+			}
+		}
+		r.Agents = agents
 		return r, nil
 	}
 	return r, ErrNoReport

@@ -65,3 +65,33 @@ func TestAgentsOnAStoppedInstanceExitsOneAndSaysUpFirst(t *testing.T) {
 		t.Errorf("exit %d stderr %q", code, errOut)
 	}
 }
+
+// Step 10 (D): `yawble agents` lists agents only. An entry the Host marks as a plugin or as running
+// no model is not listed, in text or JSON.
+func TestAgentsListsAgentsOnly(t *testing.T) {
+	others := strings.Replace(agentsStdout, "]}\n",
+		",{\"agent\":\"plugin:sample-echo\",\"kind\":\"plugin\",\"installed\":true,\"version\":null,\"authenticated\":false,\"detail\":\"\"}"+
+			",{\"agent\":\"echo\",\"kind\":\"agent\",\"languageModel\":false,\"installed\":true,\"version\":null,\"authenticated\":false,\"detail\":\"\"}]}\n", 1)
+	s := runningScript()
+	s.On(doctorExec, engine.Result{Stdout: others})
+	code, out, errOut := run(t, stubbed(s), "agents")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if strings.Contains(out, "sample-echo") || strings.Contains(out, "\necho\n") {
+		t.Errorf("a plugin or a non-model preset is listed as an agent:\n%s", out)
+	}
+
+	s = runningScript()
+	s.On(doctorExec, engine.Result{Stdout: others})
+	_, out, _ = run(t, stubbed(s), "agents", "--json")
+	var got []struct {
+		Agent string `json:"agent"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("not json: %v\n%s", err, out)
+	}
+	if len(got) != 5 {
+		t.Errorf("want the five agents, got %+v", got)
+	}
+}

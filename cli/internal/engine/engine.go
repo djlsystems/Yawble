@@ -73,6 +73,9 @@ type Engine interface {
 	// Exec runs a program inside a running container and answers its output. A non-zero exit
 	// is an error carrying stderr, as for every other verb.
 	Exec(ctx context.Context, name string, args ...string) (Result, error)
+	// CopyTo copies a folder on this computer into a container, as dst there. dst must not exist:
+	// the folder's contents become dst. Ownership and modes are the caller's to set afterwards.
+	CopyTo(ctx context.Context, name, src, dst string) error
 	Run(ctx context.Context, spec RunSpec) error
 	Start(ctx context.Context, name string) error
 	Stop(ctx context.Context, name string) error

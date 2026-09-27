@@ -1105,6 +1105,8 @@ builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddHostedService<PumpService>();
 builder.Services.AddHostedService<KanbanChangePush>();
 builder.Services.AddHostedService<DefaultBranchAtStart>();
+// The operator CLI's `plugin install` asks for a rescan by writing a file the Host polls: no restart, no API key.
+builder.Services.AddHostedService<PluginRescanRequests>();
 
 // SignalR has its OWN serialiser and does not read ConfigureHttpJsonOptions below. Configuring only
 // that one would let /api/overview answer `"state": "Idle"` while every containerChanged push

@@ -200,6 +200,11 @@ func (p podman) Exec(ctx context.Context, name string, args ...string) (Result, 
 	return p.run(ctx, append([]string{"exec", name}, args...)...)
 }
 
+func (p podman) CopyTo(ctx context.Context, name, src, dst string) error {
+	_, err := p.run(ctx, "cp", src, name+":"+dst)
+	return err
+}
+
 func (p podman) Run(ctx context.Context, s RunSpec) error {
 	args := []string{"run", "-d", "--name", s.Name, "--pod", s.Pod, "--restart", "unless-stopped"}
 	if s.Memory != "" {
