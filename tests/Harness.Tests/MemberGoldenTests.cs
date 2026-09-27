@@ -295,9 +295,19 @@ public sealed class MemberGoldenTests
             while (fake.RunsFor(member) == 0 && DateTime.UtcNow < deadline) await Task.Delay(50, ct);
 
             var run = Assert.Single(fake.Invocations, i => i.Container == member);
+            var host = services.GetRequiredService<ContainerHost>();
+
+            // The snapshot AFTER the run: its row written and the member idle again.
+            while ((host.Find(member)!.Snapshot().State != ContainerState.Idle
+                    || (await log.ReadAfterAsync(0, [MessageTypes.Completed], 10, ct)).Count == 0)
+                   && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50, ct);
+            }
+
             var row = (await services.GetRequiredService<ITeamStore>().MembersAsync(ct))
                 .Single(m => m.Team == team && m.Name == "Worker");
-            var snapshot = services.GetRequiredService<ContainerHost>().Find(member)!.Snapshot();
+            var snapshot = host.Find(member)!.Snapshot();
 
             var text = new StringBuilder();
             text.Append("--- row\n");

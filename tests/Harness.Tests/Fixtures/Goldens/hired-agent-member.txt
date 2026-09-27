@@ -74,4 +74,4 @@ Load one with skills_get when the work calls for it; skills_search finds them by
 --- prompt
 go
 --- snapshot
-{"team":"Golden","id":"Worker","name":"Worker","agent":"claude-headless","state":1,"queueDepth":0,"ceiling":16,"subscribes":["agentContainer.instruction.Golden/Worker"],"currentCorrelation":1,"sinceSeq":0,"missingAgent":null,"blocked":null,"failed":null,"needsDecision":null,"unreachableRoot":null,"hiredFor":null,"failureClass":null,"resumeAt":null,"handedBack":null,"held":false,"watchable":true}
+{"team":"Golden","id":"Worker","name":"Worker","agent":"claude-headless","state":0,"queueDepth":0,"ceiling":16,"subscribes":["agentContainer.instruction.Golden/Worker"],"currentCorrelation":null,"sinceSeq":0,"missingAgent":null,"blocked":null,"failed":null,"needsDecision":null,"unreachableRoot":null,"hiredFor":null,"failureClass":null,"resumeAt":null,"handedBack":null,"held":false,"watchable":true}
