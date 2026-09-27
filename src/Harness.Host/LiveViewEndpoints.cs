@@ -49,7 +49,7 @@ public static class LiveViewEndpoints
             .WithDescription(
                 "This member's finished runs that recorded the agent's own transcript, newest first, "
                 + $"{RunsPage} at a time: `{{ \"runs\": [ {{ \"seq\", \"workflow\", \"startedAt\", "
-                + "\"endedAt\", \"durationMs\", \"outcome\", \"output\" } ], \"nextBefore\" }`. `seq` is the run's "
+                + "\"endedAt\", \"durationMs\", \"outcome\", \"output\", \"reason\" } ], \"nextBefore\" }`. `seq` is the run's "
                 + "terminal row, `workflow` its correlation, `outcome` one of `completed`, "
                 + "`handedBack`, `blocked` and `failed`. `startedAt` and `durationMs` are null when the "
                 + "run's start is not in the log. Pass `nextBefore` as `before` for the next page; it "
@@ -58,6 +58,9 @@ public static class LiveViewEndpoints
                 + "runs is listed, one per run, and `output` is what the run reported: its result "
                 + "output, or for a failure the launch error or output. `output` is null for an agent "
                 + "member's runs; read the transcript instead.\n\n"
+                + "A plugin run that blocked every item it was given wrote no completed or failed row; "
+                + "it is listed with `outcome` `blocked`, `seq` its last `blocked` row, `output` null "
+                + "and `reason` that row's reason. `reason` is null on every other run.\n\n"
                 + "Runs from before transcripts were recorded are not listed.\n\n"
                 + "Writes nothing.\n\n"
                 + "**A person's action; no machine principal.**");
@@ -177,7 +180,8 @@ public static class LiveViewEndpoints
                 ? (long?)(run.Terminal.OccurredAt - started).TotalMilliseconds
                 : null,
             outcome = Outcome(run),
-            output = plugin ? RunOutput(run.Terminal.Payload) : null,
+            output = plugin && run.Terminal.Type != MessageTypes.Blocked ? RunOutput(run.Terminal.Payload) : null,
+            reason = run.Terminal.Type == MessageTypes.Blocked ? Field(run.Terminal.Payload, PayloadFields.Reason) : null,
         }).ToList();
 
         return Results.Ok(new

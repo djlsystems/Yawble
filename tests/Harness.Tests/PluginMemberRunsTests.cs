@@ -173,6 +173,70 @@ public sealed class PluginMemberRunsTests : IAsyncLifetime
         Assert.Equal("ba\ndc", runs[0].GetProperty("output").GetString());
     }
 
+    private async Task<Message> AwaitBlockedRowAsync(ContainerId who)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var rows = (await Services.GetRequiredService<IMessageLog>()
+                    .ReadAfterAsync(0, [MessageTypes.Blocked], int.MaxValue, Ct))
+                .Where(m => m.Source == who.ToString())
+                .ToList();
+            if (rows.Count > 0) return rows[^1];
+            await Task.Delay(50, Ct);
+        }
+
+        throw new TimeoutException($"{who} wrote no blocked row.");
+    }
+
+    [Fact]
+    public async Task A_plugin_run_that_blocked_every_item_is_listed_as_blocked_with_its_reason()
+    {
+        // Every item blocked: the run writes started and blocked, and no completed or failed row,
+        // so a listing of terminal rows alone never saw it (E5-b).
+        await TellAsync(Echo, "block:no creds");
+        var blocked = await AwaitBlockedRowAsync(Echo);
+        await AwaitStateAsync(Echo, ContainerState.Idle);
+        Assert.Empty(await TerminalRowsAsync(Echo));
+
+        await TellAsync(Echo, "abc");
+        await AwaitTerminalRowsAsync(Echo, 1);
+        await AwaitStateAsync(Echo, ContainerState.Idle);
+
+        var runs = await RunsAsync(Echo);
+
+        Assert.Equal(2, runs.Length);
+        Assert.Equal("completed", runs[0].GetProperty("outcome").GetString());
+        Assert.Equal(JsonValueKind.Null, runs[0].GetProperty("reason").ValueKind);
+
+        Assert.Equal(blocked.Seq, runs[1].GetProperty("seq").GetInt64());
+        Assert.Equal("blocked", runs[1].GetProperty("outcome").GetString());
+        Assert.Equal("no creds", runs[1].GetProperty("reason").GetString());
+        Assert.Equal(JsonValueKind.String, runs[1].GetProperty("startedAt").ValueKind);
+    }
+
+    [Fact]
+    public async Task A_run_that_blocked_one_item_and_completed_another_is_listed_once_as_completed()
+    {
+        // The completed row closes the run; the blocked item inside it is not a second run.
+        await TellAsync(Echo, "sleep:2");
+        await AwaitStateAsync(Echo, ContainerState.Running);
+
+        var first = Assert.Single(await Services.GetRequiredService<IMessageLog>()
+            .ReadAfterAsync(0, [MessageTypes.InstructionFor(Echo)], int.MaxValue, Ct));
+        await TellAsync(Echo, "block:later", first.Seq);
+        await TellAsync(Echo, "cd", first.Seq);
+
+        await AwaitTerminalRowsAsync(Echo, 2);
+        await AwaitStateAsync(Echo, ContainerState.Idle);
+
+        var runs = await RunsAsync(Echo);
+
+        Assert.Equal(2, runs.Length);
+        Assert.All(runs, run => Assert.Equal("completed", run.GetProperty("outcome").GetString()));
+    }
+
     [Fact]
     public async Task An_agent_members_listing_is_unchanged_and_a_plugin_run_has_no_transcript()
     {

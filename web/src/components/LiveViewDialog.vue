@@ -315,8 +315,10 @@ onBeforeUnmount(end);
         </div>
 
         <template v-if="selected && plugin">
+          <!-- A run that blocked every item wrote no output row: what it said is the block's reason. -->
+          <div v-if="selected.reason" class="os-body q-mb-xs run-reason">Blocked: {{ selected.reason }}</div>
           <div v-if="selected.output" class="live-view-lines run-output">{{ selected.output }}</div>
-          <div v-else class="os-body os-text-muted run-output-none">This run reported no output.</div>
+          <div v-else-if="!selected.reason" class="os-body os-text-muted run-output-none">This run reported no output.</div>
         </template>
 
         <template v-else-if="selected">

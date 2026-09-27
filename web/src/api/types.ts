@@ -2090,6 +2090,12 @@ export interface MemberRun {
    * and absent from an older Host.
    */
   output?: string | null
+  /**
+   * Why the run was blocked, for a plugin run that blocked every item it was given: such a run
+   * wrote no completed or failed row, so it is listed from its last `blocked` row, with `output`
+   * null. Null on every other run, and absent from an older Host.
+   */
+  reason?: string | null
 }
 
 /** One page of `GET .../runs`: newest first, and the cursor for the next older page or null. */
