@@ -2,7 +2,7 @@
 
 For people and coding agents working on this repository. Rules that are load-bearing, and the failure each one prevents. Most name the test that pins them; keep that test green and keep the rule true when you change the code. For what the product is and how to build it, see `README.md` and `docs/architecture.md`.
 
-The Host runs in a Linux container. An agent child starts in its own session (`setsid`), and its process group is killed when the run ends, so a detached grandchild does not outlive it. A command is resolved once with `PathSearch.Find`, and a miss is a launch failure. Pinned by `ProcessAgentRunnerLaunchTests.The_child_leads_its_own_process_group`, `ProcessAgentRunnerLaunchTests.A_detached_grandchild_does_not_outlive_the_run`, `ProcessAgentRunnerLaunchTests.A_command_not_on_PATH_is_a_launch_failure` and `PathSearchTests.A_missing_command_is_null`.
+The Host runs in a Linux container. An agent child starts in its own session (`setsid`), and its process group is killed when the run ends, so a detached grandchild does not outlive it. A command is resolved once with `PathSearch.Find`, and a miss is a launch failure. The launch lives in `ChildProcess`, which agent and plugin members share. Pinned by `ChildProcessTests`, `ProcessAgentRunnerLaunchTests.The_child_leads_its_own_process_group`, `ProcessAgentRunnerLaunchTests.A_detached_grandchild_does_not_outlive_the_run`, `ProcessAgentRunnerLaunchTests.A_command_not_on_PATH_is_a_launch_failure` and `PathSearchTests.A_missing_command_is_null`.
 
 ## Identity
 

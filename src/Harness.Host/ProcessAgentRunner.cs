@@ -156,36 +156,14 @@ public sealed partial class ProcessAgentRunner(
         }
 
         // From a system directory, never PATH: setsid runs before the agent prefix, so
-        // it still holds the Host's capabilities.
-        if (SystemCommand.Find("setsid") is not { } setsid)
+        // it still holds the Host's capabilities. Built by the launcher every member shares.
+        if (ChildProcess.StartInfo(resolvedFileName, invocation.WorkingDirectory, runAs) is not { } start)
         {
             return new AgentResult(
                 -1,
                 string.Empty,
                 $"setsid is not in a root-owned system directory ({string.Join(", ", SystemCommand.Directories)}), so this member could not be started.");
         }
-
-        var start = new ProcessStartInfo
-        {
-            // IN ITS OWN SESSION, AND SO ITS OWN PROCESS GROUP. `setsid` execs in place, so the
-            // child keeps this pid and the group id is the pid. Everything the agent starts joins
-            // that group unless it asks for a session of its own, which is what lets the group
-            // kill below reach a grandchild that has been re-parented to init.
-            FileName = setsid,
-            WorkingDirectory = Directory.Exists(invocation.WorkingDirectory)
-                ? invocation.WorkingDirectory
-                : Environment.CurrentDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        // As `agent` when the Host can switch, AFTER setsid so the session is still the
-        // child's own: setpriv execs in place, and the group kill below reaches it as before.
-        foreach (var part in runAs?.Prefix ?? []) start.ArgumentList.Add(part);
-        start.ArgumentList.Add(resolvedFileName);
 
         // History first, then the instruction that woke it - the order a human would read them in,
         // and the order that keeps the stable part at the front, which is what a prompt cache
@@ -456,29 +434,17 @@ public sealed partial class ProcessAgentRunner(
         // runner, and a terminal's lifetime belongs to `ConciergeReaper`.
         var timeout = catalog.Definition(invocation.Agent)?.TimeoutSeconds;
 
-        // The caller's token and the preset's clock, as ONE token. `stopping` fires for either, and
+        // The caller's token and the preset's clock, as ONE token. `Stopping` fires for either, and
         // the two are told apart below by asking which - because they mean different things and are
         // fixed in different places.
-        using var expiry = timeout is { } seconds and > 0
-            ? new CancellationTokenSource(TimeSpan.FromSeconds(seconds))
-            : new CancellationTokenSource();
-
-        // AN IDLE CLOCK, NOT A WALL CLOCK. `CancelAfter` RESETS a pending countdown, so every
-        // progress report this member files pushes its own deadline out again.
         //
-        // `TimeoutSeconds` therefore means "this long with nothing to say", not "this long in
-        // total". Compared with a wall clock it only ever EXTENDS a run - a member that never
-        // narrates is bounded by the full figure, and one that does survives as long as it keeps
-        // working.
-        //
-        // NOT a clock that resets on OUTPUT: a stuck agent still printing would hold it open
-        // forever. This resets on a DELIBERATE act instead - see
-        // RunHeartbeat - which is the distinction that makes an idle clock worth having.
-        using var narrating = timeout is { } window and > 0
-            ? heartbeat.WhileRunning(invocation.Container, () => expiry.CancelAfter(TimeSpan.FromSeconds(window)))
-            : null;
+        // AN IDLE CLOCK, NOT A WALL CLOCK: every progress report this member files pushes its own
+        // deadline out again, so `TimeSpan` means "this long with nothing to say". See
+        // ChildProcess.Clock and RunHeartbeat.
+        using var clock = ChildProcess.Clock(heartbeat, invocation.Container, timeout, ct);
 
-        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(ct, expiry.Token);
+        // The live view of this run, begun once the process exists and ended with the run.
+        Watch? watchable = null;
 
         try
         {
@@ -493,89 +459,25 @@ public sealed partial class ProcessAgentRunner(
             // A transcript the agent names itself is the newest one written from here on.
             var launchedAt = DateTimeOffset.UtcNow;
 
-            using var process = Process.Start(start)
-                ?? throw new InvalidOperationException("The process did not start.");
-
-            // THE BACKSTOP FOR WHAT THE TREE WALK CANNOT REACH. Declared after `process` so
-            // it disposes first: every exit from this method, including a run that completes
-            // normally, takes whatever is left in the child's process group with it.
-            using var group = new ProcessGroup(process.Id);
-
-            // Only recorded, so a person can watch: nothing below reads it, so usage and
-            // output are the same with or without a watcher.
-            using var watchable = BeginLive(invocation, start, sessionId, launchedAt);
-
-            // Both streams are read BEFORE waiting for exit. Waiting first deadlocks as soon as a
-            // child fills a pipe buffer, which is a hang rather than a failure and therefore much
-            // harder to diagnose than any error would have been.
+            // Launched, pumped, fed and waited on by the launcher every member shares: its own
+            // session, the agent user, both pipes read before the wait, stdin written and CLOSED
+            // (a CLI that reads it waits forever on a pipe nobody closed), the process group killed
+            // at the end and a bounded drain. See ChildProcess.RunAsync.
             //
-            // PUMPED INTO A BUILDER rather than ReadToEndAsync, and that is what makes the drain
-            // below possible: a ReadToEnd task that never completes hands back NOTHING, so bounding
-            // the wait on one would trade a hang for the silent loss of a whole transcript. A pump
-            // has written everything it has seen by the time we stop waiting for it.
-            //
-            // Uncancellable, deliberately, and unchanged in that: a run stopped by either clock
-            // takes the kill path below and reports what happened, where a torn read would surface
-            // first and lose the reason.
-            // Bounded: head and tail of each stream, never the whole of a large file a member printed.
-            var stdoutText = new BoundedCapture();
-            var stderrText = new BoundedCapture();
-            var stdout = PumpAsync(process.StandardOutput, stdoutText);
-            var stderr = PumpAsync(process.StandardError, stderrText);
+            // Only when the prompt did not already travel in an argument is it sent on stdin.
+            // Sending it twice would have `copilot -p` answer one prompt while reading another off
+            // stdin, and `codex exec` append a second copy as a <stdin> block.
+            var outcome = await ChildProcess.RunAsync(
+                start,
+                promptWentInAnArgument ? null : prompt,
+                clock.Stopping,
 
-            // Only when the prompt did not already travel in an argument. Sending it twice would
-            // have `copilot -p` answer one prompt while reading another off stdin, and `codex exec`
-            // append a second copy as a <stdin> block. Stdin is closed either way: a CLI that reads
-            // it waits forever on a pipe nobody closed.
-            // INSIDE THE TRY THAT KILLS, and on `stopping` rather than `ct`. Outside it, a
-            // cancellation arriving here would throw straight past the kill path - and past the
-            // outer catch too, which excludes OperationCanceledException by design. The run would
-            // end, the container go Idle, the card go green, and the child keep running: Stop
-            // reporting success while leaving an orphan.
-            //
-            // It is a real hang site rather than a theoretical one: a CLI that never reads stdin and
-            // a prompt larger than the pipe buffer blocks here forever, which is why it takes the
-            // clock as well as the caller's token.
-            try
+                // Only recorded, so a person can watch: nothing below reads it, so usage and
+                // output are the same with or without a watcher.
+                onStarted: _ => watchable = BeginLive(invocation, start, sessionId, launchedAt));
+
+            if (outcome.Killed)
             {
-                // A CHILD THAT HAS ALREADY EXITED IS NOT A FAILED RUN.
-                //
-                // A fast agent - one that answers from cache, refuses immediately, or is a
-                // one-liner - can be gone before this write lands, and writing to its closed pipe
-                // throws `IOException: The pipe is being closed`. That escaped, because the catch
-                // below takes only `OperationCanceledException`, and turned a run that had already
-                // produced its answer into a failure reporting a pipe error. It is timing, so it is
-                // invisible on an idle machine and reproducible under load - which is why it read
-                // as a flaky TEST rather than as this.
-                //
-                // Swallowed for the same reason `Kill` swallows `InvalidOperationException` below:
-                // a process that finished between two of our own calls must not turn a successful
-                // run into a failure. Nothing is lost - the prompt only fails to arrive at an agent
-                // that had already stopped reading, and its output is still drained below.
-                try
-                {
-                    if (!promptWentInAnArgument)
-                    {
-                        await process.StandardInput.WriteAsync(prompt.AsMemory(), stopping.Token);
-                    }
-
-                    process.StandardInput.Close();
-                }
-                catch (IOException)
-                {
-                }
-
-                await process.WaitForExitAsync(stopping.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                // KILLED, tree and all. `using var process` disposes a HANDLE rather than a process,
-                // so returning without this would leave the child running - parented to nothing,
-                // with no container and no queue to come back to, and still billing. A CLI
-                // that spawns its own helpers is the normal case, so killing only the parent leaves
-                // the same orphan one level down.
-                Kill(process);
-
                 // RECORDED. A killed child is a run that did not finish, and without this row the
                 // only record of it would be an `AgentResult` whose message reaches the card and the
                 // transcript - both of which belong to the TEAM. Whoever is asking "what was this
@@ -594,8 +496,7 @@ public sealed partial class ProcessAgentRunner(
                         detail: $$"""
                                   {"container":{{JsonSerializer.Serialize(invocation.Container.ToString())}},
                                    "agent":{{JsonSerializer.Serialize(invocation.Agent)}},
-                                   "reason":"{{(expiry.IsCancellationRequested && !ct.IsCancellationRequested
-                                       ? "no-progress-timeout" : "host-stopping")}}",
+                                   "reason":"{{(clock.Expired ? "no-progress-timeout" : "host-stopping")}}",
                                    "timeoutSeconds":{{timeout ?? 0}}}
                                   """,
 
@@ -603,62 +504,45 @@ public sealed partial class ProcessAgentRunner(
                         // been cancelled - passing it would cancel the write recording the
                         // cancellation, which is the one moment this row is worth having.
                         ct: CancellationToken.None);
-                }
-
-                // What it did before it was killed is still in its own transcript.
-                var killedTranscript = await watchable.TranscriptAsync();
-
-                // WHICH clock ran out, in the words a reader can act on. A timeout is a setting on
-                // this Agent; a stop is the Host going down and the run being reported as failed at
-                // the next start. One message for both sends half of them to the wrong screen.
-                return expiry.IsCancellationRequested && !ct.IsCancellationRequested
-                    ? new AgentResult(
-                        -1,
-                        string.Empty,
-                        $"This run went {timeout}s without reporting progress and was "
-                        + $"stopped. That limit is '{invocation.Agent}' own, on the Agents screen - "
-                        + "raise it there, or leave it unset for no limit at all. It measures "
-                        + "SILENCE rather than total time, so a member that says what it is doing "
-                        + "can work for as long as it needs to.",
-                        ProcessId: process.Id,
-
-                        // THE SAME SPLIT, SAID AS A CLASS. Neither ever resumes automatically and
-                        // they are still two classes rather than one, because a class is read by
-                        // people as well as by the resume: a timeout is a SETTING on this Agent and
-                        // a shutdown is the Host going down, and one word for both sends half the
-                        // readers to the wrong screen exactly as one message would.
-                        FailureClass: FailureClasses.Timeout,
-                        AgentTranscript: killedTranscript)
-                    : new AgentResult(
-                        -1,
-                        string.Empty,
-                        "This run was stopped before it finished, because the Host was shutting "
-                        + "down. Whatever it had done is not recorded.",
-                        ProcessId: process.Id,
-                        FailureClass: FailureClasses.Interrupted,
-                        AgentTranscript: killedTranscript);
             }
 
-            // THE PROCESS WE OWN HAS GONE. Anything still holding the pipe is a grandchild we did
-            // not launch and do not manage - a server, a watcher, a tunnel - and waiting on it is
-            // waiting on a handle nobody is going to close.
-            //
-            // This drain is bounded here rather than on a clock because `TimeoutSeconds` guards
-            // WaitForExitAsync alone, and that call has already SUCCEEDED by this line. There is no timeout, on any preset, that
-            // reaches this.
-            //
-            // Costs nothing on an ordinary run: a child that exits on its own closes the last write
-            // handle as it goes, so both pumps are already finished and the grace is never spent.
-            var pumps = Task.WhenAll(stdout, stderr);
+            // What it did before it was killed is still in its own transcript.
+            var killedTranscript = await watchable!.TranscriptAsync();
 
-            var heldOpen = await Task.WhenAny(pumps, Task.Delay(DrainGrace)) != pumps;
+            // WHICH clock ran out, in the words a reader can act on. A timeout is a setting on
+            // this Agent; a stop is the Host going down and the run being reported as failed at
+            // the next start. One message for both sends half of them to the wrong screen.
+            return clock.Expired
+                ? new AgentResult(
+                    -1,
+                    string.Empty,
+                    $"This run went {timeout}s without reporting progress and was "
+                    + $"stopped. That limit is '{invocation.Agent}' own, on the Agents screen - "
+                    + "raise it there, or leave it unset for no limit at all. It measures "
+                    + "SILENCE rather than total time, so a member that says what it is doing "
+                    + "can work for as long as it needs to.",
+                    ProcessId: outcome.ProcessId,
 
-            // Abandoned, not awaited. The pumps stay parked on a read that a cancellation token
-            // would not interrupt anyway - a pending pipe read on Windows does not unblock on cancel
-            // - so they are left to finish whenever the grandchild finally exits.
+                    // THE SAME SPLIT, SAID AS A CLASS. Neither ever resumes automatically and
+                    // they are still two classes rather than one, because a class is read by
+                    // people as well as by the resume: a timeout is a SETTING on this Agent and
+                    // a shutdown is the Host going down, and one word for both sends half the
+                    // readers to the wrong screen exactly as one message would.
+                    FailureClass: FailureClasses.Timeout,
+                    AgentTranscript: killedTranscript)
+                : new AgentResult(
+                    -1,
+                    string.Empty,
+                    "This run was stopped before it finished, because the Host was shutting "
+                    + "down. Whatever it had done is not recorded.",
+                    ProcessId: outcome.ProcessId,
+                    FailureClass: FailureClasses.Interrupted,
+                    AgentTranscript: killedTranscript);
+            }
 
-            var output = stdoutText.ToString();
-            var errors = stderrText.ToString();
+            var heldOpen = outcome.HeldOpen;
+            var output = outcome.Stdout;
+            var errors = outcome.Stderr;
             var usage = ParseUsage(command.UsageFormat, output, errors, usageFile);
 
             // **AN ENVELOPE THAT SAYS IT FAILED IS A FAILURE, WHATEVER THE EXIT CODE.**
@@ -706,7 +590,7 @@ public sealed partial class ProcessAgentRunner(
                 combined.AppendLine();
                 combined.AppendLine(
                     $"[harness] Something this run started is still holding its output after "
-                    + $"{DrainGrace.TotalSeconds:0}s - a server, a watcher, or a tunnel. The run is "
+                    + $"{ChildProcess.DrainGrace.TotalSeconds:0}s - a server, a watcher, or a tunnel. The run is "
                     + "complete; anything written after this line was not captured.");
 
                 // AND RECORDED: a post-exit drain hitting DrainGrace with a child still holding
@@ -724,7 +608,7 @@ public sealed partial class ProcessAgentRunner(
                         detail: $$"""
                                   {"container":{{JsonSerializer.Serialize(invocation.Container.ToString())}},
                                    "agent":{{JsonSerializer.Serialize(invocation.Agent)}},
-                                   "graceSeconds":{{DrainGrace.TotalSeconds:0}}}
+                                   "graceSeconds":{{ChildProcess.DrainGrace.TotalSeconds:0}}}
                                   """,
                         ct: ct);
                 }
@@ -735,14 +619,14 @@ public sealed partial class ProcessAgentRunner(
             if (!string.IsNullOrWhiteSpace(errors)) combined.Append(errors);
 
             return new AgentResult(
-                process.ExitCode,
+                outcome.ExitCode,
                 combined.ToString().Trim(),
 
                 // The usage is kept even when the envelope failed: it was still spent, and a
                 // refused run that cost 43k tokens must not be filed as costing nothing.
                 envelopeError,
                 Usage: usage,
-                ProcessId: process.Id,
+                ProcessId: outcome.ProcessId,
 
                 // NULL WHEN NOTHING RECOGNISED THE WORDS, which is the ordinary answer and the one
                 // this design wants: a preset with no entry in the evidence table is honestly
@@ -753,7 +637,7 @@ public sealed partial class ProcessAgentRunner(
 
                 // Recorded on the run's terminal row; read by nothing above, so usage and
                 // output are the same whether or not there is one.
-                AgentTranscript: await watchable.TranscriptAsync());
+                AgentTranscript: await watchable!.TranscriptAsync());
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -784,6 +668,8 @@ public sealed partial class ProcessAgentRunner(
         }
         finally
         {
+            watchable?.Dispose();
+
             // Deleted whatever happened. A run measured in seconds leaves one of these per
             // invocation, and a container that runs all day would otherwise fill the temp directory.
             mcp?.Delete();
@@ -925,44 +811,6 @@ public sealed partial class ProcessAgentRunner(
         {
             stopLooking?.Cancel();
             run.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// How long to keep draining a child's output AFTER the child itself has exited.
-    ///
-    /// Short on purpose. A process that exits on its own closes the last write handle as it goes, so
-    /// the pumps are already finished and this is never spent; it is paid only when something the
-    /// agent started is still holding the pipe, and there the answer is not "wait longer" at any
-    /// value - it is "stop waiting", which is what a bound gives.
-    /// </summary>
-    private static readonly TimeSpan DrainGrace = TimeSpan.FromSeconds(2);
-
-    /// <summary>
-    /// Reads a stream into <paramref name="into"/> as it arrives, rather than at end-of-file.
-    ///
-    /// The point is that what has been read SURVIVES abandoning the read. `ReadToEndAsync` hands
-    /// back a string only on EOF, so a task still waiting on a pipe a grandchild is holding yields
-    /// nothing at all - bounding the wait on one would trade a hang for a lost transcript.
-    ///
-    /// Takes no CancellationToken, and that is not an omission: a pending pipe read on Windows does
-    /// not unblock on cancel, so a token here would buy the illusion of control. The caller stops
-    /// WAITING instead, and this is left to end on its own whenever the last writer closes.
-    ///
-    /// <see cref="BoundedCapture"/> locks, because the caller reads it while an abandoned pump may
-    /// still be appending.
-    /// </summary>
-    private static async Task PumpAsync(TextReader reader, BoundedCapture into)
-    {
-        var buffer = new char[4096];
-
-        while (true)
-        {
-            var read = await reader.ReadAsync(buffer.AsMemory()).ConfigureAwait(false);
-
-            if (read <= 0) return;
-
-            into.Append(buffer, 0, read);
         }
     }
 
@@ -1348,43 +1196,6 @@ public sealed partial class ProcessAgentRunner(
     private static bool HasToken(string argument, string current, string alias) =>
         argument.Contains($"{{{current}}}", StringComparison.Ordinal)
         || argument.Contains($"{{{alias}}}", StringComparison.Ordinal);
-
-    /// <summary>
-    /// Ends the child and everything it started, tolerating the race with a normal exit.
-    ///
-    /// `entireProcessTree` because a CLI that spawns helpers is the ordinary case and killing only
-    /// the parent leaves the same orphan one level down. Wrapped because a process that exited
-    /// between the wait ending and this call throws `InvalidOperationException` - and a run that
-    /// finished on its own must not be reported as killed.
-    /// </summary>
-    private static void Kill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-        }
-        catch (InvalidOperationException)
-        {
-        }
-        catch (NotSupportedException)
-        {
-        }
-    }
-
-    /// <summary>
-    /// Kills the child's process group when disposed. The group is the child's pid because the
-    /// child was started through `setsid`. A group that is already empty answers ESRCH, which is
-    /// the ordinary case and is ignored.
-    /// </summary>
-    private sealed class ProcessGroup(int id) : IDisposable
-    {
-        public void Dispose() => _ = kill(-id, SigKill);
-    }
-
-    private const int SigKill = 9;
-
-    [DllImport("libc", SetLastError = true)]
-    private static extern int kill(int pid, int signal);
 }
 
 /// <param name="SystemPromptArguments">
