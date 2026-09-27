@@ -48,8 +48,8 @@ func fakeRelease(t *testing.T, tag, goos, goarch string, content []byte, corrupt
 	checksums := digest + "  " + name + "\n"
 	mux := http.NewServeMux()
 	var server *httptest.Server
-	mux.HandleFunc("/repos/djlsystems/Yawble/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","assets":[{"name":"` + name + `","browser_download_url":"` + server.URL + `/dl/` + name + `"},{"name":"checksums.txt","browser_download_url":"` + server.URL + `/dl/checksums.txt"}]}`))
+	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name":"` + tag + `","assets":[{"name":"` + name + `","browser_download_url":"` + server.URL + `/dl/` + name + `"},{"name":"checksums.txt","browser_download_url":"` + server.URL + `/dl/checksums.txt"}]}]`))
 	})
 	mux.HandleFunc("/dl/"+name, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(archive.Bytes()) })
 	mux.HandleFunc("/dl/checksums.txt", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(checksums)) })
@@ -112,5 +112,41 @@ func TestAChecksumMismatchReplacesNothing(t *testing.T) {
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 1 {
 		t.Errorf("temp files left: %v", entries)
+	}
+}
+
+// Releases may be pre-releases: GitHub's "latest" never is one, so the CLI reads the list, newest
+// first, and takes the first release that is not a draft (drafts show only to the owner).
+func TestLatestIsTheNewestReleaseAPreReleaseIncludedAndNeverADraft(t *testing.T) {
+	mux := http.NewServeMux()
+	var server *httptest.Server
+	asset := func(tag string) string {
+		name := "yawble_" + strings.TrimPrefix(tag, "v") + "_linux_amd64.tar.gz"
+		return `{"tag_name":"` + tag + `","prerelease":` + map[bool]string{true: "true", false: "false"}[tag == "v0.3.0"] +
+			`,"draft":` + map[bool]string{true: "true", false: "false"}[tag == "v0.4.0"] + `,"assets":[` +
+			`{"name":"` + name + `","browser_download_url":"` + server.URL + `/dl/` + name + `"},` +
+			`{"name":"checksums.txt","browser_download_url":"` + server.URL + `/dl/checksums.txt"}]}`
+	}
+	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[" + asset("v0.4.0") + "," + asset("v0.3.0") + "," + asset("v0.2.0") + "]"))
+	})
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	rel, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64")
+	if err != nil || rel.Tag != "v0.3.0" {
+		t.Errorf("want the pre-release v0.3.0 (v0.4.0 is a draft), got %q %v", rel.Tag, err)
+	}
+}
+
+func TestLatestWithNoReleaseAtAllSaysSo(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("[]"))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	if _, err := release.Latest(context.Background(), server.Client(), server.URL, "", "linux", "amd64"); err == nil || !strings.Contains(err.Error(), "no release") {
+		t.Errorf("err %v", err)
 	}
 }

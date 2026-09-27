@@ -34,11 +34,13 @@ type Release struct {
 	ChecksumsURL string
 }
 
-// Latest asks the releases API for the latest release and picks this target's archive. With a
+// Latest reads the newest release and picks this target's archive. Newest means the first of the
+// releases list, which runs newest first and includes pre-releases; GitHub's own "latest" never is
+// a pre-release, so it is not asked. A draft (listed only to the owner) is skipped. With a
 // token (GH_TOKEN, only for a private fork) the request carries it and the assets are read at
 // their API URLs, the only ones a private repository serves; without one nothing changes.
 func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goarch string) (Release, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/repos/"+Repository+"/releases/latest", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/repos/"+Repository+"/releases?per_page=20", nil)
 	if err != nil {
 		return Release{}, err
 	}
@@ -58,16 +60,28 @@ func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goar
 		}
 		return Release{}, fmt.Errorf("reading the latest release: GitHub answered %s with GH_TOKEN set (does the token have the repo scope and access to %s?)", resp.Status, Repository)
 	}
-	var body struct {
+	type listed struct {
 		Tag    string `json:"tag_name"`
+		Draft  bool   `json:"draft"`
 		Assets []struct {
 			Name   string `json:"name"`
 			URL    string `json:"browser_download_url"`
 			APIURL string `json:"url"`
 		} `json:"assets"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	var releases []listed
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return Release{}, fmt.Errorf("reading the latest release: %w", err)
+	}
+	var body listed
+	for _, r := range releases {
+		if !r.Draft {
+			body = r
+			break
+		}
+	}
+	if body.Tag == "" {
+		return Release{}, fmt.Errorf("reading the latest release: %s has no release yet", Repository)
 	}
 	rel := Release{Tag: body.Tag}
 	suffix := ".tar.gz"

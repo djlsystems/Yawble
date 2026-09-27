@@ -37,8 +37,8 @@ func slowReleaseServer(t *testing.T, tag string, content []byte, delay time.Dura
 	checksums := hex.EncodeToString(sum[:]) + "  " + name + "\n"
 	mux := http.NewServeMux()
 	var server *httptest.Server
-	mux.HandleFunc("/repos/djlsystems/Yawble/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","assets":[{"name":"` + name + `","browser_download_url":"` + server.URL + `/dl/` + name + `"},{"name":"checksums.txt","browser_download_url":"` + server.URL + `/dl/checksums.txt"}]}`))
+	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"tag_name":"` + tag + `","assets":[{"name":"` + name + `","browser_download_url":"` + server.URL + `/dl/` + name + `"},{"name":"checksums.txt","browser_download_url":"` + server.URL + `/dl/checksums.txt"}]}]`))
 	})
 	mux.HandleFunc("/dl/"+name, func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(delay)

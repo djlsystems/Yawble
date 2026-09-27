@@ -51,7 +51,8 @@ if [ -n "$token" ]; then
   if [ -n "${YAWBLE_VERSION:-}" ]; then
     release_url="$api/repos/$repo/releases/tags/v${YAWBLE_VERSION#v}"
   else
-    release_url="$api/repos/$repo/releases/latest"
+    # The newest release, pre-releases included: GitHub's "latest" never is a pre-release.
+    release_url="$api/repos/$repo/releases?per_page=1"
   fi
   curl -fsSL -H @"$tmp/auth" -H "Accept: application/vnd.github+json" -H "User-Agent: yawble-install" \
     -o "$tmp/release.json" "$release_url" \
@@ -63,7 +64,8 @@ else
     # With or without the leading v; the tag has it.
     version="v${YAWBLE_VERSION#v}"
   else
-    version=$(curl -fsSL "$api/repos/$repo/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
+    # The newest release, pre-releases included: GitHub's "latest" never is a pre-release.
+    version=$(curl -fsSL "$api/repos/$repo/releases?per_page=1" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
     [ -n "$version" ] || { echo "yawble: could not read the latest release of $repo (check the network connection; a private fork also needs GH_TOKEN)" >&2; exit 1; }
   fi
 fi

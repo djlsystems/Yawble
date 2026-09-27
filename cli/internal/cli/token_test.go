@@ -93,13 +93,13 @@ func TestUpdateCliWithGHTokenReadsAPrivateRelease(t *testing.T) {
 	var server *httptest.Server
 	mux := http.NewServeMux()
 	ok := func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer "+ghToken }
-	mux.HandleFunc("/repos/djlsystems/Yawble/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
 		if !ok(r) {
 			http.NotFound(w, r)
 			return
 		}
 		a := server.URL + "/repos/djlsystems/Yawble/releases/assets/"
-		_, _ = w.Write([]byte(`{"tag_name":"v0.2.0","assets":[{"name":"` + name + `","url":"` + a + `1","browser_download_url":"` + server.URL + `/public/1"},{"name":"checksums.txt","url":"` + a + `2","browser_download_url":"` + server.URL + `/public/2"}]}`))
+		_, _ = w.Write([]byte(`[{"tag_name":"v0.2.0","assets":[{"name":"` + name + `","url":"` + a + `1","browser_download_url":"` + server.URL + `/public/1"},{"name":"checksums.txt","url":"` + a + `2","browser_download_url":"` + server.URL + `/public/2"}]}]`))
 	})
 	mux.HandleFunc("/repos/djlsystems/Yawble/releases/assets/1", func(w http.ResponseWriter, r *http.Request) {
 		if !ok(r) || r.Header.Get("Accept") != "application/octet-stream" {

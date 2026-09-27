@@ -41,10 +41,11 @@ curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/
 irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1 | iex          # Windows
 ```
 
-Each script reads this repository's latest Release, downloads the matching archive and
+Each script reads this repository's newest Release (pre-releases included; GitHub's own
+"latest" never is a pre-release, so it is not asked), downloads the matching archive and
 `checksums.txt`, verifies the checksum, and places the binary (`~/.local/bin`, or
 `%LOCALAPPDATA%\Programs\yawble` plus the user Path on Windows). `yawble update --cli` reads the
-same latest Release.
+same newest Release.
 
 ### A private fork or package
 
@@ -63,7 +64,7 @@ irm -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } https://raw.githubuserc
 ```
 
 With a token, the scripts and `yawble update --cli` read the Release through the API
-(`releases/latest` or `releases/tags/<tag>`, then each asset's API URL with
+(the newest in `releases` or `releases/tags/<tag>`, then each asset's API URL with
 `Accept: application/octet-stream`), and follow the redirect to storage themselves, in a request
 without the token. `yawble up` and `yawble update` run `podman login ghcr.io -u x-access-token
 --password-stdin` (Docker the same) before a pull from ghcr.io, with the token on stdin; no other

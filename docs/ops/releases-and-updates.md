@@ -30,8 +30,11 @@ Each release, with the container running (the .NET suite runs inside it):
 git switch main
 git pull --ff-only
 scripts\release.ps1 -DryRun   # both suites, then names the version; publishes nothing
-scripts\release.ps1
+scripts\release.ps1                # a regular release
+scripts\release.ps1 -Prerelease    # the same, published as a pre-release
 ```
+
+A pre-release is still what the installers and `yawble update` install: they take the newest release, pre-releases included. Only GitHub's own "Latest" label skips pre-releases.
 
 What it does:
 

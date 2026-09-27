@@ -65,15 +65,15 @@ func newPrivateRelease(t *testing.T, tag string, content []byte) *privateRelease
 
 	api := http.NewServeMux()
 	authorized := func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer "+token }
-	api.HandleFunc("/repos/djlsystems/Yawble/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("/repos/djlsystems/Yawble/releases", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r) {
 			http.NotFound(w, r) // what GitHub answers for a private repository without a token
 			return
 		}
 		base := p.api.URL + "/repos/djlsystems/Yawble/releases/assets/"
-		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","assets":[` +
+		_, _ = w.Write([]byte(`[{"tag_name":"` + tag + `","assets":[` +
 			`{"name":"` + name + `","url":"` + base + `1","browser_download_url":"` + p.api.URL + `/public/` + name + `"},` +
-			`{"name":"checksums.txt","url":"` + base + `2","browser_download_url":"` + p.api.URL + `/public/checksums.txt"}]}`))
+			`{"name":"checksums.txt","url":"` + base + `2","browser_download_url":"` + p.api.URL + `/public/checksums.txt"}]}]`))
 	})
 	api.HandleFunc("/repos/djlsystems/Yawble/releases/assets/", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r) || r.Header.Get("Accept") != "application/octet-stream" {

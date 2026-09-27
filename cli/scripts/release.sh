@@ -14,6 +14,10 @@
 set -eu
 
 version="${1:-}"
+# --prerelease marks the GitHub Release as a pre-release. The installers and `yawble update` take
+# the newest release either way; GitHub's own "latest" label skips pre-releases.
+prerelease=""
+[ "${2:-}" = "--prerelease" ] && prerelease="--prerelease"
 printf '%s' "$version" | grep -Eq '^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[1-9][0-9]*$' || { echo "usage: scripts/release.sh v<yyyy.mm.dd.N>, the tag scripts/release.ps1 cut" >&2; exit 2; }
 image_tag="${version#v}"
 [ -f go.mod ] || { echo "run from cli/" >&2; exit 2; }
@@ -65,7 +69,8 @@ notes="Image: ghcr.io/djlsystems/yawble:$image_tag. CLI: the yawble_* archives b
 if gh release view "$version" >/dev/null 2>&1; then
   # Finishing by hand a release whose Release was already created: replace the assets only.
   gh release upload "$version" dist/* --clobber
+  [ -n "$prerelease" ] && gh release edit "$version" --prerelease
 else
-  gh release create "$version" dist/* --verify-tag --generate-notes --notes "$notes"
+  gh release create "$version" dist/* --verify-tag --generate-notes --notes "$notes" $prerelease
 fi
 echo "Released $version, pinning core image $image_tag."

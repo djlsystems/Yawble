@@ -12,6 +12,8 @@
 #   gh auth refresh -s write:packages
 param(
     [switch]$DryRun,
+    # Publish the GitHub Release as a pre-release. Ask the owner which it is before every release.
+    [switch]$Prerelease,
     # The running container the Linux .NET suite is run in.
     [string]$Container = 'yawble'
 )
@@ -131,7 +133,7 @@ if ($DryRun) {
     Write-Host "Would build    the image at $tag for $platforms with --build-arg HARNESS_VERSION=$version HARNESS_COMMIT=$head"
     Write-Host "Would push     ${image}:$version (one manifest, both platforms)"
     Write-Host "Would push     ${image}:latest"
-    Write-Host "Would run      cli/scripts/release.sh ${tag}: build the CLI pinned to $version, gh release create $tag with its archives"
+    Write-Host "Would run      cli/scripts/release.sh ${tag}$(if ($Prerelease) { ' --prerelease' }): build the CLI pinned to $version, gh release create $tag with its archives$(if ($Prerelease) { ', as a pre-release' })"
     return
 }
 
@@ -187,7 +189,8 @@ try {
     Invoke-Checked 'git worktree add (CLI)' { git worktree add --detach $cliTree $tag }
     Push-Location (Join-Path $cliTree 'cli')
     try {
-        Invoke-Checked 'The CLI release' { sh scripts/release.sh $tag }
+        $releaseArgs = @('scripts/release.sh', $tag) + $(if ($Prerelease) { @('--prerelease') } else { @() })
+        Invoke-Checked 'The CLI release' { sh @releaseArgs }
         $cliDone = $true
     } finally {
         Pop-Location
