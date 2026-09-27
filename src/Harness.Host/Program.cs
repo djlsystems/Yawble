@@ -3689,7 +3689,7 @@ app.MapGet("/api/teams/{team}/hiring", async (
 app.MapPost("/api/teams/{team}/containers", async (
     [Description(Describe.Team)] string team,
     CreateContainer request, TeamRegistry teams, ITeamStore teamStore, AgentCatalog catalog,
-    TenantLogging audit, AgentInstallProbe probe, HttpContext context,
+    TenantLogging audit, AgentInstallProbe probe, HttpContext context, ISecretStore secretStore,
     CancellationToken ct) =>
 {
     // `name` is free text here too, exactly as it is for a team: the identifier is derived inside
@@ -3740,8 +3740,44 @@ app.MapPost("/api/teams/{team}/containers", async (
             throw new TeamHasNoMemberAgentException(team);
         }
 
+        var hirer = PrincipalClaims.From(context.User);
+
+        // A MANAGER MAY HIRE ANY INSTALLED PLUGIN ONTO ITS OWN TEAM (a person's decision,
+        // 2026-09-27) - the allowlist bounds which AGENTS a hire may run, a spend decision, and a
+        // plugin runs no model. It is validated against its manifest exactly as a person's hire is,
+        // in `HireMemberAsync`, and an uninstalled one is refused there. Its own team only: the
+        // route's `{team}` is TeamGate's, and a Manager's credential reaches no other team.
+        //
+        // SECRETS ARE LOGICAL KEYS A PERSON HAS ALREADY SET. A Manager never handles a value, and
+        // binding a key nobody set - optional or not - is refused, so a Manager cannot pass a value
+        // off as a key or bind one a person has not provided.
+        var managerHiresPlugin = hirer is { Kind: PrincipalKind.Container }
+            && request.Agent is { } pluginReference
+            && MemberRef.IsPlugin(pluginReference.Trim(), out _);
+
+        if (managerHiresPlugin && request.Secrets is { } bindings)
+        {
+            foreach (var (secret, key) in bindings)
+            {
+                if (EnvironmentSecretStore.Refusal(key) is { } keyRefusal)
+                {
+                    return Results.BadRequest(new { error = keyRefusal });
+                }
+
+                if (secretStore.TryGet(key) is null)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = $"The key `{key}` bound for `{secret}` is not set on this Host. A Manager binds only "
+                            + "logical keys a person has already set (`secret set <KEY>`), never a value.",
+                    });
+                }
+            }
+        }
+
         if (request.Agent is { } named
-            && PrincipalClaims.From(context.User)
+            && !managerHiresPlugin
+            && hirer
                 is
                 {
                     Kind: PrincipalKind.Container
