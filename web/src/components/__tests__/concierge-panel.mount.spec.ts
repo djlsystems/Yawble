@@ -309,6 +309,67 @@ describe('the pre-flight', () => {
     expect(connectConcierge).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * The person signs in inside this terminal, so the notice must not outlive the sign-in. Only
+   * setInterval is faked: the helpers' flushPromises needs the real setTimeout.
+   */
+  describe('after a sign-in in the terminal', () => {
+    const notSignedIn = { ...effective, agent: 'claude', auth: { installed: true, signedIn: false, detail: null } };
+    const signedIn = { ...effective, agent: 'claude', auth: { installed: true, signedIn: true, detail: null } };
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('asks again and clears the notice once the agent is signed in, without restarting the session', async () => {
+      concierge.mockResolvedValue({ agent: 'claude', effective: notSignedIn });
+      await openPanel();
+      expect(bannerText()).toContain('not signed in yet');
+
+      // Still not signed in: the notice stays.
+      vi.advanceTimersByTime(15_000);
+      await flushPromises();
+      expect(bannerText()).toContain('not signed in yet');
+
+      concierge.mockResolvedValue({ agent: 'claude', effective: signedIn });
+      vi.advanceTimersByTime(15_000);
+      await flushPromises();
+      expect(banner()).toBeNull();
+      expect(connectConcierge).toHaveBeenCalledTimes(1);
+
+      // Signed in is the end of it: no more asking.
+      const asked = concierge.mock.calls.length;
+      vi.advanceTimersByTime(60_000);
+      await flushPromises();
+      expect(concierge.mock.calls.length).toBe(asked);
+    });
+
+    it('stops asking when the panel is closed', async () => {
+      concierge.mockResolvedValue({ agent: 'claude', effective: notSignedIn });
+      await openPanel();
+      await wrapper!.setProps({ modelValue: false });
+      await flushPromises();
+
+      const asked = concierge.mock.calls.length;
+      vi.advanceTimersByTime(60_000);
+      await flushPromises();
+      expect(concierge.mock.calls.length).toBe(asked);
+    });
+
+    it('does not ask at all when the agent is already signed in', async () => {
+      concierge.mockResolvedValue({ agent: 'claude', effective: signedIn });
+      await openPanel();
+
+      const asked = concierge.mock.calls.length;
+      vi.advanceTimersByTime(60_000);
+      await flushPromises();
+      expect(concierge.mock.calls.length).toBe(asked);
+    });
+  });
+
   it('with no agent, shows the sentence and the link and opens no socket', async () => {
     concierge.mockResolvedValue({
       agent: 'claude',

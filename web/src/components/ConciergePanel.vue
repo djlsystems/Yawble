@@ -581,6 +581,8 @@ async function attach() {
 
   if (preflight.value.kind === 'blocked') return;
 
+  startSignInRecheck();
+
   // Re-checked after the await: the panel may have attached, or been closed, while the read was out.
   if (terminal || !open.value || !host.value) return;
 
@@ -724,7 +726,42 @@ async function attach() {
   refit();
 }
 
+/**
+ * WHILE THE AGENT IS NOT SIGNED IN, ASK AGAIN. The person signs in inside this very terminal, so
+ * the notice above it must not outlive the sign-in until the panel is reopened. The server caches
+ * its sign-in probe for 30 seconds, so a sign-in shows within that and one interval. It stops at
+ * the first signed-in answer, and whenever the panel detaches (closed, reset, unmounted).
+ */
+const SIGN_IN_RECHECK_MS = 15_000;
+let signInRecheck: ReturnType<typeof setInterval> | null = null;
+
+function stopSignInRecheck() {
+  if (signInRecheck !== null) clearInterval(signInRecheck);
+  signInRecheck = null;
+}
+
+function startSignInRecheck() {
+  stopSignInRecheck();
+  const agent = running.value?.effective?.agent;
+  if (preflight.value.kind !== 'notice' || !agent || running.value?.effective?.auth.signedIn !== false) return;
+
+  signInRecheck = setInterval(async () => {
+    let fresh: ConciergeSettings;
+    try {
+      fresh = await readConcierge();
+    } catch {
+      return; // unknown is not signed in; the next tick asks again
+    }
+    // Only the agent this session runs: another choice takes effect through a restart, not here.
+    if (signInRecheck === null || fresh.effective?.agent !== agent || !fresh.effective.auth.signedIn) return;
+    stopSignInRecheck();
+    running.value = fresh;
+    preflight.value = conciergePreflight(fresh);
+  }, SIGN_IN_RECHECK_MS);
+}
+
 function detach() {
+  stopSignInRecheck();
   window.removeEventListener('resize', trackViewport);
   window.removeEventListener('orientationchange', onOrientationChange);
   window.visualViewport?.removeEventListener('resize', trackViewport);
