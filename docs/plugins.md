@@ -57,8 +57,12 @@ already pointing at the plugin runs the new version on its next wake.
 reverses each instruction's text. It is a .NET console app with no dependencies, and its launcher
 runs it with `dotnet`, which the image guarantees.
 
+Run the build block **from the repository root**. The sample's project takes its target framework
+from the repository's build properties, so a copy of `samples/` built anywhere else fails with
+`NETSDK1013`.
+
 ```sh
-# Build and lay out version 0.1.0.
+# From the repository root: build and lay out version 0.1.0.
 V=out/sample-echo/0.1.0
 dotnet publish samples/plugins/sample-echo/src -c Release -o "$V/lib"
 cp samples/plugins/sample-echo/plugin.json samples/plugins/sample-echo/sample-echo "$V/"
@@ -66,9 +70,14 @@ cp -r samples/plugins/sample-echo/skills "$V/"
 echo 0.1.0 > out/sample-echo/active
 
 # Put it on the volume, owned by the Host user and readable (not writable) by `agent`.
+# NOT YET VERIFIED: these two lines have not been run against a real container.
 podman cp out/sample-echo yawble:/data/plugins/
 podman exec -u 0 yawble sh -c 'chown -R harness:agent /data/plugins && chmod -R u=rwX,g=rX,o= /data/plugins'
 ```
+
+The two `podman` lines are the intended install onto a running container, but nobody has run them
+yet. The layout they produce, `/data/plugins/sample-echo/0.1.0/...` owned `harness:agent` with mode
+`u=rwX,g=rX,o=`, is what the Host expects, whatever way it gets there.
 
 Then register it without a restart: a person calls `POST /api/plugins/rescan`, or the Host is
 restarted.
@@ -219,12 +228,20 @@ slot like any member's.
   It is checked against the manifest at hire and delivered in the request's `config`. It is never
   put in the environment.
 - **Secrets are logical keys.** A member stores `{"token": "ACME_STORAGE_KEY"}`, the key only. The
-  value never goes in the database, the manifest, the plugin directory or the log.
+  Host never writes the value to the database, the manifest or the plugin directory. Cloning a team
+  carries the member's configuration and its keys, never a value.
 - **Setting a secret.** The value is resolved at each run from the Host's own environment, which is
   where `yawble secret set NAME` values already arrive: set it, then restart the Host.
   - Keys starting `HARNESS_` and model-provider keys are refused.
   - The value reaches the plugin only on stdin, never in argv or the environment.
-  - It is redacted from the plugin's output.
+  - **Redaction is a net, not a guarantee.** Every text the plugin writes - its result output and
+    error, its stderr, and the text of each `progress`, `blocked`, `needsDecision` and `handback`
+    record - has each bound value replaced with `[redacted]` before it is stored or reported, and
+    then the platform's diagnostic redaction runs over it (named values such as `password=...`, and
+    credential-shaped strings). A plugin that writes a secret TRANSFORMED - reversed, encoded, cut
+    in pieces - defeats both, and the result reaches the log. Do not write secrets out at all.
+  - A bound value shorter than 4 characters cannot be redacted without mangling the text around
+    it, so it is refused: at hire if it is already set, and on every run.
 - **Worked example.** An Azure Storage plugin would declare `config.account`, `config.container`
   and `secrets.accountKey`. Its member would store
   `{"config": {"account": "acme", "container": "invoices"}, "secrets": {"accountKey": "ACME_STORAGE_KEY"}}`.
@@ -239,6 +256,9 @@ slot like any member's.
   only with `HARNESS_UPDATE_GOLDENS=1`, and only for a change that is meant to be visible.
 - **The end-to-end proof of concept.** `PluginMemberEndToEndTests` installs and hires sample-echo on
   the real Host. It also asserts that the pump (`Harness.Containers`) has no code naming plugins.
+- **The pump stays generic, structurally.** `PumpArchitectureTests` reads the pump's compiled IL:
+  `MemberRef` is used only by `KindOf` in `MemberRuntime.Snapshot`, and a member's `Agent` is never
+  compared there.
 - **The pieces.** `PluginMemberRunnerTests` (protocol), `PluginCatalogTests` (manifest v1),
   `PluginMemberRegistryTests` (hire, restore, repoint), `ChildProcessTests` (the shared launcher)
   and `MemberReportsTests` (the shared report path).
