@@ -14,11 +14,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // `vi.mock` is hoisted above every const in this file, so the mock functions have to rise with it.
 const { listCatalog, addMember } = vi.hoisted(() => ({ listCatalog: vi.fn(), addMember: vi.fn() }));
 
+// No plugin is installed here: the Agent picker's options are the presets alone.
+const { listPlugins } = vi.hoisted(() => ({ listPlugins: vi.fn(() => Promise.resolve({ plugins: [], refused: [] })) }));
+
 // listCatalog runs from watch(open) AND again from useAgentInstallations, so one mock covers both.
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listCatalog,
   addMember,
+  listPlugins,
 }));
 
 import AddMemberDialog from '../AddMemberDialog.vue';

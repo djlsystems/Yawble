@@ -32,6 +32,8 @@ import type {
   WatchRootOption,
   MemberId,
   MemberRunsPage,
+  PluginHire,
+  PluginList,
   ContainerSnapshot,
   MemberDeleted,
   MemberDetail,
@@ -1118,14 +1120,23 @@ export const addMember = (
   team: TeamId,
   name: string,
   agent: string,
+  plugin?: PluginHire,
 ) =>
   json<ContainerSnapshot>(`/api/teams/${encodeURIComponent(team)}/containers`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
 
-    // No prompt of any kind: a member is told the built-in Member prompt, chosen by role.
-    body: JSON.stringify({ name, agent }),
+    // No prompt of any kind: a member is told the built-in Member prompt, chosen by role. A plugin
+    // member's config and secret KEYS ride the same hire; the server checks them against the
+    // manifest and refuses both on an Agent.
+    body: JSON.stringify(plugin ? { name, agent, config: plugin.config, secrets: plugin.secrets } : { name, agent }),
   })
+
+/**
+ * The plugins installed on this Host, each with its config fields and the NAMES of its secrets -
+ * never a value. The Add member dialog offers them beside the Agent presets.
+ */
+export const listPlugins = () => json<PluginList>('/api/plugins')
 
 /**
  * The STORED row behind a member - its label. `MemberSettingsDialog` calls this on open, so an edit
