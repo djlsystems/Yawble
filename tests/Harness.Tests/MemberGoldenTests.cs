@@ -104,6 +104,34 @@ public sealed class MemberGoldenTests
         Golden.Match($"rows-{arm}", text);
     }
 
+    /// <summary>
+    /// THE CARD'S `failed` MARK, for the two arms whose words moved out of the runtime and into
+    /// <see cref="AgentMemberRunner"/> (card 621 verification, F4). Recorded after that move, as a
+    /// NEW golden, so the rows goldens above stay exactly as step 0 recorded them.
+    /// </summary>
+    [Theory]
+    [InlineData("exit-nonzero")]
+    [InlineData("did-nothing")]
+    public async Task The_failed_mark_for_each_agent_failure_arm_is_unchanged(string arm)
+    {
+        await using var bed = new ContainerTestBed();
+        bed.Agent.Behaviour = _ => Task.FromResult(arm switch
+        {
+            "exit-nonzero" => new AgentResult(3, "it broke"),
+            "did-nothing" => new AgentResult(0, "I did nothing", ReachedThePlatform: false),
+            _ => throw new ArgumentOutOfRangeException(nameof(arm)),
+        });
+        var member = await bed.AddAsync(Dev);
+
+        await bed.Store.AppendAsync(new NewMessage(
+            MessageTypes.InstructionFor(Dev), """{"instruction":"go"}""", "console"), Ct);
+
+        Assert.True(await bed.PumpUntilAsync(() => member.Snapshot().Failed is not null));
+
+        var snapshot = member.Snapshot();
+        Golden.Match($"failed-mark-{arm}", $"failed={snapshot.Failed}\nfailureClass={snapshot.FailureClass}\n");
+    }
+
     [Fact]
     public async Task A_person_stopping_a_run_writes_unchanged_rows()
     {
