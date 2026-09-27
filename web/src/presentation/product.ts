@@ -5,7 +5,7 @@
  */
 export const productTitle = 'Yawble'
 
-export const productTagline = 'Run teams of coding agents on your own machine.'
+export const productTagline = 'A fleet of agents, moving with you.'
 
 /** The full logo with dark lettering, for the light theme. 1066 x 365, transparent. */
 export const productLogoLight = '/logo-light.png'

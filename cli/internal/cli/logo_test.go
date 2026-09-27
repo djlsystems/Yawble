@@ -43,7 +43,7 @@ func TestYawbleWithNoArgumentsShowsTheMarkTheTaglineAndWhereToGetHelp(t *testing
 	if code != 0 || !hasMark(out) {
 		t.Fatalf("exit %d out %q", code, out)
 	}
-	for _, want := range []string{"Yawble — Teams of agents, moving with you.", "yawble <command> [flags]", "yawble up", "yawble --help", "yawble <command> --help"} {
+	for _, want := range []string{"Yawble — A fleet of agents, moving with you.", "yawble <command> [flags]", "yawble up", "yawble --help", "yawble <command> --help"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in %q", want, out)
 		}
@@ -52,12 +52,12 @@ func TestYawbleWithNoArgumentsShowsTheMarkTheTaglineAndWhereToGetHelp(t *testing
 		t.Errorf("the command list belongs to --help: %q", out)
 	}
 	// The version sits on the line under the tagline.
-	if !strings.Contains(out, "Teams of agents, moving with you.\nv2026.09.26.8\n") {
+	if !strings.Contains(out, "A fleet of agents, moving with you.\nv2026.09.26.8\n") {
 		t.Errorf("the version belongs under the tagline: %q", out)
 	}
 
 	// A pipe: the same words, no mark.
-	if _, out, _ := run(t, cli.Deps{}); hasMark(out) || !strings.Contains(out, "Teams of agents, moving with you.") {
+	if _, out, _ := run(t, cli.Deps{}); hasMark(out) || !strings.Contains(out, "A fleet of agents, moving with you.") {
 		t.Errorf("a pipe: %q", out)
 	}
 	// --help and -h still list every command.
