@@ -1,4 +1,5 @@
 import type { ConciergeSettings } from '../api/types';
+import { productCli } from '../presentation/product';
 
 /**
  * WHAT THE CONCIERGE PANEL SAYS BEFORE IT OPENS A SOCKET, decided from `GET /api/concierge`.
@@ -38,7 +39,7 @@ export function conciergePreflight(settings: ConciergeSettings | null): Concierg
   }
 
   if (!auth.signedIn) {
-    return { kind: 'notice', lead: `${agent} is installed but not signed in; sign in from a terminal or add a key, or choose another agent in`, detail };
+    return { kind: 'notice', lead: `${agent} is not signed in yet: sign in below, in this terminal, or store a key with ${productCli} secret set; or choose another agent in`, detail };
   }
 
   // What the Concierge is TOLD is the built-in Concierge prompt, chosen by role - so the

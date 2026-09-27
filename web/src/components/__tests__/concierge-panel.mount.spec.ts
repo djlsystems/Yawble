@@ -7,6 +7,7 @@
 // be opened (see `main-layout.mount.spec.ts`) but not observed: its options, its fit and its key
 // handler are what this file asserts, so the fake records exactly those. Everything else - the
 // panel, the display store, the socket wiring - is the real code.
+import { productCli } from '../../presentation/product';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -303,7 +304,7 @@ describe('the pre-flight', () => {
     await openPanel();
 
     expect(bannerText()).toBe(
-      'claude is installed but not signed in; sign in from a terminal or add a key, or choose another agent in Tenant Settings.',
+      `claude is not signed in yet: sign in below, in this terminal, or store a key with ${productCli} secret set; or choose another agent in Tenant Settings.`,
     );
     expect(connectConcierge).toHaveBeenCalledTimes(1);
   });

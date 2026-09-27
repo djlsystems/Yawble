@@ -15,3 +15,6 @@ export const productLogoDark = '/logo-dark.png'
 
 /** The logo for the theme that is showing. */
 export const productLogoFor = (dark: boolean) => (dark ? productLogoDark : productLogoLight)
+
+/** The operator CLI's command, for sentences that tell a person what to run. */
+export const productCli = 'yawble'

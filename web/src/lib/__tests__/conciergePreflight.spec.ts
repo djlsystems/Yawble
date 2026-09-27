@@ -1,3 +1,4 @@
+import { productCli } from '../../presentation/product';
 import { describe, expect, it } from 'vitest';
 import type { ConciergeEffective, ConciergeSettings } from '../../api/types';
 import { conciergePreflight } from '../conciergePreflight';
@@ -49,7 +50,7 @@ describe('conciergePreflight', () => {
       conciergePreflight(settings({ auth: { installed: true, signedIn: false, detail: 'no credentials file' } })),
     ).toEqual({
       kind: 'notice',
-      lead: 'claude is installed but not signed in; sign in from a terminal or add a key, or choose another agent in',
+      lead: `claude is not signed in yet: sign in below, in this terminal, or store a key with ${productCli} secret set; or choose another agent in`,
       detail: 'no credentials file',
     });
   });
