@@ -438,6 +438,40 @@ leaves the workflow open for a person. An agent owner is unchanged: it declares 
 (`UndeclarableWorkflows`). Pinned by
 `PluginMemberEndToEndTests.E1_A_workflow_a_person_starts_by_telling_a_plugin_ends_completed`.
 
+## Plugins that act outward: the house rule
+
+A plugin **acts outward** when it sends, posts, pays, deletes, or does anything else a person cannot
+take back in the outside system. Every such plugin follows this rule; a spec for one names each
+setting below.
+
+- **The default mode never acts outward.** A mail plugin creates a draft for the person to send;
+  any other plugin does a dry run and reports what it would have done. A member hired with no mode
+  set is in this mode.
+- **Acting for real needs an allowlist.** The real mode is a separate `config` value, and it needs a
+  non-empty allowlist setting in the member's `config` (for mail: the recipient addresses and whole
+  domains it may send to).
+  - A member hired or run in the real mode with an empty allowlist is **refused**, with a sentence
+    naming the allowlist setting. Check it at hire (a manifest cannot express "required when"
+    today, so the plugin also checks it on every run) and fail the run with `ok:false` in those
+    words.
+  - An action whose target is outside the allowlist is **refused and reported, never sent**. The
+    run reports it (`blocked` for that item, or in its result), and nothing reaches the outside
+    system.
+  - There is no "act for anyone" mode.
+- **Only a person widens it.** The mode, the allowlist and the scope limits are `config` a person
+  sets when hiring. No command, instruction or incoming content can widen them: a command line
+  cannot name a recipient outside the list or switch the mode, and a plugin never reads settings
+  out of what it fetched. Incoming content (an email body, a web page) is untrusted, and it reaches
+  a Manager's context, so a Manager told by that content to send somewhere else must be unable to.
+  A Manager hiring a plugin member is validated like a person's hire, but the team's playbook
+  should leave the real mode and the allowlist to a person.
+- **Scope limits are settings too.** Which mailbox rule a watcher follows, which folders a member
+  may move mail to, which bucket it may delete from: each is a `config` value, not a choice made
+  per command.
+
+The built-in skill `authoring-plugins` (offered to the Concierge and the Manager) carries this rule
+in plain words, with the checklist for writing a plugin's spec as a backlog item.
+
 ## Where it is pinned
 
 - **Agents are unchanged.** `MemberGoldenTests` pins an agent member's rows, prompt, context,
