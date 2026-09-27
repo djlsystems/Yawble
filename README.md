@@ -32,30 +32,73 @@ control, with a web board to watch, steer and review the work.
 - **One operator CLI.** `yawble` installs, starts, updates, diagnoses and (optionally) exposes an
   instance through Cloudflare, Tailscale or ngrok.
 
-## Quick start
+## Required prerequisites
 
-You need Podman (recommended) or Docker. `yawble up` tells you where to get one if neither is
-installed.
+### Windows
 
-Install the operator CLI. Yawble is published as pre-releases for now, so the install asks for
-the newest pre-release:
+- Windows 11, 64-bit.
+- **Windows Subsystem for Linux (WSL).** Both container engines run in it. Sitting at the
+  computer (not over a remote session), right-click Start, open **Terminal (Admin)**, run the
+  command below, then restart Windows:
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh -s -- --prerelease    # Linux, macOS (Apple silicon)
-```
+  ```powershell
+  wsl --install --no-distribution
+  ```
+
+  `--no-distribution` skips the Ubuntu download, which Yawble does not need. `wsl --status`
+  answers once WSL is installed.
+- **Docker or Podman.** Install [Podman Desktop](https://podman-desktop.io) (recommended) or
+  [Docker Desktop](https://www.docker.com/products/docker-desktop/) and take the defaults.
+
+### macOS
+
+- Apple silicon (M1 or later). Intel Macs are not supported.
+- **Docker or Podman.** Install [Podman Desktop](https://podman-desktop.io) (recommended) or
+  [Docker Desktop](https://www.docker.com/products/docker-desktop/) and take the defaults.
+
+On either, the more memory the better: the container takes half of it, up to 12 GB. Linux works
+too, with Podman or Docker Engine, and installs the way macOS does.
+
+## Install and start Yawble
+
+Yawble is published as pre-releases for now, so the install commands ask for the newest
+pre-release. (Without `-Prerelease` / `--prerelease` they install the newest regular release, and
+say so when there is none yet.)
+
+### Windows
+
+In PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1))) -Prerelease    # Windows
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1))) -Prerelease
 ```
 
-Without `--prerelease` (`-Prerelease`) the scripts install the newest regular release, and say so
-when there is none yet.
+Open a new PowerShell window so `yawble` is on your path, then start it:
 
-Start an instance and open the board at <http://localhost:8080>:
+```powershell
+yawble up
+```
+
+### macOS
+
+In Terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh -s -- --prerelease
+```
+
+Open a new Terminal window so `yawble` is on your path, then start it:
 
 ```sh
 yawble up
 ```
+
+### Then, on either
+
+`yawble up` finds your container engine (and asks which one if you have both), pulls the image,
+starts the container and opens the board at <http://localhost:8080>. The first start installs the
+agent CLIs, which takes a few minutes. If something is not right, `yawble doctor` checks the setup
+and `yawble doctor --fix` repairs what it can.
 
 The first visit creates the admin account. Then give agents their credentials, either by
 signing in to an agent CLI from the Concierge terminal or with API keys:
