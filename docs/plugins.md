@@ -191,8 +191,10 @@ Content-Type: application/json
   failed mark, not on the run's row. There is no transcript, so `runs/{seq}/transcript` answers 404.
   A run that blocked every item it was given writes no completed or failed row. It is listed from its
   last `blocked` row with `outcome: blocked`, `output` null and `reason` set to that row's reason, and
-  the card's history opens it onto `Blocked: <reason>`. An agent member's listing is unchanged: such
-  an agent run recorded no transcript, so there is nothing to open.
+  the card's history opens it onto `Blocked: <reason>`. While the member is running, an item its
+  current run has already blocked is not listed: the run is not over, and it is listed once it is
+  (`An_item_blocked_by_a_run_still_working_is_not_listed_as_a_finished_run`). An agent member's
+  listing is unchanged: such an agent run recorded no transcript, so there is nothing to open.
 - **Team KPI card.** On a team whose every member is a plugin, the Tokens tile reads `none` with no
   advice about usage capture, and the workflow tile draws no budget line or bar.
 

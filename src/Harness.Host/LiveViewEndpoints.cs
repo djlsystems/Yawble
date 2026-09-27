@@ -60,7 +60,9 @@ public static class LiveViewEndpoints
                 + "member's runs; read the transcript instead.\n\n"
                 + "A plugin run that blocked every item it was given wrote no completed or failed row; "
                 + "it is listed with `outcome` `blocked`, `seq` its last `blocked` row, `output` null "
-                + "and `reason` that row's reason. `reason` is null on every other run.\n\n"
+                + "and `reason` that row's reason. `reason` is null on every other run. While the member "
+                + "is running, an item its current run has blocked is not listed: that run is not "
+                + "over, and it is listed once it is.\n\n"
                 + "Runs from before transcripts were recorded are not listed.\n\n"
                 + "Writes nothing.\n\n"
                 + "**A person's action; no machine principal.**");
@@ -159,16 +161,24 @@ public static class LiveViewEndpoints
         [Description(Describe.Team)] string team,
         [Description("The member, as addressed in its route.")] string member,
         [Description("Only runs whose seq is below this; the previous page's `nextBefore`.")] long? before,
-        TeamRegistry teams, IMessageLog log, CancellationToken ct)
+        TeamRegistry teams, IMessageLog log, ContainerHost host, CancellationToken ct)
     {
         if (await FindMemberAsync(teams, team, member, ct) is not { } found) return NoMember(team, member);
 
         // A plugin's run has no transcript to open, so its runs are read whole and carry their output.
         var plugin = MemberRef.IsPlugin(found.Agent);
+        var id = new ContainerId(found.Team, found.Name);
 
-        var page = await log.ReadRunsAsync(
-            new ContainerId(found.Team, found.Name), found.FloorSeq, before ?? long.MaxValue, RunsPage + 1,
-            plugin ? RunsWith.AnyRun : RunsWith.Transcript, ct);
+        // E5-c: an item the RUNNING run has blocked is not a finished run, however its row reads.
+        // Only the newest row can be one, so one more is read to keep the page full.
+        var running = host.Find(id)?.State == ContainerState.Running;
+
+        var page = (await log.ReadRunsAsync(
+                id, found.FloorSeq, before ?? long.MaxValue, RunsPage + 2,
+                plugin ? RunsWith.AnyRun : RunsWith.Transcript, ct))
+            .Where(run => !(running && run.InLatestRun))
+            .Take(RunsPage + 1)
+            .ToList();
 
         var runs = page.Take(RunsPage).Select(run => new
         {
