@@ -21,17 +21,15 @@ vi.mock('../../api/client', async (importOriginal) => ({
 import AddMemberDialog from '../AddMemberDialog.vue';
 import type { InstalledPlugin, TeamId } from '../../api/types';
 import { mountDialog, resetBody } from '../../test/mountQuasar';
+import { hostList, hostPlugin } from '../../test/pluginFixtures';
 import { button, field, settle, type } from '../../test/formProbe';
 
-const sampleEcho: InstalledPlugin = {
+const sampleEcho: InstalledPlugin = hostPlugin({
   id: 'sample-echo',
-  reference: 'plugin:sample-echo',
   name: 'Sample Echo',
   description: 'Deterministic test plugin.',
   version: '0.1.0',
-  config: {},
-  secrets: {},
-};
+});
 
 const baseProps = {
   team: 'alpha' as TeamId,
@@ -46,7 +44,7 @@ beforeEach(() => {
   listCatalog.mockReset();
   listCatalog.mockResolvedValue({ agents: [{ name: 'claude', mode: 'Headless' }] });
   listPlugins.mockReset();
-  listPlugins.mockResolvedValue({ plugins: [sampleEcho], refused: [] });
+  listPlugins.mockResolvedValue(hostList([sampleEcho]));
   addMember.mockReset();
   addMember.mockResolvedValue({ name: 'Scout' });
 });

@@ -209,11 +209,11 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
     /// after the start of the day after <paramref name="now"/>, in UTC. Worked out here, not by the
     /// code under test.
     /// </summary>
-    private static DateTimeOffset FirstOfNextUtcDay(DateTimeOffset due, DateTimeOffset now)
+    private static DateTimeOffset FirstOfNextUtcDay(DateTimeOffset due, DateTimeOffset now, int stepSeconds = 60)
     {
         var boundary = new DateTimeOffset(now.UtcDateTime.Date.AddDays(1), TimeSpan.Zero);
-        var steps = (long)Math.Ceiling((boundary - due).TotalSeconds / 60);
-        return due.AddSeconds(steps * 60);
+        var steps = (long)Math.Ceiling((boundary - due).TotalSeconds / stepSeconds);
+        return due.AddSeconds(steps * stepSeconds);
     }
 
     /// <summary>Caps an every-minute trigger on Dev at 4,000: three runs of 1,500 reach it, and the
@@ -271,6 +271,49 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
         Assert.Equal(MessageTypes.Completed, fired.Type);
         Assert.Equal(4, _agents.RunsFor(Dev));
         Assert.Equal("fired", (await RowAsync(id)).LastOutcome);
+    }
+
+    [Fact]
+    public async Task A_first_capped_skip_whose_rows_cannot_be_written_stores_nothing_and_the_next_fire_tries_again()
+    {
+        var id = await EveryMinuteAsync(4000);
+        for (var run = 1; run <= 3; run++) await FireAtDueAsync(id);
+        var fourth = await DueAsync(id);
+        var before = await RowAsync(id);
+
+        // The tenant row cannot be written: no count, no sleep, no schedule.skipped row.
+        await ExecuteAsync("ALTER TABLE tenant_events RENAME TO tenant_events_away");
+        await SweepAsync(fourth);
+
+        var row = await RowAsync(id);
+        Assert.Equal(before.CappedSkips, row.CappedSkips);
+        Assert.Equal(before.CappedSkipsDay, row.CappedSkipsDay);
+        Assert.Equal(before.LastOutcome, row.LastOutcome);
+        Assert.Equal(fourth, row.NextDueAt);
+        Assert.Empty(await SkipRowsAsync($"schedule:{id}"));
+        Assert.Equal(3, _agents.RunsFor(Dev));
+
+        // Back again, the same fire is still due and is the day's first skip, said once.
+        await ExecuteAsync("ALTER TABLE tenant_events_away RENAME TO tenant_events");
+        await SweepAsync(fourth);
+
+        Assert.Single(await SkipRowsAsync($"schedule:{id}"));
+        Assert.Single(await TenantRowsAsync(TenantActions.ScheduleSkipped, id));
+        row = await RowAsync(id);
+        Assert.Equal("capped", row.LastOutcome);
+        Assert.Equal(1, row.CappedSkips);
+        Assert.Equal(FirstOfNextUtcDay(fourth, fourth), row.NextDueAt);
+        Assert.Equal(3, _agents.RunsFor(Dev));
+    }
+
+    private async Task ExecuteAsync(string sql)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+            $"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false");
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(Ct);
     }
 
     [Fact]
@@ -380,6 +423,23 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
         var row = await RowAsync(id);
         Assert.Equal("capped", row.LastOutcome);
         Assert.True(row.NextDueAt >= new DateTimeOffset(fourth.UtcDateTime.Date.AddDays(1), TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task An_edited_schedule_still_over_its_cap_shows_capped_until_the_next_days_first_occurrence()
+    {
+        var (id, _) = await CapOnTheThirdRunAsync();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(id, new { intervalSeconds = 120 })).StatusCode);
+
+        // Re-armed from now, where it will only skip again: not the time it resumes.
+        var due = await DueAsync(id);
+        var cappedUntil = (await ViewAsync("Dev", id)).GetProperty("cappedUntil").GetDateTimeOffset();
+        Assert.Equal(FirstOfNextUtcDay(due, due, stepSeconds: 120), cappedUntil);
+
+        // And the sleep that skip takes is that same time.
+        await SweepAsync(due);
+        Assert.Equal(cappedUntil, (await RowAsync(id)).NextDueAt);
+        Assert.Equal(cappedUntil, (await ViewAsync("Dev", id)).GetProperty("cappedUntil").GetDateTimeOffset());
     }
 
     [Theory]

@@ -399,6 +399,72 @@ public sealed class FolderRemovalTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_reset_retry_that_took_two_attempts_removes_the_empty_directories_above_what_the_reset_named()
+    {
+        await CreateAlphaAsync();
+        var workspace = _paths.WorkspaceFor(new ContainerId("Alpha", "Manager"));
+        var a = Path.Combine(workspace, "a");
+        var sub = Path.Combine(a, "sub");
+        var g = await WriteAsync(Path.Combine(sub, "g.bin"));
+        var h = await WriteAsync(Path.Combine(sub, "h.bin"));
+        _deletes.Refuse(g);
+        _deletes.Refuse(h);
+
+        var reset = await _reset.ResetAsync(
+            "Alpha", new TeamResetOptions(["Manager"], ForgetHistory: false, ClearWorkspaces: true), Ct);
+
+        Assert.NotNull(reset);
+        Assert.Equal([g, h], reset.Remaining);
+
+        // The first attempt removes one of the two; its own delete makes `sub` newer than the reset.
+        await Task.Delay(100, Ct);
+        _deletes.Allow(h);
+        Assert.False(Assert.Single(await _retry.RetryAsync(ct: Ct)).Finished);
+        Assert.True(Directory.GetLastWriteTimeUtc(sub) > (await _unfinished.FindAsync(workspace, Ct))!.RecordedAt.UtcDateTime);
+
+        _deletes.Allow(g);
+        var retried = Assert.Single(await _retry.RetryAsync(ct: Ct));
+
+        Assert.True(retried.Finished);
+        Assert.True(Directory.Exists(workspace), "the retry removed the reset's own folder");
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workspace));
+        Assert.Null(await _unfinished.FindAsync(workspace, Ct));
+    }
+
+    [Fact]
+    public async Task A_reset_retry_that_took_two_attempts_keeps_a_directory_written_in_between_them()
+    {
+        await CreateAlphaAsync();
+        var workspace = _paths.WorkspaceFor(new ContainerId("Alpha", "Manager"));
+        var a = Path.Combine(workspace, "a");
+        var sub = Path.Combine(a, "sub");
+        var g = await WriteAsync(Path.Combine(sub, "g.bin"));
+        var h = await WriteAsync(Path.Combine(sub, "h.bin"));
+        _deletes.Refuse(g);
+        _deletes.Refuse(h);
+
+        await _reset.ResetAsync(
+            "Alpha", new TeamResetOptions(["Manager"], ForgetHistory: false, ClearWorkspaces: true), Ct);
+
+        await Task.Delay(100, Ct);
+        _deletes.Allow(h);
+        Assert.False(Assert.Single(await _retry.RetryAsync(ct: Ct)).Finished);
+
+        // Between the attempts the member writes in `a` (and removes it again): `a` is theirs now.
+        var scratch = await WriteSinceAsync(Path.Combine(a, "scratch.txt"));
+        File.Delete(scratch);
+        Directory.SetLastWriteTimeUtc(a, DateTime.UtcNow.AddMinutes(1));
+
+        _deletes.Allow(g);
+        var retried = Assert.Single(await _retry.RetryAsync(ct: Ct));
+
+        Assert.True(retried.Finished);
+        Assert.False(Directory.Exists(sub), "the empty directory nothing was written in since is left");
+        Assert.True(Directory.Exists(a), "the retry removed a directory the member wrote in since");
+        Assert.Null(await _unfinished.FindAsync(workspace, Ct));
+    }
+
+    [Fact]
     public async Task An_empty_directory_above_a_named_path_the_host_cannot_remove_is_left_and_the_reset_retry_finishes()
     {
         await CreateAlphaAsync();

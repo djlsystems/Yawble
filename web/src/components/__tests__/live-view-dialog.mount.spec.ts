@@ -254,6 +254,9 @@ const run = (seq: number, over: Record<string, unknown> = {}) => ({
   endedAt: new Date(2026, 8, 26, 9, seq, 42).toISOString(),
   durationMs: 42_000,
   outcome: 'completed',
+  output: null,
+  reason: null,
+  quiet: false,
   ...over,
 });
 
@@ -314,6 +317,18 @@ describe('the watch dialog: live run and earlier runs', () => {
     expect(rows[1]!.querySelector('.earlier-run-outcome')!.textContent).toBe('blocked');
     expect(rows[2]!.querySelector('.earlier-run-duration')!.textContent).toBe('1h 02m');
     expect(rows[2]!.querySelector('.earlier-run-outcome')!.textContent).toBe('failed');
+  });
+
+  it('marks a quiet run as quiet, and a loud one not at all', async () => {
+    stubApi({
+      pages: { '': { runs: [run(9, { quiet: true }), run(7, { quiet: false })], nextBefore: null } },
+    });
+    await mountDialog(LiveViewDialog, { ...props, running: false });
+
+    const [quiet, loud] = runRows();
+    expect(quiet!.querySelector('.earlier-run-quiet')?.textContent?.trim()).toBe('quiet');
+    expect(loud!.querySelector('.earlier-run-quiet')).toBeNull();
+    expect(quiet!.querySelector('.earlier-run-outcome')!.textContent).toBe('completed');
   });
 
   it('loads the next older page with the cursor the last one gave, and stops when there is none', async () => {

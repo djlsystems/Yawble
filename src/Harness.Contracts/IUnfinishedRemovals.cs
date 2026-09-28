@@ -16,6 +16,9 @@ public static class RemovalKinds
 /// <summary>
 /// A folder whose removal did not finish: <paramref name="Remaining"/> are the paths still on disk
 /// when it was last attempted. <paramref name="Member"/> is set only for a workspace.
+/// <paramref name="HostLeft"/> is, for an emptied folder, the modification time (UTC ticks) the last
+/// attempt's own deletes left on each directory it had judged nothing was written in since the
+/// reset: one still at exactly that time has had nothing written in it since either.
 /// </summary>
 public sealed record UnfinishedRemoval(
     string Path,
@@ -24,7 +27,8 @@ public sealed record UnfinishedRemoval(
     string? Member,
     IReadOnlyList<string> Remaining,
     DateTimeOffset RecordedAt,
-    int Attempts);
+    int Attempts,
+    IReadOnlyDictionary<string, long>? HostLeft = null);
 
 /// <summary>
 /// The folders a deletion or reset could not finish removing (<c>unfinished_removals</c>, auth-012).

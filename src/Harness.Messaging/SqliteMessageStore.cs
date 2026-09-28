@@ -106,12 +106,55 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         ArgumentException.ThrowIfNullOrWhiteSpace(message.Type);
         ArgumentException.ThrowIfNullOrWhiteSpace(message.Source);
 
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        var stored = await InsertAsync(connection, transaction, message, ct);
+
+        await transaction.CommitAsync(ct);
+
+        _waits?.Publish(stored);
+
+        return stored;
+    }
+
+    public async Task<Message?> AppendWithinAsync(
+        Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, CancellationToken, Task<NewMessage?>> before,
+        Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, Message, CancellationToken, Task> after,
+        CancellationToken ct = default)
+    {
+        await using var connection = Open();
+
+        // Not deferred (the driver's default, as for every transaction here): the caller's first
+        // statement is often a read-modify-write that decides whether anything is appended, and two
+        // of those must not both decide from the same state.
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        Message? stored = null;
+        if (await before(connection, transaction, ct) is { } message)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(message.Type);
+            ArgumentException.ThrowIfNullOrWhiteSpace(message.Source);
+
+            stored = await InsertAsync(connection, transaction, message, ct);
+            await after(connection, transaction, stored, ct);
+        }
+
+        await transaction.CommitAsync(ct);
+
+        // Published only once committed: a live subscriber must never be handed a row that rolled back.
+        if (stored is not null) _waits?.Publish(stored);
+
+        return stored;
+    }
+
+    /// <summary>The row itself, inside the caller's transaction. Nothing is published here.</summary>
+    private static async Task<Message> InsertAsync(
+        SqliteConnection connection, SqliteTransaction transaction, NewMessage message, CancellationToken ct)
+    {
         // `?? message.Payload` only ever fires on a null the compiler cannot rule out: `RedactUserInfo`
         // returns its argument unchanged when there is nothing to redact.
         var payload = GitOutputRedaction.RedactUserInfo(message.Payload) ?? message.Payload;
-
-        await using var connection = Open();
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
         long correlation = 0;
         var depth = 0;
@@ -174,18 +217,12 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             await settle.ExecuteNonQueryAsync(ct);
         }
 
-        await transaction.CommitAsync(ct);
-
         // THE REDACTED PAYLOAD, NOT THE ONE HANDED IN. This is what the row holds and what every
         // later reader gets, and `_waits.Publish` hands it straight to a live subscriber - returning
         // the original here would put the credential back into the one delivery that skips the read.
-        var stored = new Message(
+        return new Message(
             seq, message.Type, payload, message.Source,
             correlation, message.CausationSeq, depth, occurredAt);
-
-        _waits?.Publish(stored);
-
-        return stored;
     }
 
     public async Task<IReadOnlyList<Message>> ReadAfterAsync(

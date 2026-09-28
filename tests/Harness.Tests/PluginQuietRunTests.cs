@@ -175,6 +175,22 @@ public sealed class PluginQuietRunTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_runs_route_marks_a_quiet_run_quiet_and_a_loud_one_not()
+    {
+        var quiet = await ScheduleAndFireAsync("quiet:nothing new");
+        await SettleManagerAsync(quiet);
+        var loud = await ScheduleAndFireAsync("something new");
+        await SettleManagerAsync(loud);
+
+        var runs = (await _person.GetFromJsonAsync<JsonElement>($"/api/teams/{_team}/members/Echo/runs", Ct))
+            .GetProperty("runs").EnumerateArray()
+            .ToDictionary(run => run.GetProperty("seq").GetInt64());
+
+        Assert.True(runs[quiet.Seq].GetProperty("quiet").GetBoolean());
+        Assert.False(runs[loud.Seq].GetProperty("quiet").GetBoolean());
+    }
+
+    [Fact]
     public async Task The_same_scheduled_run_not_quiet_wakes_the_manager_exactly_once()
     {
         var row = await ScheduleAndFireAsync("something new");

@@ -148,43 +148,50 @@ public sealed class TriggerCost(
         var clock = TriggerKindIsClock(row.Kind);
         var resumesAt = clock ? ResumeAt(row, now, nextDueAt) : null;
 
-        var skippedToday = await triggers.CountCappedSkipAsync(
-            row.Id, StartOfDay(row.Timezone, now), rearm: clock, resumesAt, ct);
-        if (skippedToday > 1) return true;
-
         var reason = resumesAt is { } resumes ? CapReason(row.Timezone, resumes) : MessageTypes.ScheduleSkippedCapReason;
         var source = clock ? $"schedule:{row.Id}" : $"trigger:{row.Id}";
-        var skipped = await log.AppendAsync(
-            new NewMessage(
-                MessageTypes.ScheduleSkipped,
-                JsonSerializer.Serialize(new
-                {
-                    member = member.ToString(),
-                    reason,
-                }),
-                source,
-                cause),
-            ct);
+        var dayStart = StartOfDay(row.Timezone, now);
 
-        await triggers.RecordCappedSkipAsync(
-            row.Id,
-            skipped.Seq,
-            new TriggerAudit(
-                source,
-                ActorEmail: null,
-                TenantActions.ScheduleSkipped,
+        // ONE UNIT: the count and the sleep, the `schedule.skipped` row and its tenant row commit
+        // together. If the rows cannot be written nothing is stored, and the next fire tries again
+        // rather than finding a trigger asleep with no row saying why. A later skip that day is
+        // only counted, in the same transaction shape, with nothing appended.
+        await log.AppendWithinAsync(
+            async (connection, transaction, token) =>
+                await triggers.CountCappedSkipAsync(
+                    connection, transaction, row.Id, dayStart, rearm: clock, resumesAt, token) > 1
+                    ? null
+                    : new NewMessage(
+                        MessageTypes.ScheduleSkipped,
+                        JsonSerializer.Serialize(new
+                        {
+                            member = member.ToString(),
+                            reason,
+                        }),
+                        source,
+                        cause),
+            (connection, transaction, skipped, token) => triggers.RecordCappedSkipAsync(
+                connection,
+                transaction,
                 row.Id,
-                row.Name,
-                JsonSerializer.Serialize(new
-                {
-                    team = member.Team,
-                    container = member.Name,
-                    reason,
-                    dailyTokenCap = row.DailyTokenCap,
-                    spentToday = spent.TokensSpent,
-                    skippedAt = now.ToString("O", CultureInfo.InvariantCulture),
-                    nextDueAt = (clock ? resumesAt : null)?.ToString("O", CultureInfo.InvariantCulture),
-                })),
+                skipped.Seq,
+                new TriggerAudit(
+                    source,
+                    ActorEmail: null,
+                    TenantActions.ScheduleSkipped,
+                    row.Id,
+                    row.Name,
+                    JsonSerializer.Serialize(new
+                    {
+                        team = member.Team,
+                        container = member.Name,
+                        reason,
+                        dailyTokenCap = row.DailyTokenCap,
+                        spentToday = spent.TokensSpent,
+                        skippedAt = now.ToString("O", CultureInfo.InvariantCulture),
+                        nextDueAt = (clock ? resumesAt : null)?.ToString("O", CultureInfo.InvariantCulture),
+                    })),
+                token),
             ct);
 
         return true;
@@ -207,13 +214,16 @@ public sealed class TriggerCost(
         view["capReachedToday"] = reached;
 
         // Asleep on the cap: a schedule whose last fire the cap skipped, still over it today, and
-        // due later. A cap raised or cleared since ends it, and so does the next day.
+        // due later. A cap raised or cleared since ends it, and so does the next day. The time is
+        // when it really resumes, the same ResumeAt the sleep stores: after a person edits the
+        // schedule it is due again from now, and that fire only skips and sleeps.
         view["cappedUntil"] = TriggerKindIsClock(row.Kind)
             && reached
             && row.LastOutcome == "capped"
             && row.NextDueAt is { } due
             && due > now
-                ? due.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)
+            && ResumeAt(row, now, due) is { } resumes
+                ? resumes.ToString("O", CultureInfo.InvariantCulture)
                 : null;
 
         view["skippedToday"] = row.CappedSkipsDay == StartOfDay(row.Timezone, now) ? row.CappedSkips : 0;

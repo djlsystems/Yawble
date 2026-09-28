@@ -370,5 +370,16 @@ public static class AuthSchema
                 attempts    INTEGER NOT NULL DEFAULT 1
             );
             """),
+
+        // WHAT THE HOST'S OWN LAST ATTEMPT LEFT: for a folder a reset emptied, a JSON object of
+        // directory path to the modification time (UTC ticks) the attempt's deletes left on it. A
+        // retry that needed more than one attempt judges a directory above a named path by this as
+        // well as by `recorded_at`, so its own earlier deletes do not make it look written since.
+        // NULL for a row from before the step and for the other kinds.
+        new MigrationStep(
+            "auth-013",
+            """
+            ALTER TABLE unfinished_removals ADD COLUMN host_left TEXT NULL;
+            """),
     ];
 }

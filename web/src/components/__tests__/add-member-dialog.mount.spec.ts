@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const { listCatalog, addMember } = vi.hoisted(() => ({ listCatalog: vi.fn(), addMember: vi.fn() }));
 
 // No plugin is installed here: the Agent picker's options are the presets alone.
-const { listPlugins } = vi.hoisted(() => ({ listPlugins: vi.fn(() => Promise.resolve({ plugins: [], refused: [] })) }));
+const { listPlugins } = vi.hoisted(() => ({ listPlugins: vi.fn(() => Promise.resolve({ plugins: [], refused: [], versions: [] })) }));
 
 // listCatalog runs from watch(open) AND again from useAgentInstallations, so one mock covers both.
 vi.mock('../../api/client', async (importOriginal) => ({

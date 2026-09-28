@@ -26,6 +26,7 @@ import {
   type TeamSort,
 } from '../lib/teamsTable';
 import type { Team, TeamDeleted, TeamId } from '../api/types';
+import UnfinishedRemovals from './UnfinishedRemovals.vue';
 
 const board = useConsoleStore();
 const $q = useQuasar();
@@ -161,6 +162,9 @@ const busy = ref(false);
 const unfinished = ref<{ team: string; root: string; remaining: string[]; note: string | null } | null>(null);
 const retrying = ref(false);
 
+/** The list of EVERY unfinished removal below the table, read again when this page adds or retries one. */
+const removalsList = ref<InstanceType<typeof UnfinishedRemovals> | null>(null);
+
 async function retryUnfinished() {
   if (!unfinished.value) return;
 
@@ -177,6 +181,7 @@ async function retryUnfinished() {
     } else {
       unfinished.value = { ...shown, remaining: result.remaining, note: result.note };
     }
+    void removalsList.value?.load();
   } catch (cause) {
     $q.notify({ type: 'negative', message: cause instanceof Error ? cause.message : String(cause) });
   } finally {
@@ -237,6 +242,7 @@ async function remove() {
         remaining: removed.remaining ?? [],
         note: null,
       };
+      void removalsList.value?.load();
     } else if (removed.failures.length > 0) {
       $q.notify({
         type: 'warning',
@@ -543,6 +549,8 @@ async function setPaused(team: Team | null, paused: boolean) {
         </tr>
       </tbody>
     </q-markup-table>
+
+    <UnfinishedRemovals ref="removalsList" />
 
     <!-- `no-backdrop-dismiss`, NOT `persistent`: a stray click outside must not dismiss a question
          about destroying a team, but Escape must. `persistent` blocks both and only the click was

@@ -35,13 +35,13 @@ public sealed class FreshVolumeTests : IDisposable
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
     /// settings; `auth-008` is a plugin member's configuration and secret bindings; `auth-009` is who
     /// last set a member's own instructions, and when; `auth-010` is a trigger's wake choice and daily
-    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish.
+    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "skill-001", "skill-002", "skill-003", "backlog-001"],
+            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "skill-001", "skill-002", "skill-003", "backlog-001"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -53,7 +53,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "backlog-001", "messages-001", "skill-001", "skill-002", "skill-003"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "backlog-001", "messages-001", "skill-001", "skill-002", "skill-003"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -256,6 +256,36 @@ public sealed class FreshVolumeTests : IDisposable
     }
 
     /// <summary>
+    /// An unfinished removal recorded before `auth-013` has nothing its Host left on record, and is
+    /// judged by the reset's time alone; a later attempt records what it left.
+    /// </summary>
+    [Fact]
+    public async Task An_unfinished_removal_from_before_the_host_left_step_has_nothing_left_on_record()
+    {
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "auth-013")], ct: Ct);
+
+        await ExecuteAsync(
+            """
+            INSERT INTO unfinished_removals (path, kind, team, member, remaining, recorded_at, attempts)
+            VALUES ('/data/w', 'emptied', 'old-team', NULL, '["/data/w/a/f"]', '2026-09-01T00:00:00.0000000+00:00', 1);
+            """);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        var store = new SqliteUnfinishedRemovals(Database);
+        var old = (await store.FindAsync("/data/w", Ct))!;
+        Assert.Null(old.HostLeft);
+        Assert.Equal(["/data/w/a/f"], old.Remaining);
+
+        await store.RecordAsync(old with { HostLeft = new Dictionary<string, long> { ["/data/w/a"] = 42 } }, Ct);
+        var again = (await store.FindAsync("/data/w", Ct))!;
+        Assert.Equal(42, again.HostLeft!["/data/w/a"]);
+        Assert.Equal(2, again.Attempts);
+        Assert.Equal(old.RecordedAt, again.RecordedAt);
+    }
+
+    /// <summary>
     /// A trigger made before `auth-011` has skipped nothing today, and a save never writes the
     /// count: only a capped skip does.
     /// </summary>
@@ -319,10 +349,10 @@ public sealed class FreshVolumeTests : IDisposable
         await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct: Ct);
         var store = new SqliteTeamStore(Database);
 
-        await store.SetConciergeSettingsAsync("codex", Ct);
+        await store.SetConciergeSettingsAsync("codex", ct: Ct);
         Assert.Equal("codex", (await store.ConciergeSettingsAsync(ct: Ct)).Agent);
 
-        await store.SetConciergeSettingsAsync(null, Ct);
+        await store.SetConciergeSettingsAsync(null, ct: Ct);
         Assert.Null((await store.ConciergeSettingsAsync(ct: Ct)).Agent);
     }
 

@@ -57,6 +57,20 @@ public sealed class TenantLogging(ITenantLog log)
     }
 
     /// <summary>
+    /// The row a settings write appends in its OWN transaction, for a store that takes one. Unlike
+    /// <see cref="WriteAsync"/> nothing is swallowed: a write whose row cannot land does not happen.
+    /// </summary>
+    public static TriggerAudit Row(
+        HttpContext context, string action, string? subject, string? subjectName, object? detail) =>
+        new(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+            context.User.FindFirstValue(ClaimTypes.Email),
+            action,
+            subject,
+            subjectName,
+            detail is null ? null : JsonSerializer.Serialize(detail));
+
+    /// <summary>
     /// Records an act for somebody who is not (yet, or any longer) an authenticated caller - a sign
     /// in, or a sign out after the cookie is gone. The id and email are given rather than read.
     /// </summary>

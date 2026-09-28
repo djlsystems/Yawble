@@ -231,9 +231,14 @@ public sealed class FolderRemoval(
     /// path after checking it is not a link, so an agent process swapping it for a link in between
     /// could point the Host's deletes elsewhere; the window is small (Reset refuses busy members,
     /// and the start retry runs before members start) and closing it needs handle-relative
-    /// (<c>openat</c>, <c>O_NOFOLLOW</c>) deletes. Cosmetic: when a retry takes more than one
-    /// attempt, an earlier attempt's deletes make the directories above a named path look newer
-    /// than the reset, so the empty ones may be left behind; nothing is lost.
+    /// (<c>openat</c>, <c>O_NOFOLLOW</c>) deletes.
+    /// </para>
+    /// <para>
+    /// A RETRY THAT TAKES MORE THAN ONE ATTEMPT. An earlier attempt's own deletes make the
+    /// directories above a named path newer than the reset. So each attempt that leaves the row
+    /// unfinished records the time it left on every directory it had judged unwritten
+    /// (<see cref="UnfinishedRemoval.HostLeft"/>), and a directory still at exactly that time is
+    /// judged unwritten again; one written in since has another time and is the member's.
     /// </para>
     /// </summary>
     private async Task<FolderRemovalReport> RetryEmptiedAsync(UnfinishedRemoval row, CancellationToken ct)
@@ -257,7 +262,7 @@ public sealed class FolderRemoval(
 
             if (!isBoundary && !Confined(boundary, path) || !Exists(path)) continue;
 
-            if (!isBoundary) AddOldAncestors(boundary, path, row.RecordedAt, ancestors);
+            if (!isBoundary) AddOldAncestors(boundary, path, row.RecordedAt, row.HostLeft, ancestors);
 
             if (!isBoundary && (IsLink(path) || !Directory.Exists(path)))
             {
@@ -339,22 +344,47 @@ public sealed class FolderRemoval(
             }
         }
 
-        return await SettleAsync(boundary, RemovalKinds.Emptied, row.Team, null, remaining, ct);
+        // What this attempt's own deletes left on the directories it judged unwritten, so the next
+        // attempt does not take them for the member's.
+        var hostLeft = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var directory in ancestors.Concat(directories))
+        {
+            try
+            {
+                if (Directory.Exists(directory) && !IsLink(directory))
+                {
+                    hostLeft[directory] = Directory.GetLastWriteTimeUtc(directory).Ticks;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Not recorded: judged by the reset's time alone next time, as before.
+            }
+        }
+
+        return await SettleAsync(boundary, RemovalKinds.Emptied, row.Team, null, remaining, ct, hostLeft);
     }
 
     /// <summary>
     /// Adds to <paramref name="ancestors"/> the directories between <paramref name="path"/> and
     /// <paramref name="boundary"/>, nearest first, stopping at the first that is a link or was
-    /// modified after <paramref name="since"/>. Decided before anything is removed, so the retry's
-    /// own deletes never make one look new.
+    /// modified after <paramref name="since"/> - unless it is still at the time an earlier attempt's
+    /// own deletes left on it (<paramref name="hostLeft"/>). Decided before anything is removed, so
+    /// the retry's own deletes never make one look new.
     /// </summary>
-    private static void AddOldAncestors(string boundary, string path, DateTimeOffset since, HashSet<string> ancestors)
+    private static void AddOldAncestors(
+        string boundary, string path, DateTimeOffset since, IReadOnlyDictionary<string, long>? hostLeft,
+        HashSet<string> ancestors)
     {
         for (var parent = Path.GetDirectoryName(path); parent is not null && Confined(boundary, parent); parent = Path.GetDirectoryName(parent))
         {
             try
             {
-                if (IsLink(parent) || Directory.GetLastWriteTimeUtc(parent) > since.UtcDateTime) return;
+                if (IsLink(parent)) return;
+
+                var written = Directory.GetLastWriteTimeUtc(parent);
+                var leftByHost = hostLeft is not null && hostLeft.TryGetValue(parent, out var left) && left == written.Ticks;
+                if (written > since.UtcDateTime && !leftByHost) return;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -608,7 +638,8 @@ public sealed class FolderRemoval(
     // ---- The record.
 
     private async Task<FolderRemovalReport> SettleAsync(
-        string path, string kind, string team, string? member, List<string> remaining, CancellationToken ct)
+        string path, string kind, string team, string? member, List<string> remaining, CancellationToken ct,
+        IReadOnlyDictionary<string, long>? hostLeft = null)
     {
         if (remaining.Count == 0)
         {
@@ -621,7 +652,7 @@ public sealed class FolderRemoval(
         if (unfinished is not null)
         {
             await unfinished.RecordAsync(
-                new UnfinishedRemoval(path, kind, team, member, sorted, DateTimeOffset.UtcNow, 1), ct);
+                new UnfinishedRemoval(path, kind, team, member, sorted, DateTimeOffset.UtcNow, 1, hostLeft), ct);
         }
 
         return new FolderRemovalReport(sorted);
