@@ -71,13 +71,13 @@ func TestListSettingsAndRequires(t *testing.T) {
 	for extra, want := range map[string]string{
 		`,"config":{"allow":{"type":"list","default":[]}}`:                     "",
 		`,"config":{"allow":{"type":"list","enum":["a","b"],"default":["b"]}}`: "",
-		`,"config":{"allow":{"type":"list","enum":["a","b"],"default":["c"]}}`: "`allow` must be one of: a, b.",
+		`,"config":{"allow":{"type":"list","enum":["a","b"],"default":["c"]}}`: "`allow` holds 'c'; each item must be one of: a, b.",
 		`,"config":{"allow":{"type":"list","default":"a"}}`:                    "`allow` must be a list of strings.",
-		`,"config":{"allow":{"type":"map"}}`:                                   "`config.allow.type` must be string, number, bool or list",
+		`,"config":{"allow":{"type":"map"}}`:                                   "`config.allow.type` must be string, number, bool or list - v1 has no nested configuration.",
 		`,"requires":["dotnet","node","python3"]`:                              "",
 		`,"requires":null`:     "",
-		`,"requires":["ruby"]`: "`requires` names 'ruby', which is not a runtime this Host knows (dotnet, node, python3).",
-		`,"requires":"dotnet"`: "`requires` must be an array of runtime names.",
+		`,"requires":["ruby"]`: "`requires` names 'ruby', which is not a runtime this Host provides (it provides dotnet, node, python3); ship anything else inside the plugin's folder.",
+		`,"requires":"dotnet"`: "`requires` must be an array of runtime names: dotnet, node, python3.",
 	} {
 		_, _, err := Parse(manifest(extra))
 		got := ""

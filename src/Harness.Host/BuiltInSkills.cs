@@ -1016,7 +1016,8 @@ public static class BuiltInSkills
             for which). The person installs a built version with the operator CLI's plugin install
             command, on the machine that runs the platform; a version built inside the instance, in a
             team's worktree or your workspace, is installed where it is with `--from-instance` and
-            its path, with no copy out of the container. It is then hired from the Add member dialog, or by a Manager with `member` naming the plugin id
+            its path, or from Admin, Plugins, "Install from a folder", with no copy out of the
+            container. It is then hired from the Add member dialog, or by a Manager with `member` naming the plugin id
             that `hiring` lists. A Manager may bind only secret keys a person has already bound on its
             team, so the first member to use a new key is hired by a person.
 

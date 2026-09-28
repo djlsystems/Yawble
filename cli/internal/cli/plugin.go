@@ -31,7 +31,9 @@ const (
 var (
 	rescanWait = 20 * time.Second
 	rescanPoll = 500 * time.Millisecond
-	newNonce   = func() string {
+	// An install copies the folder before it answers, so it is given longer than a rescan.
+	installWait = 60 * time.Second
+	newNonce    = func() string {
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		return hex.EncodeToString(b)
@@ -60,10 +62,11 @@ func newPluginInstallCommand(deps Deps) *cobra.Command {
 			"/data/plugins/<id>/<version>/, owned harness:agent with directories 0750, files 0640 and the " +
 			"manifest's executable 0750, whatever the modes were here (a folder from Windows has no execute bit). " +
 			"That version becomes active; earlier versions are kept. Then the Host rescans, and its verdict is printed.\n\n" +
-			"With --from-instance, <folder> is a path inside the instance (a plugin a team built in its worktree, or " +
-			"the Concierge in its workspace) and nothing is copied from this computer. It must be under the data root " +
-			"(" + dataRoot + "), reached without a symlink that leaves it, and hold no symlink that leaves the folder; " +
-			"the checks, modes, active switch, --force and verdict are the same.",
+			"With --from-instance, <folder> is an absolute path inside the instance (a plugin a team built in its worktree, or " +
+			"the Concierge in its workspace) and nothing is copied from this computer: the running Host installs it with the " +
+			"installer Admin → Plugins uses, which checks the folder (under " + dataRoot + ", no symlink leaving it, a manifest " +
+			"it accepts), lays it out with the same modes and makes it active. --force replaces an installed version; the " +
+			"Host's verdict is printed.",
 		Example: "  yawble plugin install ~/plugins-build/sample-echo/0.1.0\n  yawble plugin install .\\sample-echo\\0.2.0 --force\n" +
 			"  yawble plugin install --from-instance /data/teams/acme/repos/Tools/main/build/sample-echo-go/0.1.0",
 		Args: cobra.ExactArgs(1),
@@ -86,67 +89,92 @@ func newPluginInstallCommand(deps Deps) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "replace this version if it is already installed")
-	cmd.Flags().BoolVar(&fromInstance, "from-instance", false, "<folder> is a path inside the instance, under "+dataRoot+"; nothing is copied from this computer")
+	cmd.Flags().BoolVar(&fromInstance, "from-instance", false, "<folder> is a path inside the instance, under "+dataRoot+"; the Host installs it where it is")
 	return cmd
 }
 
-// installFromInstance checks a folder that is already inside the instance, where it is, then
-// installs it with a copy made inside the container. Every refusal comes before anything is written.
+// installFromInstance asks the running Host to install a folder that is already inside the
+// instance, through the request file PluginRescanRequests answers. The Host runs the one installer
+// POST /api/plugins/install runs (PluginInstaller), so every check, refusal sentence, mode and the
+// verdict are the Host's; the CLI only carries the request and prints the report.
 func installFromInstance(cmd *cobra.Command, deps Deps, folder string, force bool) error {
-	if !strings.HasPrefix(folder, "/") {
-		return UsageError{fmt.Sprintf("--from-instance takes the folder's absolute path inside the instance, under %s; %q is not one", dataRoot, folder)}
-	}
-	ctx := cmd.Context()
+	ctx, out := cmd.Context(), cmd.OutOrStdout()
 	e, err := runningEngine(ctx, deps, "plugin install --from-instance")
 	if err != nil {
 		return err
 	}
-	res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", inspectScript, "sh", dataRoot, folder)
-	if err != nil {
+	nonce := newNonce()
+	request, _ := json.Marshal(installRequest{Request: nonce, Path: folder, Replace: force})
+	if _, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", installRequestScript, "sh", pluginsRoot, string(request)); err != nil {
 		return err
 	}
-	status, rest, _ := strings.Cut(res.Stdout, "\n")
-	verdict, detail, _ := strings.Cut(status, "\t")
-	if verdict != "ok" {
-		if verdict != "refuse" {
-			detail = "the instance did not answer the folder check: " + strings.TrimSpace(res.Stdout+" "+res.Stderr)
+	deadline := time.Now().Add(installWait)
+	for {
+		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", installReportScript, "sh", pluginsRoot)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("%s was not installed: %s", folder, detail)
-	}
-	source := detail
-	m, skills, err := plugin.Parse([]byte(rest))
-	if err != nil {
-		return fmt.Errorf("%s was not installed: %w", folder, err)
-	}
-	check := []string{"sh", "-c", filesScript, "sh", source}
-	for _, x := range m.Executables {
-		check = append(check, "x:"+x)
-	}
-	for _, sk := range skills {
-		check = append(check, "s:"+sk)
-	}
-	res, err = e.Exec(ctx, instance.ContainerName, check...)
-	if err != nil {
-		return err
-	}
-	if fields := strings.Split(strings.TrimSpace(res.Stdout), "\t"); fields[0] != "ok" {
-		reason := "the instance did not answer the file check: " + strings.TrimSpace(res.Stdout+" "+res.Stderr)
-		if len(fields) == 3 {
-			switch {
-			case fields[0] == "outside":
-				reason = fmt.Sprintf("`%s` resolves outside %s/.", fields[2], m.Version)
-			case fields[1] == "x":
-				reason = fmt.Sprintf("its executable %s does not exist.", fields[2])
-			default:
-				reason = fmt.Sprintf("its skill %s does not exist inside %s/.", fields[2], m.Version)
-			}
+		var r installReport
+		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.Request == nonce {
+			return r.verdict(out, folder)
 		}
+		if time.Now().After(deadline) {
+			// A request no Host answered must not be carried out later, by a Host started after an upgrade.
+			_, _ = e.Exec(ctx, instance.ContainerName, "sh", "-c", installWithdrawScript, "sh", pluginsRoot, nonce)
+			return fmt.Errorf("the Host did not answer the install request within %s, and the request was withdrawn. "+
+				"An image from before `plugin install --from-instance` does not answer; `yawble plugin list` shows what the instance holds", installWait)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(rescanPoll):
+		}
+	}
+}
+
+// installRequest is <plugins>/.install; installReport is <plugins>/.install-report.json, the
+// Host's answer, with the status POST /api/plugins/install would give.
+type installRequest struct {
+	Request string `json:"request"`
+	Path    string `json:"path"`
+	Replace bool   `json:"replace"`
+}
+
+type installReport struct {
+	Request   string  `json:"request"`
+	Status    int     `json:"status"`
+	ID        *string `json:"id"`
+	Version   *string `json:"version"`
+	Installed bool    `json:"installed"`
+	Replaced  bool    `json:"replaced"`
+	Reason    *string `json:"reason"`
+}
+
+// verdict prints an install the Host made active and listed; anything else is an error carrying
+// the Host's own sentence (400 refused, 409 installed already without --force, 200 written but
+// refused by the catalog).
+func (r installReport) verdict(out io.Writer, folder string) error {
+	reason, id, version := deref(r.Reason), deref(r.ID), deref(r.Version)
+	switch {
+	case r.Status == 200 && r.Installed:
+		verb := "installed"
+		if r.Replaced {
+			verb = "replaced"
+		}
+		fmt.Fprintf(out, "the Host %s %s %s from %s and made it the active version; hire it as plugin:%s\n", verb, id, version, folder, id)
+		return nil
+	case r.Status == 200:
+		return fmt.Errorf("the Host wrote %s %s but refuses it: %s", id, version, reason)
+	default:
 		return fmt.Errorf("%s was not installed: %s", folder, reason)
 	}
-	return install(ctx, cmd.OutOrStdout(), e, m, force, func(stage string) error {
-		_, err := e.Exec(ctx, instance.ContainerName, "cp", "-R", "-P", "--", source, stage)
-		return err
-	})
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // install is what both install paths share once the folder has passed its checks: refuse an
@@ -398,33 +426,21 @@ done`
 
 	reportScript = `cat "$1/.rescan-report.json" 2>/dev/null || true`
 
-	// $1 data root, $2 the folder named to --from-instance. One line, "refuse<TAB>reason" or
-	// "ok<TAB>the folder with every symlink resolved", then on "ok" the manifest. It refuses a folder
-	// outside the data root as named, one a symlink leads out of it, and one holding a symlink that
-	// leaves the folder: once installed, that would point the plugin at files an agent can write.
-	inspectScript = `d=$(realpath -e -- "$1" 2>/dev/null) || { printf 'refuse\tthe data root %s does not exist in the instance\n' "$1"; exit 0; }
-under() { case "$1" in "$2"|"$2"/*) return 0;; esac; return 1; }
-named=$(realpath -m -s -- "$2")
-under "$named" "$d" || { printf 'refuse\tit is outside the data root %s; build or copy the plugin under it first\n' "$1"; exit 0; }
-r=$(realpath -e -- "$2" 2>/dev/null) || { printf 'refuse\tit does not exist in the instance\n'; exit 0; }
-under "$r" "$d" || { printf 'refuse\tit leads through a symlink to %s, outside the data root %s\n' "$r" "$1"; exit 0; }
-[ "$r" != "$d" ] || { printf 'refuse\tit is the data root itself; name the folder that holds plugin.json\n'; exit 0; }
-[ -d "$r" ] || { printf 'refuse\tit is not a folder; name the folder that holds plugin.json\n'; exit 0; }
-link=$(find "$r" -type l -exec sh -c 'for l; do t=$(realpath -m -- "$l"); case "$t" in "$0"/*) ;; *) printf "%s -> %s" "$l" "$t"; exit 0;; esac; done' "$r" {} +)
-[ -z "$link" ] || { printf 'refuse\tit holds a symlink that leaves the folder (%s); a plugin must be self-contained\n' "$link"; exit 0; }
-[ -f "$r/plugin.json" ] || { printf 'refuse\tit has no plugin.json; name a built plugin version, the folder that holds it\n'; exit 0; }
-printf 'ok\t%s\n' "$r"
-cat "$r/plugin.json"`
+	// $1 root, $2 the request's JSON: the install PluginRescanRequests answers, owned and moded as
+	// .rescan, written beside it and moved in so the Host never reads half of it.
+	installRequestScript = `set -e
+mkdir -p "$1"
+chown harness:agent "$1"
+chmod u=rwx,g=rx,o=,ug-s "$1"
+printf '%s\n' "$2" > "$1/.install.tmp"
+chown harness:agent "$1/.install.tmp"
+chmod 0640 "$1/.install.tmp"
+mv -f "$1/.install.tmp" "$1/.install"`
 
-	// $1 the resolved folder, then "x:<executable>" and "s:<skill>" as the manifest names them:
-	// "ok", or "outside|missing<TAB>x|s<TAB>path" for the first one that is not a file inside it.
-	filesScript = `r="$1"; shift
-for a; do
-  k=${a%%:*}; p=${a#*:}; t=$(realpath -m -- "$r/$p")
-  case "$t" in "$r"/*) ;; *) printf 'outside\t%s\t%s\n' "$k" "$p"; exit 0;; esac
-  [ -f "$t" ] || { printf 'missing\t%s\t%s\n' "$k" "$p"; exit 0; }
-done
-echo ok`
+	installReportScript = `cat "$1/.install-report.json" 2>/dev/null || true`
+
+	// $1 root, $2 nonce: removes the install request if it is still this one.
+	installWithdrawScript = `grep -qF "$2" "$1/.install" 2>/dev/null && rm -f "$1/.install"; true`
 )
 
 // hostReport is .rescan-report.json, which PluginRescanRequests writes.

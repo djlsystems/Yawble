@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -495,182 +496,182 @@ func TestPluginRemoveSaysSoWhenTheHostStillListsIt(t *testing.T) {
 	}
 }
 
-// --from-instance: a folder already inside the instance, checked and copied there.
+// --from-instance: the CLI asks the Host through .install and prints .install-report.json. The
+// scripted engine fakes the Host's side of that exchange; the sentences are PluginInstaller's.
 const (
-	instanceFolder = "/data/teams/acme/repos/Tools/main/build/sample-echo/0.1.0"
-	inspectCall    = execPrefix + cli.PluginInspectScript + " sh /data " + instanceFolder
-	filesCall      = execPrefix + cli.PluginFilesScript + " sh " + instanceFolder
+	instanceFolder     = "/data/teams/acme/repos/Tools/main/build/sample-echo/0.1.0"
+	installRequestCall = execPrefix + cli.PluginInstallRequestScript + " sh /data/plugins "
+	installReportCall  = execPrefix + cli.PluginInstallReportScript + " sh /data/plugins"
 )
 
-// fromInstanceScript is a running instance where the folder passes the in-container folder check,
-// its manifest reads as manifest, and the file check answers files.
-func fromInstanceScript(t *testing.T, manifest, files string) *engine.Scripted {
+func installRequestFor(path string, replace bool) string {
+	b, _ := json.Marshal(path)
+	return fmt.Sprintf(`%s{"request":%q,"path":%s,"replace":%t}`, installRequestCall, nonce, b, replace)
+}
+
+func installAnswer(request string, status int, installed, replaced bool, reason string) engine.Result {
+	r := map[string]any{"request": request, "at": "2026-09-28T00:00:00Z", "status": status,
+		"id": "sample-echo", "version": "0.1.0", "installed": installed, "replaced": replaced, "reason": nil}
+	if reason != "" {
+		r["reason"] = reason
+	}
+	b, _ := json.Marshal(r)
+	return engine.Result{Stdout: string(b) + "\n"}
+}
+
+// fromInstanceScript is a running instance whose Host answers the install report with answers in
+// turn; an older report (another nonce) comes first, as it would on a volume used before.
+func fromInstanceScript(t *testing.T, answers ...engine.Result) *engine.Scripted {
 	s := pluginScript(t)
-	s.On(inspectCall, engine.Result{Stdout: "ok\t" + instanceFolder + "\n" + manifest})
-	s.On(filesCall, engine.Result{Stdout: files})
+	s.OnSequence(installReportCall, append([]engine.Result{installAnswer("older", 200, true, false, "")}, answers...)...)
 	return s
 }
 
-func TestPluginInstallFromInstanceCopiesInsideTheContainerNotFromTheHost(t *testing.T) {
-	s := fromInstanceScript(t, echoManifest, "ok\n")
+// No copy of the install in the CLI: no podman cp, no prepare/place scripts, no rescan of its own.
+func assertOnlyTheRequest(t *testing.T, s *engine.Scripted) {
+	t.Helper()
+	for _, part := range []string{"podman cp", cli.PluginPrepareScript, cli.PluginPlaceScript, cli.PluginRequestScript} {
+		if c := callsContaining(s, part); len(c) != 0 {
+			t.Errorf("ran %q itself:\n%s", part, strings.Join(c, "\n"))
+		}
+	}
+}
+
+func TestPluginInstallFromInstanceAsksTheHostAndPrintsItsVerdict(t *testing.T) {
+	s := fromInstanceScript(t, installAnswer(nonce, 200, true, false, ""))
 	code, out, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", instanceFolder)
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
-	want := []string{
-		inspectCall,
-		filesCall + " x:sample-echo s:skills/sample-echo.md",
-		prepareCall + "sample-echo 0.1.0 0",
-		"podman exec yawble cp -R -P -- " + instanceFolder + " /data/plugins/sample-echo/.incoming-0.1.0",
-		placeCall + "sample-echo 0.1.0 sample-echo",
-		requestCall,
-		reportCall,
+	if len(callsContaining(s, installRequestFor(instanceFolder, false))) != 1 {
+		t.Errorf("the request was not written once:\n%s", strings.Join(s.Calls, "\n"))
 	}
-	at := 0
-	for _, c := range s.Calls {
-		if at < len(want) && c == want[at] {
-			at++
-		}
+	if len(callsContaining(s, installReportCall)) != 2 {
+		t.Errorf("an older report was taken for the answer:\n%s", strings.Join(s.Calls, "\n"))
 	}
-	if at != len(want) {
-		t.Fatalf("missing, in order, %q\ncalls:\n%s", want[at], strings.Join(s.Calls, "\n"))
-	}
-	if cp := callsContaining(s, "podman cp"); len(cp) != 0 {
-		t.Errorf("copied from the host: %v", cp)
-	}
-	for _, want := range []string{"copied sample-echo 0.1.0 to /data/plugins/sample-echo/0.1.0", "the Host reports sample-echo 0.1.0 installed", "plugin:sample-echo"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
+	assertOnlyTheRequest(t, s)
+	want := "the Host installed sample-echo 0.1.0 from " + instanceFolder + " and made it the active version; hire it as plugin:sample-echo"
+	if !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
 	}
 }
 
-func TestPluginInstallFromInstanceRefusesAManifestTheHostWouldRefuseBeforeWriting(t *testing.T) {
+func TestPluginInstallFromInstancePrintsTheHostsRefusal(t *testing.T) {
 	for name, c := range map[string]struct {
-		manifest, files, want string
+		answer engine.Result
+		want   string
 	}{
-		"bad field":          {strings.Replace(echoManifest, "harness.member/1", "other/9", 1), "ok\n", "`protocol` 'other/9' is not one this Host speaks"},
-		"unknown runtime":    {strings.Replace(echoManifest, `"skills"`, `"requires": ["ruby"], "skills"`, 1), "ok\n", "`requires` names 'ruby'"},
-		"missing executable": {echoManifest, "missing\tx\tsample-echo\n", "its executable sample-echo does not exist."},
-		"missing skill":      {echoManifest, "missing\ts\tskills/sample-echo.md\n", "its skill skills/sample-echo.md does not exist inside 0.1.0/."},
+		"bad manifest": {installAnswer(nonce, 400, false, false, "The Host refuses this plugin: `requires` names 'ruby', which is not a runtime this Host provides (it provides dotnet, node, python3); ship anything else inside the plugin's folder."),
+			instanceFolder + " was not installed: The Host refuses this plugin: `requires` names 'ruby'"},
+		"missing file": {installAnswer(nonce, 400, false, false, "The Host refuses sample-echo 0.1.0: its executable sample-echo does not exist."),
+			"The Host refuses sample-echo 0.1.0: its executable sample-echo does not exist."},
+		"catalog refuses after writing": {installAnswer(nonce, 200, false, false, "needs python3, which is not installed on this instance"),
+			"the Host wrote sample-echo 0.1.0 but refuses it: needs python3, which is not installed on this instance"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			s := fromInstanceScript(t, c.manifest, c.files)
+			s := fromInstanceScript(t, c.answer)
 			code, _, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", instanceFolder)
 			if code != 1 || !strings.Contains(errOut, c.want) {
 				t.Errorf("exit %d stderr %q, want %q", code, errOut, c.want)
 			}
-			if w := append(callsContaining(s, cli.PluginPrepareScript), callsContaining(s, " cp ")...); len(w) != 0 {
-				t.Errorf("wrote although refused:\n%s", strings.Join(w, "\n"))
-			}
+			assertOnlyTheRequest(t, s)
 		})
 	}
 }
 
 func TestPluginInstallFromInstanceRefusesAnInstalledVersionUnlessForced(t *testing.T) {
-	s := fromInstanceScript(t, echoManifest, "ok\n")
-	s.On(prepareCall+"sample-echo 0.1.0 0", engine.Result{Stdout: "exists\n"})
+	s := fromInstanceScript(t, installAnswer(nonce, 409, false, false, "sample-echo 0.1.0 is already installed; choose Replace (the CLI's --force) to replace it."))
 	code, _, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", instanceFolder)
-	if code != 1 || !strings.Contains(errOut, "already installed") || !strings.Contains(errOut, "--force") {
+	if code != 1 || !strings.Contains(errOut, "sample-echo 0.1.0 is already installed; choose Replace (the CLI's --force)") {
 		t.Errorf("exit %d stderr %q", code, errOut)
 	}
-	if len(callsContaining(s, " cp ")) != 0 || len(callsContaining(s, cli.PluginPlaceScript)) != 0 {
-		t.Errorf("copied although refused:\n%s", strings.Join(s.Calls, "\n"))
+	if len(callsContaining(s, installRequestFor(instanceFolder, false))) != 1 {
+		t.Errorf("without --force the request must not replace:\n%s", strings.Join(s.Calls, "\n"))
 	}
 
-	s = fromInstanceScript(t, echoManifest, "ok\n")
+	s = fromInstanceScript(t, installAnswer(nonce, 200, true, true, ""))
 	code, out, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", instanceFolder, "--force")
-	if code != 0 || len(callsContaining(s, prepareCall+"sample-echo 0.1.0 1")) != 1 || len(callsContaining(s, " cp -R -P ")) != 1 {
+	if code != 0 || len(callsContaining(s, installRequestFor(instanceFolder, true))) != 1 || !strings.Contains(out, "the Host replaced sample-echo 0.1.0") {
 		t.Errorf("--force: exit %d %s %s\n%s", code, out, errOut, strings.Join(s.Calls, "\n"))
 	}
+	assertOnlyTheRequest(t, s)
 }
 
-// The in-container check's refusal (outside the data root, a symlink leaving it) is printed, and
-// nothing is written; a path that is not absolute never reaches the container.
+// Outside the data root, and a relative path, are the Host's to refuse, in its words.
 func TestPluginInstallFromInstanceRefusesAFolderOutsideTheDataRoot(t *testing.T) {
-	s := pluginScript(t)
-	s.On(execPrefix+cli.PluginInspectScript+" sh /data /srv/build/0.1.0", engine.Result{Stdout: "refuse\tit is outside the data root /data; build or copy the plugin under it first\n"})
-	code, _, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", "/srv/build/0.1.0")
-	if code != 1 || !strings.Contains(errOut, "/srv/build/0.1.0 was not installed: it is outside the data root /data") {
+	for path, reason := range map[string]string{
+		"/srv/build/0.1.0": "/srv/build/0.1.0 is outside the data root (/data); only a folder inside the instance can be installed this way.",
+		"build/0.1.0":      "Give the absolute path of one built plugin version folder (the folder holding plugin.json).",
+	} {
+		s := fromInstanceScript(t, installAnswer(nonce, 400, false, false, reason))
+		code, _, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", path)
+		if code != 1 || !strings.Contains(errOut, path+" was not installed: "+reason) {
+			t.Errorf("%s: exit %d stderr %q", path, code, errOut)
+		}
+		if len(callsContaining(s, installRequestFor(path, false))) != 1 {
+			t.Errorf("%s: not asked of the Host:\n%s", path, strings.Join(s.Calls, "\n"))
+		}
+		assertOnlyTheRequest(t, s)
+	}
+}
+
+func TestPluginInstallFromInstanceWithdrawsARequestTheHostNeverAnswers(t *testing.T) {
+	s := fromInstanceScript(t)
+	code, _, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", instanceFolder)
+	if code != 1 || !strings.Contains(errOut, "the Host did not answer the install request") || !strings.Contains(errOut, "withdrawn") {
 		t.Errorf("exit %d stderr %q", code, errOut)
 	}
-	if len(callsContaining(s, cli.PluginPrepareScript)) != 0 || len(callsContaining(s, cli.PluginFilesScript)) != 0 {
-		t.Errorf("went on although refused:\n%s", strings.Join(s.Calls, "\n"))
-	}
-
-	s = pluginScript(t)
-	code, _, errOut = run(t, stubbed(s), "plugin", "install", "--from-instance", "build/0.1.0")
-	if code != 2 || !strings.Contains(errOut, "absolute path inside the instance") || len(callsContaining(s, "podman exec")) != 0 {
-		t.Errorf("relative: exit %d stderr %q\n%s", code, errOut, strings.Join(s.Calls, "\n"))
+	if len(callsContaining(s, execPrefix+cli.PluginInstallWithdrawScript+" sh /data/plugins "+nonce)) != 1 {
+		t.Errorf("the request was not withdrawn:\n%s", strings.Join(s.Calls, "\n"))
 	}
 }
 
-// The --from-instance scripts, run for real under sh against a temporary data root.
-func TestPluginFromInstanceScriptsUnderSh(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("the scripts run in the Linux container and use GNU realpath")
+// The request, report and withdraw scripts, run for real under sh (chown stubbed: it needs root).
+func TestPluginInstallRequestScriptsUnderSh(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the scripts run in the Linux container; sh is not on Windows")
 	}
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no sh")
 	}
+	stubs := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(stubs, "chown"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	root := filepath.Join(t.TempDir(), "plugins")
 	runScript := func(script string, args ...string) string {
 		t.Helper()
-		out, err := exec.Command(sh, append([]string{"-c", script, "sh"}, args...)...).CombinedOutput()
+		cmd := exec.Command(sh, append([]string{"-c", script, "sh"}, args...)...)
+		cmd.Env = append(os.Environ(), "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%v: %s", err, out)
 		}
 		return string(out)
 	}
-	root := t.TempDir()
-	data := filepath.Join(root, "data")
-	must(t, os.MkdirAll(data, 0o755))
-	good := filepath.Join(data, "teams", "acme", "build", "0.1.0")
-	must(t, os.MkdirAll(filepath.Dir(good), 0o755))
-	must(t, os.CopyFS(good, os.DirFS(builtPlugin(t, nil))))
-	outside := filepath.Join(root, "elsewhere", "0.1.0")
-	must(t, os.CopyFS(outside, os.DirFS(builtPlugin(t, nil))))
-	must(t, os.Symlink(outside, filepath.Join(data, "teams", "acme", "link")))
 
-	if got := runScript(cli.PluginInspectScript, data, good); !strings.HasPrefix(got, "ok\t"+good+"\n") || !strings.Contains(got, `"id": "sample-echo"`) {
-		t.Errorf("good folder: %q", got)
+	if got := runScript(cli.PluginInstallReportScript, root); got != "" {
+		t.Errorf("no report yet should read empty: %q", got)
 	}
-	if got := runScript(cli.PluginInspectScript, data, good+"/../0.1.0/"); !strings.HasPrefix(got, "ok\t"+good+"\n") {
-		t.Errorf("the same folder by another name: %q", got)
+	request := `{"request":"abc","path":"/data/x y/0.1.0","replace":true}`
+	runScript(cli.PluginInstallRequestScript, root, request)
+	path := filepath.Join(root, ".install")
+	if got, _ := os.ReadFile(path); string(got) != request+"\n" {
+		t.Errorf(".install %q", got)
 	}
-	for name, c := range map[string]struct{ path, want string }{
-		"outside":      {outside, "refuse\tit is outside the data root " + data},
-		"dot-dot out":  {data + "/../elsewhere/0.1.0", "refuse\tit is outside the data root"},
-		"symlink out":  {filepath.Join(data, "teams", "acme", "link"), "refuse\tit leads through a symlink to " + outside},
-		"missing":      {filepath.Join(data, "nope"), "refuse\tit does not exist in the instance"},
-		"the root":     {data, "refuse\tit is the data root itself"},
-		"no manifest":  {filepath.Join(data, "teams", "acme", "build"), "refuse\tit has no plugin.json"},
-		"not a folder": {filepath.Join(good, "plugin.json"), "refuse\tit is not a folder"},
-	} {
-		if got := runScript(cli.PluginInspectScript, data, c.path); !strings.HasPrefix(got, c.want) {
-			t.Errorf("%s: %q, want %q", name, got, c.want)
-		}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o640 {
+		t.Errorf(".install mode: %v %v", info, err)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("the temporary request is left: %v", err)
 	}
 
-	// A symlink inside the folder that stays in it is fine; one that leaves it is refused.
-	must(t, os.Symlink("sample-echo", filepath.Join(good, "inner")))
-	if got := runScript(cli.PluginInspectScript, data, good); !strings.HasPrefix(got, "ok\t") {
-		t.Errorf("inner symlink: %q", got)
+	runScript(cli.PluginInstallWithdrawScript, root, "another")
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("withdrew another request: %v", err)
 	}
-	must(t, os.Symlink(filepath.Join(data, "teams"), filepath.Join(good, "lib", "escape")))
-	if got := runScript(cli.PluginInspectScript, data, good); !strings.HasPrefix(got, "refuse\tit holds a symlink that leaves the folder") {
-		t.Errorf("escaping symlink: %q", got)
+	runScript(cli.PluginInstallWithdrawScript, root, "abc")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("not withdrawn: %v", err)
 	}
-
-	for want, args := range map[string][]string{
-		"ok\n":                          {"x:sample-echo", "s:skills/sample-echo.md"},
-		"missing\tx\tbin/run\n":         {"x:sample-echo", "x:bin/run"},
-		"missing\ts\tskills/other.md\n": {"s:skills/other.md"},
-		"missing\tx\tlib\n":             {"x:lib"},
-		"outside\ts\tlib/escape/x.md\n": {"s:lib/escape/x.md"},
-	} {
-		if got := runScript(cli.PluginFilesScript, append([]string{good}, args...)...); got != want {
-			t.Errorf("%v: %q, want %q", args, got, want)
-		}
-	}
+	runScript(cli.PluginInstallWithdrawScript, root, "abc")
 }
