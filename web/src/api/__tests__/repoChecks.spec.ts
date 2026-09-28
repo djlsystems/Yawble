@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTeam, createTeamLocalRepo, repoCheckRefusal, setTeamRepos } from '../client'
+import { createTeam, createTeamLocalRepo, dispatchBacklogItemToNewTeam, repoCheckRefusal, setTeamRepos } from '../client'
 import { asTeamId } from '../types'
 
 /**
@@ -39,6 +39,21 @@ describe('forgiving team repositories', () => {
     await createTeam('Alpha', 'Manager', ['echo'], undefined, [url], null, undefined, undefined, undefined, { [url]: 'create-on-github' })
     expect(bodyOf().repos).toEqual([url])
     expect(bodyOf().repoChoices).toEqual({ [url]: 'create-on-github' })
+  })
+
+  it('dispatch-to-new carries localRepository and repoChoices, and omits empty choices', async () => {
+    const url = 'https://github.com/acme/job-tracker'
+    const settings = { agent: 'Manager', memberAgents: ['echo'], root: null, repos: [] as string[] }
+
+    await dispatchBacklogItemToNewTeam(7, 'b0007-x', { ...settings, localRepository: false, repoChoices: {} })
+    expect(call()[0]).toBe('/api/backlog/7/dispatch-to-new')
+    expect(bodyOf().localRepository).toBe(false)
+    expect('repoChoices' in bodyOf()).toBe(false)
+
+    fetcher.mockClear()
+    await dispatchBacklogItemToNewTeam(7, 'b0007-x', { ...settings, repos: [url], repoChoices: { [url]: 'use-local' } })
+    expect('localRepository' in bodyOf()).toBe(false)
+    expect(bodyOf().repoChoices).toEqual({ [url]: 'use-local' })
   })
 
   it('attaches with the bare array, and with { repos, repoChoices } to answer a refusal', async () => {

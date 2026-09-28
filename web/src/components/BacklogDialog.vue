@@ -15,6 +15,7 @@ import {
   fileSystemRoots,
   listCatalog,
   moveBacklogItem,
+  repoCheckRefusal,
   restoreBacklogItem,
   setMemberAgents,
   setTeamRepos,
@@ -22,7 +23,14 @@ import {
   type BacklogItemView,
   type BacklogItemDetail,
 } from '../api/client';
-import { agentsForMode, asTeamId } from '../api/types';
+import {
+  agentsForMode,
+  asTeamId,
+  type RepoCheckRefusal as RepoCheckRefused,
+  type RepoChoice,
+} from '../api/types';
+import RepoCheckRefusal from './RepoCheckRefusal.vue';
+import { afterRefusal, withChoice } from '../lib/repoChoices';
 import { applyDefaults, readRemembered, remember } from '../lib/newTeamDefaults';
 import {
   backlogTitle,
@@ -168,6 +176,36 @@ const newTeamSource = ref<{
 });
 
 const canChooseNewTeam = computed(() => newTeamSettings.value !== null);
+
+/**
+ * "Create a local repository for this team", as on New Team: with no repository listed the Host
+ * makes `local:<team>` unless this is unticked, which sends `localRepository: false`. Ticked by
+ * default and shown only while the new team's list is empty - with a URL listed the Host ignores it.
+ */
+const newTeamLocalRepository = ref(true);
+
+/**
+ * A REFUSED REPOSITORY CHECK on dispatch-to-new: a listed URL `git ls-remote` could not read, so no
+ * team was made and nothing was dispatched. Shown with the same component New Team uses; picking the
+ * offered choices sends the same dispatch again with `repoChoices`.
+ */
+const newTeamRefusal = ref<RepoCheckRefused | null>(null);
+const newTeamRepoChoices = ref<Record<string, RepoChoice>>({});
+
+function clearNewTeamRefusal() {
+  newTeamRefusal.value = null;
+  newTeamRepoChoices.value = {};
+}
+
+/** A changed list is a different request: a refusal of the old one no longer answers it. */
+watch(() => newTeamSettings.value?.repos, clearNewTeamRefusal, { deep: true });
+
+function chooseForNewTeam(url: string, choice: RepoChoice) {
+  if (!newTeamRefusal.value || busy.value) return;
+  const next = withChoice(newTeamRepoChoices.value, newTeamRefusal.value, url, choice);
+  newTeamRepoChoices.value = next.choices;
+  if (next.ready) void dispatchIntoNewTeam();
+}
 
 /**
  * Every field's rules, from `lib/rules`, held here so the buttons read the SAME list the fields
@@ -642,6 +680,8 @@ function openDispatch(row: BacklogItemView) {
   errorText.value = '';
   dispatchConfirm.value = false;
   dispatchToNew.value = false;
+  newTeamLocalRepository.value = true;
+  clearNewTeamRefusal();
   newTeamName.value = newTeamNameFor(row);
   void loadNewTeamSettings();
 }
@@ -754,9 +794,19 @@ async function dispatchIntoNewTeam() {
   errorText.value = '';
   busy.value = true;
 
+  const settings = newTeamSettings.value;
+
   try {
     const result = await dispatchBacklogItemToNewTeam(
-      dispatchTarget.value.id, newTeamName.value.trim(), newTeamSettings.value);
+      dispatchTarget.value.id, newTeamName.value.trim(), {
+        ...settings,
+
+        // Only with no repository listed: the Host ignores it otherwise.
+        localRepository: settings.repos.length === 0 ? newTeamLocalRepository.value : undefined,
+
+        // The answer to a refused check, when there was one.
+        repoChoices: newTeamRepoChoices.value,
+      });
 
     $q.notify({
       type: 'positive',
@@ -785,9 +835,11 @@ async function dispatchIntoNewTeam() {
       managerAgent: newTeamSettings.value.agent ?? '',
       memberAgents: newTeamSettings.value.memberAgents,
       root: newTeamSettings.value.root,
-      repos: newTeamSettings.value.repos,
+      // Not a URL that was dropped for a local repository: it does not exist, so it is no suggestion.
+      repos: newTeamSettings.value.repos.filter((url) => newTeamRepoChoices.value[url.trim()] !== 'use-local'),
     });
 
+    clearNewTeamRefusal();
     closeDispatch();
 
     // THE TEAM LIST IS THIS BROWSER'S TO REFRESH, AND NOTHING WILL DO IT FOR IT. `teamChanged` is
@@ -805,6 +857,14 @@ async function dispatchIntoNewTeam() {
 
     await load();
   } catch (cause) {
+    const refused = repoCheckRefusal(cause);
+    if (refused) {
+      newTeamRepoChoices.value = afterRefusal(newTeamRepoChoices.value, refused);
+      newTeamRefusal.value = refused;
+      return;
+    }
+
+    clearNewTeamRefusal();
     errorText.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     busy.value = false;
@@ -1319,6 +1379,15 @@ function down(index: number) {
             <div v-if="newTeamReposProblem" class="os-body text-negative q-mt-sm">
               {{ newTeamReposProblem }} Fix it in Team settings.
             </div>
+            <q-checkbox
+              v-if="newTeamSettings !== null && newTeamSettings.repos.length === 0"
+              v-model="newTeamLocalRepository"
+              dense
+              class="q-mt-sm"
+              label="Create a local repository for this team"
+              :disable="busy"
+              data-local-repository-checkbox
+            />
             <!-- WHAT IT WILL ACTUALLY MAKE, named rather than implied. A screen about to create a
                  team has to say what kind. The source matters too: remembered from this browser,
                  chosen on this screen, or a visible fallback when this browser remembered nothing. -->
@@ -1356,6 +1425,15 @@ function down(index: number) {
             Its Manager is told, reads the item, and cuts it into cards. This makes the item visible to
             that team.
           </div>
+
+          <RepoCheckRefusal
+            v-if="dispatchToNew && newTeamRefusal"
+            class="q-mt-md"
+            :refusal="newTeamRefusal"
+            :chosen="newTeamRepoChoices"
+            :busy="busy"
+            @choose="chooseForNewTeam"
+          />
 
           <q-banner v-if="errorText" dense class="os-bg-tint-error text-negative q-mt-md">
             {{ errorText }}
