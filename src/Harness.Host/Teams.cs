@@ -1702,20 +1702,7 @@ public sealed class TeamRegistry(
         Func<string, CancellationToken, Task<string?>>? addRepo = null)
     {
         var trimmed = label.Trim();
-        var validatedRepos = RepoUrls.Validate(repos, LocalRepoExists);
-
-        // Each repository's upstream, keyed by its URL in `repos`, checked BEFORE anything is
-        // created. The team name is not known yet, so the rows are finished below.
-        var contributors = new List<RepoContributor>();
-        foreach (var (url, upstream) in upstreams ?? new Dictionary<string, string>())
-        {
-            if (string.IsNullOrWhiteSpace(upstream)) continue;
-
-            var origin = validatedRepos.FirstOrDefault(r => string.Equals(r, url.Trim(), StringComparison.Ordinal))
-                ?? throw new ArgumentException($"The upstream '{upstream}' is for '{url}', which is not one of the team's repositories.");
-            contributors.Add(ContributorSettings.Validate(
-                "", RepoUrls.DeriveName(origin), origin, upstream, forkOwner: null, dcoSignOff: false, claSignedNote: null));
-        }
+        var (validatedRepos, contributors) = ValidateRepos(repos, upstreams);
 
         // NO DEFAULTS for any of the three Agents, exactly as there are none for the three Prompts.
         // A default here would be a catalog entry a person may rename or remove, and once it was
@@ -2073,6 +2060,30 @@ public sealed class TeamRegistry(
             await WakeManagerForReposAsync(team, validatedRepos, ct, handleRepoSetup);
 
         return All().Single(t => string.Equals(t.Id, team, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// A new team's repositories and their upstreams, checked with no network and nothing written:
+    /// every URL and each upstream, keyed by its URL in <paramref name="repos"/>. Throws
+    /// <see cref="ArgumentException"/> naming what is refused. The team name is not known yet, so
+    /// the contributor rows carry none.
+    /// </summary>
+    public (IReadOnlyList<string> Repos, List<RepoContributor> Contributors) ValidateRepos(
+        IReadOnlyList<string>? repos, IReadOnlyDictionary<string, string>? upstreams)
+    {
+        var validatedRepos = RepoUrls.Validate(repos, LocalRepoExists);
+        var contributors = new List<RepoContributor>();
+        foreach (var (url, upstream) in upstreams ?? new Dictionary<string, string>())
+        {
+            if (string.IsNullOrWhiteSpace(upstream)) continue;
+
+            var origin = validatedRepos.FirstOrDefault(r => string.Equals(r, url.Trim(), StringComparison.Ordinal))
+                ?? throw new ArgumentException($"The upstream '{upstream}' is for '{url}', which is not one of the team's repositories.");
+            contributors.Add(ContributorSettings.Validate(
+                "", RepoUrls.DeriveName(origin), origin, upstream, forkOwner: null, dcoSignOff: false, claSignedNote: null));
+        }
+
+        return (validatedRepos, contributors);
     }
 
     /// <summary>

@@ -558,10 +558,10 @@ public static class BuiltInSkills
               is right for a team that writes code. Pass a URL only when the person names a remote
               that already exists. Never suggest a repository URL as though it exists: an example
               name is not a repository. A URL the platform cannot read refuses the create and
-              nothing is made; the refusal names the choices. Creating it on GitHub and attaching
-              it anyway are the person's, never yours: offer them a local repository (call
-              `team_create` again without `repos`), or ask them to create the remote and say when
-              it exists.
+              nothing is made; the refusal names the choices. Creating it on GitHub and
+              attaching it anyway are the person's, never yours: offer them a local repository
+              (call `team_create` again without `repos`), or ask them to create the remote and
+              say when it exists.
 
             When the work does not name a team, ASK which team. Do not pick one, do not use "the
             only team they have", and do not create one to resolve the ambiguity.
@@ -753,9 +753,9 @@ public static class BuiltInSkills
                unless the person names a remote that already exists; then pass that URL. Never
                propose a URL of your own as though it exists. The platform reads every URL before
                the team is made: one that is missing or unreadable refuses the create, and nothing
-               is left behind. Then offer the person a local repository, or ask them to create the
-               remote; creating it on GitHub and attaching it anyway are theirs to choose, on the
-               Teams screen. Pass `localRepository: false` only for a team that will keep no code.
+               is left behind. Then offer the person a local repository, or ask them to
+               create the remote; creating it on GitHub and attaching it anyway are theirs to
+               choose, on the Teams screen. Pass `localRepository: false` only for a team that will keep no code.
                The clone is the platform's work and the attachment wakes the Manager. Only a person
                can attach one later, on the team's Repos screen. Do not report a team as ready while
                its card says it has no repository.

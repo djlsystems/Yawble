@@ -772,11 +772,11 @@ builder.Services.AddSingleton(sp => new LocalRepos(dataRoot, sp.GetRequiredServi
 
 // FORGIVING TEAM REPOSITORIES (B001F): a team's default local repository, and the `ls-remote` check
 // with its choices before a URL is used. The registry is resolved per call: it is built after this.
-builder.Services.AddSingleton(sp => new RemoteRepoCheck(sp.GetRequiredService<GitRunner>()));
+builder.Services.AddSingleton<IRemoteRepoCheck>(sp => new RemoteRepoCheck(sp.GetRequiredService<GitRunner>()));
 builder.Services.AddSingleton(sp => new TeamRepoSetup(
     sp.GetRequiredService<LocalRepos>(),
     () => sp.GetRequiredService<TeamRegistry>(),
-    sp.GetRequiredService<RemoteRepoCheck>(),
+    sp.GetRequiredService<IRemoteRepoCheck>(),
     sp.GetRequiredService<IGitHubContributor>()));
 
 // The instance's git identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL, set with the operator CLI's `secret set`)
@@ -2180,6 +2180,10 @@ app.MapPost("/api/teams", async (
     RepoPlan plan;
     try
     {
+        // What can be refused without the network is refused first: a URL or upstream that is not
+        // one, with the 400 it always had.
+        teams.ValidateRepos(request.Repos, request.Upstreams);
+
         plan = await repoSetup.PlanAsync(
             request.Repos ?? [], request.RepoChoices,
             person: PrincipalClaims.From(context.User) is { Kind: PrincipalKind.User }, alreadyAttached: [], ct);
@@ -2187,6 +2191,10 @@ app.MapPost("/api/teams", async (
     catch (RepoSetupRefusedException refused)
     {
         return Results.Json(refused.Body, statusCode: refused.Status);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
     }
 
     // A team that ends up with no repository gets a local one named after it, unless the caller
@@ -3579,7 +3587,7 @@ app.MapPut("/api/teams/{team}/env", async (
 // clearing it is an explicit empty array rather than a special third state.
 app.MapPut("/api/teams/{team}/repos", async (
     [Description(Describe.Team)] string team,
-    JsonElement body, TeamRegistry teams, TeamRepoSetup repoSetup, CancellationToken ct) =>
+    JsonElement body, TeamRegistry teams, TeamRepoSetup repoSetup, LocalRepos localRepos, CancellationToken ct) =>
 {
     // THE BARE ARRAY AS BEFORE, or `{ repos, repoChoices }` to answer a refused check (B001F).
     SetTeamRepos request;
@@ -3604,6 +3612,8 @@ app.MapPut("/api/teams/{team}/repos", async (
     var attached = false;
     try
     {
+        RepoUrls.Validate(request.Repos, localRepos.Exists);
+
         // Only a URL the team does not have yet is read: one already attached was checked then.
         var plan = await repoSetup.PlanAsync(
             request.Repos ?? [], request.RepoChoices, person: true, alreadyAttached: teams.ReposFor(stored), ct);

@@ -37,7 +37,14 @@ public sealed record RepoCheckFailure(string Url, string Failure, string Reason)
 /// repository - it exists. Anything else is refused as not found (or not readable), unless git's
 /// words say the network failed.
 /// </summary>
-public sealed partial class RemoteRepoCheck(GitRunner git)
+public interface IRemoteRepoCheck
+{
+    /// <summary>Null when <paramref name="url"/> can be read; otherwise why not.</summary>
+    Task<RepoCheckFailure?> CheckAsync(string url, CancellationToken ct);
+}
+
+/// <inheritdoc cref="IRemoteRepoCheck"/>
+public sealed partial class RemoteRepoCheck(GitRunner git) : IRemoteRepoCheck
 {
     public async Task<RepoCheckFailure?> CheckAsync(string url, CancellationToken ct)
     {
@@ -103,7 +110,7 @@ public sealed record RepoPlan(
 /// </para>
 /// </summary>
 public sealed class TeamRepoSetup(
-    LocalRepos localRepos, Func<TeamRegistry> teams, RemoteRepoCheck check, IGitHubContributor gitHub)
+    LocalRepos localRepos, Func<TeamRegistry> teams, IRemoteRepoCheck check, IGitHubContributor gitHub)
 {
     /// <summary>How many suffixes are tried before the name is given up on.</summary>
     private const int MaximumSuffix = 100;
