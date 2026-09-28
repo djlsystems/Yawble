@@ -7,8 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 
-const { cloneTeam, deleteTeam, getWip, pauseTeam, resumeTeam, retryRemoval, notify } = vi.hoisted(() => ({
+const { cloneTeam, deleteTeam, getWip, listRemovals, pauseTeam, resumeTeam, retryRemoval, notify } = vi.hoisted(() => ({
   cloneTeam: vi.fn(),
+  listRemovals: vi.fn(),
   retryRemoval: vi.fn(),
   getWip: vi.fn(),
   deleteTeam: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   cloneTeam,
   deleteTeam,
   getWip,
+  listRemovals,
   pauseTeam,
   resumeTeam,
   retryRemoval,
@@ -85,6 +87,7 @@ beforeEach(() => {
   pauseTeam.mockResolvedValue(undefined);
   resumeTeam.mockResolvedValue(undefined);
   getWip.mockResolvedValue({ max: 4, running: [], waiting: [] });
+  listRemovals.mockResolvedValue([]);
 });
 
 afterEach(resetBody);
@@ -199,6 +202,89 @@ describe('an unfinished removal', () => {
     await flushPromises();
     expect(retryRemoval).toHaveBeenCalledTimes(2);
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'positive' }));
+  });
+});
+
+/**
+ * EVERY UNFINISHED REMOVAL, NOT ONLY THE ONE A DELETION ON THIS PAGE JUST LEFT: a deleted member's
+ * workspace and a folder a Reset emptied are recorded and retried exactly as a team root is, and a
+ * person who comes back later - or after a restart that could not finish them - finds them here,
+ * listed from `GET /api/removals`, each with its remaining paths and its own Retry.
+ */
+describe('the unfinished removals list', () => {
+  const teamRoot = {
+    path: '/data/teams/gone', kind: 'team-root', team: 'gone', member: null,
+    remaining: ['/data/teams/gone/repos/x/.git/lock'], recordedAt: '2026-09-28T09:00:00Z', attempts: 2,
+  };
+  const workspace = {
+    path: '/data/teams/alpha/workspaces/Dev', kind: 'workspace', team: 'alpha', member: 'Dev',
+    remaining: ['/data/teams/alpha/workspaces/Dev/node_modules/.bin/x'], recordedAt: '2026-09-28T09:05:00Z', attempts: 1,
+  };
+  const emptied = {
+    path: '/data/teams/alpha/workspaces/Scout', kind: 'emptied', team: 'alpha', member: null,
+    remaining: ['/data/teams/alpha/workspaces/Scout/cache/a.bin', '/data/teams/alpha/workspaces/Scout/cache/b.bin'],
+    recordedAt: '2026-09-28T09:10:00Z', attempts: 1,
+  };
+
+  const rows = () => [...document.body.querySelectorAll<HTMLElement>('[data-removal]')];
+  const rowFor = (path: string) => rows().find((row) => row.dataset.removal === path)!;
+
+  it('lists a team root, a member workspace and a Reset folder, each with every remaining path', async () => {
+    listRemovals.mockResolvedValue([teamRoot, workspace, emptied]);
+    await mountView([aTeam('alpha')]);
+
+    expect(listRemovals).toHaveBeenCalled();
+    expect(rows().map((row) => row.dataset.removal)).toEqual([teamRoot.path, workspace.path, emptied.path]);
+
+    expect(rowFor(teamRoot.path).textContent).toContain('gone');
+    expect(rowFor(teamRoot.path).textContent).toContain(teamRoot.remaining[0]);
+    expect(rowFor(workspace.path).textContent).toContain('Dev');
+    expect(rowFor(workspace.path).textContent).toContain(workspace.remaining[0]);
+    for (const path of emptied.remaining) expect(rowFor(emptied.path).textContent).toContain(path);
+
+    // The kind in words, so a person can tell a deleted team's folder from a Reset's leftovers.
+    expect(rowFor(teamRoot.path).querySelector('[data-removal-kind]')?.textContent).toMatch(/team/i);
+    expect(rowFor(workspace.path).querySelector('[data-removal-kind]')?.textContent).toMatch(/workspace/i);
+    expect(rowFor(emptied.path).querySelector('[data-removal-kind]')?.textContent).toMatch(/reset/i);
+  });
+
+  it('shows nothing when no removal is unfinished', async () => {
+    await mountView([aTeam('alpha')]);
+
+    expect(document.body.querySelector('[data-removals]')).toBeNull();
+  });
+
+  it('retries one removal by its path, keeps what still remains, and drops it once it finishes', async () => {
+    listRemovals.mockResolvedValue([workspace, emptied]);
+    const left = [emptied.remaining[1]!];
+    retryRemoval
+      .mockResolvedValueOnce({ retried: [{ ...emptied, finished: false, remaining: left, note: 'still held' }] })
+      .mockResolvedValueOnce({ retried: [{ ...emptied, finished: true, remaining: [], note: null }] });
+    await mountView([aTeam('alpha')]);
+
+    await click(`Retry removal of ${emptied.path}`);
+    expect(retryRemoval).toHaveBeenCalledWith(emptied.path);
+    expect(rowFor(emptied.path).textContent).not.toContain(emptied.remaining[0]);
+    expect(rowFor(emptied.path).textContent).toContain(left[0]);
+    expect(rowFor(emptied.path).textContent).toContain('still held');
+
+    await click(`Retry removal of ${emptied.path}`);
+    expect(rows().map((row) => row.dataset.removal)).toEqual([workspace.path]);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'positive' }));
+  });
+
+  it('reads the list again after a team deletion leaves its folder behind', async () => {
+    const root = '/data/teams/alpha';
+    deleteTeam.mockResolvedValue({
+      containers: 0, failures: [`${root}: removal unfinished`], remaining: [`${root}/x`], removalUnfinished: root,
+    });
+    await mountView([aTeam('alpha')]);
+    const before = listRemovals.mock.calls.length;
+
+    await click('Delete this team');
+    await click('Delete team');
+
+    expect(listRemovals.mock.calls.length).toBeGreaterThan(before);
   });
 });
 

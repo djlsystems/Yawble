@@ -362,7 +362,13 @@ onBeforeUnmount(end);
                 {{ run.workflow !== null ? `workflow #${run.workflow}` : 'no workflow' }}
               </q-item-section>
               <q-item-section side class="earlier-run-duration">{{ runDuration(run.durationMs) }}</q-item-section>
-              <q-item-section side>
+              <q-item-section side class="row no-wrap items-center">
+                <!-- A QUIET RUN woke nobody when it finished: said here, beside how it ended, so a
+                     list of runs nobody was told about is not mistaken for missed work. -->
+                <span v-if="run.quiet" class="earlier-run-quiet text-caption os-text-muted q-mr-xs">
+                  quiet
+                  <q-tooltip>This run finished quietly: nobody was woken by it.</q-tooltip>
+                </span>
                 <q-badge class="earlier-run-outcome" :data-outcome="run.outcome" :label="runOutcomeLabel(run.outcome)" />
               </q-item-section>
             </q-item>

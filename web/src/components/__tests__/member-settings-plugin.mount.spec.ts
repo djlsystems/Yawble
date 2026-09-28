@@ -10,11 +10,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-const { getMember, getPluginSettings, listCatalog, listPlugins, savePluginSettings, updateMember } = vi.hoisted(() => ({
+const { getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember } = vi.hoisted(() => ({
   getMember: vi.fn(),
   getPluginSettings: vi.fn(),
   listCatalog: vi.fn(),
-  listPlugins: vi.fn(),
   savePluginSettings: vi.fn(),
   updateMember: vi.fn(),
 }));
@@ -24,7 +23,6 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getMember,
   getPluginSettings,
   listCatalog,
-  listPlugins,
   savePluginSettings,
   updateMember,
 }));
@@ -40,25 +38,31 @@ import {
   type Team,
 } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
-import { button, field, isDisabled, settle, type } from '../../test/formProbe';
+import { hostField, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
+import { button, field, fieldWrapper, hasError, isDisabled, settle, type } from '../../test/formProbe';
 
 const fields: Record<string, PluginConfigField> = {
-  greeting: { type: 'string', description: 'What it says first.', required: false, default: 'hello' },
-  mode: { type: 'string', description: 'How to transform.', required: false, default: 'upper', enum: ['upper', 'reverse'], setBy: 'person' },
-  repeat: { type: 'number', description: 'How many times.', required: false, default: 1 },
-  loud: { type: 'bool', description: 'Shout.', required: false, default: false },
-  labels: { type: 'list', description: 'Free labels.', required: false, default: [] },
-  recipients: { type: 'list', description: 'Who may be sent to.', required: true, default: [], enum: ['ops', 'dev'] },
+  greeting: hostField({ type: 'string', description: 'What it says first.', default: 'hello' }),
+  mode: hostField({ type: 'string', description: 'How to transform.', default: 'upper', enum: ['upper', 'reverse'], setBy: 'person' }),
+  repeat: hostField({ type: 'number', description: 'How many times.', default: 1 }),
+  loud: hostField({ type: 'bool', description: 'Shout.', default: false }),
+  labels: hostField({ type: 'list', description: 'Free labels.' }),
+  recipients: hostField({ type: 'list', description: 'Who may be sent to.', required: true, enum: ['ops', 'dev'] }),
 };
 
-const stored: PluginMemberSettings = {
-  plugin: 'sample-echo',
+const sampleEcho = hostPlugin({
+  id: 'sample-echo',
   version: '0.2.0',
+  config: fields,
+  secrets: { token: hostSecret({ description: 'A demo credential.', required: true }) },
+});
+
+const stored: PluginMemberSettings = hostSettings(sampleEcho, {
+  team: 'alpha',
+  member: 'Echo',
   config: { repeat: 3, recipients: ['ops'] },
   secrets: { token: 'ECHO_TOKEN' },
-  fields,
-  secretFields: { token: { description: 'A demo credential.', required: true } },
-};
+});
 
 const echo = {
   team: asTeamId('alpha'),
@@ -75,7 +79,7 @@ const echo = {
 } as unknown as ContainerSnapshot;
 
 beforeEach(() => {
-  for (const mock of [getMember, getPluginSettings, listCatalog, listPlugins, savePluginSettings, updateMember]) mock.mockReset();
+  for (const mock of [getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember]) mock.mockReset();
 
   listCatalog.mockResolvedValue({ agents: [{ name: 'claude', mode: 'Headless' }] });
   getPluginSettings.mockResolvedValue(structuredClone(stored));
@@ -267,12 +271,12 @@ describe('MemberSettingsDialog, a plugin member', () => {
     await settle();
 
     expect(savePluginSettings).not.toHaveBeenCalled();
-    expect(updateMember).toHaveBeenCalledTimes(1);
+    expect(updateMember).not.toHaveBeenCalled();
 
     wrapper.unmount();
   });
 
-  it('holds Save while a required field or secret is empty', async () => {
+  it('holds Save while a required secret is empty', async () => {
     const wrapper = await mountSettings();
 
     await type('Secret token: key name', '');
@@ -281,9 +285,21 @@ describe('MemberSettingsDialog, a plugin member', () => {
     await type('Secret token: key name', 'OTHER_KEY');
     expect(isDisabled('Save')).toBe(false);
 
+    wrapper.unmount();
+  });
+
+  it('saves a required list left empty, as the Host does: a list defaults to []', async () => {
+    const wrapper = await mountSettings();
+
     (setting('recipients').querySelector('[aria-label="Remove ops"]') as HTMLElement).click();
     await settle();
-    expect(isDisabled('Save')).toBe(true);
+    expect(isDisabled('Save')).toBe(false);
+
+    button('Save').click();
+    await settle();
+
+    expect(savePluginSettings).toHaveBeenCalledTimes(1);
+    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { repeat: 3 }, secrets: { token: 'ECHO_TOKEN' } });
 
     wrapper.unmount();
   });
@@ -302,21 +318,19 @@ describe('MemberSettingsDialog, a plugin member', () => {
     wrapper.unmount();
   });
 
-  it('reads the manifest from the plugins list when the settings route does not carry it', async () => {
-    const { fields: _fields, secretFields: _secretFields, ...bare } = structuredClone(stored);
-    getPluginSettings.mockResolvedValue(bare);
-    listPlugins.mockResolvedValue({
-      plugins: [{
-        id: 'sample-echo', reference: 'plugin:sample-echo', name: 'Sample Echo', description: '', version: '0.2.0',
-        config: fields, secrets: { token: { required: true } },
-      }],
-      refused: [],
-    });
-
+  it("shows the Host's sentence on a 409 for a plugin no longer installed, and does not flag the name", async () => {
     const wrapper = await mountSettings();
 
-    expect(field('repeat').value).toBe('3');
-    expect(field('Secret token: key name').value).toBe('ECHO_TOKEN');
+    const sentence = "Plugin 'sample-echo' is not installed: its active version 0.2.0 has no folder.";
+    savePluginSettings.mockRejectedValue(Object.assign(new Error(sentence), { status: 409 }));
+    await type('greeting', 'hi');
+    button('Save').click();
+    await settle();
+
+    expect(bodyFind('.q-banner')?.textContent).toContain(sentence);
+    expect(hasError('Member name')).toBe(false);
+    expect(fieldWrapper('Member name').textContent).not.toContain(sentence);
+    expect(updateMember).not.toHaveBeenCalled();
 
     wrapper.unmount();
   });

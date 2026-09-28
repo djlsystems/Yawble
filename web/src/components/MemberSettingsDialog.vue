@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { getMember, getPluginSettings, listCatalog, listPlugins, savePluginSettings, updateMember } from '../api/client';
+import { getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember } from '../api/client';
 import {
   agentsForMode,
   isManagerContainer,
   type Agent,
   type ContainerSnapshot,
   type MemberDetail,
-  type PluginMemberSettings,
 } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -71,7 +70,7 @@ const name = ref('');
 const nameRules = [memberName];
 const agentRules = [required('Choose an Agent.')];
 
-/** The server's refusal, shown in the dialog, and its status: a 409 is the name already in use. */
+/** The server's refusal, shown in the dialog as the Host worded it, and its status. */
 const error = ref('');
 const errorStatus = ref<number | undefined>(undefined);
 
@@ -133,9 +132,9 @@ async function loadInstructions() {
 }
 
 /**
- * A PLUGIN MEMBER'S SETTINGS. `pluginShape` is the manifest of the version it runs - from the
- * settings route when the Host sends it, else from the plugins list - and null until both answer.
- * `pluginSaved` is the body as loaded, so Save writes the settings only when they moved.
+ * A PLUGIN MEMBER'S SETTINGS. `pluginShape` is the manifest of the version it runs, as the settings
+ * route carries it (`fields`, `secretFields`), and null until that answers. `pluginSaved` is the body
+ * as loaded, so Save writes the settings only when they moved.
  */
 const isPlugin = computed(() => props.snapshot.kind === 'plugin');
 const pluginShape = ref<PluginSettingsShape | null>(null);
@@ -156,14 +155,6 @@ const pluginChanged = computed(
   () => pluginBody.value !== null && JSON.stringify(pluginBody.value) !== pluginSaved.value,
 );
 
-/** The declarations the settings route carried, under whichever name it used. */
-function declaredShape(settings: PluginMemberSettings): PluginSettingsShape | null {
-  const config = settings.fields ?? settings.configFields ?? settings.manifest?.config ?? null;
-  const secrets = settings.secretFields ?? settings.manifest?.secrets ?? null;
-
-  return config ? { config, secrets: secrets ?? {} } : null;
-}
-
 async function loadPluginSettings() {
   pluginShape.value = null;
   pluginProblem.value = null;
@@ -171,25 +162,12 @@ async function loadPluginSettings() {
   if (!isPlugin.value) return;
 
   try {
+    // A plugin that is no longer installed is the route's 409, whose sentence lands below.
     const settings = await getPluginSettings(props.snapshot.team, props.snapshot.id);
-    let shape = declaredShape(settings);
+    const shape: PluginSettingsShape = { config: settings.fields, secrets: settings.secretFields };
 
-    if (!shape) {
-      const id = settings.plugin.replace(/^plugin:/, '');
-      const installed = (await listPlugins()).plugins ?? [];
-      shape =
-        installed.find((entry) => entry.id === id && entry.version === settings.version) ??
-        installed.find((entry) => entry.id === id) ??
-        null;
-    }
-
-    if (!shape) {
-      pluginProblem.value = `The plugin ${settings.plugin} is not installed, so its settings cannot be edited.`;
-      return;
-    }
-
-    pluginConfig.value = initialConfig(shape, settings.config ?? {});
-    pluginSecrets.value = initialSecrets(shape, settings.secrets ?? {});
+    pluginConfig.value = initialConfig(shape, settings.config);
+    pluginSecrets.value = initialSecrets(shape, settings.secrets);
     pluginShape.value = shape;
     pluginSaved.value = JSON.stringify(settingsBody(shape, pluginConfig.value, pluginSecrets.value));
   } catch (cause) {
@@ -257,9 +235,16 @@ watch(open, (showing) => {
 
 const busy = ref(false);
 
+/**
+ * THE NAME IS FLAGGED ONLY WHEN THE NAME WAS THE PROBLEM: a 409 from the member's PATCH on a save
+ * that renamed it, while the field still holds the refused name. A plugin member's settings save
+ * answers 409 too - its plugin is no longer installed - and so may a PATCH that renamed nothing;
+ * neither is about the name, and the banner already carries the Host's sentence.
+ */
 const refusedName = ref<string | null>(null);
 const nameTaken = computed(
-  () => errorStatus.value === 409 && error.value !== '' && refusedName.value === name.value.trim(),
+  () => errorStatus.value === 409 && error.value !== '' && refusedName.value !== null
+    && refusedName.value === name.value.trim(),
 );
 
 const form = ref<QForm | null>(null);
@@ -271,7 +256,10 @@ async function submit() {
   busy.value = true;
   error.value = '';
   errorStatus.value = undefined;
-  refusedName.value = name.value.trim();
+  refusedName.value = null;
+
+  /** The name the PATCH would rename the member to, or null when it keeps its name. */
+  const renamedTo = name.value.trim() !== props.snapshot.name ? name.value.trim() : null;
 
   try {
     // THE SETTINGS FIRST, and only when they moved: the Host validates them as it does a hire, and
@@ -281,7 +269,11 @@ async function submit() {
       pluginSaved.value = JSON.stringify(pluginBody.value);
     }
 
-    const body: { name?: string; agent?: string; systemPrompt?: string } = { name: name.value.trim() };
+    // ONLY WHAT CHANGED. `name` goes only on a rename: the Host records every PATCH that names one
+    // as `member.changed {"renamed": true}`, so sending it unchanged logged a rename nobody made.
+    const body: { name?: string; agent?: string; systemPrompt?: string } = {};
+
+    if (renamedTo !== null) body.name = renamedTo;
 
     // Sent only when it actually moved. The server treats an unchanged Agent as a no-op anyway,
     // but sending it regardless would make every save look like a repoint in the API log.
@@ -291,7 +283,21 @@ async function submit() {
     // as blank, which clears them.
     if (instructionsChanged.value) body.systemPrompt = instructions.value.trim();
 
-    const updated = await updateMember(props.snapshot.team, props.snapshot.id, body);
+    // A save that changes nothing about the member writes nothing: no PATCH, no tenant row.
+    if (Object.keys(body).length === 0) {
+      open.value = false;
+      $q.notify({ type: 'positive', message: `${props.snapshot.name} saved.`, timeout: 4000 });
+      emit('saved', props.snapshot);
+      return;
+    }
+
+    let updated: ContainerSnapshot;
+    try {
+      updated = await updateMember(props.snapshot.team, props.snapshot.id, body);
+    } catch (cause) {
+      if (refusalStatus(cause) === 409 && renamedTo !== null) refusedName.value = renamedTo;
+      throw cause;
+    }
 
     open.value = false;
 
@@ -311,7 +317,8 @@ async function submit() {
 
     emit('saved', updated);
   } catch (cause) {
-    // In the dialog, with what was typed still in it. A 409 marks the name as well.
+    // In the dialog, in the Host's words, with what was typed still in it. `nameTaken` decides
+    // whether the name field is marked as well.
     error.value = cause instanceof Error ? cause.message : String(cause);
     errorStatus.value = refusalStatus(cause);
   } finally {

@@ -156,13 +156,16 @@ async function install() {
       installed: false,
       id: typeof body.id === 'string' ? body.id : null,
       version: typeof body.version === 'string' ? body.version : null,
+      replaced: false,
       reason: cause instanceof Error ? cause.message : String(cause),
     };
   } finally {
     installing.value = false;
   }
 
-  if (verdict.value?.installed) await load();
+  // AFTER EVERY INSTALL, whatever the verdict: a 200 with `installed: false` copied the folder and
+  // rescanned before the catalog refused it, so the list has a new row to show with its reason.
+  await load();
 }
 
 const verdictText = computed(() => {
@@ -298,8 +301,8 @@ const verdictText = computed(() => {
 
               <dt>Members</dt>
               <dd data-members>
-                <template v-if="!row.plugin.members || row.plugin.members.length === 0">None hired</template>
-                <div v-for="member in row.plugin.members ?? []" :key="`${member.team}/${member.member}`">
+                <template v-if="row.plugin.members.length === 0">None hired</template>
+                <div v-for="member in row.plugin.members" :key="`${member.team}/${member.member}`">
                   <a
                     href="#"
                     class="plugin-member-link"
