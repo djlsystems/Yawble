@@ -25,7 +25,7 @@ import {
   teamNameTaken,
   type Rule,
 } from '../lib/rules';
-import { AdditionalInstructionsHint, AdditionalInstructionsLabel } from '../lib/additionalInstructions';
+import { TeamInstructionsHint, TeamInstructionsLabel } from '../lib/additionalInstructions';
 import { upstreamUrlProblem } from '../lib/contributor';
 import HostPathPicker from './HostPathPicker.vue';
 import ForkItForMe from './ForkItForMe.vue';
@@ -182,8 +182,9 @@ const agent = ref<string | null>(null);
 const memberAgents = ref<string[]>([]);
 const memberAgentToAdd = ref<string | null>(null);
 
-/** Words appended after the built-in role prompt for this team's Manager and members. Empty adds
- *  nothing, and it never replaces the role prompt. Not remembered: it is about this team. */
+/** TEAM INSTRUCTIONS (`additionalInstructions` on the wire): read by every agent member of the team,
+ *  the Manager too, after its built-in prompt and its own instructions. Empty adds nothing, and it
+ *  never replaces either. Not remembered: it is about this team. */
 const additionalInstructions = ref('');
 
 /**
@@ -795,16 +796,22 @@ async function submit() {
             </div>
           </div>
 
-          <q-input
-            v-model="additionalInstructions"
-            type="textarea"
-            autogrow
-            outlined
-            dense
-            class="q-mt-sm"
-            :label="AdditionalInstructionsLabel"
-            :hint="AdditionalInstructionsHint"
-          />
+          <!-- TEAM INSTRUCTIONS: their own section, after Dynamic members and not inside it. Every
+               agent member reads them - the Manager too - so under Dynamic members they read as a
+               setting for hired members only. Same heading and hint as Team Settings. -->
+          <section data-section="team-instructions">
+            <div class="text-subtitle2 q-mt-sm">{{ TeamInstructionsLabel }}</div>
+            <q-input
+              v-model="additionalInstructions"
+              type="textarea"
+              autogrow
+              outlined
+              dense
+              class="q-mt-xs"
+              :aria-label="TeamInstructionsLabel"
+              :hint="TeamInstructionsHint"
+            />
+          </section>
 
           <!-- THE PER-WORKFLOW BUDGET. Last on the dialog and prefilled, which is the shape the
                argument needs: nobody has to answer it to make a team, and anybody who wants to can.

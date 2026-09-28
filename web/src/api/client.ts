@@ -1121,15 +1121,23 @@ export const addMember = (
   name: string,
   agent: string,
   plugin?: PluginHire,
+  systemPrompt?: string,
 ) =>
   json<ContainerSnapshot>(`/api/teams/${encodeURIComponent(team)}/containers`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
 
-    // No prompt of any kind: a member is told the built-in Member prompt, chosen by role. A plugin
-    // member's config and secret KEYS ride the same hire; the server checks them against the
-    // manifest and refuses both on an Agent.
-    body: JSON.stringify(plugin ? { name, agent, config: plugin.config, secrets: plugin.secrets } : { name, agent }),
+    // An agent member may carry its OWN INSTRUCTIONS as `systemPrompt`, added after the built-in
+    // Member prompt; blank or absent sends none. A plugin has no prompt: its config and secret KEYS
+    // ride the same hire instead, and the server checks them against the manifest and refuses both
+    // on an Agent.
+    body: JSON.stringify(
+      plugin
+        ? { name, agent, config: plugin.config, secrets: plugin.secrets }
+        : systemPrompt
+          ? { name, agent, systemPrompt }
+          : { name, agent },
+    ),
   })
 
 /**
@@ -1139,8 +1147,8 @@ export const addMember = (
 export const listPlugins = () => json<PluginList>('/api/plugins')
 
 /**
- * The STORED row behind a member - its label. `MemberSettingsDialog` calls this on open, so an edit
- * starts from what is actually there.
+ * The STORED row behind a member - its label, its own instructions and who last set them.
+ * `MemberSettingsDialog` calls this on open, so an edit starts from what is actually there.
  */
 export const getMember = (team: TeamId, name: MemberId) =>
   json<MemberDetail>(
@@ -1148,8 +1156,8 @@ export const getMember = (team: TeamId, name: MemberId) =>
   )
 
 /**
- * Changes what a member is CALLED. What it is TOLD is the built-in role prompt and no route
- * changes it. A key left undefined is dropped by `JSON.stringify` and leaves the stored
+ * Changes what a member is CALLED, what it RUNS and its OWN INSTRUCTIONS (`systemPrompt`: blank
+ * clears them). The built-in role prompt is not the person's to change. A key left undefined is dropped by `JSON.stringify` and leaves the stored
  * value alone, so `body` is sent exactly as given.
  *
  * `PATCH` answers 200 with the updated snapshot, unlike `saveAgents` next door, which answers 204 -
@@ -1158,7 +1166,7 @@ export const getMember = (team: TeamId, name: MemberId) =>
 export const updateMember = (
   team: TeamId,
   name: MemberId,
-  body: { name?: string; agent?: string },
+  body: { name?: string; agent?: string; systemPrompt?: string },
 ) =>
   json<ContainerSnapshot>(
     `/api/teams/${encodeURIComponent(team)}/containers/${encodeURIComponent(name)}`,
