@@ -277,6 +277,22 @@ const settingsDraft = ref<{
   root: string | null
 } | null>(null);
 
+/**
+ * A URL typed in the repositories field but not yet entered. QSelect only adds it on Enter or Tab and
+ * clears it on blur, so pressing "Use these" or Save straight after typing would drop it. It is the
+ * person's repository all the same: it joins the list on blur and on Save, as if Enter had been
+ * pressed, and goes through the same rules and the same repository check as any other.
+ */
+const settingsRepoTyped = ref('');
+
+function addTypedSettingsRepo() {
+  const url = settingsRepoTyped.value.trim();
+  settingsRepoTyped.value = '';
+  const draft = settingsDraft.value;
+  if (!url || draft === null || draft.repos.includes(url)) return;
+  draft.repos = [...draft.repos, url];
+}
+
 /** Says which of the two meanings above is in force, because they are genuinely different. */
 const settingsCaption = computed(() =>
   dispatchToNew.value
@@ -334,6 +350,7 @@ function openSettings() {
     };
   }
 
+  settingsRepoTyped.value = '';
   settingsOpen.value = true;
 }
 
@@ -341,6 +358,7 @@ const settingsValid = computed(() =>
   settingsDraft.value !== null && firstProblem(repoListRules, settingsDraft.value.repos) === null);
 
 async function saveSettings() {
+  addTypedSettingsRepo();
   const draft = settingsDraft.value;
   if (draft === null || !settingsValid.value || settingsBusy.value) return;
 
@@ -1496,6 +1514,10 @@ function down(index: number) {
             popup-content-class="backlog-popup"
             :disable="settingsBusy"
             :rules="repoListRules"
+            data-settings-repos
+            :input-debounce="0"
+            @input-value="(value: string) => (settingsRepoTyped = value)"
+            @blur="addTypedSettingsRepo"
           />
 
           <q-select

@@ -167,6 +167,59 @@ describe('New Team: Create a local repository for this team', () => {
   });
 });
 
+describe('New Team: a URL typed but not added', () => {
+  const TYPED = 'https://github.com/owner/typed.git';
+
+  it('hides the local-repository box while the field holds text, and shows it again when cleared', async () => {
+    const wrapper = await open();
+
+    await field(wrapper, 'GitHub Repos').setValue(TYPED);
+    await settled();
+    expect(checkbox()).toBeNull();
+
+    await field(wrapper, 'GitHub Repos').setValue('   ');
+    await settled();
+    expect(checkbox()).not.toBeNull();
+  });
+
+  it('Create sends it in repos, as if Add had been pressed, with no local repository requested', async () => {
+    const wrapper = await open();
+
+    await field(wrapper, 'GitHub Repos').setValue(`  ${TYPED}  `);
+    await settled();
+    button('Create team').click();
+    await settled();
+
+    expect(createTeam).toHaveBeenCalledTimes(1);
+    expect(createTeam.mock.calls[0]![REPOS]).toEqual([TYPED]);
+    expect(createTeam.mock.calls[0]![LOCAL_REPOSITORY]).toBeUndefined();
+  });
+
+  it('is added after the listed ones, and a refusal of it offers its choices', async () => {
+    createTeam.mockRejectedValueOnce(refused(notFoundSentence, [
+      { url: MISSING, failure: 'not-found', reason: 'remote: Repository not found.', choices: ['create-on-github', 'use-local'] },
+    ]));
+
+    const wrapper = await open();
+    await addRepo(wrapper, OTHER);
+    await field(wrapper, 'GitHub Repos').setValue(MISSING);
+    await settled();
+    button('Create team').click();
+    await settled();
+
+    expect(createTeam.mock.calls[0]![REPOS]).toEqual([OTHER, MISSING]);
+    expect(offered(MISSING)).toEqual(['create-on-github', 'use-local']);
+
+    choice('use-local', MISSING).click();
+    await settled();
+
+    expect(createTeam).toHaveBeenCalledTimes(2);
+    expect(createTeam.mock.calls[1]![REPOS]).toEqual([OTHER, MISSING]);
+    expect(createTeam.mock.calls[1]![REPO_CHOICES]).toEqual({ [MISSING]: 'use-local' });
+    expect(wrapper.emitted('created')).toEqual([['beta']]);
+  });
+});
+
 describe('New Team: a refused repository check', () => {
   it('shows the sentence and only the offered choices; Create it on GitHub resends create-on-github and creates', async () => {
     createTeam.mockRejectedValueOnce(refused(notFoundSentence, [
