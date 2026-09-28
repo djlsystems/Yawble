@@ -59,7 +59,7 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
 
         var c1Started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Card 1, first run: one commit, one uncommitted edit, then wait to be stopped.
+        // The first card, first run: one commit, one uncommitted edit, then wait to be stopped.
         _work["c1"] = async (_, tree, ct) =>
         {
             Commit(tree, "c1-first");
@@ -68,7 +68,7 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
             await Task.Delay(Timeout.Infinite, ct);
         };
 
-        // Card 2: its own edit, committed, handed back.
+        // The second card: its own edit, committed, handed back.
         var c2SawC1Edit = (bool?)null;
         _work["c2"] = async (invocation, tree, ct) =>
         {
@@ -80,7 +80,7 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
             await HandBackAsync(invocation, "#done c2", ct);
         };
 
-        // Card 1, resumed: the edit must be there; commit it and hand back.
+        // The first card, resumed: the edit must be there; commit it and hand back.
         string? resumedWip = null;
         _work["c1-resume"] = async (invocation, tree, ct) =>
         {
@@ -91,7 +91,7 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
             await HandBackAsync(invocation, "#done c1", ct);
         };
 
-        // Workflow A: the Manager plans card 1 and tells Dev.
+        // Workflow A: the Manager plans the first card and tells Dev.
         await TellAsync(person, "Manager", "#plan c1");
         await c1Started.Task.WaitAsync(Patience, Ct);
 
@@ -106,7 +106,7 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
         // The platform publishes the stopped run's committed work (TerminalPublish).
         var c1OnOriginAfterStop = await EventuallyAsync(() => OriginSha(c1Branch));
 
-        // Workflow B: card 2, on the same member, while card 1 is interrupted.
+        // Workflow B: the second card, on the same member, while the first is interrupted.
         await TellAsync(person, "Manager", "#plan c2");
         await EventuallyAsync(() => _declarations.Any(d => d.Tag == "c2" && d.Status == HttpStatusCode.NoContent)
             ? "yes" : null);
@@ -126,15 +126,15 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
         Assert.Equal($"dev/{c2}", entered.Single(e => e.Tag == "c2").Hint);
         Assert.False(c2SawC1Edit);
 
-        // While card 1 is interrupted its tree is on its own branch with the edit uncommitted.
+        // While the first card is interrupted its tree is on its own branch with the edit uncommitted.
         Assert.Equal(c1Branch, Git(c1Tree, "rev-parse", "--abbrev-ref", "HEAD").Output.Trim());
         Assert.Contains("c1-wip.txt", Git(c1Tree, "status", "--porcelain").Output, StringComparison.Ordinal);
 
-        // Card 2's settled tree went when workflow B was declared (clean and pushed).
+        // The second card's settled tree went when workflow B was declared (clean and pushed).
         Assert.False(Directory.Exists(c2Tree), "workflow B's settled card tree should have been removed");
         Assert.NotNull(OriginSha(Worktrees.BranchHint("Dev", c2)));
 
-        // --- Resume card 1 with the same card, in a new workflow.
+        // --- Resume the first card with the same card, in a new workflow.
         await TellAsync(person, "Manager", "#resume c1");
         await EventuallyAsync(() => resumedWip is not null ? "yes" : null);
 

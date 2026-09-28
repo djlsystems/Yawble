@@ -27,7 +27,7 @@ public sealed class WorktreePerCardTests
     }
 
     [Theory]
-    [InlineData("B000F", "B000F")]
+    [InlineData("B001F", "B001F")]
     [InlineData(" 12 ", "12")]
     [InlineData("a/b c", "a-b-c")]
     [InlineData("../..", null)]
@@ -72,7 +72,7 @@ public sealed class WorktreePerCardTests
     [Fact]
     public void The_branch_hint_is_member_slash_key_in_lower_case()
     {
-        Assert.Equal("developerana/b000f", Worktrees.BranchHint("DeveloperAna", "B000F"));
+        Assert.Equal("developerana/b001f", Worktrees.BranchHint("DeveloperAna", "B001F"));
     }
 
     [Fact]

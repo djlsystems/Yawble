@@ -382,8 +382,8 @@ public sealed class FreshVolumeTests : IDisposable
         await store.AddDispatchAsync(second.Id, "Alpha", "Alpha", 7, "a@example.invalid", ct: Ct);
 
         Assert.Equal([1L, 2L], new[] { first.Id, second.Id });
-        Assert.Equal(["B0001", "B0002"], await ColumnAsync("SELECT id FROM backlog_items ORDER BY id"));
-        Assert.Equal(["B0002"], await ColumnAsync("SELECT item FROM backlog_dispatches"));
+        Assert.Equal([PlatformBacklogId.Format(1), PlatformBacklogId.Format(2)], await ColumnAsync("SELECT id FROM backlog_items ORDER BY id"));
+        Assert.Equal([PlatformBacklogId.Format(2)], await ColumnAsync("SELECT item FROM backlog_dispatches"));
 
         Assert.Equal("two", (await store.GetAsync(2, ct: Ct))!.Title);
         Assert.Equal(2, Assert.Single(await store.DispatchesAsync(2, ct: Ct)).Item);
@@ -393,7 +393,7 @@ public sealed class FreshVolumeTests : IDisposable
 
         Assert.Equal(3, third.Id);
         Assert.Empty(await ColumnAsync("SELECT item FROM backlog_dispatches"));
-        Assert.Equal(["B0001", "B0003"], await ColumnAsync("SELECT id FROM backlog_items ORDER BY id"));
+        Assert.Equal([PlatformBacklogId.Format(1), PlatformBacklogId.Format(3)], await ColumnAsync("SELECT id FROM backlog_items ORDER BY id"));
     }
 
     private async Task<List<string>> ColumnAsync(string sql)
