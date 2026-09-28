@@ -29,6 +29,7 @@ import {
   ActionRefused,
   pushRepoAsync,
   mergeRepoToMainAsync,
+  bringCurrentAndMergeAsync,
   deleteRepoRemoteBranchAsync,
   cleanupRepoWorktreesAsync,
   getRepoStatus,
@@ -59,6 +60,7 @@ import {
   LADDER_RUNGS,
   RUNG_LABELS,
   actionLabel,
+  bringCurrentAndMergeAdvice,
 } from '../lib/repoLadder'
 import type { LadderAction, RungState } from '../lib/repoLadder'
 
@@ -88,6 +90,14 @@ const errorMessage = ref<string | null>(null)
  */
 const conflicts = ref<string[]>([])
 const askingTeam = ref(false)
+
+/**
+ * WHICH REFUSAL NAMED THE FILES. A rebase's conflicts are the Manager's to resolve on main, and
+ * the dialog offers to send them; Bring current and merge's are resolved on the team branch, and
+ * the server's own sentence says who must do it.
+ */
+const conflictsFrom = ref<'rebase' | 'bring-current-and-merge' | null>(null)
+const conflictsSentence = ref<string | null>(null)
 
 async function askTeam() {
   askingTeam.value = true
@@ -156,6 +166,7 @@ const ACTIONS: Record<LadderAction, (team: TeamId, repo: string) => Promise<Repo
   'rebase': rebaseRepoAsync,
   'push': pushRepoAsync,
   'merge-to-main': mergeRepoToMainAsync,
+  'bring-current-and-merge': bringCurrentAndMergeAsync,
   'delete-remote-branch': deleteRepoRemoteBranchAsync,
   'cleanup-worktrees': cleanupRepoWorktreesAsync,
   // Sends what the person edited in the Open pull request dialog; see `sendPullRequest`.
@@ -173,12 +184,19 @@ const ACTION_ICONS: Record<LadderAction, string> = {
   'delete-remote-branch': 'delete',
   'cleanup-worktrees': 'delete_sweep',
   'open-pull-request': 'send',
+  'bring-current-and-merge': 'merge_type',
 }
 
 const step = computed(() => nextStep(props.repo, refreshedThisOpen.value))
 
 /** Merge to main asks once before it runs; see `takeStep`. */
 const confirmMergeOpen = ref(false)
+
+/** Bring current and merge also lands on main, so it asks once too, saying it runs no tests. */
+const confirmBringMergeOpen = ref(false)
+
+/** Git only, and the suites first when both sides changed the same files; null for other steps. */
+const bringMergeAdvice = computed(() => bringCurrentAndMergeAdvice(props.repo, step.value))
 
 /**
  * OPEN PULL REQUEST IS EDITED BEFORE IT IS SENT. The draft - the backlog item's title, the
@@ -391,12 +409,22 @@ function takeStep(action: LadderAction) {
     return
   }
 
+  if (action === 'bring-current-and-merge') {
+    confirmBringMergeOpen.value = true
+    return
+  }
+
   void runStep(action)
 }
 
 function confirmMerge() {
   confirmMergeOpen.value = false
   void runStep('merge-to-main')
+}
+
+function confirmBringMerge() {
+  confirmBringMergeOpen.value = false
+  void runStep('bring-current-and-merge')
 }
 
 function confirmDelete() {
@@ -412,6 +440,8 @@ async function runStep(action: LadderAction) {
   errorMessage.value = null
   successMessage.value = null
   conflicts.value = []
+  conflictsFrom.value = null
+  conflictsSentence.value = null
 
   try {
     const result = await ACTIONS[action](props.team, props.repo.name)
@@ -434,8 +464,13 @@ async function runStep(action: LadderAction) {
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)
     const named = err instanceof ActionRefused ? err.body.conflicts : undefined
-    if (action === 'rebase' && Array.isArray(named)) {
+    if ((action === 'rebase' || action === 'bring-current-and-merge') && Array.isArray(named)) {
       conflicts.value = named.filter((path): path is string => typeof path === 'string')
+      conflictsFrom.value = action
+      const said = err instanceof ActionRefused ? err.body.detail : undefined
+      conflictsSentence.value = action === 'bring-current-and-merge'
+        ? (typeof said === 'string' ? said : `The team or a person must resolve them on ${props.repo.teamBranch}.`)
+        : null
     }
     emit('action-failed')
   } finally {
@@ -617,7 +652,9 @@ function worktreeWho(wt: { member: string | null; path: string }): string {
       <ul class="repo-conflict-files">
         <li v-for="path in conflicts" :key="path" class="mono">{{ path }}</li>
       </ul>
+      <p v-if="conflictsSentence" class="repo-conflicts-resolve">{{ conflictsSentence }}</p>
       <q-btn
+        v-if="conflictsFrom === 'rebase'"
         outline
         no-caps
         dense
@@ -680,6 +717,9 @@ function worktreeWho(wt: { member: string | null; path: string }): string {
       </p>
 
       <p class="repo-next-reason">{{ stepCaption }}</p>
+
+      <!-- Bring current and merge runs no tests; said beside it, with the files both sides changed. -->
+      <p v-if="bringMergeAdvice" class="repo-bring-merge-advice">{{ bringMergeAdvice }}</p>
     </footer>
 
     <!-- The two actions that change what other people see confirm first, and each names what it
@@ -701,6 +741,28 @@ function worktreeWho(wt: { member: string | null; path: string }): string {
         <q-card-actions align="right">
           <q-btn v-close-popup flat label="Cancel" />
           <q-btn flat color="primary" label="Merge" @click="confirmMerge" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <q-dialog v-model="confirmBringMergeOpen" class="repo-confirm">
+      <q-card class="repo-confirm-card os-dialog-sm">
+        <q-card-section class="os-dialog-title">Bring current and merge to {{ branchWord(repo) }}?</q-card-section>
+
+        <q-card-section class="q-pt-none">
+          <p class="repo-confirm-line">
+            This merges <span class="mono">{{ originBranchWord(repo) }}</span> into
+            <span class="repo-confirm-ref mono">{{ repo.teamBranch }}</span> with a merge commit, pushes
+            <span class="mono">{{ repo.teamBranch }}</span>, and then merges it to
+            <span class="mono">{{ branchWord(repo) }}</span>, which every future team clones from. A conflict
+            changes nothing and pushes nothing.
+          </p>
+          <p class="repo-confirm-line">{{ bringMergeAdvice }}</p>
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn v-close-popup flat label="Cancel" />
+          <q-btn flat color="primary" label="Bring current and merge" @click="confirmBringMerge" />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -1133,6 +1195,17 @@ function worktreeWho(wt: { member: string | null; path: string }): string {
   margin: 0.25rem 0 0.5rem;
   padding-left: 1.25rem;
   font-size: 0.8rem;
+}
+
+.repo-conflicts-resolve {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+}
+
+.repo-bring-merge-advice {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--os-ink);
 }
 .repo-checking {
   margin-left: 0.5rem;

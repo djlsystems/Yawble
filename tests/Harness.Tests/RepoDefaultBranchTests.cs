@@ -133,7 +133,7 @@ public sealed class RepoDefaultBranchTests : IAsyncDisposable
         Assert.Equal(JsonValueKind.Null, status.GetProperty("mainAhead").ValueKind);
 
         var originMainBefore = RevParse(_origin, "refs/heads/main");
-        foreach (var action in new[] { "bring-current", "merge-to-main", "rebase", "push", "delete-remote-branch", "ask-team" })
+        foreach (var action in new[] { "bring-current", "merge-to-main", "bring-current-and-merge", "rebase", "push", "delete-remote-branch", "ask-team" })
         {
             var response = await ActAsync(person, team, action);
             var text = await response.Content.ReadAsStringAsync(Ct);

@@ -70,6 +70,9 @@ public static partial class RepoEndpoints
             .WithTags("Repos")
             .WithSummary("Merge a repository's team branch to main");
 
+        // Bring current and merge: origin/main into the team branch, push, then Merge to main.
+        MapBringCurrentAndMerge(app);
+
         // Open pull request, its draft, and Fork it for me.
         MapPullRequest(app);
 
@@ -138,9 +141,10 @@ public static partial class RepoEndpoints
         app.MapPost("/api/teams/{team}/repos/{repo}/push", PushRepoAsync)
             .WithTags("Repos")
             .HumansOnly()
-            .WithSummary("Push the clone's main to origin/team/{id}")
+            .WithSummary("Push the clone's team branch (or main) to origin/team/{id}")
             .WithDescription(
-                "Fast-forwards origin/team/{id} to the clone's local main. Refuses with 409 when "
+                "Fast-forwards origin/team/{id} to the clone's local team/{id} when it exists and "
+                + "carries local main, and otherwise to the clone's local main. Refuses with 409 when "
                 + "the remote branch holds commits the clone does not have, rather than forcing "
                 + "them away - there is deliberately no way to override that refusal from here." + DefaultBranchNote);
 
@@ -1030,6 +1034,19 @@ public static partial class RepoEndpoints
             return await BranchNotKnownAsync(log, userId, email, TenantActions.RepoPush, stored, name, ct);
         }
 
+        // WHAT IS PUSHED IS THE TEAM BRANCH WHEN THE CLONE HAS ONE THAT CARRIES ITS DEFAULT BRANCH.
+        // A Manager merges members' work into a local team/{id}; publishing the default branch in
+        // its place would leave that work in the clone and the dialog reading "not pushed" forever.
+        // A team branch that lacks the default branch's commits is not it: those commits would be
+        // left behind, so the default branch is pushed, as it always was.
+        var source = $"refs/heads/{branch}";
+        var localTeam = $"refs/heads/team/{stored}";
+        if ((await gitRunner.RunGitAsync(clonePath, ["rev-parse", "--verify", "--quiet", localTeam], ct)).ExitCode == 0
+            && (await gitRunner.RunGitAsync(clonePath, ["merge-base", "--is-ancestor", source, localTeam], ct)).ExitCode == 0)
+        {
+            source = localTeam;
+        }
+
         var remoteRef = $"refs/remotes/origin/team/{stored}";
         var remoteRefLookup = await gitRunner.RunGitAsync(clonePath, ["rev-parse", "--verify", remoteRef], ct);
         var remoteExists = remoteRefLookup.ExitCode == 0;
@@ -1042,7 +1059,7 @@ public static partial class RepoEndpoints
         if (remoteExists)
         {
             var ancestor = await gitRunner.RunGitAsync(
-                clonePath, ["merge-base", "--is-ancestor", remoteRef, $"refs/heads/{branch}"], ct);
+                clonePath, ["merge-base", "--is-ancestor", remoteRef, source], ct);
             if (ancestor.ExitCode != 0)
             {
                 var message = $"origin/team/{stored} has commits this clone does not have, so pushing would discard them.";
@@ -1056,7 +1073,7 @@ public static partial class RepoEndpoints
             }
         }
 
-        var pushResult = await gitRunner.PushRefspecAsync(clonePath, $"refs/heads/{branch}", $"team/{stored}", ct);
+        var pushResult = await gitRunner.PushRefspecAsync(clonePath, source, $"team/{stored}", ct);
         if (pushResult.ExitCode != 0)
         {
             var pushDetail = BoundLines(pushResult.Stderr);
@@ -1066,11 +1083,11 @@ public static partial class RepoEndpoints
         }
 
         await log.WriteAsync(userId, email, TenantActions.RepoPush, $"{stored}/{repo}", null,
-            JsonSerializer.Serialize(new { success = true }), ct);
+            JsonSerializer.Serialize(new { success = true, pushed = source }), ct);
 
         return await ActionResultAsync(
             httpContext, gitRunner, RepoUrls.DeriveName(repoUrl), clonePath, stored,
-            $"Pushed {branch} to team/{stored}.", success: true,
+            source == localTeam ? $"Pushed team/{stored} to origin." : $"Pushed {branch} to team/{stored}.", success: true,
             originReachable: true, originUnreachableReason: null, ct);
     }
 
@@ -2067,6 +2084,20 @@ public static partial class RepoEndpoints
             }
         }
 
+        // BEHIND THE DEFAULT BRANCH, AND NOT PUSHED: the two states Bring current and merge and
+        // Push answer. Measured only with a fetch behind us, as teamPushed is above.
+        var teamRefName = teamPushedFrom is null
+            ? null
+            : gitStatus.TeamSha is not null ? $"refs/heads/team/{storedTeamId}" : $"refs/remotes/origin/team/{storedTeamId}";
+        var (teamBranchBehindDefault, filesChangedOnBothSides) =
+            teamRefName is not null && originMain is not null && gitStatus.OriginCheckedAt.HasValue
+                && contributor?.ContributorMode != true
+                ? await BehindDefaultAsync(gitRunner, clonePath, teamRefName, originMain, ct)
+                : (null, null);
+        var teamBranchUnpushed = gitStatus.TeamSha is not null && gitStatus.OriginCheckedAt.HasValue
+            ? await TeamBranchUnpushedAsync(gitRunner, clonePath, storedTeamId, ct)
+            : (bool?)null;
+
         // Map worktrees. ASYNC BECAUSE EACH ROW IS MEASURED rather than transcribed - see
         // `MapWorktreesAsync`. Every command it runs is local, like everything else here.
         var worktrees = await MapWorktreesAsync(gitRunner, gitStatus.Worktrees, clonePath, originMain, openKeys, ct);
@@ -2098,7 +2129,65 @@ public static partial class RepoEndpoints
             DefaultBranch: branch,
             DefaultBranchSource: DefaultBranchSource(defaultBranch),
             OriginUrl: GitOutputRedaction.RedactUserInfo(originUrl),
-            UpstreamUrl: GitOutputRedaction.RedactUserInfo(contributor?.UpstreamUrl));
+            UpstreamUrl: GitOutputRedaction.RedactUserInfo(contributor?.UpstreamUrl),
+            TeamBranchBehindDefault: teamBranchBehindDefault,
+            FilesChangedOnBothSides: filesChangedOnBothSides,
+            TeamBranchUnpushed: teamBranchUnpushed);
+    }
+
+    /// <summary>The most files <see cref="BehindDefaultAsync"/> names; the dialog needs a few, not a diff.</summary>
+    private const int MaxOverlapFiles = 20;
+
+    /// <summary>
+    /// How many commits <paramref name="originMain"/> has that <paramref name="teamRef"/> lacks and,
+    /// when there are any, the files both sides changed since their merge base. Null for either
+    /// answer git could not give: not measured, never zero.
+    /// </summary>
+    private static async Task<(int? Behind, IReadOnlyList<string>? Files)> BehindDefaultAsync(
+        GitRunner gitRunner, string clonePath, string teamRef, string originMain, CancellationToken ct)
+    {
+        var behind = await gitRunner.CountCommitsNotInAsync(clonePath, originMain, teamRef, ct);
+        if (behind is not > 0) return (behind, behind is null ? null : []);
+
+        var mergeBase = await gitRunner.RunGitAsync(clonePath, ["merge-base", teamRef, originMain], ct);
+        if (mergeBase.ExitCode != 0) return (behind, null);
+        var basis = mergeBase.Stdout.Trim();
+
+        async Task<HashSet<string>?> ChangedAsync(string tip)
+        {
+            var diff = await gitRunner.RunGitAsync(clonePath, ["diff", "--name-only", basis, tip], ct);
+            return diff.ExitCode != 0
+                ? null
+                : diff.Stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+        }
+
+        var ours = await ChangedAsync(teamRef);
+        var theirs = await ChangedAsync(originMain);
+        if (ours is null || theirs is null) return (behind, null);
+
+        return (behind, ours.Where(theirs.Contains).Order(StringComparer.Ordinal).Take(MaxOverlapFiles).ToList());
+    }
+
+    /// <summary>
+    /// Whether the local team/{id} is ahead of origin's copy, or origin has none: what Push
+    /// publishes as a fast-forward. False when origin has it, or holds commits the clone lacks
+    /// (Push refuses that). Asked of the remote-tracking ref, so only after a fetch.
+    /// </summary>
+    private static async Task<bool> TeamBranchUnpushedAsync(
+        GitRunner gitRunner, string clonePath, string storedTeamId, CancellationToken ct)
+    {
+        var local = $"refs/heads/team/{storedTeamId}";
+        var remote = $"refs/remotes/origin/team/{storedTeamId}";
+        if ((await gitRunner.RunGitAsync(clonePath, ["rev-parse", "--verify", "--quiet", remote], ct)).ExitCode != 0)
+        {
+            return true;
+        }
+
+        var onOrigin = await gitRunner.RunGitAsync(clonePath, ["merge-base", "--is-ancestor", local, remote], ct);
+        if (onOrigin.ExitCode == 0) return false;
+
+        var originBehind = await gitRunner.RunGitAsync(clonePath, ["merge-base", "--is-ancestor", remote, local], ct);
+        return originBehind.ExitCode == 0;
     }
 
     /// <summary>'person', 'remote', or null when not known. See <see cref="RepoStatus.DefaultBranchSource"/>.</summary>

@@ -591,6 +591,20 @@ export function pushState(status: RepoStatus): PushState {
     }
   }
 
+  // A LOCAL TEAM BRANCH ORIGIN LACKS, OR HOLDS AN OLDER COMMIT OF, is named: "team/X is not
+  // pushed" is the sentence the ladder's Push step and the board's team summary also say.
+  if (status.teamPushed === false && status.teamBranchUnpushed === true) {
+    return {
+      verdict: 'not-pushed',
+      label: 'not pushed',
+      headline: {
+        text: `${status.teamBranch} is not pushed: origin does not have its latest commits.`,
+        tone: 'attention',
+      },
+      clause: `${status.teamBranch} is not pushed`,
+    }
+  }
+
   if (status.teamPushed === false) {
     return {
       verdict: 'not-pushed',
@@ -743,4 +757,18 @@ export function repoHeadline(status: RepoStatus): RepoHeadline {
   }
 
   return merge.headline
+}
+
+/**
+ * THE BOARD'S TEAM SUMMARY LINE FOR UNPUSHED WORK: the team branch of every repository whose local
+ * `team/{id}` origin lacks, so a finished workflow with unpushed work shows without opening the Git
+ * dialog. Null when there is none, or nothing was measured.
+ */
+export function unpushedTeamBranchesLine(status: TeamRepoStatus | null): string | null {
+  const all = status?.repos ?? []
+  const repos = all.filter(repo => repo.teamBranchUnpushed === true)
+  const first = repos[0]
+  if (!first) return null
+  const where = all.length === 1 ? '' : ` (${repos.map(repo => repo.name).join(', ')})`
+  return `${first.teamBranch} is not pushed${where}`
 }

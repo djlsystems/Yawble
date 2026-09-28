@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACTION_LABELS, actionLabel, didRefreshOrigin, formatBytes, LADDER_RUNGS, nextStep, openWorktrees, refreshFailureReason, RUNG_LABELS, rungState, unintegratedWorktrees } from '../repoLadder'
+import { ACTION_LABELS, actionLabel, bringCurrentAndMergeAdvice, didRefreshOrigin, formatBytes, LADDER_RUNGS, nextStep, openWorktrees, refreshFailureReason, RUNG_LABELS, rungState, unintegratedWorktrees } from '../repoLadder'
 import type { LadderAction, LadderRung } from '../repoLadder'
 import { formatMergedState, formatPushedState, mergeState, repoHeadline } from '../repoStatus'
 import type { RepoActionResult, RepoStatus, WorktreeStatus } from '../../api/types'
@@ -541,6 +541,15 @@ function applyAction(
         status: { ...status, teamSha: null, teamPushed: null, teamPushedFrom: null, teamMergedToMain: null },
         refreshed,
       }
+    // The team branch takes origin/main by a merge and is pushed, then merged to main.
+    case 'bring-current-and-merge':
+      return {
+        status: {
+          ...status, teamBranchBehindDefault: 0, filesChangedOnBothSides: [], teamMergedToMain: true,
+          cloneMainOnTeamBranch: true, mainAhead: 0,
+        },
+        refreshed,
+      }
     case 'cleanup-worktrees':
       return { status: { ...status, worktrees: [] }, refreshed }
     // Opening one records it, open: in review until somebody upstream decides.
@@ -622,10 +631,11 @@ describe('the rungs the card paints', () => {
    * EVERY ACTION THE LADDER CAN RETURN MUST HAVE A LABEL. The `Record` makes a missing one a compile
    * error; this checks the compiler was not satisfied by an empty string.
    */
-  it('labels all eight actions', () => {
+  it('labels all nine actions', () => {
     const actions: LadderAction[] = [
       'fetch', 'bring-current', 'rebase', 'push',
       'merge-to-main', 'delete-remote-branch', 'cleanup-worktrees', 'open-pull-request',
+      'bring-current-and-merge',
     ]
     for (const action of actions) {
       expect(ACTION_LABELS[action].length).toBeGreaterThan(0)
@@ -1110,7 +1120,11 @@ describe('the ladder and the header cannot disagree about pushed-ness', () => {
  * THE DESIGN: push keeps publishing what the ladder is talking about. Making it publish some other
  * ref would let the flag and the action drift apart, which IS the defect.
  */
-describe('a local team branch ahead of main cannot be advanced by pushing main', () => {
+/**
+ * PUSH PUBLISHES A LOCAL TEAM BRANCH THAT CARRIES MAIN, so a team ref strictly ahead of main is no
+ * longer a dead end: it is "team/X is not pushed", and Push is offered first.
+ */
+describe('a local team branch ahead of main is not pushed, and Push is offered first', () => {
   const localTeamAhead = (o: Partial<RepoStatus> = {}): RepoStatus => base({
     mainSha: 'aaaaaaa',
     teamSha: 'bbbbbbb',          // a different commit from main
@@ -1122,14 +1136,17 @@ describe('a local team branch ahead of main cannot be advanced by pushing main',
     ...o,
   })
 
-  it('offers nothing, rather than a push that cannot advance the rung', () => {
-    expect(nextStep(localTeamAhead(), true).action).toBeNull()
+  it('offers Push, saying the team branch is not pushed', () => {
+    const step = nextStep(localTeamAhead(), true)
+    expect(step.action).toBe('push')
+    expect(step.rung).toBe('pushed')
+    expect(step.reason).toMatch(/^team\/alpha is not pushed/)
   })
 
-  it('says why, and what would move it forward', () => {
-    const step = nextStep(localTeamAhead(), true)
-    expect(step.reason).toContain('push publishes main')
-    expect(step.reason).toMatch(/merge or rebase/)
+  it('follows the server when it says so, whatever the shas', () => {
+    const said = nextStep(localTeamAhead({ teamSha: 'aaaaaaa', teamBranchUnpushed: true }), true)
+    expect(said.reason).toMatch(/^team\/alpha is not pushed/)
+    expect(nextStep(localTeamAhead({ teamBranchUnpushed: false }), true).reason).not.toMatch(/is not pushed/)
   })
 
   /**
@@ -1681,3 +1698,63 @@ describe('contributor mode offers Open pull request, never Merge to main', () =>
     expect(nextStep(base({ teamMergedToMain: false, teamCommitsNotOnMain: 2 }), true).action).toBe('merge-to-main')
   })
 })
+
+/**
+ * MAIN MOVED UNDER A PUSHED TEAM BRANCH. This used to end at "merge or rebase them together" with no
+ * button, and the merge was done by hand; Bring current and merge is that button.
+ */
+describe('a pushed team branch behind a moved main', () => {
+  const stranded = (o: Partial<RepoStatus> = {}) => base({
+    teamPushed: true,
+    teamMergedToMain: false,
+    teamCommitsNotOnMain: 2,
+    cloneMainOnTeamBranch: false, // the clone's main took the other team's merge; the branch did not
+    mainAhead: 0,
+    mainBehind: 0,
+    teamBranchBehindDefault: 1,
+    filesChangedOnBothSides: [],
+    ...o,
+  })
+
+  it('offers Bring current and merge where the ladder used to stop', () => {
+    const step = nextStep(stranded(), true)
+    expect(step.rung).toBe('merged')
+    expect(step.action).toBe('bring-current-and-merge')
+    expect(step.reason).toContain('origin/main has 1 commit team/alpha does not')
+    expect(actionLabel('bring-current-and-merge', stranded())).toBe('Bring current and merge')
+  })
+
+  it('offers it on the ordinary merge rung too, in place of Merge to main', () => {
+    expect(nextStep(stranded({ cloneMainOnTeamBranch: true }), true).action).toBe('bring-current-and-merge')
+  })
+
+  it('leaves the old answer to a Host that does not measure it', () => {
+    const step = nextStep(stranded({ teamBranchBehindDefault: undefined }), true)
+    expect(step.action).toBeNull()
+    expect(step.reason).toMatch(/merge or rebase/)
+    expect(nextStep(stranded({ teamBranchBehindDefault: null, cloneMainOnTeamBranch: true }), true).action)
+      .toBe('merge-to-main')
+  })
+
+  it('is never offered in contributor mode, where the work goes upstream as a pull request', () => {
+    expect(nextStep(stranded({ upstreamUrl: 'https://github.com/up/Harness.git' }), true).action)
+      .toBe('open-pull-request')
+  })
+
+  it('is refused while the clone is dirty, as Merge to main is', () => {
+    expect(nextStep(stranded({ dirty: true }), true).action).toBeNull()
+  })
+
+  it('says it is git only, and to run the suites first when both sides changed the same files', () => {
+    const step = nextStep(stranded(), true)
+    expect(bringCurrentAndMergeAdvice(stranded(), step)).toBe('This is git only: it runs no tests.')
+
+    const overlapping = stranded({ filesChangedOnBothSides: ['src/a.cs'] })
+    expect(bringCurrentAndMergeAdvice(overlapping, nextStep(overlapping, true)))
+      .toBe('This is git only: it runs no tests. team/alpha and origin/main both changed src/a.cs - '
+        + 'run the suites on the merge before pressing it.')
+
+    expect(bringCurrentAndMergeAdvice(stranded(), nextStep(base(), true))).toBeNull()
+  })
+})
+

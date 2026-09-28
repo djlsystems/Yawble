@@ -85,7 +85,16 @@ public sealed record RepoStatus(
     string? ClaSignedNote = null,
 
     [property: Description("The pull request recorded for team/{id} in contributor mode, as GitHub last described it - asked at most once a minute. Null when none is recorded or the repository is owned.")]
-    RepoPullRequestStatus? PullRequest = null);
+    RepoPullRequestStatus? PullRequest = null,
+
+    [property: Description("How many commits origin/<DefaultBranch> holds that the team ref (the one TeamPushedFrom names) lacks. Above 0 is what the Git dialog's Bring current and merge is for. Null when not measured: no team ref, origin never checked, the default branch not known, or contributor mode.")]
+    int? TeamBranchBehindDefault = null,
+
+    [property: Description("When TeamBranchBehindDefault is above 0, the files changed both on the team branch and on origin/<DefaultBranch> since the two parted, bounded to 20. Bring current and merge runs no tests, so the dialog recommends running the suites first when this is not empty. Null when not measured.")]
+    IReadOnlyList<string>? FilesChangedOnBothSides = null,
+
+    [property: Description("True when a local team/{id} exists and origin does not have it, or holds an older commit of it, so Push would publish it as a fast-forward: the dialog says 'team/{id} is not pushed'. False when origin has it (or has commits the clone lacks). Null when there is no local team branch or origin was never checked.")]
+    bool? TeamBranchUnpushed = null);
 
 /// <summary>
 /// The recorded pull request, as the Git dialog shows it: GitHub's last answer and when it

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useQuasar } from 'quasar';
 import type {
   ContainerSnapshot,
+  TeamRepoStatus,
   TeamTokenTotals,
   TeamWorkflowTiming,
   TeamWorkflows,
@@ -23,6 +24,7 @@ import {
 } from '../lib/teamKpis';
 import { budgetBar, budgetInForce, budgetLine, spendAgainstBudget } from '../lib/teamBudget';
 import { installStatus } from '../lib/agentInstall';
+import { unpushedTeamBranchesLine } from '../lib/repoStatus';
 import { asTeamId } from '../api/types';
 import { closeWorkflow, nudgeWorkflow, resumeWorkflow, stopWorkflow } from '../api/client';
 import { useConsoleStore } from '../stores/console';
@@ -68,6 +70,13 @@ const props = defineProps<{
    * through onto the root element as a stray `findings` attribute.
    */
   findings?: string[] | null;
+
+  /**
+   * This team's repository status, or null until it is read. Only read for the unpushed-branch
+   * line: a finished workflow whose team branch never reached origin shows here, without opening
+   * the Git dialog.
+   */
+  repoStatus?: TeamRepoStatus | null;
 }>();
 
 // Convert string teamId to TeamId type
@@ -114,6 +123,9 @@ const tile = computed(() =>
  *  why this can differ from `workflow.state`: that word is derived from the WHOLE roster and can be
  *  masked to RUNNING by a member working a different workflow than the one that is actually BLOCKED. */
 const chip = computed(() => teamChip(tile.value, props.containers));
+
+/** `team/<id> is not pushed` while a local team branch is ahead of origin's, else null. */
+const unpushedLine = computed(() => unpushedTeamBranchesLine(props.repoStatus ?? null));
 
 /** `waiting for a slot: Manager` while a wake is held behind the WIP limit, else ''. */
 const waitingLine = computed(() => waitingForSlotText(heldMembers(props.containers)));
@@ -586,6 +598,10 @@ function showThread(row: WorkflowRow) {
 
       <div v-if="!usePlural && workflow.detail" class="team-kpi-detail">{{ workflow.detail }}</div>
       <div v-if="waitingLine" class="team-kpi-detail team-kpi-waiting">{{ waitingLine }}</div>
+      <div v-if="unpushedLine" class="team-kpi-detail team-kpi-unpushed">
+        {{ unpushedLine }}
+        <q-tooltip>Origin does not have its latest commits. Push it from the Git dialog.</q-tooltip>
+      </div>
 
       <!-- THE BUDGET, in smaller letters under the spend it bounds.
 
@@ -1203,6 +1219,10 @@ function showThread(row: WorkflowRow) {
 }
 
 /* A wake held behind the WIP limit: about to work, so warm rather than muted. */
+.team-kpi-unpushed {
+  color: var(--q-warning);
+}
+
 .team-kpi-waiting {
   color: var(--q-warning);
 }
