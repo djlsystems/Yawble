@@ -2177,16 +2177,14 @@ app.MapPost("/api/teams", async (
 
     // EVERY URL IS READ BEFORE ANYTHING IS CREATED (B001F): one `git ls-remote` cannot read is
     // refused with the choices this caller may take, and no team, row, folder or clone is left.
-    RepoPlan plan;
+    // What can be refused without the network is refused first: a URL or upstream that is not one,
+    // with the 400 it always had. The same path as backlog dispatch-to-new.
+    NewTeamRepos newRepos;
     try
     {
-        // What can be refused without the network is refused first: a URL or upstream that is not
-        // one, with the 400 it always had.
-        teams.ValidateRepos(request.Repos, request.Upstreams);
-
-        plan = await repoSetup.PlanAsync(
-            request.Repos ?? [], request.RepoChoices,
-            person: PrincipalClaims.From(context.User) is { Kind: PrincipalKind.User }, alreadyAttached: [], ct);
+        newRepos = await repoSetup.PlanNewTeamAsync(
+            request.Repos, request.Upstreams, request.RepoChoices,
+            person: PrincipalClaims.From(context.User) is { Kind: PrincipalKind.User }, request.LocalRepository, ct);
     }
     catch (RepoSetupRefusedException refused)
     {
@@ -2197,11 +2195,6 @@ app.MapPost("/api/teams", async (
         return Results.BadRequest(new { error = exception.Message });
     }
 
-    // A team that ends up with no repository gets a local one named after it, unless the caller
-    // said not to; `use-local` asks for the same one in place of a URL.
-    var wantsLocal = plan.UseLocal || (plan.Kept.Count == 0 && request.LocalRepository != false);
-    TeamLocalRepository? localRepository = null;
-    IReadOnlyList<string> createdOnGitHub = [];
     var teamCreated = false;
 
     try
@@ -2211,7 +2204,7 @@ app.MapPost("/api/teams", async (
             // and `CreateAsync` refuses a blank one by name rather than substituting anything.
             name, request.Agent ?? "",
             request.AdditionalInstructions,
-            request.MemberAgent, request.MemberAgents, request.Root, plan.Kept,
+            request.MemberAgent, request.MemberAgents, request.Root, newRepos.Repos,
 
             // CARRIED IN THIS SAME REQUEST rather than by a client-side follow-up call to the PUT
             // route. A create that answered 201 and then failed its second call would leave a team
@@ -2223,22 +2216,12 @@ app.MapPost("/api/teams", async (
 
             // ONE UNIT WITH THE TEAM: made once every check on the team has passed and before
             // anything of it is written, so a repository that cannot be made refuses the create.
-            addRepo: async (team, token) =>
-            {
-                createdOnGitHub = await repoSetup.CreateOnGitHubAsync(plan, token);
-                if (!wantsLocal) return null;
-
-                localRepository = await repoSetup.EnsureLocalAsync(team, token);
-                return localRepository.Reference;
-            });
+            addRepo: newRepos.AddRepoAsync);
         teamCreated = true;
 
-        if (localRepository is { Created: true } made)
-        {
-            await audit.WriteAsync(
-                context, TenantActions.LocalRepoCreated, made.Name, made.Name,
-                new { reference = made.Reference, defaultBranch = LocalRepos.InitialBranch, team = created.Id }, ct);
-        }
+        await newRepos.LogAsync(audit, context, created.Id, ct);
+        var localRepository = newRepos.LocalRepository;
+        var createdOnGitHub = newRepos.CreatedOnGitHub;
 
         var unresolvedList = new List<object>();
         
@@ -2363,8 +2346,7 @@ app.MapPost("/api/teams", async (
     }
     finally
     {
-        // A local repository made for a create that then failed is not left behind.
-        if (!teamCreated) await repoSetup.ForgetAsync(localRepository, CancellationToken.None);
+        await newRepos.ForgetUnlessCreatedAsync(teamCreated);
     }
 })
     // Takes its team from the BODY, so TeamGate cannot see it - this route is covered only by this
