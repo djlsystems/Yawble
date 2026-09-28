@@ -575,3 +575,99 @@ func TestRestoreOntoAFreshEngineCreatesTheVolumeAndTheContainer(t *testing.T) {
 		t.Errorf("want the volume created, filled, then the container run:\n%s", calls(s))
 	}
 }
+
+func TestBackupRefusesAnUnwritableOutputBeforeStoppingAnything(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a read-only folder")
+	}
+	for _, program := range []string{"podman", "docker"} {
+		t.Run(program, func(t *testing.T) {
+			readOnly := t.TempDir()
+			if err := os.Chmod(readOnly, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(readOnly, 0o700) })
+			for name, path := range map[string]string{
+				"missing folder":   filepath.Join(t.TempDir(), "nope", "b.tar.gz"),
+				"read-only folder": filepath.Join(readOnly, "b.tar.gz"),
+			} {
+				s := backupScript(t, program, "running", agentListing)
+				deps := backupDeps(t, s, program)
+				code, out, errOut := run(t, deps, "backup", "--output", path, "--yes")
+				if code == 0 || !strings.Contains(errOut, "cannot be written to "+path) || !strings.Contains(errOut, "nothing was stopped") {
+					t.Errorf("%s: exit %d out %q err %q", name, code, out, errOut)
+				}
+				c := calls(s)
+				if strings.Contains(c, program+" stop ") || strings.Contains(c, program+" exec ") || strings.Contains(c, program+" run ") {
+					t.Errorf("%s: the instance was touched:\n%s", name, c)
+				}
+				if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 0 {
+					t.Errorf("%s: left behind %v", name, entries)
+				}
+			}
+		})
+	}
+}
+
+func TestRestoreReplaceRefusesAnUnwritableSafetyBackupBeforeStopping(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a read-only folder")
+	}
+	for _, program := range []string{"podman", "docker"} {
+		t.Run(program, func(t *testing.T) {
+			s := restoreScript(t, program, "/data/messages.db\n", "running")
+			deps := restoreDeps(t, s, program)
+			dir := t.TempDir()
+			file := backupFile(t, dir, "2026.09.24.1")
+			if err := os.Chmod(dir, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+			code, out, errOut := run(t, deps, "restore", file, "--replace", "--yes")
+			if code == 0 || !strings.Contains(errOut, "nothing was stopped or changed") {
+				t.Errorf("exit %d out %q err %q", code, out, errOut)
+			}
+			c := calls(s)
+			if strings.Contains(c, program+" stop ") || strings.Contains(c, "-exec rm -rf") {
+				t.Errorf("the instance was touched:\n%s", c)
+			}
+		})
+	}
+}
+
+func TestRestoreReplaceThatFailsAfterClearingSaysHowToPutItBack(t *testing.T) {
+	for _, program := range []string{"podman", "docker"} {
+		t.Run(program, func(t *testing.T) {
+			s := restoreScript(t, program, "/data/messages.db\n", "running")
+			s.On(stdinHelper(program, "tar"), engine.Result{Stderr: "tar: write error: No space left on device", ExitCode: 2})
+			deps := restoreDeps(t, s, program)
+			dir := t.TempDir()
+			file := backupFile(t, dir, "2026.09.24.1")
+			code, out, errOut := run(t, deps, "restore", file, "--replace", "--yes")
+			if code == 0 {
+				t.Fatalf("exit 0: %s", out)
+			}
+			if indexOf(s.Calls, helper(program, "find", false)+" /data -mindepth 1 -maxdepth 1 -exec rm -rf {} +") < 0 {
+				t.Fatalf("the volume was never cleared:\n%s", calls(s))
+			}
+			var before string
+			entries, _ := os.ReadDir(dir)
+			for _, e := range entries {
+				if strings.HasSuffix(e.Name(), "-before-restore.tar.gz") {
+					before = filepath.Join(dir, e.Name())
+				}
+			}
+			if before == "" || !filepath.IsAbs(before) {
+				t.Fatalf("no safety backup in %v", entries)
+			}
+			for _, want := range []string{"was cleared", "incomplete", before, "yawble restore " + before + " --replace"} {
+				if !strings.Contains(errOut, want) {
+					t.Errorf("error lacks %q:\n%s", want, errOut)
+				}
+			}
+			if indexOf(s.Calls, program+" start yawble") >= 0 || strings.Contains(calls(s), program+" run -d") {
+				t.Errorf("a partial volume was started:\n%s", calls(s))
+			}
+		})
+	}
+}

@@ -143,6 +143,33 @@ func Write(path string, m Manifest, produce func(io.Writer) error) (Manifest, er
 	return m, nil
 }
 
+// CheckWritable says whether Write could make path, before anything is stopped for it: the
+// folder exists and a file can be created there. It creates the scratch file Write would use and
+// removes it again, so it leaves nothing behind.
+func CheckWritable(path string) error {
+	dir := filepath.Dir(path)
+	st, err := os.Stat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("the folder %s does not exist", dir)
+	}
+	if err != nil {
+		return err
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("%s is not a folder", dir)
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("%s already exists; choose another name with --output", path)
+	}
+	probe := path + ".partial"
+	f, err := create(probe)
+	if err != nil {
+		return fmt.Errorf("a file cannot be created in %s: %w", dir, err)
+	}
+	f.Close()
+	return os.Remove(probe)
+}
+
 func create(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {

@@ -48,16 +48,20 @@ func newBackupCommand(deps Deps) *cobra.Command {
 		Example: "  yawble backup\n  yawble backup --output ~/yawble.tar.gz\n  yawble backup --full --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			e, s, _, err := prepare(deps)
-			if err != nil {
-				return err
-			}
 			path := output
 			if path == "" {
 				path = backup.FileName(deps.Now())
 			}
 			if _, err := os.Lstat(path); err == nil {
 				return UsageError{path + " already exists; choose another name with --output"}
+			}
+			// Before the engine is touched: the instance is not stopped for a file that cannot be written.
+			if err := backup.CheckWritable(path); err != nil {
+				return fmt.Errorf("the backup cannot be written to %s: %w; nothing was stopped or changed", path, err)
+			}
+			e, s, _, err := prepare(deps)
+			if err != nil {
+				return err
 			}
 			return runBackup(cmd.Context(), deps, e, s, path, full, yes, cmd.OutOrStdout())
 		},
@@ -291,6 +295,16 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 			}
 		}
 	}
+	safety := ""
+	if holdsData {
+		safety = filepath.Join(filepath.Dir(path), strings.TrimSuffix(backup.FileName(deps.Now()), ".tar.gz")+"-before-restore.tar.gz")
+		if abs, err := filepath.Abs(safety); err == nil {
+			safety = abs
+		}
+		if err := backup.CheckWritable(safety); err != nil {
+			return fmt.Errorf("the backup of the current volume cannot be written to %s: %w; nothing was stopped or changed", safety, err)
+		}
+	}
 	if running {
 		if err := e.Stop(ctx, instance.ContainerName); err != nil {
 			return err
@@ -298,13 +312,12 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 		fmt.Fprintf(out, "stopped %s\n", instance.ContainerName)
 	}
 	if holdsData {
-		safety := filepath.Join(filepath.Dir(path), strings.TrimSuffix(backup.FileName(deps.Now()), ".tar.gz")+"-before-restore.tar.gz")
 		fmt.Fprintf(out, "writing a backup of the current volume first: %s\n", safety)
 		if _, err := writeBackup(ctx, deps, e, s.Image, safety, false, out); err != nil {
 			return fmt.Errorf("%w; nothing was replaced", err)
 		}
 		if _, err := e.RunHelper(ctx, onVolume(false, "find", "/data", "-mindepth", "1", "-maxdepth", "1", "-exec", "rm", "-rf", "{}", "+")); err != nil {
-			return fmt.Errorf("clearing %s failed (%w); the backup of what was on it is %s", instance.VolumeName, err, safety)
+			return fmt.Errorf("clearing %s failed (%w); %s", instance.VolumeName, err, recoverHint(safety))
 		}
 	}
 
@@ -320,6 +333,9 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 	_, runErr := e.RunHelper(ctx, extract)
 	pr.CloseWithError(runErr)
 	if err := errors.Join(<-counted, runErr); err != nil {
+		if safety != "" {
+			return fmt.Errorf("restoring %s into %s failed: %w\nThe instance's data on %s was cleared first, so it is now incomplete. %s", path, instance.VolumeName, err, instance.VolumeName, recoverHint(safety))
+		}
 		return fmt.Errorf("restoring %s into %s failed: %w", path, instance.VolumeName, err)
 	}
 	fmt.Fprintf(out, "restored %s into %s: %d files, %s of data, backed up %s on %s (%s)\n", path, instance.VolumeName,
@@ -330,6 +346,16 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 	}
 	providersNote(deps, m, out)
 	return nil
+}
+
+// recoverHint names the backup restore wrote of the volume before clearing it, and the command
+// that puts it back.
+func recoverHint(safety string) string {
+	arg := safety
+	if strings.ContainsAny(arg, " '\"$`\\") {
+		arg = "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
+	}
+	return fmt.Sprintf("The backup of what was on it before is %s; to put it back, run:\n  yawble restore %s --replace", safety, arg)
 }
 
 // checkVersion refuses a backup from a newer Yawble than image: its database may hold schema
