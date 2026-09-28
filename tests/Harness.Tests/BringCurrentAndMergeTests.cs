@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Harness.Tests;
 
@@ -52,6 +53,11 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
             {
                 services.AddSingleton<IAgentRunner>(new FakeAgent());
                 services.AddSingleton<IRepoClone>(new LocalOriginClone(_origin));
+
+                // The Git dialog is what is under test, so nothing else pushes: the platform's own
+                // publisher, run when a member's run ends, would publish a branch these tests keep
+                // unpushed on purpose whenever the Manager's wake happened to end after it was made.
+                services.Replace(ServiceDescriptor.Singleton<ITeamPublisher>(new NoPublisher()));
             }));
     }
 
@@ -190,9 +196,6 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
         var (team, person) = await TeamWithCloneAsync("Epsilon");
         var clone = ClonePath(team);
 
-        // Idle first: the platform publishes a run's branches when the run ends, and the Manager's
-        // wake on the repository being attached would publish this one if it ended afterwards.
-        Assert.Equal(HttpStatusCode.OK, (await ActAsync(person, team, "fetch")).StatusCode);
         Git(clone, "checkout", "-b", $"team/{team}", "trunk");
         File.WriteAllText(Path.Combine(clone, "work.txt"), "work\n");
         Commit(clone, "work");
@@ -317,6 +320,13 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
         process.StandardError.ReadToEnd();
         process.WaitForExit();
         return (process.ExitCode, stdout);
+    }
+
+    private sealed class NoPublisher : ITeamPublisher
+    {
+        public Task<TeamPublishReport> PublishAsync(
+            string team, IReadOnlyList<string> repoUrls, ContainerId source, long? causation, CancellationToken ct) =>
+            Task.FromResult(TeamPublishReport.Nothing);
     }
 
     /// <summary>The product's own <see cref="RepoClone"/>, pointed at the local origin.</summary>
