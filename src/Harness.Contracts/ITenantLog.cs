@@ -119,6 +119,32 @@ public static class TenantActions
     /// the field and secret NAMES that changed - never a value.</summary>
     public const string MemberPluginSettingsChanged = "member.plugin-settings-changed";
 
+    /// <summary>A plugin member's connection bindings were set or changed (at hire, in its settings,
+    /// or carried by a clone). Detail names the slots and connection ids - never a token.</summary>
+    public const string MemberConnectionsChanged = "member.connections-changed";
+
+    /// <summary>A person set an OAuth provider's client. Detail names the fields changed, never the
+    /// client secret.</summary>
+    public const string ConnectionProviderSaved = "connections.provider-saved";
+
+    /// <summary>A person removed a custom OAuth provider.</summary>
+    public const string ConnectionProviderRemoved = "connections.provider-removed";
+
+    /// <summary>A person connected an account. Detail: provider, account, scopes - never a token.</summary>
+    public const string ConnectionConnected = "connections.connected";
+
+    /// <summary>A person reconnected an account, clearing <c>needs-reconnect</c>.</summary>
+    public const string ConnectionReconnected = "connections.reconnected";
+
+    /// <summary>A person renamed a connection.</summary>
+    public const string ConnectionRenamed = "connections.renamed";
+
+    /// <summary>A person disconnected an account: revoked where supported, tokens deleted.</summary>
+    public const string ConnectionDisconnected = "connections.disconnected";
+
+    /// <summary>The provider refused a refresh; the connection needs a person to reconnect it.</summary>
+    public const string ConnectionNeedsReconnect = "connections.needs-reconnect";
+
     /// <summary>A custom skill was created, changed or deleted. Built-ins are never written.</summary>
     public const string SkillCreated = "skill.created";
     public const string SkillChanged = "skill.changed";

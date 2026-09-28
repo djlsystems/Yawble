@@ -245,6 +245,10 @@ public sealed partial class PlatformMcpTools(
             "A plugin's secret bindings: each secret it names, to a LOGICAL KEY a person has already "
             + "bound on your team (for example MAILER_TOKEN). Never a secret's value. Only with `plugin`.")]
         Dictionary<string, string>? secrets = null,
+        [Description(
+            "A plugin's connection bindings: each connection slot it declares, to the id of a connection a "
+            + "person has already bound on your team (the hiring tool lists them). Never a token. Only with `plugin`.")]
+        Dictionary<string, string>? connections = null,
         CancellationToken cancellationToken = default)
     {
         var resolved = await TeamAsync(team, cancellationToken);
@@ -252,9 +256,9 @@ public sealed partial class PlatformMcpTools(
 
         if (string.IsNullOrWhiteSpace(plugin))
         {
-            if (config is not null || secrets is not null)
+            if (config is not null || secrets is not null || connections is not null)
             {
-                return "Refused: `config` and `secrets` belong to a plugin member. Pass `plugin` too, or leave them out.";
+                return "Refused: `config`, `secrets` and `connections` belong to a plugin member. Pass `plugin` too, or leave them out.";
             }
 
             return await SendAsync(
@@ -284,6 +288,7 @@ public sealed partial class PlatformMcpTools(
                 agent = MemberRef.ForPlugin(plugin.Trim()),
                 config,
                 secrets,
+                connections,
             },
             cancellationToken);
     }

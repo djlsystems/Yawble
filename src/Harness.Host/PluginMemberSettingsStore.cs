@@ -15,6 +15,14 @@ public interface IPluginMemberSettingsStore : IPluginMemberSettings
     /// TRANSACTION: a change with no record of who made it does not land.</summary>
     Task SaveAsync(ContainerId member, PluginMemberSettings settings, TriggerAudit audit, CancellationToken ct = default);
 
+    /// <summary>As the one-row save, with every row given - a settings change and the
+    /// <c>member.connections-changed</c> row that goes with it - in the same transaction.</summary>
+    Task SaveAsync(ContainerId member, PluginMemberSettings settings, IReadOnlyList<TriggerAudit> audits, CancellationToken ct = default);
+
+    /// <summary>Every connection id bound by a member currently on <paramref name="team"/> - the
+    /// connections a person has bound there, which is all an agent's hire may name.</summary>
+    Task<IReadOnlySet<string>> ConnectionsBoundOnAsync(string team, CancellationToken ct = default);
+
     /// <summary>Every logical key bound by a member currently on <paramref name="team"/> - the keys a
     /// person has already bound there, which is all a Manager may bind (see the hire route).</summary>
     Task<IReadOnlySet<string>> KeysBoundOnAsync(string team, CancellationToken ct = default);
@@ -36,7 +44,7 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
     {
         await using var connection = Open();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT config_json, secrets_json FROM team_member_config WHERE team = $team AND name = $name";
+        command.CommandText = "SELECT config_json, secrets_json, connections_json FROM team_member_config WHERE team = $team AND name = $name";
         command.Parameters.AddWithValue("$team", member.Team);
         command.Parameters.AddWithValue("$name", member.Name);
 
@@ -45,7 +53,10 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
 
         return new PluginMemberSettings(
             JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(reader.GetString(0)) ?? [],
-            JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(1)) ?? []);
+            JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(1)) ?? [])
+        {
+            Connections = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(2)) ?? [],
+        };
     }
 
     public async Task SaveAsync(ContainerId member, PluginMemberSettings settings, CancellationToken ct = default)
@@ -54,16 +65,36 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
         await UpsertAsync(connection, null, member, settings, ct);
     }
 
-    public async Task SaveAsync(ContainerId member, PluginMemberSettings settings, TriggerAudit audit, CancellationToken ct = default)
+    public Task SaveAsync(ContainerId member, PluginMemberSettings settings, TriggerAudit audit, CancellationToken ct = default) =>
+        SaveAsync(member, settings, [audit], ct);
+
+    public async Task SaveAsync(ContainerId member, PluginMemberSettings settings, IReadOnlyList<TriggerAudit> audits, CancellationToken ct = default)
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
         await UpsertAsync(connection, transaction, member, settings, ct);
 
-        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        foreach (var audit in audits) await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
 
         await transaction.CommitAsync(ct);
+    }
+
+    public async Task<IReadOnlySet<string>> ConnectionsBoundOnAsync(string team, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT connections_json FROM team_member_config WHERE team = $team";
+        command.Parameters.AddWithValue("$team", team);
+
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            ids.UnionWith((JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(0)) ?? []).Values);
+        }
+
+        return ids;
     }
 
     private static async Task UpsertAsync(
@@ -73,16 +104,18 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
         command.Transaction = transaction;
         command.CommandText =
             """
-            INSERT INTO team_member_config (team, name, config_json, secrets_json)
-            VALUES ($team, $name, $config, $secrets)
+            INSERT INTO team_member_config (team, name, config_json, secrets_json, connections_json)
+            VALUES ($team, $name, $config, $secrets, $connections)
             ON CONFLICT (team, name) DO UPDATE SET
                 config_json = excluded.config_json,
-                secrets_json = excluded.secrets_json
+                secrets_json = excluded.secrets_json,
+                connections_json = excluded.connections_json
             """;
         command.Parameters.AddWithValue("$team", member.Team);
         command.Parameters.AddWithValue("$name", member.Name);
         command.Parameters.AddWithValue("$config", JsonSerializer.Serialize(settings.Config));
         command.Parameters.AddWithValue("$secrets", JsonSerializer.Serialize(settings.Secrets));
+        command.Parameters.AddWithValue("$connections", JsonSerializer.Serialize(settings.Connections));
         await command.ExecuteNonQueryAsync(ct);
     }
 

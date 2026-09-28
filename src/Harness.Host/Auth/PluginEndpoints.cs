@@ -133,7 +133,8 @@ public static class PluginEndpoints
             [Description(Describe.Team)] string team,
             [Description("The member, as addressed in its route.")] string member,
             PluginSettingsChange request, TeamRegistry teams, PluginCatalog plugins,
-            IPluginMemberSettingsStore settings, ISecretStore secrets, HttpContext context, CancellationToken ct) =>
+            IPluginMemberSettingsStore settings, ISecretStore secrets, Connections connections, HttpContext context,
+            CancellationToken ct) =>
         {
             var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
             if (refusal is not null) return refusal;
@@ -141,12 +142,24 @@ public static class PluginEndpoints
             var id = new ContainerId(found!.Team, found.Name);
             var changed = new PluginMemberSettings(
                 request.Config ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
-                request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal));
+                request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal))
+            {
+                // OMITTED KEEPS what is bound, so a form that knows nothing of connections cannot unbind
+                // them by saving; `{}` unbinds every slot.
+                Connections = request.Connections ?? (await settings.ForAsync(id, ct)).Connections,
+            };
 
             // EXACTLY AS A HIRE: the same check the hire runs, against the active manifest.
             if (PluginMemberRunner.SettingsRefusal(plugin!.Manifest, changed, secrets) is { } invalid)
             {
                 return Results.BadRequest(new { error = invalid });
+            }
+
+            // A PERSON BINDS: this route is HumansOnly, so any connection may be named - but it must
+            // exist, suit the slot's providers and hold every scope the slot asks for.
+            if (await connections.BindingRefusalAsync(plugin.Manifest, changed.Connections, boundOnTeam: null, ct) is { } bindingRefusal)
+            {
+                return Results.BadRequest(bindingRefusal.Body());
             }
 
             var before = await settings.ForAsync(id, ct);
@@ -161,11 +174,25 @@ public static class PluginEndpoints
                 .Order(StringComparer.Ordinal)
                 .ToArray();
 
+            var slots = before.Connections.Keys.Union(changed.Connections.Keys, StringComparer.Ordinal)
+                .Where(slot => before.Connections.GetValueOrDefault(slot) != changed.Connections.GetValueOrDefault(slot))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+
+            List<TriggerAudit> rows = [];
+
+            if (slots.Length > 0)
+            {
+                rows.Add(TenantLogging.Row(
+                    context, TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", found.Label ?? found.Name,
+                    ConnectionsChangedDetail(id, plugin.Manifest.Id, slots, before, changed)));
+            }
+
             try
             {
                 await settings.SaveAsync(
                     id, changed,
-                    new TriggerAudit(
+                    [.. rows, new TriggerAudit(
                         context.User.FindFirstValue(ClaimTypes.NameIdentifier),
                         context.User.FindFirstValue(ClaimTypes.Email),
                         TenantActions.MemberPluginSettingsChanged,
@@ -177,7 +204,8 @@ public static class PluginEndpoints
                             plugin = plugin.Manifest.Id,
                             config = fields,
                             secrets = secretNames,
-                        })),
+                            connections = slots,
+                        }))],
                     ct);
             }
             catch (SqliteException exception)
@@ -193,7 +221,12 @@ public static class PluginEndpoints
             .HumansOnly()
             .WithSummary("Change a plugin member's settings")
             .WithDescription(
-                "Body `{ config, secrets }` REPLACES the member's configuration and secret bindings (send "
+                "Body `{ config, secrets, connections? }` REPLACES the member's configuration and secret "
+                + "bindings, and its connection bindings (slot to connection id) when `connections` is given "
+                + "(omitted keeps them; `{}` unbinds every slot). A binding must name a connection that exists, "
+                + "of a provider the slot takes, granted every scope the slot asks for - refused 400 otherwise, "
+                + "with `reconnect: { connectionId, scopes }` when only scopes are missing; a change appends "
+                + "`member.connections-changed` in the same transaction. (send "
                 + "only the fields that differ from their default). Validated exactly as a hire is - "
                 + "field names, types, `enum`, required fields and secrets, the logical key's form and "
                 + "that it is set - and refused 400 naming the field, with nothing written. Secrets are "
@@ -247,6 +280,22 @@ public static class PluginEndpoints
         }
     }
 
+    /// <summary>The <c>member.connections-changed</c> row's detail: each slot's connection before and
+    /// after, by id - never a token - and who may set a binding: always a person.</summary>
+    public static object ConnectionsChangedDetail(
+        ContainerId id, string plugin, IEnumerable<string> slots, PluginMemberSettings before, PluginMemberSettings after) => new
+    {
+        team = id.Team,
+        plugin,
+        setBy = "person",
+        slots = slots.Select(slot => new
+        {
+            slot,
+            from = before.Connections.GetValueOrDefault(slot),
+            to = after.Connections.GetValueOrDefault(slot),
+        }),
+    };
+
     /// <summary>The member, its active plugin, or the answer saying why there is none.</summary>
     private static async Task<(PersistedMember? Member, InstalledPlugin? Plugin, IResult? Refusal)> PluginMemberAsync(
         TeamRegistry teams, PluginCatalog plugins, string team, string member, CancellationToken ct)
@@ -287,8 +336,10 @@ public static class PluginEndpoints
         version = plugin.Manifest.Version,
         config = stored.Config,
         secrets = stored.Secrets,
+        connections = stored.Connections,
         fields = Fields(plugin.Manifest),
         secretFields = SecretFields(plugin.Manifest),
+        connectionFields = ConnectionFields(plugin.Manifest),
     };
 
     private static Dictionary<string, object> Fields(PluginManifest manifest) => manifest.Config.ToDictionary(
@@ -301,6 +352,18 @@ public static class PluginEndpoints
             @default = c.Value.Default,
             @enum = c.Value.Enum,
             setBy = c.Value.PersonOnly ? "person" : "anyone",
+        });
+
+    /// <summary>Each connection slot, its scopes in the object form, and the Plugins screen's line.</summary>
+    public static Dictionary<string, object> ConnectionFields(PluginManifest manifest) => manifest.Connections.ToDictionary(
+        c => c.Key,
+        c => (object)new
+        {
+            description = c.Value.Description,
+            providers = c.Value.Providers,
+            scopes = c.Value.Scopes,
+            required = c.Value.Required,
+            summary = c.Value.Summary,
         });
 
     private static Dictionary<string, object> SecretFields(PluginManifest manifest) => manifest.Secrets.ToDictionary(
@@ -333,6 +396,7 @@ public static class PluginEndpoints
                 timeoutSeconds = p.Manifest.TimeoutSeconds,
                 config = Fields(p.Manifest),
                 secrets = SecretFields(p.Manifest),
+                connections = ConnectionFields(p.Manifest),
                 publishes = p.Manifest.Publishes.Select(e => new { type = $"plugin.{p.Manifest.Id}.{e.Type}", summary = e.Summary }),
                 skills = p.Manifest.Skills,
                 skill = PluginSkills.SkillOf(p),
@@ -410,6 +474,7 @@ public static class PluginEndpoints
 /// <summary>Body of <c>POST /api/plugins/install</c>.</summary>
 public sealed record InstallPlugin(string? Path, bool Replace = false);
 
-/// <summary>Body of <c>PUT .../members/{member}/plugin-settings</c>: both maps replace what is stored.</summary>
+/// <summary>Body of <c>PUT .../members/{member}/plugin-settings</c>: every map replaces what is stored.</summary>
 public sealed record PluginSettingsChange(
-    Dictionary<string, JsonElement>? Config, Dictionary<string, string>? Secrets);
+    Dictionary<string, JsonElement>? Config, Dictionary<string, string>? Secrets,
+    Dictionary<string, string>? Connections = null);

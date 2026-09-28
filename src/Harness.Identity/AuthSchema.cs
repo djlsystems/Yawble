@@ -381,5 +381,72 @@ public static class AuthSchema
             """
             ALTER TABLE unfinished_removals ADD COLUMN host_left TEXT NULL;
             """),
+
+        // CONNECTIONS: a person's account at an OAuth provider, held by the Host so a plugin gets
+        // only a fresh access token per run. Every `*_protected` column is Data Protection
+        // ciphertext (the instance's `<dataRoot>/keys`), never plain text.
+        //
+        // `oauth_providers`: one row per configured provider - `google`, `microsoft` (built in; a
+        // row only once a person sets its client) or `custom-<id>`. URLs are NULL for a built-in,
+        // whose endpoints are the build's.
+        //
+        // `connections`: one row per connected account. `status` is `ok` or `needs-reconnect`, with
+        // the provider's reason. The access token is cached until it is within 5 minutes of expiry.
+        //
+        // `connection_flows`: a `start` waiting for its `callback`/`complete`. `state` is issued to
+        // `user_id`, single use (`used_at`), and refused 10 minutes after `issued_at`. The PKCE
+        // verifier stays here, protected; no client ever sees it.
+        //
+        // `team_member_config.connections_json`: a plugin member's slot -> connection id. Never a
+        // token.
+        new MigrationStep(
+            "auth-014",
+            """
+            CREATE TABLE oauth_providers (
+                id                      TEXT PRIMARY KEY,
+                kind                    TEXT NOT NULL,
+                name                    TEXT NULL,
+                client_id               TEXT NULL,
+                client_secret_protected TEXT NULL,
+                tenant                  TEXT NULL,
+                authorize_url           TEXT NULL,
+                token_url               TEXT NULL,
+                userinfo_url            TEXT NULL,
+                default_scopes          TEXT NOT NULL DEFAULT '[]',
+                updated_at              TEXT NOT NULL
+            );
+
+            CREATE TABLE connections (
+                id                      TEXT PRIMARY KEY,
+                name                    TEXT NOT NULL,
+                provider                TEXT NOT NULL,
+                account                 TEXT NOT NULL,
+                scopes                  TEXT NOT NULL DEFAULT '[]',
+                refresh_token_protected TEXT NULL,
+                access_token_protected  TEXT NULL,
+                access_expires_at       TEXT NULL,
+                connected_at            TEXT NOT NULL,
+                refreshed_at            TEXT NULL,
+                status                  TEXT NOT NULL DEFAULT 'ok',
+                status_reason           TEXT NULL,
+                connected_by            TEXT NULL
+            );
+
+            CREATE TABLE connection_flows (
+                state             TEXT PRIMARY KEY,
+                user_id           TEXT NOT NULL,
+                provider          TEXT NOT NULL,
+                scopes            TEXT NOT NULL DEFAULT '[]',
+                name              TEXT NULL,
+                reconnect_id      TEXT NULL,
+                redirect_uri      TEXT NOT NULL,
+                loopback          INTEGER NOT NULL DEFAULT 0,
+                verifier_protected TEXT NOT NULL,
+                issued_at         TEXT NOT NULL,
+                used_at           TEXT NULL
+            );
+
+            ALTER TABLE team_member_config ADD COLUMN connections_json TEXT NOT NULL DEFAULT '{}';
+            """),
     ];
 }

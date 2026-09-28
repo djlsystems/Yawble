@@ -10,7 +10,8 @@ namespace Harness.Host;
 ///
 /// REQUIRED NOW: <c>schemaVersion</c>, <c>id</c>, <c>name</c>, <c>description</c>, <c>version</c>,
 /// <c>protocol</c>, <c>executable</c>. OPTIONAL NOW: <c>timeoutSeconds</c>, <c>config</c>,
-/// <c>secrets</c>, <c>events.publishes</c>, <c>skills</c>, <c>platforms</c>, <c>requires</c>.
+/// <c>secrets</c>, <c>events.publishes</c>, <c>skills</c>, <c>platforms</c>, <c>requires</c>,
+/// <c>connections</c>.
 /// RESERVED - kept as raw JSON, validated by nothing, acted on by nothing yet: <c>actions</c>,
 /// <c>consumes</c>, <c>health</c>, <c>signature</c>, <c>publisher</c>, <c>minHostVersion</c>,
 /// <c>permits</c>. A key this version does not know is IGNORED and named in
@@ -38,6 +39,12 @@ public sealed record PluginManifest(
     /// the Host's PATH when the catalog loads it. Empty for a self-contained binary.</summary>
     public IReadOnlyList<string> Requires { get; init; } = [];
 
+    /// <summary>The accounts at OAuth providers this plugin acts on, by slot: each bound per member to
+    /// a person's connection, whose fresh access token the run receives on stdin. Empty when the
+    /// manifest has no <c>connections</c>, which behaves exactly as before.</summary>
+    public IReadOnlyDictionary<string, PluginConnectionSlot> Connections { get; init; } =
+        new Dictionary<string, PluginConnectionSlot>(StringComparer.Ordinal);
+
     /// <summary>
     /// What the image guarantees and a manifest's <c>requires</c> may name. Everything else a plugin
     /// needs lives in its own folder; nothing a plugin needs is ever added to the image.
@@ -63,7 +70,7 @@ public sealed record PluginManifest(
     private static readonly IReadOnlySet<string> KnownKeys = new HashSet<string>(StringComparer.Ordinal)
     {
         "schemaVersion", "id", "name", "description", "version", "protocol", "executable",
-        "timeoutSeconds", "config", "secrets", "events", "skills", "platforms", "requires",
+        "timeoutSeconds", "config", "secrets", "events", "skills", "platforms", "requires", "connections",
     };
 
     /// <summary>This machine's platform key, as the <c>platforms</c> map names it.</summary>
@@ -303,6 +310,20 @@ public sealed record PluginManifest(
                 }
             }
 
+            var connections = new Dictionary<string, PluginConnectionSlot>(StringComparer.Ordinal);
+
+            if (root.TryGetProperty("connections", out var connectionsElement) && connectionsElement.ValueKind != JsonValueKind.Null)
+            {
+                if (connectionsElement.ValueKind != JsonValueKind.Object) return (null, "`connections` must be an object of slot name to slot.");
+
+                foreach (var slot in connectionsElement.EnumerateObject())
+                {
+                    var (parsed, refusal) = PluginConnectionSlot.Parse(slot.Name, slot.Value);
+                    if (refusal is not null) return (null, refusal);
+                    connections[slot.Name] = parsed!;
+                }
+            }
+
             var reserved = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             var ignored = new List<string>();
 
@@ -320,7 +341,7 @@ public sealed record PluginManifest(
 
             return (new PluginManifest(
                 id, name, description, version, protocol, path, arguments, timeout, config, secrets,
-                publishes, skills, platforms, reserved, ignored) { Requires = requires }, null);
+                publishes, skills, platforms, reserved, ignored) { Requires = requires, Connections = connections }, null);
         }
     }
 
@@ -505,4 +526,128 @@ public sealed record PluginPublishedEvent(
         EventCatalog.PluginType(id, Type), EventPublisher.Plugin, HighVolume, InLedger: true,
         [EventCatalog.SourceField, .. Fields ?? []],
         Summary);
+}
+
+/// <summary>
+/// One <c>connections</c> slot: the account a plugin acts on, bound per member to a person's
+/// connection. <paramref name="Providers"/> are <c>google</c>, <c>microsoft</c>, <c>custom</c> (any
+/// custom provider) or one <c>custom-&lt;id&gt;</c>. <paramref name="Scopes"/> is keyed by those same
+/// words: what a connection of that provider must have been granted to be bound here.
+/// </summary>
+public sealed record PluginConnectionSlot(
+    string Description,
+    IReadOnlyList<string> Providers,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> Scopes,
+    bool Required)
+{
+    /// <summary>The scopes this slot asks of a connection of <paramref name="providerId"/>: its own
+    /// entry, or the <c>custom</c> entry for a custom provider.</summary>
+    public IReadOnlyList<string> ScopesFor(string providerId) =>
+        Scopes.TryGetValue(providerId, out var own) ? own
+        : ConnectionProviders.IsCustomId(providerId) && Scopes.TryGetValue(ConnectionProviders.Custom, out var custom) ? custom
+        : [];
+
+    /// <summary>Whether a connection of <paramref name="providerId"/> may be bound here.</summary>
+    public bool Admits(string providerId) => Providers.Any(p => ConnectionProviders.Admits(p, providerId));
+
+    /// <summary>"needs a Google or Microsoft connection", as the Plugins screen says it.</summary>
+    public string Summary
+    {
+        get
+        {
+            var names = Providers.Select(ConnectionProviders.Display).ToList();
+            var joined = names.Count <= 1 ? string.Concat(names)
+                : string.Join(", ", names.Take(names.Count - 1)) + " or " + names[^1];
+            return (Required ? "needs" : "may use") + $" a {joined} connection";
+        }
+    }
+
+    public static (PluginConnectionSlot? Slot, string? Refusal) Parse(string name, JsonElement element)
+    {
+        if (!PluginManifest.IsConfigName(name)) return (null, $"`connections.{name}` is not a usable slot name.");
+        if (element.ValueKind != JsonValueKind.Object) return (null, $"`connections.{name}` must be an object.");
+
+        if (!element.TryGetProperty("providers", out var providersElement) || providersElement.ValueKind != JsonValueKind.Array
+            || providersElement.GetArrayLength() == 0
+            || providersElement.EnumerateArray().Any(p => p.ValueKind != JsonValueKind.String))
+        {
+            return (null, $"`connections.{name}.providers` must be a non-empty array of provider names (google, microsoft, custom).");
+        }
+
+        var providers = new List<string>();
+
+        foreach (var provider in providersElement.EnumerateArray().Select(p => p.GetString()!))
+        {
+            if (provider is not (ConnectionProviders.Google or ConnectionProviders.Microsoft or ConnectionProviders.Custom)
+                && !ConnectionProviders.IsCustomId(provider))
+            {
+                return (null, $"`connections.{name}.providers` names '{provider}', which is not a provider this Host knows (google, microsoft, custom, or custom-<id>).");
+            }
+
+            if (!providers.Contains(provider, StringComparer.Ordinal)) providers.Add(provider);
+        }
+
+        var scopes = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+
+        if (element.TryGetProperty("scopes", out var scopesElement) && scopesElement.ValueKind != JsonValueKind.Null)
+        {
+            if (scopesElement.ValueKind == JsonValueKind.Array)
+            {
+                if (ScopeList(scopesElement) is not { } all) return (null, $"`connections.{name}.scopes` must hold scope strings.");
+                foreach (var provider in providers) scopes[provider] = all;
+            }
+            else if (scopesElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var entry in scopesElement.EnumerateObject())
+                {
+                    if (!providers.Contains(entry.Name, StringComparer.Ordinal))
+                    {
+                        return (null, $"`connections.{name}.scopes` has an entry for '{entry.Name}', which `providers` does not name.");
+                    }
+
+                    if (entry.Value.ValueKind != JsonValueKind.Array || ScopeList(entry.Value) is not { } list)
+                    {
+                        return (null, $"`connections.{name}.scopes.{entry.Name}` must be an array of scope strings.");
+                    }
+
+                    scopes[entry.Name] = list;
+                }
+            }
+            else
+            {
+                return (null, $"`connections.{name}.scopes` must be an array of scopes, or an object of provider to scopes.");
+            }
+        }
+
+        if (element.TryGetProperty("required", out var required) && required.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return (null, $"`connections.{name}.required` must be true or false.");
+        }
+
+        if (element.TryGetProperty("description", out var description) && description.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+        {
+            return (null, $"`connections.{name}.description` must be a string.");
+        }
+
+        return (new PluginConnectionSlot(
+            description.ValueKind == JsonValueKind.String ? description.GetString()! : "",
+            providers, scopes, required.ValueKind == JsonValueKind.True), null);
+    }
+
+    private static IReadOnlyList<string>? ScopeList(JsonElement array)
+    {
+        var list = new List<string>();
+
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()) || item.GetString()!.Any(char.IsWhiteSpace))
+            {
+                return null;
+            }
+
+            if (!list.Contains(item.GetString()!, StringComparer.Ordinal)) list.Add(item.GetString()!);
+        }
+
+        return list;
+    }
 }
