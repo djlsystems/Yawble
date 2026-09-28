@@ -80,6 +80,16 @@ describe('Admin > Repositories', () => {
     expect(empty).toContain('none');
   });
 
+  // B001F: a deleted team's local repository is kept, so an unused one is said to be unused.
+  it('marks a repository no team uses as unused, and one a team uses by its team', async () => {
+    listLocalRepos.mockResolvedValue([{ ...widget, unused: false }, { ...gadget, unused: true }]);
+    await open();
+
+    expect(bodyFind('[data-local-repo="gadget"] [data-local-repo-unused]')?.textContent).toContain('unused');
+    expect(bodyFind('[data-local-repo="widget"] [data-local-repo-unused]')).toBeNull();
+    expect(bodyFind('[data-local-repo="widget"]')!.textContent).toContain('Alpha Team');
+  });
+
   it('asks before deleting, sends nothing on Cancel, and deletes and re-lists on confirm', async () => {
     await open();
 

@@ -342,6 +342,9 @@ export interface TeamDeleted {
    * that stops it removing the root at all.
    */
   documentsKept: string | null
+
+  /** The `local:<name>` repositories the team had, which were KEPT; delete them in Admin -> Repositories. */
+  localRepositoriesKept?: string[]
 }
 
 /**
@@ -2381,4 +2384,50 @@ export interface LocalRepo {
   lastCommit: { sha: string; subject: string; committedAt: string | null } | null
   /** Every team whose repositories name it, by id. */
   teams: string[]
+  /**
+   * No team's list names it (`teams` empty). A team's local repository is kept when the team is
+   * deleted, so this is how one left behind is found and deleted. Optional only for an older Host.
+   */
+  unused?: boolean
+}
+
+/**
+ * What a person may answer a refused repository check with, per URL, in `repoChoices` (B001F).
+ * `create-on-github` and `attach-anyway` are a person's; an agent is only ever offered `use-local`.
+ */
+export type RepoChoice = 'create-on-github' | 'use-local' | 'attach-anyway'
+
+/** One URL `git ls-remote` could not read, as the 422 names it. */
+export interface RepoCheckFailure {
+  url: string
+  /** `not-found` (missing or not readable) or `unreachable` (a network failure). */
+  failure: string
+  /** Git's own words. */
+  reason: string
+  /** The choices THIS caller may send for this URL, in display order. */
+  choices: string[]
+}
+
+/** The 422 `code: "repo-check-failed"` body: nothing was created, and each URL needs a choice. */
+export interface RepoCheckRefusal {
+  /** The server's sentence, naming the URL and git's reason. Shown as it came. */
+  error: string
+  code: 'repo-check-failed'
+  repos: RepoCheckFailure[]
+}
+
+/** `POST /api/teams`'s answer: the team, and what was made for its repositories along the way. */
+export type TeamCreated = Team & {
+  /** The local repository attached (the default, or `use-local`). Absent when none was. */
+  localRepository?: TeamLocalRepository
+  /** The github.com URLs a `create-on-github` choice created. Absent when none. */
+  createdOnGitHub?: string[]
+}
+
+/** The team's local repository, as a create or `POST /api/teams/{team}/local-repo` attached it. */
+export interface TeamLocalRepository {
+  name: string
+  reference: string
+  /** False when an unused one of that name was reused. */
+  created: boolean
 }

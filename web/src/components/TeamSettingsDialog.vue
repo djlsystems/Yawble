@@ -3,8 +3,10 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useConsoleStore } from '../stores/console';
 import {
+  createTeamLocalRepo,
   deleteMember,
   listCatalog,
+  repoCheckRefusal,
   setMemberAgents,
   setTeamAdditionalInstructions,
   setTeamRepos,
@@ -55,7 +57,9 @@ import AddMemberDialog from './AddMemberDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import ForkItForMe from './ForkItForMe.vue';
 import LocalRepoPicker from './LocalRepoPicker.vue';
-import type { ForkResult } from '../api/types';
+import RepoCheckRefusal from './RepoCheckRefusal.vue';
+import { afterRefusal, withChoice } from '../lib/repoChoices';
+import type { ForkResult, RepoCheckRefusal as RepoCheckRefused, RepoChoice } from '../api/types';
 
 /**
  * Settings for the active team.
@@ -150,6 +154,53 @@ const agentsLoading = ref(false);
 const additionalInstructions = ref('');
 const repoInput = ref('');
 const repos = ref<string[]>([]);
+
+/**
+ * A REFUSED ATTACH: a URL new to this team that `git ls-remote` could not read. The list is
+ * unchanged on the Host. The Host's sentence and only its choices are shown; once every named URL
+ * has one, Save runs again and sends the list with `repoChoices`.
+ */
+const refusal = ref<RepoCheckRefused | null>(null);
+const repoChoices = ref<Record<string, RepoChoice>>({});
+
+/** A changed list is a different request: a refusal of the old one no longer answers it. */
+watch(repos, () => {
+  refusal.value = null;
+  repoChoices.value = {};
+}, { deep: true });
+
+function choose(url: string, choice: RepoChoice) {
+  if (!refusal.value || saving.value) return;
+  const next = withChoice(repoChoices.value, refusal.value, url, choice);
+  repoChoices.value = next.choices;
+  if (next.ready) void save();
+}
+
+/**
+ * "Create a local repository", beside Add, for a team with no repository at all: the team's own,
+ * named as a new team's is (`local:<team id>`, or an unused one of that name reused). Made and
+ * attached by the Host at once, not on Save - it is its own action, as Fork it for me is.
+ */
+const showCreateLocal = computed(() => (team.value?.repos ?? []).length === 0 && repos.value.length === 0);
+const creatingLocal = ref(false);
+const createLocalProblem = ref('');
+
+async function createLocal() {
+  if (!team.value || creatingLocal.value) return;
+  creatingLocal.value = true;
+  createLocalProblem.value = '';
+
+  try {
+    const made = await createTeamLocalRepo(team.value.id);
+    await board.refresh();
+    repos.value = [...(made.team.repos ?? [made.localRepository.reference])];
+    $q.notify({ type: 'positive', timeout: 5000, message: `${made.localRepository.reference} is attached.` });
+  } catch (cause) {
+    createLocalProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    creatingLocal.value = false;
+  }
+}
 
 /**
  * What ONE workflow on this team may spend, in tokens, input and output together.
@@ -622,7 +673,13 @@ async function save() {
     }
 
     if (reposChanged.value) {
-      await setTeamRepos(team.value.id, repos.value);
+      // With choices only when answering a refusal: otherwise the bare list, as before.
+      const saved = Object.keys(repoChoices.value).length > 0
+        ? await setTeamRepos(team.value.id, repos.value, repoChoices.value)
+        : await setTeamRepos(team.value.id, repos.value);
+
+      // What the Host stored, which `use-local` makes differ from what was sent.
+      if (saved?.repos) repos.value = [...saved.repos];
     }
 
     // After the list: each fork made here gets its upstream and owner.
@@ -670,6 +727,14 @@ async function save() {
     // make the field disagree with what was actually stored until the next opening.
     displayName.value = team.value?.name ?? displayName.value.trim();
   } catch (cause) {
+    const refused = repoCheckRefusal(cause);
+    if (refused) {
+      repoChoices.value = afterRefusal(repoChoices.value, refused);
+      refusal.value = refused;
+      tab.value = 'repos';
+      return;
+    }
+
     saveError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     saving.value = false;
@@ -696,6 +761,9 @@ watch(open, (showing) => {
   additionalInstructions.value = team.value?.additionalInstructions ?? '';
   repos.value = [...(team.value?.repos ?? [])];
   repoInput.value = '';
+  refusal.value = null;
+  repoChoices.value = {};
+  createLocalProblem.value = '';
   pendingForks.value = {};
   contributorDrafts.value = Object.fromEntries(
     (team.value?.contributors ?? []).map((entry) => [entry.repo, contributorDraft(entry)]),
@@ -1070,6 +1138,24 @@ watch(open, (showing) => {
                 :disable="!canAddRepo"
                 @click="addRepo"
               />
+              <q-btn
+                v-if="showCreateLocal"
+                class="col-auto q-ml-sm"
+                outlined
+                dense
+                no-caps
+                label="Create a local repository"
+                data-create-team-local-repo
+                :loading="creatingLocal"
+                @click="createLocal"
+              />
+            </div>
+            <div v-if="showCreateLocal" class="text-caption os-text-muted q-mt-xs">
+              This team has no repository. Create a local repository makes one named after the team,
+              on this instance only, and attaches it now.
+            </div>
+            <div v-if="createLocalProblem" class="os-body text-negative q-mt-xs" data-create-team-local-repo-problem>
+              {{ createLocalProblem }}
             </div>
 
             <ForkItForMe @forked="addFork" />
@@ -1229,6 +1315,15 @@ watch(open, (showing) => {
                 </q-item>
               </q-list>
             </template>
+
+            <RepoCheckRefusal
+              v-if="refusal"
+              class="q-mt-md"
+              :refusal="refusal"
+              :chosen="repoChoices"
+              :busy="saving"
+              @choose="choose"
+            />
 
             <q-banner v-if="saveError" dense class="os-bg-tint-error text-negative q-mt-md">
               <template #avatar><q-icon name="error" /></template>
