@@ -136,6 +136,36 @@ describe('MemberSettingsDialog, mounted', () => {
     wrapper.unmount();
   });
 
+  it('sends only what changed: no name when the name is unchanged', async () => {
+    listCatalog.mockResolvedValue({ agents: [{ name: 'claude', mode: 'Headless' }, { name: 'codex', mode: 'Headless' }] });
+    const wrapper = await mountSettings(['claude', 'codex']);
+
+    // Retyped with a trailing space: trimmed, it is the same name.
+    await type('Member name', 'Scout ');
+    const agent = wrapper.findAllComponents({ name: 'QSelect' }).find((select) => select.props('label') === 'Agent')!;
+    agent.vm.$emit('update:modelValue', 'codex');
+    await settle();
+    button('Save').click();
+    await settle();
+
+    expect(updateMember).toHaveBeenCalledTimes(1);
+    expect(updateMember.mock.calls[0]![2]).toEqual({ agent: 'codex' });
+
+    wrapper.unmount();
+  });
+
+  it('writes nothing when nothing changed', async () => {
+    const wrapper = await mountSettings();
+
+    button('Save').click();
+    await settle();
+
+    expect(updateMember).not.toHaveBeenCalled();
+    expect(bodyText()).not.toContain('Member settings');
+
+    wrapper.unmount();
+  });
+
   it('saves on Enter in the name', async () => {
     const wrapper = await mountSettings();
 
@@ -223,7 +253,6 @@ describe('MemberSettingsDialog, the member\'s own instructions', () => {
     expect(updateMember).toHaveBeenCalledTimes(1);
     expect(updateMember.mock.calls[0]!.slice(0, 2)).toEqual(['alpha', 'scout']);
     expect(updateMember.mock.calls[0]![2]).toEqual({
-      name: 'Scout',
       systemPrompt: 'You review pull requests.\nNever merge.',
     });
 
@@ -238,7 +267,7 @@ describe('MemberSettingsDialog, the member\'s own instructions', () => {
     button('Save').click();
     await settle();
 
-    expect(updateMember.mock.calls[0]![2]).toEqual({ name: 'Scout', systemPrompt: '' });
+    expect(updateMember.mock.calls[0]![2]).toEqual({ systemPrompt: '' });
 
     wrapper.unmount();
   });

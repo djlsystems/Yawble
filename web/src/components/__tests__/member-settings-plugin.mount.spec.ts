@@ -271,7 +271,7 @@ describe('MemberSettingsDialog, a plugin member', () => {
     await settle();
 
     expect(savePluginSettings).not.toHaveBeenCalled();
-    expect(updateMember).toHaveBeenCalledTimes(1);
+    expect(updateMember).not.toHaveBeenCalled();
 
     wrapper.unmount();
   });

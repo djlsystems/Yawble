@@ -269,7 +269,11 @@ async function submit() {
       pluginSaved.value = JSON.stringify(pluginBody.value);
     }
 
-    const body: { name?: string; agent?: string; systemPrompt?: string } = { name: name.value.trim() };
+    // ONLY WHAT CHANGED. `name` goes only on a rename: the Host records every PATCH that names one
+    // as `member.changed {"renamed": true}`, so sending it unchanged logged a rename nobody made.
+    const body: { name?: string; agent?: string; systemPrompt?: string } = {};
+
+    if (renamedTo !== null) body.name = renamedTo;
 
     // Sent only when it actually moved. The server treats an unchanged Agent as a no-op anyway,
     // but sending it regardless would make every save look like a repoint in the API log.
@@ -278,6 +282,14 @@ async function submit() {
     // Only when it moved, so a rename is not recorded as an edit of the instructions. Blank is sent
     // as blank, which clears them.
     if (instructionsChanged.value) body.systemPrompt = instructions.value.trim();
+
+    // A save that changes nothing about the member writes nothing: no PATCH, no tenant row.
+    if (Object.keys(body).length === 0) {
+      open.value = false;
+      $q.notify({ type: 'positive', message: `${props.snapshot.name} saved.`, timeout: 4000 });
+      emit('saved', props.snapshot);
+      return;
+    }
 
     let updated: ContainerSnapshot;
     try {
