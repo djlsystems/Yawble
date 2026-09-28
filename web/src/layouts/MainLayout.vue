@@ -30,12 +30,21 @@ import ApiKeysDialog from '../components/ApiKeysDialog.vue';
 import SkillsDialog from '../components/SkillsDialog.vue';
 import PluginsDialog from '../components/PluginsDialog.vue';
 import LocalReposDialog from '../components/LocalReposDialog.vue';
+import SitesDialog from '../components/SitesDialog.vue';
 import ConciergePanel from '../components/ConciergePanel.vue';
 import StatusStrip from '../components/StatusStrip.vue';
 import VersionTag from '../components/VersionTag.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
-import { ConnectionsAction, DocumentsAction, PluginsAction, RepositoriesAction, TenantSettingsAction } from '../lib/ribbon';
+import {
+  ConnectionsAction,
+  DocumentsAction,
+  PluginsAction,
+  RepositoriesAction,
+  SitesAction,
+  TeamSitesAction,
+  TenantSettingsAction,
+} from '../lib/ribbon';
 
 const board = useConsoleStore();
 const { connected } = storeToRefs(board);
@@ -137,6 +146,9 @@ onMounted(() => {
   void router.replace({ query: {} });
 });
 const repositoriesOpen = ref(false);
+/** Admin > Sites, and Active Team > Sites, which is the same screen with `sitesTeam` set. */
+const sitesOpen = ref(false);
+const sitesTeam = ref<TeamId | null>(null);
 const resetOpen = ref(false);
 const backlogOpen = ref(false);
 const tenantLogOpen = ref(false);
@@ -236,6 +248,7 @@ function onRibbonAction(action: string) {
   if (action === 'team-kanban') kanban.openForTeam(board.activeWorkTeamId);
   else if (action === 'team-git') gitOpen.value = true;
   else if (action === 'team-reset') resetOpen.value = true;
+  else if (action === TeamSitesAction) openSites(board.activeWorkTeamId || null);
   // UNPREFIXED, deliberately, and for the same reasons as `backlog` below - see `lib/ribbon.ts`.
   // Documents live under one tenant root, so this needs no active team.
   else if (action === DocumentsAction) documentsOpen.value = true;
@@ -257,7 +270,14 @@ function onRibbonAction(action: string) {
     connectionsOpen.value = true;
   }
   else if (action === RepositoriesAction) repositoriesOpen.value = true;
+  else if (action === SitesAction) openSites(null);
   else if (action === TenantSettingsAction) tenantSettingsOpen.value = true;
+}
+
+/** Every team's sites, or one team's. */
+function openSites(team: TeamId | null) {
+  sitesTeam.value = team;
+  sitesOpen.value = true;
 }
 
 /**
@@ -508,6 +528,7 @@ async function signOut() {
     <PluginsDialog v-model="pluginsOpen" />
     <ConnectionsDialog v-model="connectionsOpen" :notice="connectionNotice" />
     <LocalReposDialog v-model="repositoriesOpen" />
+    <SitesDialog v-model="sitesOpen" :team="sitesTeam" />
     <!-- Guarded on there BEING an active team, because the dialog reads that team's members and
          addresses it by id. The ribbon disables a `team-` action without one, so this is a
          backstop rather than the way anyone meets the rule - but the prop is non-nullable and a

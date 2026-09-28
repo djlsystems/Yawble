@@ -27,7 +27,7 @@ public static class BuiltInSkills
         """
         ## How you reach the platform
 
-        The platform is reached through the MCP tools on the server named `harness`, and through nothing else. The tools are `skills_get`, `skills_search`, `tell`, `progress`, `blocked`, `handback`, `needs_decision`, `workflow_complete`, `workflow_show`, `team_list`, `team_current`, `team_create`, `wip`, `status`, `hiring`, `member`, `kanban`, `backlog`, and `repo`. `skills_get` loads a skill by name and `skills_search` finds skills for your role by text. Pass `HARNESS_CAUSATION` as `causation` on every `tell`; a Concierge uses the number in `STEERING.md` instead when it is set. A tool refusal is the answer - there is no URL to fetch by hand.
+        The platform is reached through the MCP tools on the server named `harness`, and through nothing else. The tools are `skills_get`, `skills_search`, `tell`, `progress`, `blocked`, `handback`, `needs_decision`, `workflow_complete`, `workflow_show`, `team_list`, `team_current`, `team_create`, `wip`, `status`, `hiring`, `member`, `kanban`, `backlog`, `repo`, and `site`. `skills_get` loads a skill by name and `skills_search` finds skills for your role by text. Pass `HARNESS_CAUSATION` as `causation` on every `tell`; a Concierge uses the number in `STEERING.md` instead when it is set. A tool refusal is the answer - there is no URL to fetch by hand.
 
         ## Processes you start
 
@@ -948,6 +948,10 @@ public static class BuiltInSkills
             - `needsDecision` - it needs a person or the Manager to choose.
             - `handback` - it hands work back and wakes the Manager once.
             - `publish` - one of the events the manifest declares, as `plugin.<id>.<suffix>`.
+            - `site.put` and `site.delete` - write or delete one document in a site of the plugin's
+              own team (`{"t":"site.put","site":"...","collection":"...","id":"...","doc":{...}}`), so
+              a plugin can feed a page a person watches. Redacted like every other record; a limit,
+              another team or a missing site drops the record with a warning. See `building-sites`.
             - `result` - exactly one, last: `ok` with its output, or a failure in its own words. The
               optional `quiet` on a result means the run had nothing to report: it is recorded as
               usual but wakes nobody. A failed run, a published event and a hand-back still wake as
@@ -1202,6 +1206,156 @@ public static class BuiltInSkills
 
             Never `pkill` or `killall` by name. Report what you checked, what passed, what failed, and
             where the screenshots are.
+            """),
+        new(
+            "building-sites",
+            "Use when a person needs a working page - a tracker, a queue, an approval screen, a "
+            + "dashboard over a plugin's data: the site model, the helper script, the security limits "
+            + "and the site tool.",
+            [SkillRoles.Concierge, SkillRoles.Manager, SkillRoles.Member],
+            """
+            # Building sites
+
+            A site is a small web page your team publishes and the platform serves to signed-in
+            people. It has no server of its own: the platform is its backend. Use one when a person
+            needs to see and act on something - a job list with Apply buttons, a triage queue, an
+            approval page - rather than read a document.
+
+            ## 1. The model
+
+            - **Static files**: HTML, JS, CSS, images, JSON. Nothing in a site runs on the platform.
+            - **Data**: per site, named collections of JSON documents (id to document, with who
+              changed it last and when). The page, your team's agents (the `site` tool) and your
+              team's plugins (`site.put` records) all read and write the same data.
+            - **Actions**: a click calls `site.action(name, payload)`. That appends one `site.action`
+              event to the team's log, and an event trigger turns it into work for a member.
+            - **Triggers**: a person adds an event trigger on `site.action` in the team's Triggers
+              dialog, narrowed with a filter: `site eq <site>` for every action on the site, or
+              `siteAction eq <site>/<action>` for one action.
+
+            A site's name is a slug: lower-case letters, digits and single hyphens. It is unique
+            within the team.
+
+            ## 2. The site tool
+
+            You act on your own team's sites. A Concierge passes `team`.
+
+                site  action: create     site: triage
+                site  action: publish    site: triage  folder: <absolute path>
+                site  action: list
+                site  action: show       site: triage
+                site  action: rollback   site: triage             (or version: <n>)
+                site  action: unpublish  site: triage
+                site  action: actions    site: triage  take: 20
+                site  action: data  op: list    site: triage  collection: items
+                site  action: data  op: get     site: triage  collection: items  id: t1
+                site  action: data  op: put     site: triage  collection: items  id: t1  doc: {"title":"..."}
+                site  action: data  op: delete  site: triage  collection: items  id: t1
+
+            - **publish** copies the folder into a new version and makes it live only once the copy
+              is complete, so keep editing your working copy freely. The folder must be in the
+              team's documents folder (named in your prompt) or under the team folder (your
+              worktree or workspace), and hold an `index.html`. Links and dot-files are not copied.
+              The last five versions are kept.
+            - **show** answers the versions, the collections, the data size and the path a person
+              opens the site at. Tell the person that path; it is also in Admin > Sites with Open.
+            - **actions** reads the recent clicks, read only.
+            - **Deleting a site is a person's action**, in Admin > Sites. Unpublish keeps the files
+              and the data.
+
+            ## 3. The helper script
+
+            Include it as a plain script, with no build step:
+
+                <script src="/sites/_sdk/site.js"></script>
+
+            | Call | Answers |
+            |---|---|
+            | `site.data.list(collection)` | `[{ id, doc, updatedAt, updatedBy }]` |
+            | `site.data.get(collection, id)` | `{ id, doc, updatedAt, updatedBy }`, or `null` |
+            | `site.data.put(collection, id, doc)` | the document as written |
+            | `site.data.delete(collection, id)` | `true` when there was one |
+            | `site.action(name, payload)` | `{ seq }` |
+            | `site.whoami()` | `{ displayName }` |
+
+            Every call returns a Promise. A refusal rejects with an Error whose message is the
+            platform's sentence: show it to the person.
+
+            ## 4. The security limits
+
+            A site runs in a sandbox with an opaque origin, so a script in it can never act as the
+            person. Build for that:
+
+            - **No external network.** Scripts, styles, images and fonts load from the site's own
+              files only (plus the helper script). No CDN, no web fonts, no analytics. Calls reach
+              the site's own data and actions only. Copy a library into the folder if you need one.
+            - **Nothing inline.** No inline `<script>`, no `onclick=` attributes, no `style=`
+              attributes. Put code in a `.js` file and styles in a `.css` file.
+            - **No localStorage, sessionStorage, IndexedDB or cookies.** An opaque origin has no
+              storage; touching `localStorage` throws. Keep state in `site.data`, or in memory.
+            - **No `alert`, `confirm` or `prompt`**, and no popups. Ask with an input on the page.
+            - **Forms are handled by script.** A form cannot post anywhere; listen for the click or
+              `submit` and call `event.preventDefault()`.
+            - **Render untrusted text with `textContent`, never `innerHTML`.** A document's fields
+              may hold anything a plugin or an agent scraped - a job posting, an email. Build elements
+              with `document.createElement`, or clone a `<template>`, and set `textContent`. Never
+              put fetched content into `innerHTML`, `outerHTML`, `insertAdjacentHTML` or
+              `document.write`.
+            - **No push.** Re-read on an interval (a few seconds) and on `focus`.
+
+            Limits, each refused with a sentence: 64 KB a document, 10 000 documents a collection,
+            50 MB a site, 16 KB an action's payload, and an action name must be a slug. Keep an
+            action's payload to ids and a few fields; keep the rest in the data.
+
+            ## 5. Worked example: a plugin's data, an action, a member woken
+
+            `samples/sites/triage` in the platform's repository is this example, ready to publish.
+
+            1. **Data.** A plugin member of the team writes each item it finds, one record per line
+               on its output:
+
+                   {"t":"site.put","site":"triage","collection":"items","id":"t1","doc":{"title":"Printer on 3 is jammed","status":"open"}}
+
+               A plugin writes only to its own team's sites. You can seed or fix items the same way
+               with `site  action: data  op: put`.
+
+            2. **The page** lists the collection and posts an action per click:
+
+                   async function render() {
+                     const list = document.getElementById('items');
+                     const rows = [];
+                     for (const item of await site.data.list('items')) {
+                       const li = document.createElement('li');
+                       const title = document.createElement('span');
+                       title.textContent = item.doc.title;   // never innerHTML
+                       const done = document.createElement('button');
+                       done.textContent = 'Done';
+                       done.disabled = item.doc.status === 'done';
+                       done.addEventListener('click', () => site.action('done', { id: item.id }).then(render));
+                       li.append(title, ' ', done);
+                       rows.push(li);
+                     }
+                     list.replaceChildren(...rows);
+                   }
+                   render();
+                   setInterval(render, 5000);
+                   addEventListener('focus', render);
+
+            3. **Publish** it: `site action: create`, then `site action: publish` with the folder.
+
+            4. **The trigger.** Ask the person to add an event trigger in the team's Triggers dialog:
+               event type `site.action`, filter `siteAction eq triage/done`, the member to wake, and
+               an instruction such as "A person marked {event.payload} done on the triage site
+               ({event.by}). Read that item with the site tool, set its status to done and put it
+               back." Each click then starts a new workflow for that member.
+
+            5. **The member's run** reads the item with `site  action: data  op: get`, writes it
+               back with `"status":"done"` using `op: put`, and the page shows the change on its next
+               read.
+
+            An action widens nothing: it is a person's click carried to the team. A member woken by
+            one does only what it could do anyway, and a plugin's outward-acting settings still need
+            their person-only allowlist.
             """),
     ];
 

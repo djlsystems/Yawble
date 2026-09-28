@@ -59,7 +59,8 @@ public sealed class HostFixture : IAsyncLifetime
     }
 
     /// <summary>A caller holding nothing: no cookie, no key.</summary>
-    public HttpClient Anonymous() => _factory.CreateClient();
+    public HttpClient Anonymous(bool allowAutoRedirect = true) =>
+        _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = allowAutoRedirect });
 
     /// <summary>A handler into this Host's in-memory server, for code that makes its own clients.</summary>
     public HttpMessageHandler ServerHandler() => _factory.Server.CreateHandler();
@@ -71,9 +72,9 @@ public sealed class HostFixture : IAsyncLifetime
         return client;
     }
 
-    public async Task<HttpClient> PersonAsync()
+    public async Task<HttpClient> PersonAsync(bool allowAutoRedirect = true)
     {
-        var client = _factory.CreateClient();
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = allowAutoRedirect });
         var login = await client.PostAsJsonAsync(
             "/api/auth/login", new { email = "person@example.test", password = Password });
 

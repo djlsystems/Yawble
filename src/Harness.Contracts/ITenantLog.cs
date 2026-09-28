@@ -255,6 +255,23 @@ public static class TenantActions
     /// </summary>
     public const string TenantAgentConverted = "tenant-agent.converted";
 
+    /// <summary>A team's site was created. Subject is <c>&lt;team&gt;/&lt;site&gt;</c>, as on every site row.</summary>
+    public const string SiteCreated = "site.created";
+
+    /// <summary>A new version of a site was copied and made live. Detail carries the version, the
+    /// source folder, its file count and bytes, and the version it replaced.</summary>
+    public const string SitePublished = "site.published";
+
+    /// <summary>An earlier kept version of a site was made live again.</summary>
+    public const string SiteRolledBack = "site.rolled-back";
+
+    /// <summary>A site stopped being served. Its versions and data are kept.</summary>
+    public const string SiteUnpublished = "site.unpublished";
+
+    /// <summary>A site, its versions and its data were deleted - by a person who confirmed, or by
+    /// its team's deletion (no actor, detail <c>reason: team deleted</c>).</summary>
+    public const string SiteDeleted = "site.deleted";
+
     // ONLY ACTIONS SOMETHING WRITES ARE LISTED HERE. A tenant-log action nobody writes is a row type
     // that can never appear. Rows carrying a verb not listed here still read: this table is
     // append-only and the verbs in it can outlive the code that wrote them, which is exactly why

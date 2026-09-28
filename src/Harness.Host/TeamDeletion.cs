@@ -123,7 +123,8 @@ public sealed class TeamDeletion(
     IPrincipalStore principals,
     TeamPaths paths,
     GitRunner git,
-    FolderRemoval? removal = null)
+    FolderRemoval? removal = null,
+    SiteService? sites = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -214,6 +215,20 @@ public sealed class TeamDeletion(
         await principals.RevokeForTeamAsync(stored, ct);
 
         var removedSchedules = await schedules.DeleteForTeamAsync(stored, ct);
+
+        // The team's sites, their files and their data, one tenant row per site, in one
+        // transaction. Keyed by the stored spelling, so a same-name successor starts with none.
+        if (sites is not null)
+        {
+            try
+            {
+                await sites.DeleteTeamAsync(stored, ct);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"sites: {ex.Message}");
+            }
+        }
 
         // 3. The team row. Cascades to team_members.
         await store.DeleteTeamAsync(stored, ct);

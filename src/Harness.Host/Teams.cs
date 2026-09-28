@@ -812,6 +812,10 @@ public sealed class TeamRegistry(
             // It dispatches and then waits. "Dispatched, waiting on Helen Morse" is exactly
             // what a person looking at the board wants to read off the manager's own card.
             Permits.Progress,
+
+            // The team's own sites: publish a page for a person, feed its data. Bounded to its own
+            // team by TeamGate like every other {team} route.
+            Permits.Sites,
         };
 
     /// <summary>
@@ -1131,6 +1135,10 @@ public sealed class TeamRegistry(
                 var command = isPlugin ? null : agents.For(member.Agent);
 
                 var permits = new HashSet<string>(member.Permits, StringComparer.Ordinal);
+
+                // Sites is a member's default (see AddContainerAsync), so one hired before the
+                // permit existed is given it here rather than refused by the skill it is offered.
+                if (!isPlugin) permits.Add(Permits.Sites);
 
                 // Built BEFORE ComposePrompt, not after: C# evaluates constructor arguments
                 // left to right, and ComposePrompt is one of them, so composing the prompt
@@ -2762,6 +2770,12 @@ public sealed class TeamRegistry(
             // This reaches members created from here on; the stored `permits` column is what
             // `RestoreAsync` reads for everyone who already exists.
             Permits.Read,
+
+            // SITES ALWAYS, ON THE SAME TERMS: a member builds the page and feeds its data, bounded
+            // to its own team by TeamGate. Unlike Read this one is also added on restore - a member
+            // hired before the permit existed would otherwise be told by building-sites to publish
+            // and be refused. Delete stays a person's action; no permit reaches it.
+            Permits.Sites,
         };
 
         // Built before ComposePrompt for the same reason RestoreAsync's local is: C# evaluates

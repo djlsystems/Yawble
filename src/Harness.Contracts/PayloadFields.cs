@@ -277,4 +277,23 @@ public static class PayloadFields
     /// </para>
     /// </summary>
     public const string Retryable = "retryable";
+
+    /// <summary>`site.action`: the site's name, a slug unique within its team.</summary>
+    public const string Site = "site";
+
+    /// <summary>`site.action`: the action's name, a slug the page chose.</summary>
+    public const string Action = "action";
+
+    /// <summary>`site.action`: the site and the action together, <c>&lt;site&gt;/&lt;action&gt;</c>,
+    /// so ONE trigger filter (<c>siteAction eq triage/done</c>) narrows to both.</summary>
+    public const string SiteAction = "siteAction";
+
+    /// <summary>`site.action`: what the page sent with the action, a JSON value of at most 16 KB.</summary>
+    public const string Payload = "payload";
+
+    /// <summary>`site.action`: the email of the signed-in person whose click it was.</summary>
+    public const string By = "by";
+
+    /// <summary>`site.action`: when the Host received it, ISO-8601 UTC.</summary>
+    public const string At = "at";
 }

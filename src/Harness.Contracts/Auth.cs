@@ -73,10 +73,21 @@ public static class Permits
     public const string Skills = "Skills";
     public const string SkillsGated = "SkillsGated";
 
+    /// <summary>
+    /// Changing a team's SITES: create, publish, roll back, unpublish, and write or delete their
+    /// data. Its own verb rather than Read, Progress or Skills stretched to cover it: each of those
+    /// is narrow on purpose, and a page a person opens is a different thing to be able to change.
+    /// Reading a site is Read. Deleting one is a person's action and no permit reaches it.
+    ///
+    /// Granted by default to a team's Manager, to every agent member, and to the Concierge - all
+    /// bounded to their own team by <c>TeamGate</c> like every other <c>{team}</c> route.
+    /// </summary>
+    public const string Sites = "Sites";
+
     public static IReadOnlySet<string> All { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         Read, Tell, CreateContainer, CreateTeam, Progress,
-        Skills, SkillsGated,
+        Skills, SkillsGated, Sites,
     };
 }
 

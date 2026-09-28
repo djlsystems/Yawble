@@ -64,7 +64,8 @@ import { useKanbanStore } from '../../stores/kanban';
 import { useTerminalDisplayStore } from '../../stores/terminalDisplay';
 import ConciergePanel from '../../components/ConciergePanel.vue';
 import RibbonBar from '../../components/RibbonBar.vue';
-import { Ribbon, needsActiveWorkTeam } from '../../lib/ribbon';
+import SitesDialog from '../../components/SitesDialog.vue';
+import { Ribbon, SitesAction, TeamSitesAction, needsActiveWorkTeam } from '../../lib/ribbon';
 import type { Team, TeamId } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -116,6 +117,7 @@ const stubs = {
   TenantLogDialog: true,
   ApiKeysDialog: true,
   SkillsDialog: true,
+  SitesDialog: true,
 };
 
 const beta: Team = { ...team, id: 'beta' as TeamId, name: 'Beta' };
@@ -312,6 +314,24 @@ describe('MainLayout ribbon actions', () => {
     const { wrapper, openForTeam } = await ribbonAction('team-kanban');
 
     expect(openForTeam).toHaveBeenCalledWith('alpha');
+
+    wrapper.unmount();
+  });
+
+  /** Active Team › Sites is Admin › Sites narrowed to the team whose ribbon was used. */
+  it('opens Sites filtered to the active team on team-sites, and unfiltered from Admin', async () => {
+    const { wrapper } = await ribbonAction(TeamSitesAction);
+
+    const sites = wrapper.findComponent(SitesDialog);
+    expect(sites.props('modelValue')).toBe(true);
+    expect(sites.props('team')).toBe('alpha');
+
+    await sites.vm.$emit('update:modelValue', false);
+    wrapper.findComponent(RibbonBar).vm.$emit('action', SitesAction);
+    await flushPromises();
+
+    expect(sites.props('modelValue')).toBe(true);
+    expect(sites.props('team')).toBeNull();
 
     wrapper.unmount();
   });

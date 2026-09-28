@@ -510,6 +510,27 @@ public static class EventCatalog
             "Files were added, removed or resized in a watched folder, or a person uploaded or "
             + "deleted one through the Documents dialog. Paths and counts only, never contents. "
             + "Source is the folder trigger that polled (`trigger:<id>`) or the person."),
+
+        // `team` IS IN THE PAYLOAD because the source, `site:<team>/<site>`, is not a container id.
+        // Only the site action route writes this type, from the site its capability names - which
+        // is what lets MessageTeam read it. Not high volume: one row per person's click.
+        new(MessageTypes.SiteAction, EventPublisher.Person, HighVolume: false, InLedger: true,
+            [
+                Source,
+                Team,
+                new(PayloadFields.Site, EventFieldKind.String, "The site the person clicked on."),
+                new(PayloadFields.Action, EventFieldKind.String, "The action's name, a slug the page chose."),
+                new(PayloadFields.SiteAction, EventFieldKind.String,
+                    "The site and the action together, `<site>/<action>`, so one filter narrows to both."),
+                new(PayloadFields.Payload, EventFieldKind.String,
+                    "What the page sent with the action, as JSON text. At most 16 KB."),
+                new(PayloadFields.By, EventFieldKind.String, "The email of the signed-in person who clicked."),
+                new(PayloadFields.At, EventFieldKind.String, "When the Host received it, ISO-8601 UTC."),
+            ],
+            "A signed-in person clicked something on one of the team's sites: the page called "
+            + "`site.action(name, payload)`. Each one roots its own workflow. Source is "
+            + "`site:<team>/<site>`. Narrow a trigger with `site eq <site>` or "
+            + "`siteAction eq <site>/<action>`."),
     ];
 
     public static IReadOnlySet<string> Types { get; } =

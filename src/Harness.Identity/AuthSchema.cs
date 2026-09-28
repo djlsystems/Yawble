@@ -448,5 +448,50 @@ public static class AuthSchema
 
             ALTER TABLE team_member_config ADD COLUMN connections_json TEXT NOT NULL DEFAULT '{}';
             """),
+
+        // A TEAM'S SITES: static files the Host serves and backs. `sites` is one row per site,
+        // unique by name within its team; `live_version` NULL is an unpublished site, and
+        // `next_version` is never reused, so a folder `v<n>` always means one copy. `site_versions`
+        // is one row per copy kept on disk. `site_documents` is the site's data: named collections
+        // of JSON documents, with `bytes` stored so the per-site limit is a SUM rather than a
+        // re-measure. No foreign keys to `teams`: a team deletion removes its sites itself, and the
+        // rows are keyed by the team's stored spelling.
+        new MigrationStep(
+            "auth-015",
+            """
+            CREATE TABLE sites (
+                team         TEXT    NOT NULL COLLATE NOCASE,
+                name         TEXT    NOT NULL,
+                live_version INTEGER NULL,
+                next_version INTEGER NOT NULL DEFAULT 1,
+                created_at   TEXT    NOT NULL,
+                created_by   TEXT    NOT NULL,
+                PRIMARY KEY (team, name)
+            );
+
+            CREATE TABLE site_versions (
+                team         TEXT    NOT NULL COLLATE NOCASE,
+                site         TEXT    NOT NULL,
+                version      INTEGER NOT NULL,
+                published_at TEXT    NOT NULL,
+                published_by TEXT    NOT NULL,
+                source       TEXT    NOT NULL,
+                files        INTEGER NOT NULL,
+                bytes        INTEGER NOT NULL,
+                PRIMARY KEY (team, site, version)
+            );
+
+            CREATE TABLE site_documents (
+                team       TEXT    NOT NULL COLLATE NOCASE,
+                site       TEXT    NOT NULL,
+                collection TEXT    NOT NULL,
+                id         TEXT    NOT NULL,
+                doc        TEXT    NOT NULL,
+                bytes      INTEGER NOT NULL,
+                updated_at TEXT    NOT NULL,
+                updated_by TEXT    NOT NULL,
+                PRIMARY KEY (team, site, collection, id)
+            );
+            """),
     ];
 }

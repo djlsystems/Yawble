@@ -68,6 +68,12 @@ export const ConnectionsAction = 'admin-connections';
 /** Admin > Repositories, the instance's local repositories: listed, and deleted after asking. */
 export const RepositoriesAction = 'admin-repositories';
 
+/** Admin > Sites, every team's published sites: opened, rolled back, unpublished, deleted. */
+export const SitesAction = 'admin-sites';
+
+/** Active Team > Sites, the same screen filtered to the active team. `team-`, so it needs one. */
+export const TeamSitesAction = 'team-sites';
+
 /** Admin > Settings, the instance-wide Tenant Settings dialog. */
 export const TenantSettingsAction = 'admin-settings';
 
@@ -94,6 +100,7 @@ export const Ribbon: RibbonSpec = {
         { kind: 'button', action: 'team-members', label: 'Members', icon: 'groups', size: 'small' },
         { kind: 'button', action: 'team-kanban', label: 'Kanban', icon: 'view_kanban', size: 'small' },
         { kind: 'button', action: 'team-git', label: 'Git', icon: 'account_tree', size: 'small' },
+        { kind: 'button', action: TeamSitesAction, label: 'Sites', icon: 'public', size: 'small' },
         { kind: 'button', action: 'team-settings', label: 'Settings', icon: 'settings', size: 'small' },
         { kind: 'button', action: 'team-reset', label: 'Reset', icon: 'restart_alt', size: 'small' },
       ],
@@ -142,8 +149,10 @@ export const Ribbon: RibbonSpec = {
         // machine principal on `GET /api/diagnostics` outright.
         { kind: 'button', action: 'admin-diagnostics', label: 'Diagnostics', icon: 'monitor_heart', size: 'large' },
         // The instance's local repositories - git kept on the volume, which a team names as
-        // `local:<name>`. Before Plugins.
+        // `local:<name>`. Before Sites.
         { kind: 'button', action: RepositoriesAction, label: 'Repositories', icon: 'account_tree', size: 'large' },
+        // Every team's published sites. After Repositories, before Plugins.
+        { kind: 'button', action: SitesAction, label: 'Sites', icon: 'public', size: 'large' },
         // What is installed on the instance, then the accounts it acts on, then how it is configured.
         { kind: 'button', action: PluginsAction, label: 'Plugins', icon: 'extension', size: 'large' },
         // DIRECTLY AFTER Plugins, and Settings follows: the OAuth accounts plugins act on.

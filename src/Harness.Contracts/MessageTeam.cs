@@ -75,7 +75,11 @@ public static class MessageTeam
             // the row or the route value TeamGate checked; nothing outside can write this type.
             || string.Equals(message.Type, MessageTypes.FileChanged, StringComparison.Ordinal)
             || string.Equals(message.Type, MessageTypes.RepoForkSynced, StringComparison.Ordinal)
-            || string.Equals(message.Type, MessageTypes.RepoPullRequestOpened, StringComparison.Ordinal))
+            || string.Equals(message.Type, MessageTypes.RepoPullRequestOpened, StringComparison.Ordinal)
+
+            // Published by the site action route only, as `site:<team>/<site>` - a source whose
+            // front half is not a team - with `team` from the site the capability names.
+            || string.Equals(message.Type, MessageTypes.SiteAction, StringComparison.Ordinal))
         {
             // FAILS CLOSED on anything unusable - malformed JSON, a missing field, a non-string, a
             // blank. `Field` swallows the parse failure; the blank check is here because an empty

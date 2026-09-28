@@ -440,6 +440,8 @@ name. The install checks the same before it writes.
 | `{"t":"handback","delivered":"…"}` | Hands the work back and wakes the Manager once. |
 | `{"t":"result","ok":true,"output":"…"}` | The run's result. Send exactly one, last. `ok:false` with `"error"` is a failure in those words. Add `"quiet":true` to finish without waking anyone; see [Quiet runs](#quiet-runs). |
 | `{"t":"publish","type":"…","payload":{…}}` | Publishes one of the events the manifest declares. See [Events](#events). |
+| `{"t":"site.put","site":"…","collection":"…","id":"…","doc":…}` | Writes one document to a site of the plugin's OWN team (see [sites.md](sites.md)). The document is redacted like every other record; a limit, a name, another team or a missing site drops the record with one progress warning per kind per run. |
+| `{"t":"site.delete","site":"…","collection":"…","id":"…"}` | Deletes one document from a site of the plugin's own team. |
 
 - **Same path as agents.** The first four records go through the same code as an agent's MCP tools
   (`MemberReports`). A plugin's report and an agent's report are therefore the same row, the same

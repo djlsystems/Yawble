@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import * as ribbonModule from '../ribbon'
-import { ConnectionsAction, DocumentsAction, PluginsAction, RepositoriesAction, Ribbon, TenantSettingsAction, needsActiveWorkTeam } from '../ribbon'
+import {
+  ConnectionsAction,
+  DocumentsAction,
+  PluginsAction,
+  RepositoriesAction,
+  Ribbon,
+  SitesAction,
+  TeamSitesAction,
+  TenantSettingsAction,
+  needsActiveWorkTeam,
+} from '../ribbon'
 
 describe('the ribbon', () => {
   /**
@@ -134,7 +144,7 @@ describe('the ribbon', () => {
 
     expect(actions).toContain(RepositoriesAction)
     expect(actions.indexOf(RepositoriesAction)).toBe(actions.indexOf('admin-diagnostics') + 1)
-    expect(actions.indexOf(RepositoriesAction)).toBe(actions.indexOf(PluginsAction) - 1)
+    expect(actions.indexOf(RepositoriesAction)).toBeLessThan(actions.indexOf(PluginsAction))
     expect(needsActiveWorkTeam(RepositoriesAction, undefined)).toBe(false)
   })
 
@@ -146,6 +156,24 @@ describe('the ribbon', () => {
     expect(actions.indexOf(ConnectionsAction)).toBe(actions.indexOf(PluginsAction) + 1)
     expect(actions.indexOf(TenantSettingsAction)).toBe(actions.indexOf(ConnectionsAction) + 1)
     expect(needsActiveWorkTeam(ConnectionsAction, undefined)).toBe(false)
+  })
+
+  /**
+   * Admin › Sites, every team's sites: between Repositories and Plugins, so before Settings, needing
+   * no active team. Active Team › Sites is the same screen for one team, and needs one.
+   */
+  it('puts Sites in the Admin group before Settings, and a team-scoped Sites under Active Team', () => {
+    const admin = Ribbon.tabs.find((tab) => tab.id === 'admin')
+    const actions = admin?.items.map((item) => item.action) ?? []
+
+    expect(actions.indexOf(SitesAction)).toBe(actions.indexOf(RepositoriesAction) + 1)
+    expect(actions.indexOf(SitesAction)).toBe(actions.indexOf(PluginsAction) - 1)
+    expect(actions.indexOf(SitesAction)).toBeLessThan(actions.indexOf(TenantSettingsAction))
+    expect(needsActiveWorkTeam(SitesAction, undefined)).toBe(false)
+
+    const active = Ribbon.tabs.find((tab) => tab.id === 'active')
+    expect(active?.items.map((item) => item.action)).toContain(TeamSitesAction)
+    expect(needsActiveWorkTeam(TeamSitesAction, undefined)).toBe(true)
   })
 
   /** Projects sits BEFORE Admin. */
