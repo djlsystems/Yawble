@@ -52,7 +52,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
 
 vi.mock('../../lib/browserNavigation', () => ({
   goTo,
-  currentOrigin: () => 'https://yawble.example.test',
+  currentOrigin: () => 'https://instance.example.test',
 }));
 
 import AddMemberDialog from '../AddMemberDialog.vue';
@@ -120,7 +120,7 @@ beforeEach(() => {
   startConnection.mockResolvedValue({
     authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=r1',
     state: 'r1',
-    redirectUri: 'https://yawble.example.test/api/connections/callback',
+    redirectUri: 'https://instance.example.test/api/connections/callback',
     expiresAt: '2026-09-28T10:10:00Z',
   });
   savePluginSettings.mockResolvedValue(undefined);

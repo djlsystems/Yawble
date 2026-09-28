@@ -13,7 +13,7 @@ import { hostConnection, hostProvider, hostSlot } from '../../test/pluginFixture
 
 describe('connections', () => {
   it('builds the redirect URI the Host builds for the address in use', () => {
-    expect(redirectUriFor('https://yawble.example.test')).toBe('https://yawble.example.test/api/connections/callback')
+    expect(redirectUriFor('https://instance.example.test')).toBe('https://instance.example.test/api/connections/callback')
     expect(redirectUriFor('http://127.0.0.1:8080/')).toBe('http://127.0.0.1:8080/api/connections/callback')
   })
 

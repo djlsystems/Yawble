@@ -124,6 +124,10 @@ func (d docker) ExecTo(ctx context.Context, name string, stdout io.Writer, args 
 	return execTo(ctx, d.r, "docker", name, stdout, args)
 }
 
+func (d docker) ExecInput(ctx context.Context, name, stdin string, args ...string) (Result, error) {
+	return execInput(ctx, d.r, "docker", name, stdin, args)
+}
+
 func (d docker) CopyTo(ctx context.Context, name, src, dst string) error {
 	_, err := d.run(ctx, "cp", src, name+":"+dst)
 	return err

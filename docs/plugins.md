@@ -797,7 +797,15 @@ plugin declares none.
   verdict for a good folder, a refused manifest, an installed version without and with `--force`,
   and a folder outside the data root, and a request the Host never answers being withdrawn; its
   request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side.
-  `cli/internal/plugin` pins the manifest rules against both samples.
+  `cli/internal/plugin` pins the manifest rules against the samples, the `connections` slot rules
+  included.
+- **Connections, the web and the CLI.** The mount specs `connections-dialog`, `connection-picker`
+  (the binding picker at hire and in Member settings) and `plugins-dialog` (each slot on the Plugins
+  screen). `cli/internal/cli/connect_test.go` runs `yawble connect` against a scripted Host and a real
+  loopback listener: the start request, the browser's round trip, a redirect with another state
+  ignored, the provider's refusal, reconnect by name, the code never on a command line, `list`,
+  `remove` refused naming the members, and a request no Host answers withdrawn.
+  `samples/plugins/sample-whoami-go` has its own `go test` against a userinfo double.
   `PluginRescanRequestTests` shows a plugin installed after start is listed with no restart, and pins
   the report's refusals, its hired members and its `0600` mode. `PrepareVolumeTests` pins
   `/data/plugins` as `harness:agent 0750`, created when missing.

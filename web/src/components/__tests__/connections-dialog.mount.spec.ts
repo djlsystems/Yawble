@@ -44,7 +44,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
 
 vi.mock('../../lib/browserNavigation', () => ({
   goTo,
-  currentOrigin: () => 'https://yawble.example.test',
+  currentOrigin: () => 'https://instance.example.test',
 }));
 
 import ConnectionsDialog from '../ConnectionsDialog.vue';
@@ -103,7 +103,7 @@ beforeEach(() => {
   startConnection.mockResolvedValue({
     authorizationUrl,
     state: 'abc',
-    redirectUri: 'https://yawble.example.test/api/connections/callback',
+    redirectUri: 'https://instance.example.test/api/connections/callback',
     expiresAt: '2026-09-28T10:10:00Z',
   });
 });
@@ -190,7 +190,7 @@ describe('ConnectionsDialog, connecting an account', () => {
     button('Connect an account…').click();
     await settle();
 
-    expect(bodyFind('[data-redirect-uri]')!.textContent).toBe('https://yawble.example.test/api/connections/callback');
+    expect(bodyFind('[data-redirect-uri]')!.textContent).toBe('https://instance.example.test/api/connections/callback');
     expect(bodyFind('[data-provider-help]')!.textContent).toContain('"Desktop app" client');
 
     await type('Scopes', 'https://mail.google.com/, https://www.googleapis.com/auth/drive.readonly');

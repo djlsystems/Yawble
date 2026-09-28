@@ -77,7 +77,20 @@ to reach this computer's `127.0.0.1`.
 
 ### How the CLI reaches the Host
 
-HOW-THE-CLI-REACHES-THE-HOST
+The same way the other commands that talk to a running instance do (`yawble plugin install
+--from-instance`, `yawble plugin list`): **through the container engine**, never over HTTP.
+
+- `yawble` finds the running instance's container (`yawble up` first if it is not running) and
+  runs a short script in it with `podman exec` / `docker exec`.
+- The script writes a request file, `/data/connections/.connect`, from the request handed to it on
+  **stdin** (it can carry the authorization code, so it is never on a command line). The folder and
+  file belong to the Host's own user and nobody else can read them - no agent sees a request.
+- The Host answers each request in `/data/connections/.connect-report.json`; the CLI waits for the
+  answer to its own request (a random id in both) and withdraws a request no Host answered.
+- Nothing is signed in and no port of the instance is used: whoever can run the engine on that
+  computer already controls the instance. The Host records what was done in the tenant log.
+- An image from before connections does not answer; the command says so after 20 seconds.
+  `yawble update` brings the instance current.
 
 ## Registering a Google client
 

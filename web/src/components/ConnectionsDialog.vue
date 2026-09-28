@@ -12,6 +12,7 @@ import {
 } from '../api/client';
 import type { Connection, ConnectionProvider, ConnectionProviderSave, ConnectionUse } from '../api/types';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
+import { productCli } from '../presentation/product';
 import {
   parseScopes,
   providerHelp,
@@ -479,7 +480,7 @@ async function removeProvider(provider: ConnectionProvider) {
           </div>
           <div class="text-caption os-text-muted q-mt-xs">
             If the provider will not accept this address, connect from the operator's computer with
-            <span class="mono">yawble connect</span>.
+            <span class="mono">{{ productCli }} connect</span>.
           </div>
         </div>
 
