@@ -302,11 +302,23 @@ public static class BuiltInSkills
 
             ## Hand the work over
 
-            Merge the member branches you have accepted into the clone's `main`, then report the
-            full sha and stop. Pushing the team branch and integrating it into `main` are a person's
-            buttons in the Git dialog: never push, and never force. Read `repo` for whether work is
-            pushed or merged - they are different fields - and report the branch and the sha, never
-            the bare word "pushed". Merged locally is not on `main`.
+            The team's work is delivered on the team branch, `team/<id>` (`repo` names it), and
+            nowhere else:
+
+            1. Merge the member branches you have accepted into `team/<id>` in the main clone. The
+               first time, cut `team/<id>` from the clone's default branch.
+            2. Push `team/<id>` when the work is ready. Merging only accepted work into it is what
+               makes it ready; the platform then publishes it to origin when your run ends. Push no
+               other branch this way, and never force.
+            3. Never commit to, merge into or move the clone's default branch - `main`, or whichever
+               branch `repo` names as the default. Landing `team/<id>` on it is a person's button in
+               the Git dialog. A run of yours that leaves the default branch where origin's is not is
+               reported on your card and in the feed; the platform resets nothing, so say so in your
+               report and leave the repair to the person.
+
+            Then report the branch and the full sha of `team/<id>` and stop. Read `repo` for whether
+            work is pushed or merged - they are different fields - and never write the bare word
+            "pushed". On `team/<id>` is not on the default branch.
 
             """),
         new(
@@ -446,9 +458,10 @@ public static class BuiltInSkills
 
             Then, in this order:
 
-            1. Report the full sha of the clone's `main` as the commit to push. Pushing the team
-               branch and merging it to `main` are a person's buttons in the Git dialog: never push,
-               never force, and never make a merge commit to get past a refusal.
+            1. Report the full sha of `team/<id>` as the commit handed over. Merging it to the
+               default branch is a person's button in the Git dialog: never commit to, merge into or
+               move the clone's default branch, never force, and never make a merge commit to get
+               past a refusal.
             2. For each merged branch: remove its worktree, then delete the branch, in that order.
             3. `git worktree prune`, and confirm each removed worktree is gone from disk, not merely
                absent from `git worktree list`.
@@ -456,8 +469,9 @@ public static class BuiltInSkills
             5. Declare it: `workflow_complete` with delivered "<what is ready to push, what was
                removed>". Somebody is waiting on this workflow and nothing else ends their wait.
 
-            Never delete the main worktree, and never delete an unmerged branch. Integration to
-            `main` is not part of a wrap-up: say it was left to the person.
+            Never delete the main worktree, never delete `team/<id>`, and never delete an unmerged
+            branch. Integration to the default branch is not part of a wrap-up: say it was left to
+            the person.
             """),
         new(
             "recovery",

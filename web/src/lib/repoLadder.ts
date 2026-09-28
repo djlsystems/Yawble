@@ -9,7 +9,7 @@ export type LadderRung = 'refreshed' | 'current' | 'pushed' | 'merged' | 'tidied
 export type LadderAction =
   | 'fetch' | 'bring-current' | 'rebase' | 'push'
   | 'merge-to-main' | 'delete-remote-branch' | 'cleanup-worktrees'
-  | 'open-pull-request'
+  | 'open-pull-request' | 'bring-current-and-merge'
 
 export interface LadderStep {
   readonly rung: LadderRung
@@ -241,40 +241,20 @@ export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): Ladder
 
   if (!workIsOnMain && merge.verdict !== 'merged') {
     if (status.teamPushed !== true) {
-      // THE MIRROR OF THE CRITICAL ABOVE, IN THE OTHER ARM. Where a LOCAL `team/{id}` exists,
-      // the server answers `teamPushed` by asking whether that LOCAL BRANCH is on
-      // `origin/team/{id}` - a fact about the local branch - while `push` publishes **main**
-      // (`main:team/{id}`). The two never meet: a clone holding a local team branch with a commit
-      // main does not have would sit here forever, every click answering 200 and "Pushed main to
-      // team/X." while the card still says the work is not on origin.
-      //
-      // `cloneMainOnTeamBranch === false` says main carries something the team ref does not, which
-      // after a push of main would still be true - so pushing changes nothing and the rung cannot
-      // advance. REFUSE AND EXPLAIN rather than offer it. `=== false` only: null is not measured.
-      //
-      // THE DESIGN DOES NOT let `push` publish some other ref instead. Push publishes what the
-      // ladder is talking about, or the flag and the action drift apart.
-      // THE CONDITION IS "THE LOCAL TEAM REF IS STRICTLY AHEAD OF MAIN", and it is derivable from
-      // fields already on the record - no new measurement needed:
-      //
-      //   cloneMainOnTeamBranch === true   main IS an ancestor of the team ref (main is ON it)
-      //   teamSha !== mainSha              they are not the same commit
-      //   => the team ref has commits main does not
-      //
-      // Pushing main then republishes main, `teamPushed` asks whether the LOCAL team ref is on
-      // origin/team/{id}, and it still is not - so the rung never advances however many times it
-      // is clicked. Where the team ref EQUALS main (the shape the seeded push pattern produces)
-      // the shas match and push is offered.
-      if (status.cloneMainOnTeamBranch === true
-        && status.teamSha !== null
-        && status.teamSha !== status.mainSha) {
+      // A LOCAL TEAM BRANCH ORIGIN LACKS IS "NOT PUSHED", SAID IN ITS OWN NAME. Where a local
+      // `team/{id}` exists the server answers `teamPushed` about THAT branch, and `push` always
+      // publishes it - main only when there is no local team branch - so the flag and the action
+      // talk about the same ref and one click advances the rung. It used to publish main only, which left a
+      // Manager's merged-but-unpushed team branch as a dead end with no button.
+      if (teamBranchNotPushed(status)) {
         return {
           rung: 'pushed',
-          action: null,
+          action: 'push',
           reason:
-            `the local ${status.teamBranch} holds commits this clone's ${main} does not, and push ` +
-            `publishes ${main} - so it cannot advance this from here; merge or rebase them together `
-            + 'first',
+            `${status.teamBranch} is not pushed: origin does not have its latest commits, so push it ` +
+            `first - push publishes this clone's local ${status.teamBranch}, Merge to ${main} ` +
+            `integrates the branch on origin, and nothing past this rung is ` +
+            'offered until it is there',
         }
       }
 
@@ -293,7 +273,8 @@ export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): Ladder
       // WHAT THE PUSH UNLOCKS IS AN ENDPOINT PRECONDITION, not merely this ladder's order:
       // `MergeToMainAsync` answers 400 - "Team branch team/{id} does not exist locally or on
       // origin" - when neither ref resolves, and publishing main to `team/{id}` is what creates
-      // the branch it then integrates. SAID ONCE FOR BOTH VERDICTS: the clause above them differs
+      // the branch it then integrates. A clone WITH a local team branch the server reports
+      // unpushed never reaches this sentence: the arm above says Push publishes that branch. SAID ONCE FOR BOTH VERDICTS: the clause above them differs
       // because pushed-ness differs, but the button does the same thing either way.
       const publishes =
         `push publishes this clone's ${main} to ${status.teamBranch}, which is the branch Merge to ` +
@@ -349,6 +330,12 @@ export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): Ladder
       // THE 'content' CASE CANNOT REACH HERE. Rewritten shas whose changes are all on main are
       // MERGED, so the verdict gate above sends them to the tidied tail with the delete offered -
       // which is the point: that state loses nothing by being closed out.
+      //
+      // MAIN MOVED UNDER A PUSHED TEAM BRANCH IS THE COMMON CASE OF THIS ARM, and it has a button:
+      // Bring current and merge merges origin/main into the team branch and lands it.
+      const catchUp = bringCurrentAndMergeStep(status)
+      if (catchUp) return catchUp
+
       return {
         rung: 'merged',
         action: null,
@@ -368,6 +355,9 @@ export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): Ladder
     if (refused) {
       return { rung: 'merged', action: null, reason: refused }
     }
+
+    const behind = bringCurrentAndMergeStep(status)
+    if (behind) return behind
 
     // THE REASON FOLLOWS THE VERDICT HERE TOO. "The work is on origin but not on main" is a claim
     // about content, and it must not be made on a status where content was never measured - the
@@ -447,6 +437,57 @@ export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): Ladder
     action: null,
     reason: 'nothing left to do, by everything git reports',
   }
+}
+
+/**
+ * WHETHER THE LOCAL TEAM BRANCH IS WHAT IS MISSING FROM ORIGIN: the server's `teamBranchUnpushed`,
+ * or - from a Host that does not send it - a local team ref strictly ahead of main. The server
+ * sends the field only when a local `team/{id}` exists, and Push always publishes that ref when it
+ * does, so the field is followed even when the clone's main has moved off the team ref
+ * (`cloneMainOnTeamBranch === false`). Only the fallback for an older Host, whose Push published
+ * main there, still reads that state as not this one.
+ */
+export function teamBranchNotPushed(status: RepoStatus): boolean {
+  if (status.teamPushed === true) return false
+  if (status.teamBranchUnpushed != null) return status.teamBranchUnpushed
+  return status.cloneMainOnTeamBranch === true
+    && status.teamSha !== null
+    && status.teamSha !== status.mainSha
+}
+
+/**
+ * BRING CURRENT AND MERGE, when the pushed team branch lacks commits origin's default branch has.
+ * Null when it is not behind, or not measured - the ordinary Merge to main owns those.
+ */
+function bringCurrentAndMergeStep(status: RepoStatus): LadderStep | null {
+  const behind = status.teamBranchBehindDefault
+  if (behind == null || behind <= 0 || status.teamPushed !== true) return null
+
+  const origin = originBranchWord(status)
+  return {
+    rung: 'merged',
+    action: 'bring-current-and-merge',
+    reason:
+      `${origin} has ${behind} commit${behind === 1 ? '' : 's'} ${status.teamBranch} does not, so bring it ` +
+      `current and merge: ${origin} is merged into ${status.teamBranch} with a merge commit, the branch is ` +
+      `pushed, and then it is merged to ${branchWord(status)}`,
+  }
+}
+
+/**
+ * WHAT BRING CURRENT AND MERGE DOES NOT DO, said beside its button: it is git only and runs no tests,
+ * and when both sides changed the same files the suites should be run on the merge first. Null for
+ * any other step.
+ */
+export function bringCurrentAndMergeAdvice(status: RepoStatus, step: LadderStep): string | null {
+  if (step.action !== 'bring-current-and-merge') return null
+
+  const gitOnly = 'This is git only: it runs no tests.'
+  const both = status.filesChangedOnBothSides ?? []
+  if (both.length === 0) return gitOnly
+
+  return `${gitOnly} ${status.teamBranch} and ${originBranchWord(status)} both changed ` +
+    `${both.join(', ')} - run the suites on the merge before pressing it.`
 }
 
 /**
@@ -640,6 +681,7 @@ export const ACTION_LABELS: Record<LadderAction, string> = {
   'delete-remote-branch': 'Delete the branch on origin',
   'cleanup-worktrees': 'Clean up worktrees',
   'open-pull-request': 'Open pull request',
+  'bring-current-and-merge': 'Bring current and merge',
 }
 
 /**

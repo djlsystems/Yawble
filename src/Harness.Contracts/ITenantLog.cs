@@ -165,6 +165,11 @@ public static class TenantActions
     /// </summary>
     public const string RepoBringCurrent = "repo.bring-current";
     public const string RepoMergeToMain = "repo.merge-to-main";
+
+    /// <summary>A person pressed Bring current and merge: origin's default branch merged into the
+    /// team branch, which was pushed; or refused, with the conflicting files named. The row that
+    /// says it was pushed is written after the push. Merge to main then writes its own row.</summary>
+    public const string RepoBringCurrentAndMerge = "repo.bring-current-and-merge";
     public const string RepoCleanupWorktrees = "repo.cleanup-worktrees";
     public const string RepoFetch = "repo.fetch";
     public const string RepoRebase = "repo.rebase";

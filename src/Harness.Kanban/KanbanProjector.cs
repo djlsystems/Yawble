@@ -22,7 +22,8 @@ public static class KanbanProjector
         || type is MessageTypes.Started or MessageTypes.Progress or MessageTypes.Blocked
             or MessageTypes.Failed or MessageTypes.Completed or MessageTypes.WorkflowCompleted
             or MessageTypes.WorkflowPaused or MessageTypes.WorkflowResumed or MessageTypes.NeedsDecision
-            or "needs-decision" or MessageTypes.Handback or MessageTypes.ContainerRemoved;
+            or "needs-decision" or MessageTypes.Handback or MessageTypes.ContainerRemoved
+            or MessageTypes.RepoDefaultBranchMoved;
 
     /// <summary>
     /// Project a sequence of messages into a board snapshot.
@@ -183,6 +184,15 @@ public static class KanbanProjector
         else if (msgType == MessageTypes.ContainerRemoved)
         {
             HandleContainerRemoved(msg, cardStates);
+        }
+        else if (msgType == MessageTypes.RepoDefaultBranchMoved)
+        {
+            // On the Manager's card, as a trail row; the status is the run's, not this report's.
+            if (CardFor(msg, cardStates) is { } moved)
+            {
+                Record(moved, msg, FirstStringField(msg, PayloadFields.Reason));
+                moved.UpdatedAt = msg.OccurredAt.DateTime;
+            }
         }
     }
 

@@ -544,6 +544,7 @@ onUnmounted(() => {
         :clock-offset="board.workflowClockOffset"
         :team-id="activeTeam.id"
         :findings="board.findingKinds(activeTeam.id)"
+        :repo-status="board.repoStatusTeam === activeTeam.id ? board.repoStatus : null"
       />
 
       <!-- Fixed-size windows that WRAP, rather than a responsive column count.

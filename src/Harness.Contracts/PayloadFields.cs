@@ -241,6 +241,13 @@ public static class PayloadFields
     /// <summary>A pull request's number on `repo.pullRequestOpened`.</summary>
     public const string Number = "number";
 
+    /// <summary>The full sha a `repo.defaultBranchMoved` row names: where the clone's default
+    /// branch is, and so where the work is.</summary>
+    public const string Commit = "commit";
+
+    /// <summary>The team branch a `repo.defaultBranchMoved` row names: `team/{id}`.</summary>
+    public const string TeamBranch = "teamBranch";
+
     /// <summary>The absolute path of the worktree a `repo.worktreeLeft` row is about.</summary>
     public const string Worktree = "worktree";
 

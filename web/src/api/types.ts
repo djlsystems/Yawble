@@ -1786,6 +1786,26 @@ export interface RepoStatus {
   claSignedNote?: string | null
   /**The pull request recorded for the team branch, as GitHub last described it. */
   pullRequest?: RepoPullRequestStatus | null
+  /**
+   * Commits on `origin/<defaultBranch>` the team ref lacks: above 0 is what Bring current and
+   * merge is for. Null when not measured (no team ref, never fetched, contributor mode).
+   */
+  teamBranchBehindDefault?: number | null
+  /**
+   * With the team branch behind, the files changed on both sides since they parted (at most 20).
+   * Bring current and merge runs no tests, so a non-empty list is when the dialog says to run the
+   * suites first. Null when not measured.
+   */
+  filesChangedOnBothSides?: string[] | null
+  /**
+   * A local `team/{id}` that origin lacks or holds an older commit of: "team/{id} is not pushed",
+   * and Push publishes it. Null when there is no local team branch or origin was never fetched.
+   */
+  teamBranchUnpushed?: boolean | null
+  /**Set when the clone's default branch holds commits origin's lacks - a Manager moved it: "moved
+   * <default> in the clone; the work is on <commit>; the team branch is team/<id>". Measured on
+   * every read; the platform resets nothing. Null when unmoved or not measured. */
+  defaultBranchMoved?: string | null
 }
 
 /**

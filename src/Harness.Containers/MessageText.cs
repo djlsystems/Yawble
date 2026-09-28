@@ -280,6 +280,12 @@ public static class MessageText
                 $"A pull request was opened upstream for {Field(payload, PayloadFields.Branch) ?? "(unknown branch)"} "
                 + $"of {Field(payload, PayloadFields.Repo) ?? "(unknown repo)"}: {Field(payload, PayloadFields.Url) ?? "(no URL)"}.",
 
+            // The Manager moved the clone's default branch. Reported, never reset.
+            MessageTypes.RepoDefaultBranchMoved =>
+                $"{who} {Field(payload, PayloadFields.Reason) ?? "moved the clone's default branch"} "
+                + $"({Field(payload, PayloadFields.Repo) ?? "(unknown repo)"}). The platform reset nothing; "
+                + "the work belongs on the team branch, and the clone's default branch is never committed to, merged into or moved.",
+
             // A person's Bring current brought the fork level with upstream; never forced.
             MessageTypes.RepoForkSynced =>
                 $"The fork of {Field(payload, PayloadFields.Repo) ?? "(unknown repo)"} was fast-forwarded "

@@ -1445,6 +1445,17 @@ export const mergeRepoToMainAsync = (team: TeamId, repo: string) =>
   )
 
 /**
+ * Bring current and merge: origin's default branch merged into the team branch (a merge commit,
+ * never a rebase), the team branch pushed, then Merge to main. A conflict changes and pushes
+ * nothing and answers 409 naming the files. Git only: it runs no tests.
+ */
+export const bringCurrentAndMergeAsync = (team: TeamId, repo: string) =>
+  json<RepoActionResult>(
+    `/api/teams/${encodeURIComponent(team)}/repos/${encodeURIComponent(repo)}/bring-current-and-merge`,
+    { method: 'POST' },
+  )
+
+/**
  * Contributor mode's Open pull request: `gh pr create` from team/{id} on the fork, with the
  * title and body the person edited. A person's button only; the platform never opens one by itself.
  */
@@ -1496,7 +1507,7 @@ export const askTeamToBringCurrent = (team: TeamId, repo: string) =>
     { method: 'POST' },
   )
 
-/** Push the clone's main to the team branch. Refuses rather than forcing. */
+/** Push the clone's team branch (or its main, when it has none carrying main) to origin. Refuses rather than forcing. */
 export const pushRepoAsync = (team: TeamId, repo: string) =>
   json<RepoActionResult>(
     `/api/teams/${encodeURIComponent(team)}/repos/${encodeURIComponent(repo)}/push`,
