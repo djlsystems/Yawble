@@ -107,7 +107,8 @@ public sealed class UndeclarableWorkflows(
             return false;
         }
 
-        if (await IdleWorkflowOffer.UndeliveredAsync(host, subscriptions, cursors, diagnostics, stored, thread, ct)) return false;
+        if (await IdleWorkflowOffer.UndeliveredAsync(
+                host, subscriptions, cursors, diagnostics, stored, thread, member, waking, ct)) return false;
 
         // AN UNFINISHED CARD IS LEFT FOR A PERSON: the declaration moves every card to Done, and
         // only a member's own `dropped` may say why one is being left. The owner's and the ending

@@ -78,7 +78,11 @@ public sealed class ProcessAgentRunnerLaunchTests : IDisposable
     private readonly string _workspace =
         Directory.CreateTempSubdirectory("harness-runner-").FullName;
 
-    public void Dispose() => Directory.Delete(_workspace, recursive: true);
+    public void Dispose()
+    {
+        MemberTempCleanup.Remove(_workspace);
+        Directory.Delete(_workspace, recursive: true);
+    }
 
     private Task<AgentResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string prompt = "hello")
     {

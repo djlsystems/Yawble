@@ -93,7 +93,11 @@ public sealed class IdleClockTests : IDisposable
 
     private readonly string _workspace = Directory.CreateTempSubdirectory("harness-idle-").FullName;
 
-    public void Dispose() => Directory.Delete(_workspace, recursive: true);
+    public void Dispose()
+    {
+        MemberTempCleanup.Remove(_workspace);
+        Directory.Delete(_workspace, recursive: true);
+    }
 
     [Fact]
     public async Task Output_alone_does_not_hold_the_clock_open()
