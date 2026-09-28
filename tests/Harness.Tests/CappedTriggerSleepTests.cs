@@ -252,7 +252,10 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
         Assert.Equal(resumesAt, row.NextDueAt);
 
         // No fire and no skip before the next day's first occurrence, however often it is swept.
-        foreach (var at in new[] { fourth.AddMinutes(1), fourth.AddMinutes(30), fourth.AddHours(3), resumesAt.AddSeconds(-1) })
+        // Points between the skip and the resume, as fractions of that gap: a fixed "three hours
+        // later" lands past midnight, and past the resume, when the suite runs late in the UTC day.
+        var asleep = resumesAt - fourth;
+        foreach (var at in new[] { fourth + (asleep / 8), fourth + (asleep / 4), fourth + (asleep / 2), resumesAt.AddSeconds(-1) })
         {
             await SweepAsync(at);
         }
