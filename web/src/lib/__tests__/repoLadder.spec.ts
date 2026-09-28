@@ -1729,7 +1729,8 @@ describe('a pushed team branch behind a moved main', () => {
   })
 
   it('leaves the old answer to a Host that does not measure it', () => {
-    const step = nextStep(stranded({ teamBranchBehindDefault: undefined }), true)
+    const { teamBranchBehindDefault: _unmeasured, ...older } = stranded()
+    const step = nextStep(older, true)
     expect(step.action).toBeNull()
     expect(step.reason).toMatch(/merge or rebase/)
     expect(nextStep(stranded({ teamBranchBehindDefault: null, cloneMainOnTeamBranch: true }), true).action)
