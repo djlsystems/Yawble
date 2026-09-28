@@ -999,6 +999,9 @@ public sealed class GitRunner
 
         return args[0] switch
         {
+            // `--no-local` is passed only for a local repository's folder (see CloneAsync), which a
+            // name like `github.com.git` must not turn into a GitHub remote.
+            "clone" when args.Contains("--no-local") => null,
             "clone" => AgentEnvironment.GitHubTokenFor([.. args.Skip(1)]),
             // A URL is judged by itself; a remote NAME ("origin") names no host, so it is judged by
             // the team's remotes, as a fetch is - or `repo` refresh is refused by GitHub.
