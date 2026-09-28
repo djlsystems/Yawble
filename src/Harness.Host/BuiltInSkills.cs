@@ -994,10 +994,12 @@ public static class BuiltInSkills
 
             ## 9. Where the code lives and how it ships
 
-            A plugin lives in its own repository, built by a team from the sample plugin
-            `samples/plugins/sample-echo` as its template. The person installs a built version with
-            the operator CLI's plugin install command, on the machine that runs the platform. It is
-            then hired from the Add member dialog, or by a Manager with `member` naming the plugin id
+            A plugin lives in its own repository, built by a team from a template:
+            `samples/plugins/sample-echo-go` for Go, `samples/plugins/sample-echo` for .NET (see 11
+            for which). The person installs a built version with the operator CLI's plugin install
+            command, on the machine that runs the platform; a version built inside the instance, in a
+            team's worktree or your workspace, is installed where it is with `--from-instance` and
+            its path, with no copy out of the container. It is then hired from the Add member dialog, or by a Manager with `member` naming the plugin id
             that `hiring` lists. A Manager may bind only secret keys a person has already bound on its
             team, so the first member to use a new key is hired by a person.
 
@@ -1016,6 +1018,28 @@ public static class BuiltInSkills
             - The failure words: what it says when it is blocked, refused or fails.
             - How the building team tests it without a real account: a fake of the outside system,
               recorded responses, or a test mailbox.
+            - The language, and the reason for it (see 11).
+
+            ## 11. Choosing a language
+
+            A plugin speaks JSON on its input and output, so it can be written in any language whose
+            program runs in the image. Every run is a new process, so start-up time is paid each run.
+
+            - Default to **Go** for connectors to REST APIs, clouds, databases, queues and mail: one
+              small static binary per processor, no runtime, a start measured in milliseconds.
+            - Choose **.NET** when the best or only SDK for the target system is .NET: SharePoint,
+              Dynamics, Exchange on-premises, SAP, heavy Office documents.
+            - Choose **Python** when the library the plugin needs exists only in Python.
+
+            Before you write the spec, find which language has the official SDK for the target system.
+            Record the choice and the reason in the spec, for example "Go: the vendor's official SDK is
+            Go and the API is plain REST".
+
+            Plugins are self-contained. The image guarantees the .NET runtime, Node and Python 3, and
+            nothing else. Everything a plugin needs beyond that lives in its own folder: Go libraries
+            compiled into the binary, NuGet packages published beside the .NET build, Python packages
+            in a virtual environment inside the plugin's folder. Nothing a plugin needs is ever added
+            to the image, so a spec never asks for a system package.
             """),
         new(
             "running-a-tree",

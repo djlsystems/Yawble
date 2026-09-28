@@ -179,6 +179,15 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.Contains("Wake the Manager when a run ends", skill.Body, StringComparison.Ordinal);
         Assert.Contains("Daily token cap", skill.Body, StringComparison.Ordinal);
 
+        // It says which language to build in, that the spec records why, and that a plugin brings
+        // everything it needs in its own folder.
+        Assert.Contains("Default to **Go** for connectors", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("Choose **.NET** when the best or only SDK", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("Choose **Python** when the library", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("Record the choice and the reason in the spec", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("Plugins are self-contained.", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("Nothing a plugin needs is ever added", skill.Body, StringComparison.Ordinal);
+
         // `plugin-` is the namespace plugin skills are forced into; a built-in there could collide
         // with an installed plugin's skill (a plugin with id `authoring` would ship `plugin-authoring`).
         Assert.DoesNotContain(BuiltInSkills.All, s => s.Name.StartsWith("plugin-", StringComparison.Ordinal));
