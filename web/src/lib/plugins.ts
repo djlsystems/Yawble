@@ -51,7 +51,7 @@ export function pluginRows(list: PluginList): PluginRow[] {
   const plugins = list.plugins ?? [];
 
   if (list.versions && list.versions.length > 0) {
-    return list.versions
+    const rows = list.versions
       .map((entry: PluginVersion, index): PluginRow => {
         const plugin = entry.verdict === 'installed'
           ? plugins.find((candidate) => candidate.id === entry.id && candidate.version === entry.version)
@@ -68,8 +68,9 @@ export function pluginRows(list: PluginList): PluginRow[] {
           active: entry.active,
           reason: entry.reason ?? null,
         };
-      })
-      .sort(byId);
+      });
+
+    return [...rows, ...unshownRefusals(list.refused ?? [], rows)].sort(byId);
   }
 
   const refused = (list.refused ?? []).map(
@@ -85,6 +86,30 @@ export function pluginRows(list: PluginList): PluginRow[] {
   );
 
   return [...plugins.map(installedRow).sort(byId), ...refused.sort(byId)];
+}
+
+/**
+ * EVERY REFUSAL IS SHOWN. `versions` carries a refused reason only on the version folder it
+ * belongs to, so a refusal with no such folder is in `refused[]` alone: an `active` naming a folder
+ * that is not there (its folders all read inactive), or a refused folder whose name starts with `.`
+ * (left out of `versions` altogether). Each one no version row already says becomes its own row.
+ */
+function unshownRefusals(refused: RefusedPlugin[], rows: PluginRow[]): PluginRow[] {
+  const said = new Set(
+    rows.flatMap((row) => (row.verdict === 'refused' ? [`${row.id}\n${row.reason ?? ''}`] : [])),
+  );
+
+  return refused
+    .filter((entry) => !said.has(`${entry.id}\n${entry.reason}`))
+    .map((entry, index): PluginRow => ({
+      key: `refused:${entry.id}#only-${index}`,
+      verdict: 'refused',
+      id: entry.id,
+      name: entry.id,
+      version: null,
+      active: false,
+      reason: entry.reason,
+    }));
 }
 
 /** The events a plugin publishes, as full type names, under either name the Host has used. */

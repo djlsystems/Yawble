@@ -156,6 +156,32 @@ describe('PluginsDialog', () => {
     wrapper.unmount();
   });
 
+  it('shows every refusal reason, including those only refused[] carries when versions exist', async () => {
+    // `active` names a folder that is not there: the version folders read inactive, and the reason
+    // is only in refused[]. A dot-named folder is left out of versions altogether.
+    const missingActive = "`active` names '9.9', which is not a version directory.";
+    const dotNamed = 'the directory name is not a plugin id.';
+    listPlugins.mockResolvedValue({
+      ...list,
+      refused: [...list.refused, { id: 'relay', reason: missingActive }, { id: '.staging', reason: dotNamed }],
+      versions: [
+        ...list.versions,
+        { id: 'relay', version: '1.0.0', name: 'Relay', active: false, verdict: 'inactive', reason: null },
+      ],
+    });
+    const wrapper = await mountPlugins();
+
+    const reasons = [...document.body.querySelectorAll('[data-verdict="refused"] [data-reason]')].map((el) => el.textContent?.trim());
+    expect(reasons).toContain(missingActive);
+    expect(reasons).toContain(dotNamed);
+    expect(bodyFind('[data-plugin=".staging"][data-verdict="refused"]')).not.toBeNull();
+    // The version folder is still listed as it is, and the Host's one reason for `broken` once.
+    expect(row('relay', '1.0.0')?.getAttribute('data-verdict')).toBe('inactive');
+    expect(reasons.filter((reason) => reason === "config field 'x' has unknown type 'map'.")).toHaveLength(1);
+
+    wrapper.unmount();
+  });
+
   it("shows an installed plugin's description, settings, secret names, events, skill and members", async () => {
     const wrapper = await mountPlugins();
     const installed = row('sample-echo')!;
