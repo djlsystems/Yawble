@@ -57,6 +57,10 @@ The product name, Yawble, lives in the web app's presentation layer
 - A headless agent receives only its own provider's API key (plus `GH_TOKEN` when its team has a
   GitHub remote). A member's platform key is passed in its environment and referenced, not
   written, in the MCP config files the launcher creates.
+- A member's temporary files go in `.tmp` inside its own workspace: every headless run is started
+  with `TMPDIR` pointing there. The launch creates the folder on first use, as the agent and
+  owner-only, so no two members share one and none shares the Host's `/tmp`. The Concierge and
+  the Host's own temporary files (prompt files, MCP configs) are unchanged.
 - Platform credentials are stored as SHA-256 hashes. Session cookies are signed with an ASP.NET
   Data Protection key ring under `<dataRoot>/keys`.
 - Every response carries `nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: DENY` and a
