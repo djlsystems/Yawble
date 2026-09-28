@@ -289,14 +289,14 @@ public sealed record PluginManifest(
             {
                 if (requiresElement.ValueKind != JsonValueKind.Array || requiresElement.EnumerateArray().Any(r => r.ValueKind != JsonValueKind.String))
                 {
-                    return (null, $"`requires` must be an array of runtime names: {string.Join(", ", Runtimes)}.");
+                    return (null, "`requires` must be an array of runtime names.");
                 }
 
                 foreach (var runtime in requiresElement.EnumerateArray().Select(r => r.GetString()!))
                 {
                     if (!Runtimes.Contains(runtime, StringComparer.Ordinal))
                     {
-                        return (null, $"`requires` names '{runtime}', which is not a runtime this Host provides (it provides {string.Join(", ", Runtimes)}); ship anything else inside the plugin's folder.");
+                        return (null, $"`requires` names '{runtime}', which is not a runtime this Host knows ({string.Join(", ", Runtimes)}).");
                     }
 
                     if (!requires.Contains(runtime, StringComparer.Ordinal)) requires.Add(runtime);
