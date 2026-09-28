@@ -262,4 +262,21 @@ public sealed class SettingsAuditTransactionTests : IAsyncLifetime
         Assert.True(Teams.IsPaused("Alpha"));
         Assert.Equal(1L, await ScalarAsync("SELECT paused FROM teams WHERE id = 'Alpha'"));
     }
+
+    [Fact]
+    public async Task The_agent_catalog_is_not_saved_when_its_tenant_row_cannot_be_written()
+    {
+        var client = await PersonAsync();
+        var file = AgentCatalogFile.PathIn(_dataRoot);
+        var fileBefore = File.Exists(file) ? await File.ReadAllTextAsync(file, Ct) : null;
+        var namesBefore = Catalog.Definitions.Select(d => d.Name).ToList();
+        var custom = AgentCatalogFile.BuiltIns().First(a => a.Mode == AgentMode.Headless) with { Name = "custom-probe" };
+        await DropTenantEventsAsync();
+
+        var saved = await client.PutAsJsonAsync("/api/agents", new { agents = new[] { custom } }, Ct);
+
+        Assert.False(saved.IsSuccessStatusCode);
+        Assert.Equal(fileBefore, File.Exists(file) ? await File.ReadAllTextAsync(file, Ct) : null);
+        Assert.Equal(namesBefore, Catalog.Definitions.Select(d => d.Name).ToList());
+    }
 }

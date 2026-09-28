@@ -120,7 +120,7 @@ public static class AgentEndpoints
         app.MapPut("/api/agents", async (
             CatalogSubmission submitted, AgentCatalog catalog, ITeamStore teams,
             EffectiveSubscriptions effective,
-            TenantLogging audit, HttpContext context, CancellationToken ct) =>
+            ITenantLog tenantLog, HttpContext context, CancellationToken ct) =>
         {
             var submittedAgents = submitted.Agents ?? [];
 
@@ -143,18 +143,32 @@ public static class AgentEndpoints
                 return Results.BadRequest(new { error = orphaned });
             }
 
-            AgentCatalogFile.Save(dataRoot, custom);
-
-            catalog.Replace(agents);
-
-            await audit.WriteAsync(
+            // RECORDED BEFORE SAVED, and not swallowed the way TenantLogging swallows: agents.json
+            // cannot share the tenant log's transaction, so the row goes first and neither the file
+            // nor the live catalog changes when it cannot be written - the documents delete's order.
+            var row = TenantLogging.Row(
                 context, TenantActions.AgentsSaved, null, null,
                 new
                 {
                     count = custom.Count,
                     names = custom.Select(a => a.Name).ToArray(),
-                },
-                ct);
+                });
+
+            try
+            {
+                await tenantLog.WriteAsync(
+                    row.ActorId, row.ActorEmail, row.Action, row.Subject, row.SubjectName, row.Detail, ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return Results.Problem(
+                    "The save could not be recorded, so no Agent was changed.",
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            AgentCatalogFile.Save(dataRoot, custom);
+
+            catalog.Replace(agents);
 
             return Results.NoContent();
         })
