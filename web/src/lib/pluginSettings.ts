@@ -118,7 +118,8 @@ export const setByPerson = (field: PluginConfigField) => field.setBy === 'person
 
 /**
  * A required field left empty, or a required secret with no key: the names, in order. A bool is
- * never empty - it is on or off.
+ * never empty - it is on or off - and a list is never missing: the Host defaults one to `[]`, so a
+ * required list left empty saves, exactly as the Host takes it.
  */
 export function missingRequired(
   shape: PluginSettingsShape,
@@ -128,14 +129,10 @@ export function missingRequired(
   const missing: string[] = [];
 
   for (const [name, field] of Object.entries(shape.config)) {
-    if (!field.required || field.type === 'bool') continue;
+    if (!field.required || field.type === 'bool' || field.type === 'list') continue;
 
     const value = config[name];
-    const empty = field.type === 'list'
-      ? !Array.isArray(value) || value.length === 0
-      : typeof value !== 'string' || value.trim() === '';
-
-    if (empty) missing.push(name);
+    if (typeof value !== 'string' || value.trim() === '') missing.push(name);
   }
 
   for (const [name, secret] of Object.entries(shape.secrets)) {

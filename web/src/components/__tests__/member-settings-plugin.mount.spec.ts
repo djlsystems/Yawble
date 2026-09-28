@@ -272,7 +272,7 @@ describe('MemberSettingsDialog, a plugin member', () => {
     wrapper.unmount();
   });
 
-  it('holds Save while a required field or secret is empty', async () => {
+  it('holds Save while a required secret is empty', async () => {
     const wrapper = await mountSettings();
 
     await type('Secret token: key name', '');
@@ -281,9 +281,21 @@ describe('MemberSettingsDialog, a plugin member', () => {
     await type('Secret token: key name', 'OTHER_KEY');
     expect(isDisabled('Save')).toBe(false);
 
+    wrapper.unmount();
+  });
+
+  it('saves a required list left empty, as the Host does: a list defaults to []', async () => {
+    const wrapper = await mountSettings();
+
     (setting('recipients').querySelector('[aria-label="Remove ops"]') as HTMLElement).click();
     await settle();
-    expect(isDisabled('Save')).toBe(true);
+    expect(isDisabled('Save')).toBe(false);
+
+    button('Save').click();
+    await settle();
+
+    expect(savePluginSettings).toHaveBeenCalledTimes(1);
+    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { repeat: 3 }, secrets: { token: 'ECHO_TOKEN' } });
 
     wrapper.unmount();
   });
