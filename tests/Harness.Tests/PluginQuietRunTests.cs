@@ -160,8 +160,8 @@ public sealed class PluginQuietRunTests : IAsyncLifetime
         Assert.Equal(MessageTypes.Completed, row.Type);
         Assert.True(Quiet(row));
 
-        // The workflow the schedule started is Echo's, and ends exactly as a non-quiet one does
-        // (B0012 E1): declared by the platform on Echo's behalf.
+        // The workflow the schedule started is Echo's, and ends exactly as a non-quiet one does:
+        // declared by the platform on Echo's behalf.
         var declared = await AwaitRowAsync(
             [MessageTypes.WorkflowCompleted], m => m.CorrelationId == row.CorrelationId, "the workflow's declaration");
         Assert.Equal(Echo.ToString(), declared.Source);

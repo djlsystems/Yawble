@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// TRIGGER COST CONTROL (B0015 A and B). A trigger chooses what a run it started does to the
+/// TRIGGER COST CONTROL. A trigger chooses what a run it started does to the
 /// Manager when it ends (`wakeManager`), and may carry a daily token cap over what its runs, and the
 /// Manager runs they woke, measured today.
 ///

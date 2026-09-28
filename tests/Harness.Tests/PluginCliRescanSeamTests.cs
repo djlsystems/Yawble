@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// THE SEAM BETWEEN THE OPERATOR CLI'S INSTALL AND PLUGIN SKILLS (B0012, card 730 verification):
+/// THE SEAM BETWEEN THE OPERATOR CLI'S INSTALL AND PLUGIN SKILLS:
 /// a request through <c>plugins/.rescan</c> - which reaches <see cref="PluginCatalog.Rescan"/> by way
 /// of <see cref="PluginRescanRequests"/>, never the rescan route - must also run the followers
 /// <c>Program</c> attached: the plugin's skills are registered, and every Manager's roster is
