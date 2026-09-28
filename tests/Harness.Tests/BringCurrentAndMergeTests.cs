@@ -274,6 +274,41 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
         Assert.Equal(RevParse(clone, "HEAD"), RevParse(_origin, $"refs/heads/team/{team}"));
     }
 
+    [Fact]
+    public async Task Push_publishes_an_unpushed_team_branch_even_when_the_default_branch_has_moved_ahead_of_it()
+    {
+        var (team, person) = await TeamWithCloneAsync("Zeta");
+        var clone = ClonePath(team);
+        Assert.Equal(HttpStatusCode.OK, (await ActAsync(person, team, "fetch")).StatusCode);
+
+        // The team branch holds its own commit, cut from the default branch as it was.
+        var cut = RevParse(clone, "refs/heads/trunk");
+        Git(clone, "checkout", "-b", $"team/{team}", cut);
+        File.WriteAllText(Path.Combine(clone, "work.txt"), "work\n");
+        Commit(clone, "work");
+        var work = RevParse(clone, "HEAD");
+
+        // Then the clone's default branch moves ahead of it (and origin's with it).
+        Git(clone, "checkout", "trunk");
+        File.WriteAllText(Path.Combine(clone, "ahead.txt"), "ahead\n");
+        Commit(clone, "ahead");
+        Git(clone, "push", "origin", "trunk");
+        var ahead = RevParse(clone, "HEAD");
+
+        Assert.True((await RepoStatusAsync(person, team)).GetProperty("teamBranchUnpushed").GetBoolean());
+
+        var response = await ActAsync(person, team, "push");
+        var text = await response.Content.ReadAsStringAsync(Ct);
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, text);
+        Assert.Equal(work, RevParse(_origin, $"refs/heads/team/{team}"));
+        Assert.NotEqual(ahead, RevParse(_origin, $"refs/heads/team/{team}"));
+        var after = JsonDocument.Parse(text).RootElement.GetProperty("status");
+        Assert.False(after.GetProperty("teamBranchUnpushed").GetBoolean());
+        Assert.True(after.GetProperty("teamPushed").GetBoolean());
+        Assert.Equal(1, after.GetProperty("teamBranchBehindDefault").GetInt32());
+    }
+
     /// <summary>The Manager's pattern: team/{id} cut from the default branch, work on it, pushed.</summary>
     private static string PushedTeamWork(string clone, string team, string file, string content)
     {

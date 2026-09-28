@@ -165,7 +165,10 @@ public sealed class DefaultBranchMovedTests : IAsyncDisposable
         await TellAsync(person, "Dev", "do the work");
         await TerminalAsync("Dev");
 
-        Assert.Empty(await RowsAsync(MessageTypes.RepoDefaultBranchMoved));
+        // No row is the member's. Dev ending wakes the Manager, and that run's end may report the
+        // moved branch in its own name; whether it has yet is timing, so only the Source is asserted.
+        var dev = new ContainerId(_team, "Dev").ToString();
+        Assert.DoesNotContain(await RowsAsync(MessageTypes.RepoDefaultBranchMoved), row => row.Source == dev);
 
         // The dialog measures the clone, whoever moved it.
         Assert.NotNull(await DialogSaysAsync(person));

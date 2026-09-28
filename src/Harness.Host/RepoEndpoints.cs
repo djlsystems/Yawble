@@ -1028,25 +1028,24 @@ public static partial class RepoEndpoints
             return Results.BadRequest(new { error = "Fetch failed.", detail = fetchDetail });
         }
 
-        // What is pushed is the clone's local default branch, as stored; not known stops.
+        // The stored default branch is still required: it is the fallback below, and a team whose
+        // default branch is not known stops here with nothing pushed.
         var name = RepoUrls.DeriveName(repoUrl);
         if (await DefaultBranchRecorder.RecordFromOriginAsync(teams, gitRunner, stored, name, clonePath, ct) is not { } branch)
         {
             return await BranchNotKnownAsync(log, userId, email, TenantActions.RepoPush, stored, name, ct);
         }
 
-        // WHAT IS PUSHED IS THE TEAM BRANCH WHEN THE CLONE HAS ONE THAT CARRIES ITS DEFAULT BRANCH.
-        // A Manager merges members' work into a local team/{id}; publishing the default branch in
-        // its place would leave that work in the clone and the dialog reading "not pushed" forever.
-        // A team branch that lacks the default branch's commits is not it: those commits would be
-        // left behind, so the default branch is pushed, as it always was.
-        var source = $"refs/heads/{branch}";
+        // WHAT IS PUSHED IS THE LOCAL TEAM BRANCH WHENEVER THE CLONE HAS ONE, whether or not it
+        // contains the default branch. A Manager merges members' work into a local team/{id};
+        // publishing the default branch in its place would overwrite origin/team/{id} with main,
+        // leave that work in the clone and stop the dialog saying "not pushed". A team branch
+        // that is behind the default branch after the push is offered Bring current and merge.
+        // Only when there is no local team branch is the clone's default branch pushed instead.
         var localTeam = $"refs/heads/team/{stored}";
-        if ((await gitRunner.RunGitAsync(clonePath, ["rev-parse", "--verify", "--quiet", localTeam], ct)).ExitCode == 0
-            && (await gitRunner.RunGitAsync(clonePath, ["merge-base", "--is-ancestor", source, localTeam], ct)).ExitCode == 0)
-        {
-            source = localTeam;
-        }
+        var source = (await gitRunner.RunGitAsync(clonePath, ["rev-parse", "--verify", "--quiet", localTeam], ct)).ExitCode == 0
+            ? localTeam
+            : $"refs/heads/{branch}";
 
         var remoteRef = $"refs/remotes/origin/team/{stored}";
         var remoteRefLookup = await gitRunner.RunGitAsync(clonePath, ["rev-parse", "--verify", remoteRef], ct);
