@@ -2804,7 +2804,6 @@ app.MapPost("/api/teams/{team}/triggers", async (
     AgentCatalog catalog,
     EffectiveSubscriptions effective,
     TriggerWakeSignal wake,
-    TenantLogging audit,
     HttpContext context,
     CancellationToken ct) =>
 {
@@ -2969,7 +2968,13 @@ app.MapPost("/api/teams/{team}/triggers", async (
         DailyTokenCap = request.DailyTokenCap,
     };
 
-    await schedules.SaveAsync(row, ct);
+    // The row and its tenant_events row are one transaction: a trigger with no record of who made
+    // it does not land.
+    await schedules.SaveAsync(
+        row,
+        TenantLogging.Row(
+            context, TenantActions.ScheduleCreated, row.Id, row.Name, new { team = row.Team, member = row.Container }),
+        ct);
 
     // A NEW event trigger changes what wakes its container, so the effective set is recomputed
     // right after the row lands - a no-op for a clock-driven trigger, which contributes nothing.
@@ -2980,14 +2985,6 @@ app.MapPost("/api/teams/{team}/triggers", async (
     // sit unnoticed for a minute - which reads as the feature being broken rather than
     // slow. Signalled AFTER the write, so waking early cannot read a row that is not there.
     wake.Signal();
-
-    await audit.WriteAsync(
-        context,
-        TenantActions.ScheduleCreated,
-        row.Id,
-        row.Name,
-        new { team = row.Team, member = row.Container },
-        ct);
 
     return Results.Created($"/api/teams/{row.Team}/triggers/{row.Id}", await cost.ViewAsync(row, DateTimeOffset.UtcNow, ct));
 })
@@ -3223,7 +3220,6 @@ app.MapDelete("/api/teams/{team}/triggers/{id}", async (
     ITriggerStore schedules,
     EffectiveSubscriptions effective,
     TriggerWakeSignal wake,
-    TenantLogging audit,
     HttpContext context,
     CancellationToken ct) =>
 {
@@ -3238,7 +3234,12 @@ app.MapDelete("/api/teams/{team}/triggers/{id}", async (
         return Results.NotFound(new { error = $"No schedule '{id}' on team '{stored}'." });
     }
 
-    await schedules.DeleteAsync(row.Id, ct);
+    // One transaction with its tenant_events row, as the create and the change are.
+    await schedules.DeleteAsync(
+        row.Id,
+        TenantLogging.Row(
+            context, TenantActions.ScheduleDeleted, row.Id, row.Name, new { team = row.Team, member = row.Container }),
+        ct);
 
     // A DELETED event trigger can only ever remove a subscription - the base set is untouched, so
     // this can never eat a Manager's agentContainer.completed - but "can only add or remove nothing" is
@@ -3251,14 +3252,6 @@ app.MapDelete("/api/teams/{team}/triggers/{id}", async (
     // sit unnoticed for a minute - which reads as the feature being broken rather than
     // slow. Signalled AFTER the write, so waking early cannot read a row that is not there.
     wake.Signal();
-
-    await audit.WriteAsync(
-        context,
-        TenantActions.ScheduleDeleted,
-        row.Id,
-        row.Name,
-        new { team = row.Team, member = row.Container },
-        ct);
 
     return Results.NoContent();
 })
@@ -3374,7 +3367,7 @@ app.MapGet("/api/teams/{team}/env", (
 // number they can change. `WorkflowSpendLimit` stays the thing an unset team is bounded by.
 app.MapPut("/api/teams/{team}/budget", async (
     [Description(Describe.Team)] string team,
-    TeamBudget? body, TeamRegistry teams, TenantLogging audit, HttpContext context,
+    TeamBudget? body, TeamRegistry teams, HttpContext context,
     CancellationToken ct) =>
 {
     // REFUSED HERE, ON THE ROUTE, not left to the input control: "a boundary a route call can
@@ -3391,9 +3384,15 @@ app.MapPut("/api/teams/{team}/budget", async (
         });
     }
 
+    // The figure and its tenant_events row are one transaction: a change with no record of who
+    // made it does not land.
     try
     {
-        await teams.SetBudgetAsync(team, body?.BudgetTokens, ct);
+        await teams.SetBudgetAsync(
+            team, body?.BudgetTokens, ct,
+            stored => TenantLogging.Row(
+                context, TenantActions.TeamBudgetChanged, stored, teams.LabelFor(stored),
+                new { budgetTokens = body?.BudgetTokens }));
     }
     catch (InvalidOperationException exception)
     {
@@ -3401,14 +3400,6 @@ app.MapPut("/api/teams/{team}/budget", async (
     }
 
     var stored = teams.ExistingName(team)!;
-
-    await audit.WriteAsync(
-        context,
-        TenantActions.TeamBudgetChanged,
-        stored,
-        teams.LabelFor(stored),
-        new { budgetTokens = body?.BudgetTokens },
-        ct);
 
     // THE WHOLE SUMMARY, not the single field back. The caller needs `effectiveWorkflowBudget`
     // alongside the choice it just made - it is what the KPI bar measures against, and a browser
@@ -3498,21 +3489,18 @@ app.MapPut("/api/teams/{team}/repos", async (
 app.MapPut("/api/teams/{team}/repos/{repo}/default-branch", async (
     [Description(Describe.Team)] string team,
     [Description("The repository name (derived from the URL in the team's repos list)")] string repo,
-    SetRepoDefaultBranch request, TeamRegistry teams, TenantLogging audit, HttpContext context,
+    SetRepoDefaultBranch request, TeamRegistry teams, HttpContext context,
     CancellationToken ct) =>
 {
     try
     {
-        await teams.SetPersonDefaultBranchAsync(team, repo, request.Branch, ct);
+        // One transaction with its tenant_events row.
+        await teams.SetPersonDefaultBranchAsync(
+            team, repo, request.Branch, ct,
+            next => TenantLogging.Row(
+                context, TenantActions.RepoDefaultBranchSet, $"{next.Team}/{next.Repo}", null,
+                new { setByPerson = next.SetByPerson, fromRemote = next.FromRemote }));
         var stored = teams.ExistingName(team)!;
-        var now = teams.DefaultBranchFor(stored, repo);
-
-        await audit.WriteAsync(
-            context, TenantActions.RepoDefaultBranchSet,
-            subject: $"{stored}/{now.Repo}",
-            subjectName: null,
-            new { setByPerson = now.SetByPerson, fromRemote = now.FromRemote },
-            ct);
 
         return Results.Ok(teams.All().Single(t => string.Equals(t.Id, stored, StringComparison.OrdinalIgnoreCase)));
     }
@@ -3640,19 +3628,15 @@ app.MapGet("/api/concierge", async (
         + "**A person's action.**");
 
 app.MapPut("/api/concierge", async (
-    SetConcierge request, TeamRegistry teams, TenantLogging audit, HttpContext context,
+    SetConcierge request, TeamRegistry teams, HttpContext context,
     CancellationToken ct) =>
 {
     try
     {
-        await teams.SetInteractiveAsync(request.Agent, ct);
-
-        await audit.WriteAsync(
-            context, TenantActions.ConciergeChanged,
-            subject: null,
-            subjectName: null,
-            new { agent = request.Agent },
-            ct);
+        // One transaction with its tenant_events row.
+        await teams.SetInteractiveAsync(
+            request.Agent, ct,
+            TenantLogging.Row(context, TenantActions.ConciergeChanged, null, null, new { agent = request.Agent }));
 
         return Results.NoContent();
     }
@@ -3675,19 +3659,18 @@ app.MapPut("/api/concierge", async (
 
 app.MapPut("/api/teams/{team}/member-agent", async (
     [Description(Describe.Team)] string team,
-    SetMemberAgent request, TeamRegistry teams, TenantLogging audit, AgentInstallProbe probe,
+    SetMemberAgent request, TeamRegistry teams, AgentInstallProbe probe,
     AgentCatalog catalog, HttpContext context, CancellationToken ct) =>
 {
     try
     {
-        if (request.Agents is { } list)
-        {
-            await teams.SetMemberAgentsAsync(team, list, ct);
-        }
-        else
-        {
-            await teams.SetMemberAgentAsync(team, request.Agent ?? "", ct);
-        }
+        // One transaction with its tenant_events row.
+        await teams.SetMemberAgentsAsync(
+            team, request.Agents ?? [request.Agent ?? ""], ct,
+            agents => TenantLogging.Row(
+                context, TenantActions.TeamMemberAgentChanged,
+                teams.ExistingName(team), teams.LabelFor(teams.ExistingName(team) ?? team),
+                new { agents }));
 
         var unresolvedList = new List<object>();
         var memberAgents = teams.MemberAgentsFor(team) ?? [];
@@ -3703,11 +3686,6 @@ app.MapPut("/api/teams/{team}/member-agent", async (
                 }
             }
         }
-
-        await audit.WriteAsync(
-            context, TenantActions.TeamMemberAgentChanged,
-            teams.ExistingName(team), teams.LabelFor(teams.ExistingName(team) ?? team),
-            new { agents = memberAgents }, ct);
 
         var teamData = teams.All().Single(t => string.Equals(
             t.Id, teams.ExistingName(team), StringComparison.OrdinalIgnoreCase));
@@ -3756,7 +3734,7 @@ app.MapPut("/api/teams/{team}/member-agent", async (
 
 app.MapPut("/api/teams/{team}/additional-instructions", async (
     [Description(Describe.Team)] string team,
-    SetAdditionalInstructions request, TeamRegistry teams, TenantLogging audit, HttpContext context,
+    SetAdditionalInstructions request, TeamRegistry teams, HttpContext context,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -3764,12 +3742,13 @@ app.MapPut("/api/teams/{team}/additional-instructions", async (
         return Results.NotFound(new { error = $"No team '{team}'." });
     }
 
-    await teams.SetAdditionalInstructionsAsync(stored, request.AdditionalInstructions, ct);
-
-    // WHETHER they are set, never the words: the log is read by every person and kept forever.
-    await audit.WriteAsync(
-        context, TenantActions.TeamInstructionsChanged, stored, teams.LabelFor(stored),
-        new { set = !string.IsNullOrWhiteSpace(request.AdditionalInstructions) }, ct);
+    // One transaction with its tenant_events row. WHETHER they are set, never the words: the log is
+    // read by every person and kept forever.
+    await teams.SetAdditionalInstructionsAsync(
+        stored, request.AdditionalInstructions, ct,
+        TenantLogging.Row(
+            context, TenantActions.TeamInstructionsChanged, stored, teams.LabelFor(stored),
+            new { set = !string.IsNullOrWhiteSpace(request.AdditionalInstructions) }));
 
     return Results.Ok(teams.All().Single(t => string.Equals(
         t.Id, stored, StringComparison.OrdinalIgnoreCase)));
@@ -4675,18 +4654,21 @@ app.MapGet("/api/teams/rollup", async (
 app.MapPatch("/api/teams/{team}/containers/{name}", async (
     [Description(Describe.Team)] string team,
     [Description("The member's current identifier, as addressed in its route.")] string name,
-    UpdateContainer request, TeamRegistry teams, TenantLogging audit, AgentInstallProbe probe,
+    UpdateContainer request, TeamRegistry teams, AgentInstallProbe probe,
     AgentCatalog catalog, HttpContext context, IUserStore users, CancellationToken ct) =>
 {
     try
     {
-        var update = await teams.UpdateMemberAsync(
-            team, name, request.Name, request.SystemPrompt, request.Agent,
-            await SystemPromptSetters.ForAsync(context, users, ct), ct);
-        var updated = update.Snapshot;
-
+        // The row and its tenant_events rows are one transaction: an edit with no record of who
+        // made it does not land.
+        //
         // WHICH fields moved, not what they moved to. A prompt is a person's words and can be long;
         // recording that one changed keeps the log readable and still answers "who touched this".
+        var update = await teams.UpdateMemberAsync(
+            team, name, request.Name, request.SystemPrompt, request.Agent,
+            await SystemPromptSetters.ForAsync(context, users, ct), ct,
+            change => MemberAuditRows(context, change, renamed: request.Name is not null, request.Agent));
+        var updated = update.Snapshot;
 
         var unresolvedList = new List<object>();
         
@@ -4702,34 +4684,6 @@ app.MapPatch("/api/teams/{team}/containers/{name}", async (
                     unresolvedList.Add(new { agent = installation.Agent, command = installation.Command, message = installation.Message });
                 }
             }
-        }
-
-        await audit.WriteAsync(
-            context, TenantActions.MemberChanged, $"{updated.Team}/{updated.Id}", updated.Name,
-            new
-            {
-                team = updated.Team,
-                renamed = request.Name is not null,
-                promptChanged = update.PromptChanged,
-                agent = request.Agent,
-            },
-            ct);
-
-        // ITS OWN ROW when the member's own instructions changed, so "who told this member to be
-        // what it is" is found by name. Who and whether cleared - never the words.
-        if (update.PromptChanged)
-        {
-            await audit.WriteAsync(
-                context, TenantActions.MemberInstructionsChanged, $"{updated.Team}/{updated.Id}",
-                updated.Name,
-                new
-                {
-                    team = updated.Team,
-                    setBy = update.Row.SystemPromptSetBy?.By,
-                    setByKind = update.Row.SystemPromptSetBy?.Kind,
-                    cleared = update.Row.SystemPrompt is null,
-                },
-                ct);
         }
 
         // Serialize updated to JsonNode and add unresolvedAgents
@@ -6826,6 +6780,36 @@ static async Task<IResult> DocumentsAsync(Func<Task<IResult>> action)
 // ISO-8601 UTC, `Z`-suffixed, as the member routes answer it.
 static string? SystemPromptSetAt(SystemPromptSetter? setter) =>
     setter?.At.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+
+// A member edit's tenant rows: `member.changed` always, and ITS OWN ROW when the member's own
+// instructions changed, so "who told this member to be what it is" is found by name. Who and
+// whether cleared - never the words.
+static IReadOnlyList<TriggerAudit> MemberAuditRows(
+    HttpContext context, MemberChange change, bool renamed, string? agent)
+{
+    var subject = $"{change.Id.Team}/{change.Id.Name}";
+    var rows = new List<TriggerAudit>
+    {
+        TenantLogging.Row(
+            context, TenantActions.MemberChanged, subject, change.Name,
+            new { team = change.Id.Team, renamed, promptChanged = change.PromptChanged, agent }),
+    };
+
+    if (change.PromptChanged)
+    {
+        rows.Add(TenantLogging.Row(
+            context, TenantActions.MemberInstructionsChanged, subject, change.Name,
+            new
+            {
+                team = change.Id.Team,
+                setBy = change.Row.SystemPromptSetBy?.By,
+                setByKind = change.Row.SystemPromptSetBy?.Kind,
+                cleared = change.Row.SystemPrompt is null,
+            }));
+    }
+
+    return rows;
+}
 
 static bool TeamHasMember(TeamRegistry teams, string team, string member) =>
     teams.ContainerIdsOf(team).Any(id => string.Equals(id.Name, member, StringComparison.OrdinalIgnoreCase));

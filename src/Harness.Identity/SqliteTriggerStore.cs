@@ -45,7 +45,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
             await command.ExecuteNonQueryAsync(ct);
         }
 
-        await AppendAuditAsync(connection, transaction, audit, ct);
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
         await transaction.CommitAsync(ct);
     }
 
@@ -324,33 +324,8 @@ public sealed class SqliteTriggerStore : ITriggerStore
             await command.ExecuteNonQueryAsync(ct);
         }
 
-        await AppendAuditAsync(connection, transaction, audit, ct);
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
         await transaction.CommitAsync(ct);
-    }
-
-    /// <summary>One `tenant_events` row, inside the caller's transaction. The columns and the
-    /// timestamp format are the tenant log's own.</summary>
-    private static async Task AppendAuditAsync(
-        SqliteConnection connection, SqliteTransaction transaction, TriggerAudit audit, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText =
-            """
-            INSERT INTO tenant_events
-                (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
-            VALUES ($at, $actorId, $actorEmail, $action, $subject, $subjectName, $detail)
-            """;
-
-        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-        command.Parameters.AddWithValue("$actorId", (object?)audit.ActorId ?? DBNull.Value);
-        command.Parameters.AddWithValue("$actorEmail", (object?)audit.ActorEmail ?? DBNull.Value);
-        command.Parameters.AddWithValue("$action", audit.Action);
-        command.Parameters.AddWithValue("$subject", audit.Subject);
-        command.Parameters.AddWithValue("$subjectName", (object?)audit.SubjectName ?? DBNull.Value);
-        command.Parameters.AddWithValue("$detail", (object?)audit.Detail ?? DBNull.Value);
-
-        await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default)
@@ -374,6 +349,23 @@ public sealed class SqliteTriggerStore : ITriggerStore
         command.Parameters.AddWithValue("$id", id);
 
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task DeleteAsync(string id, TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM triggers WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
     }
 
     public async Task<int> DeleteForTeamAsync(string team, CancellationToken ct = default)

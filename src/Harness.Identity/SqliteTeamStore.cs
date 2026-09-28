@@ -132,36 +132,69 @@ public sealed class SqliteTeamStore : ITeamStore
         return new TenantConciergeSettings(reader.IsDBNull(0) ? null : reader.GetString(0));
     }
 
-    public async Task SetConciergeSettingsAsync(string? agent, CancellationToken ct = default)
+    public Task SetConciergeSettingsAsync(string? agent, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText =
+                    """
+                    INSERT INTO tenant_interactive_agent_settings (id, interactive_agent)
+                    VALUES ($id, $agent)
+                    ON CONFLICT(id) DO UPDATE SET
+                        interactive_agent = excluded.interactive_agent
+                    """;
+                command.Parameters.AddWithValue("$id", TenantInteractiveSettingsRowId);
+                command.Parameters.AddWithValue("$agent", (object?)agent ?? DBNull.Value);
+            },
+            audit,
+            ct);
+
+    /// <summary>One statement and, when given, its `tenant_events` row, in one transaction: a
+    /// setting with no record of who changed it does not land.</summary>
+    private async Task WriteAsync(Action<SqliteCommand> statement, TriggerAudit? audit, CancellationToken ct)
     {
         await using var connection = Open();
-        await using var command = connection.CreateCommand();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
-        command.CommandText =
-            """
-            INSERT INTO tenant_interactive_agent_settings (id, interactive_agent)
-            VALUES ($id, $agent)
-            ON CONFLICT(id) DO UPDATE SET
-                interactive_agent = excluded.interactive_agent
-            """;
-        command.Parameters.AddWithValue("$id", TenantInteractiveSettingsRowId);
-        command.Parameters.AddWithValue("$agent", (object?)agent ?? DBNull.Value);
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            statement(command);
+            await command.ExecuteNonQueryAsync(ct);
+        }
 
-        await command.ExecuteNonQueryAsync(ct);
+        if (audit is not null) await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
     }
 
-    public async Task SetAdditionalInstructionsAsync(string team, string? text, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
+    public Task SetAdditionalInstructionsAsync(
+        string team, string? text, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText = "UPDATE teams SET additional_instructions = $text WHERE id = $id COLLATE NOCASE";
+                command.Parameters.AddWithValue("$id", team);
+                command.Parameters.AddWithValue(
+                    "$text", string.IsNullOrWhiteSpace(text) ? DBNull.Value : text.Trim());
+            },
+            audit,
+            ct);
 
-        command.CommandText = "UPDATE teams SET additional_instructions = $text WHERE id = $id COLLATE NOCASE";
-        command.Parameters.AddWithValue("$id", team);
-        command.Parameters.AddWithValue(
-            "$text", string.IsNullOrWhiteSpace(text) ? DBNull.Value : text.Trim());
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
+    /// <summary>Narrow: the two member-agent columns only, so a save of this choice cannot write
+    /// any other column back as it was when the row was read.</summary>
+    public Task SetMemberAgentsAsync(
+        string team, IReadOnlyList<string> memberAgents, TriggerAudit audit, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText =
+                    "UPDATE teams SET member_agent = $memberAgent, member_agents = $memberAgents WHERE id = $id COLLATE NOCASE";
+                command.Parameters.AddWithValue("$id", team);
+                command.Parameters.AddWithValue("$memberAgent", (object?)memberAgents.FirstOrDefault() ?? DBNull.Value);
+                command.Parameters.AddWithValue("$memberAgents", JsonSerializer.Serialize(memberAgents));
+            },
+            audit,
+            ct);
 
     public async Task SetReposAsync(string team, IReadOnlyList<string> repos, CancellationToken ct = default)
     {
@@ -204,11 +237,11 @@ public sealed class SqliteTeamStore : ITeamStore
     }
 
     /// <summary>Narrow, single column. See <see cref="ITeamStore.SetBudgetAsync"/>.</summary>
-    public async Task SetBudgetAsync(string team, long? budgetTokens, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
+    public Task SetBudgetAsync(string team, long? budgetTokens, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(command => BindBudget(command, team, budgetTokens), audit, ct);
 
+    private static void BindBudget(SqliteCommand command, string team, long? budgetTokens)
+    {
         command.CommandText = "UPDATE teams SET budget_tokens = $budget WHERE id = $id";
 
         // 0 IS STORED AS 0, AND THAT IS THE WHOLE POINT OF THIS LINE.
@@ -223,8 +256,6 @@ public sealed class SqliteTeamStore : ITeamStore
         // A negative value never reaches here - both routes refuse it with 400 before writing.
         command.Parameters.AddWithValue("$budget", (object?)budgetTokens ?? DBNull.Value);
         command.Parameters.AddWithValue("$id", team);
-
-        await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task SaveMemberAsync(PersistedMember member, CancellationToken ct = default)
@@ -232,6 +263,29 @@ public sealed class SqliteTeamStore : ITeamStore
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
+        BindMember(command, member);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task SaveMemberAsync(
+        PersistedMember member, IReadOnlyList<TriggerAudit> audits, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            BindMember(command, member);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var audit in audits) await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    private static void BindMember(SqliteCommand command, PersistedMember member)
+    {
         // Upsert: created_utc is left alone on conflict, matching SaveTeamAsync.
         command.CommandText =
             """
@@ -270,8 +324,6 @@ public sealed class SqliteTeamStore : ITeamStore
             (object?)member.SystemPromptSetBy?.At.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)
                 ?? DBNull.Value);
         command.Parameters.AddWithValue("$createdUtc", DateTimeOffset.UtcNow.ToString("O"));
-
-        await command.ExecuteNonQueryAsync(ct);
     }
 
     public async Task SetFloorAsync(
@@ -435,31 +487,31 @@ public sealed class SqliteTeamStore : ITeamStore
 
     /// <summary>Narrow: writes `from_remote` only, so a person's choice survives every Fetch.</summary>
     public Task SetRemoteDefaultBranchAsync(string team, string repo, string? branch, CancellationToken ct = default) =>
-        UpsertDefaultBranchAsync("from_remote", team, repo, branch, ct);
+        UpsertDefaultBranchAsync("from_remote", team, repo, branch, null, ct);
 
     /// <summary>Narrow: writes `set_by_person` only, so clearing it falls back to what the remote named.</summary>
-    public Task SetPersonDefaultBranchAsync(string team, string repo, string? branch, CancellationToken ct = default) =>
-        UpsertDefaultBranchAsync("set_by_person", team, repo, branch, ct);
+    public Task SetPersonDefaultBranchAsync(
+        string team, string repo, string? branch, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        UpsertDefaultBranchAsync("set_by_person", team, repo, branch, audit, ct);
 
     // `column` is one of the two literals above, never caller input.
-    private async Task UpsertDefaultBranchAsync(
-        string column, string team, string repo, string? branch, CancellationToken ct)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        command.CommandText =
-            $"""
-            INSERT INTO team_repo_default_branches (team, repo, {column})
-            VALUES ($team, $repo, $branch)
-            ON CONFLICT(team, repo) DO UPDATE SET {column} = excluded.{column}
-            """;
-        command.Parameters.AddWithValue("$team", team);
-        command.Parameters.AddWithValue("$repo", repo);
-        command.Parameters.AddWithValue("$branch", (object?)branch ?? DBNull.Value);
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
+    private Task UpsertDefaultBranchAsync(
+        string column, string team, string repo, string? branch, TriggerAudit? audit, CancellationToken ct) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText =
+                    $"""
+                    INSERT INTO team_repo_default_branches (team, repo, {column})
+                    VALUES ($team, $repo, $branch)
+                    ON CONFLICT(team, repo) DO UPDATE SET {column} = excluded.{column}
+                    """;
+                command.Parameters.AddWithValue("$team", team);
+                command.Parameters.AddWithValue("$repo", repo);
+                command.Parameters.AddWithValue("$branch", (object?)branch ?? DBNull.Value);
+            },
+            audit,
+            ct);
 
     public async Task<IReadOnlyList<RepoContributor>> RepoContributorsAsync(CancellationToken ct = default)
     {

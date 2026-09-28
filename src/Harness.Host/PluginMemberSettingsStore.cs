@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Harness.Contracts;
+using Harness.Identity;
 using Microsoft.Data.Sqlite;
 
 namespace Harness.Host;
@@ -60,24 +61,7 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
 
         await UpsertAsync(connection, transaction, member, settings, ct);
 
-        await using (var command = connection.CreateCommand())
-        {
-            command.Transaction = transaction;
-            command.CommandText =
-                """
-                INSERT INTO tenant_events
-                    (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
-                VALUES ($at, $actorId, $actorEmail, $action, $subject, $subjectName, $detail)
-                """;
-            command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-            command.Parameters.AddWithValue("$actorId", (object?)audit.ActorId ?? DBNull.Value);
-            command.Parameters.AddWithValue("$actorEmail", (object?)audit.ActorEmail ?? DBNull.Value);
-            command.Parameters.AddWithValue("$action", audit.Action);
-            command.Parameters.AddWithValue("$subject", audit.Subject);
-            command.Parameters.AddWithValue("$subjectName", (object?)audit.SubjectName ?? DBNull.Value);
-            command.Parameters.AddWithValue("$detail", (object?)audit.Detail ?? DBNull.Value);
-            await command.ExecuteNonQueryAsync(ct);
-        }
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
 
         await transaction.CommitAsync(ct);
     }

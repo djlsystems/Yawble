@@ -77,14 +77,15 @@ public sealed record TriggerRow(
     int CappedSkips = 0);
 
 /// <summary>
-/// The `tenant_events` row a trigger write appends in the SAME transaction as the write, so a
-/// change with no record of it cannot land.
+/// The `tenant_events` row a settings write appends in the SAME transaction as the write, so a
+/// change with no record of it cannot land. Named for triggers, the first writes to carry it; team
+/// and instance settings carry it too.
 /// </summary>
 public sealed record TriggerAudit(
     string? ActorId,
     string? ActorEmail,
     string Action,
-    string Subject,
+    string? Subject,
     string? SubjectName,
     string? Detail);
 
@@ -182,6 +183,10 @@ public interface ITriggerStore
 
     Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default);
     Task DeleteAsync(string id, CancellationToken ct = default);
+
+    /// <summary>Deletes the row and appends <paramref name="audit"/> to `tenant_events` in one
+    /// transaction: both land or neither does.</summary>
+    Task DeleteAsync(string id, TriggerAudit audit, CancellationToken ct = default);
     Task<int> DeleteForTeamAsync(string team, CancellationToken ct = default);
     Task<int> DeleteForContainerAsync(
         string team, string container, CancellationToken ct = default);

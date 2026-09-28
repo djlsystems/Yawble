@@ -319,10 +319,10 @@ public sealed class FreshVolumeTests : IDisposable
         await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct: Ct);
         var store = new SqliteTeamStore(Database);
 
-        await store.SetConciergeSettingsAsync("codex", Ct);
+        await store.SetConciergeSettingsAsync("codex", ct: Ct);
         Assert.Equal("codex", (await store.ConciergeSettingsAsync(ct: Ct)).Agent);
 
-        await store.SetConciergeSettingsAsync(null, Ct);
+        await store.SetConciergeSettingsAsync(null, ct: Ct);
         Assert.Null((await store.ConciergeSettingsAsync(ct: Ct)).Agent);
     }
 

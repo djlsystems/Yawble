@@ -152,6 +152,10 @@ public sealed record TeamRepoDefaultBranch(string Repo, string? Branch, string? 
 /// instructions changed.</summary>
 public sealed record MemberUpdate(ContainerSnapshot Snapshot, PersistedMember Row, bool PromptChanged);
 
+/// <summary>A member edit as it is about to be stored: what its tenant rows are made from, so they
+/// are written in the same transaction as the row.</summary>
+public sealed record MemberChange(ContainerId Id, string Name, PersistedMember Row, bool PromptChanged);
+
 /// <summary>One repository's contributor settings as a screen sees them. See <see cref="RepoContributor"/>.</summary>
 public sealed record TeamRepoContributor(
     string Repo, string? UpstreamUrl, string? ForkOwner, bool DcoSignOff, string? ClaSignedNote);
@@ -404,8 +408,11 @@ public sealed class TeamRegistry(
     /// <summary>
     /// Sets which Agents this team's new members may run, in tie-break order.
     /// </summary>
+    /// <remarks>With <paramref name="audit"/>, the row it makes from the normalised list is written
+    /// in the same transaction as the choice, and the choice does not land without it.</remarks>
     public async Task SetMemberAgentsAsync(
-        string team, IReadOnlyList<string> memberAgents, CancellationToken ct = default)
+        string team, IReadOnlyList<string> memberAgents, CancellationToken ct = default,
+        Func<IReadOnlyList<string>, TriggerAudit>? audit = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var normalized = memberAgents
@@ -439,17 +446,24 @@ public sealed class TeamRegistry(
             .FirstOrDefault(t => string.Equals(t.Id, stored, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"No stored row for team '{stored}'.");
 
-        await teams.SaveTeamAsync(
-            new PersistedTeam(
-                stored,
-                row.Name,
-                normalized[0],
-                normalized,
-                row.AdditionalInstructions,
-                row.Root,
-                row.Repos,
-                row.Env),
-            ct);
+        if (audit is not null)
+        {
+            await teams.SetMemberAgentsAsync(stored, normalized, audit(normalized), ct);
+        }
+        else
+        {
+            await teams.SaveTeamAsync(
+                new PersistedTeam(
+                    stored,
+                    row.Name,
+                    normalized[0],
+                    normalized,
+                    row.AdditionalInstructions,
+                    row.Root,
+                    row.Repos,
+                    row.Env),
+                ct);
+        }
 
         _memberAgents[stored] = normalized;
     }
@@ -552,11 +566,12 @@ public sealed class TeamRegistry(
     /// fact, the summary already rides the hub group-routed to this team, and a snapshot is
     /// per-container - which is the same reason `Reenv` publishes nothing.
     /// </summary>
-    public async Task SetBudgetAsync(string team, long? budgetTokens, CancellationToken ct = default)
+    public async Task SetBudgetAsync(
+        string team, long? budgetTokens, CancellationToken ct = default, Func<string, TriggerAudit>? audit = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
 
-        await teams.SetBudgetAsync(stored, budgetTokens, ct);
+        await teams.SetBudgetAsync(stored, budgetTokens, audit?.Invoke(stored), ct);
 
         // ABSENT FROM THE DICTIONARY IS "CHOSEN NOTHING", which is what null means in the column.
         // An explicit 0 is KEPT as 0 - removing it here would read back as "chosen nothing" and
@@ -587,12 +602,13 @@ public sealed class TeamRegistry(
     /// the cache second: a setter that writes only memory works all session and is gone on the next
     /// restart.
     /// </summary>
-    public async Task SetAdditionalInstructionsAsync(string team, string? text, CancellationToken ct = default)
+    public async Task SetAdditionalInstructionsAsync(
+        string team, string? text, CancellationToken ct = default, TriggerAudit? audit = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var trimmed = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
-        await teams.SetAdditionalInstructionsAsync(stored, trimmed, ct);
+        await teams.SetAdditionalInstructionsAsync(stored, trimmed, audit, ct);
 
         if (trimmed is null) _instructions.Remove(stored);
         else _instructions[stored] = trimmed;
@@ -644,7 +660,8 @@ public sealed class TeamRegistry(
     /// <exception cref="InvalidOperationException">No such team, or no such repository on it.</exception>
     /// <exception cref="ArgumentException">Not a name git accepts for a branch.</exception>
     public async Task SetPersonDefaultBranchAsync(
-        string team, string repo, string? branch, CancellationToken ct = default)
+        string team, string repo, string? branch, CancellationToken ct = default,
+        Func<RepoDefaultBranch, TriggerAudit>? audit = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var name = ReposFor(stored).Select(RepoUrls.DeriveName)
@@ -657,8 +674,9 @@ public sealed class TeamRegistry(
             throw new ArgumentException($"'{chosen}' is not a branch name git accepts.");
         }
 
-        await teams.SetPersonDefaultBranchAsync(stored, name, chosen, ct);
-        _defaultBranches[BranchKey(stored, name)] = DefaultBranchFor(stored, name) with { SetByPerson = chosen };
+        var next = DefaultBranchFor(stored, name) with { SetByPerson = chosen };
+        await teams.SetPersonDefaultBranchAsync(stored, name, chosen, audit?.Invoke(next), ct);
+        _defaultBranches[BranchKey(stored, name)] = next;
 
         TeamChanged?.Invoke(SummaryFor(stored, withRoot: false));
     }
@@ -1365,7 +1383,7 @@ public sealed class TeamRegistry(
     /// <remarks>A NULL <paramref name="agent"/> keeps what is stored, which is also what code
     /// carrying the live setting across (a catalog reset repointing the Prompt) wants. A blank one
     /// stores NULL - nobody has chosen - and the launcher falls back to ConciergeAgentDefault.</remarks>
-    public async Task SetInteractiveAsync(string? agent, CancellationToken ct = default)
+    public async Task SetInteractiveAsync(string? agent, CancellationToken ct = default, TriggerAudit? audit = null)
     {
         // The Agent carries three states: null keeps what is stored,
         // blank CLEARS the choice (NULL is stored and the launcher falls back to
@@ -1387,7 +1405,7 @@ public sealed class TeamRegistry(
                 : NoSuchAgentException.WithNoInteractiveCommand(trimmed, offerable);
         }
 
-        await teams.SetConciergeSettingsAsync(trimmed, ct);
+        await teams.SetConciergeSettingsAsync(trimmed, audit, ct);
 
         _Concierge = trimmed;
     }
@@ -2858,9 +2876,12 @@ public sealed class TeamRegistry(
     /// <see cref="UpdateContainerAsync"/>, answering also the row as written and whether the
     /// member's own instructions changed - what the PATCH route audits.
     /// </summary>
+    /// <remarks>With <paramref name="audit"/>, the rows it makes are written in the same transaction
+    /// as the member's row, and the edit does not land without them.</remarks>
     public async Task<MemberUpdate> UpdateMemberAsync(
         string team, string name, string? label, string? systemPrompt, string? agent,
-        SystemPromptSetter? promptSetBy, CancellationToken ct = default)
+        SystemPromptSetter? promptSetBy, CancellationToken ct = default,
+        Func<MemberChange, IReadOnlyList<TriggerAudit>>? audit = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var id = new ContainerId(stored, name);
@@ -2989,7 +3010,15 @@ public sealed class TeamRegistry(
             SystemPromptSetBy = promptChanged ? promptSetBy : member.SystemPromptSetBy,
         };
 
-        await teams.SaveMemberAsync(saved, ct);
+        if (audit is not null)
+        {
+            await teams.SaveMemberAsync(
+                saved, audit(new MemberChange(container.Id, trimmedLabel ?? container.Id.Name, saved, promptChanged)), ct);
+        }
+        else
+        {
+            await teams.SaveMemberAsync(saved, ct);
+        }
 
         // Read back from the LIVE container's own Environment, never rebuilt and never an empty
         // dictionary - the same reason RepromptManager reads it rather than passing {}. An empty

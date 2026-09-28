@@ -194,9 +194,10 @@ public interface ITeamStore
     Task<TenantConciergeSettings> ConciergeSettingsAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Sets the tenant-wide Concierge settings.
+    /// Sets the tenant-wide Concierge settings. With <paramref name="audit"/>, that row is appended
+    /// to `tenant_events` in the same transaction: both land or neither does.
     /// </summary>
-    Task SetConciergeSettingsAsync(string? agent, CancellationToken ct = default);
+    Task SetConciergeSettingsAsync(string? agent, TriggerAudit? audit = null, CancellationToken ct = default);
 
     /// <summary>Replaces a team's ordered repository list.</summary>
     Task SetReposAsync(string team, IReadOnlyList<string> repos, CancellationToken ct = default) =>
@@ -242,10 +243,16 @@ public interface ITeamStore
     /// A NARROW SINGLE-COLUMN UPDATE, never a re-save of the whole row - the same argument that
     /// keeps <see cref="SetFloorAsync"/> narrow.
     /// </summary>
-    Task SetBudgetAsync(string team, long? budgetTokens, CancellationToken ct = default);
+    /// <remarks>With <paramref name="audit"/>, that row is appended to `tenant_events` in the same
+    /// transaction: both land or neither does.</remarks>
+    Task SetBudgetAsync(string team, long? budgetTokens, TriggerAudit? audit = null, CancellationToken ct = default);
 
 
     Task SaveMemberAsync(PersistedMember member, CancellationToken ct = default);
+
+    /// <summary>Saves <paramref name="member"/> and appends every one of <paramref name="audits"/>
+    /// to `tenant_events` in one transaction: all land or none does.</summary>
+    Task SaveMemberAsync(PersistedMember member, IReadOnlyList<TriggerAudit> audits, CancellationToken ct = default);
 
     /// <summary>
     /// Advances ONE member's floor, and nothing else on its row.
@@ -284,9 +291,19 @@ public interface ITeamStore
 
     /// <summary>
     /// Sets a team's additional instructions. A NARROW single-column update, for the reason
-    /// <see cref="SetPausedAsync"/> gives. Null or blank clears them.
+    /// <see cref="SetPausedAsync"/> gives. Null or blank clears them. With <paramref name="audit"/>,
+    /// that row is appended to `tenant_events` in the same transaction: both land or neither does.
     /// </summary>
-    Task SetAdditionalInstructionsAsync(string team, string? text, CancellationToken ct = default);
+    Task SetAdditionalInstructionsAsync(
+        string team, string? text, TriggerAudit? audit = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sets which Agents a team's new members may run, first as the default. A NARROW update of
+    /// `member_agent` and `member_agents`, and `audit` appended to `tenant_events` in the same
+    /// transaction: both land or neither does.
+    /// </summary>
+    Task SetMemberAgentsAsync(
+        string team, IReadOnlyList<string> memberAgents, TriggerAudit audit, CancellationToken ct = default);
 
     /// <summary>Every stored repository default branch. A repository with no row is not known.</summary>
     Task<IReadOnlyList<RepoDefaultBranch>> RepoDefaultBranchesAsync(CancellationToken ct = default);
@@ -301,9 +318,11 @@ public interface ITeamStore
     /// <summary>
     /// Sets or (with null) clears a person's choice of default branch. Leaves
     /// <see cref="RepoDefaultBranch.FromRemote"/> alone. REQUIRED, for the reason
-    /// <see cref="SetEnvAsync"/> gives.
+    /// <see cref="SetEnvAsync"/> gives. With <paramref name="audit"/>, that row is appended to
+    /// `tenant_events` in the same transaction: both land or neither does.
     /// </summary>
-    Task SetPersonDefaultBranchAsync(string team, string repo, string? branch, CancellationToken ct = default);
+    Task SetPersonDefaultBranchAsync(
+        string team, string repo, string? branch, TriggerAudit? audit = null, CancellationToken ct = default);
 
     /// <summary>Every stored repository's contributor settings. No row is an owned repository.</summary>
     Task<IReadOnlyList<RepoContributor>> RepoContributorsAsync(CancellationToken ct = default);
