@@ -24,11 +24,12 @@ public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedR
         await using var command = connection.CreateCommand();
         command.CommandText =
             """
-            INSERT INTO unfinished_removals (path, kind, team, member, remaining, recorded_at, attempts)
-            VALUES ($path, $kind, $team, $member, $remaining, $at, 1)
+            INSERT INTO unfinished_removals (path, kind, team, member, remaining, recorded_at, attempts, host_left)
+            VALUES ($path, $kind, $team, $member, $remaining, $at, 1, $hostLeft)
             ON CONFLICT(path) DO UPDATE SET
                 kind = excluded.kind, team = excluded.team, member = excluded.member,
-                remaining = excluded.remaining, attempts = unfinished_removals.attempts + 1
+                remaining = excluded.remaining, attempts = unfinished_removals.attempts + 1,
+                host_left = excluded.host_left
             """;
         command.Parameters.AddWithValue("$path", removal.Path);
         command.Parameters.AddWithValue("$kind", removal.Kind);
@@ -36,6 +37,8 @@ public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedR
         command.Parameters.AddWithValue("$member", (object?)removal.Member ?? DBNull.Value);
         command.Parameters.AddWithValue("$remaining", JsonSerializer.Serialize(removal.Remaining));
         command.Parameters.AddWithValue("$at", removal.RecordedAt.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue(
+            "$hostLeft", removal.HostLeft is { Count: > 0 } left ? JsonSerializer.Serialize(left) : DBNull.Value);
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -44,7 +47,7 @@ public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedR
         await using var connection = Open();
         await using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT path, kind, team, member, remaining, recorded_at, attempts FROM unfinished_removals ORDER BY path";
+            "SELECT path, kind, team, member, remaining, recorded_at, attempts, host_left FROM unfinished_removals ORDER BY path";
 
         return await ReadAsync(command, ct);
     }
@@ -54,7 +57,7 @@ public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedR
         await using var connection = Open();
         await using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT path, kind, team, member, remaining, recorded_at, attempts FROM unfinished_removals WHERE path = $path";
+            "SELECT path, kind, team, member, remaining, recorded_at, attempts, host_left FROM unfinished_removals WHERE path = $path";
         command.Parameters.AddWithValue("$path", path);
 
         return (await ReadAsync(command, ct)).SingleOrDefault();
@@ -83,7 +86,8 @@ public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedR
                 reader.IsDBNull(3) ? null : reader.GetString(3),
                 JsonSerializer.Deserialize<List<string>>(reader.GetString(4)) ?? [],
                 DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
-                reader.GetInt32(6)));
+                reader.GetInt32(6),
+                reader.IsDBNull(7) ? null : JsonSerializer.Deserialize<Dictionary<string, long>>(reader.GetString(7))));
         }
 
         return rows;
