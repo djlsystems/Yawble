@@ -476,6 +476,50 @@ export interface TeamTrigger {
   lastPollEntries?: number | null
   lastPollError?: string | null
   lastChangeAt?: string | null
+
+  /** What a run this trigger started does to the Manager when it ends. OPTIONAL ON THE CLIENT ONLY,
+   *  so a row from a Host that predates it still reads; absent is read as `always`, today's
+   *  behaviour, which is what every trigger made before the setting keeps. */
+  wakeManager?: TriggerWakeManager
+
+  /** The most billable tokens this trigger's runs (and the Manager runs they woke) may spend in one
+   *  day, in the trigger's timezone. Null is no cap. */
+  dailyTokenCap?: number | null
+
+  /** What this trigger's runs spent today, measured only. Read-only. */
+  spentToday?: TriggerSpentToday | null
+
+  /** The cap was reached today, so fires are skipped until the next day. Read-only. */
+  capReachedToday?: boolean
+}
+
+/**
+ * Whether a run a trigger started wakes the Manager when it ends: `onHandbackOrFailure` (the default
+ * for a new trigger) wakes it only on a hand-back or a failure, `always` on every completion, and
+ * `never` not even on a failure - the failure still shows on the card and in the feed.
+ */
+export type TriggerWakeManager = 'always' | 'onHandbackOrFailure' | 'never'
+
+/**
+ * A trigger's spend today. `billableTokens` sums only the MEASURED runs; `unmeasuredRuns` are runs
+ * that reported no usage, and they are counted as such - never as zero.
+ */
+export interface TriggerSpentToday {
+  billableTokens: number
+  measuredRuns: number
+  unmeasuredRuns: number
+}
+
+/**
+ * What a member's recent runs actually cost, from its last `lastRuns` finished runs. The median is
+ * over the measured ones only, and null when none was measured - nothing is estimated.
+ */
+export interface MemberMeasuredCost {
+  lastRuns: number
+  measuredRuns: number
+  unmeasuredRuns: number
+  medianBillableTokens: number | null
+  kind: 'agent' | 'plugin'
 }
 
 export interface CreateTriggerRequest {
@@ -498,6 +542,8 @@ export interface CreateTriggerRequest {
   pollSeconds?: number | null
   quietSeconds?: number | null
   minIntervalSeconds?: number | null
+  wakeManager?: TriggerWakeManager | null
+  dailyTokenCap?: number | null
 }
 
 export interface UpdateTriggerRequest {
@@ -520,6 +566,8 @@ export interface UpdateTriggerRequest {
   pollSeconds?: number | null
   quietSeconds?: number | null
   minIntervalSeconds?: number | null
+  wakeManager?: TriggerWakeManager | null
+  dailyTokenCap?: number | null
 }
 
 /**

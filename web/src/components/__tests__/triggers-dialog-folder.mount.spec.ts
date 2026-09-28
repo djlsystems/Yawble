@@ -12,6 +12,7 @@ vi.mock('quasar', async (importOriginal) => ({
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getMemberMeasuredCost: vi.fn(),
   listContainerTriggers: vi.fn(),
   listEvents: vi.fn(),
   listWatchRoots: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
 
 import TriggersDialog from '../TriggersDialog.vue';
 import {
+  getMemberMeasuredCost,
   listContainerTriggers,
   listEvents,
   listWatchRoots,
@@ -72,6 +74,9 @@ function folderRow(over: Partial<TeamTrigger> = {}): TeamTrigger {
 }
 
 beforeEach(() => {
+  vi.mocked(getMemberMeasuredCost).mockResolvedValue({
+    lastRuns: 0, measuredRuns: 0, unmeasuredRuns: 0, medianBillableTokens: null, kind: 'agent',
+  });
   vi.mocked(listEvents).mockResolvedValue([]);
   vi.mocked(listWatchRoots).mockResolvedValue([
     { value: 'documents', label: 'Team documents' },

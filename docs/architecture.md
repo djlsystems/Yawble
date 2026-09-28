@@ -71,4 +71,5 @@ The product name, Yawble, lives in the web app's presentation layer
 - [ops/releases-and-updates.md](ops/releases-and-updates.md): updating an instance and cutting a release.
 - [ops/cli-releases-and-install.md](ops/cli-releases-and-install.md): releasing and installing the operator CLI.
 - [ops/backups-logs-and-versions.md](ops/backups-logs-and-versions.md): backups, restores, logs and agent CLI versions.
+- [triggers.md](triggers.md): what triggers cost, the wake choice and the daily token cap.
 - [ops/folder-change-triggers.md](ops/folder-change-triggers.md): waking a member when files change in a folder.

@@ -174,6 +174,11 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         var skill = BuiltInSkills.Find(Name)!;
         Assert.Equal([SkillRoles.Concierge, SkillRoles.Manager], skill.Roles);
 
+        // B0015: the skill states the polling principle and the two trigger settings that bound cost.
+        Assert.Contains("Poll with plugins, spend models only when something happened", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("Wake the Manager when a run ends", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("Daily token cap", skill.Body, StringComparison.Ordinal);
+
         // `plugin-` is the namespace plugin skills are forced into; a built-in there could collide
         // with an installed plugin's skill (a plugin with id `authoring` would ship `plugin-authoring`).
         Assert.DoesNotContain(BuiltInSkills.All, s => s.Name.StartsWith("plugin-", StringComparison.Ordinal));

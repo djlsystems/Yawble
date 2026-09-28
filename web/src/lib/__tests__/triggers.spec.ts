@@ -27,6 +27,11 @@ import {
   triggerSentence,
   secondsForEvery,
   validateSchedule,
+  measuredCostLine,
+  needsShortScheduleConfirmation,
+  shortestScheduleGapSeconds,
+  spentTodayLine,
+  wakeManagerOf,
 } from '../triggers'
 import { asTeamId, type TeamTrigger } from '../../api/types'
 
@@ -42,6 +47,13 @@ const folderDefaults = {
   pollSeconds: 60,
   quietSeconds: 30,
   minIntervalSeconds: 60,
+}
+
+/** The cost-control fields every NEW draft carries: wake the Manager only on a hand-back or a
+ *  failure, and no daily cap. */
+const costDefaults = {
+  wakeManager: 'onHandbackOrFailure' as const,
+  dailyTokenCap: null,
 }
 
 describe('triggerSentence', () => {
@@ -378,6 +390,7 @@ describe('trigger draft helpers', () => {
       eventType: '',
       filter: '',
       ...folderDefaults,
+      ...costDefaults,
     })
 
     expect(body).toEqual({
@@ -393,6 +406,8 @@ describe('trigger draft helpers', () => {
       enabled: false,
       eventType: null,
       filter: null,
+      wakeManager: 'onHandbackOrFailure',
+      dailyTokenCap: null,
     })
   })
 
@@ -412,6 +427,7 @@ describe('trigger draft helpers', () => {
       eventType: 'agentContainer.failed',
       filter: 'container eq alpha/dev1',
       ...folderDefaults,
+      ...costDefaults,
     })
 
     expect(body).toEqual({
@@ -427,6 +443,8 @@ describe('trigger draft helpers', () => {
       enabled: true,
       eventType: 'agentContainer.failed',
       filter: 'container eq alpha/dev1',
+      wakeManager: 'onHandbackOrFailure',
+      dailyTokenCap: null,
     })
   })
 
@@ -470,6 +488,9 @@ describe('trigger draft helpers', () => {
       eventType: '',
       filter: '',
       ...folderDefaults,
+      // An older row has no wake choice and reads as `always`; kept so, this patch is not about it.
+      wakeManager: 'always',
+      dailyTokenCap: null,
     })
 
     expect(patch).toEqual({
@@ -557,6 +578,7 @@ describe('trigger draft helpers', () => {
       eventType: '',
       filter: '',
       ...folderDefaults,
+      ...costDefaults,
     })
   })
 
@@ -970,6 +992,8 @@ describe('folder-change triggers', () => {
       pollSeconds: 60,
       quietSeconds: 30,
       minIntervalSeconds: 60,
+      wakeManager: 'onHandbackOrFailure',
+      dailyTokenCap: null,
     })
   })
 
@@ -1025,5 +1049,64 @@ describe('folder-change triggers', () => {
     expect(formatPollDuration(2400)).toBe('2.4 s')
     expect(formatPollDuration(12_600)).toBe('13 s')
     expect(formatPollDuration(null)).toBe('?')
+  })
+})
+
+describe('trigger cost control', () => {
+  const now = new Date('2026-09-28T08:00:00Z')
+
+  it('reads a row with no wake choice as always, which is what it did before the setting', () => {
+    expect(wakeManagerOf({})).toBe('always')
+    expect(wakeManagerOf({ wakeManager: 'never' })).toBe('never')
+    expect(draftForCreate().wakeManager).toBe('onHandbackOrFailure')
+    expect(draftForCreate().dailyTokenCap).toBeNull()
+  })
+
+  it('refuses a cap that is not a whole number of 1 or more, and takes no cap', () => {
+    const draft = { ...draftForCreate('Dev'), name: 'Sweep', instruction: 'Sweep.' }
+    expect(triggerFieldProblems({ ...draft, dailyTokenCap: null }).dailyTokenCap).toBeUndefined()
+    expect(triggerFieldProblems({ ...draft, dailyTokenCap: 1 }).dailyTokenCap).toBeUndefined()
+    expect(triggerFieldProblems({ ...draft, dailyTokenCap: 0 }).dailyTokenCap).toBeDefined()
+    expect(triggerFieldProblems({ ...draft, dailyTokenCap: 2.5 }).dailyTokenCap).toBeDefined()
+    expect(triggerFieldProblems({ ...draft, dailyTokenCap: NaN }).dailyTokenCap).toBeDefined()
+  })
+
+  it('measures a cron schedule by its shortest gap, and a one-off or event not at all', () => {
+    const base = draftForCreate('Dev')
+    expect(shortestScheduleGapSeconds({ ...base, mode: 'cron', cronExpression: '0 * * * * *' }, now)).toBe(60)
+    expect(shortestScheduleGapSeconds({ ...base, mode: 'cron', cronExpression: '0 */5 * * * *' }, now)).toBe(300)
+    expect(shortestScheduleGapSeconds({ ...base, mode: 'every', everyCount: 90, everyUnit: 'seconds' }, now)).toBe(90)
+    expect(shortestScheduleGapSeconds({ ...base, mode: 'event', eventType: 'x.y' }, now)).toBeNull()
+  })
+
+  it('asks for confirmation below 5 minutes on an agent, and never on a plugin', () => {
+    const everyMinute = { ...draftForCreate('Dev'), everyCount: 1, everyUnit: 'minutes' as const }
+    const everyFive = { ...draftForCreate('Dev'), everyCount: 5, everyUnit: 'minutes' as const }
+    expect(needsShortScheduleConfirmation(everyMinute, 'agent', now)).toBe(true)
+    expect(needsShortScheduleConfirmation(everyFive, 'agent', now)).toBe(false)
+    expect(needsShortScheduleConfirmation(everyMinute, 'plugin', now)).toBe(false)
+    expect(needsShortScheduleConfirmation(
+      { ...everyMinute, mode: 'cron', cronExpression: '0 * * * * *' }, 'agent', now,
+    )).toBe(true)
+  })
+
+  it('says a member whose runs reported nothing has no runs measured, not a zero', () => {
+    expect(measuredCostLine({
+      lastRuns: 3, measuredRuns: 0, unmeasuredRuns: 3, medianBillableTokens: null, kind: 'agent',
+    })).toBe('No runs measured yet - its last 3 runs reported no usage.')
+    expect(measuredCostLine({
+      lastRuns: 1, measuredRuns: 1, unmeasuredRuns: 0, medianBillableTokens: 900, kind: 'agent',
+    })).toBe('Median 900 billable tokens per run, over its last 1 run (1 measured).')
+  })
+
+  it('says spent today without a cap, and not known when the Host sends no spend', () => {
+    expect(spentTodayLine({ spentToday: { billableTokens: 500, measuredRuns: 1, unmeasuredRuns: 0 }, dailyTokenCap: null }))
+      .toBe('spent today 500 tokens (no cap)')
+    expect(spentTodayLine({ dailyTokenCap: 800 })).toBe('spent today not known / cap 800 tokens')
+    expect(spentTodayLine({})).toBeNull()
+  })
+
+  it('names a fire skipped at the cap', () => {
+    expect(outcomeBadge('capped')).toEqual({ label: 'skipped (daily cap)', color: 'warning' })
   })
 })

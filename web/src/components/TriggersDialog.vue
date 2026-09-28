@@ -4,6 +4,7 @@ import { useQuasar } from 'quasar'
 import {
   createSchedule,
   deleteSchedule,
+  getMemberMeasuredCost,
   listContainerTriggers,
   listEvents,
   listWatchRoots,
@@ -14,6 +15,7 @@ import type {
   EventDefinition,
   FolderTestRequest,
   MemberId,
+  MemberMeasuredCost,
   TeamId,
   TeamTrigger,
   WatchRootOption,
@@ -25,6 +27,7 @@ import {
   instructionWakeSource,
   outcomeBadge,
   renderNextDue,
+  spentTodayLine,
   triggerSentence,
   updateTriggerPatchFromDraft,
   type TriggerDraft,
@@ -44,7 +47,13 @@ import TriggerEditDialog from './TriggerEditDialog.vue'
  * create or an update - and hands the editor a draft. Same split as `AgentsDialog`/`AgentEditDialog`.
  */
 const open = defineModel<boolean>({ required: true })
-const props = defineProps<{ team: TeamId; container: MemberId; subscribes: string[] }>()
+const props = withDefaults(defineProps<{
+  team: TeamId
+  container: MemberId
+  subscribes: string[]
+  /** The member's kind from its snapshot; absent is an agent, from an older Host. */
+  memberKind?: 'agent' | 'plugin'
+}>(), { memberKind: 'agent' })
 
 const $q = useQuasar()
 const board = useConsoleStore()
@@ -61,6 +70,11 @@ const events = ref<EventDefinition[]>([])
 
 /** What a folder trigger may watch. Fetched with the rows; a failure leaves documents only. */
 const watchRoots = ref<WatchRootOption[]>([])
+
+/** What this member's recent runs actually cost, for the editor's cost line and the short-schedule
+ *  confirmation. Read with the rows; a failure is said in the editor, never guessed around. */
+const measuredCost = ref<MemberMeasuredCost | null>(null)
+const measuredCostError = ref('')
 
 /** The server's sentence for the last refused save, shown inside the editor rather than a toast. */
 const saveRefusal = ref('')
@@ -118,10 +132,11 @@ async function loadRows() {
   // ALLSETTLED, NOT ONE TRY/CATCH: the rows and the catalog are independent reads, and a catalog
   // fetch failing must not blank the list of triggers this member already has - the event arm
   // simply offers nothing to pick from until it succeeds.
-  const [rowsResult, eventsResult, rootsResult] = await Promise.allSettled([
+  const [rowsResult, eventsResult, rootsResult, costResult] = await Promise.allSettled([
     listContainerTriggers(props.team, props.container),
     listEvents(),
     listWatchRoots(props.team),
+    getMemberMeasuredCost(props.team, props.container),
   ])
 
   if (rowsResult.status === 'fulfilled') {
@@ -132,6 +147,14 @@ async function loadRows() {
 
   events.value = eventsResult.status === 'fulfilled' ? eventsResult.value : []
   watchRoots.value = rootsResult.status === 'fulfilled' ? rootsResult.value : []
+
+  if (costResult.status === 'fulfilled') {
+    measuredCost.value = costResult.value
+    measuredCostError.value = ''
+  } else {
+    measuredCost.value = null
+    measuredCostError.value = costResult.reason instanceof Error ? costResult.reason.message : String(costResult.reason)
+  }
 
   loading.value = false
 }
@@ -291,6 +314,14 @@ watch(open, (showing) => {
                 <q-item-label v-if="isFolder(row) && row.lastPollError" caption class="text-negative folder-poll-error">
                   {{ row.lastPollError }}
                 </q-item-label>
+                <!-- Spent today against the cap; runs that reported no usage are said as such. -->
+                <q-item-label
+                  v-if="spentTodayLine(row)"
+                  caption
+                  :class="['trigger-spend', { 'text-negative': row.capReachedToday }]"
+                >
+                  {{ spentTodayLine(row) }}
+                </q-item-label>
                 <q-item-label caption class="ellipsis">{{ row.instruction }}</q-item-label>
               </q-item-section>
 
@@ -386,6 +417,9 @@ watch(open, (showing) => {
       :watch-roots="watchRoots"
       :refusal="saveRefusal"
       :test-folder="testFolder"
+      :member-kind="memberKind"
+      :measured-cost="measuredCost"
+      :measured-cost-error="measuredCostError"
       @save="save"
     />
   </q-dialog>

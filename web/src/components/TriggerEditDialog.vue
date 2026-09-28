@@ -4,6 +4,7 @@ import type {
   EventDefinition,
   FolderTestRequest,
   FolderTestResult,
+  MemberMeasuredCost,
   TeamTrigger,
   WatchRootOption,
 } from '../api/types'
@@ -16,8 +17,13 @@ import {
   formatPollDuration,
   fromDateTimeLocalValue,
   cronPreviewForDraft,
+  measuredCostLine,
+  needsShortScheduleConfirmation,
+  shortScheduleConfirmation,
   triggerDraftProblem,
   triggerFieldProblems,
+  wakeManagerHint,
+  wakeManagerOptions,
   watchRootOptions,
   type TriggerDraft,
   type TriggerField,
@@ -71,13 +77,26 @@ const props = withDefaults(defineProps<{
 
   /** Lists the folder the way the runner will. Absent, the Test button is not shown. */
   testFolder?: ((request: FolderTestRequest) => Promise<FolderTestResult>) | null
-}>(), { watchRoots: () => [], refusal: '', testFolder: null })
+
+  /** From the member's snapshot; absent is an agent, as everywhere else. A short schedule on an
+   *  agent asks for confirmation, and on a plugin it does not. */
+  memberKind?: 'agent' | 'plugin'
+
+  /** What the member's recent runs actually cost, or null while it has not been read. */
+  measuredCost?: MemberMeasuredCost | null
+
+  /** Why the measured cost could not be read; shown in place of the line. */
+  measuredCostError?: string
+}>(), { watchRoots: () => [], refusal: '', testFolder: null, memberKind: 'agent', measuredCost: null, measuredCostError: '' })
 
 const emit = defineEmits<{ save: [TriggerDraft] }>()
 
 const draft = ref<TriggerDraft>(draftForCreate(props.container))
 
 const editing = computed(() => props.trigger !== null)
+
+/** The short-schedule confirmation, open over this dialog. */
+const confirmOpen = ref(false)
 
 const kindOptions = [
   { label: 'Every N', value: 'every' },
@@ -194,6 +213,7 @@ watch(
       ? draftFromTrigger(props.trigger)
       : draftForCreate(props.container)
     folderTest.value = null
+    confirmOpen.value = false
   },
   { immediate: true },
 )
@@ -252,10 +272,39 @@ const valid = computed(
     (draft.value.mode !== 'cron' || timezone(draft.value.cronTimezone) === true),
 )
 
+const confirmText = computed(() => shortScheduleConfirmation(draft.value, props.measuredCost))
+
 function submit() {
   if (!valid.value || props.saving) return
 
+  // Asked at Save rather than while choosing: the schedule is only final when the person says so.
+  if (needsShortScheduleConfirmation(draft.value, props.memberKind)) {
+    confirmOpen.value = true
+    return
+  }
+
   emit('save', draft.value)
+}
+
+function confirmSave() {
+  confirmOpen.value = false
+  if (!valid.value || props.saving) return
+
+  emit('save', draft.value)
+}
+
+/** The cost line under the title - measured only, never a projection. */
+const costLine = computed(() => {
+  if (props.measuredCostError) return `Measured cost not available: ${props.measuredCostError}`
+  if (props.measuredCost === null) return 'Reading what its recent runs cost…'
+  return measuredCostLine(props.measuredCost)
+})
+
+const dailyCapRules = [fieldRule('dailyTokenCap', (value) => ({ dailyTokenCap: asCap(value) }))]
+
+/** A cleared cap box is no cap, not a zero. */
+function asCap(value: unknown): number | null {
+  return value === '' || value === null || value === undefined ? null : Number(value)
 }
 
 // Only the schedule's own fields decide the preview - an empty name does not hide it.
@@ -391,6 +440,10 @@ function insertToken(token: string) {
         >
           {{ refusal }}
         </q-banner>
+
+        <div class="measured-cost text-caption os-text-muted">
+          <q-icon name="payments" class="q-mr-xs" />{{ costLine }}
+        </div>
 
         <q-input
           v-model="draft.name"
@@ -752,6 +805,32 @@ function insertToken(token: string) {
           />
         </div>
 
+        <q-select
+          v-model="draft.wakeManager"
+          outlined
+          dense
+          emit-value
+          map-options
+          :options="wakeManagerOptions"
+          label="Wake the Manager when a run ends"
+          :hint="wakeManagerHint(draft.wakeManager)"
+          popup-content-class="triggers-popup"
+        />
+
+        <q-input
+          :model-value="draft.dailyTokenCap ?? ''"
+          type="number"
+          min="1"
+          outlined
+          dense
+          clearable
+          label="Daily token cap (optional)"
+          hint="Billable tokens its runs, and the Manager runs they wake, may spend in a day. Once reached, fires are skipped until the next day. Blank is no cap."
+          lazy-rules
+          :rules="dailyCapRules"
+          @update:model-value="(value) => (draft.dailyTokenCap = asCap(value))"
+        />
+
         <!-- A column, because a checkbox is inline-flex and two of them on one row put the second
              one's label a long way from the box it belongs to on a narrow dialog. -->
         <div class="column items-start q-gutter-xs">
@@ -773,6 +852,18 @@ function insertToken(token: string) {
       </q-card-actions>
       </q-form>
     </q-card>
+
+    <!-- Nested so Quasar raises it over the editor. -->
+    <q-dialog v-model="confirmOpen">
+      <q-card class="os-dialog-sm short-schedule-confirm">
+        <q-card-section class="os-dialog-title">Run a model this often?</q-card-section>
+        <q-card-section class="q-pt-none">{{ confirmText }}</q-card-section>
+        <q-card-actions align="right">
+          <q-btn v-close-popup flat no-caps label="Go back" />
+          <q-btn flat no-caps color="primary" label="Save anyway" @click="confirmSave" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-dialog>
 </template>
 

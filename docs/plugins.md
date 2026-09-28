@@ -319,6 +319,30 @@ anyone needs to be woken for. It is for a plugin that polls on a schedule: witho
 Pinned by `PluginQuietRunTests` and
 `PluginHostProbes.A_quiet_answer_to_the_managers_own_instruction_still_wakes_the_manager`.
 
+### Poll with plugins, spend models only when something happened
+
+A plugin watches for free and publishes an event when it finds something; an agent reacts to that
+event. A model member on a short schedule is almost always better as a plugin plus an event trigger.
+
+- A **schedule trigger** on the plugin member polls every few minutes. The plugin publishes one
+  event per new item and finishes; a run with nothing new costs no tokens.
+- An **event trigger** on the agent member, on the plugin's event type, wakes it only when there is
+  something to act on.
+
+The trigger's own settings bound what is left (see [triggers.md](triggers.md)):
+
+- **Wake the Manager when a run ends.** A new trigger wakes the Manager only when its run hands back
+  or fails, so a plugin poll that finds nothing wakes nobody, `quiet` or not. Under **Always** (every
+  trigger made before the setting), `quiet` is still how a plugin says "nothing happened". Under
+  **Never**, not even a failure wakes the Manager; it still shows on the card and in the feed.
+- **Daily token cap.** The billable tokens a trigger's runs, and the Manager runs they woke, may
+  spend in a day; past it, fires are skipped until the next day. A plugin run reports no usage, so
+  it counts as not measured and never towards the cap - the cap matters on the agent's event trigger.
+
+The Triggers dialog asks for confirmation before a schedule more frequent than every 5 minutes on an
+agent member, naming what a run of it has cost and suggesting this shape. A plugin member has no
+minimum.
+
 **Outcome.**
 
 | What happened | Result |

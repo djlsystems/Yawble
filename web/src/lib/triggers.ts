@@ -1,7 +1,9 @@
 import type {
   CreateTriggerRequest,
   EventDefinition,
+  MemberMeasuredCost,
   TeamTrigger,
+  TriggerWakeManager,
   UpdateTriggerRequest,
   WatchRootOption,
 } from '../api/types'
@@ -111,7 +113,49 @@ export interface TriggerDraft {
   pollSeconds: number
   quietSeconds: number
   minIntervalSeconds: number
+
+  /** What a run this trigger started does to the Manager when it ends. */
+  wakeManager: TriggerWakeManager
+
+  /** The most billable tokens this trigger may spend in a day; null is no cap. */
+  dailyTokenCap: number | null
 }
+
+/** A new trigger wakes the Manager only when its run hands back or fails. */
+export const DefaultWakeManager: TriggerWakeManager = 'onHandbackOrFailure'
+
+/**
+ * A row with no `wakeManager` comes from a Host that predates the setting, and every trigger there
+ * wakes the Manager on each completion - so absent reads as `always`, never as the new default.
+ */
+export function wakeManagerOf(row: Pick<TeamTrigger, 'wakeManager'>): TriggerWakeManager {
+  return row.wakeManager ?? 'always'
+}
+
+/** The wake choice's options, in the order a person should consider them. */
+export const wakeManagerOptions: readonly { label: string; value: TriggerWakeManager }[] = [
+  { label: 'Only if it hands back or fails', value: 'onHandbackOrFailure' },
+  { label: 'Always', value: 'always' },
+  { label: 'Never', value: 'never' },
+]
+
+/** The hint under the wake choice, for the option chosen. */
+export function wakeManagerHint(choice: TriggerWakeManager): string {
+  switch (choice) {
+    case 'always':
+      return 'Every run this trigger starts wakes the Manager when it ends - a second paid run, even when nothing happened.'
+    case 'never':
+      return 'Nobody is woken, not even for a failure. The run is still recorded, and a failure still shows on the card and in the feed.'
+    default:
+      return 'The Manager is woken only when the run hands something back or fails. A run that finds nothing just finishes.'
+  }
+}
+
+/**
+ * A schedule that fires more often than this on an agent member asks the person to confirm first.
+ * Plugin members have no minimum: a plugin run costs no model tokens.
+ */
+export const ShortScheduleSeconds = 5 * 60
 
 export interface OutcomeBadge {
   label: string
@@ -619,6 +663,9 @@ export function outcomeBadge(outcome: string | null | undefined): OutcomeBadge {
       return { label: 'missed', color: 'negative' }
     case 'member-missing':
       return { label: 'member missing', color: 'negative' }
+    // The fire was skipped because the trigger's daily token cap was reached.
+    case 'capped':
+      return { label: 'skipped (daily cap)', color: 'warning' }
     default:
       return { label: outcome.replace(/[-_]/g, ' '), color: 'info' }
   }
@@ -704,6 +751,7 @@ export type TriggerField =
   | 'pollSeconds'
   | 'quietSeconds'
   | 'minIntervalSeconds'
+  | 'dailyTokenCap'
 
 /** The order `triggerDraftProblem` reports in, which is the order a person should fix them in. */
 const TriggerFieldOrder: readonly TriggerField[] = [
@@ -722,6 +770,7 @@ const TriggerFieldOrder: readonly TriggerField[] = [
   'pollSeconds',
   'quietSeconds',
   'minIntervalSeconds',
+  'dailyTokenCap',
 ]
 
 /**
@@ -789,6 +838,10 @@ export function triggerFieldProblems(
     && (draft.startsAt ?? '').trim().length > 0
     && fromDateTimeLocalValue(draft.startsAt ?? '') === null) {
     problems.startsAt = 'The start is not a valid date and time; clear it to start now.'
+  }
+
+  if (draft.dailyTokenCap !== null && (!Number.isInteger(draft.dailyTokenCap) || draft.dailyTokenCap < 1)) {
+    problems.dailyTokenCap = 'A daily cap is a whole number of tokens, 1 or more. Leave it blank for no cap.'
   }
 
   return problems
@@ -942,6 +995,8 @@ export function draftForCreate(defaultContainer = 'Manager'): TriggerDraft {
     pollSeconds: DefaultPollSeconds,
     quietSeconds: DefaultQuietSeconds,
     minIntervalSeconds: DefaultMinIntervalSeconds,
+    wakeManager: DefaultWakeManager,
+    dailyTokenCap: null,
   }
 }
 
@@ -970,6 +1025,8 @@ export function draftFromTrigger(row: TeamTrigger): TriggerDraft {
     pollSeconds: row.pollSeconds ?? DefaultPollSeconds,
     quietSeconds: row.quietSeconds ?? DefaultQuietSeconds,
     minIntervalSeconds: row.minIntervalSeconds ?? DefaultMinIntervalSeconds,
+    wakeManager: wakeManagerOf(row),
+    dailyTokenCap: row.dailyTokenCap ?? null,
   }
 }
 
@@ -1018,6 +1075,8 @@ function wireShapeFromDraft(draft: TriggerDraft) {
     pollSeconds,
     quietSeconds,
     minIntervalSeconds,
+    wakeManager: draft.wakeManager,
+    dailyTokenCap: draft.dailyTokenCap,
   }
 }
 
@@ -1048,6 +1107,8 @@ export function createTriggerRequestFromDraft(draft: TriggerDraft): CreateTrigge
           minIntervalSeconds: wire.minIntervalSeconds,
         }
       : {}),
+    wakeManager: wire.wakeManager,
+    dailyTokenCap: wire.dailyTokenCap,
   }
 }
 
@@ -1092,6 +1153,10 @@ export function updateTriggerPatchFromDraft(
   if (next.minIntervalSeconds !== (existing.minIntervalSeconds ?? null)) {
     patch.minIntervalSeconds = next.minIntervalSeconds
   }
+  // Compared against what the row MEANS, so an older row (no `wakeManager`, read as `always`) saved
+  // unchanged sends nothing - and choosing `always` for it is not a change either.
+  if (next.wakeManager !== wakeManagerOf(existing)) patch.wakeManager = next.wakeManager
+  if (next.dailyTokenCap !== (existing.dailyTokenCap ?? null)) patch.dailyTokenCap = next.dailyTokenCap
 
   return patch
 }
@@ -1254,13 +1319,19 @@ export function previewCronOccurrences(
   const after = startsAt !== null && startsAt.getTime() > now.getTime()
     ? new Date(startsAt.getTime() - 1000)
     : now
+  return nextCronInstants(expression, timezone, count, after)
+    .map((instant) => formatZonedPreview(instant, timezone))
+}
+
+/** The next `count` instants a cron expression fires after `after`; empty when it cannot run. */
+function nextCronInstants(expression: string, timezone: string, count: number, after: Date): Date[] {
   if (!isValidTimezone(timezone)) return []
   const matcher = parseCronMatcher(expression)
   if (!matcher) return []
   const formatter = zonedFormatter(timezone)
 
   const wanted = Math.max(1, count)
-  const found: string[] = []
+  const found: Date[] = []
   const fromMs = after.getTime() + 1000
   const limitMs = fromMs + (SecondsPerYear * 1000)
 
@@ -1270,7 +1341,7 @@ export function previewCronOccurrences(
       if (candidateMs < fromMs) continue
       const candidate = new Date(candidateMs)
       if (!cronMatch(matcher, formatter, candidate)) continue
-      found.push(formatZonedPreview(candidate, timezone))
+      found.push(candidate)
       if (found.length >= wanted) return found
     }
   }
@@ -1325,4 +1396,105 @@ export function cronPreviewForDraft(draft: TriggerDraft, count = 5, now = new Da
 
   const start = fromDateTimeLocalValue(draft.startsAt ?? '')
   return previewCronOccurrences(draft.cronExpression, draft.cronTimezone, count, now, start === null ? null : new Date(start))
+}
+
+/**
+ * The shortest gap, in seconds, between two fires of a draft's schedule, or null when the draft has
+ * no repeating schedule (a one-off, an event or a folder trigger) or one that cannot run yet.
+ *
+ * For cron it is the shortest gap among the next few fires, so `0 * 9 * * *` - every minute of the
+ * nine o'clock hour - counts as every minute, which is what it costs while it runs.
+ */
+export function shortestScheduleGapSeconds(draft: TriggerDraft, now = new Date()): number | null {
+  if (draft.mode === 'every') {
+    if (!Number.isFinite(draft.everyCount) || draft.everyCount < 1) return null
+    return secondsForEvery(draft.everyCount, draft.everyUnit)
+  }
+  if (draft.mode !== 'cron') return null
+  if (cronExpressionProblem(draft.cronExpression) !== null) return null
+  if (cronTimezoneProblem(draft.cronTimezone) !== null) return null
+
+  const instants = nextCronInstants(draft.cronExpression, draft.cronTimezone, 12, now)
+  let shortest: number | null = null
+  for (let index = 1; index < instants.length; index++) {
+    const gap = ((instants[index] as Date).getTime() - (instants[index - 1] as Date).getTime()) / 1000
+    if (shortest === null || gap < shortest) shortest = gap
+  }
+  return shortest
+}
+
+/**
+ * Whether saving this draft asks the person to confirm first: a schedule more frequent than every
+ * five minutes on an agent member. A plugin member never does - its runs spend no model tokens.
+ */
+export function needsShortScheduleConfirmation(
+  draft: TriggerDraft,
+  memberKind: 'agent' | 'plugin',
+  now = new Date(),
+): boolean {
+  if (memberKind !== 'agent') return false
+  const gap = shortestScheduleGapSeconds(draft, now)
+  return gap !== null && gap < ShortScheduleSeconds
+}
+
+function runs(count: number): string {
+  return plural(count, 'run')
+}
+
+/**
+ * The member's measured cost, as one line: the median billable tokens of its recent runs and how
+ * many were not measured, or that none was. Never a projection - only what runs actually reported.
+ */
+export function measuredCostLine(cost: MemberMeasuredCost): string {
+  if (cost.medianBillableTokens === null || cost.measuredRuns === 0) {
+    return cost.unmeasuredRuns > 0
+      ? `No runs measured yet - its last ${runs(cost.unmeasuredRuns)} reported no usage.`
+      : 'No runs measured yet.'
+  }
+
+  const median = `${cost.medianBillableTokens.toLocaleString()} billable tokens`
+  const unmeasured = cost.unmeasuredRuns > 0 ? `, ${cost.unmeasuredRuns} not measured` : ''
+  return `Median ${median} per run, over its last ${runs(cost.lastRuns)} (${cost.measuredRuns} measured${unmeasured}).`
+}
+
+/**
+ * What a trigger spent today against its cap: `spent today / cap`. Unmeasured runs are said as such,
+ * never folded in as zero; a row the Host sends no spend for says it is not known.
+ */
+export function spentTodayLine(row: Pick<TeamTrigger, 'spentToday' | 'dailyTokenCap' | 'capReachedToday'>): string | null {
+  const spent = row.spentToday
+  const cap = row.dailyTokenCap ?? null
+
+  if (!spent) return cap === null ? null : `spent today not known / cap ${cap.toLocaleString()} tokens`
+
+  // Runs that reported nothing are not a zero: with none measured the figure is not "0 tokens".
+  const measured = spent.measuredRuns === 0 && spent.unmeasuredRuns > 0
+    ? 'nothing measured'
+    : `${spent.billableTokens.toLocaleString()} tokens`
+  const unmeasured = spent.unmeasuredRuns > 0 ? ` + ${runs(spent.unmeasuredRuns)} not measured` : ''
+  const total = `${measured}${unmeasured}`
+  const reached = row.capReachedToday ? ' - cap reached, fires again tomorrow' : ''
+
+  return cap === null
+    ? `spent today ${total} (no cap)`
+    : `spent today ${total} / cap ${cap.toLocaleString()} tokens${reached}`
+}
+
+/**
+ * The confirmation a short schedule on an agent member asks for: how often it fires, what one run of
+ * this member has actually cost (or that it is not known), and the cheaper shape - a plugin that
+ * watches and an event trigger that wakes this member only when something happened.
+ */
+export function shortScheduleConfirmation(draft: TriggerDraft, cost: MemberMeasuredCost | null, now = new Date()): string {
+  const gap = shortestScheduleGapSeconds(draft, now)
+  const often = gap === null ? 'often' : `every ${describeDuration(gap)}`
+
+  const perRun = cost === null
+    ? 'Its measured cost per run could not be read.'
+    : cost.medianBillableTokens === null || cost.measuredRuns === 0
+      ? 'None of its runs has been measured yet, so its cost per run is not known.'
+      : `Each run has cost a median of ${cost.medianBillableTokens.toLocaleString()} billable tokens, measured over its last ${runs(cost.lastRuns)}.`
+
+  return `This fires ${often}, and every fire is a paid model run. ${perRun} `
+    + 'A plugin can watch for free and publish an event when it finds something; an event trigger then wakes this member only when something happened.'
 }

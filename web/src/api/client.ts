@@ -31,6 +31,7 @@ import type {
   FolderTestResult,
   WatchRootOption,
   MemberId,
+  MemberMeasuredCost,
   MemberRunsPage,
   PluginHire,
   PluginList,
@@ -213,6 +214,15 @@ export const listMemberRuns = (team: TeamId, member: MemberId, before?: number |
   json<MemberRunsPage>(
     `/api/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(member)}/runs` +
       (before == null ? '' : `?before=${before}`),
+  )
+
+/**
+ * What a member's recent runs actually cost: the median billable tokens of its last runs and how
+ * many of them were not measured. Measured only - there is no projection to ask for.
+ */
+export const getMemberMeasuredCost = (team: TeamId, member: MemberId) =>
+  json<MemberMeasuredCost>(
+    `/api/teams/${encodeURIComponent(team)}/containers/${encodeURIComponent(member)}/cost`,
   )
 
 /**

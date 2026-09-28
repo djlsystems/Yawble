@@ -100,6 +100,10 @@ The listing time matters for a share. A share that takes several seconds to list
 
 The instruction can use the `file.changed` fields as tokens: `{event.path}` (the watched folder), `{event.changed}` (the changed files, at most 100), and `{event.count}` (how many changed in total). The event carries paths and counts. It never carries file contents.
 
+## Waking the Manager and the daily cap
+
+A folder trigger has the same **Wake the Manager when a run ends** choice and optional **Daily token cap** as every other trigger; see [../triggers.md](../triggers.md). A new folder trigger wakes the Manager only when its run hands back or fails.
+
 ## What is ignored
 
 These never count as a change, wherever they appear in the watched folder:
