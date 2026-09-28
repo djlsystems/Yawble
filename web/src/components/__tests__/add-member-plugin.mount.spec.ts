@@ -168,7 +168,7 @@ describe('AddMemberDialog, hiring a plugin', () => {
     button('Add member').click();
     await settle();
 
-    expect(addMember.mock.calls[0]).toEqual(['alpha', 'Scout', 'claude']);
+    expect(addMember.mock.calls[0]).toEqual(['alpha', 'Scout', 'claude', undefined, undefined]);
     expect(document.body.querySelector('[data-plugin-hire]')).toBeNull();
 
     wrapper.unmount();

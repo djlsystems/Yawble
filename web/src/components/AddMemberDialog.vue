@@ -16,6 +16,7 @@ import {
   pluginHire,
   type PluginFieldValues,
 } from '../lib/pluginHire';
+import { MemberInstructionsHint, MemberInstructionsLabel } from '../lib/memberInstructions';
 
 /**
  * Adds a member to a team.
@@ -29,8 +30,9 @@ import {
  * completion types are global, and a free-text subscription box puts an unbounded wake loop one
  * keystroke from someone with no way to know. A worker is reachable without it.
  *
- * Nor is there a prompt: a member is told the built-in Member prompt, chosen by role, plus the team's
- * Additional instructions.
+ * An agent member may be given its OWN INSTRUCTIONS, sent as `systemPrompt` on the hire: added to
+ * its prompt after the built-in Member prompt, before the team instructions. A plugin has no prompt,
+ * so the field is not offered for one and nothing is sent.
  *
  * INSTALLED PLUGINS ARE OFFERED BESIDE THE PRESETS, by their `plugin:<id>` reference, from
  * `GET /api/plugins`. Choosing one shows its manifest's config fields as inputs and its secrets BY
@@ -53,6 +55,10 @@ const $q = useQuasar();
 const { installations } = useAgentInstallations();
 
 const name = ref('');
+
+/** The member's own instructions. Kept while the choice flips between an Agent and a plugin, and
+ *  sent only for an Agent. */
+const instructions = ref('');
 
 /** Matching `TeamRegistry.MaximumLabelLength`, which the server checks too. */
 const MaximumLength = MAXIMUM_LABEL_LENGTH;
@@ -211,9 +217,10 @@ async function submit() {
           agent.value!,
           pluginHire(plugin.value, pluginConfig.value, pluginSecrets.value),
         )
-      : await addMember(props.team, name.value.trim(), agent.value!);
+      : await addMember(props.team, name.value.trim(), agent.value!, undefined, instructions.value.trim() || undefined);
 
     name.value = '';
+    instructions.value = '';
     open.value = false;
 
     // Handle unresolvedAgents if present
@@ -354,10 +361,17 @@ async function submit() {
           </template>
         </div>
 
-        <div v-if="!plugin" class="text-caption os-text-muted">
-          What a member is told comes with this build, by its role, followed by the team's Additional
-          instructions.
-        </div>
+        <!-- THE MEMBER'S OWN INSTRUCTIONS, for an Agent only: a plugin has no prompt. -->
+        <q-input
+          v-if="!plugin"
+          v-model="instructions"
+          type="textarea"
+          autogrow
+          outlined
+          dense
+          :label="MemberInstructionsLabel"
+          :hint="MemberInstructionsHint"
+        />
 
         <q-banner v-if="error" dense class="os-bg-tint-error text-negative">
           <template #avatar><q-icon name="error" /></template>

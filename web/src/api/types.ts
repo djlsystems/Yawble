@@ -198,6 +198,20 @@ export interface MemberDetail {
   team: TeamId
   id: string
   name: string
+
+  /** The member's OWN INSTRUCTIONS, added after its built-in role prompt and before the team
+   *  instructions. Null when it has none. */
+  systemPrompt?: string | null
+
+  /** WHO LAST SET `systemPrompt`: the hiring Manager's member id, or a person's identity. Null for
+   *  a member from before this was recorded, until it is next edited. */
+  systemPromptSetBy?: string | null
+
+  /** Whether `systemPromptSetBy` is the Manager that hired it or a person. */
+  systemPromptSetByKind?: 'manager' | 'person' | null
+
+  /** When `systemPrompt` was last set, ISO-8601 UTC. */
+  systemPromptSetAt?: string | null
 }
 
 /**

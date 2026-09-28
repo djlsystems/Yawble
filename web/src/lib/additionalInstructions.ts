@@ -1,12 +1,16 @@
 /**
- * A team's ADDITIONAL INSTRUCTIONS: optional words a person writes for one team, appended
- * after the built-in role prompt for that team's Manager and members. They never replace it - the
- * role prompt comes from the build and no person chooses it.
+ * A team's TEAM INSTRUCTIONS: optional words a person writes for one team, added to the prompt of
+ * EVERY agent member of that team - the Manager, members the Manager hired and members a person
+ * added - after each member's built-in prompt and its own instructions. They never replace either.
  *
  * ONE LABEL AND ONE HINT for New Team and Team Settings, so the two dialogs cannot drift apart on
- * what the box does.
+ * what the box does. The wire field stays `additionalInstructions`: only the words a person reads
+ * changed.
  */
-export const AdditionalInstructionsLabel = 'Additional instructions (optional)'
+export const TeamInstructionsLabel = 'Team instructions (optional)'
 
-export const AdditionalInstructionsHint =
-  'Appended after the built-in role prompt for this team’s Manager and members. It never replaces it. Leave empty to add nothing.'
+export const TeamInstructionsHint =
+  "How this team works: its purpose, rules, conventions and playbook. Every member reads it: the Manager and every member, whether the Manager hired them or a person added them. It is added after each member's built-in prompt and its own instructions, and never replaces them."
+
+/** Under the field in Team Settings: saving re-prompts every member for its next wake. */
+export const TeamInstructionsTakesEffect = "Takes effect on each member's next run."

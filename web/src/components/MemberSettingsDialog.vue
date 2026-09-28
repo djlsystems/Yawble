@@ -1,21 +1,38 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { listCatalog, updateMember } from '../api/client';
-import { agentsForMode, type Agent, type ContainerSnapshot } from '../api/types';
+import { getMember, listCatalog, updateMember } from '../api/client';
+import {
+  agentsForMode,
+  isManagerContainer,
+  type Agent,
+  type ContainerSnapshot,
+  type MemberDetail,
+} from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
 import { useAgentInstallations } from '../lib/useAgentInstallations';
 import { useConsoleStore } from '../stores/console';
 import { MAXIMUM_LABEL_LENGTH, memberName, required } from '../lib/rules';
 import { passes, refusalStatus, submitOnEnter } from '../lib/forms';
+import {
+  ManagerInstructionsHint,
+  MemberInstructionsHint,
+  MemberInstructionsLabel,
+  MemberInstructionsTakesEffect,
+  instructionsWrittenBy,
+} from '../lib/memberInstructions';
 
 /**
  * Settings for an existing member — the card's way into `PATCH /api/teams/{team}/containers/{name}`.
  *
- * What a member is CALLED and what it RUNS. What it is TOLD is not here: the prompt is chosen by role
- * from the build - the Manager prompt for the Manager, the Member prompt for everyone else - and the
- * only words a person adds are the team's Additional instructions, in Team settings.
+ * What a member is CALLED, what it RUNS, and its OWN INSTRUCTIONS (`systemPrompt`), which are added
+ * to its prompt after the built-in role prompt and before the team instructions. The built-in prompt
+ * itself is chosen by role from the build and is nobody's to edit.
+ *
+ * THE INSTRUCTIONS ARE ONE FIELD, VISIBLE AND EDITABLE, on every agent member's card - the Manager's
+ * too. When a Manager hired the member it shows exactly what the Manager wrote, and what is saved is
+ * what the member gets. A plugin member has no prompt, so the field is absent for one.
  *
  * The Agent IS editable. The preset is resolved by name on every invocation, so a repoint is a
  * single write and takes effect on the member’s next wake, with no Host restart. The manager can be repointed like any other member.
@@ -63,6 +80,42 @@ const agents = computed(() => {
   const names = headless.value.map((a) => a.name);
   return allowedAgentOptions(names, teamAllowlist.value);
 });
+
+/** A plugin member has no prompt, so it has no instructions to show. */
+const hasInstructions = computed(() => props.snapshot.kind !== 'plugin');
+
+const isManager = computed(() => isManagerContainer(props.snapshot.id, board.managerName));
+
+/** The member's own instructions as typed, and the stored row they were read from. Null until
+ *  `getMember` answers, and the field is disabled until then: a Save before it would write over
+ *  instructions nobody was shown. */
+const instructions = ref('');
+const stored = ref<MemberDetail | null>(null);
+const instructionsProblem = ref<string | null>(null);
+
+/** Trimmed on both sides, like the team's instructions: trailing whitespace is not a change. */
+const instructionsChanged = computed(
+  () => stored.value !== null && instructions.value.trim() !== (stored.value.systemPrompt ?? '').trim(),
+);
+
+const writtenBy = computed(() => instructionsWrittenBy(stored.value));
+
+async function loadInstructions() {
+  stored.value = null;
+  instructions.value = '';
+  instructionsProblem.value = null;
+
+  if (!hasInstructions.value) return;
+
+  try {
+    const detail = await getMember(props.snapshot.team, props.snapshot.id);
+
+    stored.value = detail;
+    instructions.value = detail.systemPrompt ?? '';
+  } catch (cause) {
+    instructionsProblem.value = `Could not read this member's instructions: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+}
 
 const valid = computed(
   () =>
@@ -115,6 +168,7 @@ watch(open, (showing) => {
   errorStatus.value = undefined;
 
   void loadAgents();
+  void loadInstructions();
 }, { immediate: true });
 
 const busy = ref(false);
@@ -136,11 +190,15 @@ async function submit() {
   refusedName.value = name.value.trim();
 
   try {
-    const body: { name?: string; agent?: string } = { name: name.value.trim() };
+    const body: { name?: string; agent?: string; systemPrompt?: string } = { name: name.value.trim() };
 
     // Sent only when it actually moved. The server treats an unchanged Agent as a no-op anyway,
     // but sending it regardless would make every save look like a repoint in the API log.
     if (agent.value && agent.value !== props.snapshot.agent) body.agent = agent.value;
+
+    // Only when it moved, so a rename is not recorded as an edit of the instructions. Blank is sent
+    // as blank, which clears them.
+    if (instructionsChanged.value) body.systemPrompt = instructions.value.trim();
 
     const updated = await updateMember(props.snapshot.team, props.snapshot.id, body);
 
@@ -223,9 +281,25 @@ async function submit() {
           </span>
         </div>
 
-        <div class="text-caption os-text-muted">
-          What this member is told comes with this build, by its role. Words for the whole team go in
-          Team settings, under Additional instructions.
+        <!-- THE MEMBER'S OWN INSTRUCTIONS: every agent member, the Manager included, with the
+             Manager's own hint on its card. Absent for a plugin, which has no prompt. -->
+        <div v-if="hasInstructions" data-member-instructions>
+          <q-input
+            v-model="instructions"
+            type="textarea"
+            autogrow
+            outlined
+            dense
+            :label="MemberInstructionsLabel"
+            :hint="isManager ? ManagerInstructionsHint : MemberInstructionsHint"
+            :disable="stored === null"
+            :error="instructionsProblem !== null ? true : undefined"
+            :error-message="instructionsProblem ?? ''"
+          />
+          <div v-if="writtenBy" class="text-caption os-text-muted q-mt-lg" data-written-by>{{ writtenBy }}</div>
+          <div class="text-caption os-text-muted" :class="writtenBy ? '' : 'q-mt-lg'">
+            {{ MemberInstructionsTakesEffect }}
+          </div>
         </div>
 
           <q-banner v-if="error" dense class="os-bg-tint-error text-negative">

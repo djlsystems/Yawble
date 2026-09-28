@@ -32,6 +32,7 @@ import { useConsoleStore } from '../../stores/console';
 import { useSessionStore } from '../../stores/session';
 import { remember } from '../../lib/newTeamDefaults';
 import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { TeamInstructionsLabel } from '../../lib/additionalInstructions';
 
 beforeEach(() => {
   localStorage.clear();
@@ -76,7 +77,7 @@ async function open(remembered = true) {
 function field(wrapper: VueWrapper, label: string) {
   const found = wrapper.findAllComponents({ name: 'QInput' })
     .find((input) => input.props('label') === label || input.attributes('aria-label') === label
-      || input.find('input').attributes('aria-label') === label);
+      || input.find('input, textarea').attributes('aria-label') === label);
 
   if (!found) throw new Error(`no ${label} input in the rendered dialog`);
 
@@ -253,12 +254,27 @@ describe('CreateTeamDialog prompts', () => {
     wrapper.unmount();
   });
 
-  it('offers Additional instructions, saying they are appended and never replace the role prompt', async () => {
+  it('gives Team instructions a section of their own, after Dynamic members, with the shared hint', async () => {
     const wrapper = await open();
 
-    const box = field(wrapper, 'Additional instructions (optional)');
-    expect(box.props('hint')).toContain('Appended after the built-in role prompt');
-    expect(box.props('hint')).toContain('never replaces');
+    const section = document.body.querySelector('[data-section="team-instructions"]');
+    expect(section, 'no Team instructions section in the rendered dialog').not.toBeNull();
+    expect(section!.textContent).toContain('Team instructions (optional)');
+    expect(section!.textContent).not.toContain('Dynamic members');
+
+    const text = bodyText();
+    expect(text.indexOf('Dynamic members')).toBeGreaterThan(-1);
+    expect(text.indexOf('Team instructions (optional)')).toBeGreaterThan(text.indexOf('Dynamic members'));
+
+    // DIRECTLY after: the Dynamic members allowlist is the last control before the section.
+    const heading = [...document.body.querySelectorAll('.text-subtitle2')].map((node) => node.textContent?.trim());
+    expect(heading.indexOf('Team instructions (optional)')).toBe(heading.indexOf('Dynamic members') + 1);
+
+    const box = field(wrapper, TeamInstructionsLabel);
+    expect(section!.contains(box.element)).toBe(true);
+    expect(box.props('hint')).toBe(
+      "How this team works: its purpose, rules, conventions and playbook. Every member reads it: the Manager and every member, whether the Manager hired them or a person added them. It is added after each member's built-in prompt and its own instructions, and never replaces them.",
+    );
 
     wrapper.unmount();
   });
@@ -266,7 +282,7 @@ describe('CreateTeamDialog prompts', () => {
   it('sends what was typed as additionalInstructions and no prompt', async () => {
     const wrapper = await open();
     await field(wrapper, 'Team name').setValue('Beta');
-    await field(wrapper, 'Additional instructions (optional)').setValue('Prefer small commits.');
+    await field(wrapper, TeamInstructionsLabel).setValue('Prefer small commits.');
     await validated();
 
     button('Create team').click();

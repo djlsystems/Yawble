@@ -59,11 +59,25 @@ describe('addMember', () => {
     expect(bodyOf()).not.toHaveProperty('subscribes')
   })
 
-  /** A member is told the built-in Member prompt by role, so no prompt of any kind is sent. */
-  it('sends a name and an agent and no prompt', async () => {
+  /** With no instructions typed, an Agent's hire carries a name and an agent and nothing else. */
+  it('sends a name and an agent and no prompt when there are no instructions', async () => {
     await addMember(asTeamId('Alpha'), 'dev1', 'claude')
 
     expect(bodyOf()).toEqual({ name: 'dev1', agent: 'claude' })
+  })
+
+  /** The member's OWN INSTRUCTIONS ride the hire as `systemPrompt`, as given. */
+  it('sends an agent member\'s instructions as systemPrompt', async () => {
+    await addMember(asTeamId('Alpha'), 'dev1', 'claude', undefined, 'You review pull requests.')
+
+    expect(bodyOf()).toEqual({ name: 'dev1', agent: 'claude', systemPrompt: 'You review pull requests.' })
+  })
+
+  /** A plugin has no prompt: its hire never carries one, whatever the caller passed. */
+  it('never sends systemPrompt for a plugin', async () => {
+    await addMember(asTeamId('Alpha'), 'echo', 'plugin:sample-echo', { config: {}, secrets: {} }, 'ignored')
+
+    expect(bodyOf()).not.toHaveProperty('systemPrompt')
   })
 
   it('surfaces the server’s own refusal wording', async () => {

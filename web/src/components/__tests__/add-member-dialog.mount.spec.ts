@@ -157,7 +157,7 @@ describe('AddMemberDialog, validated', () => {
     await pressEnter('Member name');
 
     expect(addMember).toHaveBeenCalledTimes(1);
-    expect(addMember.mock.calls[0]).toEqual(['alpha', 'Scout', 'claude']);
+    expect(addMember.mock.calls[0]).toEqual(['alpha', 'Scout', 'claude', undefined, undefined]);
 
     wrapper.unmount();
   });

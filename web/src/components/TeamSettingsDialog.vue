@@ -45,7 +45,11 @@ import {
 } from '../lib/contributor';
 import { installStatus, installationFor } from '../lib/agentInstall';
 import { useAgentInstallations } from '../lib/useAgentInstallations';
-import { AdditionalInstructionsHint, AdditionalInstructionsLabel } from '../lib/additionalInstructions';
+import {
+  TeamInstructionsHint,
+  TeamInstructionsLabel,
+  TeamInstructionsTakesEffect,
+} from '../lib/additionalInstructions';
 import AddMemberDialog from './AddMemberDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import ForkItForMe from './ForkItForMe.vue';
@@ -83,7 +87,7 @@ const open = defineModel<boolean>({ required: true });
  *  would have to live in a module of its own for the sake of one union that both ends already
  *  state. */
 const props = withDefaults(
-  defineProps<{ initialTab?: 'general' | 'members' | 'repos' | 'env' }>(),
+  defineProps<{ initialTab?: 'general' | 'members' | 'instructions' | 'repos' | 'env' }>(),
   { initialTab: 'general' },
 );
 
@@ -92,7 +96,10 @@ const board = useConsoleStore();
 
 const { installations } = useAgentInstallations();
 
-const tab = ref<'general' | 'members' | 'repos' | 'env'>(props.initialTab);
+/** The tab's name: the heading without "(optional)", which a tab has no room for. */
+const TeamInstructionsTab = 'Team instructions';
+
+const tab = ref<'general' | 'members' | 'instructions' | 'repos' | 'env'>(props.initialTab);
 
 const team = computed(() => board.activeTeam);
 const containers = computed(() => team.value?.containers ?? []);
@@ -742,6 +749,7 @@ watch(open, (showing) => {
         <q-tabs v-model="tab" dense no-caps align="left" active-color="primary" class="os-text-muted">
           <q-tab name="general" label="General" />
           <q-tab name="members" :label="`Members (${containers.length})`" />
+          <q-tab name="instructions" :label="TeamInstructionsTab" />
           <q-tab name="repos" label="GitHub Repos" />
           <q-tab name="env" label="Environment" />
         </q-tabs>
@@ -889,19 +897,6 @@ watch(open, (showing) => {
               </div>
             </div>
 
-            <!-- The only words a person adds to what this team is told. Appended after the built-in
-                 role prompt, never instead of it - the same box and the same hint as New Team. -->
-            <q-input
-              v-model="additionalInstructions"
-              type="textarea"
-              autogrow
-              outlined
-              dense
-              class="q-mt-md"
-              :label="AdditionalInstructionsLabel"
-              :hint="AdditionalInstructionsHint"
-            />
-
             <!-- THE PER-WORKFLOW BUDGET, the same field and the same words as New Team - a person
                  who has met one has met the other, which is the rule the two pickers above already
                  follow.
@@ -1011,6 +1006,29 @@ watch(open, (showing) => {
               :disable="!team"
               @click="addingMember = true"
             />
+          </q-tab-panel>
+
+          <!-- TEAM INSTRUCTIONS, a tab of their own and not a box on General: every agent member
+               reads them, the Manager too, so they are not a setting of Dynamic members. The same
+               heading and hint as New Team. Saved by Save, like everything else here. -->
+          <q-tab-panel name="instructions">
+            <div class="text-subtitle2">{{ TeamInstructionsLabel }}</div>
+            <q-input
+              v-model="additionalInstructions"
+              type="textarea"
+              autogrow
+              outlined
+              dense
+              class="q-mt-xs"
+              :aria-label="TeamInstructionsLabel"
+              :hint="TeamInstructionsHint"
+            />
+            <div class="os-body os-text-muted q-mt-lg">{{ TeamInstructionsTakesEffect }}</div>
+
+            <q-banner v-if="saveError" dense class="os-bg-tint-error text-negative q-mt-md">
+              <template #avatar><q-icon name="error" /></template>
+              {{ saveError }}
+            </q-banner>
           </q-tab-panel>
 
           <q-tab-panel name="repos">
