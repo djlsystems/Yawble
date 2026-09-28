@@ -31,6 +31,9 @@ public static class LocalRepoEndpoints
             ? new { sha = commit.Sha, subject = commit.Subject, committedAt = commit.CommittedAt }
             : null,
         teams = info.Teams,
+
+        // No team names it: kept when its team was deleted (B001F), and a person's to delete.
+        unused = info.Teams.Count == 0,
     };
 
     public static void Map(WebApplication app)
@@ -51,7 +54,8 @@ public static class LocalRepoEndpoints
             .WithDescription(
                 "Every bare repository under `<dataRoot>/repos`, with its `reference` (`local:<name>`, what a "
                 + "team's repository list names), size on disk in bytes, default branch (its HEAD), last "
-                + "commit on that branch, and the teams whose repositories name it.\n\n**A person's view.**");
+                + "commit on that branch, the teams whose repositories name it, and `unused` - no team names it, as "
+                + "after its team was deleted, which keeps it.\n\n**A person's view.**");
 
         app.MapPost("/api/local-repos", async (
             CreateLocalRepo request, LocalRepos repos, TeamRegistry teams, TenantLogging audit,

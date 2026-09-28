@@ -58,6 +58,20 @@ public interface IGitHubContributor
 
     /// <summary>The recorded pull request's state now.</summary>
     Task<GitHubAnswer<PullRequestInfo>> ReadAsync(string upstreamUrl, int number, CancellationToken ct);
+
+    /// <summary>
+    /// Whether the instance's token can create a repository in <paramref name="owner"/>'s account:
+    /// the token's own account, or an organisation it is an active member of, with a token that may
+    /// create repositories. Asked only to decide whether "Create it on GitHub" is offered to a person.
+    /// </summary>
+    Task<GitHubAnswer<bool>> CanCreateRepositoryAsync(string owner, CancellationToken ct);
+
+    /// <summary>
+    /// <c>gh repo create &lt;owner&gt;/&lt;name&gt; --private --add-readme</c>: a private repository with
+    /// one commit on its default branch, so a team's clone knows that branch. Only a person's
+    /// choice reaches this; an agent is refused before it is asked.
+    /// </summary>
+    Task<GitHubAnswer<string>> CreatePrivateRepositoryAsync(string owner, string name, CancellationToken ct);
 }
 
 /// <summary>
@@ -217,6 +231,65 @@ public sealed partial class GhContributor(AgentLaunchUser? runAs = null, Func<st
         }
     }
 
+    public async Task<GitHubAnswer<bool>> CanCreateRepositoryAsync(string owner, CancellationToken ct)
+    {
+        // `-i` for the headers: a classic token names its scopes in X-OAuth-Scopes and needs `repo`
+        // to create a private repository; a fine-grained token sends no such header, and GitHub is
+        // then the judge when the create is asked.
+        var user = await RunAsync(["api", "-i", "user"], ct);
+        if (user.Failure is not null) return Refused<bool>(user);
+
+        var split = user.Stdout.Replace("\r\n", "\n", StringComparison.Ordinal).Split("\n\n", 2);
+        var headers = split[0];
+        var scopes = OAuthScopes().Match(headers);
+        if (scopes.Success
+            && !scopes.Groups[1].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Contains("repo", StringComparer.OrdinalIgnoreCase))
+        {
+            return GitHubAnswer<bool>.Of(false);
+        }
+
+        string login;
+        try
+        {
+            using var json = JsonDocument.Parse(split.Length > 1 ? split[1] : "{}");
+            login = json.RootElement.GetProperty("login").GetString() ?? "";
+        }
+        catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return new(false, "GitHub's answer about the token's account could not be read.", Unreachable: true);
+        }
+
+        if (string.Equals(login, owner, StringComparison.OrdinalIgnoreCase)) return GitHubAnswer<bool>.Of(true);
+
+        var membership = await RunAsync(["api", $"user/memberships/orgs/{owner}"], ct);
+        if (membership.Failure is not null) return GitHubAnswer<bool>.Of(false);
+
+        try
+        {
+            using var json = JsonDocument.Parse(membership.Stdout);
+            return GitHubAnswer<bool>.Of(string.Equals(
+                json.RootElement.GetProperty("state").GetString(), "active", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return GitHubAnswer<bool>.Of(false);
+        }
+    }
+
+    public async Task<GitHubAnswer<string>> CreatePrivateRepositoryAsync(string owner, string name, CancellationToken ct)
+    {
+        var run = await RunAsync(["repo", "create", $"{owner}/{name}", "--private", "--add-readme"], ct);
+        if (run.Failure is not null)
+        {
+            // GitHub's own sentence: the contributor-mode token advice does not apply to a create.
+            var said = Bound(run.Failure);
+            return new(null, run.NotStarted ? said : $"GitHub said: {said}", run.NotStarted || Unreachable().IsMatch(said));
+        }
+
+        return GitHubAnswer<string>.Of($"https://github.com/{owner}/{name}");
+    }
+
     /// <summary>open, closed (without merging) or merged, from GitHub's REST shape.</summary>
     public static PullRequestInfo Describe(JsonElement pull)
     {
@@ -330,6 +403,9 @@ public sealed partial class GhContributor(AgentLaunchUser? runAs = null, Func<st
 
     [GeneratedRegex(@"^([A-Za-z0-9-]+/[A-Za-z0-9._-]+) already exists", RegexOptions.Multiline)]
     private static partial Regex AlreadyExists();
+
+    [GeneratedRegex(@"^X-Oauth-Scopes:\s*(.*)$", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
+    private static partial Regex OAuthScopes();
 
     [GeneratedRegex(@"https://github\.com/[^/\s]+/[^/\s]+/pull/(\d+)")]
     private static partial Regex PullUrl();
