@@ -28,6 +28,7 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
     private readonly string _origin;
     private readonly string _seed;
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly FakeAgent _agent = new();
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -51,7 +52,7 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
             .UseSetting("Logging:LogLevel:Default", "Warning")
             .ConfigureTestServices(services =>
             {
-                services.AddSingleton<IAgentRunner>(new FakeAgent());
+                services.AddSingleton<IAgentRunner>(_agent);
                 services.AddSingleton<IRepoClone>(new LocalOriginClone(_origin));
 
                 // The Git dialog is what is under test, so nothing else pushes: the platform's own
@@ -96,7 +97,7 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
         Assert.Equal(teamOnOrigin, RevParse(clone, $"refs/heads/team/{team}"));
 
         Assert.Equal(decoy, RevParse(_origin, "refs/heads/main"));
-        Assert.Contains($"merged into team/{team}", text, StringComparison.Ordinal);
+        Assert.True(text.Contains($"merged into team/{team}", StringComparison.Ordinal), text);
 
         var after = JsonDocument.Parse(text).RootElement.GetProperty("status");
         Assert.True(after.GetProperty("teamMergedToMain").GetBoolean());
@@ -240,6 +241,20 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
         var agent = services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;
         var team = (await registry.CreateAsync(name, agent, memberAgent: agent, ct: Ct)).Id;
         await registry.SetReposAsync(team, [$"https://github.com/example/{Repo}.git"], Ct);
+
+        // THE MANAGER'S WAKE ON REPO ATTACH ENDS BEFORE ANY BUTTON IS PRESSED. Bring current and merge
+        // pushes the team branch before Merge to main makes its own busy check, so a wake starting
+        // between the two refuses the second half of a button whose first half already landed; a
+        // retry would then find the branch current and say nothing was merged.
+        var manager = registry.ContainerIdsOf(team).First(id => id.Name == TeamRegistry.DefaultManagerName);
+        var host = services.GetRequiredService<ContainerHost>();
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (_agent.RunsFor(manager) == 0
+            || host.Find(manager) is { State: ContainerState.Running } or { QueueDepth: > 0 })
+        {
+            Assert.True(DateTime.UtcNow < deadline, "the Manager's wake on repo attach did not end");
+            await Task.Delay(20, Ct);
+        }
 
         var clone = ClonePath(team);
         Assert.True(Directory.Exists(Path.Combine(clone, ".git")), "the platform did not clone");

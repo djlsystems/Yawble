@@ -170,6 +170,15 @@ describe('Bring current and merge', () => {
     expect(card.text()).not.toContain('Ask the team to resolve it');
   });
 
+  it("shows part C's moved-default-branch notice beside it, and the button is still the one step", async () => {
+    const moved = 'moved main in the clone; the work is on ' + 'c'.repeat(40) + '; the team branch is team/alpha';
+    const card = await mountCard(behind({ defaultBranchMoved: moved }));
+
+    expect(card.find('.repo-moved-text').text()).toBe(moved);
+    expect(action(card).text()).toContain('Bring current and merge');
+    expect(card.find('.repo-bring-merge-advice').text()).toBe('This is git only: it runs no tests.');
+  });
+
   it('is not offered when the team branch already has everything on main', async () => {
     const card = await mountCard(behind({ teamBranchBehindDefault: 0, cloneMainOnTeamBranch: true }));
 
