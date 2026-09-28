@@ -2,18 +2,19 @@
 
 Operations notes for the container described in the root `README.md`: the container `yawble` that `yawble up` runs, its image (`<image>` below; `yawble status` names it), and the volume `yawble-data` mounted at `/data`.
 
-The commands below use `podman`. With Docker, `docker` takes the same arguments for `exec`, `stop`, `start`, `run` and `volume rm`/`create`; Docker has no `volume export` or `volume import`, so the full-volume export below is Podman-only.
+The engine commands below use `podman`. With Docker, `docker` takes the same arguments for `exec`, `stop`, `start` and `run`. `yawble backup` and `yawble restore` work the same on both engines.
 
 ## What is backed up, and how
 
 There are two kinds of backup, and they cover different things.
 
-| | Daily database copy | Full-volume export |
+| | Daily database copy | `yawble backup` |
 |---|---|---|
-| What | `messages.db` only: teams, accounts, the message log, settings, backlog | Everything on `/data`: the database, team folders and git clones, documents, keys, agent logins, installed CLIs, caches |
-| Who takes it | The host, by itself | A person, by hand |
-| Where | `/data/backups` inside the volume | A `.tar` wherever you run `podman` |
+| What | `messages.db` only: teams, accounts, the message log, settings, backlog | Everything on `/data`: the database, team folders and git clones, documents, keys, agent logins and settings. Caches and reinstallable agent programs are left out unless `--full` |
+| Who takes it | The host, by itself | A person, with `yawble backup` |
+| Where | `/data/backups` inside the volume | A `.tar.gz` on the computer where `yawble` runs |
 | Survives losing the volume | No | Yes |
+| Moves to another engine or computer | No | Yes, with `yawble restore` |
 
 ### Daily database copy (automatic)
 
@@ -52,31 +53,59 @@ podman start yawble
 
 The restore writes its own backup of the database it replaces before overwriting it.
 
-### Full-volume export (`podman volume export`)
+### Whole-instance backup (`yawble backup`)
 
-This is the only backup that survives losing the volume or the machine. It also covers things outside the database, such as team repositories, documents, Data Protection keys and CLI logins. Stop the container first so the tar is not taken while SQLite and git are writing:
-
-```sh
-podman stop yawble
-podman volume export yawble-data --output yawble-data-$(date +%Y%m%d).tar
-podman start yawble
-```
-
-From PowerShell, use `--output "yawble-data-$(Get-Date -Format yyyyMMdd).tar"`. The tar is written where the `podman` client runs, so on Windows it lands on the Windows side, outside the Podman machine.
-
-**The tar contains secrets.** It holds the Data Protection keys (`/data/keys`), every agent CLI's saved login (`/data/agent-home`) and any tokens in team clones. Store it the way you store the `.env` file.
-
-To restore into a fresh volume:
+This is the only backup that survives losing the volume or the computer. It covers everything outside the database too: team repositories, documents, Data Protection keys and agent logins.
 
 ```sh
-podman rm -f yawble
-podman volume rm yawble-data
-podman volume create yawble-data
-podman volume import yawble-data yawble-data-20260923.tar
-yawble up
+yawble backup                          # yawble-backup-<yyyyMMdd-HHmmss>.tar.gz in the current folder
+yawble backup --output ~/yawble.tar.gz
+yawble backup --full --yes
 ```
 
-`podman volume import` needs the volume to exist and should be given an empty one. It adds files; it does not delete files that are not in the tar.
+- **It is consistent, not live.** A running instance is stopped while the archive is written, then started again, and `backup` says so. When agents are running it names them, the same way `up` does before a restart, and asks first. `--yes` answers the question. A stopped instance stays stopped.
+- **It works the same on Podman and Docker.** A short-lived container from the instance's own image reads the volume read-only and streams a tar to `yawble`. The image is already on the computer, so nothing is pulled. If the image is missing, `yawble up` pulls it.
+- **It is written where `yawble` runs.** On Windows the archive is on the Windows side, not inside the Podman machine or WSL.
+
+**What is left out by default.** Only what the instance reinstalls by itself on its next start:
+
+- the package caches `npm-cache`, `pip-cache`, `go-cache` and `nuget`;
+- the headless browser in `ms-playwright`;
+- the Claude, Codex and Copilot packages in `npm-global` (other global npm packages are kept);
+- Grok's program under `agent-home/.grok/bin` and `agent-home/.grok/downloads`.
+
+These programs are built for one processor type, so leaving them out is also what lets a backup move between an Intel/AMD computer and an Apple silicon Mac. Everything else is kept, including agent logins and settings under `agent-home` (`.claude`, `.codex`, `.copilot`, Grok's `auth.json`), `/data/bin`, `/data/go`, logs and the host's daily database copies. `--full` keeps everything. The first start after a restore reinstalls the left-out programs, which takes a few minutes; `yawble logs` shows it.
+
+**What is in the file.** It is a `.tar.gz`, readable with standard tools (`tar -tzf <file>` lists it). The first entry is `manifest.json`: the format version, the yawble and image versions, the image, the engine and its version, the processor type, when it was made, the database schema steps applied, what was left out, byte and file counts, and the names of the providers whose keys were set. The volume's files follow under `data/`.
+
+**The file contains secrets.** It holds the Data Protection keys (`/data/keys`), every agent CLI's saved login (`/data/agent-home`) and any tokens in team clones. `backup` writes it readable by you only and says so in one line. Keep it that way, and store it the way you store the `.env` file. `yawble backup` does not encrypt it; use your own tools if you want to.
+
+**What is not in the file.** yawble's own settings: the engine and port choices, and the keys set with `yawble secret set`. They belong to the computer, not the instance.
+
+`yawble doctor` shows an `info` line with the newest backup written on this computer and how old it is. It is never a failure.
+
+### Restoring a backup (`yawble restore`)
+
+```sh
+yawble restore yawble-backup-20260928-101500.tar.gz
+```
+
+`restore` puts the backup into the instance on this computer and engine, whichever made it: Podman to Docker, Windows to macOS, one computer to another. It pulls the image and creates the volume if needed, restores, then starts the instance the way `yawble up` does and waits for it to answer. File ownership is set by the container at every start, so nothing needs fixing afterwards.
+
+- **Into an empty volume, it asks nothing.**
+- **Into a volume that already holds data, it refuses** unless you pass `--replace`. With `--replace` it asks you to type the word `replace` at a terminal; from a script, use `--replace --yes`. Before it clears the volume it writes a backup of the current one beside the file being restored, named `yawble-backup-<yyyyMMdd-HHmmss>-before-restore.tar.gz`, and prints the name. Running `yawble up` on a new computer before restoring creates such data (one sign-up is enough), so restore first if you can.
+- **A backup from a newer Yawble is refused.** Its database may hold schema steps this image does not know. The message names both versions; run `yawble update`, then restore again. A backup from an older Yawble is fine: the host migrates the database at start and takes its usual pre-migration copy first.
+
+`restore` ends by listing the providers whose keys the backed-up instance had set with `yawble secret set`, never their values.
+
+### Moving an instance to another engine or computer
+
+1. On the old computer: `yawble backup`, then copy the file to the new computer the way you would copy any secret.
+2. On the new computer, install `yawble`. Choose the engine and port again: `yawble config set engine podman|docker` and `yawble config set port <port>`, or let `restore` ask the way `up` does.
+3. `yawble restore <file>`.
+4. Set again the keys `restore` listed, with `yawble secret set NAME` (and `yawble github` for `GH_TOKEN`), then `yawble up`.
+
+To switch engines on the same computer: `yawble backup`, then `yawble uninstall --keep-settings --data`, then `yawble config set engine docker` (or `podman`), then `yawble restore <file>`. The `--keep-settings` flag keeps your keys and port. The uninstall deletes the volume, so check that the backup was written first.
 
 ## Logs
 

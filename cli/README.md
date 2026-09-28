@@ -53,6 +53,8 @@ yawble status             running or not, URL, versions, tunnel URL, one line pe
 yawble doctor [--fix]     every check, pass or fail with the fix spelled out. Exit 1 on any failure.
 yawble update             a newer yawble when there is one, then the instance onto its image. --cli / --instance do one half.
 yawble logs [-f]          the container log
+yawble backup [--output <file>] [--full] [--yes]   the instance's data in one .tar.gz on this computer, to restore here or elsewhere
+yawble restore <file> [--replace] [--yes]         a backup into this computer's instance, on either engine, then start it
 yawble agents             per agent: installed, signed in, and how to sign in if not
 yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
 yawble config get|set     port, engine, memory, cpus, running limit, image
@@ -78,6 +80,16 @@ yawble plugin install ~/plugins-build/sample-echo/0.1.0
 That is the whole install. The manifest is checked with the Host's rules before anything is copied, and a bad field is named. The folder is copied to `/data/plugins/<id>/<version>/` through the engine, `/data/plugins` is created if it is missing, and ownership and modes are set: `harness:agent`, directories `0750`, files `0640`, and the manifest's executable `0750`. The executable bit is set even when the folder came from Windows without one. `active` is pointed at the version, and earlier versions are kept. The Host then rescans with no restart and no API key, and the command prints its verdict: installed, or refused with the reason. An existing version is refused unless `--force` is given.
 
 `yawble plugin list` shows each version, active or not, and installed or refused (`--json` too). `yawble plugin remove <id>` asks first (`--yes` answers) and refuses while a member is hired on the plugin, naming the members. `--version <v>` removes one kept version; the active one cannot be removed while others are kept.
+
+## Backup and restore
+
+`yawble backup` writes the instance's data to one `.tar.gz` on this computer: by default `yawble-backup-<yyyyMMdd-HHmmss>.tar.gz` in the current folder, or the file named with `--output`. A short-lived container from the instance's own image reads the volume read-only, so it works the same on Podman and Docker and pulls nothing. A running instance is stopped while the archive is written and started again, and `backup` says so. When agents are running it names them, as `up` does, and asks first (`--yes` answers). A stopped instance stays stopped.
+
+By default it leaves out only what the instance reinstalls at its next start: the package caches (`npm-cache`, `pip-cache`, `go-cache`, `nuget`), the headless browser (`ms-playwright`), and the Claude, Codex, Copilot and Grok programs. Agent logins and settings are kept. `--full` keeps everything. The archive starts with `manifest.json`: versions, image, engine, processor type, creation time, database schema steps and byte counts. The file holds secrets (sign-in keys, agent logins, tokens in clones), so it is written readable by you only, and `backup` says so.
+
+`yawble restore <file>` puts a backup into the instance on this computer and engine, whichever made it: Podman to Docker, or one computer to another. It restores into an empty volume without asking. If the volume already holds data, it refuses unless `--replace` is given. `--replace` asks you to type the word `replace` (or use `--replace --yes` from a script), and first writes a backup of the current volume beside the file, naming it. A backup from a newer Yawble is refused with both versions named: run `yawble update` first. After restoring, it starts the instance as `up` does and waits for it to answer. It ends by listing the providers whose keys the backed-up instance used, never their values.
+
+yawble's own settings are not in a backup. On a new computer, choose the engine and port again and set those keys again with `yawble secret set`. `yawble doctor` shows the newest backup written on this computer and its age, as an `info` line that never fails. More in [docs/ops/backups-logs-and-versions.md](../docs/ops/backups-logs-and-versions.md).
 
 ## Secrets: GitHub and API keys
 
@@ -116,7 +128,7 @@ yawble up
 
 Conventions: `--json` on `status`, `doctor`, `agents`, `config get` and `version`; exit 0 on success, 1 when the thing failed, 2 when the invocation was wrong; `YAWBLE_*` environment variables override the config file; no prompts when stdin is not a terminal; no colour, except the Yawble mark that `yawble`, `yawble version` and `yawble up` draw in orange for a terminal (`NO_COLOR` turns the colour off; a pipe or `--json` gets no mark at all).
 
-`doctor` prints one line per check. The verdict words are `ok`, `warn`, `FAIL` and `skip`; `skip` means the check could not be measured (a stopped instance has no health to check) and is not a failure. Exit 1 when anything FAILs. The in-container half runs the Host's own `--doctor` switch through `podman exec` (or `docker exec`), so those checks are computed by the platform and only rendered here. `--fix` starts a stopped Podman machine (with Podman as the engine), creates a missing data volume and starts a stopped container; it never removes anything. After starting a machine it checks again and stops there, so a second `--fix` may be needed for the container.
+`doctor` prints one line per check. The verdict words are `ok`, `warn`, `FAIL`, `skip` and `info`; `skip` means the check could not be measured (a stopped instance has no health to check) and is not a failure, and `info` (the newest backup) only informs. Exit 1 when anything FAILs. The in-container half runs the Host's own `--doctor` switch through `podman exec` (or `docker exec`), so those checks are computed by the platform and only rendered here. `--fix` starts a stopped Podman machine (with Podman as the engine), creates a missing data volume and starts a stopped container; it never removes anything. After starting a machine it checks again and stops there, so a second `--fix` may be needed for the container.
 
 ```
 ok    machine        podman-machine-default, 10 CPUs, 15688 MB
@@ -137,6 +149,7 @@ ok    database       schema accepted (9 steps)
 warn  backups        no daily backup yet (the Host writes one a day into /data/backups)
 warn  agents         claude signed in · codex NOT signed in · copilot not measured · grok signed in · agy not installed
                      fix: yawble agents
+info  backup         newest C:\Users\me\yawble-backup-20260927-181200.tar.gz, 17 hours old
 ```
 
 The first four rows appear only with Podman on macOS and Windows, where it runs in a machine; on Linux, and with Docker, the list starts at `engine`.
