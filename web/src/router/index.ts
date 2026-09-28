@@ -8,6 +8,7 @@ import {
 
 import routes from './routes';
 import { useSessionStore } from '../stores/session';
+import { landProviderReturn } from '../lib/connections';
 
 /*
  * If not building with SSR mode, you can
@@ -22,6 +23,10 @@ export default defineRouter((/* { store, ssrContext } */) => {
   const createHistory = import.meta.env.QUASAR_SERVER
     ? createMemoryHistory
     : (import.meta.env.QUASAR_VUE_ROUTER_MODE === 'history' ? createWebHistory : createWebHashHistory);
+
+  // Back from a provider's consent page at `/console?connection=…`: the hash history reads the
+  // address when it is created, so the query is moved into the hash first.
+  if (!import.meta.env.QUASAR_SERVER && createHistory === createWebHashHistory) landProviderReturn();
 
   const Router = createRouter({
     scrollBehavior: () => ({ left: 0, top: 0 }),

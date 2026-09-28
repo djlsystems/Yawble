@@ -86,9 +86,14 @@ export function scopeRefusal(slotName: string, connection: Connection, missing: 
   const those = missing.length === 1 ? 'that scope' : 'those scopes';
 
   return (
-    `Connection '${connection.name}' (${connection.account}) was not granted ${what} that slot \`${slotName}\` needs. ` +
+    `Connection ${named(connection)} was not granted ${what} that slot \`${slotName}\` needs. ` +
     `Reconnect it from Admin → Connections with ${those}, then bind it again.`
   );
+}
+
+/** "'Work mail' (person@example.com)", or just "'person@example.com'" when the name IS the account: the Host's `Named`. */
+export function named(connection: Pick<Connection, 'name' | 'account'>): string {
+  return connection.name === connection.account ? `'${connection.name}'` : `'${connection.name}' (${connection.account})`;
 }
 
 /** The Host's sentence for a required slot left unbound: the member's runs are blocked with it. */
@@ -169,6 +174,30 @@ export function callbackOutcome(query: Record<string, unknown>): CallbackOutcome
     return { outcome, reason: typeof reason === 'string' && reason !== '' ? reason : 'The Host gave no reason.' };
   }
   return null;
+}
+
+/**
+ * THE PROVIDER'S RETURN, MOVED INTO THE HASH. The Host's callback redirects to
+ * `/console?connection=…`, but the router is in hash mode and reads only the hash: left alone it
+ * resolves `/` with an empty query and the person lands on the front page with no notice. The
+ * address to replace it with carries the same query in `#/console?…` and no search, so a reload
+ * does not say it again. Null when the search carries no `connection`.
+ */
+export function providerReturnAddress(location: Pick<Location, 'pathname' | 'search'>): string | null {
+  const params = new URLSearchParams(location.search);
+  if (!params.has('connection')) return null;
+
+  const base = location.pathname.replace(/console\/?$/, '');
+  return `${base}#/console?${params.toString()}`;
+}
+
+/** Rewrites the address in place, before the hash router reads it. True when it did. */
+export function landProviderReturn(target: Pick<Window, 'location' | 'history'> = window): boolean {
+  const address = providerReturnAddress(target.location);
+  if (address === null) return false;
+
+  target.history.replaceState(target.history.state, '', address);
+  return true;
 }
 
 /** A timestamp for a person: the local date and time, or "never". */
