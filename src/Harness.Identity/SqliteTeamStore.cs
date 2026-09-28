@@ -224,17 +224,16 @@ public sealed class SqliteTeamStore : ITeamStore
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task SetPausedAsync(string team, bool paused, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        command.CommandText = "UPDATE teams SET paused = $paused WHERE id = $id";
-        command.Parameters.AddWithValue("$paused", paused ? 1 : 0);
-        command.Parameters.AddWithValue("$id", team);
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
+    public Task SetPausedAsync(string team, bool paused, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText = "UPDATE teams SET paused = $paused WHERE id = $id";
+                command.Parameters.AddWithValue("$paused", paused ? 1 : 0);
+                command.Parameters.AddWithValue("$id", team);
+            },
+            audit,
+            ct);
 
     /// <summary>Narrow, single column. See <see cref="ITeamStore.SetBudgetAsync"/>.</summary>
     public Task SetBudgetAsync(string team, long? budgetTokens, TriggerAudit? audit = null, CancellationToken ct = default) =>

@@ -102,6 +102,8 @@ public sealed class SettingsAuditTransactionTests : IAsyncLifetime
             "/api/teams/Alpha/repos/Widget/default-branch", new { branch = "trunk" }, Ct)).EnsureSuccessStatusCode();
         (await client.PutAsJsonAsync("/api/concierge", new { agent = interactive }, Ct)).EnsureSuccessStatusCode();
         (await client.PutAsJsonAsync("/api/teams/Alpha/member-agent", new { agents = headless }, Ct)).EnsureSuccessStatusCode();
+        (await client.PostAsync("/api/teams/Alpha/pause", null, Ct)).EnsureSuccessStatusCode();
+        (await client.PostAsync("/api/teams/Alpha/resume", null, Ct)).EnsureSuccessStatusCode();
 
         var rows = (await _factory.Services.GetRequiredService<ITenantLog>().ReadAsync(take: 100, ct: Ct)).Events;
         TenantEvent Row(string action, string? subject) =>
@@ -114,6 +116,8 @@ public sealed class SettingsAuditTransactionTests : IAsyncLifetime
         Assert.Contains("trunk", Row(TenantActions.RepoDefaultBranchSet, "Alpha/Widget").Detail, StringComparison.Ordinal);
         Assert.Contains(interactive, Row(TenantActions.ConciergeChanged, null).Detail, StringComparison.Ordinal);
         Assert.Contains(headless[^1], Row(TenantActions.TeamMemberAgentChanged, "Alpha").Detail, StringComparison.Ordinal);
+        Assert.Equal("person@example.test", Row(TenantActions.TeamPaused, "Alpha").ActorEmail);
+        Assert.Equal("person@example.test", Row(TenantActions.TeamResumed, "Alpha").ActorEmail);
     }
 
     [Fact]
@@ -237,5 +241,42 @@ public sealed class SettingsAuditTransactionTests : IAsyncLifetime
         Assert.False(set.IsSuccessStatusCode);
         Assert.Equal(before, Teams.MemberAgentsFor("Alpha"));
         Assert.Equal(before[0], (string?)await ScalarAsync("SELECT member_agent FROM teams WHERE id = 'Alpha'"));
+    }
+    [Fact]
+    public async Task A_team_is_not_paused_or_resumed_when_its_tenant_row_cannot_be_written()
+    {
+        var client = await PersonAsync();
+        await DropTenantEventsAsync();
+
+        var paused = await client.PostAsync("/api/teams/Alpha/pause", null, Ct);
+
+        Assert.False(paused.IsSuccessStatusCode);
+        Assert.False(Teams.IsPaused("Alpha"));
+        Assert.Equal(0L, await ScalarAsync("SELECT paused FROM teams WHERE id = 'Alpha'"));
+
+        await Teams.SetPausedAsync("Alpha", paused: true, Ct);
+
+        var resumed = await client.PostAsync("/api/teams/Alpha/resume", null, Ct);
+
+        Assert.False(resumed.IsSuccessStatusCode);
+        Assert.True(Teams.IsPaused("Alpha"));
+        Assert.Equal(1L, await ScalarAsync("SELECT paused FROM teams WHERE id = 'Alpha'"));
+    }
+
+    [Fact]
+    public async Task The_agent_catalog_is_not_saved_when_its_tenant_row_cannot_be_written()
+    {
+        var client = await PersonAsync();
+        var file = AgentCatalogFile.PathIn(_dataRoot);
+        var fileBefore = File.Exists(file) ? await File.ReadAllTextAsync(file, Ct) : null;
+        var namesBefore = Catalog.Definitions.Select(d => d.Name).ToList();
+        var custom = AgentCatalogFile.BuiltIns().First(a => a.Mode == AgentMode.Headless) with { Name = "custom-probe" };
+        await DropTenantEventsAsync();
+
+        var saved = await client.PutAsJsonAsync("/api/agents", new { agents = new[] { custom } }, Ct);
+
+        Assert.False(saved.IsSuccessStatusCode);
+        Assert.Equal(fileBefore, File.Exists(file) ? await File.ReadAllTextAsync(file, Ct) : null);
+        Assert.Equal(namesBefore, Catalog.Definitions.Select(d => d.Name).ToList());
     }
 }

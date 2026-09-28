@@ -2652,21 +2652,18 @@ app.MapPost("/api/teams/{team}/reset", async (
 
 app.MapPost("/api/teams/{team}/pause", async (
     [Description(Describe.Team)] string team,
-    TeamRegistry teams, TenantLogging audit, HttpContext context, CancellationToken ct) =>
+    TeamRegistry teams, HttpContext context, CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
         return Results.NotFound(new { error = $"No team '{team}'." });
     }
 
-    await teams.SetPausedAsync(stored, paused: true, ct);
-    await audit.WriteAsync(
-        context,
-        TenantActions.TeamPaused,
-        stored,
-        teams.LabelFor(stored),
-        new { paused = true },
-        ct);
+    // The flag and its tenant_events row are one transaction: a change with no record of who
+    // made it does not land.
+    await teams.SetPausedAsync(
+        stored, paused: true, ct,
+        id => TenantLogging.Row(context, TenantActions.TeamPaused, id, teams.LabelFor(id), new { paused = true }));
 
     return Results.NoContent();
 })
@@ -2680,21 +2677,18 @@ app.MapPost("/api/teams/{team}/pause", async (
 
 app.MapPost("/api/teams/{team}/resume", async (
     [Description(Describe.Team)] string team,
-    TeamRegistry teams, TenantLogging audit, HttpContext context, CancellationToken ct) =>
+    TeamRegistry teams, HttpContext context, CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
         return Results.NotFound(new { error = $"No team '{team}'." });
     }
 
-    await teams.SetPausedAsync(stored, paused: false, ct);
-    await audit.WriteAsync(
-        context,
-        TenantActions.TeamResumed,
-        stored,
-        teams.LabelFor(stored),
-        new { paused = false },
-        ct);
+    // The flag and its tenant_events row are one transaction: a change with no record of who
+    // made it does not land.
+    await teams.SetPausedAsync(
+        stored, paused: false, ct,
+        id => TenantLogging.Row(context, TenantActions.TeamResumed, id, teams.LabelFor(id), new { paused = false }));
 
     return Results.NoContent();
 })

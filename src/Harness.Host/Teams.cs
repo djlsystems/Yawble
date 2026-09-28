@@ -586,11 +586,14 @@ public sealed class TeamRegistry(
     public bool IsPaused(string team) =>
         ExistingName(team) is { } stored && host.IsPaused(stored);
 
-    public async Task SetPausedAsync(string team, bool paused, CancellationToken ct = default)
+    public async Task SetPausedAsync(
+        string team, bool paused, CancellationToken ct = default, Func<string, TriggerAudit>? audit = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
 
-        await teams.SetPausedAsync(stored, paused, ct);
+        // Row and its tenant_events row first, in one transaction; memory and the host follow only
+        // once both have landed.
+        await teams.SetPausedAsync(stored, paused, audit?.Invoke(stored), ct);
         await host.SetPausedAsync(stored, paused);
 
         host.RepublishTeam(stored);
