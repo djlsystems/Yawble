@@ -30,6 +30,14 @@ All of these are for a person signed in to the web app. The routes (`GET`/`POST 
 
 Creating and deleting a local repository each append a row to the tenant log (`local-repo.created`, `local-repo.deleted`).
 
+## A team's own local repository
+
+A team created with no repository gets a local repository named after it, attached as `local:<team id>`. When a local repository of that name exists and no team uses it, it is reused; when a team uses it, `-2`, `-3` and so on are tried. The team and its repository are one unit: if the repository cannot be made, the team is not created and the reason is named. `POST /api/teams` takes `localRepository: false` to make none, as does the `team_create` tool. For an existing team, `POST /api/teams/{team}/local-repo` makes its local repository the same way (a person's action).
+
+Before a team is created with a repository URL, and before a URL is attached, the Host reads it with `git ls-remote` (a github.com URL with `GH_TOKEN`, as Fetch). A URL that cannot be read is refused with a sentence naming it and git's reason, and nothing is created. A person may then create it on GitHub as a private repository (github.com only, when the instance's token can create repositories), use a local repository instead, or attach it anyway (a network failure only). An agent is offered only the local repository.
+
+Deleting a team keeps its local repository. It is listed as unused in Admin → Repositories, where a person may delete it.
+
 ## Getting the code out
 
 The operator CLI copies a local repository onto your computer so you can open it in an editor. The instance must be running (`yawble up`), and git must be installed on your computer.

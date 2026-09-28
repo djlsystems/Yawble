@@ -770,6 +770,15 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
 // agent. A team names one as `local:<name>`; see LocalRepos.
 builder.Services.AddSingleton(sp => new LocalRepos(dataRoot, sp.GetRequiredService<GitRunner>()));
 
+// FORGIVING TEAM REPOSITORIES (B001F): a team's default local repository, and the `ls-remote` check
+// with its choices before a URL is used. The registry is resolved per call: it is built after this.
+builder.Services.AddSingleton(sp => new RemoteRepoCheck(sp.GetRequiredService<GitRunner>()));
+builder.Services.AddSingleton(sp => new TeamRepoSetup(
+    sp.GetRequiredService<LocalRepos>(),
+    () => sp.GetRequiredService<TeamRegistry>(),
+    sp.GetRequiredService<RemoteRepoCheck>(),
+    sp.GetRequiredService<IGitHubContributor>()));
+
 // The instance's git identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL, set with the operator CLI's `secret set`)
 // and the one place a clone is brought in line with its contributor settings.
 builder.Services.AddSingleton(new InstanceGitIdentity(builder.Configuration));
@@ -2137,7 +2146,8 @@ app.MapGet("/api/tenant-log", async (
 
 app.MapPost("/api/teams", async (
     CreateTeam request, TeamRegistry teams, TenantLogging audit, HttpContext context,
-    AgentInstallProbe probe, AgentCatalog catalog, TeamListPush listPush, CancellationToken ct) =>
+    AgentInstallProbe probe, AgentCatalog catalog, TeamListPush listPush, TeamRepoSetup repoSetup,
+    CancellationToken ct) =>
 {
     var name = (request.Name ?? "").Trim();
 
@@ -2165,6 +2175,27 @@ app.MapPost("/api/teams", async (
         });
     }
 
+    // EVERY URL IS READ BEFORE ANYTHING IS CREATED (B001F): one `git ls-remote` cannot read is
+    // refused with the choices this caller may take, and no team, row, folder or clone is left.
+    RepoPlan plan;
+    try
+    {
+        plan = await repoSetup.PlanAsync(
+            request.Repos ?? [], request.RepoChoices,
+            person: PrincipalClaims.From(context.User) is { Kind: PrincipalKind.User }, alreadyAttached: [], ct);
+    }
+    catch (RepoSetupRefusedException refused)
+    {
+        return Results.Json(refused.Body, statusCode: refused.Status);
+    }
+
+    // A team that ends up with no repository gets a local one named after it, unless the caller
+    // said not to; `use-local` asks for the same one in place of a URL.
+    var wantsLocal = plan.UseLocal || (plan.Kept.Count == 0 && request.LocalRepository != false);
+    TeamLocalRepository? localRepository = null;
+    IReadOnlyList<string> createdOnGitHub = [];
+    var teamCreated = false;
+
     try
     {
         var created = await teams.CreateAsync(
@@ -2172,7 +2203,7 @@ app.MapPost("/api/teams", async (
             // and `CreateAsync` refuses a blank one by name rather than substituting anything.
             name, request.Agent ?? "",
             request.AdditionalInstructions,
-            request.MemberAgent, request.MemberAgents, request.Root, request.Repos,
+            request.MemberAgent, request.MemberAgents, request.Root, plan.Kept,
 
             // CARRIED IN THIS SAME REQUEST rather than by a client-side follow-up call to the PUT
             // route. A create that answered 201 and then failed its second call would leave a team
@@ -2180,7 +2211,26 @@ app.MapPost("/api/teams", async (
             // exactly when the Manager's first wake happens.
             budgetTokens: request.BudgetTokens,
             ct: ct,
-            upstreams: request.Upstreams);
+            upstreams: request.Upstreams,
+
+            // ONE UNIT WITH THE TEAM: made once every check on the team has passed and before
+            // anything of it is written, so a repository that cannot be made refuses the create.
+            addRepo: async (team, token) =>
+            {
+                createdOnGitHub = await repoSetup.CreateOnGitHubAsync(plan, token);
+                if (!wantsLocal) return null;
+
+                localRepository = await repoSetup.EnsureLocalAsync(team, token);
+                return localRepository.Reference;
+            });
+        teamCreated = true;
+
+        if (localRepository is { Created: true } made)
+        {
+            await audit.WriteAsync(
+                context, TenantActions.LocalRepoCreated, made.Name, made.Name,
+                new { reference = made.Reference, defaultBranch = LocalRepos.InitialBranch, team = created.Id }, ct);
+        }
 
         var unresolvedList = new List<object>();
         
@@ -2246,6 +2296,10 @@ app.MapPost("/api/teams", async (
                 manager = created.Containers.FirstOrDefault()?.Agent,
                 Concierge = created.Concierge,
                 retiredDocuments,
+                localRepository = localRepository is null
+                    ? null
+                    : new { name = localRepository.Name, reference = localRepository.Reference, created = localRepository.Created },
+                createdOnGitHub = createdOnGitHub.Count == 0 ? null : createdOnGitHub,
             },
             ct);
 
@@ -2261,8 +2315,24 @@ app.MapPost("/api/teams", async (
             // render an empty row on every create. See the tenant log line above for why it is
             // reported at all.
             if (retiredDocuments is not null) obj["retiredDocuments"] = retiredDocuments;
+
+            if (localRepository is not null)
+            {
+                obj["localRepository"] = new JsonObject
+                {
+                    ["name"] = localRepository.Name,
+                    ["reference"] = localRepository.Reference,
+                    ["created"] = localRepository.Created,
+                };
+            }
+
+            if (createdOnGitHub.Count > 0) obj["createdOnGitHub"] = new JsonArray([.. createdOnGitHub.Select(u => JsonValue.Create(u))]);
         }
         return Results.Json(node, statusCode: 200);
+    }
+    catch (RepoSetupRefusedException refused)
+    {
+        return Results.Json(refused.Body, statusCode: refused.Status);
     }
     catch (TeamNameTakenException taken)
     {
@@ -2282,6 +2352,11 @@ app.MapPost("/api/teams", async (
     catch (ArgumentException exception)
     {
         return Results.BadRequest(new { error = exception.Message });
+    }
+    finally
+    {
+        // A local repository made for a create that then failed is not left behind.
+        if (!teamCreated) await repoSetup.ForgetAsync(localRepository, CancellationToken.None);
     }
 })
     // Takes its team from the BODY, so TeamGate cannot see it - this route is covered only by this
@@ -2310,6 +2385,14 @@ app.MapPost("/api/teams", async (
         + "name. 400 for an empty or over-long name.\n\n"
         + "Requires team-creation authority: a person directly, or a machine principal acting "
         + "for an owner who still exists.\n\n"
+        + "**Repositories (B001F).** Every URL in `repos` is read with `git ls-remote` first (a github.com "
+        + "URL with `GH_TOKEN`, as Fetch). One that cannot be read is refused with 422 `{ error, code: "
+        + "\"repo-check-failed\", repos: [{ url, failure, reason, choices }] }` and nothing is created; send "
+        + "it again with `repoChoices` naming a choice per URL: `use-local`, and for a person only "
+        + "`create-on-github` and `attach-anyway` (network failure only). An agent sending a person's "
+        + "choice is refused with 403. A team left with no repository gets a local one named after it, "
+        + "`local:<team id>` (an unused one of that name is reused; `-2`, `-3` when a team uses it), "
+        + "unless `localRepository` is false; when it cannot be made, no team is created.\n\n"
         + "so a refused value leaves nothing behind.");
 
 // A NEW TEAM CARRYING AN EXISTING ONE'S CONFIGURATION.
@@ -2513,6 +2596,13 @@ app.MapDelete("/api/teams/{team}", async (
         ? Array.Empty<string>()
         : (await listPush.EntitledViewerIdsAsync(team, ct)).ToArray();
 
+    // KEPT, NEVER DELETED WITH THE TEAM (B001F): its local repositories live under
+    // `<dataRoot>/repos`, outside the team's root, and show as unused in Admin -> Repositories,
+    // where a person may delete them. Read before the deletion, which forgets the list.
+    var localRepositoriesKept = teams.ExistingName(team) is { } named
+        ? teams.ReposFor(named).Where(LocalRepos.IsLocal).ToArray()
+        : [];
+
     TeamDeleted? removed;
     try
     {
@@ -2547,6 +2637,7 @@ app.MapDelete("/api/teams/{team}", async (
 
             // Every path still on disk, one by one: the root keeps its marker and is retried.
             remaining = removed.Remaining,
+            localRepositoriesKept,
         },
         ct);
 
@@ -2555,7 +2646,7 @@ app.MapDelete("/api/teams/{team}", async (
     // 200 with a body rather than 204. A deletion that could not remove a directory is still a
     // deletion - the team is gone from every list - and a caller that is told only "no content"
     // cannot say which files are still on disk.
-    return Results.Ok(removed);
+    return Results.Ok(removed with { LocalRepositoriesKept = localRepositoriesKept });
 })
     .WithTags("Teams")
     .HumansOnly()
@@ -2573,6 +2664,8 @@ app.MapDelete("/api/teams/{team}", async (
         + "record of how that work was checked. They stay readable - by any person, once the "
         + "team that shared them is gone - through `GET /api/documents` and the documents routes "
         + "under this team's name.\n\n"
+        + "**ITS LOCAL REPOSITORIES ARE KEPT** (`localRepositoriesKept`, the `local:<name>` references it "
+        + "had): they are listed as unused in `GET /api/local-repos`, where a person may delete them.\n\n"
         + "**The message log is not touched.** It is append-only, and a team's messages are the "
         + "history of what happened rather than a property of the team; deleting them would take "
         + "other teams' causally-linked messages with them.\n\n"
@@ -3486,13 +3579,50 @@ app.MapPut("/api/teams/{team}/env", async (
 // clearing it is an explicit empty array rather than a special third state.
 app.MapPut("/api/teams/{team}/repos", async (
     [Description(Describe.Team)] string team,
-    IReadOnlyList<string>? repos, TeamRegistry teams, CancellationToken ct) =>
+    JsonElement body, TeamRegistry teams, TeamRepoSetup repoSetup, CancellationToken ct) =>
 {
+    // THE BARE ARRAY AS BEFORE, or `{ repos, repoChoices }` to answer a refused check (B001F).
+    SetTeamRepos request;
     try
     {
-        await teams.SetReposAsync(team, repos, ct);
-        return Results.Ok(teams.All().Single(t => string.Equals(
-            t.Id, teams.ExistingName(team), StringComparison.OrdinalIgnoreCase)));
+        request = body.ValueKind switch
+        {
+            JsonValueKind.Array => new SetTeamRepos(body.Deserialize<List<string>>(JsonSerializerOptions.Web), null),
+            JsonValueKind.Object => body.Deserialize<SetTeamRepos>(JsonSerializerOptions.Web)!,
+            JsonValueKind.Null => new SetTeamRepos(null, null),
+            _ => throw new JsonException(),
+        };
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { error = "Send the repository list as an array, or as { \"repos\": [...], \"repoChoices\": {...} }." });
+    }
+
+    if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+
+    TeamLocalRepository? localRepository = null;
+    var attached = false;
+    try
+    {
+        // Only a URL the team does not have yet is read: one already attached was checked then.
+        var plan = await repoSetup.PlanAsync(
+            request.Repos ?? [], request.RepoChoices, person: true, alreadyAttached: teams.ReposFor(stored), ct);
+        await repoSetup.CreateOnGitHubAsync(plan, ct);
+
+        var repos = plan.Kept.ToList();
+        if (plan.UseLocal && !repos.Any(LocalRepos.IsLocal))
+        {
+            localRepository = await repoSetup.EnsureLocalAsync(stored, ct);
+            repos.Add(localRepository.Reference);
+        }
+
+        await teams.SetReposAsync(stored, repos, ct);
+        attached = true;
+        return Results.Ok(teams.All().Single(t => string.Equals(t.Id, stored, StringComparison.OrdinalIgnoreCase)));
+    }
+    catch (RepoSetupRefusedException refused)
+    {
+        return Results.Json(refused.Body, statusCode: refused.Status);
     }
     catch (ArgumentException exception)
     {
@@ -3501,6 +3631,10 @@ app.MapPut("/api/teams/{team}/repos", async (
     catch (InvalidOperationException exception)
     {
         return Results.NotFound(new { error = exception.Message });
+    }
+    finally
+    {
+        if (!attached) await repoSetup.ForgetAsync(localRepository, CancellationToken.None);
     }
 })
     .WithTags("Teams")
@@ -3511,7 +3645,70 @@ app.MapPut("/api/teams/{team}/repos", async (
         + "for one of the instance's local repositories (`GET /api/local-repos`). An empty array "
         + "clears it. A `local:` name that is not legal or names no local repository is refused naming it. Every URL is validated before anything is written; repository names are "
         + "derived from the final path segment and unsafe or colliding names are refused. 404 for "
-        + "an unknown team, 400 for an invalid URL or derived folder name.");
+        + "an unknown team, 400 for an invalid URL or derived folder name.\n\n"
+        + "**Every URL the team does not have yet is read with `git ls-remote` first (B001F).** One that "
+        + "cannot be read is refused with 422 `{ error, code: \"repo-check-failed\", repos: [{ url, failure, "
+        + "reason, choices }] }` and the list is unchanged. To answer it, send `{ \"repos\": [...], "
+        + "\"repoChoices\": { \"<url>\": \"create-on-github\" | \"use-local\" | \"attach-anyway\" } }` "
+        + "instead of the bare array; `use-local` puts the team's local repository in place of the URL.");
+
+// "Create a local repository" in Team settings: the team's own, by the same naming as a new team's.
+app.MapPost("/api/teams/{team}/local-repo", async (
+    [Description(Describe.Team)] string team,
+    TeamRegistry teams, TeamRepoSetup repoSetup, TenantLogging audit, HttpContext context, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+
+    var current = teams.ReposFor(stored);
+    if (current.FirstOrDefault(LocalRepos.IsLocal) is { } existing)
+    {
+        return Results.Conflict(new { error = $"{stored} already has a local repository, {existing}." });
+    }
+
+    TeamLocalRepository? localRepository = null;
+    var attached = false;
+    try
+    {
+        localRepository = await repoSetup.EnsureLocalAsync(stored, ct);
+        await teams.SetReposAsync(stored, [.. current, localRepository.Reference], ct);
+        attached = true;
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status500InternalServerError);
+    }
+    finally
+    {
+        if (!attached) await repoSetup.ForgetAsync(localRepository, CancellationToken.None);
+    }
+
+    await audit.WriteAsync(
+        context, TenantActions.LocalRepoCreated, localRepository.Name, localRepository.Name,
+        new
+        {
+            reference = localRepository.Reference,
+            defaultBranch = LocalRepos.InitialBranch,
+            team = stored,
+            created = localRepository.Created,
+        },
+        ct);
+
+    return Results.Created($"/api/local-repos/{localRepository.Name}", new
+    {
+        team = teams.All().Single(t => string.Equals(t.Id, stored, StringComparison.OrdinalIgnoreCase)),
+        localRepository = new { name = localRepository.Name, reference = localRepository.Reference, created = localRepository.Created },
+    });
+})
+    .WithTags("Teams")
+    .HumansOnly()
+    .WithSummary("Create the team's local repository")
+    .WithDescription(
+        "No body. Creates the team's local repository and adds it to the team's list, which clones it: "
+        + "named after the team, `local:<team id>`; an existing one of that name that no team uses is "
+        + "reused, and `-2`, `-3` are tried when a team uses it. Answers 201 `{ team, localRepository: "
+        + "{ name, reference, created } }`. 409 when the team already has a local repository, 404 for an "
+        + "unknown team, 500 naming the reason when the repository cannot be made (nothing is attached). "
+        + "Appends `local-repo.created` to the tenant log.\n\n**A person's action.**");
 
 // A person's choice of one repository's default branch. `branch` null or blank clears it,
 // and the host goes back to what origin's HEAD named on the last clone or successful Fetch (or not
@@ -7332,6 +7529,12 @@ internal sealed record TeamBudget(
         + "positive value is stored exactly as typed, including above the instance figure.")]
     long? BudgetTokens);
 
+/// <summary>The object form of <c>PUT /api/teams/{team}/repos</c>: the list and the choices for URLs a
+/// check refused.</summary>
+internal sealed record SetTeamRepos(
+    IReadOnlyList<string>? Repos,
+    IReadOnlyDictionary<string, string>? RepoChoices);
+
 internal sealed record CreateTeam(
     [property: Description(
         "The team's name as a PERSON would write it - free text, spaces and accents included. The "
@@ -7380,6 +7583,17 @@ internal sealed record CreateTeam(
         + "refused (400) BEFORE anything is created. Changeable later on the team's settings "
         + "screen.")]
     long? BudgetTokens = null,
+
+    [property: Description(
+        "Whether a team left with no repository gets a local repository named after it, attached as "
+        + "`local:<team id>`. Omitted means true. Ignored when `repos` names any repository.")]
+    bool? LocalRepository = null,
+
+    [property: Description(
+        "What to do with a URL in `repos` that `git ls-remote` could not read, keyed by that URL: "
+        + "`use-local`, `create-on-github` (a person only; github.com only) or `attach-anyway` (a person "
+        + "only; a network failure only). A URL with no choice that cannot be read refuses the create.")]
+    IReadOnlyDictionary<string, string>? RepoChoices = null,
 
     [property: Description(
         "Each contributed repository's upstream, keyed by its URL in `repos`: that repository "

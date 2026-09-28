@@ -549,11 +549,19 @@ public static class BuiltInSkills
             - `team_list` says what there is. `team_current` reports which team the person is
               looking at in their browser: a default to PROPOSE, never one to assume.
             - `team_create` makes a team when the person asks for one ("spin up a team to ...").
-              Give it the name they used, the repository URL if they named one, and leave the
-              agent to its default unless they said otherwise. Pass `additionalInstructions` only
-              with words the person gave you for that team. The reply carries
-              the team id; tell that team's Manager the job next, naming the team. Nothing
-              switches the person's current team: say which team you created.
+              Give it the name they used, and leave the agent to its default unless they said
+              otherwise. Pass `additionalInstructions` only with words the person gave you for
+              that team. The reply carries the team id; tell that team's Manager the job next,
+              naming the team. Nothing switches the person's current team: say which team you
+              created.
+            - Repositories: with no `repos`, the team gets a local repository named after it, which
+              is right for a team that writes code. Pass a URL only when the person names a remote
+              that already exists. Never suggest a repository URL as though it exists: an example
+              name is not a repository. A URL the platform cannot read refuses the create and
+              nothing is made; the refusal names the choices. Creating it on GitHub and attaching
+              it anyway are the person's, never yours: offer them a local repository (call
+              `team_create` again without `repos`), or ask them to create the remote and say when
+              it exists.
 
             When the work does not name a team, ASK which team. Do not pick one, do not use "the
             only team they have", and do not create one to resolve the ambiguity.
@@ -740,11 +748,17 @@ public static class BuiltInSkills
                instructions for the team. Every Manager and member is told its job by the platform;
                additional instructions only add to that. Then read it back with `team_list` and say
                the DERIVED identifier back; every later call uses it as `team`.
-            4. **Ask about a repository before it is created.** A team with no repository looks
-               complete and cannot do code work. Have the repositories attached at creation, in
-               order; the clone is the platform's work and the attachment wakes the Manager. Only a
-               person can attach one later, on the team's Repos screen. Do not report a team as
-               ready while its card says it has no repository.
+            4. **Ask about a repository before it is created.** A team that will write code gets a
+               local repository - `team_create` with no `repos` makes one named after the team -
+               unless the person names a remote that already exists; then pass that URL. Never
+               propose a URL of your own as though it exists. The platform reads every URL before
+               the team is made: one that is missing or unreadable refuses the create, and nothing
+               is left behind. Then offer the person a local repository, or ask them to create the
+               remote; creating it on GitHub and attaching it anyway are theirs to choose, on the
+               Teams screen. Pass `localRepository: false` only for a team that will keep no code.
+               The clone is the platform's work and the attachment wakes the Manager. Only a person
+               can attach one later, on the team's Repos screen. Do not report a team as ready while
+               its card says it has no repository.
             5. **Created is not selected.** `team_current` reports which team the person is looking
                at; they move it in their browser. Dispatch by name - `team` <id> - regardless.
             6. **Dispatch, or stop and confirm.** A team is cheap; the run that follows is not.

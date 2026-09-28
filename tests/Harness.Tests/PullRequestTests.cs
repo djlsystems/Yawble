@@ -479,6 +479,12 @@ public sealed class PullRequestTests : IAsyncDisposable
                 ? new GitHubAnswer<PullRequestInfo>(null, "GitHub said: error connecting to api.github.com", Unreachable: true)
                 : GitHubAnswer<PullRequestInfo>.Of(new PullRequestInfo(Url, number, State)));
         }
+
+        public Task<GitHubAnswer<bool>> CanCreateRepositoryAsync(string owner, CancellationToken ct) =>
+            Task.FromResult(GitHubAnswer<bool>.Of(false));
+
+        public Task<GitHubAnswer<string>> CreatePrivateRepositoryAsync(string owner, string name, CancellationToken ct) =>
+            throw new InvalidOperationException("Contributor mode never creates a repository.");
     }
 
     /// <summary>The product's own <see cref="RepoClone"/>, pointed at the local fork.</summary>

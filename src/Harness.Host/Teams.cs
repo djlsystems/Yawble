@@ -1698,7 +1698,8 @@ public sealed class TeamRegistry(
         long? budgetTokens = null,
         CancellationToken ct = default,
         Func<IReadOnlyList<RepoCloneOutcome>, bool>? handleRepoSetup = null,
-        IReadOnlyDictionary<string, string>? upstreams = null)
+        IReadOnlyDictionary<string, string>? upstreams = null,
+        Func<string, CancellationToken, Task<string?>>? addRepo = null)
     {
         var trimmed = label.Trim();
         var validatedRepos = RepoUrls.Validate(repos, LocalRepoExists);
@@ -1937,6 +1938,15 @@ public sealed class TeamRegistry(
                         : $"'{container}' already exists. Choose another root, or another team name.",
                     nameof(root));
             }
+        }
+
+        // THE TEAM'S OWN REPOSITORY, made here: after every check above has passed, because it is
+        // named after the identifier derived above, and before anything of the team is written, so a
+        // repository that cannot be made refuses the create and leaves no team behind (B001F). The
+        // caller answers the reference to add - `local:<name>` - or throws the reason.
+        if (addRepo is not null && await addRepo(team, ct) is { } added)
+        {
+            validatedRepos = RepoUrls.Validate([.. validatedRepos, added], LocalRepoExists);
         }
 
         // THE DOCUMENTS FOLDER IS CLAIMED BEFORE THE ROW IS WRITTEN, and that ordering is the
