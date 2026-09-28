@@ -115,6 +115,24 @@ public sealed class AgentEnvironmentTests : IDisposable
     }
 
     [Fact]
+    public async Task A_team_on_a_local_repository_is_never_handed_GH_TOKEN_whatever_the_repository_is_called()
+    {
+        using var restore = new EnvironmentScope([new("GH_TOKEN", "github-token")]);
+        var catalog = new AgentCatalog(
+            [new AgentDefinition("grok", AgentMode.Headless, new AgentLaunch("grok", []))]);
+        var environment = new AgentEnvironment(
+            new MintingPrincipals(), catalog, "http://localhost:5000",
+            new TeamDocuments(new TeamPaths(_directory)));
+
+        var local = await environment.ForContainerAsync(
+            new ContainerId("Alpha", "DeveloperRowan"), "grok", new HashSet<string> { Permits.Progress },
+            new Dictionary<string, string>(), ["local:github.com"], TestContext.Current.CancellationToken);
+
+        Assert.False(local.ContainsKey("GH_TOKEN"));
+        Assert.Null(AgentEnvironment.GitHubTokenFor(["local:github.com"]));
+    }
+
+    [Fact]
     public async Task A_team_with_a_GitHub_remote_hands_its_member_GH_TOKEN_and_no_other_foreign_key()
     {
         using var restore = new EnvironmentScope(

@@ -23,6 +23,7 @@ import {
   repoFolderName,
   repoUrl,
   repoUrlRules,
+  localRepoName,
   required,
   skillName,
   teamLabel,
@@ -116,6 +117,26 @@ describe('rules', () => {
       expect(repoUrl('ssh://github.com/owner/repo.git')).toMatch(/^Use an absolute http or https URL/)
       expect(repoUrl('github.com/owner/repo')).toMatch(/^Use an absolute http or https URL/)
       expect(repoUrl('')).toBe('Enter a repository URL, or remove this row.')
+    })
+
+    it('takes local:<name> for a local repository, and refuses an illegal name naming it', () => {
+      expect(repoUrl('local:widget')).toBe(true)
+      expect(repoUrl(' local:Widget-core.v2 ')).toBe(true)
+      expect(repoFolderName('local:widget')).toBe('widget')
+      expect(repoUrl('local:../keys')).toMatch(/^'local:\.\.\/keys' is not a local repository name/)
+      expect(repoUrl('local:')).toMatch(/is not a local repository name/)
+      expect(repoUrl('local:a b')).toMatch(/is not a local repository name/)
+      expect(repoUrl('local:widget.git')).toMatch(/is not a local repository name/)
+      expect(repoUrlRules(['https://github.com/owner/widget.git', 'local:Widget'], 1)
+        .map((rule) => rule('local:Widget'))).toContain("Another URL in this list already clones into 'Widget'.")
+    })
+
+    it('checks a local repository name as the Host does', () => {
+      expect(localRepoName('widget')).toBe(true)
+      expect(localRepoName('-x')).toMatch(/^Use 1 to 100 letters/)
+      expect(localRepoName('a..b')).toMatch(/^Use 1 to 100 letters/)
+      expect(localRepoName('x.lock')).toMatch(/^Use 1 to 100 letters/)
+      expect(localRepoName('')).toBe('A local repository needs a name.')
     })
 
     it('refuses a URL that derives no legal folder name', () => {

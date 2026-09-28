@@ -763,7 +763,12 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
     plugins: sp.GetRequiredService<PluginCatalog>(),
     pluginSettings: sp.GetRequiredService<IPluginMemberSettingsStore>(),
     secrets: sp.GetRequiredService<ISecretStore>(),
-    removal: sp.GetRequiredService<FolderRemoval>()));
+    removal: sp.GetRequiredService<FolderRemoval>(),
+    localRepos: sp.GetRequiredService<LocalRepos>()));
+
+// THE INSTANCE'S LOCAL REPOSITORIES: bare, under <dataRoot>/repos, the Host's and read-only to the
+// agent. A team names one as `local:<name>`; see LocalRepos.
+builder.Services.AddSingleton(sp => new LocalRepos(dataRoot, sp.GetRequiredService<GitRunner>()));
 
 // The instance's git identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL, set with the operator CLI's `secret set`)
 // and the one place a clone is brought in line with its contributor settings.
@@ -775,7 +780,8 @@ builder.Services.AddSingleton(sp => new ContributorClone(
 // because a seam that can be omitted is one something quietly omits - and the omission here looks
 // like a team with a repository and nothing at its path.
 //
-builder.Services.AddSingleton<IRepoClone>(sp => new RepoClone(sp.GetRequiredService<GitRunner>()));
+builder.Services.AddSingleton<IRepoClone>(sp => new RepoClone(
+    sp.GetRequiredService<GitRunner>(), localRepos: sp.GetRequiredService<LocalRepos>()));
 
 // THE PLATFORM PUBLISHES A TEAM'S WORK TO ORIGIN, on the acceptance of a card, BEFORE the row that
 // accepts it. Wired here for the reason `IRepoClone` above it is - a seam that can be omitted is one
@@ -884,6 +890,34 @@ builder.Services.AddSingleton(sp => new GitRunner(
         }
 
         return [];
+    },
+    // A clone whose origin is, by the registry, a local repository: its pushes go into the bare
+    // repository as the Host, and GH_TOKEN is never handed to it.
+    localOriginFor: clonePath =>
+    {
+        var registry = sp.GetRequiredService<TeamRegistry>();
+        var paths = sp.GetRequiredService<TeamPaths>();
+        var clone = Path.GetFullPath(clonePath);
+        foreach (var team in registry.All())
+        {
+            try
+            {
+                var repos = Path.GetFullPath(paths.ReposFor(team.Id)) + Path.DirectorySeparatorChar;
+                if (!clone.StartsWith(repos, StringComparison.Ordinal)) continue;
+
+                var folder = clone[repos.Length..].Split(Path.DirectorySeparatorChar)[0];
+                var url = registry.ReposFor(team.Id)
+                    .FirstOrDefault(u => string.Equals(RepoUrls.DeriveName(u), folder, StringComparison.OrdinalIgnoreCase));
+                return url is not null && LocalRepos.IsLocal(url)
+                    ? sp.GetRequiredService<LocalRepos>().PathForReference(url)
+                    : null;
+            }
+            catch (KeyNotFoundException)
+            {
+            }
+        }
+
+        return null;
     }));
 
 // The one place a settled card's worktree is removed - never forced - shared by the
@@ -1710,6 +1744,7 @@ TenantSettingsEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
 RemovalEndpoints.Map(app);
+LocalRepoEndpoints.Map(app);
 
 // AFTER UseAuthorization, so context.User is populated, and BEFORE the endpoints run. One gate
 // keyed on the route's team value - see TeamGate's own doc comment for why it is preferred over a
@@ -3487,8 +3522,9 @@ app.MapPut("/api/teams/{team}/repos", async (
     .HumansOnly()
     .WithSummary("Replace a team's Git repository list")
     .WithDescription(
-        "Takes the complete ordered list of absolute http or https repository URLs. An empty array "
-        + "clears it. Every URL is validated before anything is written; repository names are "
+        "Takes the complete ordered list of absolute http or https repository URLs, or `local:<name>` "
+        + "for one of the instance's local repositories (`GET /api/local-repos`). An empty array "
+        + "clears it. A `local:` name that is not legal or names no local repository is refused naming it. Every URL is validated before anything is written; repository names are "
         + "derived from the final path segment and unsafe or colliding names are refused. 404 for "
         + "an unknown team, 400 for an invalid URL or derived folder name.");
 
@@ -7355,7 +7391,8 @@ internal sealed record CreateTeam(
     string? Root = null,
     [property: Description(
         "The ordered Git repository URLs for this team. Each must be an absolute http or https "
-        + "URL whose final path segment is safe and unique as a folder name. Omitted means none.")]
+        + "URL whose final path segment is safe and unique as a folder name, or `local:<name>` for one "
+        + "of the instance's local repositories. Omitted means none.")]
     IReadOnlyList<string>? Repos = null,
 
     [property: Description(

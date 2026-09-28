@@ -193,6 +193,14 @@ public static class TenantActions
     /// <summary>A person pressed Open pull request in the Git dialog: opened, linked or refused.</summary>
     public const string RepoPullRequestOpen = "repo.pull-request-open";
 
+    /// <summary>A person created one of the instance's local repositories (<c>local:&lt;name&gt;</c>).
+    /// Subject is the name.</summary>
+    public const string LocalRepoCreated = "local-repo.created";
+
+    /// <summary>A person deleted a local repository. Written BEFORE the delete, which does not
+    /// happen when this row cannot be.</summary>
+    public const string LocalRepoDeleted = "local-repo.deleted";
+
     /// <summary>A person asked GitHub to fork an upstream for a team repository.</summary>
     public const string RepoFork = "repo.fork";
 

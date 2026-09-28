@@ -19,7 +19,9 @@ import { useAgentInstallations } from '../lib/useAgentInstallations';
 import {
   MAXIMUM_LABEL_LENGTH,
   firstProblem,
+  isLocalRepoReference,
   optional,
+  repoFolderName,
   repoUrlRules,
   teamLabel,
   teamNameTaken,
@@ -29,6 +31,7 @@ import { TeamInstructionsHint, TeamInstructionsLabel } from '../lib/additionalIn
 import { upstreamUrlProblem } from '../lib/contributor';
 import HostPathPicker from './HostPathPicker.vue';
 import ForkItForMe from './ForkItForMe.vue';
+import LocalRepoPicker from './LocalRepoPicker.vue';
 import type { ForkResult } from '../api/types';
 
 /** Carries the new team's IDENTIFIER, so whoever opened this can switch to the team that was just
@@ -339,6 +342,13 @@ function addFork(fork: ForkResult) {
   setUpstream(repos.value.length - 1, fork.upstreamUrl);
 }
 
+/** A local repository, created or picked beside the URL field, joins the list as `local:<name>`. */
+function attachLocal(reference: string) {
+  const folder = repoFolderName(reference)?.toLowerCase();
+  if (repos.value.some((entry) => repoFolderName(entry)?.toLowerCase() === folder)) return;
+  repos.value = [...repos.value, reference];
+}
+
 function applyRepoSuggestion(url: string) {
   repoInput.value = url;
 }
@@ -593,6 +603,8 @@ async function submit() {
 
             <ForkItForMe @forked="addFork" />
 
+            <LocalRepoPicker :attached="repos" @attach="attachLocal" />
+
             <div v-if="repoSuggestions.length > 0" class="q-mt-sm">
               <div class="text-caption os-text-muted">Recent repositories:</div>
               <div class="row q-gutter-xs q-mt-xs">
@@ -628,8 +640,10 @@ async function submit() {
                   <q-item-label caption>
                     {{ index === 0 ? 'Primary repo' : `Repo ${index + 1}` }}
                   </q-item-label>
-                  <!-- Blank: the team owns this repository. Set: the URL above is its fork. -->
+                  <!-- Blank: the team owns this repository. Set: the URL above is its fork. A
+                       local repository has no upstream: contributor mode does not apply to it. -->
                   <q-input
+                    v-if="!isLocalRepoReference(repo)"
                     :model-value="upstreams[index] ?? ''"
                     class="mono"
                     dense

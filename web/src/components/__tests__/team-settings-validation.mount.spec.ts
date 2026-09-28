@@ -9,8 +9,9 @@ import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, type VueWrapper } from '@vue/test-utils';
 
 const {
-  listCatalog, getTeamEnv, setTeamEnv, setMemberAgents, setMemberPrompt, setTeamRepos,
+  listCatalog, getTeamEnv, setTeamEnv, setMemberAgents, setMemberPrompt, setTeamRepos, listLocalRepos,
 } = vi.hoisted(() => ({
+  listLocalRepos: vi.fn(),
   listCatalog: vi.fn(),
   getTeamEnv: vi.fn(),
   setTeamEnv: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   setMemberAgents,
   setMemberPrompt,
   setTeamRepos,
+  listLocalRepos,
 }));
 
 import TeamSettingsDialog from '../TeamSettingsDialog.vue';
@@ -73,6 +75,8 @@ beforeEach(() => {
   setMemberPrompt.mockReset();
   setTeamRepos.mockReset();
   setTeamRepos.mockResolvedValue(undefined);
+  listLocalRepos.mockReset();
+  listLocalRepos.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -138,6 +142,23 @@ describe('TeamSettingsDialog: repository URLs', () => {
     await validated();
 
     expect(setTeamRepos).toHaveBeenCalledWith('alpha', ['https://github.com/owner/app.git']);
+  });
+
+  it('attaches a local repository from the list beside the URL field and saves it as local:<name>', async () => {
+    listLocalRepos.mockResolvedValue([
+      { name: 'widget', reference: 'local:widget', sizeBytes: 1, defaultBranch: 'main', lastCommit: null, teams: [] },
+    ]);
+    await open('repos', ['https://github.com/owner/app.git']);
+    await validated();
+
+    document.body.querySelector<HTMLElement>('[aria-label="Attach local:widget"]')!.click();
+    await validated();
+    expect(document.body.querySelector('[aria-label="local:widget is attached"]')).not.toBeNull();
+
+    button('Save changes').click();
+    await validated();
+
+    expect(setTeamRepos).toHaveBeenCalledWith('alpha', ['https://github.com/owner/app.git', 'local:widget']);
   });
 
   it('refuses a URL that cannot be cloned and asks nobody', async () => {

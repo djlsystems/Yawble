@@ -151,8 +151,9 @@ public sealed class AgentEnvironment(
     /// <summary>A provider key with no command in the probe file. Still never inherited.</summary>
     private const string GeminiVariable = "GEMINI_API_KEY";
 
+    // A local repository is never GitHub, whatever it is called (`local:github.com` is a legal name).
     private static bool IsGitHub(string url) =>
-        url.Contains("github.com", StringComparison.OrdinalIgnoreCase);
+        !LocalRepos.IsLocal(url) && url.Contains("github.com", StringComparison.OrdinalIgnoreCase);
 
     private static string? NonEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 

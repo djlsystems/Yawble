@@ -29,6 +29,7 @@ import type {
   EventDefinition,
   FolderTestRequest,
   FolderTestResult,
+  LocalRepo,
   WatchRootOption,
   MemberId,
   MemberMeasuredCost,
@@ -595,6 +596,26 @@ export const uploadHostFile = (parent: string, file: File) => {
  * NULL IS UNLIMITED and so is 0 — the server stores both as null, so there is one spelling of
  * "no bound" on the wire and no caller has to know two.
  */
+
+/** The instance's local repositories. A person's. */
+export const listLocalRepos = () => json<LocalRepo[]>('/api/local-repos')
+
+/**
+ * Creates a local repository - a bare repository on the volume with default branch `main` and one
+ * empty commit - that a team then names as `local:<name>`. 400 for a name that is not legal, 409
+ * for one that exists.
+ */
+export const createLocalRepo = (name: string) =>
+  json<LocalRepo>('/api/local-repos', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+
+/** Deletes a local repository and everything in it. 409, naming them, while a team uses it. */
+export const deleteLocalRepo = async (name: string): Promise<void> => {
+  await send(`/api/local-repos/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
 
 /** Replaces a team's ordered Git repository URL list. */
 export const setTeamRepos = (team: TeamId, repos: string[]) =>
