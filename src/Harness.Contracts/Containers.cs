@@ -358,9 +358,10 @@ public static class MessageTypes
         "Skipped because this team is paused.";
 
     /// <summary>
-    /// The exact skip reason published in <see cref="ScheduleSkipped"/> rows, and written on the
-    /// `tenant_events` row, for a trigger whose runs have spent its daily token cap. It fires again
-    /// the next day in its timezone.
+    /// The skip reason published in <see cref="ScheduleSkipped"/> rows, and written on the
+    /// `tenant_events` row, for a trigger whose runs have spent its daily token cap - once a day.
+    /// An event or folder trigger's reason is exactly this; a schedule's adds "; resumes at
+    /// &lt;time&gt;", the first occurrence of the next day it sleeps until.
     /// </summary>
     public const string ScheduleSkippedCapReason = "daily token cap reached";
 }

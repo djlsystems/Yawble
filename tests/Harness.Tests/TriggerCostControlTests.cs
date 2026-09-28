@@ -430,8 +430,8 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
 
         var skipped = await AwaitRowAsync(
             [MessageTypes.ScheduleSkipped], m => m.Seq > before, "the skip");
-        Assert.Equal(MessageTypes.ScheduleSkippedCapReason,
-            JsonDocument.Parse(skipped.Payload).RootElement.GetProperty("reason").GetString());
+        Assert.StartsWith($"{MessageTypes.ScheduleSkippedCapReason}; resumes at ",
+            JsonDocument.Parse(skipped.Payload).RootElement.GetProperty("reason").GetString(), StringComparison.Ordinal);
         Assert.Equal($"schedule:{id}", skipped.Source);
 
         var audit = await Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.ScheduleSkipped, id, Ct);

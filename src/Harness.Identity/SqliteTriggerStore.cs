@@ -27,7 +27,31 @@ public sealed class SqliteTriggerStore : ITriggerStore
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
-        command.CommandText =
+        command.CommandText = Upsert;
+        BindSave(command, row);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task SaveAsync(TriggerRow row, TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = Upsert;
+            BindSave(command, row);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await AppendAuditAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    /// <summary>The whole-row upsert. The capped-skip count is not in it: a save must not write a
+    /// stale count back over one a skip has just taken.</summary>
+    private const string Upsert =
             """
             INSERT INTO triggers
                 (id, team, container, name, instruction, kind, expression, timezone,
@@ -89,10 +113,6 @@ public sealed class SqliteTriggerStore : ITriggerStore
                 daily_token_cap      = excluded.daily_token_cap
             """;
 
-        BindSave(command, row);
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
     public async Task<IReadOnlyList<TriggerRow>> ListForTeamAsync(
         string team, CancellationToken ct = default)
     {
@@ -106,7 +126,8 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap
+                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
+                   capped_skips_day, capped_skips
             FROM triggers
             WHERE team = $team COLLATE NOCASE
             ORDER BY created_at, id
@@ -128,7 +149,8 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap
+                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
+                   capped_skips_day, capped_skips
             FROM triggers
             WHERE id = $id
             """;
@@ -150,7 +172,8 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap
+                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
+                   capped_skips_day, capped_skips
             FROM triggers
             WHERE enabled = 1
               AND next_due_at IS NOT NULL
@@ -158,7 +181,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
             ORDER BY next_due_at, id
             """;
 
-        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        command.Parameters.AddWithValue("$now", now.ToUniversalTime().ToString("O"));
         return await ReadRowsAsync(command, ct);
     }
 
@@ -262,6 +285,74 @@ public sealed class SqliteTriggerStore : ITriggerStore
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task<int> CountCappedSkipAsync(
+        string id, DateTimeOffset dayStart, bool rearm, DateTimeOffset? nextDueAt, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            """
+            UPDATE triggers
+            SET capped_skips     = CASE WHEN capped_skips_day IS $day THEN capped_skips + 1 ELSE 1 END,
+                capped_skips_day = $day,
+                last_outcome     = 'capped',
+                next_due_at      = CASE WHEN $rearm = 1 THEN $nextDueAt ELSE next_due_at END
+            WHERE id = $id
+            RETURNING capped_skips
+            """;
+
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$day", ToDbValue(dayStart));
+        command.Parameters.AddWithValue("$rearm", rearm ? 1 : 0);
+        command.Parameters.AddWithValue("$nextDueAt", ToDbValue(nextDueAt));
+
+        return await command.ExecuteScalarAsync(ct) is long count ? (int)count : 0;
+    }
+
+    public async Task RecordCappedSkipAsync(string id, long seq, TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE triggers SET last_seq = $seq WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$seq", seq);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await AppendAuditAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    /// <summary>One `tenant_events` row, inside the caller's transaction. The columns and the
+    /// timestamp format are the tenant log's own.</summary>
+    private static async Task AppendAuditAsync(
+        SqliteConnection connection, SqliteTransaction transaction, TriggerAudit audit, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            """
+            INSERT INTO tenant_events
+                (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
+            VALUES ($at, $actorId, $actorEmail, $action, $subject, $subjectName, $detail)
+            """;
+
+        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$actorId", (object?)audit.ActorId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$actorEmail", (object?)audit.ActorEmail ?? DBNull.Value);
+        command.Parameters.AddWithValue("$action", audit.Action);
+        command.Parameters.AddWithValue("$subject", audit.Subject);
+        command.Parameters.AddWithValue("$subjectName", (object?)audit.SubjectName ?? DBNull.Value);
+        command.Parameters.AddWithValue("$detail", (object?)audit.Detail ?? DBNull.Value);
+
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default)
     {
         await using var connection = Open();
@@ -327,7 +418,8 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap
+                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
+                   capped_skips_day, capped_skips
             FROM triggers
             WHERE team = $team COLLATE NOCASE
               AND container = $container COLLATE NOCASE
@@ -463,7 +555,9 @@ public sealed class SqliteTriggerStore : ITriggerStore
                 ReadNullableDate(reader, 31),
                 ReadNullableString(reader, 32),
                 reader.GetString(33),
-                ReadNullableLong(reader, 34)));
+                ReadNullableLong(reader, 34),
+                ReadNullableDate(reader, 35),
+                reader.GetInt32(36)));
         }
 
         return rows;
@@ -507,8 +601,10 @@ public sealed class SqliteTriggerStore : ITriggerStore
             "$dailyTokenCap", row.DailyTokenCap is null ? DBNull.Value : row.DailyTokenCap.Value);
     }
 
+    /// <summary>UTC, always: `next_due_at` is compared as TEXT, and a round-trip string with a local
+    /// offset (what a cron time in a trigger's timezone comes back as) sorts wrong.</summary>
     private static object ToDbValue(DateTimeOffset? value) =>
-        value is null ? DBNull.Value : value.Value.ToString("O");
+        value is null ? DBNull.Value : value.Value.ToUniversalTime().ToString("O");
 
     private static string? ReadNullableString(SqliteDataReader reader, int index) =>
         reader.IsDBNull(index) ? null : reader.GetString(index);
