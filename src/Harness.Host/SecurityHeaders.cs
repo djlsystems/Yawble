@@ -45,8 +45,10 @@ public static class SecurityHeaders
 
     /// <summary>
     /// The one way a route replaces the app's CSP: it puts a policy under this key in
-    /// <c>HttpContext.Items</c>, and the stamp below uses it instead. Only <c>documents/view</c>
-    /// does, and only with a STRICTER policy (<see cref="DocumentView"/>). Setting the header
+    /// <c>HttpContext.Items</c>, and the stamp below uses it instead. Two routes do:
+    /// <c>documents/view</c>, with a STRICTER policy (<see cref="DocumentView"/>), and a site's files
+    /// and data under a valid capability, with a sandbox that runs the site's own scripts in an
+    /// opaque origin and connects only to that site (<see cref="SitePolicy"/>). Setting the header
     /// itself would not work: OnStarting callbacks run last-registered first, so this stamp,
     /// registered before any route, runs after the route's and would overwrite it.
     /// </summary>

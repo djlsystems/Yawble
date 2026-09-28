@@ -292,6 +292,17 @@ builder.Services.AddSingleton<ITeamStore>(new SqliteTeamStore(database));
 builder.Services.AddSingleton<ITriggerStore>(new SqliteTriggerStore(database));
 builder.Services.AddSingleton<ITenantLog>(new SqliteTenantLog(database));
 
+// A team's sites: their versions and their data (auth-014), and the service every caller - the
+// browser routes, a plugin's records, the team deletion - goes through. See SiteService.
+builder.Services.AddSingleton<ISiteStore>(new SqliteSiteStore(database));
+// The team lookup is LATE: TeamRegistry needs the member runtime, whose plugin runner needs this.
+builder.Services.AddSingleton(sp => new SiteService(
+    sp.GetRequiredService<ISiteStore>(),
+    team => sp.GetRequiredService<TeamRegistry>().ExistingName(team),
+    sp.GetRequiredService<TeamPaths>(),
+    sp.GetRequiredService<IMessageLog>()));
+builder.Services.AddSingleton<SiteCapability>();
+
 // The folders a deletion or reset could not finish removing (auth-012), retried at start and on
 // request. See FolderRemoval.
 builder.Services.AddSingleton<IUnfinishedRemovals>(new SqliteUnfinishedRemovals(database));
@@ -547,7 +558,8 @@ builder.Services.AddSingleton(sp => new PluginMemberRunner(
     sp.GetRequiredService<RunHeartbeat>(),
     sp.GetRequiredService<AgentLaunchUser>(),
     sp.GetRequiredService<IPluginMemberSettingsStore>(),
-    sp.GetRequiredService<ISecretStore>()));
+    sp.GetRequiredService<ISecretStore>(),
+    sp.GetRequiredService<SiteService>()));
 builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
     sp.GetRequiredService<AgentMemberRunner>(),
     sp.GetRequiredService<PluginMemberRunner>()));
@@ -834,7 +846,8 @@ builder.Services.AddSingleton(sp => new TeamDeletion(
     sp.GetRequiredService<IPrincipalStore>(),
     sp.GetRequiredService<TeamPaths>(),
     sp.GetRequiredService<GitRunner>(),
-    sp.GetRequiredService<FolderRemoval>()));
+    sp.GetRequiredService<FolderRemoval>(),
+    sp.GetRequiredService<SiteService>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a reset would silently skip
 // if it were optional. A TeamReset missing its pending-delivery store cannot tell a member that has
@@ -1666,7 +1679,7 @@ app.UseDefaultFiles();
 // A `regex(^(?!api/|hub/).*$)` route constraint serves nothing at all. So the rule belongs BEFORE
 // routing, where it costs the machine surface nothing.
 //
-// THE RULE: a GET, for an extensionless path, outside `/api` and `/hub`, is a client-side route.
+// THE RULE: a GET, for an extensionless path, outside `/api`, `/hub` and `/sites` (a site is served by its own routes), is a client-side route.
 // That is exact here because nothing on this server renders HTML - every page is the one bundle.
 //   - GET only, so a mistyped POST still gets a refusal rather than a page to parse.
 //   - Extensionless, so a missing `/assets/...` chunk still 404s as itself instead of silently
@@ -1686,6 +1699,7 @@ app.Use(async (context, next) =>
         && !Path.HasExtension(path.Value)
         && !path.StartsWithSegments("/api")
         && !path.StartsWithSegments("/hub")
+        && !path.StartsWithSegments(SiteEndpoints.Prefix)
         && !path.StartsWithSegments(HealthEndpoints.Route))
     {
         context.Request.Path = "/index.html";
@@ -1740,6 +1754,7 @@ PrincipalLogScope.Use(app);
 // call on that route's own marker. RouteMarkerTests requires a marker here like everywhere else.
 app.MapMcp("/mcp").NoPermitRequired();
 SurfaceEndpoints.Map(app, dataRoot);
+SiteEndpoints.Map(app);
 TenantSettingsEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);

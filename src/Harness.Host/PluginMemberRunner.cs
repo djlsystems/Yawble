@@ -33,7 +33,8 @@ public sealed class PluginMemberRunner(
     RunHeartbeat heartbeat,
     AgentLaunchUser? runAs = null,
     IPluginMemberSettings? settings = null,
-    ISecretStore? secrets = null) : IMemberRunner
+    ISecretStore? secrets = null,
+    SiteService? sites = null) : IMemberRunner
 {
     /// <summary>The only variables a plugin child inherits from the Host. Everything else - provider
     /// keys, HARNESS_*, CLAUDE_*, GROK_* - is absent because it was never copied.</summary>
@@ -435,6 +436,11 @@ public sealed class PluginMemberRunner(
                 await PublishAsync(member, manifest, limits, record!, gathered, secretValues, ct);
                 break;
 
+            case "site.put":
+            case "site.delete":
+                await SiteRecordAsync(member, record!, gathered, secretValues, ct);
+                break;
+
             default:
                 // NOT A RECORD, OR NOT ONE THIS VERSION KNOWS: kept as text, never an error.
                 if (gathered.Text.Length > 0) gathered.Text.Append('\n');
@@ -503,6 +509,94 @@ public sealed class PluginMemberRunner(
         {
             if (!gathered.Dropped.Add(what)) return;
             await reports.ProgressAsync(member, Redact($"A `publish` of `{what}` was dropped: {why}", secretValues), ct);
+        }
+    }
+
+    /// <summary>
+    /// A <c>site.put</c> or <c>site.delete</c> record:
+    /// <c>{"t":"site.put","site":"&lt;site&gt;","collection":"&lt;c&gt;","id":"&lt;id&gt;","doc":&lt;json&gt;}</c>.
+    ///
+    /// <list type="bullet">
+    /// <item>A SITE OF THE PLUGIN'S OWN TEAM ONLY: the site is looked up in the member's team, with the
+    /// member as a bound actor, so another team's site answers as a missing one does. A record naming
+    /// a <c>team</c> other than the member's is dropped.</item>
+    /// <item>The document is redacted like every other text the plugin writes, and a site, collection
+    /// or id that redaction would change drops the record.</item>
+    /// <item>A refusal - a limit, a name, no such site - is one warning row per kind per run, as a
+    /// dropped <c>publish</c> is.</item>
+    /// </list>
+    /// </summary>
+    private async Task SiteRecordAsync(
+        ContainerId member, JsonObject record, Gathered gathered, IEnumerable<string> secretValues, CancellationToken ct)
+    {
+        var kind = (string)record["t"]!;
+
+        if (sites is null)
+        {
+            await DropAsync("this Host serves no sites.");
+            return;
+        }
+
+        if (record["team"] is { } named
+            && !(named.GetValueKind() == JsonValueKind.String
+                && string.Equals((string?)named, member.Team, StringComparison.OrdinalIgnoreCase)))
+        {
+            await DropAsync("a plugin writes only its own team's sites.");
+            return;
+        }
+
+        var site = Words(record, "site");
+        var collection = Words(record, "collection");
+        var id = Words(record, "id");
+
+        if (site is null || collection is null || id is null)
+        {
+            await DropAsync("it needs `site`, `collection` and `id`.");
+            return;
+        }
+
+        if (Redact(site, secretValues) != site || Redact(collection, secretValues) != collection || Redact(id, secretValues) != id)
+        {
+            await DropAsync("its site, collection or id holds a secret.");
+            return;
+        }
+
+        var actor = SiteActor.Member(member);
+        var service = sites;
+
+        if (kind == "site.delete")
+        {
+            var deleted = await service.DeleteDocumentAsync(member.Team, site, collection, id, actor, ct);
+            if (deleted.Refusal is { } refusal) await DropAsync(refusal);
+            return;
+        }
+
+        if (!record.ContainsKey("doc"))
+        {
+            await DropAsync("it needs `doc`, the document's JSON.");
+            return;
+        }
+
+        var doc = record["doc"]?.DeepClone();
+
+        if (doc is JsonValue scalar && scalar.TryGetValue<string>(out var text))
+        {
+            doc = JsonValue.Create(Redact(text, secretValues));
+        }
+        else if (RedactPayload(doc, secretValues) is { } secret)
+        {
+            await DropAsync(secret.Replace("its payload", "its document", StringComparison.Ordinal));
+            return;
+        }
+
+        var written = await service.PutDocumentAsync(
+            member.Team, site, collection, id, doc?.ToJsonString() ?? "null", actor, ct);
+        if (written.Refusal is { } why) await DropAsync(why);
+
+        async Task DropAsync(string why)
+        {
+            if (!gathered.Dropped.Add(kind)) return;
+            await reports.ProgressAsync(member, Redact($"A `{kind}` record was dropped: {why}", secretValues), ct);
         }
     }
 

@@ -294,6 +294,9 @@ public static class MessageText
             // Paths and a count - never contents, which the row does not carry either.
             MessageTypes.FileChanged => FileChanged(payload),
 
+            // A person's click on a site. The payload is the page's, so it is quoted as JSON text.
+            MessageTypes.SiteAction => SiteAction(payload),
+
             // An unrecognised type is passed through rather than dropped: a container may subscribe
             // to something this file has never heard of, and inventing a summary for it would be
             // worse than handing over what actually arrived.
@@ -374,6 +377,18 @@ public static class MessageText
         var path = Field(payload, PayloadFields.Path) is { Length: > 0 } folder ? $"/{folder}" : "";
 
         return $"{count} file(s) changed in {root}{path}.";
+    }
+
+    private static string SiteAction(JsonElement? payload)
+    {
+        var sent = payload is { ValueKind: JsonValueKind.Object } element
+            && element.TryGetProperty(PayloadFields.Payload, out var value)
+                ? value.GetRawText()
+                : "null";
+
+        return $"{Field(payload, PayloadFields.By) ?? "A person"} posted the action "
+            + $"`{Field(payload, PayloadFields.Action) ?? "(unknown action)"}` on the site "
+            + $"`{Field(payload, PayloadFields.Site) ?? "(unknown site)"}` with the payload {sent}.";
     }
 
     private static string? Field(JsonElement? payload, string name) =>

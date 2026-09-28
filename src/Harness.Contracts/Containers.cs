@@ -353,6 +353,14 @@ public static class MessageTypes
     public const string FileChanged = "file.changed";
 
     /// <summary>
+    /// A PERSON CLICKED SOMETHING ON A TEAM'S SITE: the page called <c>site.action(name, payload)</c>.
+    /// Published by the PLATFORM only, by the site action route, with source
+    /// <c>site:&lt;team&gt;/&lt;site&gt;</c> and no causation, so each one roots a workflow as a
+    /// trigger's fire does. Carries <c>team</c>, because the source is not a container id.
+    /// </summary>
+    public const string SiteAction = "site.action";
+
+    /// <summary>
     /// The exact skip reason published in <see cref="ScheduleSkipped"/> rows for idle-only schedules.
     /// Kept as one constant so every producer and assertion says the same sentence.
     /// </summary>

@@ -8,6 +8,7 @@
 | [ops/backups-logs-and-versions.md](ops/backups-logs-and-versions.md) | Daily database copies, full-volume exports, restoring either, logs, and agent CLI versions. |
 | [triggers.md](triggers.md) | Triggers and what they cost: the measured cost line, waking the Manager, the daily token cap, and why polling belongs to plugins. |
 | [local-repositories.md](local-repositories.md) | Local repositories: git repositories that live only on the instance, `local:<name>`, creating and deleting them, and getting the code out with `yawble repo`. |
+| [sites.md](sites.md) | Sites: a team's small web pages the platform serves and backs - publishing, the data store, actions, the helper script, and how every browser request is authorized. |
 | [plugins.md](plugins.md) | Plugin members: installing, the manifest and protocol, events, and polling for free. |
 | [ops/folder-change-triggers.md](ops/folder-change-triggers.md) | Folder-change triggers: watching the team's documents or a mounted share. |
 
