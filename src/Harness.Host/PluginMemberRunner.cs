@@ -52,7 +52,16 @@ public sealed class PluginMemberRunner(
     /// </summary>
     public const int MinimumSecretLength = 4;
 
-    public async Task<MemberResult> RunAsync(MemberInvocation invocation, CancellationToken ct = default)
+    /// <summary>
+    /// A PLUGIN RUNS NO MODEL, so every result it comes to - a success, a failure, a run that did not
+    /// begin - reports <see cref="InvocationUsage.NoModel"/>: its token cost is known, and it is zero.
+    /// The runtime writes that on the terminal row as <c>tokensSource: "none"</c>, the reason no
+    /// figures follow, and the spend queries count it as a measured run of 0.
+    /// </summary>
+    public async Task<MemberResult> RunAsync(MemberInvocation invocation, CancellationToken ct = default) =>
+        await RunPluginAsync(invocation, ct) with { Usage = InvocationUsage.NoModel };
+
+    private async Task<MemberResult> RunPluginAsync(MemberInvocation invocation, CancellationToken ct)
     {
         if (invocation.Context.UnreachableRoot is { Length: > 0 } unreachable)
         {

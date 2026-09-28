@@ -20,6 +20,14 @@ namespace Harness.Contracts;
 public static class UsageSource
 {
     public const string ExcludedEstimate = "estimated";
+
+    /// <summary>
+    /// A run that ran NO MODEL - a plugin member's - so its token cost is known, and it is zero. Not
+    /// an estimate and not a fallback: the reason no figures follow on the row. Only the plugin
+    /// runner reports it (<see cref="InvocationUsage.NoModel"/>); an agent run that reports nothing
+    /// stays unmeasured. The spend queries count a row carrying it as a measured run of 0.
+    /// </summary>
+    public const string NoModel = "none";
 }
 
 public sealed record InvocationUsage
@@ -55,6 +63,17 @@ public sealed record InvocationUsage
         Total = total;
         Source = source;
     }
+
+    private InvocationUsage(string source)
+    {
+        Source = source;
+    }
+
+    /// <summary>
+    /// A run that ran no model: every figure null, <see cref="Source"/> <see cref="UsageSource.NoModel"/>,
+    /// <see cref="BillableTokens"/> 0. Reported by the plugin runner and nothing else.
+    /// </summary>
+    public static InvocationUsage NoModel { get; } = new(UsageSource.NoModel);
 
     /// <summary>
     /// A brand that reports ONE FIGURE for a run and no split - codex prints `tokens used N` and

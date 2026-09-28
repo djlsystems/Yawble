@@ -339,5 +339,17 @@ public static class AuthSchema
             ALTER TABLE triggers ADD COLUMN wake_manager    TEXT    NOT NULL DEFAULT 'always';
             ALTER TABLE triggers ADD COLUMN daily_token_cap INTEGER NULL;
             """),
+
+        // HOW OFTEN THE DAILY CAP SKIPPED A TRIGGER TODAY. Only the first skip of a day writes a
+        // `schedule.skipped` row and a tenant row; the rest are counted here. `capped_skips_day` is
+        // the start of the day counted (ISO-8601 UTC, the instant midnight falls in the trigger's
+        // timezone), and a skip on another day starts again from one. NULL and 0 for a row from
+        // before this step: it has skipped nothing yet today.
+        new MigrationStep(
+            "auth-011",
+            """
+            ALTER TABLE triggers ADD COLUMN capped_skips_day TEXT    NULL;
+            ALTER TABLE triggers ADD COLUMN capped_skips     INTEGER NOT NULL DEFAULT 0;
+            """),
     ];
 }
