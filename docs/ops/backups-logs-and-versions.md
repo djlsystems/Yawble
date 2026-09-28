@@ -10,7 +10,7 @@ There are two kinds of backup, and they cover different things.
 
 | | Daily database copy | `yawble backup` |
 |---|---|---|
-| What | `messages.db` only: teams, accounts, the message log, settings, backlog | Everything on `/data`: the database, team folders and git clones, documents, keys, agent logins and settings. Caches and reinstallable agent programs are left out unless `--full` |
+| What | `messages.db` only: teams, accounts, the message log, settings, backlog | Everything on `/data`: the database, team folders and git clones, local repositories, documents, keys, agent logins and settings. Caches and reinstallable agent programs are left out unless `--full` |
 | Who takes it | The host, by itself | A person, with `yawble backup` |
 | Where | `/data/backups` inside the volume | A `.tar.gz` on the computer where `yawble` runs |
 | Survives losing the volume | No | Yes |
@@ -56,6 +56,8 @@ The restore writes its own backup of the database it replaces before overwriting
 ### Whole-instance backup (`yawble backup`)
 
 This is the only backup that survives losing the volume or the computer. It covers everything outside the database too: team repositories, documents, Data Protection keys and agent logins.
+
+**Local repositories are in it.** A local repository ([../local-repositories.md](../local-repositories.md)) is a bare git repository at `<dataRoot>/repos/<name>.git`, which is `/data/repos` on the volume. The whole-instance backup carries `<dataRoot>/repos` like every other folder on the volume, and `yawble restore` puts it back. For a team on a local repository with no hosted remote, this backup is the only copy that survives losing the volume. The daily database copy does not include local repositories.
 
 ```sh
 yawble backup                          # yawble-backup-<yyyyMMdd-HHmmss>.tar.gz in the current folder

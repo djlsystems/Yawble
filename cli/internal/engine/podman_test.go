@@ -261,3 +261,27 @@ func TestCopyToCopiesAFolderIntoTheContainer(t *testing.T) {
 		t.Errorf("err %v", err)
 	}
 }
+
+func TestExecToStreamsTheProgramsOutputOnBothEngines(t *testing.T) {
+	s := engine.NewScripted()
+	s.On("podman exec yawble tar", engine.Result{Stdout: "tar bytes"})
+	s.On("docker exec yawble tar", engine.Result{Stdout: "docker tar bytes"})
+	var p, d strings.Builder
+	if _, err := engine.NewPodman(s).ExecTo(context.Background(), "yawble", &p, "tar", "-C", "/data/repos", "-cf", "-", "x.git"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.NewDocker(s).ExecTo(context.Background(), "yawble", &d, "tar", "-C", "/data/repos", "-cf", "-", "x.git"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"podman exec yawble tar -C /data/repos -cf - x.git",
+		"docker exec yawble tar -C /data/repos -cf - x.git",
+	}
+	if strings.Join(s.Calls, "\n") != strings.Join(want, "\n") || p.String() != "tar bytes" || d.String() != "docker tar bytes" {
+		t.Errorf("calls %q, podman %q, docker %q", s.Calls, p.String(), d.String())
+	}
+	s.On("podman exec gone", engine.Result{Stderr: "Error: no container with name or ID \"gone\" found", ExitCode: 125})
+	if _, err := engine.NewPodman(s).ExecTo(context.Background(), "gone", &p, "true"); err == nil || !strings.Contains(err.Error(), "no container") {
+		t.Errorf("err %v", err)
+	}
+}

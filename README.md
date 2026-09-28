@@ -121,6 +121,7 @@ Other everyday commands: `yawble status`, `yawble doctor`, `yawble agents`, `yaw
 - **Host settings** are standard ASP.NET configuration (`src/Harness.Host/appsettings.json`,
   overridable with environment variables such as `Backups__Keep=14`).
 - **Watching a folder or share:** [docs/ops/folder-change-triggers.md](docs/ops/folder-change-triggers.md).
+- **Repositories with no hosting service:** [docs/local-repositories.md](docs/local-repositories.md).
 - **Backups and restores:** [docs/ops/backups-logs-and-versions.md](docs/ops/backups-logs-and-versions.md).
 
 ## Build from source
