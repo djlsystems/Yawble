@@ -1099,6 +1099,16 @@ describe('trigger cost control', () => {
     })).toBe('Median 900 billable tokens per run, over its last 1 run (1 measured).')
   })
 
+  it('says a plugin member runs no model, rather than a median of zero', () => {
+    expect(measuredCostLine({
+      lastRuns: 2, measuredRuns: 2, unmeasuredRuns: 0, medianBillableTokens: 0, kind: 'plugin',
+    })).toBe('Runs no model: no token cost')
+    // Rows from before plugin runs were marked are still read as not measured; the line is the same.
+    expect(measuredCostLine({
+      lastRuns: 2, measuredRuns: 0, unmeasuredRuns: 2, medianBillableTokens: null, kind: 'plugin',
+    })).toBe('Runs no model: no token cost')
+  })
+
   it('says spent today without a cap, and not known when the Host sends no spend', () => {
     expect(spentTodayLine({ spentToday: { billableTokens: 500, measuredRuns: 1, unmeasuredRuns: 0 }, dailyTokenCap: null }))
       .toBe('spent today 500 tokens (no cap)')

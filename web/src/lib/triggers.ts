@@ -1441,11 +1441,17 @@ function runs(count: number): string {
   return plural(count, 'run')
 }
 
+/** A plugin member's cost line: it runs no model, so its token cost is known, and it is zero. */
+export const NoModelCostLine = 'Runs no model: no token cost'
+
 /**
  * The member's measured cost, as one line: the median billable tokens of its recent runs and how
  * many were not measured, or that none was. Never a projection - only what runs actually reported.
+ * A plugin member runs no model, and says so rather than a median of zero.
  */
 export function measuredCostLine(cost: MemberMeasuredCost): string {
+  if (cost.kind === 'plugin') return NoModelCostLine
+
   if (cost.medianBillableTokens === null || cost.measuredRuns === 0) {
     return cost.unmeasuredRuns > 0
       ? `No runs measured yet - its last ${runs(cost.unmeasuredRuns)} reported no usage.`
