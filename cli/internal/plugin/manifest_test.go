@@ -76,8 +76,8 @@ func TestListSettingsAndRequires(t *testing.T) {
 		`,"config":{"allow":{"type":"map"}}`:                                   "`config.allow.type` must be string, number, bool or list - v1 has no nested configuration.",
 		`,"requires":["dotnet","node","python3"]`:                              "",
 		`,"requires":null`:     "",
-		`,"requires":["ruby"]`: "`requires` names 'ruby', which is not a runtime this Host provides (it provides dotnet, node, python3); ship anything else inside the plugin's folder.",
-		`,"requires":"dotnet"`: "`requires` must be an array of runtime names: dotnet, node, python3.",
+		`,"requires":["ruby"]`: "`requires` names 'ruby', which is not a runtime this Host knows (dotnet, node, python3).",
+		`,"requires":"dotnet"`: "`requires` must be an array of runtime names.",
 	} {
 		_, _, err := Parse(manifest(extra))
 		got := ""

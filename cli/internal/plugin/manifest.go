@@ -250,11 +250,11 @@ func parse(root map[string]any) (Manifest, []string, string) {
 	}
 	if r, present := root["requires"]; present && r != nil {
 		if !stringArray(r) {
-			return m, nil, fmt.Sprintf("`requires` must be an array of runtime names: %s.", strings.Join(Runtimes, ", "))
+			return m, nil, "`requires` must be an array of runtime names."
 		}
 		for _, item := range r.([]any) {
 			if !containsString(Runtimes, item.(string)) {
-				return m, nil, fmt.Sprintf("`requires` names '%s', which is not a runtime this Host provides (it provides %s); ship anything else inside the plugin's folder.", item, strings.Join(Runtimes, ", "))
+				return m, nil, fmt.Sprintf("`requires` names '%s', which is not a runtime this Host knows (%s).", item, strings.Join(Runtimes, ", "))
 			}
 		}
 	}

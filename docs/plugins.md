@@ -83,12 +83,15 @@ is installed where it is, with no copy out to the operator's computer. Both ways
 
 - **The web app:** Admin → Plugins → "Install from a folder…" picks the built version folder and calls
   `POST /api/plugins/install` with `{ "path": "<absolute folder>", "replace": false }` (humans-only).
-- **The operator CLI:** `yawble plugin install --from-instance <path>` checks the folder and copies it
-  inside the container itself. It does not call the route. `--force` is `replace`.
-- **A request file, for anything running as root in the container:** write
-  `{"request": "<nonce>", "path": ..., "replace": ...}` to `/data/plugins/.install` (the same seam as
-  the rescan). The Host answers in `/data/plugins/.install-report.json` (`0600`) with that nonce,
-  `status` (200, 400 or 409), `id`, `version`, `installed`, `replaced` and `reason`.
+- **The operator CLI:** `yawble plugin install --from-instance <path>` asks the running Host through a
+  request file, the same seam as the rescan. Through `podman exec` (or `docker exec`), which runs as
+  root, it writes `{"request": "<nonce>", "path": ..., "replace": ...}` to `/data/plugins/.install`,
+  owned `harness:agent` `0640` like `.rescan`: the Host user reads and removes it, and an agent can
+  neither write it nor create it. The Host answers in `/data/plugins/.install-report.json` (`0600`,
+  the Host user's; the CLI reads it as root) with that nonce, `status` (200, 400 or 409), `id`,
+  `version`, `installed`, `replaced` and `reason`. `--force` is `replace`. The CLI prints the verdict
+  and exits 1 on a refusal; a Host that does not answer within 60 seconds is reported and the
+  request withdrawn.
 
 The route and the request file share one implementation (`PluginInstaller`), so they check, write and answer alike:
 
