@@ -127,15 +127,18 @@ describe('rules', () => {
       expect(repoUrl('local:')).toMatch(/is not a local repository name/)
       expect(repoUrl('local:a b')).toMatch(/is not a local repository name/)
       expect(repoUrl('local:widget.git')).toMatch(/is not a local repository name/)
+      expect(repoUrl('local:a..b')).toMatch(/^'local:a\.\.b' is not a local repository name\. Use 1 to 100 .*, with no '\.\.'\.$/)
       expect(repoUrlRules(['https://github.com/owner/widget.git', 'local:Widget'], 1)
         .map((rule) => rule('local:Widget'))).toContain("Another URL in this list already clones into 'Widget'.")
     })
 
     it('checks a local repository name as the Host does', () => {
       expect(localRepoName('widget')).toBe(true)
-      expect(localRepoName('-x')).toMatch(/^Use 1 to 100 letters/)
-      expect(localRepoName('a..b')).toMatch(/^Use 1 to 100 letters/)
-      expect(localRepoName('x.lock')).toMatch(/^Use 1 to 100 letters/)
+      expect(localRepoName('-x')).toMatch(/^'-x' is not a local repository name\. Use 1 to 100 letters/)
+      expect(localRepoName('x.lock')).toMatch(/^'x\.lock' is not a local repository name\. Use 1 to 100 letters/)
+      expect(localRepoName('a..b')).toBe(
+        "'a..b' is not a local repository name. Use 1 to 100 letters, digits, '.', '_' or '-', starting with a "
+        + "letter or digit, not ending in '.git' or '.lock', with no '..'.")
       expect(localRepoName('')).toBe('A local repository needs a name.')
     })
 

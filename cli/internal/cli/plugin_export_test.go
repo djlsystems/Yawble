@@ -33,3 +33,6 @@ func NoGit() func() {
 	lookGit = func(string) (string, error) { return "", exec.ErrNotFound }
 	return func() { lookGit = was }
 }
+
+// How `repo list` prints a size in bytes.
+var RepoHumanSize = humanSize

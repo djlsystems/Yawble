@@ -109,7 +109,10 @@ func tarOf(t *testing.T, root, name string) string {
 }
 
 func TestRepoListShowsEachLocalRepositoryOnBothEngines(t *testing.T) {
-	listing := "my-plugin\t2048\tmain\tabc1234\t2026-09-28T10:00:00+00:00\tAdd the manifest\nscratch\t12\tmain\t\t\t\n"
+	// Sizes are bytes, the sum of file lengths the Host's Admin view shows. A name the Host would
+	// not call a local repository is not listed.
+	listing := "my-plugin\t2097152\tmain\tabc1234\t2026-09-28T10:00:00+00:00\tAdd the manifest\n" +
+		"scratch\t27648\tmain\t\t\t\n.hidden\t1\tmain\t\t\t\na..b\t1\tmain\t\t\t\n"
 	for _, program := range []string{"podman", "docker"} {
 		t.Run(program, func(t *testing.T) {
 			s := repoScript(program, listing)
@@ -117,9 +120,14 @@ func TestRepoListShowsEachLocalRepositoryOnBothEngines(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("exit %d: %s %s", code, out, errOut)
 			}
-			for _, want := range []string{"NAME", "local:my-plugin", "abc1234 2026-09-28T10:00:00+00:00 Add the manifest", "2.0 MB", "local:scratch", "12 KB"} {
+			for _, want := range []string{"NAME", "local:my-plugin", "abc1234 2026-09-28T10:00:00+00:00 Add the manifest", "2.0 MB", "local:scratch", "27 KB"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("out lacks %q:\n%s", want, out)
+				}
+			}
+			for _, unwanted := range []string{".hidden", "a..b"} {
+				if strings.Contains(out, unwanted) {
+					t.Errorf("out lists %q:\n%s", unwanted, out)
 				}
 			}
 			if indexOf(s.Calls, repoListCall(program)) < 0 {
@@ -127,7 +135,7 @@ func TestRepoListShowsEachLocalRepositoryOnBothEngines(t *testing.T) {
 			}
 			code, out, _ = run(t, backupDeps(t, s, program), "repo", "list", "--json")
 			var rows []map[string]any
-			if code != 0 || json.Unmarshal([]byte(out), &rows) != nil || len(rows) != 2 || rows[0]["reference"] != "local:my-plugin" || rows[0]["defaultBranch"] != "main" {
+			if code != 0 || json.Unmarshal([]byte(out), &rows) != nil || len(rows) != 2 || rows[0]["reference"] != "local:my-plugin" || rows[0]["defaultBranch"] != "main" || rows[0]["sizeBytes"] != float64(2097152) {
 				t.Errorf("json exit %d: %s", code, out)
 			}
 		})
@@ -161,6 +169,8 @@ func TestRepoListScriptReadsARealBareRepository(t *testing.T) {
 	}
 	root := bareRepo(t, "my-plugin")
 	must(t, os.MkdirAll(filepath.Join(root, "not-a-repo"), 0o755))
+	// LocalRepos.Exists ignores a symbolic link: one planted in the repos root is not listed.
+	must(t, os.Symlink(filepath.Join(root, "my-plugin.git"), filepath.Join(root, "planted.git")))
 	out, err := exec.Command("sh", "-c", cli.RepoListScript, "sh", root).Output()
 	if err != nil {
 		t.Fatal(err)
@@ -168,6 +178,21 @@ func TestRepoListScriptReadsARealBareRepository(t *testing.T) {
 	fields := strings.Split(strings.TrimSpace(string(out)), "\t")
 	if len(fields) != 6 || fields[0] != "my-plugin" || fields[2] != "main" || fields[3] == "" || fields[5] != "Initial commit" {
 		t.Errorf("fields %q", fields)
+	}
+	// Size is the sum of file lengths, as LocalRepos.DescribeAsync counts it, not disk blocks.
+	var size int64
+	must(t, filepath.WalkDir(filepath.Join(root, "my-plugin.git"), func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		info, err := d.Info()
+		if err == nil {
+			size += info.Size()
+		}
+		return err
+	}))
+	if len(fields) > 1 && fields[1] != fmt.Sprint(size) {
+		t.Errorf("size %s, want %d", fields[1], size)
 	}
 	if out, _ := exec.Command("sh", "-c", cli.RepoListScript, "sh", filepath.Join(root, "missing")).Output(); len(out) != 0 {
 		t.Errorf("a missing repos folder lists %q", out)
@@ -223,6 +248,16 @@ func TestRepoCloneIntoTheNameByDefault(t *testing.T) {
 	}
 }
 
+func TestRepoListPrintsSizeAsAdminRepositoriesDoes(t *testing.T) {
+	// LocalReposDialog.vue's size(): B below 1024, then units of 1024, one decimal below 10.
+	for bytes, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1024: "1.0 KB", 27648: "27 KB", 10 * 1024: "10 KB",
+		2 * 1024 * 1024: "2.0 MB", 5 * 1024 * 1024 * 1024: "5.0 GB", 2048 * 1024 * 1024 * 1024 * 1024: "2048 TB"} {
+		if got := cli.RepoHumanSize(bytes); got != want {
+			t.Errorf("%d: %q, want %q", bytes, got, want)
+		}
+	}
+}
+
 func TestRepoCloneRefusesAFolderThatExistsAndTouchesNothing(t *testing.T) {
 	folder := t.TempDir()
 	must(t, os.WriteFile(filepath.Join(folder, "mine.txt"), []byte("keep"), 0o644))
@@ -239,16 +274,31 @@ func TestRepoCloneRefusesAFolderThatExistsAndTouchesNothing(t *testing.T) {
 	}
 }
 
-func TestRepoCloneRefusesAnIllegalNameNamingIt(t *testing.T) {
-	for _, name := range []string{"..", ".", "a/b", `a\b`, ".git", ".GIT", "-x", ""} {
-		s := repoScript("podman", "")
-		code, _, errOut := run(t, backupDeps(t, s, "podman"), "repo", "clone", "--", name, filepath.Join(t.TempDir(), "out"))
-		if code != 2 || !strings.Contains(errOut, fmt.Sprintf("%q is not a local repository name", name)) {
-			t.Errorf("%q: exit %d: %s", name, code, errOut)
+func TestRepoCloneRefusesAnIllegalNameNamingItOnBothEngines(t *testing.T) {
+	// LocalRepos.IsLegalName: 1 to 100 of letters, digits, '.', '_', '-', starting with a letter or
+	// digit, no '..', not ending in .git or .lock.
+	names := []string{"..", ".", "a/b", `a\b`, ".git", ".GIT", "-x", "", ".hidden", "_x", "a..b", "x.git", "X.Lock",
+		"a b", "caf\u00e9", strings.Repeat("a", 101)}
+	for _, program := range []string{"podman", "docker"} {
+		for _, name := range names {
+			s := repoScript(program, name+"\t1\tmain\t\t\t\n")
+			code, _, errOut := run(t, backupDeps(t, s, program), "repo", "clone", "--", name, filepath.Join(t.TempDir(), "out"))
+			if code != 2 || !strings.Contains(errOut, fmt.Sprintf("%q is not a local repository name", name)) || !strings.Contains(errOut, "with no '..'") {
+				t.Errorf("%s %q: exit %d: %s", program, name, code, errOut)
+			}
+			if len(s.Calls) != 0 {
+				t.Errorf("%s %q: the engine was asked:\n%s", program, name, calls(s))
+			}
 		}
-		if len(s.Calls) != 0 {
-			t.Errorf("%q: the engine was asked:\n%s", name, calls(s))
-		}
+	}
+}
+
+func TestRepoCloneTakesTheLongestLegalName(t *testing.T) {
+	name := strings.Repeat("a", 100)
+	s := repoScript("podman", "")
+	code, _, errOut := run(t, backupDeps(t, s, "podman"), "repo", "clone", name, filepath.Join(t.TempDir(), "out"))
+	if code != 1 || !strings.Contains(errOut, "no local repository named") {
+		t.Errorf("exit %d: %s", code, errOut)
 	}
 }
 

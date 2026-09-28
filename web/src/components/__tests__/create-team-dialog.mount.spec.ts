@@ -279,7 +279,8 @@ describe('CreateTeamDialog validation', () => {
     await field(wrapper, 'Create a local repository').setValue('../escape');
     await validated();
 
-    expect(bodyText()).toContain("Use 1 to 100 letters, digits, '.', '_' or '-'");
+    expect(bodyText()).toContain("'../escape' is not a local repository name. Use 1 to 100 letters, digits, '.', '_' or '-'");
+    expect(bodyText()).toContain("with no '..'");
     expect(button('Create').hasAttribute('disabled')).toBe(true);
     expect(createLocalRepo).not.toHaveBeenCalled();
   });

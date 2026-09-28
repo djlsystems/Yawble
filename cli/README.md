@@ -101,7 +101,7 @@ yawble repo list [--json]
 yawble repo clone my-plugin [~/code/my-plugin]
 ```
 
-`list` shows each one: name, `local:<name>`, default branch, last commit and size. `clone` streams `/data/repos/<name>.git` out of the running instance through the engine (`exec ... tar`, Podman or Docker) and clones it with this computer's git into the folder (default `./<name>`). Every branch becomes a local branch and the default branch is checked out. The clone has no remote, because pushing back is not supported. A folder that already exists is refused and left alone. An illegal name (empty, `/`, `\`, `.`, `..`, `.git`, a leading `-`) or one the instance does not have is refused and named.
+`list` shows each one: name, `local:<name>`, default branch, last commit and size. `clone` streams `/data/repos/<name>.git` out of the running instance through the engine (`exec ... tar`, Podman or Docker) and clones it with this computer's git into the folder (default `./<name>`). Every branch becomes a local branch and the default branch is checked out. The clone has no remote, because pushing back is not supported. A folder that already exists is refused and left alone. An illegal name (the Host's rule: 1 to 100 letters, digits, `.`, `_` or `-`, starting with a letter or digit, not ending in `.git` or `.lock`, with no `..`) or one the instance does not have is refused and named. Size is the total length of the repository's files, as Admin → Repositories shows it.
 
 ## Backup and restore
 

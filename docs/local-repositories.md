@@ -12,7 +12,7 @@ A new local repository starts on `main` with one empty commit, so a team can clo
 
 A team refers to a local repository as `local:<name>`, anywhere a repository URL is accepted: the URL field in New Team and Team settings, `PUT /api/teams/{team}/repos`, `POST /api/teams`, and the `repo` tools. `local:` is a reference, not a path: the Host finds the repository by name, and no path from a request reaches the filesystem. You never type a folder.
 
-The name is 1 to 100 letters, digits, `.`, `_` or `-`, starting with a letter or digit, and not ending in `.git` or `.lock`. A name that is not legal, or names no local repository, is refused with a sentence naming it.
+The name is 1 to 100 letters, digits, `.`, `_` or `-`, starting with a letter or digit, not ending in `.git` or `.lock` (in any case), with no `..` anywhere. So `.hidden`, `a..b` and `widget.git` are not names. A name that is not legal, or names no local repository, is refused with a sentence naming it. The web app, the API and the CLI all apply this rule.
 
 ## Working on one
 
@@ -25,7 +25,7 @@ All of these are for a person signed in to the web app. The routes (`GET`/`POST 
 - **Create.** In **New Team** or **Team settings → GitHub Repos**, type a name in **Create a local repository**, beside the URL field, and press **Create**. The name is checked as the Host checks it. The new repository joins the team's list as `local:<name>`.
 - **Attach.** Under the same field, **Local repositories:** shows a chip for each one the instance has. Click one to attach it; one already in the team's list is shown as attached. Several teams can use the same local repository.
 - **No upstream.** A local repository has no upstream field. In Team settings its row says "A local repository on this instance: contributor mode and pull requests do not apply."
-- **See them all.** **Admin → Repositories** lists each local repository: its name, size on disk, default branch, last commit and the teams using it.
+- **See them all.** **Admin → Repositories** lists each local repository: its name, size (the total length of its files), default branch, last commit and the teams using it.
 - **Delete.** Also in Admin → Repositories. **Delete** asks first ("Delete <name>?"; it cannot be undone). It is refused while any team's repository list names the repository, and the refusal names those teams.
 
 Creating and deleting a local repository each append a row to the tenant log (`local-repo.created`, `local-repo.deleted`).
@@ -41,12 +41,12 @@ yawble repo clone my-plugin                   # into ./my-plugin
 yawble repo clone my-plugin ~/code/my-plugin  # into a folder you name
 ```
 
-`repo list` does not show which teams use each repository; Admin → Repositories does.
+`repo list` shows size the way Admin → Repositories does: the total length of the repository's files, in B, KB, MB, GB or TB of 1024. It does not show which teams use each repository; Admin → Repositories does.
 
 `repo clone` copies `<dataRoot>/repos/<name>.git` out of the instance through the container engine, then clones it on your computer. It works the same with Podman and with Docker.
 
 - The folder must not already exist. If it does, `clone` refuses and leaves it untouched.
-- An illegal name, or one the instance does not have, is refused and named; for an unknown name it lists the names the instance has.
+- An illegal name (by the rule above) is refused as not a local repository name, naming it, before anything is asked of the instance. A legal name the instance does not have is refused naming it and listing the names the instance has.
 - Every branch on the instance becomes a local branch in the clone (`main`, and each `team/<team>` branch). The default branch is checked out.
 - The clone has **no remote**. Pushing back from your computer to the instance is not supported. To take newer work, run `repo clone` again into a new folder.
 

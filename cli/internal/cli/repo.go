@@ -75,7 +75,7 @@ func newRepoListCommand(deps Deps) *cobra.Command {
 				if r.LastCommit != "" {
 					last = r.LastCommit + " " + r.LastCommitAt + " " + r.LastSubject
 				}
-				fmt.Fprintf(w, "%s\tlocal:%s\t%s\t%s\t%s\n", r.Name, r.Name, orDash(r.DefaultBranch), last, humanKB(r.SizeKB))
+				fmt.Fprintf(w, "%s\tlocal:%s\t%s\t%s\t%s\n", r.Name, r.Name, orDash(r.DefaultBranch), last, humanSize(r.SizeBytes))
 			}
 			return w.Flush()
 		},
@@ -96,8 +96,8 @@ func newRepoCloneCommand(deps Deps) *cobra.Command {
 		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if reason := illegalRepoName(name); reason != "" {
-				return UsageError{fmt.Sprintf("%q is not a local repository name: %s", name, reason)}
+			if !legalRepoName(name) {
+				return UsageError{fmt.Sprintf("%q is not a local repository name: %s", name, repoNameRule)}
 			}
 			folder := name
 			if len(args) == 2 {
@@ -258,23 +258,25 @@ func gitOutput(ctx context.Context, git, dir string, args ...string) (string, er
 	return string(out), nil
 }
 
-// illegalRepoName is the Host's repository folder-name rule (RepoUrls.IsLegalFolderName): not
-// empty, no `/` or NUL, not `.`, `..` or `.git`. `\` is refused too, because on Windows it is a
-// separator, and a leading `-`, which a program would read as an option.
-func illegalRepoName(name string) string {
-	switch {
-	case name == "":
-		return "it is empty"
-	case strings.ContainsAny(name, "/\\\x00"):
-		return "it holds a path separator"
-	case name == "." || name == "..":
-		return "it names a folder, not a repository"
-	case strings.EqualFold(name, ".git"):
-		return "git refuses .git as a name"
-	case strings.HasPrefix(name, "-"):
-		return "it starts with -"
+// repoNameRule is the Host's rule for a local repository name, as LocalRepos.IllegalName says it.
+const repoNameRule = "use 1 to 100 letters, digits, '.', '_' or '-', starting with a letter or digit, " +
+	"not ending in '.git' or '.lock', with no '..'"
+
+// legalRepoName is the Host's LocalRepos.IsLegalName: 1 to 100 of ASCII letters, digits, '.', '_'
+// and '-', starting with a letter or digit, no "..", not ending in .git or .lock (any case).
+func legalRepoName(name string) bool {
+	if len(name) == 0 || len(name) > 100 || strings.Contains(name, "..") {
+		return false
 	}
-	return ""
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		alnum := 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
+		if !alnum && (i == 0 || c != '.' && c != '_' && c != '-') {
+			return false
+		}
+	}
+	lower := strings.ToLower(name)
+	return !strings.HasSuffix(lower, ".git") && !strings.HasSuffix(lower, ".lock")
 }
 
 // localRepo is one line of `repo list`.
@@ -285,19 +287,21 @@ type localRepo struct {
 	LastCommit    string `json:"lastCommit"`
 	LastCommitAt  string `json:"lastCommitAt"`
 	LastSubject   string `json:"lastSubject"`
-	SizeKB        int64  `json:"sizeKB"`
+	SizeBytes     int64  `json:"sizeBytes"`
 }
 
 // repoListScript runs as root in the container. $1 is the repos root. One line per <name>.git:
-// name, size in KB, the branch HEAD names, then the last commit's short hash, date and subject.
-// safe.directory is given on the command line because the repositories belong to harness.
+// name, size in bytes (the sum of its files' lengths, as the Admin view counts it), the branch HEAD names, then the last commit's short hash, date and subject.
+// safe.directory is given on the command line because the repositories belong to harness. A symbolic link
+// is skipped, as LocalRepos.Exists skips one.
 const repoListScript = `cd "$1" 2>/dev/null || exit 0
 g() { git -c 'safe.directory=*' --git-dir="$d" "$@"; }
 for d in *.git; do
-  [ -d "$d" ] || continue
+  [ -d "$d" ] && [ ! -L "$d" ] || continue
   b=$(g symbolic-ref --short -q HEAD 2>/dev/null)
   c=$(g log -1 --format=%h%x09%cI%x09%s 2>/dev/null)
-  s=$(du -sk "$d" | cut -f1)
+  s=0
+  for n in $(find "$d" -type f -printf '%s\n'); do s=$((s + n)); done
   printf '%s\t%s\t%s\t%s\n' "${d%.git}" "$s" "$b" "$c"
 done`
 
@@ -309,14 +313,15 @@ func readRepos(ctx context.Context, e engine.Engine) ([]localRepo, error) {
 	repos := []localRepo{}
 	for _, line := range strings.Split(strings.ReplaceAll(res.Stdout, "\r\n", "\n"), "\n") {
 		f := strings.SplitN(line, "\t", 6)
-		if len(f) < 3 || f[0] == "" {
+		// The Host lists only names it could have made; anything else in the folder is not one.
+		if len(f) < 3 || !legalRepoName(f[0]) {
 			continue
 		}
 		for len(f) < 6 {
 			f = append(f, "")
 		}
 		size, _ := strconv.ParseInt(f[1], 10, 64)
-		repos = append(repos, localRepo{Name: f[0], Reference: "local:" + f[0], SizeKB: size, DefaultBranch: f[2], LastCommit: f[3], LastCommitAt: f[4], LastSubject: f[5]})
+		repos = append(repos, localRepo{Name: f[0], Reference: "local:" + f[0], SizeBytes: size, DefaultBranch: f[2], LastCommit: f[3], LastCommitAt: f[4], LastSubject: f[5]})
 	}
 	sort.Slice(repos, func(i, j int) bool { return repos[i].Name < repos[j].Name })
 	return repos, nil
@@ -349,12 +354,21 @@ func orDash(s string) string {
 	return s
 }
 
-func humanKB(kb int64) string {
-	switch {
-	case kb >= 1024*1024:
-		return fmt.Sprintf("%.1f GB", float64(kb)/(1024*1024))
-	case kb >= 1024:
-		return fmt.Sprintf("%.1f MB", float64(kb)/1024)
+// humanSize is bytes as Admin → Repositories shows them (LocalReposDialog.vue's size): B below
+// 1024, then KB, MB, GB, TB of 1024, one decimal below 10.
+func humanSize(bytes int64) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
 	}
-	return fmt.Sprintf("%d KB", kb)
+	units := []string{"KB", "MB", "GB", "TB"}
+	value, unit := float64(bytes)/1024, 0
+	for value >= 1024 && unit < len(units)-1 {
+		value /= 1024
+		unit++
+	}
+	decimals := 0
+	if value < 10 {
+		decimals = 1
+	}
+	return fmt.Sprintf("%.*f %s", decimals, value, units[unit])
 }
