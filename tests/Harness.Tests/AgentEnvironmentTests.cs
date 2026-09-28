@@ -205,7 +205,7 @@ public sealed class AgentEnvironmentTests : IDisposable
     }
 
     [Fact]
-    public async Task A_member_gets_its_own_TMPDIR_inside_its_workspace_and_two_members_never_share_one()
+    public async Task A_member_gets_its_own_short_TMPDIR_and_two_members_never_share_one()
     {
         // A real child printing what it was handed. A handed-in TMPDIR naming the shared /tmp is
         // there to show it cannot win: the member's own folder is set after every merge.
@@ -237,25 +237,24 @@ public sealed class AgentEnvironmentTests : IDisposable
             Assert.Equal(0, result.ExitCode);
             var tmpdir = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Single(line => line.StartsWith("TMPDIR=", StringComparison.Ordinal))["TMPDIR=".Length..];
-            var folder = Path.Combine(workspace, MemberTemp.FolderName);
-
-            Assert.True(Directory.Exists(folder), $"{folder} was not created");
+            Assert.True(Directory.Exists(tmpdir), $"{tmpdir} was not created");
             if (OperatingSystem.IsWindows())
             {
-                Assert.Equal(folder, tmpdir);
+                Assert.Equal(Path.Combine(workspace, MemberTemp.WindowsFolderName), tmpdir);
                 return tmpdir;
             }
 
-            // What the child writes lands in its workspace, however TMPDIR is spelled.
-            Assert.Equal(folder, new DirectoryInfo(tmpdir).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? tmpdir);
+            // A real folder, owner-only, and the one the workspace's link names.
+            Assert.Null(new DirectoryInfo(tmpdir).LinkTarget);
             Assert.Equal(
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-                File.GetUnixFileMode(folder) & (UnixFileMode)0x1FF);
+                File.GetUnixFileMode(tmpdir) & (UnixFileMode)0x1FF);
+            Assert.Equal(tmpdir, new FileInfo(MemberTemp.LinkFor(workspace)).LinkTarget);
 
-            // The .NET runtime's named pipes, which test platforms, build servers and compilers
-            // use, are Unix sockets at TMPDIR/CoreFxPipe_<name>, and a socket path holds 103 bytes.
-            // A 64-character pipe name is longer than any of theirs.
-            var socket = Path.Combine(tmpdir, "CoreFxPipe_" + new string('p', 64));
+            // The .NET runtime's named pipes, which test platforms, build servers and the compiler
+            // server use, are Unix sockets at TMPDIR/CoreFxPipe_<name>, and a socket path holds 103
+            // bytes. The name here is as long as the test platform's.
+            var socket = Path.Combine(tmpdir, "CoreFxPipe_" + new string('p', 36));
             Assert.True(
                 System.Text.Encoding.UTF8.GetByteCount(socket) <= 103,
                 $"'{socket}' is {System.Text.Encoding.UTF8.GetByteCount(socket)} bytes, over a socket path's 103");
@@ -269,9 +268,15 @@ public sealed class AgentEnvironmentTests : IDisposable
         Assert.NotEqual(rowan, tomas);
         Assert.Equal(rowan, await TmpdirOf("DeveloperRowan"));
 
-        foreach (var member in new[] { "DeveloperRowan", "DeveloperTomas" })
+        // Not a folder by path: a member made again under the same name starts empty.
+        var link = MemberTemp.LinkFor(Path.Combine(workspaces, "DeveloperRowan"));
+        File.Delete(link);
+        var successor = await TmpdirOf("DeveloperRowan");
+        Assert.NotEqual(rowan, successor);
+
+        foreach (var folder in new[] { rowan, tomas, successor })
         {
-            MemberTemp.Forget(Path.Combine(workspaces, member));
+            Directory.Delete(folder, recursive: true);
         }
     }
 
