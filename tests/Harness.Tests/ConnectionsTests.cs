@@ -16,7 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// CONNECTIONS (B001D), on the real Host with a FAKED provider - no test calls a real one. A person
+/// CONNECTIONS, on the real Host with a FAKED provider - no test calls a real one. A person
 /// sets Google's client, connects an account through the web flow (start, the provider's redirect
 /// back to the callback), binds it to a plugin member, and the member's run receives a fresh access
 /// token on stdin; refreshes, rotation, a refused refresh, the binding rules, the callback's refusals
