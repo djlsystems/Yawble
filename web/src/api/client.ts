@@ -842,14 +842,33 @@ export const dispatchBacklogItemToNewTeam = (
     memberAgents: string[]
     root: string | null
     repos: string[]
+
+    /** As on `createTeam`: with no `repos`, false makes no local repository. Omitted otherwise. */
+    localRepository?: boolean | undefined
+
+    /** As on `createTeam`: the answer to a refused repository check. Omitted when empty. */
+    repoChoices?: Record<string, RepoChoice>
   },
 ) =>
-  json<{ team: string; teamName: string; correlation: number; dispatch: number }>(
+  json<{
+    team: string
+    teamName: string
+    correlation: number
+    dispatch: number
+    localRepository?: TeamLocalRepository | null
+    createdOnGitHub?: string[] | null
+  }>(
     `/api/backlog/${id}/dispatch-to-new`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name, ...settings }),
+      body: JSON.stringify({
+        name,
+        ...settings,
+        repoChoices: settings.repoChoices && Object.keys(settings.repoChoices).length > 0
+          ? settings.repoChoices
+          : undefined,
+      }),
     },
   )
 
