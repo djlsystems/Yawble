@@ -441,9 +441,7 @@ function insertToken(token: string) {
           {{ refusal }}
         </q-banner>
 
-        <div class="measured-cost text-caption os-text-muted">
-          <q-icon name="payments" class="q-mr-xs" />{{ costLine }}
-        </div>
+        <div class="measured-cost text-caption os-text-muted">{{ costLine }}</div>
 
         <q-input
           v-model="draft.name"
