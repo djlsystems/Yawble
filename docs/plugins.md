@@ -28,7 +28,17 @@ marketplace, downloading, signing and updating are out of scope.
 
 ## Install a plugin
 
-Install a built plugin version with the operator CLI:
+There are two install paths. Both check the same rules, lay the plugin out the same way, set the
+same owner and modes, switch `active` to it and print the Host's verdict:
+
+- **From your computer.** `yawble plugin install <folder>` copies a version you built on the machine
+  that runs the instance into it (below).
+- **From inside the instance.** A plugin a team built in its worktree, or the Concierge in its
+  workspace, is already in the container. `yawble plugin install --from-instance <path>` installs it
+  where it is, with no copy out of the container and back
+  ([Install from inside the instance](#install-from-inside-the-instance)).
+
+Install a built plugin version from your computer with the operator CLI:
 
 ```sh
 yawble plugin install <folder>
@@ -65,6 +75,28 @@ report back. Only the Host user and root can write in `/data/plugins` (`harness:
 agent cannot ask for a rescan. The report names members of every team, so the Host writes it `0600`.
 An image from before this command does not answer. The CLI says so after 20 seconds, and a restart
 (`yawble down`, `yawble up`) loads the files it has already put in place.
+
+### Install from inside the instance
+
+```sh
+yawble plugin install --from-instance /data/teams/<team>/repos/<repo>/<tree>/build/<id>/<version>
+```
+
+`<path>` is the version folder's absolute path **inside the container**. Nothing is copied from your
+computer: the CLI checks the folder where it is, through the engine, then copies it inside the
+container into `/data/plugins/<id>/<version>/`. It refuses, naming the reason, before anything is
+written:
+
+- a path that is not absolute, or is outside the data root (`/data`), `..` included;
+- a path that leads through a symlink to somewhere outside the data root;
+- a folder holding a symlink that leaves the folder: once installed, it would point the plugin at
+  files an agent can write, and a plugin is [self-contained](#self-contained-plugins);
+- a folder with no `plugin.json`, or a manifest the Host would refuse (the same rules and sentences
+  as the copy from your computer, including an executable or skill that is not a file inside it).
+
+Then it does what `plugin install <folder>` does from step 2 on: `--force` to replace an installed
+version, the Host's owner and modes, `active`, a rescan and the Host's verdict. Installing stays a
+person's action: agents cannot write `/data/plugins`, and the CLI runs on the operator's machine.
 
 The layout the Host reads, whatever put it there:
 
@@ -142,6 +174,26 @@ What has been verified, and what has not:
   (`chown` was a stub), and a build made on Windows. In particular, not yet run: what
   `podman cp`/`docker cp` do with a folder from a Windows host, and a hired sample-echo running after
   this install on a real instance.
+
+### Example: sample-echo-go
+
+`samples/plugins/sample-echo-go` is the same plugin in Go, and the template for a connector (see
+[Choosing a language](#choosing-a-language)). `build.sh` builds two static binaries
+(`CGO_ENABLED=0`, `GOOS=linux`, `GOARCH=amd64` and `arm64`) into `bin/linux-x64/` and
+`bin/linux-arm64/`, which the manifest's `platforms` map names; the Host runs the one for its
+processor. It needs no runtime from the image, so its manifest has no `requires`.
+
+```sh
+# From the repository root, on your computer or inside the instance.
+samples/plugins/sample-echo-go/build.sh ~/plugins-build/sample-echo-go/0.1.0
+yawble plugin install ~/plugins-build/sample-echo-go/0.1.0
+
+# Built inside the instance, in a team's tree: install it where it is.
+yawble plugin install --from-instance /data/teams/<team>/repos/<repo>/<tree>/build/sample-echo-go/0.1.0
+```
+
+`PluginGoTemplateEndToEndTests` builds both binaries, checks each is a static ELF for its processor,
+installs the folder, hires it and runs it on the Host's processor.
 
 ### Hire it into a team
 
@@ -531,6 +583,38 @@ setting below.
 The built-in skill `authoring-plugins` (offered to the Concierge and the Manager) carries this rule
 in plain words, with the checklist for writing a plugin's spec as a backlog item.
 
+## Choosing a language
+
+The protocol is JSON on stdin and stdout, so a plugin may be written in any language whose program
+runs in the image. Every run is a new process, so start-up is paid on every run.
+
+- **Go is the default** for connectors to REST APIs, clouds, databases, queues and mail: one small
+  static binary per processor, no runtime, a start measured in milliseconds. Template:
+  `samples/plugins/sample-echo-go`.
+- **.NET** when the best or only SDK for the target system is .NET: SharePoint, Dynamics, Exchange
+  on-premises, SAP, heavy Office documents. Template: `samples/plugins/sample-echo`.
+- **Python** when the library the plugin needs exists only in Python.
+
+A plugin's spec says which language and why: find which language has the official SDK for the
+target system, and record the choice and the reason. The built-in `authoring-plugins` skill carries
+these rules.
+
+### Self-contained plugins
+
+The image guarantees the .NET runtime, Node and Python 3, and nothing else. Everything a plugin needs
+beyond that lives in its own folder:
+
+- **Go:** libraries are compiled into the binary; build with `CGO_ENABLED=0` so it links nothing
+  from the image.
+- **.NET:** `dotnet publish` puts every NuGet package into the plugin's folder beside its build.
+- **Python:** packages go in a virtual environment inside the plugin's folder, and the launcher runs
+  that environment's interpreter.
+
+Nothing a plugin needs is ever added to the image, and a plugin must not rely on a system package
+someone happened to install. The runtimes it does need from the image are named in the manifest's
+`requires` (`"dotnet"`, `"node"`, `"python3"`); the .NET template declares `["dotnet"]`, and a Go
+plugin declares none.
+
 ## Where it is pinned
 
 - **Agents are unchanged.** `MemberGoldenTests` pins an agent member's rows, prompt, context,
@@ -538,6 +622,7 @@ in plain words, with the checklist for writing a plugin's spec as a backlog item
   only with `HARNESS_UPDATE_GOLDENS=1`, and only for a change that is meant to be visible.
 - **The end-to-end proof of concept.** `PluginMemberEndToEndTests` installs and hires sample-echo on
   the real Host. It also asserts that the pump (`Harness.Containers`) has no code naming plugins.
+  `PluginGoTemplateEndToEndTests` does the same for sample-echo-go, built for both processors.
 - **The pump stays generic, structurally.** `PumpArchitectureTests` reads the pump's compiled IL:
   `MemberRef` is used only by `KindOf` in `MemberRuntime.Snapshot`, and a member's implementation -
   `ContainerDefinition.Agent`, `ContainerSnapshot.Agent` and `Kind`, `MemberRef.KindOf` - is
@@ -563,7 +648,11 @@ in plain words, with the checklist for writing a plugin's spec as a backlog item
 - **The install.** `cli/internal/cli/plugin_test.go` pins each `yawble plugin` command and each
   refusal against a scripted engine, including an install from a folder whose launcher has no execute
   bit. It also runs the container scripts under a real `sh`: the modes, a setgid parent, `active`, and
-  a kept version. `cli/internal/plugin` pins the manifest rules against the sample.
+  a kept version. `plugin install --from-instance` is pinned the same way: a good folder copied inside
+  the container with no `podman cp`, a refused manifest, an installed version without and with
+  `--force`, and a folder outside the data root; its folder check runs under `sh` against a temporary
+  data root (outside, `..`, a symlink out, a symlink inside the folder that leaves it).
+  `cli/internal/plugin` pins the manifest rules against both samples.
   `PluginRescanRequestTests` shows a plugin installed after start is listed with no restart, and pins
   the report's refusals, its hired members and its `0600` mode. `PrepareVolumeTests` pins
   `/data/plugins` as `harness:agent 0750`, created when missing.
