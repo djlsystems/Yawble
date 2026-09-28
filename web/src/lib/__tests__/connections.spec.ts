@@ -5,6 +5,8 @@ import {
   connectionsForSlot,
   missingScopes,
   parseScopes,
+  providerReturnAddress,
+  scopeRefusal,
   redirectUriFor,
   slotSummary,
 } from '../connections'
@@ -46,5 +48,22 @@ describe('connections', () => {
     expect(callbackOutcome({ connection: 'connected', id: 'conn-1' })).toEqual({ outcome: 'connected', id: 'conn-1' })
     expect(callbackOutcome({ connection: 'refused', reason: 'state expired' })).toEqual({ outcome: 'refused', reason: 'state expired' })
     expect(callbackOutcome({ tab: 'x' })).toBeNull()
+  })
+
+  it("names a connection as the Host's Named does: the account only when it differs from the name", () => {
+    const own = hostConnection({ id: 'c1', provider: 'google', name: 'person@example.com' })
+    const renamed = hostConnection({ id: 'c2', provider: 'google', name: 'Work mail' })
+
+    expect(scopeRefusal('mail', own, ['s'])).toMatch(/^Connection 'person@example.com' was not granted/)
+    expect(scopeRefusal('mail', renamed, ['s'])).toMatch(/^Connection 'Work mail' \(person@example.com\) was not granted/)
+  })
+
+  it("moves the provider's return from the search into the hash route, and leaves anything else alone", () => {
+    expect(providerReturnAddress({ pathname: '/console', search: '?connection=refused&reason=No+refresh+token' })).toBe(
+      '/#/console?connection=refused&reason=No+refresh+token',
+    )
+    expect(providerReturnAddress({ pathname: '/console', search: '?connection=connected&id=c1' })).toBe('/#/console?connection=connected&id=c1')
+    expect(providerReturnAddress({ pathname: '/', search: '' })).toBeNull()
+    expect(providerReturnAddress({ pathname: '/', search: '?tab=x' })).toBeNull()
   })
 })

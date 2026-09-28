@@ -383,3 +383,94 @@ func equalJSON(got any, want any) bool {
 	b, _ := json.Marshal(want)
 	return string(a) == string(b)
 }
+
+func TestConnectSendsMicrosoftALocalhostRedirectAndStillListensOnTheLoopbackAddress(t *testing.T) {
+	h := googleHost(t)
+	h.browse = provider(t, func(state string) url.Values { return url.Values{"code": {"the-code"}, "state": {state}} })
+
+	code, _, errOut := run(t, stubbed(h), "connect", "microsoft")
+
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	start := h.sent("start")
+	if len(start) != 1 {
+		t.Fatalf("start requests: %v", start)
+	}
+	redirect, _ := start[0]["redirectUri"].(string)
+	if !strings.HasPrefix(redirect, "http://localhost:") || strings.HasSuffix(redirect, ":0/") {
+		t.Errorf("redirectUri = %q, want http://localhost:<the listener's port>/", redirect)
+	}
+	// The browser reached the listener through localhost, so the code came back.
+	if len(h.sent("complete")) != 1 {
+		t.Error("the redirect to localhost did not reach the listener")
+	}
+}
+
+// lateHost stores the connection on complete but answers nothing, as a Host whose exchange with
+// the provider outlasts the CLI's wait; `stores` says whether it stored one at all.
+func lateHost(t *testing.T, stores bool) *scriptedHost {
+	var stored bool
+	return newScriptedHost(t, func(req map[string]any) map[string]any {
+		switch req["op"] {
+		case "list":
+			list := []any{workMail}
+			if stored {
+				fresh := map[string]any{}
+				for k, v := range workMail {
+					fresh[k] = v
+				}
+				fresh["id"], fresh["name"], fresh["usedBy"] = "conn-new", "person@example.com", []any{}
+				list = append(list, fresh)
+			}
+			return map[string]any{"status": 200, "connections": list}
+		case "start":
+			q := url.Values{"redirect_uri": {req["redirectUri"].(string)}, "state": {"st4te"}}
+			return map[string]any{"status": 200, "start": map[string]any{
+				"authorizationUrl": authorize + "?" + q.Encode(), "state": "st4te", "redirectUri": req["redirectUri"],
+				"expiresAt": time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339),
+			}}
+		case "complete":
+			stored = stores
+		}
+		return nil
+	})
+}
+
+func TestAConnectTheHostStoredTooLateToAnswerIsReportedAsConnected(t *testing.T) {
+	h := lateHost(t, true)
+	h.browse = provider(t, func(state string) url.Values { return url.Values{"code": {"the-code"}, "state": {state}} })
+
+	code, out, errOut := run(t, stubbed(h), "connect", "google")
+
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(out, "connected person@example.com: person@example.com at google") {
+		t.Errorf("output: %s", out)
+	}
+}
+
+func TestAConnectTheHostNeverStoredFailsAfterLookingAgain(t *testing.T) {
+	h := lateHost(t, false)
+	h.browse = provider(t, func(state string) url.Values { return url.Values{"code": {"the-code"}, "state": {state}} })
+
+	code, _, errOut := run(t, stubbed(h), "connect", "google")
+
+	if code != 1 || !strings.Contains(errOut, "did not answer the connect request") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if n := len(h.sent("list")); n != 2 {
+		t.Errorf("list requests = %d, want one before the flow and one after the complete went unanswered", n)
+	}
+}
+
+func TestConnectRefusesACustomProviderIdLongerThanTheHostTakes(t *testing.T) {
+	h := newScriptedHost(t, func(map[string]any) map[string]any { return nil })
+
+	code, _, errOut := run(t, stubbed(h), "connect", "custom-"+strings.Repeat("a", 34))
+
+	if code != 2 || !strings.Contains(errOut, "is not a provider") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+}

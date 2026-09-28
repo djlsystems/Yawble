@@ -66,10 +66,12 @@ yawble connect remove "Work mail"
 `yawble connect <provider>`:
 
 1. asks the Host to start a flow and gets back the authorization URL and `state`;
-2. listens on a free port on this computer and opens the browser with the redirect
-   `http://127.0.0.1:<port>` (`--port` picks the port, for a client that needs it registered exactly);
+2. listens on a free port of this computer's `127.0.0.1` and opens the browser with the redirect
+   `http://127.0.0.1:<port>/` - for `microsoft`, `http://localhost:<port>/`, the form Entra takes
+   (`--port` picks the port, for a client that needs it registered exactly);
 3. catches the code the provider sends back to that listener;
-4. hands the code and the PKCE verifier to the Host, which does the exchange. **The client secret
+4. hands the code (with its `state`) to the Host, which holds the PKCE verifier from step 1 and does
+   the exchange. **The client secret
    never leaves the Host**, and no token reaches this computer.
 
 Without a browser on this computer, `connect` prints the URL to open by hand; the redirect still has
@@ -127,10 +129,12 @@ issues after **7 days**, and every connection then turns `needs reconnect`. Publ
    registration**.
 2. **Supported account types**: *Accounts in any organizational directory and personal Microsoft
    accounts* for the built-in provider (it uses the `common` tenant).
-3. **Redirect URI**: platform **Web**, and the URI the Connections dialog shows. For the CLI flow also
-   add `http://localhost` - Entra ignores the port on a loopback redirect, so one entry covers every
-   port `yawble connect` picks. (A `127.0.0.1` loopback entry can be added in **Manifest** →
-   `replyUrlsWithType` if the portal refuses it.)
+3. **Redirect URI**: platform **Web**, and the URI the Connections dialog shows. For the CLI flow add
+   `http://localhost` under the same platform **Web** - Entra ignores the port on a loopback
+   redirect, so one entry covers every port `yawble connect` picks, and `yawble connect microsoft`
+   sends `http://localhost:<port>/` for that reason. Keep it under **Web**: the Host sends the client
+   secret, and Entra refuses a client secret on a redirect registered under a public-client
+   platform.
 4. **Certificates & secrets → New client secret**. Copy its **Value** (not its ID) at once; Entra
    never shows it again. Note when it expires, and set a new one in the Connections dialog before it
    does.

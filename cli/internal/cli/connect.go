@@ -27,14 +27,18 @@ const connectionsRoot = dataRoot + "/connections"
 var (
 	// connectWait is how long the Host has to answer one request; the browser wait is separate.
 	connectWait = 20 * time.Second
-	connectPoll = 500 * time.Millisecond
+	// completeWait is longer: the Host exchanges the code (up to 30 s) and asks the provider who
+	// the account is (up to 30 s more) before it answers a complete.
+	completeWait = 75 * time.Second
+	connectPoll  = 500 * time.Millisecond
 	// browserWait is the most `connect` waits for the provider to send the browser back. The
 	// Host's state lasts 10 minutes, so waiting longer could only end in a refusal.
 	browserWait = 10 * time.Minute
 )
 
-// providerPattern is a provider id as the Host names one: google, microsoft, custom-<id>.
-var providerPattern = regexp.MustCompile(`^(google|microsoft|custom-[a-z0-9][a-z0-9-]{0,39})$`)
+// providerPattern is a provider id as the Host names one: google, microsoft, custom-<id>, at most
+// 40 characters in all.
+var providerPattern = regexp.MustCompile(`^(google|microsoft|custom-[a-z0-9][a-z0-9-]{0,32})$`)
 
 func newConnectCommand(deps Deps) *cobra.Command {
 	var scopes []string
@@ -44,7 +48,7 @@ func newConnectCommand(deps Deps) *cobra.Command {
 		Use:   "connect <provider>",
 		Short: "Connect an account at an OAuth service (google, microsoft, custom-<id>) for plugins to use",
 		Long: "Connects an account at an OAuth provider to the running instance, from this computer's browser. " +
-			"The Host starts the flow and keeps the PKCE verifier; this command listens on http://127.0.0.1:<free port>, " +
+			"The Host starts the flow and keeps the PKCE verifier; this command listens on http://127.0.0.1:<free port> (sent to Microsoft as http://localhost:<port>), " +
 			"opens the browser at the provider's consent page, catches the code the provider sends back, and hands it to the " +
 			"Host, which does the exchange. The client secret never leaves the Host and no token reaches this computer.\n\n" +
 			"Use it when the provider will not accept the instance's own address as a redirect (a tunnel, a private address). " +
@@ -157,12 +161,14 @@ func connect(ctx context.Context, out io.Writer, deps Deps, provider string, sco
 	}
 
 	request := connectRequest{Op: "start", Provider: provider, Scopes: scopes}
+	// What is stored before the flow, so a complete the Host answered too late can still be told
+	// apart from one it refused.
+	before, err := listConnections(ctx, e)
+	if err != nil {
+		return err
+	}
 	if name != "" {
-		list, err := listConnections(ctx, e)
-		if err != nil {
-			return err
-		}
-		if existing := sameName(list, provider, name); existing != nil {
+		if existing := sameName(before, provider, name); existing != nil {
 			request.ReconnectID = existing.ID
 			fmt.Fprintf(out, "reconnecting %s (%s)\n", existing.Name, existing.Account)
 		} else {
@@ -175,7 +181,7 @@ func connect(ctx context.Context, out io.Writer, deps Deps, provider string, sco
 		return fmt.Errorf("cannot listen on 127.0.0.1:%d for the provider's redirect: %w", port, err)
 	}
 	defer listener.Close()
-	request.RedirectURI = fmt.Sprintf("http://127.0.0.1:%d/", listener.Addr().(*net.TCPAddr).Port)
+	request.RedirectURI = loopbackRedirect(provider, listener.Addr().(*net.TCPAddr).Port)
 
 	started, err := exchange(ctx, e, request)
 	if err != nil {
@@ -201,14 +207,22 @@ func connect(ctx context.Context, out io.Writer, deps Deps, provider string, sco
 		return err
 	}
 
-	done, err := exchange(ctx, e, connectRequest{Op: "complete", State: flow.State, Code: code})
-	if err != nil {
+	var c *connection
+	done, err := exchangeWithin(ctx, e, connectRequest{Op: "complete", State: flow.State, Code: code}, completeWait)
+	switch {
+	case errors.Is(err, errUnanswered):
+		// The Host may have taken the code and still be storing it: look before saying it failed.
+		c = storedSince(ctx, e, before, provider, request.ReconnectID)
+		if c == nil {
+			return err
+		}
+	case err != nil:
 		return err
-	}
-	if !done.ok() || done.Connection == nil {
+	case !done.ok() || done.Connection == nil:
 		return done.refusal("the Host did not store the connection")
+	default:
+		c = done.Connection
 	}
-	c := done.Connection
 	verb := "connected"
 	if request.ReconnectID != "" {
 		verb = "reconnected"
@@ -369,16 +383,66 @@ func (r connectReport) refusal(what string) error {
 	return fmt.Errorf("%s (status %d)", what, r.Status)
 }
 
-// exchange hands one request to the Host and waits for the report that answers it. A request no
-// Host answered is withdrawn, so a Host started later never carries it out.
+// loopbackRedirect is the redirect URI this computer's listener answers, which is always bound to
+// 127.0.0.1. Microsoft's Entra takes a loopback redirect registered under platform "Web" only as
+// `http://localhost` (it ignores the port), and compares the host literally, so microsoft is sent
+// localhost; every other provider is sent 127.0.0.1.
+func loopbackRedirect(provider string, port int) string {
+	host := "127.0.0.1"
+	if provider == "microsoft" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s:%d/", host, port)
+}
+
+// errUnanswered is a request the Host did not answer in time; it was withdrawn.
+var errUnanswered = errors.New("the Host did not answer the connect request")
+
+// storedSince is the connection a complete stored after all, when the Host answered too late: a
+// connection of provider that was not in before, or the reconnected one changed. Nil when there
+// is none, or when the Host cannot list.
+func storedSince(ctx context.Context, e engine.Engine, before []connection, provider, reconnectID string) *connection {
+	after, err := listConnections(ctx, e)
+	if err != nil {
+		return nil
+	}
+	was := map[string]connection{}
+	for _, c := range before {
+		was[c.ID] = c
+	}
+	for i, c := range after {
+		old, existed := was[c.ID]
+		if reconnectID != "" && c.ID == reconnectID && existed && !sameConnection(old, c) {
+			return &after[i]
+		}
+		if reconnectID == "" && !existed && c.Provider == provider {
+			return &after[i]
+		}
+	}
+	return nil
+}
+
+func sameConnection(a, b connection) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
+}
+
+// exchange hands one request to the Host and waits connectWait for the report that answers it.
 func exchange(ctx context.Context, e engine.Engine, req connectRequest) (connectReport, error) {
+	return exchangeWithin(ctx, e, req, connectWait)
+}
+
+// exchangeWithin hands one request to the Host and waits for the report that answers it. A request
+// no Host answered within wait is withdrawn, so a Host started later never carries it out.
+func exchangeWithin(ctx context.Context, e engine.Engine, req connectRequest, wait time.Duration) (connectReport, error) {
 	req.Request = newNonce()
 	body, _ := json.Marshal(req)
 	// ON STDIN, never argv: a complete request carries the authorization code.
 	if _, err := e.ExecInput(ctx, instance.ContainerName, string(body)+"\n", "sh", "-c", connectRequestScript, "sh", connectionsRoot); err != nil {
 		return connectReport{}, err
 	}
-	deadline := time.Now().Add(connectWait)
+	deadline := time.Now().Add(wait)
 	for {
 		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", connectReportScript, "sh", connectionsRoot)
 		if err != nil {
@@ -390,8 +454,8 @@ func exchange(ctx context.Context, e engine.Engine, req connectRequest) (connect
 		}
 		if time.Now().After(deadline) {
 			_, _ = e.Exec(ctx, instance.ContainerName, "sh", "-c", connectWithdrawScript, "sh", connectionsRoot, req.Request)
-			return connectReport{}, fmt.Errorf("the Host did not answer the connect request within %s, and the request was withdrawn. "+
-				"An image from before connections does not answer; `yawble update` brings the instance current", connectWait)
+			return connectReport{}, fmt.Errorf("%w within %s, and the request was withdrawn. "+
+				"An image from before connections does not answer; `yawble update` brings the instance current", errUnanswered, wait)
 		}
 		select {
 		case <-ctx.Done():
