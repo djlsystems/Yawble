@@ -1802,6 +1802,10 @@ export interface RepoStatus {
    * and Push publishes it. Null when there is no local team branch or origin was never fetched.
    */
   teamBranchUnpushed?: boolean | null
+  /**Set when the clone's default branch holds commits origin's lacks - a Manager moved it: "moved
+   * <default> in the clone; the work is on <commit>; the team branch is team/<id>". Measured on
+   * every read; the platform resets nothing. Null when unmoved or not measured. */
+  defaultBranchMoved?: string | null
 }
 
 /**

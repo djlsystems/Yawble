@@ -94,7 +94,10 @@ public sealed record RepoStatus(
     IReadOnlyList<string>? FilesChangedOnBothSides = null,
 
     [property: Description("True when a local team/{id} exists and origin does not have it, or holds an older commit of it, so Push would publish it as a fast-forward: the dialog says 'team/{id} is not pushed'. False when origin has it (or has commits the clone lacks). Null when there is no local team branch or origin was never checked.")]
-    bool? TeamBranchUnpushed = null);
+    bool? TeamBranchUnpushed = null,
+
+    [property: Description("Set when the clone's default branch holds commits origin/<DefaultBranch> lacks - a Manager moved it, which the delivery rule forbids: \"moved <default> in the clone; the work is on <commit>; the team branch is team/{id}\". Measured on every read and never reset by the platform. Null when it has not moved or could not be measured (default branch not known, no clone, no origin ref).")]
+    string? DefaultBranchMoved = null);
 
 /// <summary>
 /// The recorded pull request, as the Git dialog shows it: GitHub's last answer and when it

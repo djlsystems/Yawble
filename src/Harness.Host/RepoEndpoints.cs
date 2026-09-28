@@ -2103,6 +2103,9 @@ public static partial class RepoEndpoints
         // `MapWorktreesAsync`. Every command it runs is local, like everything else here.
         var worktrees = await MapWorktreesAsync(gitRunner, gitStatus.Worktrees, clonePath, originMain, openKeys, ct);
 
+        // The Manager's delivery rule, measured: work left on the clone's default branch. See `DefaultBranchMove`.
+        var movedTo = await DefaultBranchMove.MovedToAsync(gitRunner, clonePath, branch, ct);
+
         var originCheckedAtStr = gitStatus.OriginCheckedAt.HasValue
             ? gitStatus.OriginCheckedAt.Value.ToString("O")
             : null;
@@ -2133,7 +2136,8 @@ public static partial class RepoEndpoints
             UpstreamUrl: GitOutputRedaction.RedactUserInfo(contributor?.UpstreamUrl),
             TeamBranchBehindDefault: teamBranchBehindDefault,
             FilesChangedOnBothSides: filesChangedOnBothSides,
-            TeamBranchUnpushed: teamBranchUnpushed);
+            TeamBranchUnpushed: teamBranchUnpushed,
+            DefaultBranchMoved: movedTo is null ? null : DefaultBranchMove.Sentence(branch!, movedTo, storedTeamId));
     }
 
     /// <summary>The most files <see cref="BehindDefaultAsync"/> names; the dialog needs a few, not a diff.</summary>

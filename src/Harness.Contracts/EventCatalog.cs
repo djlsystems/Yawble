@@ -456,6 +456,25 @@ public static class EventCatalog
             + "was fast-forwarded to upstream's, never forced, by Bring current in the Git dialog. "
             + "Appended after the push succeeded. Source is the person."),
 
+        // IN THE LEDGER: the Manager reads back that it broke the delivery rule, rather than
+        // carrying on as if the work were where the Git dialog looks for it.
+        new(MessageTypes.RepoDefaultBranchMoved, EventPublisher.Platform, HighVolume: false, InLedger: true,
+            [
+                Source,
+                new(PayloadFields.Repo, EventFieldKind.String,
+                    "Which repository, by the folder name derived from its URL - never the URL."),
+                new(PayloadFields.Branch, EventFieldKind.String,
+                    "The stored default branch the clone moved."),
+                new(PayloadFields.Commit, EventFieldKind.String,
+                    "The full sha the clone's default branch is at: where the work is."),
+                new(PayloadFields.TeamBranch, EventFieldKind.String,
+                    "The team branch the work belongs on: team/{id}."),
+                new(PayloadFields.Reason, EventFieldKind.String,
+                    "The sentence the card, the feed and the Git dialog show."),
+            ],
+            "A Manager's run ended with the clone's default branch holding commits origin's lacks. "
+            + "Reported, never reset: a person moves the work to the team branch. Source is the Manager."),
+
         // OUT OF THE LEDGER for `repo.forkSynced`'s reason. `team` IS IN THE PAYLOAD because
         // the publisher is the person who pressed Open pull request.
         new(MessageTypes.RepoPullRequestOpened, EventPublisher.Platform, HighVolume: false, InLedger: false,

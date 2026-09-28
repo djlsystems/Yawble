@@ -675,6 +675,18 @@ builder.Services.AddSingleton(sp => new ContainerHost(
             // origin can take well over ten seconds on a loaded host. See `TerminalPublish.Budget`.
             activity: () => sp.GetRequiredService<GitRunner>().Activity);
 
+        // A MANAGER THAT MOVED ITS CLONE'S DEFAULT BRANCH IS REPORTED, BEFORE THE TERMINAL ROW, so
+        // the report lands on its card and in the feed. Reported only; nothing is reset. See
+        // `DefaultBranchMove`.
+        await DefaultBranchMove.OnRunEndingAsync(
+            sp.GetRequiredService<TeamRegistry>(),
+            sp.GetRequiredService<TeamPaths>(),
+            sp.GetRequiredService<GitRunner>(),
+            sp.GetRequiredService<IMessageLog>(),
+            member,
+            causation,
+            ct);
+
         await sp.GetRequiredService<IdleWorkflowOffer>()
             .OnRunEndingAsync(member, causation, succeeded, ct);
 
