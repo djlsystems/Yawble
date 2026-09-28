@@ -52,6 +52,7 @@ import type {
   TeamCloned,
   TeamDeleted,
   RemovalRetried,
+  UnfinishedRemoval,
   TeamId,
   TeamResetRequest,
   TeamRollup,
@@ -938,6 +939,9 @@ export const deleteTeam = async (team: TeamId, confirmation?: string) => {
 
   return (await response.json()) as TeamDeleted
 }
+
+/** Every folder a team deletion, member deletion or Reset could not finish removing. Human-only. */
+export const listRemovals = () => json<UnfinishedRemoval[]>('/api/removals')
 
 /**
  * Retries a removal a deletion or reset could not finish — the one at `path`, or every one when it

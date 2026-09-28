@@ -435,11 +435,30 @@ export interface TeamWasReset {
   remaining?: string[]
 }
 
+/** What an unfinished removal was removing: a deleted team's root, a deleted member's workspace,
+ *  or a folder a Reset emptied and kept (`RemovalKinds` on the Host). */
+export type RemovalKind = 'team-root' | 'workspace' | 'emptied'
+
+/**
+ * One folder whose removal did not finish, as `GET /api/removals` lists it: every path still on
+ * disk at its last attempt, when it was first recorded, and how many attempts it has had. `member`
+ * is set only for a workspace.
+ */
+export interface UnfinishedRemoval {
+  path: string
+  kind: RemovalKind
+  team: string
+  member: string | null
+  remaining: string[]
+  recordedAt: string
+  attempts: number
+}
+
 /** One unfinished removal retried: whether it `finished`, what is still `remaining`, and why it
  *  was set aside when it was (`note`). */
 export interface RemovalRetried {
   path: string
-  kind: 'team-root' | 'workspace' | 'emptied'
+  kind: RemovalKind
   team: string
   member: string | null
   finished: boolean
