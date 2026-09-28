@@ -30,6 +30,9 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
     private readonly WebApplicationFactory<Program> _factory;
     private readonly FakeAgent _agent = new();
 
+    /// <summary>Origin's team branch as it stood when each successful Bring current and merge row was written.</summary>
+    private readonly List<string?> _originTeamAtRow = [];
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     public BringCurrentAndMergeTests()
@@ -59,6 +62,10 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
                 // publisher, run when a member's run ends, would publish a branch these tests keep
                 // unpushed on purpose whenever the Manager's wake happened to end after it was made.
                 services.Replace(ServiceDescriptor.Singleton<ITeamPublisher>(new NoPublisher()));
+
+                // The ordering rule: the row that says the team branch was pushed is written after origin has it.
+                var inner = (ITenantLog)services.Last(d => d.ServiceType == typeof(ITenantLog)).ImplementationInstance!;
+                services.Replace(ServiceDescriptor.Singleton<ITenantLog>(new OrderWatchingLog(inner, _origin, _originTeamAtRow)));
             }));
     }
 
@@ -97,6 +104,9 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
         Assert.Equal(teamOnOrigin, RevParse(clone, $"refs/heads/team/{team}"));
 
         Assert.Equal(decoy, RevParse(_origin, "refs/heads/main"));
+
+        // Its row came after the push: origin already held the merge commit when it was written.
+        Assert.Equal([teamOnOrigin], _originTeamAtRow);
         Assert.True(text.Contains($"merged into team/{team}", StringComparison.Ordinal), text);
 
         var after = JsonDocument.Parse(text).RootElement.GetProperty("status");
@@ -144,6 +154,46 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
         Assert.Equal(fileBefore, File.ReadAllText(Path.Combine(clone, "shared.txt")));
         Assert.Equal(string.Empty, Run(clone, "status", "--porcelain").Stdout);
         Assert.False(File.Exists(Path.Combine(clone, ".git", "MERGE_HEAD")));
+    }
+
+    [Fact]
+    public async Task A_conflict_in_several_files_names_every_one_and_only_those()
+    {
+        var (team, person) = await TeamWithCloneAsync("Zeta");
+        var clone = ClonePath(team);
+        Git(clone, "checkout", "-b", $"team/{team}", "trunk");
+        File.WriteAllText(Path.Combine(clone, "shared.txt"), "team\n");
+        File.WriteAllText(Path.Combine(clone, "README.md"), "team widget\n");
+        File.WriteAllText(Path.Combine(clone, "team-only.txt"), "team\n");
+        Commit(clone, "team edits two shared files");
+        Git(clone, "push", "origin", $"team/{team}");
+
+        File.WriteAllText(Path.Combine(_seed, "shared.txt"), "other\n");
+        File.WriteAllText(Path.Combine(_seed, "README.md"), "other widget\n");
+        File.WriteAllText(Path.Combine(_seed, "other-only.txt"), "other\n");
+        Commit(_seed, "other edits the same two");
+        Git(_seed, "push", "origin", "trunk");
+
+        Assert.Equal(HttpStatusCode.OK, (await ActAsync(person, team, "fetch")).StatusCode);
+        var originTeam = RevParse(_origin, $"refs/heads/team/{team}");
+        var refsBefore = Run(clone, "for-each-ref").Stdout;
+
+        var response = await ActAsync(person, team, "bring-current-and-merge");
+        var text = await response.Content.ReadAsStringAsync(Ct);
+
+        Assert.True(response.StatusCode == HttpStatusCode.Conflict, text);
+        var body = JsonDocument.Parse(text).RootElement;
+        Assert.Equal(["README.md", "shared.txt"],
+            body.GetProperty("conflicts").EnumerateArray().Select(f => f.GetString()).Order(StringComparer.Ordinal));
+        Assert.Contains("conflicts in 2 files", body.GetProperty("error").GetString(), StringComparison.Ordinal);
+        var detail = body.GetProperty("detail").GetString()!;
+        Assert.Contains($"must resolve them on team/{team}", detail, StringComparison.Ordinal);
+        Assert.Contains("README.md", detail, StringComparison.Ordinal);
+        Assert.Contains("shared.txt", detail, StringComparison.Ordinal);
+
+        Assert.Equal(originTeam, RevParse(_origin, $"refs/heads/team/{team}"));
+        Assert.Equal(refsBefore, Run(clone, "for-each-ref").Stdout);
+        Assert.Equal(string.Empty, Run(clone, "status", "--porcelain").Stdout);
     }
 
     [Fact]
@@ -335,6 +385,34 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
         process.StandardError.ReadToEnd();
         process.WaitForExit();
         return (process.ExitCode, stdout);
+    }
+
+    private sealed class OrderWatchingLog(ITenantLog inner, string origin, List<string?> seen) : ITenantLog
+    {
+        public async Task WriteAsync(
+            string? actorId, string? actorEmail, string action, string? subject = null,
+            string? subjectName = null, string? detail = null, CancellationToken ct = default)
+        {
+            if (action == TenantActions.RepoBringCurrentAndMerge && subject is not null
+                && detail?.Contains("\"success\":true", StringComparison.Ordinal) == true)
+            {
+                var team = subject.Split('/')[0];
+                var (exit, stdout) = Run(origin, "rev-parse", "--verify", "--quiet", $"refs/heads/team/{team}");
+                lock (seen) seen.Add(exit == 0 ? stdout.Trim() : null);
+            }
+
+            await inner.WriteAsync(actorId, actorEmail, action, subject, subjectName, detail, ct);
+        }
+
+        public Task<TenantEvent?> FindLatestAsync(string action, string subject, CancellationToken ct = default) =>
+            inner.FindLatestAsync(action, subject, ct);
+
+        public Task<IReadOnlyList<TenantEvent>> FindLatestBySubjectAsync(
+            IReadOnlyCollection<string> actions, CancellationToken ct = default) =>
+            inner.FindLatestBySubjectAsync(actions, ct);
+
+        public Task<TenantLogPage> ReadAsync(long? before = null, int take = 50, CancellationToken ct = default) =>
+            inner.ReadAsync(before, take, ct);
     }
 
     private sealed class NoPublisher : ITeamPublisher
