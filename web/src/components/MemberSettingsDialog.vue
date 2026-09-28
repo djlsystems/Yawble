@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { getMember, getPluginSettings, listCatalog, listPlugins, savePluginSettings, updateMember } from '../api/client';
+import { getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember } from '../api/client';
 import {
   agentsForMode,
   isManagerContainer,
   type Agent,
   type ContainerSnapshot,
   type MemberDetail,
-  type PluginMemberSettings,
 } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -133,9 +132,9 @@ async function loadInstructions() {
 }
 
 /**
- * A PLUGIN MEMBER'S SETTINGS. `pluginShape` is the manifest of the version it runs - from the
- * settings route when the Host sends it, else from the plugins list - and null until both answer.
- * `pluginSaved` is the body as loaded, so Save writes the settings only when they moved.
+ * A PLUGIN MEMBER'S SETTINGS. `pluginShape` is the manifest of the version it runs, as the settings
+ * route carries it (`fields`, `secretFields`), and null until that answers. `pluginSaved` is the body
+ * as loaded, so Save writes the settings only when they moved.
  */
 const isPlugin = computed(() => props.snapshot.kind === 'plugin');
 const pluginShape = ref<PluginSettingsShape | null>(null);
@@ -156,14 +155,6 @@ const pluginChanged = computed(
   () => pluginBody.value !== null && JSON.stringify(pluginBody.value) !== pluginSaved.value,
 );
 
-/** The declarations the settings route carried, under whichever name it used. */
-function declaredShape(settings: PluginMemberSettings): PluginSettingsShape | null {
-  const config = settings.fields ?? settings.configFields ?? settings.manifest?.config ?? null;
-  const secrets = settings.secretFields ?? settings.manifest?.secrets ?? null;
-
-  return config ? { config, secrets: secrets ?? {} } : null;
-}
-
 async function loadPluginSettings() {
   pluginShape.value = null;
   pluginProblem.value = null;
@@ -171,25 +162,12 @@ async function loadPluginSettings() {
   if (!isPlugin.value) return;
 
   try {
+    // A plugin that is no longer installed is the route's 409, whose sentence lands below.
     const settings = await getPluginSettings(props.snapshot.team, props.snapshot.id);
-    let shape = declaredShape(settings);
+    const shape: PluginSettingsShape = { config: settings.fields, secrets: settings.secretFields };
 
-    if (!shape) {
-      const id = settings.plugin.replace(/^plugin:/, '');
-      const installed = (await listPlugins()).plugins ?? [];
-      shape =
-        installed.find((entry) => entry.id === id && entry.version === settings.version) ??
-        installed.find((entry) => entry.id === id) ??
-        null;
-    }
-
-    if (!shape) {
-      pluginProblem.value = `The plugin ${settings.plugin} is not installed, so its settings cannot be edited.`;
-      return;
-    }
-
-    pluginConfig.value = initialConfig(shape, settings.config ?? {});
-    pluginSecrets.value = initialSecrets(shape, settings.secrets ?? {});
+    pluginConfig.value = initialConfig(shape, settings.config);
+    pluginSecrets.value = initialSecrets(shape, settings.secrets);
     pluginShape.value = shape;
     pluginSaved.value = JSON.stringify(settingsBody(shape, pluginConfig.value, pluginSecrets.value));
   } catch (cause) {

@@ -156,6 +156,7 @@ async function install() {
       installed: false,
       id: typeof body.id === 'string' ? body.id : null,
       version: typeof body.version === 'string' ? body.version : null,
+      replaced: false,
       reason: cause instanceof Error ? cause.message : String(cause),
     };
   } finally {
@@ -300,8 +301,8 @@ const verdictText = computed(() => {
 
               <dt>Members</dt>
               <dd data-members>
-                <template v-if="!row.plugin.members || row.plugin.members.length === 0">None hired</template>
-                <div v-for="member in row.plugin.members ?? []" :key="`${member.team}/${member.member}`">
+                <template v-if="row.plugin.members.length === 0">None hired</template>
+                <div v-for="member in row.plugin.members" :key="`${member.team}/${member.member}`">
                   <a
                     href="#"
                     class="plugin-member-link"

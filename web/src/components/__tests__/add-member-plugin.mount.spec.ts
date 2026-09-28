@@ -21,28 +21,28 @@ vi.mock('../../api/client', async (importOriginal) => ({
 import AddMemberDialog from '../AddMemberDialog.vue';
 import type { Agent, InstalledPlugin, PluginList, TeamId } from '../../api/types';
 import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { hostField, hostList, hostPlugin, hostSecret } from '../../test/pluginFixtures';
 import { button, field, isDisabled, settle, type } from '../../test/formProbe';
 
 const headless = (name: string): Agent => ({ name, mode: 'Headless' });
 
 /** The shape `GET /api/plugins` answers, for a plugin with an enum, a number and two secrets. */
-const sampleEcho: InstalledPlugin = {
+const sampleEcho: InstalledPlugin = hostPlugin({
   id: 'sample-echo',
-  reference: 'plugin:sample-echo',
   name: 'Sample Echo',
   description: "Deterministic test plugin: transforms each instruction's text.",
   version: '0.1.0',
   config: {
-    mode: { type: 'string', description: 'How to transform.', required: false, default: 'upper', enum: ['upper', 'reverse'] },
-    repeat: { type: 'number', description: 'How many times.', required: false, default: null, enum: null },
+    mode: hostField({ type: 'string', description: 'How to transform.', default: 'upper', enum: ['upper', 'reverse'] }),
+    repeat: hostField({ type: 'number', description: 'How many times.' }),
   },
   secrets: {
-    token: { description: 'A demo credential.', required: false },
-    signing: { description: 'Signs the output.', required: true },
+    token: hostSecret({ description: 'A demo credential.' }),
+    signing: hostSecret({ description: 'Signs the output.', required: true }),
   },
-};
+});
 
-const plugins: PluginList = { plugins: [sampleEcho], refused: [] };
+const plugins: PluginList = hostList([sampleEcho]);
 
 const baseProps = {
   team: 'alpha' as TeamId,
@@ -162,13 +162,10 @@ describe('AddMemberDialog, hiring a plugin', () => {
   });
 
   it('hires with a list setting edited as chips, through the same editor Member settings shows', async () => {
-    listPlugins.mockResolvedValue({
-      plugins: [{
-        ...sampleEcho,
-        config: { ...sampleEcho.config, allow: { type: 'list', required: false, default: [], enum: ['ops', 'dev'], setBy: 'person' } },
-      }],
-      refused: [],
-    });
+    listPlugins.mockResolvedValue(hostList([{
+      ...sampleEcho,
+      config: { ...sampleEcho.config, allow: hostField({ type: 'list', enum: ['ops', 'dev'], setBy: 'person' }) },
+    }]));
     const wrapper = await mountDialog(AddMemberDialog, baseProps);
 
     await type('Member name', 'Echo');

@@ -10,11 +10,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-const { getMember, getPluginSettings, listCatalog, listPlugins, savePluginSettings, updateMember } = vi.hoisted(() => ({
+const { getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember } = vi.hoisted(() => ({
   getMember: vi.fn(),
   getPluginSettings: vi.fn(),
   listCatalog: vi.fn(),
-  listPlugins: vi.fn(),
   savePluginSettings: vi.fn(),
   updateMember: vi.fn(),
 }));
@@ -24,7 +23,6 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getMember,
   getPluginSettings,
   listCatalog,
-  listPlugins,
   savePluginSettings,
   updateMember,
 }));
@@ -40,25 +38,31 @@ import {
   type Team,
 } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
+import { hostField, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
 import { button, field, fieldWrapper, hasError, isDisabled, settle, type } from '../../test/formProbe';
 
 const fields: Record<string, PluginConfigField> = {
-  greeting: { type: 'string', description: 'What it says first.', required: false, default: 'hello' },
-  mode: { type: 'string', description: 'How to transform.', required: false, default: 'upper', enum: ['upper', 'reverse'], setBy: 'person' },
-  repeat: { type: 'number', description: 'How many times.', required: false, default: 1 },
-  loud: { type: 'bool', description: 'Shout.', required: false, default: false },
-  labels: { type: 'list', description: 'Free labels.', required: false, default: [] },
-  recipients: { type: 'list', description: 'Who may be sent to.', required: true, default: [], enum: ['ops', 'dev'] },
+  greeting: hostField({ type: 'string', description: 'What it says first.', default: 'hello' }),
+  mode: hostField({ type: 'string', description: 'How to transform.', default: 'upper', enum: ['upper', 'reverse'], setBy: 'person' }),
+  repeat: hostField({ type: 'number', description: 'How many times.', default: 1 }),
+  loud: hostField({ type: 'bool', description: 'Shout.', default: false }),
+  labels: hostField({ type: 'list', description: 'Free labels.' }),
+  recipients: hostField({ type: 'list', description: 'Who may be sent to.', required: true, enum: ['ops', 'dev'] }),
 };
 
-const stored: PluginMemberSettings = {
-  plugin: 'sample-echo',
+const sampleEcho = hostPlugin({
+  id: 'sample-echo',
   version: '0.2.0',
+  config: fields,
+  secrets: { token: hostSecret({ description: 'A demo credential.', required: true }) },
+});
+
+const stored: PluginMemberSettings = hostSettings(sampleEcho, {
+  team: 'alpha',
+  member: 'Echo',
   config: { repeat: 3, recipients: ['ops'] },
   secrets: { token: 'ECHO_TOKEN' },
-  fields,
-  secretFields: { token: { description: 'A demo credential.', required: true } },
-};
+});
 
 const echo = {
   team: asTeamId('alpha'),
@@ -75,7 +79,7 @@ const echo = {
 } as unknown as ContainerSnapshot;
 
 beforeEach(() => {
-  for (const mock of [getMember, getPluginSettings, listCatalog, listPlugins, savePluginSettings, updateMember]) mock.mockReset();
+  for (const mock of [getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember]) mock.mockReset();
 
   listCatalog.mockResolvedValue({ agents: [{ name: 'claude', mode: 'Headless' }] });
   getPluginSettings.mockResolvedValue(structuredClone(stored));
@@ -327,25 +331,6 @@ describe('MemberSettingsDialog, a plugin member', () => {
     expect(hasError('Member name')).toBe(false);
     expect(fieldWrapper('Member name').textContent).not.toContain(sentence);
     expect(updateMember).not.toHaveBeenCalled();
-
-    wrapper.unmount();
-  });
-
-  it('reads the manifest from the plugins list when the settings route does not carry it', async () => {
-    const { fields: _fields, secretFields: _secretFields, ...bare } = structuredClone(stored);
-    getPluginSettings.mockResolvedValue(bare);
-    listPlugins.mockResolvedValue({
-      plugins: [{
-        id: 'sample-echo', reference: 'plugin:sample-echo', name: 'Sample Echo', description: '', version: '0.2.0',
-        config: fields, secrets: { token: { required: true } },
-      }],
-      refused: [],
-    });
-
-    const wrapper = await mountSettings();
-
-    expect(field('repeat').value).toBe('3');
-    expect(field('Secret token: key name').value).toBe('ECHO_TOKEN');
 
     wrapper.unmount();
   });

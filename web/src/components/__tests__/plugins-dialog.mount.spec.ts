@@ -58,24 +58,24 @@ import {
   type Team,
 } from '../../api/types';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { hostField, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
 import { button, isDisabled, settle, type } from '../../test/formProbe';
 
-const sampleEcho: InstalledPlugin = {
+const sampleEcho: InstalledPlugin = hostPlugin({
   id: 'sample-echo',
-  reference: 'plugin:sample-echo',
   name: 'Sample Echo',
   description: "Deterministic test plugin: transforms each instruction's text.",
   version: '0.2.0',
-  active: true,
   config: {
-    mode: { type: 'string', required: false, default: 'upper', enum: ['upper', 'reverse'] },
-    allow: { type: 'list', required: true, default: [], setBy: 'person' },
+    mode: hostField({ type: 'string', description: 'How to transform.', default: 'upper', enum: ['upper', 'reverse'] }),
+    allow: hostField({ type: 'list', description: 'Who may be sent to.', required: true, setBy: 'person' }),
   },
-  secrets: { token: { description: 'A demo credential.', required: false } },
-  events: [{ type: 'plugin.sample-echo.echoed', summary: 'One echo done.' }],
-  skill: 'sample-echo',
+  secrets: { token: hostSecret({ description: 'A demo credential.' }) },
+  publishes: [{ type: 'plugin.sample-echo.echoed', summary: 'One echo done.' }],
+  skills: ['skills/SKILL.md'],
+  skill: 'plugin-sample-echo',
   members: [{ team: 'alpha', member: 'Echo' }],
-};
+});
 
 /** The shape the settled contract answers: `versions` names every folder and the Host's verdict. */
 const list: PluginList = {
@@ -108,7 +108,7 @@ beforeEach(() => {
   }
   listPlugins.mockResolvedValue(list);
   listCatalog.mockResolvedValue({ agents: [] });
-  getPluginSettings.mockResolvedValue({ plugin: 'sample-echo', version: '0.2.0', config: {}, secrets: {} });
+  getPluginSettings.mockResolvedValue(hostSettings(sampleEcho, { team: 'alpha', member: 'Echo' }));
 });
 
 afterEach(resetBody);
@@ -199,7 +199,7 @@ describe('PluginsDialog', () => {
 
     expect(installed.querySelector('[data-secrets]')?.textContent).toContain('token');
     expect(installed.querySelector('[data-events]')?.textContent).toContain('plugin.sample-echo.echoed');
-    expect(installed.querySelector('[data-skill]')?.textContent).toContain('sample-echo');
+    expect(installed.querySelector('[data-skill]')?.textContent?.trim()).toBe('plugin-sample-echo');
     expect(installed.querySelector('[data-member-link="alpha/Echo"]')?.textContent).toContain('Alpha Team / Echo');
 
     wrapper.unmount();
@@ -268,7 +268,7 @@ describe('PluginsDialog, installing from a folder', () => {
     expect(isDisabled('Install')).toBe(true);
     await type('Folder', '/data/teams/alpha/repos/Echo/wt/bin/plugin');
 
-    installPlugin.mockResolvedValue({ id: 'sample-echo', version: '0.2.0', installed: true });
+    installPlugin.mockResolvedValue({ id: 'sample-echo', version: '0.2.0', installed: true, replaced: false, reason: null });
     button('Install').click();
     await settle();
 
@@ -305,7 +305,7 @@ describe('PluginsDialog, installing from a folder', () => {
     (bodyFind('[data-install-dialog] .q-checkbox') as HTMLElement).click();
     await settle();
 
-    installPlugin.mockResolvedValueOnce({ id: 'sample-echo', version: '0.2.0', installed: true, replaced: true });
+    installPlugin.mockResolvedValueOnce({ id: 'sample-echo', version: '0.2.0', installed: true, replaced: true, reason: null });
     button('Install').click();
     await settle();
 
@@ -322,7 +322,7 @@ describe('PluginsDialog, installing from a folder', () => {
     await settle();
     await type('Folder', '/data/work/other');
 
-    installPlugin.mockResolvedValue({ id: 'other', version: '1.0.0', installed: false, reason: 'The folder has no plugin.json.' });
+    installPlugin.mockResolvedValue({ id: 'other', version: '1.0.0', installed: false, replaced: false, reason: 'The folder has no plugin.json.' });
     button('Install').click();
     await settle();
 
@@ -358,19 +358,8 @@ describe('PluginsDialog, installing from a folder', () => {
     wrapper.unmount();
   });
 
-  it("still lists an older Host's answer, which has no versions", async () => {
-    listPlugins.mockResolvedValue({ plugins: [{ ...sampleEcho, active: undefined }], refused: [{ id: 'broken', reason: 'bad' }] });
-    const wrapper = await mountPlugins();
-
-    expect(row('sample-echo')?.getAttribute('data-verdict')).toBe('installed');
-    expect(row('sample-echo')?.querySelector('[data-active]')).not.toBeNull();
-    expect(row('broken')?.querySelector('[data-reason]')?.textContent).toContain('bad');
-
-    wrapper.unmount();
-  });
-
   it('is empty-handed rather than blank when nothing is installed', async () => {
-    listPlugins.mockResolvedValue({ plugins: [], refused: [] });
+    listPlugins.mockResolvedValue({ plugins: [], refused: [], versions: [] });
     const wrapper = await mountPlugins();
 
     expect(bodyFind('[data-no-plugins]')).not.toBeNull();
