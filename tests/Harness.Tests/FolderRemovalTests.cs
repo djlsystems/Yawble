@@ -339,6 +339,66 @@ public sealed class FolderRemovalTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_reset_retry_keeps_a_named_file_the_member_rewrote_since_and_judges_a_named_link_by_itself()
+    {
+        await CreateAlphaAsync();
+        var workspace = _paths.WorkspaceFor(new ContainerId("Alpha", "Manager"));
+        var notes = await WriteAsync(Path.Combine(workspace, "notes.md"));
+        var stale = await WriteAsync(Path.Combine(workspace, "stale.md"));
+        var target = await WriteAsync(Path.Combine(_dataRoot, "outside", "target.md"));
+        var link = Path.Combine(workspace, "link");
+        File.CreateSymbolicLink(link, target);
+        _deletes.Refuse(notes);
+        _deletes.Refuse(stale);
+        _deletes.Refuse(link);
+
+        var reset = await _reset.ResetAsync(
+            "Alpha", new TeamResetOptions(["Manager"], ForgetHistory: false, ClearWorkspaces: true), Ct);
+
+        Assert.NotNull(reset);
+        Assert.Equal([link, notes, stale], reset.Remaining);
+
+        // The member rewrites notes.md; the link's target changes too, but the link itself does not.
+        await WriteSinceAsync(notes);
+        File.SetLastWriteTimeUtc(target, DateTime.UtcNow.AddMinutes(1));
+        _deletes.Allow(notes);
+        _deletes.Allow(stale);
+        _deletes.Allow(link);
+        var retried = Assert.Single(await _retry.RetryAsync(ct: Ct));
+
+        Assert.True(retried.Finished);
+        Assert.True(File.Exists(notes), "the retry removed a file the member rewrote after the reset");
+        Assert.False(File.Exists(stale));
+        Assert.False(File.Exists(link) || Directory.Exists(link));
+        Assert.True(File.Exists(target));
+        Assert.Null(await _unfinished.FindAsync(workspace, Ct));
+    }
+
+    [Fact]
+    public async Task A_finished_reset_retry_removes_the_empty_directories_above_what_the_reset_named()
+    {
+        await CreateAlphaAsync();
+        var workspace = _paths.WorkspaceFor(new ContainerId("Alpha", "Manager"));
+        var deep = await WriteAsync(Path.Combine(workspace, "a", "sub", "g.bin"));
+        await WriteAsync(Path.Combine(workspace, "a", "f1.bin"));
+        _deletes.Refuse(deep);
+
+        var reset = await _reset.ResetAsync(
+            "Alpha", new TeamResetOptions(["Manager"], ForgetHistory: false, ClearWorkspaces: true), Ct);
+
+        Assert.NotNull(reset);
+        Assert.Equal([deep], reset.Remaining);
+
+        _deletes.Allow(deep);
+        var retried = Assert.Single(await _retry.RetryAsync(ct: Ct));
+
+        Assert.True(retried.Finished);
+        Assert.True(Directory.Exists(workspace), "the retry removed the reset's own folder");
+        Assert.Empty(Directory.EnumerateFileSystemEntries(workspace));
+        Assert.Null(await _unfinished.FindAsync(workspace, Ct));
+    }
+
+    [Fact]
     public async Task Creating_a_team_over_the_unfinished_removal_of_a_deleted_team_finishes_it_first()
     {
         await CreateAlphaAsync();

@@ -210,11 +210,15 @@ public sealed class FolderRemoval(
     /// written into it since; A RETRY REMOVES ONLY WHAT THE RESET NAMED, NEVER WHAT WAS WRITTEN
     /// SINCE:
     /// <list type="bullet">
-    /// <item>a named file or link is removed;</item>
+    /// <item>a named file or link is removed only when it was not modified after the reset (the
+    /// row's first <c>RecordedAt</c>; a link judged as itself, never its target); a newer one is
+    /// the member's and is left, and no longer counted;</item>
     /// <item>a named directory - one the reset emptied but could not remove, or one it could not
     /// even list, the folder itself included - has removed from it only the entries in which
-    /// nothing was written after the reset (the row's first <c>RecordedAt</c>), and goes itself
-    /// only once empty. Anything newer is the member's and is left, and no longer counted;</item>
+    /// nothing was written after the reset, and goes itself only once empty. Anything newer is the
+    /// member's and is left, and no longer counted;</item>
+    /// <item>once a named path is gone, the directories above it go too while empty, up to but
+    /// never including the folder, stopping at a link or one modified after the reset;</item>
     /// <item>a named directory the Host still cannot list stays unfinished: it is named again and
     /// retried again, never reported finished.</item>
     /// </list>
@@ -242,6 +246,7 @@ public sealed class FolderRemoval(
         var remaining = new List<string>();
         var old = new List<string>();
         var directories = new List<string>();
+        var ancestors = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var path in row.Remaining.Select(p => Path.TrimEndingDirectorySeparator(Path.GetFullPath(p))).Distinct(StringComparer.Ordinal))
         {
@@ -249,9 +254,17 @@ public sealed class FolderRemoval(
 
             if (!isBoundary && !Confined(boundary, path) || !Exists(path)) continue;
 
+            if (!isBoundary) AddOldAncestors(boundary, path, row.RecordedAt, ancestors);
+
             if (!isBoundary && (IsLink(path) || !Directory.Exists(path)))
             {
-                old.Add(path);
+                // A named file is the member's again once rewritten; a link is judged as itself.
+                switch (NothingWrittenSince(path, row.RecordedAt))
+                {
+                    case true: old.Add(path); break;
+                    case null: remaining.Add(path); break;
+                }
+
                 continue;
             }
 
@@ -306,7 +319,46 @@ public sealed class FolderRemoval(
             }
         }
 
+        // The directories above a named path that the reset emptied go too once empty, deepest
+        // first, never the folder itself.
+        foreach (var directory in ancestors.OrderByDescending(d => d.Length))
+        {
+            if (!Directory.Exists(directory) || IsLink(directory) || remaining.Any(r => Within(directory, r))) continue;
+
+            try
+            {
+                if (_host.Entries(directory).Count == 0) _host.DeleteEmptyDirectory(directory);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                remaining.Add(directory);
+            }
+        }
+
         return await SettleAsync(boundary, RemovalKinds.Emptied, row.Team, null, remaining, ct);
+    }
+
+    /// <summary>
+    /// Adds to <paramref name="ancestors"/> the directories between <paramref name="path"/> and
+    /// <paramref name="boundary"/>, nearest first, stopping at the first that is a link or was
+    /// modified after <paramref name="since"/>. Decided before anything is removed, so the retry's
+    /// own deletes never make one look new.
+    /// </summary>
+    private static void AddOldAncestors(string boundary, string path, DateTimeOffset since, HashSet<string> ancestors)
+    {
+        for (var parent = Path.GetDirectoryName(path); parent is not null && Confined(boundary, parent); parent = Path.GetDirectoryName(parent))
+        {
+            try
+            {
+                if (IsLink(parent) || Directory.GetLastWriteTimeUtc(parent) > since.UtcDateTime) return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return;
+            }
+
+            ancestors.Add(parent);
+        }
     }
 
     /// <summary>
