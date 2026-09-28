@@ -10,7 +10,7 @@ namespace Harness.Host;
 ///
 /// REQUIRED NOW: <c>schemaVersion</c>, <c>id</c>, <c>name</c>, <c>description</c>, <c>version</c>,
 /// <c>protocol</c>, <c>executable</c>. OPTIONAL NOW: <c>timeoutSeconds</c>, <c>config</c>,
-/// <c>secrets</c>, <c>events.publishes</c>, <c>skills</c>, <c>platforms</c>.
+/// <c>secrets</c>, <c>events.publishes</c>, <c>skills</c>, <c>platforms</c>, <c>requires</c>.
 /// RESERVED - kept as raw JSON, validated by nothing, acted on by nothing yet: <c>actions</c>,
 /// <c>consumes</c>, <c>health</c>, <c>signature</c>, <c>publisher</c>, <c>minHostVersion</c>,
 /// <c>permits</c>. A key this version does not know is IGNORED and named in
@@ -34,6 +34,16 @@ public sealed record PluginManifest(
     IReadOnlyDictionary<string, JsonElement> Reserved,
     IReadOnlyList<string> Ignored)
 {
+    /// <summary>The runtimes this plugin needs from the image (<see cref="Runtimes"/>), checked on
+    /// the Host's PATH when the catalog loads it. Empty for a self-contained binary.</summary>
+    public IReadOnlyList<string> Requires { get; init; } = [];
+
+    /// <summary>
+    /// What the image guarantees and a manifest's <c>requires</c> may name. Everything else a plugin
+    /// needs lives in its own folder; nothing a plugin needs is ever added to the image.
+    /// </summary>
+    public static readonly IReadOnlyList<string> Runtimes = ["dotnet", "node", "python3"];
+
     public const string FileName = "plugin.json";
 
     public const int SchemaVersion = 1;
@@ -53,7 +63,7 @@ public sealed record PluginManifest(
     private static readonly IReadOnlySet<string> KnownKeys = new HashSet<string>(StringComparer.Ordinal)
     {
         "schemaVersion", "id", "name", "description", "version", "protocol", "executable",
-        "timeoutSeconds", "config", "secrets", "events", "skills", "platforms",
+        "timeoutSeconds", "config", "secrets", "events", "skills", "platforms", "requires",
     };
 
     /// <summary>This machine's platform key, as the <c>platforms</c> map names it.</summary>
@@ -273,6 +283,26 @@ public sealed record PluginManifest(
                 }
             }
 
+            var requires = new List<string>();
+
+            if (root.TryGetProperty("requires", out var requiresElement) && requiresElement.ValueKind != JsonValueKind.Null)
+            {
+                if (requiresElement.ValueKind != JsonValueKind.Array || requiresElement.EnumerateArray().Any(r => r.ValueKind != JsonValueKind.String))
+                {
+                    return (null, $"`requires` must be an array of runtime names: {string.Join(", ", Runtimes)}.");
+                }
+
+                foreach (var runtime in requiresElement.EnumerateArray().Select(r => r.GetString()!))
+                {
+                    if (!Runtimes.Contains(runtime, StringComparer.Ordinal))
+                    {
+                        return (null, $"`requires` names '{runtime}', which is not a runtime this Host provides (it provides {string.Join(", ", Runtimes)}); ship anything else inside the plugin's folder.");
+                    }
+
+                    if (!requires.Contains(runtime, StringComparer.Ordinal)) requires.Add(runtime);
+                }
+            }
+
             var reserved = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             var ignored = new List<string>();
 
@@ -290,7 +320,7 @@ public sealed record PluginManifest(
 
             return (new PluginManifest(
                 id, name, description, version, protocol, path, arguments, timeout, config, secrets,
-                publishes, skills, platforms, reserved, ignored), null);
+                publishes, skills, platforms, reserved, ignored) { Requires = requires }, null);
         }
     }
 
@@ -335,7 +365,8 @@ public sealed record PluginManifest(
     };
 }
 
-/// <summary>One ordinary configuration field. Flat in v1: string, number or bool.</summary>
+/// <summary>One ordinary configuration field. Flat in v1: string, number, bool, or list (a list of
+/// strings, default <c>[]</c>, whose optional <c>enum</c> limits each item).</summary>
 /// <param name="PersonOnly">
 /// <c>"setBy": "person"</c> in the manifest: only a person's hire may set this field to anything but
 /// its default. It is how a plugin that acts outward (sends, posts, pays) keeps its real mode and its
@@ -351,6 +382,8 @@ public sealed record PluginConfigField(
     IReadOnlyList<string>? Enum,
     bool PersonOnly = false)
 {
+    private static readonly JsonElement EmptyList = JsonDocument.Parse("[]").RootElement.Clone();
+
     public static (PluginConfigField? Field, string? Refusal) Parse(string name, JsonElement element)
     {
         if (!PluginManifest.IsConfigName(name)) return (null, $"`config.{name}` is not a usable name.");
@@ -358,9 +391,9 @@ public sealed record PluginConfigField(
 
         var type = element.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString()! : "string";
 
-        if (type is not ("string" or "number" or "bool"))
+        if (type is not ("string" or "number" or "bool" or "list"))
         {
-            return (null, $"`config.{name}.type` must be string, number or bool - v1 has no nested configuration.");
+            return (null, $"`config.{name}.type` must be string, number, bool or list - v1 has no nested configuration.");
         }
 
         IReadOnlyList<string>? choices = null;
@@ -376,6 +409,9 @@ public sealed record PluginConfigField(
         }
 
         JsonElement? fallback = element.TryGetProperty("default", out var d) ? d.Clone() : null;
+
+        // A LIST WITH NO DEFAULT IS EMPTY, never absent: the plugin always receives an array.
+        if (type == "list" && fallback is null) fallback = EmptyList;
 
         var personOnly = false;
 
@@ -424,10 +460,22 @@ public sealed record PluginConfigField(
             "string" => value.ValueKind == JsonValueKind.String,
             "number" => value.ValueKind == JsonValueKind.Number,
             "bool" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+            "list" => value.ValueKind == JsonValueKind.Array && value.EnumerateArray().All(v => v.ValueKind == JsonValueKind.String),
             _ => false,
         };
 
-        if (!fits) return $"`{name}` must be a {Type}.";
+        if (!fits) return Type == "list" ? $"`{name}` must be a list of strings." : $"`{name}` must be a {Type}.";
+
+        if (Type == "list")
+        {
+            if (Enum is { } allowed
+                && value.EnumerateArray().Select(v => v.GetString()!).FirstOrDefault(v => !allowed.Contains(v, StringComparer.Ordinal)) is { } outside)
+            {
+                return $"`{name}` holds '{outside}'; each item must be one of: {string.Join(", ", allowed)}.";
+            }
+
+            return null;
+        }
 
         if (Enum is { } choices && value.ValueKind == JsonValueKind.String
             && !choices.Contains(value.GetString()!, StringComparer.Ordinal))
