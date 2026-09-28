@@ -587,21 +587,35 @@ func TestBackupRefusesAnUnwritableOutputBeforeStoppingAnything(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.Chmod(readOnly, 0o700) })
+			existingDir := t.TempDir()
+			existing := filepath.Join(existingDir, "b.tar.gz")
+			if err := os.WriteFile(existing, []byte("keep"), 0o400); err != nil {
+				t.Fatal(err)
+			}
 			for name, path := range map[string]string{
 				"missing folder":   filepath.Join(t.TempDir(), "nope", "b.tar.gz"),
 				"read-only folder": filepath.Join(readOnly, "b.tar.gz"),
+				"existing file":    existing,
 			} {
 				s := backupScript(t, program, "running", agentListing)
 				deps := backupDeps(t, s, program)
 				code, out, errOut := run(t, deps, "backup", "--output", path, "--yes")
-				if code == 0 || !strings.Contains(errOut, "cannot be written to "+path) || !strings.Contains(errOut, "nothing was stopped") {
+				refused := strings.Contains(errOut, "cannot be written to "+path) && strings.Contains(errOut, "nothing was stopped")
+				if path == existing {
+					refused = strings.Contains(errOut, path+" already exists")
+				}
+				if code == 0 || !refused {
 					t.Errorf("%s: exit %d out %q err %q", name, code, out, errOut)
 				}
 				c := calls(s)
 				if strings.Contains(c, program+" stop ") || strings.Contains(c, program+" exec ") || strings.Contains(c, program+" run ") {
 					t.Errorf("%s: the instance was touched:\n%s", name, c)
 				}
-				if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 0 {
+				if path == existing {
+					if b, _ := os.ReadFile(existing); string(b) != "keep" {
+						t.Errorf("%s: the existing file was changed: %q", name, b)
+					}
+				} else if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 0 {
 					t.Errorf("%s: left behind %v", name, entries)
 				}
 			}
