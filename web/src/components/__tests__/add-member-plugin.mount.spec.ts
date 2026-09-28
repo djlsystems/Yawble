@@ -143,7 +143,7 @@ describe('AddMemberDialog, hiring a plugin', () => {
     wrapper.unmount();
   });
 
-  it('leaves an empty optional field and an unnamed optional secret out of the hire', async () => {
+  it('leaves a field at its default, an empty optional field and an unnamed optional secret out of the hire', async () => {
     const wrapper = await mountDialog(AddMemberDialog, baseProps);
 
     await type('Member name', 'Echo');
@@ -154,7 +154,41 @@ describe('AddMemberDialog, hiring a plugin', () => {
     await settle();
 
     expect(addMember.mock.calls[0]?.[3]).toEqual({
-      config: { mode: 'upper' },
+      config: {},
+      secrets: { signing: 'ECHO_SIGNING_KEY' },
+    });
+
+    wrapper.unmount();
+  });
+
+  it('hires with a list setting edited as chips, through the same editor Member settings shows', async () => {
+    listPlugins.mockResolvedValue({
+      plugins: [{
+        ...sampleEcho,
+        config: { ...sampleEcho.config, allow: { type: 'list', required: false, default: [], enum: ['ops', 'dev'], setBy: 'person' } },
+      }],
+      refused: [],
+    });
+    const wrapper = await mountDialog(AddMemberDialog, baseProps);
+
+    await type('Member name', 'Echo');
+    await choose(wrapper, 'Agent', 'plugin:sample-echo');
+    await type('Secret signing: key name', 'ECHO_SIGNING_KEY');
+
+    expect(document.body.querySelector('[data-setting="allow"] [data-person-only]')?.textContent).toBe('Set by a person only');
+
+    await type('Add to allow', 'dev');
+    field('Add to allow').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await settle();
+
+    // Enter added the chip and did not hire.
+    expect(addMember).not.toHaveBeenCalled();
+
+    button('Add member').click();
+    await settle();
+
+    expect(addMember.mock.calls[0]?.[3]).toEqual({
+      config: { allow: ['dev'] },
       secrets: { signing: 'ECHO_SIGNING_KEY' },
     });
 

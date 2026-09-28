@@ -35,6 +35,8 @@ import type {
   MemberRunsPage,
   PluginHire,
   PluginList,
+  PluginInstallResult,
+  PluginMemberSettings,
   ContainerSnapshot,
   MemberDeleted,
   MemberDetail,
@@ -1168,6 +1170,47 @@ export const addMember = (
  * never a value. The Add member dialog offers them beside the Agent presets.
  */
 export const listPlugins = () => json<PluginList>('/api/plugins')
+
+/** Re-reads the plugins directory on the Host and answers the list as `listPlugins` does. A person's. */
+export const rescanPlugins = () => json<PluginList>('/api/plugins/rescan', { method: 'POST' })
+
+/** One plugin version's `plugin.json`, as the Host holds it: the raw text, for reading only. */
+export async function getPluginManifest(id: string, version: string): Promise<string> {
+  const response = await send(`/api/plugins/${encodeURIComponent(id)}/${encodeURIComponent(version)}/manifest`)
+
+  return response.text()
+}
+
+/**
+ * Installs a built plugin folder that is already inside the instance's data root. The Host checks
+ * it exactly as `plugin install` does and refuses - with the reason, before anything is written -
+ * a folder outside the data root, a link leaving it, a manifest it would refuse, and an existing
+ * version unless `replace` is set. A person's.
+ */
+export const installPlugin = (path: string, replace: boolean) =>
+  json<PluginInstallResult>('/api/plugins/install', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path, replace }),
+  })
+
+const pluginSettingsPath = (team: string, member: string) =>
+  `/api/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(member)}/plugin-settings`
+
+/** A plugin member's stored settings and secret KEY bindings - never a secret's value. */
+export const getPluginSettings = (team: string, member: string) =>
+  json<PluginMemberSettings>(pluginSettingsPath(team, member))
+
+/**
+ * Replaces a plugin member's settings. Validated by the Host exactly as a hire is, refused naming
+ * the field; takes effect on the member's next run. A person's: a Manager is refused.
+ */
+export const savePluginSettings = (team: string, member: string, settings: PluginHire) =>
+  send(pluginSettingsPath(team, member), {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(settings),
+  }).then(() => undefined)
 
 /**
  * The STORED row behind a member - its label, its own instructions and who last set them.

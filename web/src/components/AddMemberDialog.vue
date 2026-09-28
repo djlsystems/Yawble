@@ -13,9 +13,10 @@ import {
   initialConfig,
   initialSecrets,
   missingRequired,
-  pluginHire,
+  settingsBody,
   type PluginFieldValues,
-} from '../lib/pluginHire';
+} from '../lib/pluginSettings';
+import PluginSettingsForm from './PluginSettingsForm.vue';
 import { MemberInstructionsHint, MemberInstructionsLabel } from '../lib/memberInstructions';
 
 /**
@@ -215,7 +216,7 @@ async function submit() {
           props.team,
           name.value.trim(),
           agent.value!,
-          pluginHire(plugin.value, pluginConfig.value, pluginSecrets.value),
+          settingsBody(plugin.value, pluginConfig.value, pluginSecrets.value),
         )
       : await addMember(props.team, name.value.trim(), agent.value!, undefined, instructions.value.trim() || undefined);
 
@@ -313,52 +314,17 @@ async function submit() {
           </span>
         </div>
 
-        <!-- THE CHOSEN PLUGIN'S MANIFEST, AS INPUTS. Config fields by type; secrets by NAME, each
-             asking for the logical key a person set with `secret set`. No value is ever shown,
-             because no route carries one. -->
+        <!-- THE CHOSEN PLUGIN'S MANIFEST, AS INPUTS: the same editor Member settings shows after
+             hire. Config fields by type; secrets by NAME, each asking for the logical key a person
+             set with `secret set`. No value is ever shown, because no route carries one. -->
         <div v-if="plugin" class="plugin-hire q-gutter-sm" data-plugin-hire>
           <div class="text-caption os-text-muted">{{ plugin.description }}</div>
 
-          <template v-for="(field, key) in plugin.config" :key="`config-${key}`">
-            <q-toggle
-              v-if="field.type === 'bool'"
-              v-model="pluginConfig[key]"
-              dense
-              :label="String(key)"
-            />
-            <q-select
-              v-else-if="field.enum && field.enum.length > 0"
-              v-model="pluginConfig[key]"
-              :options="field.enum"
-              outlined
-              dense
-              :label="String(key)"
-              :hint="field.description || undefined"
-            />
-            <q-input
-              v-else
-              :model-value="String(pluginConfig[key] ?? '')"
-              @update:model-value="(value) => (pluginConfig[key] = value === null ? '' : String(value))"
-              outlined
-              dense
-              :type="field.type === 'number' ? 'number' : 'text'"
-              :label="String(key)"
-              :hint="field.description || undefined"
-              :error="pluginMissing.includes(String(key)) ? true : undefined"
-            />
-          </template>
-
-          <template v-for="(secret, key) in plugin.secrets" :key="`secret-${key}`">
-            <q-input
-              v-model="pluginSecrets[key]"
-              outlined
-              dense
-              :label="`Secret ${key}: key name`"
-              :hint="`${secret.description ? secret.description + ' ' : ''}The name of a key set with secret set, never its value.${secret.required ? '' : ' Optional.'}`"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </template>
+          <PluginSettingsForm
+            v-model:config="pluginConfig"
+            v-model:secrets="pluginSecrets"
+            :shape="plugin"
+          />
         </div>
 
         <!-- THE MEMBER'S OWN INSTRUCTIONS, for an Agent only: a plugin has no prompt. -->

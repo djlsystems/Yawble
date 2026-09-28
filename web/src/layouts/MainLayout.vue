@@ -28,10 +28,11 @@ import TenantLogDialog from '../components/TenantLogDialog.vue';
 import DiagnosticsDialog from '../components/DiagnosticsDialog.vue';
 import ApiKeysDialog from '../components/ApiKeysDialog.vue';
 import SkillsDialog from '../components/SkillsDialog.vue';
+import PluginsDialog from '../components/PluginsDialog.vue';
 import ConciergePanel from '../components/ConciergePanel.vue';
 import StatusStrip from '../components/StatusStrip.vue';
 import VersionTag from '../components/VersionTag.vue';
-import { DocumentsAction, TenantSettingsAction } from '../lib/ribbon';
+import { DocumentsAction, PluginsAction, TenantSettingsAction } from '../lib/ribbon';
 
 const board = useConsoleStore();
 const { connected } = storeToRefs(board);
@@ -111,6 +112,8 @@ watch(
  *  the INSTANCE: one Concierge per person, serving every team they reach. Opened from a team's
  *  own dialog, changing it changed every other team's too. */
 const skillsOpen = ref(false);
+/** Admin > Plugins. */
+const pluginsOpen = ref(false);
 const resetOpen = ref(false);
 const backlogOpen = ref(false);
 const tenantLogOpen = ref(false);
@@ -225,6 +228,7 @@ function onRibbonAction(action: string) {
   else if (action === 'admin-agents') agentsOpen.value = true;
   else if (action === 'admin-skills') skillsOpen.value = true;
   else if (action === 'admin-keys') keysOpen.value = true;
+  else if (action === PluginsAction) pluginsOpen.value = true;
   else if (action === TenantSettingsAction) tenantSettingsOpen.value = true;
 }
 
@@ -473,6 +477,7 @@ async function signOut() {
       @open-skills="skillsOpen = true"
     />
     <SkillsDialog v-model="skillsOpen" />
+    <PluginsDialog v-model="pluginsOpen" />
     <!-- Guarded on there BEING an active team, because the dialog reads that team's members and
          addresses it by id. The ribbon disables a `team-` action without one, so this is a
          backstop rather than the way anyone meets the rule - but the prop is non-nullable and a

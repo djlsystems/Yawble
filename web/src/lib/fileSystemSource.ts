@@ -67,7 +67,7 @@ function truncationNote(listing: DirectoryListing): string | null {
  * and how its "All locations" button gets back to the top. That also re-reads the allowlist once
  * per open.
  */
-export function hostFileBrowser(): HostBrowser {
+export function hostFileBrowser(options: { instanceOnly?: boolean } = {}): HostBrowser {
   const activeRoot = ref<FileSystemRoot | null>(null)
 
   /** The allowlist, fetched ONCE for the life of this source - see the note about a new object per
@@ -76,7 +76,13 @@ export function hostFileBrowser(): HostBrowser {
   let allowlist: FileSystemRoot[] | null = null
 
   async function roots(): Promise<FileSystemRoot[]> {
-    if (allowlist === null) allowlist = (await fileSystemRoots()).roots
+    if (allowlist === null) {
+      const all = (await fileSystemRoots()).roots
+
+      // `instanceOnly`: the instance's own data root and nothing else, by the server's own flag -
+      // for a picker whose answer the Host refuses anywhere outside it (installing a plugin).
+      allowlist = options.instanceOnly ? all.filter((root) => root.isInstance) : all
+    }
 
     return allowlist
   }
