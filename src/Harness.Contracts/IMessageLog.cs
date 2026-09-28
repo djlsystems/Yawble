@@ -1,3 +1,5 @@
+using System.Data.Common;
+
 namespace Harness.Contracts;
 
 /// <summary>
@@ -14,6 +16,17 @@ public interface IMessageLog
     /// Appends and returns the stored message, with the seq, correlation and depth the log assigned.
     /// </summary>
     Task<Message> AppendAsync(NewMessage message, CancellationToken ct = default);
+
+    /// <summary>
+    /// An append and the caller's own writes to the same database, in ONE transaction: all of it
+    /// commits, or none of it does. <paramref name="before"/> runs first and answers the message to
+    /// append, or null to append nothing (its writes still commit); <paramref name="after"/> runs
+    /// with the row as stored. Answers the appended message, or null.
+    /// </summary>
+    Task<Message?> AppendWithinAsync(
+        Func<DbConnection, DbTransaction, CancellationToken, Task<NewMessage?>> before,
+        Func<DbConnection, DbTransaction, Message, CancellationToken, Task> after,
+        CancellationToken ct = default);
 
     /// <summary>
     /// The next messages after <paramref name="afterSeq"/> whose type is in <paramref name="types"/>,

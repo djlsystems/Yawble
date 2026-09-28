@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
@@ -289,7 +290,19 @@ public sealed class SqliteTriggerStore : ITriggerStore
         string id, DateTimeOffset dayStart, bool rearm, DateTimeOffset? nextDueAt, CancellationToken ct = default)
     {
         await using var connection = Open();
-        await using var command = connection.CreateCommand();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        var count = await CountCappedSkipAsync(connection, transaction, id, dayStart, rearm, nextDueAt, ct);
+        await transaction.CommitAsync(ct);
+        return count;
+    }
+
+    public async Task<int> CountCappedSkipAsync(
+        DbConnection connection, DbTransaction transaction,
+        string id, DateTimeOffset dayStart, bool rearm, DateTimeOffset? nextDueAt, CancellationToken ct = default)
+    {
+        await using var command = (SqliteCommand)connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
 
         command.CommandText =
             """
@@ -315,17 +328,27 @@ public sealed class SqliteTriggerStore : ITriggerStore
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
-        await using (var command = connection.CreateCommand())
+        await RecordCappedSkipAsync(connection, transaction, id, seq, audit, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task RecordCappedSkipAsync(
+        DbConnection connection, DbTransaction transaction, string id, long seq, TriggerAudit audit,
+        CancellationToken ct = default)
+    {
+        var sqlite = (SqliteConnection)connection;
+        var within = (SqliteTransaction)transaction;
+
+        await using (var command = sqlite.CreateCommand())
         {
-            command.Transaction = transaction;
+            command.Transaction = within;
             command.CommandText = "UPDATE triggers SET last_seq = $seq WHERE id = $id";
             command.Parameters.AddWithValue("$id", id);
             command.Parameters.AddWithValue("$seq", seq);
             await command.ExecuteNonQueryAsync(ct);
         }
 
-        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
-        await transaction.CommitAsync(ct);
+        await TenantAuditRow.AppendAsync(sqlite, within, audit, ct);
     }
 
     public async Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default)

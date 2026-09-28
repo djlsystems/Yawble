@@ -1,3 +1,5 @@
+using System.Data.Common;
+
 namespace Harness.Contracts;
 
 /// <summary>A durable trigger row. Only platform-neutral primitives cross this boundary.</summary>
@@ -180,6 +182,19 @@ public interface ITriggerStore
     /// <summary>Records the logged capped skip's row as the trigger's last, and appends
     /// <paramref name="audit"/> to `tenant_events`, in one transaction.</summary>
     Task RecordCappedSkipAsync(string id, long seq, TriggerAudit audit, CancellationToken ct = default);
+
+    /// <summary><see cref="CountCappedSkipAsync(string, DateTimeOffset, bool, DateTimeOffset?, CancellationToken)"/>
+    /// inside the caller's transaction on this store's database (<see cref="IMessageLog.AppendWithinAsync"/>),
+    /// so the first skip's count, its `schedule.skipped` row and its tenant row commit together.</summary>
+    Task<int> CountCappedSkipAsync(
+        DbConnection connection, DbTransaction transaction,
+        string id, DateTimeOffset dayStart, bool rearm, DateTimeOffset? nextDueAt, CancellationToken ct = default);
+
+    /// <summary><see cref="RecordCappedSkipAsync(string, long, TriggerAudit, CancellationToken)"/>
+    /// inside the caller's transaction on this store's database.</summary>
+    Task RecordCappedSkipAsync(
+        DbConnection connection, DbTransaction transaction, string id, long seq, TriggerAudit audit,
+        CancellationToken ct = default);
 
     Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default);
     Task DeleteAsync(string id, CancellationToken ct = default);

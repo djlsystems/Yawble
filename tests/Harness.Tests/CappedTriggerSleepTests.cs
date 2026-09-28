@@ -274,6 +274,49 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_first_capped_skip_whose_rows_cannot_be_written_stores_nothing_and_the_next_fire_tries_again()
+    {
+        var id = await EveryMinuteAsync(4000);
+        for (var run = 1; run <= 3; run++) await FireAtDueAsync(id);
+        var fourth = await DueAsync(id);
+        var before = await RowAsync(id);
+
+        // The tenant row cannot be written: no count, no sleep, no schedule.skipped row.
+        await ExecuteAsync("ALTER TABLE tenant_events RENAME TO tenant_events_away");
+        await SweepAsync(fourth);
+
+        var row = await RowAsync(id);
+        Assert.Equal(before.CappedSkips, row.CappedSkips);
+        Assert.Equal(before.CappedSkipsDay, row.CappedSkipsDay);
+        Assert.Equal(before.LastOutcome, row.LastOutcome);
+        Assert.Equal(fourth, row.NextDueAt);
+        Assert.Empty(await SkipRowsAsync($"schedule:{id}"));
+        Assert.Equal(3, _agents.RunsFor(Dev));
+
+        // Back again, the same fire is still due and is the day's first skip, said once.
+        await ExecuteAsync("ALTER TABLE tenant_events_away RENAME TO tenant_events");
+        await SweepAsync(fourth);
+
+        Assert.Single(await SkipRowsAsync($"schedule:{id}"));
+        Assert.Single(await TenantRowsAsync(TenantActions.ScheduleSkipped, id));
+        row = await RowAsync(id);
+        Assert.Equal("capped", row.LastOutcome);
+        Assert.Equal(1, row.CappedSkips);
+        Assert.Equal(FirstOfNextUtcDay(fourth, fourth), row.NextDueAt);
+        Assert.Equal(3, _agents.RunsFor(Dev));
+    }
+
+    private async Task ExecuteAsync(string sql)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+            $"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false");
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(Ct);
+    }
+
+    [Fact]
     public async Task A_host_restarted_while_the_trigger_sleeps_waits_for_the_stored_time_and_fires_at_it()
     {
         var (id, fourth) = await CapOnTheThirdRunAsync();
