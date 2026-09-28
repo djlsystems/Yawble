@@ -207,13 +207,16 @@ public sealed class TriggerCost(
         view["capReachedToday"] = reached;
 
         // Asleep on the cap: a schedule whose last fire the cap skipped, still over it today, and
-        // due later. A cap raised or cleared since ends it, and so does the next day.
+        // due later. A cap raised or cleared since ends it, and so does the next day. The time is
+        // when it really resumes, the same ResumeAt the sleep stores: after a person edits the
+        // schedule it is due again from now, and that fire only skips and sleeps.
         view["cappedUntil"] = TriggerKindIsClock(row.Kind)
             && reached
             && row.LastOutcome == "capped"
             && row.NextDueAt is { } due
             && due > now
-                ? due.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)
+            && ResumeAt(row, now, due) is { } resumes
+                ? resumes.ToString("O", CultureInfo.InvariantCulture)
                 : null;
 
         view["skippedToday"] = row.CappedSkipsDay == StartOfDay(row.Timezone, now) ? row.CappedSkips : 0;

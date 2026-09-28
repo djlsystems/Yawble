@@ -209,11 +209,11 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
     /// after the start of the day after <paramref name="now"/>, in UTC. Worked out here, not by the
     /// code under test.
     /// </summary>
-    private static DateTimeOffset FirstOfNextUtcDay(DateTimeOffset due, DateTimeOffset now)
+    private static DateTimeOffset FirstOfNextUtcDay(DateTimeOffset due, DateTimeOffset now, int stepSeconds = 60)
     {
         var boundary = new DateTimeOffset(now.UtcDateTime.Date.AddDays(1), TimeSpan.Zero);
-        var steps = (long)Math.Ceiling((boundary - due).TotalSeconds / 60);
-        return due.AddSeconds(steps * 60);
+        var steps = (long)Math.Ceiling((boundary - due).TotalSeconds / stepSeconds);
+        return due.AddSeconds(steps * stepSeconds);
     }
 
     /// <summary>Caps an every-minute trigger on Dev at 4,000: three runs of 1,500 reach it, and the
@@ -380,6 +380,23 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
         var row = await RowAsync(id);
         Assert.Equal("capped", row.LastOutcome);
         Assert.True(row.NextDueAt >= new DateTimeOffset(fourth.UtcDateTime.Date.AddDays(1), TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task An_edited_schedule_still_over_its_cap_shows_capped_until_the_next_days_first_occurrence()
+    {
+        var (id, _) = await CapOnTheThirdRunAsync();
+        Assert.Equal(HttpStatusCode.OK, (await PatchAsync(id, new { intervalSeconds = 120 })).StatusCode);
+
+        // Re-armed from now, where it will only skip again: not the time it resumes.
+        var due = await DueAsync(id);
+        var cappedUntil = (await ViewAsync("Dev", id)).GetProperty("cappedUntil").GetDateTimeOffset();
+        Assert.Equal(FirstOfNextUtcDay(due, due, stepSeconds: 120), cappedUntil);
+
+        // And the sleep that skip takes is that same time.
+        await SweepAsync(due);
+        Assert.Equal(cappedUntil, (await RowAsync(id)).NextDueAt);
+        Assert.Equal(cappedUntil, (await ViewAsync("Dev", id)).GetProperty("cappedUntil").GetDateTimeOffset());
     }
 
     [Theory]
