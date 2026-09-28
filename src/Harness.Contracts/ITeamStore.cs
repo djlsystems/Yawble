@@ -225,7 +225,9 @@ public interface ITeamStore
     /// A NARROW SINGLE-COLUMN UPDATE, never a re-save of the whole row. That upsert takes an
     /// entire team, so a caller would write every other column back as it read them.
     /// </summary>
-    Task SetPausedAsync(string team, bool paused, CancellationToken ct = default);
+    /// <remarks>With <paramref name="audit"/>, that row is appended to `tenant_events` in the same
+    /// transaction: both land or neither does.</remarks>
+    Task SetPausedAsync(string team, bool paused, TriggerAudit? audit = null, CancellationToken ct = default);
 
     /// <summary>
     /// Sets what this team may spend on ONE workflow. See <see cref="PersistedTeam.BudgetTokens"/>
