@@ -148,6 +148,10 @@ public sealed record TeamSummary(
 /// <summary>One repository's default branch as a screen sees it. See <see cref="RepoDefaultBranch"/>.</summary>
 public sealed record TeamRepoDefaultBranch(string Repo, string? Branch, string? FromRemote, string? SetByPerson);
 
+/// <summary>What an edit to a member left: its live snapshot, its stored row, and whether its own
+/// instructions changed.</summary>
+public sealed record MemberUpdate(ContainerSnapshot Snapshot, PersistedMember Row, bool PromptChanged);
+
 /// <summary>One repository's contributor settings as a screen sees them. See <see cref="RepoContributor"/>.</summary>
 public sealed record TeamRepoContributor(
     string Repo, string? UpstreamUrl, string? ForkOwner, bool DcoSignOff, string? ClaSignedNote);
@@ -2161,10 +2165,13 @@ public sealed class TeamRegistry(
                 // THE LABEL, so the clone's member derives the SAME identifier - `AddContainerAsync`
                 // derives from what it is given, and passing the identifier would lose a name a
                 // person typed. `member.Label` is null exactly when the two are already equal.
+                // THE SOURCE'S AUTHOR travels with the words: the clone copies what somebody
+                // wrote, and does not make the person cloning its author.
                 await HireMemberAsync(
                     created.Id, member.Label ?? member.Name, member.Agent,
                     member.SystemPrompt ?? "", member.Subscribes,
-                    hiredFor: member.HiredFor, ct: ct, settings: settings);
+                    hiredFor: member.HiredFor, ct: ct, settings: settings,
+                    promptSetBy: member.SystemPromptSetBy);
 
                 hired += 1;
             }
@@ -2202,7 +2209,8 @@ public sealed class TeamRegistry(
             {
                 await UpdateContainerAsync(
                     created.Id, DefaultManagerName,
-                    label: manager.Label, systemPrompt: manager.SystemPrompt, ct: ct);
+                    label: manager.Label, systemPrompt: manager.SystemPrompt, ct: ct,
+                    promptSetBy: manager.SystemPromptSetBy);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -2498,13 +2506,17 @@ public sealed class TeamRegistry(
     /// suite one symbol to pin, so a future hire refusal with clone parity consequences has a
     /// natural home and one missing call site is visible in the build.
     /// </summary>
+    /// <param name="promptSetBy">Who is hiring, recorded as having set the member's own
+    /// instructions. Null records nobody.</param>
     public Task<ContainerSnapshot> HireMemberAsync(
         string team, string label, string agent, string systemPrompt, IReadOnlyCollection<string> subscribes,
         string? hiredFor = null,
         CancellationToken ct = default,
-        PluginMemberSettings? settings = null) =>
+        PluginMemberSettings? settings = null,
+        SystemPromptSetter? promptSetBy = null) =>
         AddContainerAsync(
-            team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct, settings: settings);
+            team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct, settings: settings,
+            promptSetBy: promptSetBy);
 
     /// <summary>
     /// Adds a container called <paramref name="label"/>, deriving its identifier the same way a
@@ -2520,7 +2532,8 @@ public sealed class TeamRegistry(
         IReadOnlySet<string>? permits = null,
         string? hiredFor = null,
         CancellationToken ct = default,
-        PluginMemberSettings? settings = null)
+        PluginMemberSettings? settings = null,
+        SystemPromptSetter? promptSetBy = null)
     {
         if (!_teams.TryGetValue(team, out var members)) throw new InvalidOperationException($"No team '{team}'.");
 
@@ -2721,7 +2734,11 @@ public sealed class TeamRegistry(
                 // The floor the host actually gave it, read back rather than recomputed: computing
                 // it twice is how the two disagree.
                 container.Snapshot().SinceSeq,
-                string.IsNullOrWhiteSpace(hiredFor) ? null : hiredFor.Trim()),
+                string.IsNullOrWhiteSpace(hiredFor) ? null : hiredFor.Trim(),
+
+                // Who hired it set its own instructions, even when they are empty. A plugin has
+                // none, so nobody set them.
+                isPlugin ? null : promptSetBy),
             ct);
 
         // AFTER SaveMemberAsync, not before: RecomputeAsync reads the member back from `teams`, and
@@ -2812,9 +2829,20 @@ public sealed class TeamRegistry(
     /// The new preset must be HEADLESS. `AgentCatalog.For` returns null for a missing preset and for
     /// an interactive one alike, so both are refused by the same lookup.
     /// </summary>
+    /// <param name="promptSetBy">Who is making this edit. Recorded on the row only when the
+    /// member's own instructions CHANGE - a clear included; null records nobody.</param>
     public async Task<ContainerSnapshot> UpdateContainerAsync(
         string team, string name, string? label, string? systemPrompt, string? agent = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, SystemPromptSetter? promptSetBy = null) =>
+        (await UpdateMemberAsync(team, name, label, systemPrompt, agent, promptSetBy, ct)).Snapshot;
+
+    /// <summary>
+    /// <see cref="UpdateContainerAsync"/>, answering also the row as written and whether the
+    /// member's own instructions changed - what the PATCH route audits.
+    /// </summary>
+    public async Task<MemberUpdate> UpdateMemberAsync(
+        string team, string name, string? label, string? systemPrompt, string? agent,
+        SystemPromptSetter? promptSetBy, CancellationToken ct = default)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var id = new ContainerId(stored, name);
@@ -2931,15 +2959,19 @@ public sealed class TeamRegistry(
             override_ = string.IsNullOrWhiteSpace(systemPrompt) ? null : systemPrompt.Trim();
         }
 
+        // A CHANGE, not a send: saving the same words again leaves who wrote them alone, and a
+        // clear of something that was there is a change like any other.
+        var promptChanged = !string.Equals(override_, member.SystemPrompt, StringComparison.Ordinal);
 
-        await teams.SaveMemberAsync(
-            member with
-            {
-                Label = trimmedLabel,
-                SystemPrompt = override_,
-                Agent = newAgent,
-            },
-            ct);
+        var saved = member with
+        {
+            Label = trimmedLabel,
+            SystemPrompt = override_,
+            Agent = newAgent,
+            SystemPromptSetBy = promptChanged ? promptSetBy : member.SystemPromptSetBy,
+        };
+
+        await teams.SaveMemberAsync(saved, ct);
 
         // Read back from the LIVE container's own Environment, never rebuilt and never an empty
         // dictionary - the same reason RepromptManager reads it rather than passing {}. An empty
@@ -2955,7 +2987,7 @@ public sealed class TeamRegistry(
             trimmedLabel,
             repointed ? newAgent : null);
 
-        return container.Snapshot();
+        return new MemberUpdate(container.Snapshot(), saved, promptChanged);
     }
 
     /// <summary>

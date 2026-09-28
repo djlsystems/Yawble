@@ -313,5 +313,19 @@ public static class AuthSchema
                 FOREIGN KEY (team, name) REFERENCES team_members(team, name) ON DELETE CASCADE
             );
             """),
+
+        // WHO LAST SET A MEMBER'S OWN INSTRUCTIONS (`system_prompt`), and when. Written at hire
+        // (the hiring principal) and by every edit that changes the text, a clear included.
+        // `system_prompt_set_by` is a Manager's member id or a person's email;
+        // `system_prompt_set_by_kind` says which (`manager` or `person`); `system_prompt_set_at` is
+        // ISO-8601 UTC. All NULL for a member from before this step until it is next edited -
+        // nothing is backfilled, because nobody knows who wrote those.
+        new MigrationStep(
+            "auth-009",
+            """
+            ALTER TABLE team_members ADD COLUMN system_prompt_set_by      TEXT NULL;
+            ALTER TABLE team_members ADD COLUMN system_prompt_set_by_kind TEXT NULL;
+            ALTER TABLE team_members ADD COLUMN system_prompt_set_at      TEXT NULL;
+            """),
     ];
 }

@@ -96,6 +96,10 @@ public static class TenantActions
     public const string MemberChanged = "member.changed";
     public const string MemberDeleted = "member.deleted";
 
+    /// <summary>A member's own instructions changed, a clear included. Detail names who set them
+    /// and whether they were cleared - never the words, which are somebody's and can be long.</summary>
+    public const string MemberInstructionsChanged = "member.instructions-changed";
+
     public const string AgentsSaved = "agents.saved";
 
     /// <summary>A person re-read the installed plugins, so a plugin installed or upgraded on disk is
