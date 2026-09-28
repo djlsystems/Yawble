@@ -4667,7 +4667,7 @@ app.MapPatch("/api/teams/{team}/containers/{name}", async (
         var update = await teams.UpdateMemberAsync(
             team, name, request.Name, request.SystemPrompt, request.Agent,
             await SystemPromptSetters.ForAsync(context, users, ct), ct,
-            change => MemberAuditRows(context, change, renamed: request.Name is not null, request.Agent));
+            change => MemberAuditRows(context, change, request.Agent));
         var updated = update.Snapshot;
 
         var unresolvedList = new List<object>();
@@ -6784,15 +6784,14 @@ static string? SystemPromptSetAt(SystemPromptSetter? setter) =>
 // A member edit's tenant rows: `member.changed` always, and ITS OWN ROW when the member's own
 // instructions changed, so "who told this member to be what it is" is found by name. Who and
 // whether cleared - never the words.
-static IReadOnlyList<TriggerAudit> MemberAuditRows(
-    HttpContext context, MemberChange change, bool renamed, string? agent)
+static IReadOnlyList<TriggerAudit> MemberAuditRows(HttpContext context, MemberChange change, string? agent)
 {
     var subject = $"{change.Id.Team}/{change.Id.Name}";
     var rows = new List<TriggerAudit>
     {
         TenantLogging.Row(
             context, TenantActions.MemberChanged, subject, change.Name,
-            new { team = change.Id.Team, renamed, promptChanged = change.PromptChanged, agent }),
+            new { team = change.Id.Team, renamed = change.Renamed, promptChanged = change.PromptChanged, agent }),
     };
 
     if (change.PromptChanged)

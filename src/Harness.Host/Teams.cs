@@ -153,8 +153,9 @@ public sealed record TeamRepoDefaultBranch(string Repo, string? Branch, string? 
 public sealed record MemberUpdate(ContainerSnapshot Snapshot, PersistedMember Row, bool PromptChanged);
 
 /// <summary>A member edit as it is about to be stored: what its tenant rows are made from, so they
-/// are written in the same transaction as the row.</summary>
-public sealed record MemberChange(ContainerId Id, string Name, PersistedMember Row, bool PromptChanged);
+/// are written in the same transaction as the row. <paramref name="Renamed"/> is whether what the
+/// member is called changed, not whether a name was sent.</summary>
+public sealed record MemberChange(ContainerId Id, string Name, PersistedMember Row, bool PromptChanged, bool Renamed);
 
 /// <summary>One repository's contributor settings as a screen sees them. See <see cref="RepoContributor"/>.</summary>
 public sealed record TeamRepoContributor(
@@ -3010,12 +3011,21 @@ public sealed class TeamRegistry(
             SystemPromptSetBy = promptChanged ? promptSetBy : member.SystemPromptSetBy,
         };
 
-        if (audit is not null)
+        // A NAME SENT IS NOT A RENAME. The Member settings dialog sends the name on every save, and
+        // a save that changes nothing - the same name, the same words, the same Agent - writes
+        // nothing: no row, and no `member.changed` claiming a rename that did not happen.
+        var renamed = !string.Equals(trimmedLabel, member.Label, StringComparison.Ordinal);
+
+        var changed = renamed || promptChanged || repointed;
+
+        if (changed && audit is not null)
         {
             await teams.SaveMemberAsync(
-                saved, audit(new MemberChange(container.Id, trimmedLabel ?? container.Id.Name, saved, promptChanged)), ct);
+                saved,
+                audit(new MemberChange(container.Id, trimmedLabel ?? container.Id.Name, saved, promptChanged, renamed)),
+                ct);
         }
-        else
+        else if (changed)
         {
             await teams.SaveMemberAsync(saved, ct);
         }
