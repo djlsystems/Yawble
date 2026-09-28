@@ -2222,16 +2222,17 @@ export interface MemberRun {
   outcome: RunOutcome
   /**
    * What the run reported, for a PLUGIN member's run: its output, or a failure's launch error. A
-   * plugin run has no transcript to open, so this is its record. Null for an agent member's runs,
-   * and absent from an older Host.
+   * plugin run has no transcript to open, so this is its record. Null for an agent member's runs.
    */
-  output?: string | null
+  output: string | null
   /**
    * Why the run was blocked, for a plugin run that blocked every item it was given: such a run
    * wrote no completed or failed row, so it is listed from its last `blocked` row, with `output`
-   * null. Null on every other run, and absent from an older Host.
+   * null. Null on every other run.
    */
-  reason?: string | null
+  reason: string | null
+  /** A run that finished quietly (`quiet: true` on its `completed` row), which woke nobody. */
+  quiet: boolean
 }
 
 /** One page of `GET .../runs`: newest first, and the cursor for the next older page or null. */
