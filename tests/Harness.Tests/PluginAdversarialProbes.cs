@@ -14,11 +14,11 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// B0013 independent verification (card 847, Tester Imogen): adversarial probes of A (quiet runs),
+/// Adversarial probes from the independent verification of quiet runs, the plugin-authoring skill and
 /// C1 (P1-b scan), C2 (R1-c numeric secrets) at the protocol level. A probe that shows a defect is
-/// kept as a Skip naming it, so the suite stays green; see plugin-quiet-skill-verification.md.
+/// kept as a Skip naming it, so the suite stays green.
 /// </summary>
-public sealed class B0013RunnerProbes : IDisposable
+public sealed class PluginRunnerProbes : IDisposable
 {
     private static readonly ContainerId Plug = new("alpha", "plug");
 
@@ -64,8 +64,10 @@ public sealed class B0013RunnerProbes : IDisposable
             ContainerTestBed.Definition(Plug) with { Agent = "plugin:fixture", WorkingDirectory = _dataRoot },
             new MemberRunnerRouter(bed.Runner, plugins), Ct);
 
+        // From a schedule, not a member: a run answering a member's instruction is never quiet
+        // (that member is waiting), and these probes are about what quiet itself does.
         await bed.Store.AppendAsync(new NewMessage(
-            MessageTypes.InstructionFor(Plug), JsonSerializer.Serialize(new { instruction = "hello" }), "alpha/manager"), Ct);
+            MessageTypes.InstructionFor(Plug), JsonSerializer.Serialize(new { instruction = "hello" }), "trigger:poll"), Ct);
 
         Assert.True(await bed.PumpUntilAsync(async () =>
             (await bed.Store.ReadAfterAsync(0, [MessageTypes.Completed, MessageTypes.Failed], 10, Ct)).Count > 0, attempts: 400));
@@ -206,7 +208,7 @@ public sealed class B0013RunnerProbes : IDisposable
 /// <summary>C1 (P1-b): further evasions of the definition scan, run through the scan by reflection,
 /// over the probe AND every method the compiler generated for it, as the real pump scan walks a
 /// whole assembly.</summary>
-public sealed class B0013ScanProbes
+public sealed class PluginScanProbes
 {
     private static IReadOnlyList<string> Violations(string probe)
     {
@@ -217,8 +219,8 @@ public sealed class B0013ScanProbes
         const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
             | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
-        var methods = new List<MethodBase> { typeof(B0013ScanProbes).GetMethod(probe, all)! };
-        foreach (var nested in typeof(B0013ScanProbes).GetNestedTypes(BindingFlags.NonPublic))
+        var methods = new List<MethodBase> { typeof(PluginScanProbes).GetMethod(probe, all)! };
+        foreach (var nested in typeof(PluginScanProbes).GetNestedTypes(BindingFlags.NonPublic))
         {
             methods.AddRange(nested.GetMethods(all));
         }
@@ -273,7 +275,7 @@ public sealed class B0013ScanProbes
 }
 
 /// <summary>A (wakes) and C3 (E5-c listing) on the real Host with the real sample-echo plugin.</summary>
-public sealed class B0013HostProbes : IAsyncLifetime
+public sealed class PluginHostProbes : IAsyncLifetime
 {
     private const string Email = "person@example.test";
     private const string Password = "correct horse battery";
@@ -448,8 +450,13 @@ public sealed class B0013HostProbes : IAsyncLifetime
         Assert.Equal(1, _agents.RunsFor(Dev));
     }
 
+    /// <summary>
+    /// Quiet is for work nobody waits on. A quiet answer to an instruction ANOTHER MEMBER sent (the
+    /// Manager's `tell`) is written without the quiet mark, so the Manager is woken with the answer
+    /// and its workflow does not stay open.
+    /// </summary>
     [Fact]
-    public async Task A_quiet_run_in_a_workflow_the_manager_owns_never_tells_the_manager()
+    public async Task A_quiet_answer_to_the_managers_own_instruction_still_wakes_the_manager()
     {
         // The Manager's workflow: a person tells the Manager; the Manager (simulated) tells Echo in
         // that workflow, and Echo finishes quiet.
@@ -471,19 +478,12 @@ public sealed class B0013HostProbes : IAsyncLifetime
             m => m.Source == Echo.ToString() && m.CorrelationId == mgrDone.CorrelationId, "Echo's quiet completion");
         await SettleAsync(row);
 
-        // Observed: the Manager is not woken for the answer to its own command, and its workflow
-        // stays open. By the letter of A this is intended ("wakes nobody"); see the report, F-A1.
-        await Task.Delay(1000, Ct);
-        await SettleAsync(row);
-        foreach (var i in _agents.Invocations.Where(i => i.Container == Manager))
-        {
-            TestContext.Current.SendDiagnosticMessage("MANAGER PROMPT: " + i.Prompt.Replace("\n", " | "));
-            Console.WriteLine("MANAGER PROMPT: " + i.Prompt.Replace("\n", " | "));
-        }
-
         Assert.True(row.Seq > echoBefore);
-        Assert.Equal(baseline, _agents.RunsFor(Manager));
-        Assert.Contains(mgrDone.CorrelationId, await Log.OpenWorkflowsAmongAsync([mgrDone.CorrelationId], Ct));
+        Assert.DoesNotContain("\"quiet\"", row.Payload, StringComparison.Ordinal);
+
+        // The Manager is woken with the answer to its own instruction.
+        for (var i = 0; i < 100 && _agents.RunsFor(Manager) == baseline; i++) await Task.Delay(100, Ct);
+        Assert.Equal(baseline + 1, _agents.RunsFor(Manager));
     }
 
     // ---------------------------------------------------------------- C3 (E5-c)

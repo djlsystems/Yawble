@@ -336,12 +336,20 @@ public sealed record PluginManifest(
 }
 
 /// <summary>One ordinary configuration field. Flat in v1: string, number or bool.</summary>
+/// <param name="PersonOnly">
+/// <c>"setBy": "person"</c> in the manifest: only a person's hire may set this field to anything but
+/// its default. It is how a plugin that acts outward (sends, posts, pays) keeps its real mode and its
+/// allowlist out of an agent's reach: a Manager's or a Concierge's hire may leave the field at its
+/// default and nothing else, because incoming content that reaches an agent's context must not be
+/// able to widen what the plugin may do.
+/// </param>
 public sealed record PluginConfigField(
     string Type,
     string Description,
     bool Required,
     JsonElement? Default,
-    IReadOnlyList<string>? Enum)
+    IReadOnlyList<string>? Enum,
+    bool PersonOnly = false)
 {
     public static (PluginConfigField? Field, string? Refusal) Parse(string name, JsonElement element)
     {
@@ -369,16 +377,43 @@ public sealed record PluginConfigField(
 
         JsonElement? fallback = element.TryGetProperty("default", out var d) ? d.Clone() : null;
 
+        var personOnly = false;
+
+        if (element.TryGetProperty("setBy", out var setBy))
+        {
+            if (setBy.ValueKind != JsonValueKind.String || setBy.GetString() is not ("person" or "anyone"))
+            {
+                return (null, $"`config.{name}.setBy` must be \"person\" or \"anyone\".");
+            }
+
+            personOnly = setBy.GetString() == "person";
+        }
+
         var field = new PluginConfigField(
             type,
             element.TryGetProperty("description", out var desc) && desc.ValueKind == JsonValueKind.String ? desc.GetString()! : "",
             element.TryGetProperty("required", out var r) && r.ValueKind == JsonValueKind.True,
             fallback,
-            choices);
+            choices,
+            personOnly);
 
         if (fallback is { } value && field.Refusal(name, value) is { } badDefault) return (null, badDefault);
 
         return (field, null);
+    }
+
+    /// <summary>
+    /// Why an agent's hire (a Manager or a Concierge) may not set this field to
+    /// <paramref name="value"/>, or null. Only a <see cref="PersonOnly"/> field refuses, and only a
+    /// value other than its default.
+    /// </summary>
+    public string? AgentRefusal(string name, JsonElement value)
+    {
+        if (!PersonOnly || (Default is { } fallback && JsonElement.DeepEquals(fallback, value))) return null;
+
+        var keep = Default is { } d ? $"leave it at its default ({d.GetRawText()}) or omit it" : "hire this plugin yourself";
+        return $"`{name}` is set by a person only: an agent's hire may {keep}. A person sets it when hiring, "
+            + "in the Add member dialog.";
     }
 
     /// <summary>Why <paramref name="value"/> is not a valid value for this field, or null.</summary>

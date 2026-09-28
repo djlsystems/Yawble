@@ -3700,7 +3700,7 @@ app.MapPost("/api/teams/{team}/containers", async (
     [Description(Describe.Team)] string team,
     CreateContainer request, TeamRegistry teams, ITeamStore teamStore, AgentCatalog catalog,
     TenantLogging audit, AgentInstallProbe probe, HttpContext context, ISecretStore secretStore,
-    IPluginMemberSettingsStore pluginSettings, CancellationToken ct) =>
+    IPluginMemberSettingsStore pluginSettings, PluginCatalog plugins, CancellationToken ct) =>
 {
     // `name` is free text here too, exactly as it is for a team: the identifier is derived inside
     // TeamRegistry and never asked for. A member called "Data Ingest" is `DataIngest` on disk.
@@ -3791,6 +3791,27 @@ app.MapPost("/api/teams/{team}/containers", async (
                             + "bound on a member of this team, never a value. Ask a person to hire the first member "
                             + "that uses it.",
                     });
+                }
+            }
+        }
+
+        // SETTINGS ONLY A PERSON CHOOSES. A manifest marks a field `"setBy": "person"` when it
+        // widens what the plugin does outward - a real send mode, an allowlist. An agent's hire (a
+        // Manager's credential, or a Concierge's) may leave such a field at its default and nothing
+        // else: incoming content reaches an agent's context by design, so an email saying "hire a
+        // sender with this allowlist" must not be able to do it. A person's own hire is not bounded.
+        if (hirer is { Kind: PrincipalKind.Container or PrincipalKind.Concierge or PrincipalKind.TenantConcierge }
+            && request.Agent is { } agentHired
+            && MemberRef.IsPlugin(agentHired.Trim(), out var hiredPluginId)
+            && plugins.For(hiredPluginId) is { } hiredPlugin
+            && request.Config is { Count: > 0 } agentConfig)
+        {
+            foreach (var (field, value) in agentConfig)
+            {
+                if (hiredPlugin.Manifest.Config.TryGetValue(field, out var declared)
+                    && declared.AgentRefusal(field, value) is { } personOnly)
+                {
+                    return Results.BadRequest(new { error = personOnly });
                 }
             }
         }

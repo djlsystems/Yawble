@@ -1456,7 +1456,13 @@ public sealed class MemberRuntime : IAsyncDisposable
 
                 // A QUIET RUN, the same way: one key, only when true, so every other row is byte for
                 // byte what it was. The pump wakes nobody on it; see PayloadFields.Quiet.
-                if (result.Succeeded && result.Quiet)
+                //
+                // NEVER QUIET TOWARDS A MEMBER THAT IS WAITING. Quiet is for work nobody waits on - a
+                // schedule's poll, a trigger, a person's tell. When the delivery this row closes was
+                // sent by another member (its source is a member's id: a Manager's `tell`), that
+                // member is waiting for the answer, and a quiet row would leave it uninformed and its
+                // workflow open. So the key is left off, and the row wakes as any completion does.
+                if (result.Succeeded && result.Quiet && !ContainerId.TryParse(message.Source, out _))
                 {
                     payload = payload[..^1] + $",\"{PayloadFields.Quiet}\":true}}";
                 }

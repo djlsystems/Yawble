@@ -34,6 +34,7 @@ public sealed class PluginManagerHiringTests : IAsyncLifetime
     {
         Directory.CreateDirectory(_dataRoot);
         PluginMemberEndToEndTests.InstallSampleEcho(_dataRoot);
+        MarkAPersonOnlySetting(_dataRoot);
         Environment.SetEnvironmentVariable(TokenKey, "set-by-a-person");
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
@@ -81,6 +82,62 @@ public sealed class PluginManagerHiringTests : IAsyncLifetime
         return new PlatformMcpTools(
             new HttpContextAccessor { HttpContext = context }, Services.GetRequiredService<IPrincipalStore>(),
             Services.GetRequiredService<AgentCatalog>(), new ServerClients(_factory));
+    }
+
+    /// <summary>
+    /// The installed sample gains `live`, a bool that defaults to false and is `"setBy": "person"` -
+    /// the shape an outward-acting plugin's real mode takes (an email plugin's `sendMode`).
+    /// </summary>
+    private static void MarkAPersonOnlySetting(string dataRoot)
+    {
+        var manifestPath = Path.Combine(dataRoot, "plugins", "sample-echo", "0.1.0", "plugin.json");
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(manifestPath))!;
+        manifest["config"]!["live"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["type"] = "bool",
+            ["default"] = false,
+            ["setBy"] = "person",
+            ["description"] = "Act for real rather than in the default safe mode.",
+        };
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+    }
+
+    /// <summary>
+    /// A setting the manifest marks `"setBy": "person"` is out of an agent's reach: a Manager's hire
+    /// may leave it at its default, or omit it, and is refused any other value with a sentence naming
+    /// the field. Incoming content reaches a Manager's context, so it must not be able to widen what an
+    /// outward-acting plugin may do.
+    /// </summary>
+    [Fact]
+    public async Task A_manager_may_not_set_a_person_only_setting_to_anything_but_its_default()
+    {
+        var tools = ManagerTools(await ManagerKeyAsync());
+        var live = new Dictionary<string, JsonElement> { ["live"] = JsonSerializer.SerializeToElement(true) };
+
+        var refused = await tools.Hire("Sender", plugin: "sample-echo", config: live, cancellationToken: Ct);
+        Assert.StartsWith("HTTP 400", refused);
+        Assert.Contains("`live` is set by a person only", refused);
+
+        var host = Services.GetRequiredService<Harness.Containers.ContainerHost>();
+        Assert.Null(host.Find(new ContainerId(_team, "Sender")));
+
+        var atDefault = new Dictionary<string, JsonElement> { ["live"] = JsonSerializer.SerializeToElement(false) };
+        Assert.StartsWith("HTTP 200", await tools.Hire("Drafts", plugin: "sample-echo", config: atDefault, cancellationToken: Ct));
+        Assert.StartsWith("HTTP 200", await tools.Hire("Plain", plugin: "sample-echo", config: Config("reverse"), cancellationToken: Ct));
+    }
+
+    [Fact]
+    public void A_manifest_setting_names_who_sets_it_as_person_or_anyone()
+    {
+        var (personOnly, _) = PluginConfigField.Parse("live", JsonDocument.Parse("""{"type":"bool","default":false,"setBy":"person"}""").RootElement);
+        Assert.True(personOnly!.PersonOnly);
+
+        var (anyone, _) = PluginConfigField.Parse("mode", JsonDocument.Parse("""{"type":"string","setBy":"anyone"}""").RootElement);
+        Assert.False(anyone!.PersonOnly);
+
+        var (none, refusal) = PluginConfigField.Parse("live", JsonDocument.Parse("""{"type":"bool","setBy":"manager"}""").RootElement);
+        Assert.Null(none);
+        Assert.Contains("`config.live.setBy` must be \"person\" or \"anyone\"", refusal);
     }
 
     private static Dictionary<string, JsonElement> Config(string mode) =>

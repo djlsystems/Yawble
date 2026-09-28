@@ -299,7 +299,13 @@ anyone needs to be woken for. It is for a plugin that polls on a schedule: witho
 - **The run is still recorded.** Its `agentContainer.completed` row is written as usual, marked
   `"quiet": true`, and the card, the run history and the feed show it.
 - **Nobody is woken by that row.** The pump passes over every subscriber on it, the same way it
-  passes over a Manager on a `completed` row marked `handedBack`.
+  passes over a Manager on a `completed` row marked `handedBack`. That includes a person's own
+  trigger on the plugin's `completed` rows: a trigger that must see every run should watch the
+  plugin's event instead.
+- **Never quiet towards a member that is waiting.** Quiet is for work nobody waits on: a schedule's
+  poll, a trigger, a person's tell. When the instruction came from another member (a Manager's
+  `tell`), the row is written without the quiet mark and wakes as any completion does, so a Manager
+  that asked `list is:unread` always gets its answer, even an empty one, and its workflow ends.
 - **What quiet does not suppress:**
   - A failure: `ok:false`, a non-zero exit, a timeout or a Stop. A failure is never quiet, whatever
     the record says, and wakes as always.
@@ -310,7 +316,8 @@ anyone needs to be woken for. It is for a plugin that polls on a schedule: witho
   way a non-quiet one does.
 - **Optional.** A plugin that never sends `quiet` behaves exactly as before.
 
-Pinned by `PluginQuietRunTests`.
+Pinned by `PluginQuietRunTests` and
+`PluginHostProbes.A_quiet_answer_to_the_managers_own_instruction_still_wakes_the_manager`.
 
 **Outcome.**
 
@@ -489,8 +496,10 @@ setting below.
   cannot name a recipient outside the list or switch the mode, and a plugin never reads settings
   out of what it fetched. Incoming content (an email body, a web page) is untrusted, and it reaches
   a Manager's context, so a Manager told by that content to send somewhere else must be unable to.
-  A Manager hiring a plugin member is validated like a person's hire, but the team's playbook
-  should leave the real mode and the allowlist to a person.
+  **The platform enforces this:** mark those fields `"setBy": "person"` in the manifest. An
+  agent's hire (a Manager's `member` tool, or a Concierge) may leave such a field at its default or
+  omit it, and is refused any other value with a sentence naming the field; only a person's hire
+  sets it. For mail: `sendMode` (default `draft`) and `sendAllowlist` are both `"setBy": "person"`.
 - **Scope limits are settings too.** Which mailbox rule a watcher follows, which folders a member
   may move mail to, which bucket it may delete from: each is a `config` value, not a choice made
   per command.
