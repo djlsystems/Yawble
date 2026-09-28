@@ -2345,3 +2345,18 @@ export interface PluginHire {
   config: Record<string, PluginSettingValue>
   secrets: Record<string, string>
 }
+
+/**
+ * One of the instance's local repositories, as `GET /api/local-repos` lists it: a bare repository
+ * on the volume that a team names as `reference` (`local:<name>`) in its repository list.
+ */
+export interface LocalRepo {
+  name: string
+  reference: string
+  sizeBytes: number
+  /** Its HEAD. Null when HEAD names no branch. */
+  defaultBranch: string | null
+  lastCommit: { sha: string; subject: string; committedAt: string | null } | null
+  /** Every team whose repositories name it, by id. */
+  teams: string[]
+}

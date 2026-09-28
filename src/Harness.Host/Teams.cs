@@ -370,13 +370,26 @@ public sealed class TeamRegistry(
 
     // What creating a team over the unfinished removal of a deleted team of the same id finishes
     // first. Without one, every existing folder is refused, as it always was.
-    FolderRemoval? removal = null)
+    FolderRemoval? removal = null,
+
+    // The instance's local repositories, for `local:<name>`. Without one, every `local:` entry is
+    // refused, as an unknown name is.
+    LocalRepos? localRepos = null)
 {
     /// <summary>What each role is offered, for the "Available skills" list every prompt carries.
     /// A registry built without one lists the built-ins.</summary>
     private readonly SkillDirectory _skills = skillDirectory ?? new SkillDirectory();
 
     public const string DefaultManagerName = "Manager";
+
+    private bool LocalRepoExists(string name) => localRepos?.Exists(name) == true;
+
+    /// <summary>Every team whose repositories name <c>local:&lt;name&gt;</c>, by id.</summary>
+    public IReadOnlyList<string> TeamsUsingLocalRepo(string name) =>
+        [.. All().Where(t => ReposFor(t.Id).Any(url =>
+                LocalRepos.IsLocal(url) && string.Equals(LocalRepos.NameOf(url), name, StringComparison.Ordinal)))
+            .Select(t => t.Id)
+            .Order(StringComparer.OrdinalIgnoreCase)];
 
     public event Action<TeamSummary>? TeamChanged;
 
@@ -1666,7 +1679,7 @@ public sealed class TeamRegistry(
         IReadOnlyDictionary<string, string>? upstreams = null)
     {
         var trimmed = label.Trim();
-        var validatedRepos = RepoUrls.Validate(repos);
+        var validatedRepos = RepoUrls.Validate(repos, LocalRepoExists);
 
         // Each repository's upstream, keyed by its URL in `repos`, checked BEFORE anything is
         // created. The team name is not known yet, so the rows are finished below.
@@ -2247,7 +2260,7 @@ public sealed class TeamRegistry(
     public async Task SetReposAsync(string team, IReadOnlyList<string>? repos, CancellationToken ct = default)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
-        var validated = RepoUrls.Validate(repos);
+        var validated = RepoUrls.Validate(repos, LocalRepoExists);
         var current = _repos.GetValueOrDefault(stored) ?? [];
 
         if (current.SequenceEqual(validated, StringComparer.Ordinal))

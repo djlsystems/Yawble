@@ -23,6 +23,11 @@
 # are kept, and group write, other and setuid/setgid are taken away. An agent that could write here
 # could replace the program a plugin member runs, or ask the host to rescan. It is created when
 # missing, so the operator CLI's `plugin install` has somewhere to copy to.
+# repos holds the instance's local repositories, bare, one <name>.git each. It is the host's and
+# readable by agent, never writable by it: harness:agent all the way down, directories 2750 (setgid,
+# so a directory git adds later is still the group's), files lose group write, other and
+# setuid/setgid and gain group read; the owner's bits git chose (objects are 0444) are kept. Agents
+# never push: the host publishes into these as itself. It is created when missing.
 # Every other top-level entry - teams, documents, agent-home, npm-global, bin, the tool caches, the
 # Concierge's workspaces - is agent:agent, with directories group-writable and setgid and files
 # group read-write, so what the host creates there (it runs with umask 0007) stays in group agent
@@ -95,6 +100,12 @@ own_plugins() { # path
   find "$1" ! -type d ! -type l ! -name '.rescan*' \( -perm /6027 -o ! -perm -640 \) -print -exec chmod u+rw,g+r,g-w,o=,ug-s {} +
 }
 
+own_repos() { # path
+  set_owner "$1" "$host_uid" "$agent_gid"
+  find "$1" -type d ! -perm 2750 -print -exec chmod u=rwx,g=rxs,o=,u-s {} +
+  find "$1" ! -type d ! -type l \( -perm /6027 -o ! -perm -040 \) -print -exec chmod g+r,g-w,o=,ug-s {} +
+}
+
 own_agent() { # path
   set_owner "$1" "$agent_uid" "$agent_gid"
   if [ "$1" = "$root/agent-home" ]; then own_agent_home "$1"; return; fi
@@ -148,12 +159,14 @@ ownership() {
       [ "$(stat -c '%a' "$root")" = 750 ] || { chmod u=rwx,g=rx,o=,ug-s "$root"; echo "$root"; }
 
       [ -e "$root/plugins" ] || [ -L "$root/plugins" ] || { mkdir "$root/plugins"; echo "$root/plugins"; }
+      [ -e "$root/repos" ] || [ -L "$root/repos" ] || { mkdir "$root/repos"; echo "$root/repos"; }
 
       for path in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         [ -e "$path" ] || [ -L "$path" ] || continue
         name=$(basename "$path")
         if is_host_entry "$name"; then own_host "$path"
         elif [ "$name" = plugins ]; then own_plugins "$path"
+        elif [ "$name" = repos ]; then own_repos "$path"
         else own_agent "$path"; fi
       done
 

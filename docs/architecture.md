@@ -39,7 +39,8 @@ The product name, Yawble, lives in the web app's presentation layer
   reserved slot so a pool full of members cannot starve it.
 - **Repositories.** Each team clones its repositories under `repos/<Repo>/main` and every card gets
   its own git worktree. Fetch, merge, push and pull requests are a person's actions in the Git
-  dialog; agents branch and commit only.
+  dialog; agents branch and commit only. A repository can also be a local one kept on the
+  instance, named `local:<name>`; see [local-repositories.md](local-repositories.md).
 
 ## Data
 

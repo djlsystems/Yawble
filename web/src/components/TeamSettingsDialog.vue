@@ -26,6 +26,7 @@ import {
   envNameRules,
   envValue,
   firstProblem,
+  isLocalRepoReference,
   optional,
   parseEnvLines,
   repoFolderName,
@@ -53,6 +54,7 @@ import {
 import AddMemberDialog from './AddMemberDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import ForkItForMe from './ForkItForMe.vue';
+import LocalRepoPicker from './LocalRepoPicker.vue';
 import type { ForkResult } from '../api/types';
 
 /**
@@ -307,6 +309,16 @@ function addFork(fork: ForkResult) {
   if (!repos.value.includes(fork.forkUrl)) repos.value = [...repos.value, fork.forkUrl];
   pendingForks.value = { ...pendingForks.value, [fork.forkUrl]: fork };
 }
+
+/** A local repository, created or picked beside the URL field, joins the list as `local:<name>`. */
+function attachLocal(reference: string) {
+  const folder = repoFolderName(reference)?.toLowerCase();
+  if (repos.value.some((entry) => repoFolderName(entry)?.toLowerCase() === folder)) return;
+  repos.value = [...repos.value, reference];
+}
+
+/** Whether a saved repository is one of the instance's local repositories. */
+const isLocalRepo = (repo: string) => isLocalRepoReference(originUrlFor(repo) ?? '');
 
 function moveRepo(index: number, direction: -1 | 1) {
   const target = index + direction;
@@ -1062,6 +1074,8 @@ watch(open, (showing) => {
 
             <ForkItForMe @forked="addFork" />
 
+            <LocalRepoPicker :attached="repos" @attach="attachLocal" />
+
             <q-list v-if="repos.length > 0" bordered separator class="q-mt-sm">
               <!-- Keyed by POSITION: keyed by the URL, every keystroke in a row would remount it and
                    drop the focus. Each row is a field with its own rules, duplicates included, so a
@@ -1168,7 +1182,11 @@ watch(open, (showing) => {
                 <q-item v-for="{ entry, draft } in contributorRows" :key="entry.repo">
                   <q-item-section>
                     <q-item-label class="mono">{{ entry.repo }}</q-item-label>
+                    <q-item-label v-if="isLocalRepo(entry.repo)" caption>
+                      A local repository on this instance: contributor mode and pull requests do not apply.
+                    </q-item-label>
                     <q-input
+                      v-else
                       v-model="draft.upstreamUrl"
                       class="mono"
                       dense

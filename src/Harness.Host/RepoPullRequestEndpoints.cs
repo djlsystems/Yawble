@@ -83,9 +83,15 @@ public static partial class RepoEndpoints
             return Results.NotFound(new { error = $"No team '{team}'." });
         }
 
-        if (!teams.ReposFor(stored).Any(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase)))
+        var draftUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
+        if (draftUrl is null)
         {
             return Results.NotFound(new { error = $"No repo '{repo}' on team '{team}'." });
+        }
+
+        if (LocalRepos.IsLocal(draftUrl))
+        {
+            return Results.Conflict(new { error = LocalRepoSentences.NoPullRequest(RepoUrls.DeriveName(draftUrl)) });
         }
 
         return Results.Ok(await PullRequestDraft.ComposeAsync(teams, backlog, messages, stored, ct));
@@ -129,6 +135,11 @@ public static partial class RepoEndpoints
             await log.WriteAsync(userId, email, TenantActions.RepoPullRequestOpen, $"{stored}/{name}", null,
                 JsonSerializer.Serialize(new { refused = true, reason = error, extra }), ct);
             return Results.Json(new { error, detail = extra }, statusCode: status);
+        }
+
+        if (LocalRepos.IsLocal(repoUrl))
+        {
+            return await RefuseAsync(LocalRepoSentences.NoPullRequest(name));
         }
 
         var contributor = teams.ContributorFor(stored, name);

@@ -78,6 +78,11 @@ public static partial class ContributorSettings
         var upstream = string.IsNullOrWhiteSpace(upstreamUrl) ? null : upstreamUrl.Trim();
         string? owner = null;
 
+        if (upstream is not null && LocalRepos.IsLocal(originUrl))
+        {
+            throw new ArgumentException(LocalRepoSentences.NoContributorMode(repo));
+        }
+
         if (upstream is not null)
         {
             if (!Uri.TryCreate(upstream, UriKind.Absolute, out var uri)

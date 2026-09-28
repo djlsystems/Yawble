@@ -1,29 +1,34 @@
 # Local repositories
 
-A local repository is a git repository that lives only on the instance. There is no hosting service behind it: no GitHub account, no token, nothing leaves the computer. Use one for work that should stay on the operator's machine, such as a plugin that is not ready to share, an experiment, or when there is no hosting account at all.
+A local repository is a git repository kept on the instance, with no hosting service behind it: no GitHub account, no token, nothing leaves the computer. Use one for work that should stay on the operator's machine: a plugin that is not ready to share, an experiment, or an instance with no GitHub account.
 
 ## What one is
 
-Each local repository is a bare git repository on the data volume, at `<dataRoot>/repos/<name>.git` (`/data/repos/<name>.git` in the container). The Host owns it. Agents can read it through their team's clone but can never write to it directly: as with a remote, agents commit in their worktrees and the platform does the pushing.
+Each local repository is a bare git repository on the data volume, at `<dataRoot>/repos/<name>.git` (`/data/repos/<name>.git` in the container). It is owned by the Host's user (`harness`), readable by the `agent` group and never writable by it. Agents can clone and fetch from it but never push: as with a remote, agents commit in their worktrees, and when a person pushes or merges, or the platform publishes a card, the Host fetches the commits into the bare repository as itself. Pushes are never forced. The entrypoint (`scripts/prepare-volume.sh`) creates `repos` when it is missing and resets these owners and modes on every start.
 
-A new local repository starts with the default branch `main` and one empty first commit, so a team can clone it and branch from it straight away.
+A new local repository starts on `main` with one empty commit, so a team can clone and branch from it at once.
 
 ## `local:<name>`
 
-A team refers to a local repository as `local:<name>`, anywhere a repository URL is accepted: New Team, Team settings → repositories, and the `repo` tools. `local:` is a reference scheme, not a path. You never type a folder. The name follows the same rules as a repository folder name: it cannot be empty, contain `/`, or be `.`, `..` or `.git`. An illegal name, or one the instance does not have, is refused and named.
+A team refers to a local repository as `local:<name>`, anywhere a repository URL is accepted: the URL field in New Team and Team settings, `PUT /api/teams/{team}/repos`, `POST /api/teams`, and the `repo` tools. `local:` is a reference, not a path: the Host finds the repository by name, and no path from a request reaches the filesystem. You never type a folder.
 
-After that, the team works on it as it would on any repository, with the bare repository as `origin`. Its clone, a worktree per card, Fetch, Bring current, Rebase, Push, Merge to main, Delete remote branch and the stored default branch all behave as they do for a remote. The default branch is read from the repository, never assumed.
+The name is 1 to 100 letters, digits, `.`, `_` or `-`, starting with a letter or digit, and not ending in `.git` or `.lock`. A name that is not legal, or names no local repository, is refused with a sentence naming it.
+
+## Working on one
+
+The team's clone uses the local repository as `origin`. Fetch, Bring current, Rebase, Push, Merge to main and Delete remote branch in the Git dialog work as they do for a remote. The default branch is read from the local repository's `HEAD` and stored, as for a remote; it is never assumed.
 
 ## Creating, attaching and deleting (people only)
 
-All of these are for people signed in to the web app. A Manager or any other agent cannot create or delete a local repository.
+All of these are for a person signed in to the web app. The routes (`GET`/`POST /api/local-repos`, `DELETE /api/local-repos/{name}`) refuse a Manager or member credential, and agents get no tool for them.
 
-- **Create.** New Team and Team settings have **Create a local repository** beside the URL field. Give it a name; it is checked like a repository folder name.
-- **Attach.** The same places list the existing local repositories. Choose one to attach it to the team as `local:<name>`. Several teams can use the same one.
-- **See them all.** **Admin → Repositories** lists each local repository with its name, size, default branch, last commit, and the teams using it.
-- **Delete.** Also in Admin → Repositories. Delete is refused while any team uses the repository, and it asks before deleting.
+- **Create.** In **New Team** or **Team settings → GitHub Repos**, type a name in **Create a local repository**, beside the URL field, and press **Create**. The name is checked as the Host checks it. The new repository joins the team's list as `local:<name>`.
+- **Attach.** Under the same field, **Local repositories:** shows a chip for each one the instance has. Click one to attach it; one already in the team's list is shown as attached. Several teams can use the same local repository.
+- **No upstream.** A local repository has no upstream field. In Team settings its row says "A local repository on this instance: contributor mode and pull requests do not apply."
+- **See them all.** **Admin → Repositories** lists each local repository: its name, size on disk, default branch, last commit and the teams using it.
+- **Delete.** Also in Admin → Repositories. **Delete** asks first ("Delete <name>?"; it cannot be undone). It is refused while any team's repository list names the repository, and the refusal names those teams.
 
-Creating and deleting are both recorded in the instance's event log.
+Creating and deleting a local repository each append a row to the tenant log (`local-repo.created`, `local-repo.deleted`).
 
 ## Getting the code out
 
@@ -36,16 +41,19 @@ yawble repo clone my-plugin                   # into ./my-plugin
 yawble repo clone my-plugin ~/code/my-plugin  # into a folder you name
 ```
 
+`repo list` does not show which teams use each repository; Admin → Repositories does.
+
 `repo clone` copies `<dataRoot>/repos/<name>.git` out of the instance through the container engine, then clones it on your computer. It works the same with Podman and with Docker.
 
 - The folder must not already exist. If it does, `clone` refuses and leaves it untouched.
+- An illegal name, or one the instance does not have, is refused and named; for an unknown name it lists the names the instance has.
 - Every branch on the instance becomes a local branch in the clone (`main`, and each `team/<team>` branch). The default branch is checked out.
 - The clone has **no remote**. Pushing back from your computer to the instance is not supported. To take newer work, run `repo clone` again into a new folder.
 
 ## What does not apply
 
-- **Pull requests.** A local repository has no hosting service, so there is nothing to open a pull request on. The pull request actions say so rather than failing. Merge to main is how work lands.
-- **Contributor mode.** Upstreams, forks, "Fork it for me" and DCO sign-off with a pull request all belong to hosted repositories. For a local repository, contributor mode says it does not apply. `GH_TOKEN` is never involved.
+- **Pull requests.** A local repository has no hosting service, so there is nothing to open a pull request on. Asking for one answers a sentence saying so. Merge to main is how work lands.
+- **Contributor mode.** Upstreams, forks and pull requests belong to hosted repositories. A local repository has no upstream field, and asking for contributor mode answers a sentence saying it does not apply. `GH_TOKEN` is never used.
 - **Access from outside.** Nothing outside the instance can reach a local repository over the network, and nothing outside can push into it. The CLI's copy-out is the only way out.
 - **Publishing later** to a hosted service (adding a remote and pushing every branch) is not built yet.
 

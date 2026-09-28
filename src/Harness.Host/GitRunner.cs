@@ -44,6 +44,7 @@ public sealed class GitRunner
     private readonly string _gitExecutable;
     private readonly AgentLaunchUser? _runAs;
     private readonly Func<string, IReadOnlyList<string>>? _remotesFor;
+    private readonly Func<string, string?>? _localOriginFor;
     private readonly int _timeoutSeconds;
     private readonly int _cloneTimeoutSeconds;
     private readonly Dictionary<string, SemaphoreSlim> _locksByPath = new(StringComparer.OrdinalIgnoreCase);
@@ -75,13 +76,18 @@ public sealed class GitRunner
     /// <param name="runAs">Who git runs as; see the class comment. Null runs it as the Host.</param>
     /// <param name="remotesFor">The remotes the Host has on record for the team a clone path
     /// belongs to. Decides whether a fetch or push gets <c>GH_TOKEN</c>. Null: never.</param>
+    /// <param name="localOriginFor">The bare repository a clone path's origin is, by the Host's
+    /// record, when that origin is a local repository (<see cref="LocalRepos"/>); null otherwise.
+    /// Decides that a push goes into it as the Host rather than as the agent. Null: never.</param>
     public GitRunner(
         string gitExecutable = "git", int timeoutSeconds = 30, int cloneTimeoutSeconds = 600,
-        AgentLaunchUser? runAs = null, Func<string, IReadOnlyList<string>>? remotesFor = null)
+        AgentLaunchUser? runAs = null, Func<string, IReadOnlyList<string>>? remotesFor = null,
+        Func<string, string?>? localOriginFor = null)
     {
         _gitExecutable = gitExecutable;
         _runAs = runAs;
         _remotesFor = remotesFor;
+        _localOriginFor = localOriginFor;
         _timeoutSeconds = timeoutSeconds;
         _cloneTimeoutSeconds = cloneTimeoutSeconds;
     }
@@ -199,14 +205,23 @@ public sealed class GitRunner
     /// a whole history over a network. Thirty seconds is right for a `fetch` and would fail this on
     /// any repository worth cloning.
     /// </summary>
+    ///
+    /// <para>
+    /// <paramref name="noLocal"/> for a local repository's folder: <c>--no-local</c> makes git copy
+    /// through its transport instead of hard-linking the bare repository's object files into the
+    /// agent's clone, where a later ownership pass over the team's folder would hand those shared
+    /// inodes - the Host's objects - to the agent.
+    /// </para>
+    /// </summary>
     public async Task<GitInvocation> CloneAsync(
-        string parentPath, string url, string leafName, CancellationToken ct = default)
+        string parentPath, string url, string leafName, CancellationToken ct = default, bool noLocal = false)
     {
         using var semaphore = await AcquireSemaphoreAsync(Path.Combine(parentPath, leafName));
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(_cloneTimeoutSeconds));
 
-        return await ExecuteGitAsync(parentPath, ["clone", url, leafName], cts.Token);
+        return await ExecuteGitAsync(
+            parentPath, noLocal ? ["clone", "--no-local", "--", url, leafName] : ["clone", url, leafName], cts.Token);
     }
 
     public async Task<GitInvocation> FetchAsync(string clonePath, CancellationToken ct = default)
@@ -356,6 +371,11 @@ public sealed class GitRunner
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
 
+        if (_localOriginFor?.Invoke(clonePath) is { } bare)
+        {
+            return await PushIntoLocalAsync(clonePath, bare, @ref, @ref, cts.Token);
+        }
+
         return await ExecuteGitAsync(clonePath, ["push", "origin", @ref], cts.Token);
     }
 
@@ -370,8 +390,158 @@ public sealed class GitRunner
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
 
+        if (_localOriginFor?.Invoke(clonePath) is { } bare)
+        {
+            return await PushIntoLocalAsync(clonePath, bare, source, destination, cts.Token);
+        }
+
         return await ExecuteGitAsync(clonePath, ["push", "origin", $"{source}:{destination}"], cts.Token);
     }
+
+    /// <summary>
+    /// A PUSH TO A LOCAL ORIGIN, made by the Host from the bare repository's side.
+    ///
+    /// <para>
+    /// The bare repository is the Host's and never writable by the agent, and every other git here
+    /// runs as the agent - so <c>git push</c> could not write it, and making it writable would let
+    /// any agent push. Instead the commit is resolved in the clone (as the agent), and the Host, as
+    /// itself with no capability and no global config, FETCHES it into the bare repository:
+    /// <c>git fetch --no-tags &lt;clone&gt; &lt;sha&gt;:refs/heads/&lt;branch&gt;</c>. Without a <c>+</c> the fetch
+    /// refuses anything that is not a fast-forward - <c>! [rejected] … (non-fast-forward)</c>, as a
+    /// push would say - so nothing is ever forced. A delete is <c>update-ref -d</c> against the
+    /// value it was read at. Then the clone's <c>refs/remotes/origin/&lt;branch&gt;</c> is moved as a
+    /// push would move it. It returns only once the bare repository holds the branch, so the
+    /// push-then-record ordering (<c>PublishOrderTests</c>) holds as it does for a remote.
+    /// </para>
+    ///
+    /// <para>
+    /// The clone's side of that fetch is <c>git upload-pack</c> running in the agent's clone as the
+    /// Host. upload-pack is the half of git built to serve an untrusted repository, the hardening
+    /// flags reach it through the environment, and the only config it honours for a command
+    /// (<c>uploadpack.packObjectsHook</c>) is read from system and command-line config only.
+    /// </para>
+    /// </summary>
+    private async Task<GitInvocation> PushIntoLocalAsync(
+        string clonePath, string bare, string source, string destination, CancellationToken ct)
+    {
+        var target = destination.StartsWith("refs/", StringComparison.Ordinal) ? destination : "refs/heads/" + destination;
+        var branch = target.StartsWith("refs/heads/", StringComparison.Ordinal) ? target["refs/heads/".Length..] : null;
+        if (branch is null || !BranchNames.IsValid(branch))
+        {
+            return new GitInvocation(1, string.Empty, $"error: '{destination}' is not a branch; only branches are published to a local repository.");
+        }
+
+        var tracking = $"refs/remotes/{ContributorRemotes.Origin}/{branch}";
+        using var bareLock = await AcquireSemaphoreAsync(bare);
+
+        if (source.Length == 0)
+        {
+            var had = await ExecuteGitAsync(bare, ["rev-parse", "--verify", "--quiet", target], ct, asHost: true);
+            if (had.ExitCode != 0)
+            {
+                return new GitInvocation(
+                    1, string.Empty,
+                    $"error: unable to delete '{branch}': remote ref does not exist\nerror: failed to push some refs to '{bare}'\n");
+            }
+
+            var deleted = await ExecuteGitAsync(bare, ["update-ref", "-d", target, had.Stdout.Trim()], ct, asHost: true);
+            if (deleted.ExitCode != 0) return deleted;
+
+            await ExecuteGitAsync(clonePath, ["update-ref", "-d", tracking], ct);
+            return new GitInvocation(0, string.Empty, $"To {bare}\n - [deleted]         {branch}\n");
+        }
+
+        var resolved = await ExecuteGitAsync(clonePath, ["rev-parse", "--verify", "--quiet", "--end-of-options", source + "^{commit}"], ct);
+        if (resolved.ExitCode != 0)
+        {
+            return new GitInvocation(
+                1, string.Empty, $"error: src refspec {source} does not match any\nerror: failed to push some refs to '{bare}'\n");
+        }
+
+        var sha = resolved.Stdout.Trim();
+        var fetched = await ExecuteGitAsync(
+            bare,
+            ["fetch", "--no-tags", "--no-write-fetch-head", "--", Path.GetFullPath(clonePath), $"{sha}:{target}"],
+            ct, asHost: true);
+        if (fetched.ExitCode != 0) return fetched;
+
+        await ExecuteGitAsync(clonePath, ["update-ref", tracking, sha], ct);
+        return fetched;
+    }
+
+    /// <summary>
+    /// Makes a new bare repository at <paramref name="path"/> (inside <paramref name="root"/>),
+    /// readable by the agent's group and never writable by it (<c>--shared=0640</c>), whose HEAD is
+    /// <paramref name="branch"/> and which holds one empty commit on it. As the Host. Answers null,
+    /// or git's first line when it refused.
+    /// </summary>
+    public async Task<string?> CreateLocalRepositoryAsync(
+        string root, string path, string branch, CancellationToken ct = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
+
+        var init = await ExecuteGitAsync(
+            root, ["init", "--quiet", "--bare", "--shared=0640", "-b", branch, "--", path], cts.Token, asHost: true);
+        if (init.ExitCode != 0) return FirstLineOf(init);
+
+        // The empty tree is known to every git without being stored.
+        var commit = await ExecuteGitAsync(
+            path, ["commit-tree", "-m", "Initial commit", EmptyTree], cts.Token, asHost: true,
+            environment: new Dictionary<string, string>
+            {
+                ["GIT_AUTHOR_NAME"] = PlatformIdentity, ["GIT_AUTHOR_EMAIL"] = PlatformEmail,
+                ["GIT_COMMITTER_NAME"] = PlatformIdentity, ["GIT_COMMITTER_EMAIL"] = PlatformEmail,
+            });
+        if (commit.ExitCode != 0) return FirstLineOf(commit);
+
+        var update = await ExecuteGitAsync(
+            path, ["update-ref", $"refs/heads/{branch}", commit.Stdout.Trim(), ""], cts.Token, asHost: true);
+        return update.ExitCode != 0 ? FirstLineOf(update) : null;
+    }
+
+    /// <summary>The branch a local repository's HEAD names, as the Host reads it; null when it names
+    /// none git would take.</summary>
+    public async Task<string?> ReadLocalRepositoryHeadAsync(string path, CancellationToken ct = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
+
+        var head = await ExecuteGitAsync(path, ["symbolic-ref", "--quiet", "HEAD"], cts.Token, asHost: true);
+        var target = head.Stdout.Trim();
+        if (head.ExitCode != 0 || !target.StartsWith("refs/heads/", StringComparison.Ordinal)) return null;
+
+        var branch = target["refs/heads/".Length..];
+        return BranchNames.IsValid(branch) ? branch : null;
+    }
+
+    /// <summary>The newest commit on <paramref name="branch"/> in a local repository; null when it
+    /// has none.</summary>
+    public async Task<LocalRepoCommit?> ReadLocalRepositoryTipAsync(
+        string path, string branch, CancellationToken ct = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
+
+        var log = await ExecuteGitAsync(
+            path, ["log", "-1", "--format=%H%x1f%cI%x1f%s", $"refs/heads/{branch}", "--"], cts.Token, asHost: true);
+        var parts = log.Stdout.TrimEnd('\r', '\n').Split('\u001f');
+        if (log.ExitCode != 0 || parts.Length != 3) return null;
+
+        return new LocalRepoCommit(
+            parts[0], parts[2],
+            DateTimeOffset.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var at) ? at : null);
+    }
+
+    private const string EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    private const string PlatformIdentity = "Platform";
+    private const string PlatformEmail = "platform@localhost";
+
+    private static string FirstLineOf(GitInvocation run) =>
+        (run.Stderr + "\n" + run.Stdout)
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? "git failed and said nothing.";
 
     /// <summary>
     /// Every LOCAL branch in this clone, by short name, in git's own ref order.
@@ -688,7 +858,12 @@ public sealed class GitRunner
         return worktrees;
     }
 
-    private async Task<GitInvocation> ExecuteGitAsync(string clonePath, IReadOnlyList<string> args, CancellationToken ct)
+    /// <param name="asHost">Run as the Host itself - for the Host's own bare repositories only
+    /// (<see cref="LocalRepos"/>) - with every capability cleared and no global config, which lives
+    /// in the agent's HOME.</param>
+    private async Task<GitInvocation> ExecuteGitAsync(
+        string clonePath, IReadOnlyList<string> args, CancellationToken ct,
+        bool asHost = false, IReadOnlyDictionary<string, string>? environment = null)
     {
         // THE HEARTBEAT, AT THE ONE PLACE EVERY OPERATION ON THIS CLASS FUNNELS THROUGH. See
         // `Activity`. Ticked on the way in and, in the `finally`, on every way out - including the
@@ -718,7 +893,7 @@ public sealed class GitRunner
                     + $"({string.Join(", ", SystemCommand.Directories)}). Install git there, or set GitExecutable to its full path.");
             }
 
-            var prefix = _runAs?.Prefix ?? [];
+            var prefix = asHost ? _runAs?.HostPrefix ?? [] : _runAs?.Prefix ?? [];
             var start = new ProcessStartInfo(prefix.Count > 0 ? prefix[0] : executable)
             {
                 WorkingDirectory = clonePath,
@@ -741,7 +916,16 @@ public sealed class GitRunner
             // No provider key, and GitHub's only where the Host itself says this is a GitHub team.
             foreach (var variable in AgentEnvironment.ProviderVariables) start.Environment.Remove(variable);
             start.Environment.Remove(AgentEnvironment.GitHubVariable);
-            if (GitHubTokenFor(clonePath, args) is { } token) start.Environment[AgentEnvironment.GitHubVariable] = token;
+            if (!asHost && GitHubTokenFor(clonePath, args) is { } token) start.Environment[AgentEnvironment.GitHubVariable] = token;
+
+            if (asHost)
+            {
+                // The global config is the agent's (the shared HOME): the Host reads none of it.
+                start.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null";
+                foreach (var variable in new[] { "XDG_CONFIG_HOME", "GIT_DIR", "GIT_WORK_TREE" }) start.Environment.Remove(variable);
+            }
+
+            foreach (var (key, value) in environment ?? new Dictionary<string, string>()) start.Environment[key] = value;
 
             // A MISSING GIT IS A REPORTED OUTCOME, NOT AN EXCEPTION, and this is the whole reason the
             // dashboard can render a prerequisite instead of a stack trace.
@@ -810,8 +994,14 @@ public sealed class GitRunner
     {
         if (args.Count == 0) return null;
 
+        // A local origin is a folder on this volume: GitHub is never asked about it.
+        if (args[0] is not "clone" && _localOriginFor?.Invoke(clonePath) is not null) return null;
+
         return args[0] switch
         {
+            // `--no-local` is passed only for a local repository's folder (see CloneAsync), which a
+            // name like `github.com.git` must not turn into a GitHub remote.
+            "clone" when args.Contains("--no-local") => null,
             "clone" => AgentEnvironment.GitHubTokenFor([.. args.Skip(1)]),
             // A URL is judged by itself; a remote NAME ("origin") names no host, so it is judged by
             // the team's remotes, as a fetch is - or `repo` refresh is refused by GitHub.
