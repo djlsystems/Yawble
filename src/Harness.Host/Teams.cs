@@ -366,7 +366,11 @@ public sealed class TeamRegistry(
     Func<RepoContributor, string, CancellationToken, Task>? prepareClone = null,
     PluginCatalog? plugins = null,
     IPluginMemberSettingsStore? pluginSettings = null,
-    ISecretStore? secrets = null)
+    ISecretStore? secrets = null,
+
+    // What creating a team over the unfinished removal of a deleted team of the same id finishes
+    // first. Without one, every existing folder is refused, as it always was.
+    FolderRemoval? removal = null)
 {
     /// <summary>What each role is offered, for the "Available skills" list every prompt carries.
     /// A registry built without one lists the built-ins.</summary>
@@ -1879,11 +1883,25 @@ public sealed class TeamRegistry(
         // HARNESS_SHARED.
         var container = TeamPaths.ContainerOf(resolvedRoot ?? paths.DataRoot, team);
 
+        // THE ONE EXISTING FOLDER THAT IS NOT REFUSED: the unfinished removal of a deleted team of
+        // this id, still carrying its marker. Its removal is FINISHED first, the same removal the
+        // deletion ran, so nothing of the dead team is adopted; if it still cannot finish, the
+        // create is refused and names what remains. A folder with no marker, or one nothing
+        // recorded, is refused exactly as before.
         if (Directory.Exists(container))
         {
-            throw new ArgumentException(
-                $"'{container}' already exists. Choose another root, or another team name.",
-                nameof(root));
+            var finished = removal is null ? null : await removal.FinishBeforeCreateAsync(container, team, ct);
+
+            if (finished is not { Complete: true })
+            {
+                throw new ArgumentException(
+                    finished is { Refused: null, Remaining.Count: > 0 }
+                        ? $"'{container}' is the unfinished removal of a deleted team '{team}', and "
+                          + $"{finished.Remaining.Count} path(s) in it still cannot be removed: "
+                          + $"{string.Join(", ", finished.Remaining)}. Retry the removal, or choose another name."
+                        : $"'{container}' already exists. Choose another root, or another team name.",
+                    nameof(root));
+            }
         }
 
         // THE DOCUMENTS FOLDER IS CLAIMED BEFORE THE ROW IS WRITTEN, and that ordering is the

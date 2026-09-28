@@ -7,8 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 
-const { cloneTeam, deleteTeam, getWip, pauseTeam, resumeTeam, notify } = vi.hoisted(() => ({
+const { cloneTeam, deleteTeam, getWip, pauseTeam, resumeTeam, retryRemoval, notify } = vi.hoisted(() => ({
   cloneTeam: vi.fn(),
+  retryRemoval: vi.fn(),
   getWip: vi.fn(),
   deleteTeam: vi.fn(),
   pauseTeam: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getWip,
   pauseTeam,
   resumeTeam,
+  retryRemoval,
 }));
 
 import TeamsView from '../TeamsView.vue';
@@ -165,6 +167,38 @@ describe('the team delete dialog', () => {
     expect(text).toContain('Harness: 2 commits on no remote');
     expect(text).toContain('Type discard alpha to confirm losing those commits');
     expect(button('Delete team').disabled).toBe(true);
+  });
+});
+
+/**
+ * A DELETION THAT COULD NOT REMOVE ITS FOLDER WHOLE names every path still on disk where the delete
+ * was asked for, and retries it from there.
+ */
+describe('an unfinished removal', () => {
+  const root = '/data/teams/alpha';
+  const stuck = `${root}/workspaces/Dev/tmp/a.bin`;
+
+  it('names every remaining path and retries from the dialog until it finishes', async () => {
+    deleteTeam.mockResolvedValue({
+      containers: 0, failures: [`${root}: removal unfinished`], remaining: [stuck], removalUnfinished: root,
+    });
+    retryRemoval
+      .mockResolvedValueOnce({ retried: [{ path: root, finished: false, remaining: [stuck], note: null }] })
+      .mockResolvedValueOnce({ retried: [{ path: root, finished: true, remaining: [], note: null }] });
+    await mountView([aTeam('alpha')]);
+    await click('Delete this team');
+    await click('Delete team');
+
+    expect(cardText('.teams-unfinished-card')).toContain(stuck);
+
+    await click('Retry removal');
+    expect(retryRemoval).toHaveBeenCalledWith(root);
+    expect(cardText('.teams-unfinished-card')).toContain(stuck);
+
+    await click('Retry removal');
+    await flushPromises();
+    expect(retryRemoval).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'positive' }));
   });
 });
 
