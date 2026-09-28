@@ -175,7 +175,8 @@ public sealed partial class ProcessAgentRunner(
             return new AgentResult(
                 -1,
                 string.Empty,
-                $"This member's temporary folder '{MemberTemp.PathFor(invocation.WorkingDirectory)}' could not be "
+                $"This member's temporary folder '{MemberTemp.PathFor(invocation.WorkingDirectory)}', or its link "
+                + $"'{MemberTemp.LinkFor(invocation.WorkingDirectory)}', could not be "
                 + "created, so this member was not started. Check that its workspace can be written.");
         }
 

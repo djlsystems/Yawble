@@ -220,9 +220,13 @@ public sealed class AgentEnvironmentTests : IDisposable
             [new AgentDefinition("grok", AgentMode.Headless, new AgentLaunch("grok", []))]);
         var runner = new ProcessAgentRunner(catalog, new RunHeartbeat());
 
+        // A workspace path as long as a real team's, well past what a socket path can hold once a
+        // tool puts its pipe in TMPDIR.
+        var workspaces = Path.Combine(_directory, "teams", "a-team-with-a-long-descriptive-name", "workspaces");
+
         async Task<string> TmpdirOf(string member)
         {
-            var workspace = Path.Combine(_directory, "workspaces", member);
+            var workspace = Path.Combine(workspaces, member);
             Directory.CreateDirectory(workspace);
             var result = await runner.RunAsync(
                 new AgentInvocation(
@@ -233,15 +237,28 @@ public sealed class AgentEnvironmentTests : IDisposable
             Assert.Equal(0, result.ExitCode);
             var tmpdir = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Single(line => line.StartsWith("TMPDIR=", StringComparison.Ordinal))["TMPDIR=".Length..];
+            var folder = Path.Combine(workspace, MemberTemp.FolderName);
 
-            Assert.Equal(Path.Combine(workspace, MemberTemp.FolderName), tmpdir);
-            Assert.True(Directory.Exists(tmpdir), $"{tmpdir} was not created");
-            if (!OperatingSystem.IsWindows())
+            Assert.True(Directory.Exists(folder), $"{folder} was not created");
+            if (OperatingSystem.IsWindows())
             {
-                Assert.Equal(
-                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-                    File.GetUnixFileMode(tmpdir) & (UnixFileMode)0x1FF);
+                Assert.Equal(folder, tmpdir);
+                return tmpdir;
             }
+
+            // What the child writes lands in its workspace, however TMPDIR is spelled.
+            Assert.Equal(folder, new DirectoryInfo(tmpdir).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? tmpdir);
+            Assert.Equal(
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                File.GetUnixFileMode(folder) & (UnixFileMode)0x1FF);
+
+            // The .NET runtime's named pipes, which test platforms, build servers and compilers
+            // use, are Unix sockets at TMPDIR/CoreFxPipe_<name>, and a socket path holds 103 bytes.
+            // A 64-character pipe name is longer than any of theirs.
+            var socket = Path.Combine(tmpdir, "CoreFxPipe_" + new string('p', 64));
+            Assert.True(
+                System.Text.Encoding.UTF8.GetByteCount(socket) <= 103,
+                $"'{socket}' is {System.Text.Encoding.UTF8.GetByteCount(socket)} bytes, over a socket path's 103");
 
             return tmpdir;
         }
@@ -251,6 +268,11 @@ public sealed class AgentEnvironmentTests : IDisposable
 
         Assert.NotEqual(rowan, tomas);
         Assert.Equal(rowan, await TmpdirOf("DeveloperRowan"));
+
+        foreach (var member in new[] { "DeveloperRowan", "DeveloperTomas" })
+        {
+            MemberTemp.Forget(Path.Combine(workspaces, member));
+        }
     }
 
     /// <summary>What the platform itself sets, spelled exactly. Any other HARNESS_ key, in any

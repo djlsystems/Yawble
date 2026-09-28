@@ -57,10 +57,15 @@ The product name, Yawble, lives in the web app's presentation layer
 - A headless agent receives only its own provider's API key (plus `GH_TOKEN` when its team has a
   GitHub remote). A member's platform key is passed in its environment and referenced, not
   written, in the MCP config files the launcher creates.
-- A member's temporary files go in `.tmp` inside its own workspace: every headless run is started
-  with `TMPDIR` pointing there. The launch creates the folder on first use, as the agent and
-  owner-only, so no two members share one and none shares the Host's `/tmp`. The Concierge and
-  the Host's own temporary files (prompt files, MCP configs) are unchanged.
+- A member's temporary files go in `.tmp` inside its own workspace. Every headless run is started
+  with `TMPDIR` set to a short link to that folder, `/tmp/member-<hash of the workspace path>`, so
+  what the child writes lands in its workspace. The launch creates the folder and the link on
+  first use, as the agent, and the folder is owner-only, so no two members share one and none
+  shares the Host's `/tmp`. The link is there because tools put Unix sockets in `TMPDIR` (the .NET
+  runtime's named pipes, used by the test platform, build servers and the compiler server) and a
+  socket path holds only 103 bytes, which `<workspace>/.tmp` can use up on its own. No extra
+  variable is needed to run a test suite. On Windows `TMPDIR` is the folder itself. The Concierge
+  and the Host's own temporary files (prompt files, MCP configs) are unchanged.
 - Platform credentials are stored as SHA-256 hashes. Session cookies are signed with an ASP.NET
   Data Protection key ring under `<dataRoot>/keys`.
 - Every response carries `nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: DENY` and a
