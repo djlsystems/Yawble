@@ -40,7 +40,7 @@ import {
   type Team,
 } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
-import { button, field, isDisabled, settle, type } from '../../test/formProbe';
+import { button, field, fieldWrapper, hasError, isDisabled, settle, type } from '../../test/formProbe';
 
 const fields: Record<string, PluginConfigField> = {
   greeting: { type: 'string', description: 'What it says first.', required: false, default: 'hello' },
@@ -297,6 +297,23 @@ describe('MemberSettingsDialog, a plugin member', () => {
     await settle();
 
     expect(bodyFind('.q-banner')?.textContent).toContain("Config field 'greeting' is too long.");
+    expect(updateMember).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+
+  it("shows the Host's sentence on a 409 for a plugin no longer installed, and does not flag the name", async () => {
+    const wrapper = await mountSettings();
+
+    const sentence = "Plugin 'sample-echo' is not installed: its active version 0.2.0 has no folder.";
+    savePluginSettings.mockRejectedValue(Object.assign(new Error(sentence), { status: 409 }));
+    await type('greeting', 'hi');
+    button('Save').click();
+    await settle();
+
+    expect(bodyFind('.q-banner')?.textContent).toContain(sentence);
+    expect(hasError('Member name')).toBe(false);
+    expect(fieldWrapper('Member name').textContent).not.toContain(sentence);
     expect(updateMember).not.toHaveBeenCalled();
 
     wrapper.unmount();

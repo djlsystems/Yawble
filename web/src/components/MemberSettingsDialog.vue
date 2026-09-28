@@ -71,7 +71,7 @@ const name = ref('');
 const nameRules = [memberName];
 const agentRules = [required('Choose an Agent.')];
 
-/** The server's refusal, shown in the dialog, and its status: a 409 is the name already in use. */
+/** The server's refusal, shown in the dialog as the Host worded it, and its status. */
 const error = ref('');
 const errorStatus = ref<number | undefined>(undefined);
 
@@ -257,9 +257,16 @@ watch(open, (showing) => {
 
 const busy = ref(false);
 
+/**
+ * THE NAME IS FLAGGED ONLY WHEN THE NAME WAS THE PROBLEM: a 409 from the member's PATCH on a save
+ * that renamed it, while the field still holds the refused name. A plugin member's settings save
+ * answers 409 too - its plugin is no longer installed - and so may a PATCH that renamed nothing;
+ * neither is about the name, and the banner already carries the Host's sentence.
+ */
 const refusedName = ref<string | null>(null);
 const nameTaken = computed(
-  () => errorStatus.value === 409 && error.value !== '' && refusedName.value === name.value.trim(),
+  () => errorStatus.value === 409 && error.value !== '' && refusedName.value !== null
+    && refusedName.value === name.value.trim(),
 );
 
 const form = ref<QForm | null>(null);
@@ -271,7 +278,10 @@ async function submit() {
   busy.value = true;
   error.value = '';
   errorStatus.value = undefined;
-  refusedName.value = name.value.trim();
+  refusedName.value = null;
+
+  /** The name the PATCH would rename the member to, or null when it keeps its name. */
+  const renamedTo = name.value.trim() !== props.snapshot.name ? name.value.trim() : null;
 
   try {
     // THE SETTINGS FIRST, and only when they moved: the Host validates them as it does a hire, and
@@ -291,7 +301,13 @@ async function submit() {
     // as blank, which clears them.
     if (instructionsChanged.value) body.systemPrompt = instructions.value.trim();
 
-    const updated = await updateMember(props.snapshot.team, props.snapshot.id, body);
+    let updated: ContainerSnapshot;
+    try {
+      updated = await updateMember(props.snapshot.team, props.snapshot.id, body);
+    } catch (cause) {
+      if (refusalStatus(cause) === 409 && renamedTo !== null) refusedName.value = renamedTo;
+      throw cause;
+    }
 
     open.value = false;
 
@@ -311,7 +327,8 @@ async function submit() {
 
     emit('saved', updated);
   } catch (cause) {
-    // In the dialog, with what was typed still in it. A 409 marks the name as well.
+    // In the dialog, in the Host's words, with what was typed still in it. `nameTaken` decides
+    // whether the name field is marked as well.
     error.value = cause instanceof Error ? cause.message : String(cause);
     errorStatus.value = refusalStatus(cause);
   } finally {

@@ -163,6 +163,22 @@ describe('MemberSettingsDialog, mounted', () => {
 
     wrapper.unmount();
   });
+
+  it('does not flag the name on a 409 that is not about the name', async () => {
+    const sentence = 'The member is busy; try again when its run ends.';
+    updateMember.mockRejectedValue(Object.assign(new Error(sentence), { status: 409 }));
+    getMember.mockResolvedValue(detail({ systemPrompt: 'Old.' }));
+    const wrapper = await mountSettings();
+
+    await type('Instructions (optional)', 'New.');
+    button('Save').click();
+    await settle();
+
+    expect(document.body.textContent).toContain(sentence);
+    expect(hasError('Member name')).toBe(false);
+
+    wrapper.unmount();
+  });
 });
 
 const MemberHint =
