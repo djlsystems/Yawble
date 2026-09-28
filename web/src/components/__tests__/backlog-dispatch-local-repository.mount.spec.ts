@@ -168,6 +168,64 @@ describe('Backlog dispatch to a new team: Create a local repository for this tea
   });
 });
 
+describe('Backlog dispatch to a new team: a URL typed in Team settings but not entered', () => {
+  const TYPED = 'https://github.com/owner/typed.git';
+
+  function button(label: string): HTMLElement {
+    const found = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim().endsWith(label));
+    if (!found) throw new Error(`no ${label} button in the rendered dialog`);
+    return found as HTMLElement;
+  }
+
+  /** Opens Team settings and types `url` into the repositories field without pressing Enter. */
+  async function typeWithoutEntering(url: string): Promise<HTMLInputElement> {
+    button('Team settings').click();
+    await flushPromises();
+    const input = document.body.querySelector<HTMLInputElement>('input[data-settings-repos]')!;
+    input.focus();
+    input.value = url;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    return input;
+  }
+
+  it('Use these adds it: the box hides, and Dispatch sends it in repos with no local repository requested', async () => {
+    await openDispatchToNew([]);
+    expect(checkbox()).not.toBeNull();
+
+    await typeWithoutEntering(`  ${TYPED}  `);
+    button('Use these').click();
+    await flushPromises();
+
+    expect(checkbox()).toBeNull();
+
+    dispatchButton().click();
+    await flushPromises();
+
+    expect(dispatchBacklogItemToNewTeam).toHaveBeenCalledTimes(1);
+    expect(sent(0).repos).toEqual([TYPED]);
+    expect(sent(0).localRepository).toBeUndefined();
+  });
+
+  it('leaving the field adds it to the list, after the ones already there', async () => {
+    await openDispatchToNew([OTHER]);
+
+    const input = await typeWithoutEntering(TYPED);
+    input.blur();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await flushPromises();
+    expect([...document.body.querySelectorAll('.q-chip')].map((chip) => chip.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining(OTHER), expect.stringContaining(TYPED)]));
+    button('Use these').click();
+    await flushPromises();
+
+    dispatchButton().click();
+    await flushPromises();
+
+    expect(sent(0).repos).toEqual([OTHER, TYPED]);
+  });
+});
+
 describe('Backlog dispatch to a new team: a refused repository check', () => {
   it('shows the sentence and only the offered choices; Create it on GitHub resends and dispatches', async () => {
     dispatchBacklogItemToNewTeam.mockRejectedValueOnce(refused(notFoundSentence, [

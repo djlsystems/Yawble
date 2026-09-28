@@ -100,9 +100,11 @@ const repoSuggestions = ref<string[]>([]);
  * "Create a local repository for this team": with no repository listed, the Host makes one named
  * after the team unless this is unticked, which sends `localRepository: false`. Ticked by default,
  * as the Host's own default is, and shown only while the list is empty - with a URL listed the Host
- * ignores it, so a box there would be a control that does nothing.
+ * ignores it, so a box there would be a control that does nothing. A URL typed in the field and not
+ * yet added counts as listed: Create adds it, so the box hides while the field holds text.
  */
 const localRepository = ref(true);
+const offerLocalRepository = computed(() => repos.value.length === 0 && repoInput.value.trim() === '');
 
 /**
  * A REFUSED REPOSITORY CHECK: a listed URL `git ls-remote` could not read. Nothing was created. The
@@ -466,6 +468,10 @@ const valid = computed(() => formIsLegal());
 async function submit() {
   if (!formIsLegal() || !agent.value || busy.value) return;
 
+  // A URL typed but not added is still the person's repository: Create adds it, as Add would, so it
+  // is checked like any other rather than dropped for a local repository nobody asked for.
+  addRepo();
+
   busy.value = true;
   serverError.value = '';
 
@@ -748,7 +754,7 @@ async function submit() {
             </div>
 
             <q-checkbox
-              v-if="repos.length === 0"
+              v-if="offerLocalRepository"
               v-model="localRepository"
               dense
               class="q-mt-sm"
