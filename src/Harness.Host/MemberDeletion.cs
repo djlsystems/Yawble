@@ -11,7 +11,11 @@ public sealed record MemberDeleted(
     int PendingDeliveries,
     int Schedules,
     IReadOnlyList<string> Directories,
-    IReadOnlyList<string> Failures);
+    IReadOnlyList<string> Failures,
+
+    /// <summary>Every path in the workspace that could not be removed. When it is not empty the
+    /// workspace is recorded as a removal unfinished and retried, as a team root is.</summary>
+    IReadOnlyList<string> Remaining);
 
 /// <summary>
 /// Deletes one member, and everything that names it.
@@ -49,7 +53,9 @@ public sealed record MemberDeleted(
 ///    child that has not finished exiting. For each team repo, every one of the member's per-card
 ///    trees goes through <see cref="WorktreeRemoval"/>: <c>git worktree remove</c> without
 ///    <c>--force</c>, then <c>git worktree prune</c>. A tree it leaves (uncommitted edits, commits
-///    not on origin) is named in the result and on the team feed rather than forced.
+///    not on origin) is named in the result and on the team feed rather than forced. The workspace
+///    goes through <see cref="FolderRemoval"/>, as a team root does: agent content removed as the
+///    agent, links never followed, and whatever remains named and recorded to be retried.
 ///
 /// <b>The transcripts are NOT removed, and that is the one place this deliberately differs from
 /// deleting a team.</b> Messages already in the log carry <c>payload.transcript</c> paths into
@@ -83,8 +89,11 @@ public sealed class MemberDeletion(
     /// </summary>
     IMessageLog log,
     string gitExecutable = "git",
-    AgentLaunchUser? runAs = null)
+    AgentLaunchUser? runAs = null,
+    FolderRemoval? removal = null)
 {
+    private readonly FolderRemoval _removal = removal ?? new FolderRemoval(runAs);
+
     private readonly WorktreeRemoval _worktrees = new(
         new GitRunner(string.IsNullOrWhiteSpace(gitExecutable) ? "git" : gitExecutable, runAs: runAs), log);
 
@@ -175,18 +184,24 @@ public sealed class MemberDeletion(
         var member = new ContainerId(stored, id.Name);
         var workspace = paths.WorkspaceFor(member);
 
+        var remaining = new List<string>();
+
         if (Directory.Exists(workspace))
         {
-            try
+            var report = await _removal.RemoveWorkspaceAsync(workspace, stored, id.Name, ct);
+
+            if (report.Complete)
             {
-                Directory.Delete(workspace, recursive: true);
                 removed.Add(workspace);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            else
             {
-                // Named, not swallowed. The member is gone from every list either way, and the
-                // honest thing is to say which directory is still on disk.
-                failures.Add($"{workspace}: {ex.Message}");
+                // Named, not swallowed, and recorded to be retried. The member is gone from every
+                // list either way.
+                remaining.AddRange(report.Remaining);
+                failures.Add(
+                    $"{workspace}: removal unfinished, {report.Remaining.Count} path(s) remain; it is "
+                    + "retried at the next start or on request: " + string.Join(", ", report.Remaining));
             }
         }
 
@@ -214,7 +229,7 @@ public sealed class MemberDeletion(
             }
         }
 
-        return new MemberDeleted(stored, id.Name, snapshot.Name, swept, removedSchedules, removed, failures);
+        return new MemberDeleted(stored, id.Name, snapshot.Name, swept, removedSchedules, removed, failures, remaining);
     }
 }
 

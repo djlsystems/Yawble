@@ -339,5 +339,24 @@ public static class AuthSchema
             ALTER TABLE triggers ADD COLUMN wake_manager    TEXT    NOT NULL DEFAULT 'always';
             ALTER TABLE triggers ADD COLUMN daily_token_cap INTEGER NULL;
             """),
+
+        // A FOLDER WHOSE REMOVAL DID NOT FINISH: a deleted team's root, a deleted member's
+        // workspace, or a folder a reset emptied. `path` is absolute. `kind` is `team-root`,
+        // `workspace` or `emptied`; `member` is set for a workspace only. `remaining` is a JSON list
+        // of the paths still on disk after the last attempt. No foreign key: the team is usually
+        // gone, which is when this row matters. The Host retries every row at start.
+        new MigrationStep(
+            "auth-011",
+            """
+            CREATE TABLE unfinished_removals (
+                path        TEXT    PRIMARY KEY,
+                kind        TEXT    NOT NULL,
+                team        TEXT    NOT NULL,
+                member      TEXT    NULL,
+                remaining   TEXT    NOT NULL DEFAULT '[]',
+                recorded_at TEXT    NOT NULL,
+                attempts    INTEGER NOT NULL DEFAULT 1
+            );
+            """),
     ];
 }

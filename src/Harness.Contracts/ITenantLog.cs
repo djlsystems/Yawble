@@ -37,6 +37,10 @@ public static class TenantActions
     public const string TeamCreated = "team.created";
     public const string TeamRelabelled = "team.renamed";
     public const string TeamDeleted = "team.deleted";
+
+    /// <summary>Unfinished removals were retried - at the Host's start (no actor) or by a person.
+    /// Detail names every folder retried, whether it finished, and each path still remaining.</summary>
+    public const string RemovalRetried = "removal.retried";
     public const string TeamPaused = "team.paused";
     public const string TeamResumed = "team.resumed";
 

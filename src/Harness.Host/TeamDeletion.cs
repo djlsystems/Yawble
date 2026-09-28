@@ -17,6 +17,17 @@ public sealed record TeamDeleted(
     IReadOnlyList<string> Failures,
 
     /// <summary>
+    /// EVERY PATH UNDER THE ROOT THAT COULD NOT BE REMOVED, one by one. Empty when the root went.
+    /// When it is not, the root keeps its marker, is recorded as a removal unfinished, and is
+    /// retried at the Host's next start or when a person asks (<c>POST /api/removals/retry</c>).
+    /// </summary>
+    IReadOnlyList<string> Remaining,
+
+    /// <summary>The root recorded as a removal unfinished - the path a retry names - or null when
+    /// the root went, was refused, or was never there.</summary>
+    string? RemovalUnfinished,
+
+    /// <summary>
     /// THE TEAM'S DOCUMENTS, WHICH THIS DELETION KEPT. Said out loud rather than left to be
     /// noticed, because keeping them is the point: documents live outside the root step 5
     /// removes, and a team is deleted as soon as its work is merged - exactly when its reports
@@ -75,7 +86,10 @@ public sealed class TeamDeletionConfirmationRequiredException(
 ///    a team root is a path a person can type, and this is the most destructive operation in the
 ///    product, so it is refused rather than removed when the marker is missing — the same
 ///    fails-in-the-recoverable-direction argument the pre-migration backup makes, in the opposite
-///    direction: a diagnostic must fail open, a delete must fail closed.
+///    direction: a diagnostic must fail open, a delete must fail closed. The removal is
+///    <see cref="FolderRemoval"/>'s: the marker goes LAST, content the Host cannot remove is removed
+///    as the agent, and whatever still remains is named path by path, keeps the marker, and is
+///    recorded so it is retried.
 ///
 /// <b>The root is RESOLVED BEFORE any of the above, not at step 5.</b> <see cref="TeamPaths.RootFor"/>
 /// throws for a team nobody registered, and resolving it only at step 5 would mean a wiring fault surfaces AFTER the team row,
@@ -100,8 +114,11 @@ public sealed class TeamDeletion(
     ITriggerStore schedules,
     IPrincipalStore principals,
     TeamPaths paths,
-    GitRunner git)
+    GitRunner git,
+    FolderRemoval? removal = null)
 {
+    private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
+
     /// <summary>
     /// Deletes <paramref name="team"/>. Returns null when there is no such team, which is a 404
     /// rather than an error - asking twice is not a fault.
@@ -207,33 +224,32 @@ public sealed class TeamDeletion(
         // team root, so removing the root below cannot reach them.
         var kept = TeamPaths.DocumentsFolderIn(paths.DataRoot, stored);
 
+        var remaining = new List<string>();
+
         if (Directory.Exists(root))
         {
-            if (!File.Exists(TeamPaths.MarkerIn(root)))
+            // REFUSED, not deleted, when the root carries no marker, and reported rather than
+            // swallowed: a team root is a path a person can type, and without the marker there is
+            // no evidence the platform made this directory. Otherwise emptied around its marker,
+            // then the marker, then the root - so anything left keeps the marker, is named path by
+            // path, and is recorded to be retried.
+            var report = await _removal.RemoveTeamRootAsync(root, stored, ct);
+
+            if (report.Refused is { } refused)
             {
-                // REFUSED, not deleted, and reported rather than swallowed. A team root is a path a
-                // person can type; without the marker there is no evidence the platform made this
-                // directory, and deleting a tree on the strength of a stored string is not a risk
-                // worth taking against somebody's only copy of their work.
+                failures.Add(refused);
+            }
+            else if (report.Remaining.Count > 0)
+            {
+                remaining.AddRange(report.Remaining);
                 failures.Add(
-                    $"{root} was left alone: it carries no {TeamPaths.MarkerFileName} marker, so "
-                    + "it is not a directory this platform created. Remove it by hand if it is "
-                    + "yours.");
+                    $"{root}: removal unfinished, {report.Remaining.Count} path(s) remain and keep its "
+                    + $"{TeamPaths.MarkerFileName} marker; it is retried at the next start or on request: "
+                    + string.Join(", ", report.Remaining));
             }
             else
             {
-                try
-                {
-                    Directory.Delete(root, recursive: true);
-                    removed.Add(root);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    // Named, not swallowed. What reaches here is a file something really is holding
-                    // open - a child that has not finished exiting - and the honest thing is to say
-                    // which directory is still there.
-                    failures.Add($"{root}: {ex.Message}");
-                }
+                removed.Add(root);
             }
         }
 
@@ -257,6 +273,8 @@ public sealed class TeamDeletion(
             removedSchedules,
             removed,
             failures,
+            remaining,
+            remaining.Count > 0 ? root : null,
             Directory.Exists(kept) ? kept : null);
     }
 

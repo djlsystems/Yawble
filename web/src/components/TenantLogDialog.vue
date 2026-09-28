@@ -56,6 +56,7 @@ const wording: Record<string, string> = {
   'team.renamed': 'relabelled team',
   'team.cloned': 'cloned team',
   'team.deleted': 'deleted team',
+  'removal.retried': 'retried an unfinished removal',
   'team.concierge-changed': 'changed Concierge',
   'member.added': 'added member',
   'member.changed': 'changed member',

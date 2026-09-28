@@ -77,7 +77,11 @@ public sealed record TeamWasReset(
     // connected" while somebody was typing into the session. The dialog's rule is the same: no
     // count, because a number that might be wrong is worse than none.
     IReadOnlyList<string> Cleared,
-    IReadOnlyList<string> Failures);
+    IReadOnlyList<string> Failures,
+
+    /// <summary>Every path a clear could not remove. Recorded by path and retried; a retry
+    /// removes only these paths, never what the member has written since.</summary>
+    IReadOnlyList<string> Remaining);
 
 /// <summary>
 /// A targeted member is running, holds queued work, or has accepted a delivery it has not finished.
@@ -125,7 +129,9 @@ public sealed class TeamBusyException(string team, IReadOnlyList<string> busy)
 ///    correct; the purge is disk and confidentiality. A purge that fails leaves a reset that
 ///    succeeded.
 /// 5. <b>Directories last</b>, for TeamDeletion's stated reason: the only step that is not a
-///    database write and the only one that can fail halfway. Failures are NAMED, not swallowed.
+///    database write and the only one that can fail halfway. Emptied through
+///    <see cref="FolderRemoval"/>, as a team root is removed; what remains is NAMED path by path,
+///    not swallowed, and recorded to be retried.
 /// </summary>
 public sealed class TeamReset(
     TeamRegistry teams,
@@ -134,8 +140,11 @@ public sealed class TeamReset(
     ICursors cursors,
     IPendingDeliveries pending,
     IMessageLog log,
-    TeamPaths paths)
+    TeamPaths paths,
+    FolderRemoval? removal = null)
 {
+    private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
+
     /// <summary>How many rows one range read takes while enumerating a purge. Big enough that an
     /// ordinary instance is one or two round trips (a few thousand messages is about a megabyte)
     /// - and small enough that a million-row log does not arrive in one list.</summary>
@@ -228,32 +237,35 @@ public sealed class TeamReset(
         // 5. The directories.
         var cleared = new List<string>();
 
+        var remaining = new List<string>();
+
         foreach (var directory in ToClear(stored, targeted, options))
         {
             if (!Directory.Exists(directory)) continue;
 
-            try
-            {
-                // EMPTIED, NEVER REMOVED. ProcessAgentRunner silently falls back to the Host's own
-                // current directory for a container whose workspace is missing - which for anyone
-                // running from a clone is this repository - so a removed workspace puts the next
-                // run's AGENTS.md somewhere nobody expects. A team's documents folder is created
-                // with the team and takes the same rule.
-                foreach (var file in Directory.GetFiles(directory)) File.Delete(file);
-                foreach (var child in Directory.GetDirectories(directory)) Directory.Delete(child, recursive: true);
+            // EMPTIED, NEVER REMOVED. ProcessAgentRunner silently falls back to the Host's own
+            // current directory for a container whose workspace is missing - which for anyone
+            // running from a clone is this repository - so a removed workspace puts the next
+            // run's AGENTS.md somewhere nobody expects. A team's documents folder is created
+            // with the team and takes the same rule.
+            var emptied = await _removal.EmptyAsync(directory, stored, ct);
 
+            if (emptied.Complete)
+            {
                 cleared.Add(directory);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            else
             {
-                // Named, not swallowed. What reaches here is a file something really is holding
-                // open, and the honest thing is to say which directory is still full.
-                failures.Add($"{directory}: {ex.Message}");
+                // Named, not swallowed, and recorded to be retried.
+                remaining.AddRange(emptied.Remaining);
+                failures.Add(
+                    $"{directory}: {emptied.Remaining.Count} path(s) could not be removed; they are "
+                    + "retried at the next start or on request: " + string.Join(", ", emptied.Remaining));
             }
         }
 
         return new TeamWasReset(
-            stored, head, floored, report.Purged, report.Retained, cleared, failures);
+            stored, head, floored, report.Purged, report.Retained, cleared, failures, remaining);
     }
 
     /// <summary>

@@ -323,6 +323,16 @@ export interface TeamDeleted {
   failures: string[]
 
   /**
+   * Every path under the team's root that could not be removed, one by one. Empty when the root
+   * went. When it is not, the root keeps its `.harness-team` marker, is recorded as a removal
+   * unfinished, and is retried at the Host's next start or by `retryRemoval`.
+   */
+  remaining?: string[]
+
+  /** The root recorded as a removal unfinished — the path `retryRemoval` names — or null. */
+  removalUnfinished?: string | null
+
+  /**
    * The team's documents, WHICH THIS DELETION KEPT. Said out loud rather than left to be noticed,
    * because a team is deleted as soon as its work is merged - exactly when its reports become the
    * only record of how that work was checked.
@@ -420,6 +430,21 @@ export interface TeamWasReset {
   retained: number
   cleared: string[]
   failures: string[]
+
+  /** Every path a clear could not remove. Recorded and retried; a retry removes only these. */
+  remaining?: string[]
+}
+
+/** One unfinished removal retried: whether it `finished`, what is still `remaining`, and why it
+ *  was set aside when it was (`note`). */
+export interface RemovalRetried {
+  path: string
+  kind: 'team-root' | 'workspace' | 'emptied'
+  team: string
+  member: string | null
+  finished: boolean
+  remaining: string[]
+  note: string | null
 }
 
 export type TriggerKindWire = 'cron' | 'every' | 'once' | 'event' | 'folderChange'
@@ -608,6 +633,9 @@ export interface MemberDeleted {
   schedules?: number
   directories: string[]
   failures: string[]
+
+  /** Every path in the workspace that could not be removed; recorded and retried. */
+  remaining?: string[]
 }
 
 /** One page of the tenant log, with the total beside it so a grid can say "page 3 of 47". */

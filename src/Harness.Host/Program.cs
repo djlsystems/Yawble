@@ -292,6 +292,10 @@ builder.Services.AddSingleton<ITeamStore>(new SqliteTeamStore(database));
 builder.Services.AddSingleton<ITriggerStore>(new SqliteTriggerStore(database));
 builder.Services.AddSingleton<ITenantLog>(new SqliteTenantLog(database));
 
+// The folders a deletion or reset could not finish removing (auth-011), retried at start and on
+// request. See FolderRemoval.
+builder.Services.AddSingleton<IUnfinishedRemovals>(new SqliteUnfinishedRemovals(database));
+
 // INSTANCE-WIDE SETTINGS, read once here - rows over appsettings.json over built-in defaults -
 // and then held in memory. Every consumer below is handed a delegate onto this, never a number, so
 // a person's change applies at its next use with no restart. See `TenantSettings`.
@@ -738,7 +742,8 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
         sp.GetRequiredService<ContributorClone>().ApplyAsync(clonePath, contributor, ct),
     plugins: sp.GetRequiredService<PluginCatalog>(),
     pluginSettings: sp.GetRequiredService<IPluginMemberSettingsStore>(),
-    secrets: sp.GetRequiredService<ISecretStore>()));
+    secrets: sp.GetRequiredService<ISecretStore>(),
+    removal: sp.GetRequiredService<FolderRemoval>()));
 
 // The instance's git identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL, set with the operator CLI's `secret set`)
 // and the one place a clone is brought in line with its contributor settings.
@@ -774,6 +779,20 @@ builder.Services.AddSingleton(sp => new TeamAccess(
 
 builder.Services.AddSingleton<TeamListPush>();
 
+// THE ONE REMOVAL a team root, a member's workspace and a reset's folders go through: the marker
+// last, agent content removed as the agent through its launch prefix, and whatever remains recorded
+// to be retried. See FolderRemoval.
+builder.Services.AddSingleton(sp => new FolderRemoval(
+    sp.GetRequiredService<AgentLaunchUser>(),
+    sp.GetRequiredService<IUnfinishedRemovals>()));
+
+builder.Services.AddSingleton(sp => new UnfinishedRemovalRetry(
+    sp.GetRequiredService<FolderRemoval>(),
+    sp.GetRequiredService<IUnfinishedRemovals>(),
+    sp.GetRequiredService<TeamRegistry>(),
+    sp.GetRequiredService<ContainerHost>(),
+    sp.GetRequiredService<TeamPaths>()));
+
 // Constructed BY HAND, like ContainerHost, and for the same reason: every dependency here is one a
 // deletion would silently skip if it were optional. A TeamDeletion missing its pending-delivery
 // store deletes a team and leaves rows the next team of that name inherits.
@@ -788,7 +807,8 @@ builder.Services.AddSingleton(sp => new TeamDeletion(
     sp.GetRequiredService<ITriggerStore>(),
     sp.GetRequiredService<IPrincipalStore>(),
     sp.GetRequiredService<TeamPaths>(),
-    sp.GetRequiredService<GitRunner>()));
+    sp.GetRequiredService<GitRunner>(),
+    sp.GetRequiredService<FolderRemoval>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a reset would silently skip
 // if it were optional. A TeamReset missing its pending-delivery store cannot tell a member that has
@@ -800,7 +820,8 @@ builder.Services.AddSingleton(sp => new TeamReset(
     sp.GetRequiredService<ICursors>(),
     sp.GetRequiredService<IPendingDeliveries>(),
     sp.GetRequiredService<IMessageLog>(),
-    sp.GetRequiredService<TeamPaths>()));
+    sp.GetRequiredService<TeamPaths>(),
+    sp.GetRequiredService<FolderRemoval>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a deletion would silently
 // skip if it were optional, and a MemberDeletion missing its pending-delivery store leaves rows the
@@ -817,7 +838,8 @@ builder.Services.AddSingleton(sp => new MemberDeletion(
     sp.GetRequiredService<TeamPaths>(),
     sp.GetRequiredService<IMessageLog>(),
     builder.Configuration["GitExecutable"] ?? "git",
-    sp.GetRequiredService<AgentLaunchUser>()));
+    sp.GetRequiredService<AgentLaunchUser>(),
+    sp.GetRequiredService<FolderRemoval>()));
 
 // Git runner for repository operations: as the agent, and GH_TOKEN only for a team the
 // registry says has a GitHub remote - see GitRunner's class comment.
@@ -1272,6 +1294,34 @@ foreach (var team in restoreReport.Unrestorable)
         + "it by hand if you no longer want it.");
 }
 
+// THE REMOVALS A DELETION OR RESET COULD NOT FINISH, retried now that the teams are restored and a
+// live team or member can be told from a dead one. Before any member runs, so nothing is writing in
+// a folder being emptied. Never fatal: a folder that still cannot be removed stays recorded, is said
+// here, and is retried at the next start or on request.
+try
+{
+    var retried = await app.Services.GetRequiredService<UnfinishedRemovalRetry>().RetryAsync();
+
+    foreach (var removal in retried)
+    {
+        Console.WriteLine(removal.Finished
+            ? $"Removal finished at start: {removal.Path}."
+            : $"WARNING: removal still unfinished at start: {removal.Path} - "
+              + (removal.Note ?? $"{removal.Remaining.Count} path(s) remain: {string.Join(", ", removal.Remaining)}"));
+    }
+
+    if (retried.Count > 0)
+    {
+        await app.Services.GetRequiredService<TenantLogging>().WriteAsAsync(
+            null, null, TenantActions.RemovalRetried, null, null,
+            new { atStart = true, retried = retried.Select(RemovalEndpoints.Detail).ToArray() });
+    }
+}
+catch (Exception exception) when (exception is not OperationCanceledException)
+{
+    Console.WriteLine($"WARNING: unfinished removals could not be retried at start: {exception.Message}");
+}
+
 // Any per-team skill folders still on disk, now that the teams are registered and their
 // roots resolve. No skill is team-scoped: each folder is migrated like the tenant's and
 // moved to the backup, and a skill imported from one re-prompts everybody so it is listed.
@@ -1639,6 +1689,7 @@ SurfaceEndpoints.Map(app, dataRoot);
 TenantSettingsEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
+RemovalEndpoints.Map(app);
 
 // AFTER UseAuthorization, so context.User is populated, and BEFORE the endpoints run. One gate
 // keyed on the route's team value - see TeamGate's own doc comment for why it is preferred over a
@@ -2438,6 +2489,9 @@ app.MapDelete("/api/teams/{team}", async (
             schedules = removed.Schedules,
             directories = removed.Directories,
             failures = removed.Failures,
+
+            // Every path still on disk, one by one: the root keeps its marker and is retried.
+            remaining = removed.Remaining,
         },
         ct);
 
@@ -2536,6 +2590,7 @@ app.MapPost("/api/teams/{team}/reset", async (
             retained = done.Retained,
             cleared = done.Cleared,
             failures = done.Failures,
+            remaining = done.Remaining,
         },
         ct);
 
@@ -4730,6 +4785,7 @@ app.MapDelete("/api/teams/{team}/containers/{name}", async (
                 schedules = removed.Schedules,
                 directories = removed.Directories,
                 failures = removed.Failures,
+                remaining = removed.Remaining,
             },
             ct);
 

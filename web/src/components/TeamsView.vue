@@ -4,6 +4,7 @@ import { useQuasar } from 'quasar';
 import {
   cloneTeam,
   deleteTeam,
+  retryRemoval,
   pauseTeam,
   resumeTeam,
   TeamDeletionConfirmationRequired,
@@ -153,6 +154,37 @@ const deletionConfirmation = ref<string | null>(null);
 const busy = ref(false);
 
 /**
+ * A DELETION WHOSE FOLDER COULD NOT BE REMOVED WHOLE: the team is gone, its root keeps its marker
+ * and is recorded as a removal unfinished, and this names every remaining path and offers the retry
+ * right here. The Host also retries it at its next start. Null when there is nothing to report.
+ */
+const unfinished = ref<{ team: string; root: string; remaining: string[]; note: string | null } | null>(null);
+const retrying = ref(false);
+
+async function retryUnfinished() {
+  if (!unfinished.value) return;
+
+  const shown = unfinished.value;
+  retrying.value = true;
+
+  try {
+    const { retried } = await retryRemoval(shown.root);
+    const result = retried[0];
+
+    if (!result || result.finished) {
+      $q.notify({ type: 'positive', timeout: 5000, message: `What was left of ${shown.team} has been removed.` });
+      unfinished.value = null;
+    } else {
+      unfinished.value = { ...shown, remaining: result.remaining, note: result.note };
+    }
+  } catch (cause) {
+    $q.notify({ type: 'negative', message: cause instanceof Error ? cause.message : String(cause) });
+  } finally {
+    retrying.value = false;
+  }
+}
+
+/**
  * NO TYPING FOR THE ORDINARY CASE; A TYPED CONFIRMATION ONLY WHEN WORK WOULD BE LOST.
  *
  * This screen is where a finished team is closed out, teams are deleted in batches once their work
@@ -198,7 +230,14 @@ async function remove() {
     // The team is gone whether or not every directory went with it, so this is positive either way
     // — but a failure has to be SAID, because the alternative is files left on disk that nobody is
     // ever told about. Usually a child process that has not finished exiting.
-    if (removed.failures.length > 0) {
+    if ((removed.remaining?.length ?? 0) > 0 && removed.removalUnfinished) {
+      unfinished.value = {
+        team: team.name,
+        root: removed.removalUnfinished,
+        remaining: removed.remaining ?? [],
+        note: null,
+      };
+    } else if (removed.failures.length > 0) {
       $q.notify({
         type: 'warning',
         timeout: 12000,
@@ -572,6 +611,37 @@ async function setPaused(team: Team | null, paused: boolean) {
             :loading="busy"
             :disable="!confirmed || busy"
             @click="remove"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- THE REMOVAL THAT DID NOT FINISH, said where the deletion was asked for, with the retry
+         beside it. Every remaining path is listed: a count alone would leave somebody guessing
+         which files are still on disk. -->
+    <q-dialog :model-value="unfinished !== null" no-backdrop-dismiss @update:model-value="unfinished = null">
+      <q-card class="teams-unfinished-card os-dialog-sm">
+        <q-card-section class="os-dialog-title">{{ unfinished?.team }} was deleted, but its folder was not removed whole</q-card-section>
+
+        <q-card-section class="q-pt-none">
+          <p>
+            These paths under <code>{{ unfinished?.root }}</code> could not be removed. The folder
+            keeps its marker and is retried when the Host next starts, or now:
+          </p>
+          <ul class="q-pl-md teams-unfinished-paths">
+            <li v-for="path in unfinished?.remaining ?? []" :key="path"><code>{{ path }}</code></li>
+          </ul>
+          <p v-if="unfinished?.note" class="text-negative">{{ unfinished.note }}</p>
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Close" :disable="retrying" @click="unfinished = null" />
+          <q-btn
+            color="primary"
+            unelevated
+            label="Retry removal"
+            :loading="retrying"
+            @click="retryUnfinished"
           />
         </q-card-actions>
       </q-card>

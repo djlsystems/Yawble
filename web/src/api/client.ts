@@ -49,6 +49,7 @@ import type {
   Team,
   TeamCloned,
   TeamDeleted,
+  RemovalRetried,
   TeamId,
   TeamResetRequest,
   TeamRollup,
@@ -935,6 +936,18 @@ export const deleteTeam = async (team: TeamId, confirmation?: string) => {
 
   return (await response.json()) as TeamDeleted
 }
+
+/**
+ * Retries a removal a deletion or reset could not finish — the one at `path`, or every one when it
+ * is omitted. Human-only. Resolves with each folder retried, whether it finished, and every path
+ * still remaining; a retry that still cannot finish is an answer, not an error.
+ */
+export const retryRemoval = (path?: string) =>
+  json<{ retried: RemovalRetried[] }>('/api/removals/retry', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(path ? { path } : {}),
+  })
 
 /**
  * Hands a team a clean slate without deleting it.
