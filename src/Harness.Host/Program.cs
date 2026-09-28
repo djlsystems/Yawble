@@ -480,7 +480,8 @@ builder.Services.AddHttpClient(nameof(HttpOAuthEndpoints), client => client.Time
 builder.Services.AddSingleton<IOAuthEndpoints>(sp => new HttpOAuthEndpoints(
     sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(HttpOAuthEndpoints))));
 builder.Services.AddSingleton(sp => new Connections(
-    sp.GetRequiredService<ConnectionStore>(), sp.GetRequiredService<IOAuthEndpoints>(), sp.GetRequiredService<TimeProvider>()));
+    sp.GetRequiredService<ConnectionStore>(), sp.GetRequiredService<IOAuthEndpoints>(), sp.GetRequiredService<TimeProvider>(),
+    sp.GetRequiredService<IUserStore>()));
 builder.Services.AddSingleton(sp => new ConnectRequests(
     sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
     sp.GetRequiredService<TeamRegistry>()));

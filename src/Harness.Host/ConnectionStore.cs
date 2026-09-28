@@ -387,6 +387,15 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         return (true, []);
     }
 
+    /// <summary>A tenant row on its own: what followed a write already committed.</summary>
+    public async Task RecordAsync(TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+    }
+
     /// <summary>Every plugin member that binds <paramref name="id"/>, by slot.</summary>
     public async Task<IReadOnlyList<ConnectionUse>> UsedByAsync(string id, CancellationToken ct = default)
     {

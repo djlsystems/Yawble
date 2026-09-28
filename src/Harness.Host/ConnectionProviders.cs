@@ -137,8 +137,8 @@ public static class ConnectionProviders
                     null,
                     ["openid", "email", "offline_access"],
                     new Dictionary<string, string>(StringComparer.Ordinal),
-                    "Register an app in Microsoft Entra ID. Add the redirect URI shown here as a \"Web\" platform URI, "
-                    + "or add http://localhost under \"Mobile and desktop applications\" for the CLI flow.");
+                    "Register an app in Microsoft Entra ID. Under the \"Web\" platform, add two redirect URIs: the web "
+                    + "callback URL shown here, and http://localhost for the CLI (Entra ignores the port on a loopback address).");
 
             default:
                 return new OAuthProvider(

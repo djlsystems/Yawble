@@ -139,8 +139,11 @@ public static class TenantActions
     /// <summary>A person renamed a connection.</summary>
     public const string ConnectionRenamed = "connections.renamed";
 
-    /// <summary>A person disconnected an account: revoked where supported, tokens deleted.</summary>
+    /// <summary>A person disconnected an account: its tokens deleted. The revoke follows it.</summary>
     public const string ConnectionDisconnected = "connections.disconnected";
+
+    /// <summary>After a disconnect, the provider's revocation of its token, best effort: the result.</summary>
+    public const string ConnectionRevoked = "connections.revoked";
 
     /// <summary>The provider refused a refresh; the connection needs a person to reconnect it.</summary>
     public const string ConnectionNeedsReconnect = "connections.needs-reconnect";

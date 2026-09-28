@@ -47,7 +47,7 @@ public sealed record ConnectionActor(string Id, string? Email)
 /// <item>Nothing here answers a token or the client secret to a route, a row or a log.</item>
 /// </list>
 /// </summary>
-public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints, TimeProvider clock)
+public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints, TimeProvider clock, IUserStore? users = null)
 {
     public static readonly TimeSpan FlowLifetime = TimeSpan.FromMinutes(10);
 
@@ -277,7 +277,10 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
             return (null, false, $"'{flow.Provider}' is no longer set up on this Host.");
         }
 
-        var who = actor ?? (flow.UserId == ConnectionActor.Operator.Id ? ConnectionActor.Operator : new ConnectionActor(flow.UserId, null));
+        // The web callback carries no session: the person is the one the state was issued to.
+        var who = actor ?? (flow.UserId == ConnectionActor.Operator.Id
+            ? ConnectionActor.Operator
+            : new ConnectionActor(flow.UserId, users is null ? null : (await users.FindByIdAsync(flow.UserId, ct))?.Email));
 
         var answer = await endpoints.ExchangeCodeAsync(provider, await store.ClientSecretAsync(provider.Id, ct), code, flow.RedirectUri, flow.CodeVerifier, ct);
         if (!answer.Ok) return (null, false, $"{provider.Name} refused the sign-in: {answer.Reason}.");
@@ -288,20 +291,32 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
 
         if (flow.ReconnectId is { } reconnectId)
         {
-            var existing = await store.GetAsync(reconnectId, ct);
-            if (existing is null) return (null, false, "The connection being reconnected was disconnected meanwhile. Connect it again.");
+            // UNDER THE REFRESH'S GATE: a refresh in flight with the old refresh token finishes
+            // first, so it can neither store its tokens over these nor mark this reconnect refused.
+            var gate = Gate(reconnectId);
+            await gate.WaitAsync(ct);
 
-            if (!string.Equals(existing.Account, account, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                return (null, false, $"You signed in as {account}, but {existing.Named} is {existing.Account}. Reconnect with the same account, or connect {account} as a new connection.");
+                var existing = await store.GetAsync(reconnectId, ct);
+                if (existing is null) return (null, false, "The connection being reconnected was disconnected meanwhile. Connect it again.");
+
+                if (!string.Equals(existing.Account, account, StringComparison.OrdinalIgnoreCase))
+                {
+                    return (null, false, $"You signed in as {account}, but {existing.Named} is {existing.Account}. Reconnect with the same account, or connect {account} as a new connection.");
+                }
+
+                var scopes = Union(existing.Scopes, granted);
+                await store.ReconnectAsync(existing.Id, scopes, tokens, who.Row(
+                    TenantActions.ConnectionReconnected, existing.Id, existing.Name,
+                    new { connection = existing.Id, provider = provider.Id, account = existing.Account, scopes, wasNeedingReconnect = existing.Status == ConnectionRecord.NeedsReconnect }), ct);
+
+                return (await store.GetAsync(existing.Id, ct), true, null);
             }
-
-            var scopes = Union(existing.Scopes, granted);
-            await store.ReconnectAsync(existing.Id, scopes, tokens, who.Row(
-                TenantActions.ConnectionReconnected, existing.Id, existing.Name,
-                new { connection = existing.Id, provider = provider.Id, account = existing.Account, scopes, wasNeedingReconnect = existing.Status == ConnectionRecord.NeedsReconnect }), ct);
-
-            return (await store.GetAsync(existing.Id, ct), true, null);
+            finally
+            {
+                gate.Release();
+            }
         }
 
         var record = new ConnectionRecord(
@@ -324,7 +339,7 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
     /// </summary>
     public async Task<(ConnectionGrant? Grant, string? Refusal)> GrantAsync(string connectionId, string slot, CancellationToken ct = default)
     {
-        var gate = _refreshing.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
+        var gate = Gate(connectionId);
         await gate.WaitAsync(ct);
 
         try
@@ -368,7 +383,14 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
             var refreshed = new ConnectionTokens(answer.RefreshToken, answer.AccessToken, Expiry(now, answer.ExpiresIn));
 
             // STORED FIRST: a rotated refresh token is on disk before the access token leaves.
-            await store.StoreRefreshAsync(connection.Id, refreshed, ct);
+            try
+            {
+                await store.StoreRefreshAsync(connection.Id, refreshed, ct);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException exception)
+            {
+                throw new RefreshNotStoredException(exception);
+            }
 
             return (new ConnectionGrant(connection.Id, connection.Provider, connection.Account, answer.AccessToken!, refreshed.AccessExpiresAt, connection.Scopes), null);
         }
@@ -377,6 +399,12 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
             gate.Release();
         }
     }
+
+    /// <summary>One gate per connection: its refreshes and its reconnects, one at a time.</summary>
+    private SemaphoreSlim Gate(string connectionId) => _refreshing.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>A disconnected connection's gate is dropped, so the gates do not grow without end.</summary>
+    public void Forget(string connectionId) => _refreshing.TryRemove(connectionId, out _);
 
     private async Task<string> MarkAsync(ConnectionRecord connection, string reason, CancellationToken ct)
     {
@@ -550,6 +578,14 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
 
     private static string Base64Url(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+}
+
+/// <summary>A refresh the provider answered whose tokens could not be stored: the access token is
+/// not handed out, since a rotated refresh token lost here would strand the connection.</summary>
+public sealed class RefreshNotStoredException(Microsoft.Data.Sqlite.SqliteException inner)
+    : Exception("A refreshed token could not be stored.", inner)
+{
+    public int SqliteErrorCode => inner.SqliteErrorCode;
 }
 
 /// <summary>Body of <c>PUT /api/connections/providers/{id}</c>.</summary>
