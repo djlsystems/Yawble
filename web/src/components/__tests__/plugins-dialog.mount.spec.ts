@@ -58,7 +58,7 @@ import {
   type Team,
 } from '../../api/types';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
-import { hostField, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
+import { hostField, hostList, hostPlugin, hostSecret, hostSettings, hostSlot } from '../../test/pluginFixtures';
 import { button, isDisabled, settle, type } from '../../test/formProbe';
 
 const sampleEcho: InstalledPlugin = hostPlugin({
@@ -152,6 +152,31 @@ describe('PluginsDialog', () => {
     expect(refused.getAttribute('data-verdict')).toBe('refused');
     expect(refused.textContent).toContain('Refused');
     expect(refused.querySelector('[data-reason]')?.textContent).toContain("config field 'x' has unknown type 'map'.");
+
+    wrapper.unmount();
+  });
+
+  it('shows each connection slot in the Host\'s words, and None for a plugin without', async () => {
+    const mailer = hostPlugin({
+      id: 'mailer',
+      connections: {
+        mail: hostSlot({
+          providers: ['google', 'microsoft'],
+          required: true,
+          description: 'The mailbox to read and send from.',
+          summary: 'needs a Google or Microsoft connection',
+        }),
+      },
+    });
+    listPlugins.mockResolvedValue(hostList([mailer, sampleEcho]));
+    const wrapper = await mountPlugins();
+
+    const slot = row('mailer')!.querySelector('[data-connection-slot="mail"]')!.textContent;
+    expect(slot).toContain('mail');
+    expect(slot).toContain('needs a Google or Microsoft connection');
+    expect(slot).toContain('Required');
+    expect(slot).toContain('The mailbox to read and send from.');
+    expect(row('sample-echo')!.querySelector('[data-connections]')!.textContent?.trim()).toBe('None');
 
     wrapper.unmount();
   });

@@ -30,6 +30,7 @@ import {
   type PluginFieldValues,
   type PluginSettingsShape,
 } from '../lib/pluginSettings';
+import { initialBindings } from '../lib/connections';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 
 /**
@@ -140,15 +141,17 @@ const isPlugin = computed(() => props.snapshot.kind === 'plugin');
 const pluginShape = ref<PluginSettingsShape | null>(null);
 const pluginConfig = ref<PluginFieldValues>({});
 const pluginSecrets = ref<Record<string, string>>({});
+/** Slot -> connection id; saved with the settings, which replace the bindings whole. */
+const pluginConnections = ref<Record<string, string>>({});
 const pluginSaved = ref('');
 const pluginProblem = ref<string | null>(null);
 
 const pluginMissing = computed(() =>
-  pluginShape.value ? missingRequired(pluginShape.value, pluginConfig.value, pluginSecrets.value) : [],
+  pluginShape.value ? missingRequired(pluginShape.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value) : [],
 );
 
 const pluginBody = computed(() =>
-  pluginShape.value ? settingsBody(pluginShape.value, pluginConfig.value, pluginSecrets.value) : null,
+  pluginShape.value ? settingsBody(pluginShape.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value) : null,
 );
 
 const pluginChanged = computed(
@@ -164,12 +167,17 @@ async function loadPluginSettings() {
   try {
     // A plugin that is no longer installed is the route's 409, whose sentence lands below.
     const settings = await getPluginSettings(props.snapshot.team, props.snapshot.id);
-    const shape: PluginSettingsShape = { config: settings.fields, secrets: settings.secretFields };
+    const shape: PluginSettingsShape = {
+      config: settings.fields,
+      secrets: settings.secretFields,
+      connections: settings.connectionFields ?? {},
+    };
 
     pluginConfig.value = initialConfig(shape, settings.config);
     pluginSecrets.value = initialSecrets(shape, settings.secrets);
+    pluginConnections.value = initialBindings(shape.connections, settings.connections ?? {});
     pluginShape.value = shape;
-    pluginSaved.value = JSON.stringify(settingsBody(shape, pluginConfig.value, pluginSecrets.value));
+    pluginSaved.value = JSON.stringify(settingsBody(shape, pluginConfig.value, pluginSecrets.value, pluginConnections.value));
   } catch (cause) {
     pluginProblem.value = `Could not read this member's settings: ${cause instanceof Error ? cause.message : String(cause)}`;
   }
@@ -409,6 +417,7 @@ async function submit() {
             v-if="pluginShape"
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"
+            v-model:connections="pluginConnections"
             :shape="pluginShape"
           />
           <div v-else-if="pluginProblem" class="text-negative text-caption">{{ pluginProblem }}</div>
