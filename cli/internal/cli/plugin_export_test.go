@@ -17,4 +17,6 @@ const (
 	PluginRequestScript = requestScript
 	PluginLayoutScript  = layoutScript
 	PluginReportScript  = reportScript
+	PluginInspectScript = inspectScript
+	PluginFilesScript   = filesScript
 )

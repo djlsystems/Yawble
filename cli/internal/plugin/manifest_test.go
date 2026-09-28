@@ -47,3 +47,45 @@ func TestRelativePaths(t *testing.T) {
 		}
 	}
 }
+
+// The Go template names one static binary per processor; both are marked executable.
+func TestTheGoSampleManifestIsAccepted(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "samples", "plugins", "sample-echo-go", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, skills, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ID != "sample-echo-go" || strings.Join(m.Executables, ",") != "bin/linux-x64/sample-echo-go,bin/linux-arm64/sample-echo-go,bin/linux-x64/sample-echo-go" || len(skills) != 1 {
+		t.Errorf("%+v %v", m, skills)
+	}
+}
+
+func TestListSettingsAndRequires(t *testing.T) {
+	manifest := func(extra string) []byte {
+		return []byte(`{"schemaVersion":1,"id":"p","name":"n","description":"d","version":"1","protocol":"harness.member/1",
+			"executable":{"path":"run"}` + extra + `}`)
+	}
+	for extra, want := range map[string]string{
+		`,"config":{"allow":{"type":"list","default":[]}}`:                     "",
+		`,"config":{"allow":{"type":"list","enum":["a","b"],"default":["b"]}}`: "",
+		`,"config":{"allow":{"type":"list","enum":["a","b"],"default":["c"]}}`: "`allow` must be one of: a, b.",
+		`,"config":{"allow":{"type":"list","default":"a"}}`:                    "`allow` must be a list of strings.",
+		`,"config":{"allow":{"type":"map"}}`:                                   "`config.allow.type` must be string, number, bool or list",
+		`,"requires":["dotnet","node","python3"]`:                              "",
+		`,"requires":null`:     "",
+		`,"requires":["ruby"]`: "`requires` names 'ruby', which is not a runtime this Host knows (dotnet, node, python3).",
+		`,"requires":"dotnet"`: "`requires` must be an array of runtime names.",
+	} {
+		_, _, err := Parse(manifest(extra))
+		got := ""
+		if err != nil {
+			got = err.Error()
+		}
+		if (want == "" && got != "") || (want != "" && !strings.Contains(got, want)) {
+			t.Errorf("%s: got %q, want %q", extra, got, want)
+		}
+	}
+}

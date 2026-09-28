@@ -6,6 +6,7 @@
   "version": "0.1.0",
   "protocol": "harness.member/1",
   "executable": { "path": "sample-echo", "args": [] },
+  "requires": ["dotnet"],
   "timeoutSeconds": 60,
   "config": {
     "mode": {

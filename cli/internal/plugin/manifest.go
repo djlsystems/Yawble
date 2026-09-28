@@ -248,6 +248,16 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			executables = append(executables, value)
 		}
 	}
+	if r, present := root["requires"]; present && r != nil {
+		if !stringArray(r) {
+			return m, nil, "`requires` must be an array of runtime names."
+		}
+		for _, item := range r.([]any) {
+			if !containsString(Runtimes, item.(string)) {
+				return m, nil, fmt.Sprintf("`requires` names '%s', which is not a runtime this Host knows (%s).", item, strings.Join(Runtimes, ", "))
+			}
+		}
+	}
 	return Manifest{ID: id, Name: name, Version: version, Executables: executables}, skills, ""
 }
 
@@ -263,8 +273,8 @@ func configField(name string, value any) string {
 	if t, ok := field["type"].(string); ok {
 		typ = t
 	}
-	if typ != "string" && typ != "number" && typ != "bool" {
-		return fmt.Sprintf("`config.%s.type` must be string, number or bool - v1 has no nested configuration.", name)
+	if typ != "string" && typ != "number" && typ != "bool" && typ != "list" {
+		return fmt.Sprintf("`config.%s.type` must be string, number, bool or list - v1 has no nested configuration.", name)
 	}
 	var choices []string
 	if e, present := field["enum"]; present {
@@ -279,6 +289,17 @@ func configField(name string, value any) string {
 	if !present {
 		return ""
 	}
+	if typ == "list" {
+		if !stringArray(d) {
+			return fmt.Sprintf("`%s` must be a list of strings.", name)
+		}
+		for _, item := range d.([]any) {
+			if choices != nil && !containsString(choices, item.(string)) {
+				return fmt.Sprintf("`%s` must be one of: %s.", name, strings.Join(choices, ", "))
+			}
+		}
+		return ""
+	}
 	fits := false
 	switch typ {
 	case "string":
@@ -291,15 +312,22 @@ func configField(name string, value any) string {
 	if !fits {
 		return fmt.Sprintf("`%s` must be a %s.", name, typ)
 	}
-	if s, ok := d.(string); ok && choices != nil {
-		for _, c := range choices {
-			if c == s {
-				return ""
-			}
-		}
+	if s, ok := d.(string); ok && choices != nil && !containsString(choices, s) {
 		return fmt.Sprintf("`%s` must be one of: %s.", name, strings.Join(choices, ", "))
 	}
 	return ""
+}
+
+// Runtimes are the names `requires` may list: what the image guarantees. A Go plugin needs none.
+var Runtimes = []string{"dotnet", "node", "python3"}
+
+func containsString(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // text is a string property that is not blank, trimmed.

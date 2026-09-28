@@ -1,7 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- The sample plugin member: a console app with no dependencies. Install it with
-       `dotnet publish -c Release -o <version-dir>/lib` - see docs/plugins.md. -->
+       `dotnet publish -c Release -o <version-dir>/lib` - see docs/plugins.md.
+       Self-contained: the image guarantees the .NET runtime (the manifest's "requires": ["dotnet"])
+       and nothing else. A NuGet package the plugin uses is published into lib/ beside it; nothing
+       a plugin needs is ever added to the image. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>SampleEcho</AssemblyName>

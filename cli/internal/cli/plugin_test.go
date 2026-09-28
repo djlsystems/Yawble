@@ -494,3 +494,183 @@ func TestPluginRemoveSaysSoWhenTheHostStillListsIt(t *testing.T) {
 		t.Errorf("exit %d %q", code, errOut)
 	}
 }
+
+// --from-instance: a folder already inside the instance, checked and copied there.
+const (
+	instanceFolder = "/data/teams/acme/repos/Tools/main/build/sample-echo/0.1.0"
+	inspectCall    = execPrefix + cli.PluginInspectScript + " sh /data " + instanceFolder
+	filesCall      = execPrefix + cli.PluginFilesScript + " sh " + instanceFolder
+)
+
+// fromInstanceScript is a running instance where the folder passes the in-container folder check,
+// its manifest reads as manifest, and the file check answers files.
+func fromInstanceScript(t *testing.T, manifest, files string) *engine.Scripted {
+	s := pluginScript(t)
+	s.On(inspectCall, engine.Result{Stdout: "ok\t" + instanceFolder + "\n" + manifest})
+	s.On(filesCall, engine.Result{Stdout: files})
+	return s
+}
+
+func TestPluginInstallFromInstanceCopiesInsideTheContainerNotFromTheHost(t *testing.T) {
+	s := fromInstanceScript(t, echoManifest, "ok\n")
+	code, out, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", instanceFolder)
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	want := []string{
+		inspectCall,
+		filesCall + " x:sample-echo s:skills/sample-echo.md",
+		prepareCall + "sample-echo 0.1.0 0",
+		"podman exec yawble cp -R -P -- " + instanceFolder + " /data/plugins/sample-echo/.incoming-0.1.0",
+		placeCall + "sample-echo 0.1.0 sample-echo",
+		requestCall,
+		reportCall,
+	}
+	at := 0
+	for _, c := range s.Calls {
+		if at < len(want) && c == want[at] {
+			at++
+		}
+	}
+	if at != len(want) {
+		t.Fatalf("missing, in order, %q\ncalls:\n%s", want[at], strings.Join(s.Calls, "\n"))
+	}
+	if cp := callsContaining(s, "podman cp"); len(cp) != 0 {
+		t.Errorf("copied from the host: %v", cp)
+	}
+	for _, want := range []string{"copied sample-echo 0.1.0 to /data/plugins/sample-echo/0.1.0", "the Host reports sample-echo 0.1.0 installed", "plugin:sample-echo"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestPluginInstallFromInstanceRefusesAManifestTheHostWouldRefuseBeforeWriting(t *testing.T) {
+	for name, c := range map[string]struct {
+		manifest, files, want string
+	}{
+		"bad field":          {strings.Replace(echoManifest, "harness.member/1", "other/9", 1), "ok\n", "`protocol` 'other/9' is not one this Host speaks"},
+		"unknown runtime":    {strings.Replace(echoManifest, `"skills"`, `"requires": ["ruby"], "skills"`, 1), "ok\n", "`requires` names 'ruby'"},
+		"missing executable": {echoManifest, "missing\tx\tsample-echo\n", "its executable sample-echo does not exist."},
+		"missing skill":      {echoManifest, "missing\ts\tskills/sample-echo.md\n", "its skill skills/sample-echo.md does not exist inside 0.1.0/."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := fromInstanceScript(t, c.manifest, c.files)
+			code, _, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", instanceFolder)
+			if code != 1 || !strings.Contains(errOut, c.want) {
+				t.Errorf("exit %d stderr %q, want %q", code, errOut, c.want)
+			}
+			if w := append(callsContaining(s, cli.PluginPrepareScript), callsContaining(s, " cp ")...); len(w) != 0 {
+				t.Errorf("wrote although refused:\n%s", strings.Join(w, "\n"))
+			}
+		})
+	}
+}
+
+func TestPluginInstallFromInstanceRefusesAnInstalledVersionUnlessForced(t *testing.T) {
+	s := fromInstanceScript(t, echoManifest, "ok\n")
+	s.On(prepareCall+"sample-echo 0.1.0 0", engine.Result{Stdout: "exists\n"})
+	code, _, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", instanceFolder)
+	if code != 1 || !strings.Contains(errOut, "already installed") || !strings.Contains(errOut, "--force") {
+		t.Errorf("exit %d stderr %q", code, errOut)
+	}
+	if len(callsContaining(s, " cp ")) != 0 || len(callsContaining(s, cli.PluginPlaceScript)) != 0 {
+		t.Errorf("copied although refused:\n%s", strings.Join(s.Calls, "\n"))
+	}
+
+	s = fromInstanceScript(t, echoManifest, "ok\n")
+	code, out, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", instanceFolder, "--force")
+	if code != 0 || len(callsContaining(s, prepareCall+"sample-echo 0.1.0 1")) != 1 || len(callsContaining(s, " cp -R -P ")) != 1 {
+		t.Errorf("--force: exit %d %s %s\n%s", code, out, errOut, strings.Join(s.Calls, "\n"))
+	}
+}
+
+// The in-container check's refusal (outside the data root, a symlink leaving it) is printed, and
+// nothing is written; a path that is not absolute never reaches the container.
+func TestPluginInstallFromInstanceRefusesAFolderOutsideTheDataRoot(t *testing.T) {
+	s := pluginScript(t)
+	s.On(execPrefix+cli.PluginInspectScript+" sh /data /srv/build/0.1.0", engine.Result{Stdout: "refuse\tit is outside the data root /data; build or copy the plugin under it first\n"})
+	code, _, errOut := run(t, stubbed(s), "plugin", "install", "--from-instance", "/srv/build/0.1.0")
+	if code != 1 || !strings.Contains(errOut, "/srv/build/0.1.0 was not installed: it is outside the data root /data") {
+		t.Errorf("exit %d stderr %q", code, errOut)
+	}
+	if len(callsContaining(s, cli.PluginPrepareScript)) != 0 || len(callsContaining(s, cli.PluginFilesScript)) != 0 {
+		t.Errorf("went on although refused:\n%s", strings.Join(s.Calls, "\n"))
+	}
+
+	s = pluginScript(t)
+	code, _, errOut = run(t, stubbed(s), "plugin", "install", "--from-instance", "build/0.1.0")
+	if code != 2 || !strings.Contains(errOut, "absolute path inside the instance") || len(callsContaining(s, "podman exec")) != 0 {
+		t.Errorf("relative: exit %d stderr %q\n%s", code, errOut, strings.Join(s.Calls, "\n"))
+	}
+}
+
+// The --from-instance scripts, run for real under sh against a temporary data root.
+func TestPluginFromInstanceScriptsUnderSh(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the scripts run in the Linux container and use GNU realpath")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	runScript := func(script string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command(sh, append([]string{"-c", script, "sh"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return string(out)
+	}
+	root := t.TempDir()
+	data := filepath.Join(root, "data")
+	must(t, os.MkdirAll(data, 0o755))
+	good := filepath.Join(data, "teams", "acme", "build", "0.1.0")
+	must(t, os.MkdirAll(filepath.Dir(good), 0o755))
+	must(t, os.CopyFS(good, os.DirFS(builtPlugin(t, nil))))
+	outside := filepath.Join(root, "elsewhere", "0.1.0")
+	must(t, os.CopyFS(outside, os.DirFS(builtPlugin(t, nil))))
+	must(t, os.Symlink(outside, filepath.Join(data, "teams", "acme", "link")))
+
+	if got := runScript(cli.PluginInspectScript, data, good); !strings.HasPrefix(got, "ok\t"+good+"\n") || !strings.Contains(got, `"id": "sample-echo"`) {
+		t.Errorf("good folder: %q", got)
+	}
+	if got := runScript(cli.PluginInspectScript, data, good+"/../0.1.0/"); !strings.HasPrefix(got, "ok\t"+good+"\n") {
+		t.Errorf("the same folder by another name: %q", got)
+	}
+	for name, c := range map[string]struct{ path, want string }{
+		"outside":      {outside, "refuse\tit is outside the data root " + data},
+		"dot-dot out":  {data + "/../elsewhere/0.1.0", "refuse\tit is outside the data root"},
+		"symlink out":  {filepath.Join(data, "teams", "acme", "link"), "refuse\tit leads through a symlink to " + outside},
+		"missing":      {filepath.Join(data, "nope"), "refuse\tit does not exist in the instance"},
+		"the root":     {data, "refuse\tit is the data root itself"},
+		"no manifest":  {filepath.Join(data, "teams", "acme", "build"), "refuse\tit has no plugin.json"},
+		"not a folder": {filepath.Join(good, "plugin.json"), "refuse\tit is not a folder"},
+	} {
+		if got := runScript(cli.PluginInspectScript, data, c.path); !strings.HasPrefix(got, c.want) {
+			t.Errorf("%s: %q, want %q", name, got, c.want)
+		}
+	}
+
+	// A symlink inside the folder that stays in it is fine; one that leaves it is refused.
+	must(t, os.Symlink("sample-echo", filepath.Join(good, "inner")))
+	if got := runScript(cli.PluginInspectScript, data, good); !strings.HasPrefix(got, "ok\t") {
+		t.Errorf("inner symlink: %q", got)
+	}
+	must(t, os.Symlink(filepath.Join(data, "teams"), filepath.Join(good, "lib", "escape")))
+	if got := runScript(cli.PluginInspectScript, data, good); !strings.HasPrefix(got, "refuse\tit holds a symlink that leaves the folder") {
+		t.Errorf("escaping symlink: %q", got)
+	}
+
+	for want, args := range map[string][]string{
+		"ok\n":                          {"x:sample-echo", "s:skills/sample-echo.md"},
+		"missing\tx\tbin/run\n":         {"x:sample-echo", "x:bin/run"},
+		"missing\ts\tskills/other.md\n": {"s:skills/other.md"},
+		"missing\tx\tlib\n":             {"x:lib"},
+		"outside\ts\tlib/escape/x.md\n": {"s:lib/escape/x.md"},
+	} {
+		if got := runScript(cli.PluginFilesScript, append([]string{good}, args...)...); got != want {
+			t.Errorf("%v: %q, want %q", args, got, want)
+		}
+	}
+}
