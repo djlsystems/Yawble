@@ -961,8 +961,9 @@ public static partial class RepoEndpoints
 
     /// <summary>
     /// THE ONE PLACE THIS PLATFORM PUSHES. Fast-forwards <c>origin/team/{id}</c> to the clone's
-    /// local <c>main</c>. NEVER FORCES: before touching the remote, it asks git whether
-    /// <c>origin/team/{id}</c> (as of a fresh fetch) is an ancestor of the clone's <c>main</c>. If
+    /// local <c>team/{id}</c> when it carries the default branch, otherwise to the local default
+    /// branch. NEVER FORCES: before touching the remote, it asks git whether
+    /// <c>origin/team/{id}</c> (as of a fresh fetch) is an ancestor of what is pushed. If
     /// it is not - somebody else pushed commits this clone never saw - the push would have to
     /// discard them, so this refuses with 409 and explains, rather than attempting the push and
     /// relying on git's own non-fast-forward rejection: that rejection protects exactly the commits
