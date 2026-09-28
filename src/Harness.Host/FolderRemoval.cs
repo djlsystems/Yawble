@@ -218,7 +218,8 @@ public sealed class FolderRemoval(
     /// nothing was written after the reset, and goes itself only once empty. Anything newer is the
     /// member's and is left, and no longer counted;</item>
     /// <item>once a named path is gone, the directories above it go too while empty, up to but
-    /// never including the folder, stopping at a link or one modified after the reset;</item>
+    /// never including the folder, stopping at a link or one modified after the reset. This is
+    /// best-effort clean-up by the Host: one it cannot remove is left and never counted;</item>
     /// <item>a named directory the Host still cannot list stays unfinished: it is named again and
     /// retried again, never reported finished.</item>
     /// </list>
@@ -230,7 +231,9 @@ public sealed class FolderRemoval(
     /// path after checking it is not a link, so an agent process swapping it for a link in between
     /// could point the Host's deletes elsewhere; the window is small (Reset refuses busy members,
     /// and the start retry runs before members start) and closing it needs handle-relative
-    /// (<c>openat</c>, <c>O_NOFOLLOW</c>) deletes.
+    /// (<c>openat</c>, <c>O_NOFOLLOW</c>) deletes. Cosmetic: when a retry takes more than one
+    /// attempt, an earlier attempt's deletes make the directories above a named path look newer
+    /// than the reset, so the empty ones may be left behind; nothing is lost.
     /// </para>
     /// </summary>
     private async Task<FolderRemovalReport> RetryEmptiedAsync(UnfinishedRemoval row, CancellationToken ct)
@@ -320,7 +323,8 @@ public sealed class FolderRemoval(
         }
 
         // The directories above a named path that the reset emptied go too once empty, deepest
-        // first, never the folder itself.
+        // first, never the folder itself. Best-effort clean-up by the Host alone: one it cannot
+        // remove is left in place and never counted, so it never keeps the row unfinished.
         foreach (var directory in ancestors.OrderByDescending(d => d.Length))
         {
             if (!Directory.Exists(directory) || IsLink(directory) || remaining.Any(r => Within(directory, r))) continue;
@@ -331,7 +335,7 @@ public sealed class FolderRemoval(
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                remaining.Add(directory);
+                // Left in place: an empty directory, nothing lost.
             }
         }
 

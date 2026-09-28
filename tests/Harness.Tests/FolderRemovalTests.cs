@@ -399,6 +399,33 @@ public sealed class FolderRemovalTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task An_empty_directory_above_a_named_path_the_host_cannot_remove_is_left_and_the_reset_retry_finishes()
+    {
+        await CreateAlphaAsync();
+        var workspace = _paths.WorkspaceFor(new ContainerId("Alpha", "Manager"));
+        var sub = Path.Combine(workspace, "a", "sub");
+        var deep = await WriteAsync(Path.Combine(sub, "g.bin"));
+        _deletes.Refuse(deep);
+
+        var reset = await _reset.ResetAsync(
+            "Alpha", new TeamResetOptions(["Manager"], ForgetHistory: false, ClearWorkspaces: true), Ct);
+
+        Assert.NotNull(reset);
+        Assert.Equal([deep], reset.Remaining);
+
+        // The named file can go now, but the directory above it cannot (as when the agent owns it).
+        _deletes.Allow(deep);
+        _deletes.Refuse(sub);
+        var retried = Assert.Single(await _retry.RetryAsync(ct: Ct));
+
+        // Removing an empty ancestor is clean-up: failing it never keeps the row unfinished.
+        Assert.True(retried.Finished, $"remaining: {string.Join(", ", retried.Remaining)}");
+        Assert.False(File.Exists(deep));
+        Assert.True(Directory.Exists(sub), "the directory the Host could not remove is left in place");
+        Assert.Null(await _unfinished.FindAsync(workspace, Ct));
+    }
+
+    [Fact]
     public async Task Creating_a_team_over_the_unfinished_removal_of_a_deleted_team_finishes_it_first()
     {
         await CreateAlphaAsync();
