@@ -408,7 +408,7 @@ public sealed class SiteApiTests(HostFixture host) : IClassFixture<HostFixture>
         {
             var served = await sandbox.GetAsync(page + file, Ct);
             Assert.Equal(HttpStatusCode.OK, served.StatusCode);
-            Assert.StartsWith("sandbox allow-scripts allow-forms;", served.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+            Assert.StartsWith("sandbox allow-scripts allow-forms allow-downloads;", served.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
         }
 
         var items = await sandbox.GetFromJsonAsync<JsonElement>(page + "_api/data/items", Ct);

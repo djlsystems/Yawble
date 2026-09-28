@@ -328,10 +328,14 @@ public static class SiteEndpoints
 /// <see cref="SecurityHeaders.PolicyOverride"/> and nothing else.
 ///
 /// <list type="bullet">
-/// <item><c>sandbox allow-scripts allow-forms</c> and NOT <c>allow-same-origin</c>: the page runs in
+/// <item><c>sandbox allow-scripts allow-forms allow-downloads</c> and NOT <c>allow-same-origin</c>: the page runs in
 /// an opaque origin, so it cannot read the app's cookie, storage or DOM, and its own requests to
 /// the Host carry no cookie (it is <c>SameSite=Strict</c>, and an opaque origin is never same-site).
-/// No <c>allow-top-navigation</c>, no <c>allow-popups</c>, so no <c>allow-popups-to-escape-sandbox</c>.</item>
+/// No <c>allow-top-navigation</c>, no <c>allow-popups</c>, so no <c>allow-popups-to-escape-sandbox</c>.
+/// <c>allow-downloads</c> lets a link save a file the site itself serves (a document a team made for
+/// the person): without it the browser drops every download silently. It widens nothing the page can
+/// read: a download's request from the opaque origin carries no cookie (<c>SameSite=Strict</c>), so it
+/// reaches only what the capability in its path already serves, and the browser shows every download.</item>
 /// <item>Scripts, styles, images and fonts from the site's own files under this capability only,
 /// plus the helper script; nothing inline, nothing from anywhere else.</item>
 /// <item><c>connect-src</c> the site's own <c>_api/</c> under this capability, and nothing else.</item>
@@ -349,7 +353,7 @@ public static class SitePolicy
         var api = $"{files}{SiteRules.ApiSegment}/";
         var sdk = $"{origin}{SiteEndpoints.SdkPath}";
 
-        return "sandbox allow-scripts allow-forms; "
+        return "sandbox allow-scripts allow-forms allow-downloads; "
             + "default-src 'none'; "
             + $"script-src {files} {sdk}; "
             + $"style-src {files}; "

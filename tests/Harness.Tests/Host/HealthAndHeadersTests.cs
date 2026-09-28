@@ -147,7 +147,7 @@ public sealed class HealthAndHeadersTests(HostFixture host) : IClassFixture<Host
 
         var files = $"http://localhost/sites/{host.Alpha}/headers/_c/{capability}/";
         Assert.Equal(
-            "sandbox allow-scripts allow-forms; default-src 'none'; "
+            "sandbox allow-scripts allow-forms allow-downloads; default-src 'none'; "
             + $"script-src {files} http://localhost/sites/_sdk/site.js; style-src {files}; img-src {files}; font-src {files}; "
             + $"connect-src {files}_api/; form-action 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'",
             SitePolicy.For("http://localhost", host.Alpha, "headers", capability));

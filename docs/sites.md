@@ -103,13 +103,15 @@ Every response under a valid capability carries this CSP **in place of** the app
 `<origin>/sites/<team>/<site>/_c/<capability>/`):
 
 ```
-sandbox allow-scripts allow-forms; default-src 'none';
+sandbox allow-scripts allow-forms allow-downloads; default-src 'none';
 script-src <files> <origin>/sites/_sdk/site.js; style-src <files>; img-src <files>; font-src <files>;
 connect-src <files>_api/; form-action 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'
 ```
 
 - `sandbox` with `allow-scripts` and `allow-forms` but **not** `allow-same-origin`: the page's script
   runs, in an **opaque origin**. It cannot read the app's cookie, storage or DOM.
+- `allow-downloads`: a link can save a file the site serves, such as a document the team made for the
+  person (publish it with the site). Without it the browser drops every download without a word.
 - No `allow-top-navigation`, no `allow-popups` and so no `allow-popups-to-escape-sandbox`.
 - Scripts, styles, images and fonts come from the site's own files under this capability only, plus
   the helper script. Nothing inline, no `data:`, nothing from anywhere else.

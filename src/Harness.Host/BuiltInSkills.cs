@@ -1294,6 +1294,12 @@ public static class BuiltInSkills
             - **No localStorage, sessionStorage, IndexedDB or cookies.** An opaque origin has no
               storage; touching `localStorage` throws. Keep state in `site.data`, or in memory.
             - **No `alert`, `confirm` or `prompt`**, and no popups. Ask with an input on the page.
+              A link to another site (a posting at its source) is a plain `<a href>` with no
+              `target="_blank"`: it opens in this tab, and Back returns to the site.
+            - **Downloads work for the site's own files.** To hand the person a document the team
+              made (a .docx, a PDF), put it in the site's folder and publish, then link it with
+              `<a href="files/name.docx" download>`. A document outside the published folder cannot
+              be reached from the page.
             - **Forms are handled by script.** A form cannot post anywhere; listen for the click or
               `submit` and call `event.preventDefault()`.
             - **Render untrusted text with `textContent`, never `innerHTML`.** A document's fields
