@@ -2224,7 +2224,21 @@ public sealed class TeamRegistry(
                     created.Id, member.Label ?? member.Name, member.Agent,
                     member.SystemPrompt ?? "", member.Subscribes,
                     hiredFor: member.HiredFor, ct: ct, settings: settings,
-                    promptSetBy: member.SystemPromptSetBy);
+                    promptSetBy: member.SystemPromptSetBy,
+
+                    // THE BINDING TRAVELS with the member (a connection id, never a token), recorded
+                    // as carried from the source rather than chosen again.
+                    connectionsAudit: settings is { Connections.Count: > 0 } carriedBindings
+                        ? cloned => new TriggerAudit(
+                            null, null, TenantActions.MemberConnectionsChanged, $"{cloned.Team}/{cloned.Name}", member.Label ?? member.Name,
+                            System.Text.Json.JsonSerializer.Serialize(new
+                            {
+                                team = cloned.Team,
+                                clonedFrom = $"{id.Team}/{id.Name}",
+                                setBy = "person",
+                                slots = carriedBindings.Connections.OrderBy(c => c.Key, StringComparer.Ordinal).Select(c => new { slot = c.Key, from = (string?)null, to = c.Value }),
+                            }))
+                        : null);
 
                 hired += 1;
             }
@@ -2566,10 +2580,11 @@ public sealed class TeamRegistry(
         string? hiredFor = null,
         CancellationToken ct = default,
         PluginMemberSettings? settings = null,
-        SystemPromptSetter? promptSetBy = null) =>
+        SystemPromptSetter? promptSetBy = null,
+        Func<ContainerId, TriggerAudit>? connectionsAudit = null) =>
         AddContainerAsync(
             team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct, settings: settings,
-            promptSetBy: promptSetBy);
+            promptSetBy: promptSetBy, connectionsAudit: connectionsAudit);
 
     /// <summary>
     /// Adds a container called <paramref name="label"/>, deriving its identifier the same way a
@@ -2586,7 +2601,8 @@ public sealed class TeamRegistry(
         string? hiredFor = null,
         CancellationToken ct = default,
         PluginMemberSettings? settings = null,
-        SystemPromptSetter? promptSetBy = null)
+        SystemPromptSetter? promptSetBy = null,
+        Func<ContainerId, TriggerAudit>? connectionsAudit = null)
     {
         if (!_teams.TryGetValue(team, out var members)) throw new InvalidOperationException($"No team '{team}'.");
 
@@ -2604,9 +2620,9 @@ public sealed class TeamRegistry(
         // CONFIGURATION IS A PLUGIN'S, checked against its manifest HERE, before anything is made,
         // so a person hears a missing field or an unset secret at hire rather than at the first run.
         if (!isPlugin && settings is { } agentSettings
-            && (agentSettings.Config.Count > 0 || agentSettings.Secrets.Count > 0))
+            && (agentSettings.Config.Count > 0 || agentSettings.Secrets.Count > 0 || agentSettings.Connections.Count > 0))
         {
-            throw new PluginSettingsException("`config` and `secrets` are for plugin members; an Agent takes its settings from its preset.");
+            throw new PluginSettingsException("`config`, `secrets` and `connections` are for plugin members; an Agent takes its settings from its preset, and gets no connection.");
         }
 
         if (isPlugin && plugins?.For(pluginId!) is { } installed
@@ -2800,7 +2816,15 @@ public sealed class TeamRegistry(
         // the one and only write of its subscriptions row; ContainerHost does not write one.
         if (isPlugin && pluginSettings is not null)
         {
-            await pluginSettings.SaveAsync(id, settings ?? PluginMemberSettings.None, ct);
+            // A CONNECTION BINDING lands with its `member.connections-changed` row, or not at all.
+            if (connectionsAudit is not null && settings is { Connections.Count: > 0 })
+            {
+                await pluginSettings.SaveAsync(id, settings, [connectionsAudit(id)], ct);
+            }
+            else
+            {
+                await pluginSettings.SaveAsync(id, settings ?? PluginMemberSettings.None, ct);
+            }
         }
 
         await effective.RecomputeAsync(id, ct);
