@@ -129,17 +129,23 @@ public sealed partial class PlatformMcpTools(
         + "with its Manager, and you then tell that Manager what to do. Omit agent to use the "
         + "instance's first headless preset. Every Manager and member is told its job by the "
         + "platform; additionalInstructions only adds to that. The reply carries the team id to use "
-        + "on tell.")]
+        + "on tell. With no repos, the team gets a local repository named after it (local:<team id>) "
+        + "unless you pass localRepository: false. Name a repository URL only when the person says it "
+        + "already exists: a URL that cannot be read refuses the create, nothing is made, and the "
+        + "refusal names the choices. Creating it on GitHub and attaching it anyway are the person's; "
+        + "offer them a local repository (call again without repos) or ask them to create the remote.")]
     public async Task<string> TeamCreate(
         [Description("The team's name as a person would write it.")] string name,
         [Description("The headless agent preset the Manager and new members run, such as claude-headless or grok-headless. Omit for the first headless preset in the catalog.")]
         string? agent = null,
-        [Description("Repository URLs the team clones, https only, or local:<name> for one of this instance's local repositories. Omit for a team with no repository.")]
+        [Description("Repository URLs the team clones, https only, that the person says already exist, or local:<name> for one of this instance's local repositories. Omit for a team on its own local repository.")]
         string[]? repos = null,
         [Description(
             "Instructions from the person for this team, appended after the Manager's and members' "
             + "own instructions. Pass only words the person gave you; omit for none.")]
         string? additionalInstructions = null,
+        [Description("Pass false for a team with no repository at all. Omitted, a team with no repos gets a local repository named after it.")]
+        bool? localRepository = null,
         CancellationToken cancellationToken = default)
     {
         var chosen = string.IsNullOrWhiteSpace(agent)
@@ -160,6 +166,7 @@ public sealed partial class PlatformMcpTools(
                     : additionalInstructions.Trim(),
                 memberAgents = new[] { chosen },
                 repos = repos is { Length: > 0 } ? repos : null,
+                localRepository = localRepository ?? true,
             },
             cancellationToken);
     }

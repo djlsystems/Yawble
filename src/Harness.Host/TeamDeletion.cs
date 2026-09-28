@@ -37,7 +37,15 @@ public sealed record TeamDeleted(
     /// and open. Null when there was nothing to keep: a folder holding only the platform's marker
     /// is removed with the team, so a team that wrote no documents leaves no folder behind.
     /// </summary>
-    string? DocumentsKept);
+    string? DocumentsKept)
+{
+    /// <summary>
+    /// THE TEAM'S LOCAL REPOSITORIES, WHICH THIS DELETION KEPT (B001F): the <c>local:&lt;name&gt;</c>
+    /// references it had. They live under <c>&lt;dataRoot&gt;/repos</c>, never under the root, and are
+    /// listed as unused afterwards, where a person may delete them. Filled in by the route.
+    /// </summary>
+    public IReadOnlyList<string> LocalRepositoriesKept { get; init; } = [];
+}
 
 /// <summary>
 /// Deleting this team would discard commits no remote-tracking ref in the clone can reach, and the

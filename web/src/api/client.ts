@@ -30,6 +30,9 @@ import type {
   FolderTestRequest,
   FolderTestResult,
   LocalRepo,
+  RepoCheckRefusal,
+  RepoChoice,
+  TeamLocalRepository,
   WatchRootOption,
   MemberId,
   MemberMeasuredCost,
@@ -56,6 +59,7 @@ import type {
   TeamTrigger,
   Team,
   TeamCloned,
+  TeamCreated,
   TeamDeleted,
   RemovalRetried,
   UnfinishedRemoval,
@@ -516,8 +520,21 @@ export const createTeam = (
    * so the clone is made with its `upstream` remote. Omitted when empty.
    */
   upstreams?: Record<string, string>,
+
+  /**
+   * With no `repos`, whether the team gets a local repository named after it (`local:<team id>`).
+   * The server's default is true; `false` makes none. Omitted when `repos` is non-empty, where the
+   * server ignores it.
+   */
+  localRepository?: boolean,
+
+  /**
+   * The answer to a refused repository check (422 `repo-check-failed`): URL, exactly as in `repos`,
+   * to a choice the refusal offered for it. Omitted when empty.
+   */
+  repoChoices?: Record<string, RepoChoice>,
 ) =>
-  json<Team>('/api/teams', {
+  json<TeamCreated>('/api/teams', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
 
@@ -533,6 +550,8 @@ export const createTeam = (
       budgetTokens,
       additionalInstructions: additionalInstructions?.trim() || undefined,
       upstreams: upstreams && Object.keys(upstreams).length > 0 ? upstreams : undefined,
+      localRepository,
+      repoChoices: repoChoices && Object.keys(repoChoices).length > 0 ? repoChoices : undefined,
     }),
   })
 
@@ -623,13 +642,42 @@ export const deleteLocalRepo = async (name: string): Promise<void> => {
   await send(`/api/local-repos/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
 
-/** Replaces a team's ordered Git repository URL list. */
-export const setTeamRepos = (team: TeamId, repos: string[]) =>
+/**
+ * Replaces a team's ordered Git repository URL list. A URL the team does not have yet is read with
+ * `git ls-remote` first; one that cannot be read is refused with 422 `repo-check-failed` (read it
+ * with `repoCheckRefusal`) and the list is unchanged. `repoChoices` answers that refusal: sent, the
+ * body is `{ repos, repoChoices }` instead of the bare array.
+ */
+export const setTeamRepos = (team: TeamId, repos: string[], repoChoices?: Record<string, RepoChoice>) =>
   json<Team>(`/api/teams/${encodeURIComponent(team)}/repos`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(repos),
+    body: JSON.stringify(repoChoices && Object.keys(repoChoices).length > 0 ? { repos, repoChoices } : repos),
   })
+
+/**
+ * "Create a local repository" in Team settings: creates (or reuses an unused one of) the team's own
+ * local repository, by the naming a new team's gets, and attaches it. 409 when the team already has
+ * a `local:` repository. A person's.
+ */
+export const createTeamLocalRepo = (team: TeamId) =>
+  json<{ team: Team; localRepository: TeamLocalRepository }>(
+    `/api/teams/${encodeURIComponent(team)}/local-repo`,
+    { method: 'POST' },
+  )
+
+/**
+ * The refused repository check inside a failed create or attach, or null for any other failure.
+ * Only a 422 whose body says `code: "repo-check-failed"` is one: a sentence alone is not enough to
+ * offer choices on.
+ */
+export function repoCheckRefusal(cause: unknown): RepoCheckRefusal | null {
+  if (!(cause instanceof ActionRefused)) return null
+  if ((cause as { status?: unknown }).status !== 422) return null
+  const body = cause.body as Partial<RepoCheckRefusal>
+  if (body.code !== 'repo-check-failed' || !Array.isArray(body.repos)) return null
+  return { error: typeof body.error === 'string' ? body.error : cause.message, code: body.code, repos: body.repos }
+}
 
 /**
  * Set a repository's default branch, or clear it with null so the branch origin's HEAD
@@ -799,14 +847,33 @@ export const dispatchBacklogItemToNewTeam = (
     memberAgents: string[]
     root: string | null
     repos: string[]
+
+    /** As on `createTeam`: with no `repos`, false makes no local repository. Omitted otherwise. */
+    localRepository?: boolean | undefined
+
+    /** As on `createTeam`: the answer to a refused repository check. Omitted when empty. */
+    repoChoices?: Record<string, RepoChoice>
   },
 ) =>
-  json<{ team: string; teamName: string; correlation: number; dispatch: number }>(
+  json<{
+    team: string
+    teamName: string
+    correlation: number
+    dispatch: number
+    localRepository?: TeamLocalRepository | null
+    createdOnGitHub?: string[] | null
+  }>(
     `/api/backlog/${id}/dispatch-to-new`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name, ...settings }),
+      body: JSON.stringify({
+        name,
+        ...settings,
+        repoChoices: settings.repoChoices && Object.keys(settings.repoChoices).length > 0
+          ? settings.repoChoices
+          : undefined,
+      }),
     },
   )
 

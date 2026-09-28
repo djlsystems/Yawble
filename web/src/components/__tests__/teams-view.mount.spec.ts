@@ -147,6 +147,23 @@ describe('the team delete dialog', () => {
     expect(text).toContain("every account's access to it");
   });
 
+  /** B001F: a team's local repository is not deleted with it, and the dialog says where it goes. */
+  it('says the team\'s local repository is kept and can be deleted from Admin → Repositories', async () => {
+    await mountView([{ ...aTeam('alpha'), repos: ['https://github.com/o/app.git', 'local:alpha'] } as unknown as Team]);
+    await click('Delete this team');
+
+    const kept = document.body.querySelector('[data-local-repos-kept]')?.textContent?.replace(/\s+/g, ' ').trim();
+    expect(kept).toBe('Its local repository local:alpha is kept, and can be deleted from Admin → Repositories.');
+  });
+
+  it('says nothing about a kept repository when the team has no local one', async () => {
+    await mountView([{ ...aTeam('alpha'), repos: ['https://github.com/o/app.git'] } as unknown as Team]);
+    await click('Delete this team');
+
+    expect(document.body.querySelector('[data-local-repos-kept]')).toBeNull();
+    expect(cardText('.teams-confirm-card')).not.toContain('Admin → Repositories');
+  });
+
   it('deletes without typing when the server has nothing to warn about', async () => {
     deleteTeam.mockResolvedValue({ containers: 0, failures: [] });
     await mountView([aTeam('alpha')]);

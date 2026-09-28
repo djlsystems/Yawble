@@ -73,6 +73,10 @@ public sealed class ContributorModeTests : IAsyncDisposable
                 services.AddSingleton<IAgentRunner>(new FakeAgent());
                 services.AddSingleton<IRepoClone>(new LocalOriginClone(_fork));
 
+                // The fork's github.com URL is cloned from a local folder here, so it is read as
+                // one that exists: the check never reaches GitHub from a test.
+                services.AddSingleton<IRemoteRepoCheck>(new EveryRepositoryReads());
+
                 // Every append is observed with the fork's trunk AS IT IS AT THAT MOMENT, which is
                 // what pins "the row is appended after the push".
                 var logged = services.Single(d => d.ServiceType == typeof(IMessageLog));
@@ -523,6 +527,11 @@ public sealed class ContributorModeTests : IAsyncDisposable
         process.StandardError.ReadToEnd();
         process.WaitForExit();
         return (process.ExitCode, stdout);
+    }
+
+    private sealed class EveryRepositoryReads : IRemoteRepoCheck
+    {
+        public Task<RepoCheckFailure?> CheckAsync(string url, CancellationToken ct) => Task.FromResult<RepoCheckFailure?>(null);
     }
 
     /// <summary>The product's own <see cref="RepoClone"/>, pointed at the local fork whatever URL

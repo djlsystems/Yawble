@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
-import { createTeam, fileSystemRoots, listCatalog } from '../api/client';
+import { createTeam, fileSystemRoots, listCatalog, repoCheckRefusal } from '../api/client';
 import {
   agentsForMode,
   type Catalog,
   type FileSystemRoot,
+  type RepoCheckRefusal as RepoCheckRefused,
+  type RepoChoice,
   type TeamId,
   type UnresolvedAgent,
 } from '../api/types';
@@ -32,6 +34,8 @@ import { upstreamUrlProblem } from '../lib/contributor';
 import HostPathPicker from './HostPathPicker.vue';
 import ForkItForMe from './ForkItForMe.vue';
 import LocalRepoPicker from './LocalRepoPicker.vue';
+import RepoCheckRefusal from './RepoCheckRefusal.vue';
+import { afterRefusal, withChoice } from '../lib/repoChoices';
 import type { ForkResult } from '../api/types';
 
 /** Carries the new team's IDENTIFIER, so whoever opened this can switch to the team that was just
@@ -91,6 +95,37 @@ function setUpstream(index: number, url: string | number | null) {
   upstreams.value = next;
 }
 const repoSuggestions = ref<string[]>([]);
+
+/**
+ * "Create a local repository for this team": with no repository listed, the Host makes one named
+ * after the team unless this is unticked, which sends `localRepository: false`. Ticked by default,
+ * as the Host's own default is, and shown only while the list is empty - with a URL listed the Host
+ * ignores it, so a box there would be a control that does nothing. A URL typed in the field and not
+ * yet added counts as listed: Create adds it, so the box hides while the field holds text.
+ */
+const localRepository = ref(true);
+const offerLocalRepository = computed(() => repos.value.length === 0 && repoInput.value.trim() === '');
+
+/**
+ * A REFUSED REPOSITORY CHECK: a listed URL `git ls-remote` could not read. Nothing was created. The
+ * dialog stays open showing the Host's sentence and only the choices it offered; picking them sends
+ * the same request again with `repoChoices`, which ends in a created team or another refusal.
+ */
+const refusal = ref<RepoCheckRefused | null>(null);
+const repoChoices = ref<Record<string, RepoChoice>>({});
+
+/** A changed list is a different request: a refusal of the old one no longer answers it. */
+watch(repos, () => {
+  refusal.value = null;
+  repoChoices.value = {};
+}, { deep: true });
+
+function choose(url: string, choice: RepoChoice) {
+  if (!refusal.value || busy.value) return;
+  const next = withChoice(repoChoices.value, refusal.value, url, choice);
+  repoChoices.value = next.choices;
+  if (next.ready) void submit();
+}
 
 /**
  * The instance's own data root, exactly as `GET /api/fs/roots` answers it — found by the route's
@@ -263,6 +298,9 @@ async function loadDefaults() {
   repos.value = defaults.repos;
   upstreams.value = [];
   repoInput.value = '';
+  localRepository.value = true;
+  refusal.value = null;
+  repoChoices.value = {};
 
   // THE INSTANCE FIGURE, NOT A LITERAL AND NOT A REMEMBERED ONE. `board.workflowSpendLimit` is
   // what `GET /api/overview` answered, already fetched by the time this dialog opens, so the box
@@ -430,6 +468,10 @@ const valid = computed(() => formIsLegal());
 async function submit() {
   if (!formIsLegal() || !agent.value || busy.value) return;
 
+  // A URL typed but not added is still the person's repository: Create adds it, as Add would, so it
+  // is checked like any other rather than dropped for a local repository nobody asked for.
+  addRepo();
+
   busy.value = true;
   serverError.value = '';
 
@@ -463,13 +505,20 @@ async function submit() {
 
       // In this request, so each clone is made with its upstream remote.
       upstreamsByRepo(),
+
+      // Only with no repository listed: the Host ignores it otherwise.
+      repos.value.length === 0 ? localRepository.value : undefined,
+
+      // The answer to a refused check, when there was one.
+      repoChoices.value,
     );
 
     remember({
       managerAgent: agent.value,
       memberAgents: memberAgents.value,
       root: root.value.trim() === '' ? null : root.value.trim(),
-      repos: repos.value,
+      // Not a URL that was dropped for a local repository: it does not exist, so it is no suggestion.
+      repos: repos.value.filter((url) => repoChoices.value[url.trim()] !== 'use-local'),
     });
 
     // Handle unresolvedAgents if present
@@ -489,13 +538,24 @@ async function submit() {
     repos.value = [];
     upstreams.value = [];
     repoInput.value = '';
+    localRepository.value = true;
+    refusal.value = null;
+    repoChoices.value = {};
     open.value = false;
     // The ID. `setActiveTeam` stores what `activeTeam` matches on, and that getter compares
     // `team.id` - so emitting the name selects nothing at all for any team whose name is not
     // already its identifier, which is every team with a space in it.
     emit('created', created.id);
   } catch (cause) {
+    const refused = repoCheckRefusal(cause);
+    if (refused) {
+      repoChoices.value = afterRefusal(repoChoices.value, refused);
+      refusal.value = refused;
+      return;
+    }
+
     // In the dialog, verbatim, and the dialog stays open - see `serverError`.
+    refusal.value = null;
     serverError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     busy.value = false;
@@ -692,6 +752,15 @@ async function submit() {
             <div v-else class="text-caption os-text-muted q-mt-xs">
               Optional. Add repositories in priority order; the first entry is the team's primary repo.
             </div>
+
+            <q-checkbox
+              v-if="offerLocalRepository"
+              v-model="localRepository"
+              dense
+              class="q-mt-sm"
+              label="Create a local repository for this team"
+              data-local-repository-checkbox
+            />
           </div>
 
           <!-- Which CLI the Manager runs. What it is told is the built-in Manager prompt.
@@ -847,6 +916,14 @@ async function submit() {
             :rules="budgetRules"
             label="Budget for one workflow (tokens)"
             hint="What ONE workflow on this team may spend before it pauses — not a total across the team. Empty follows the instance figure; 0 is unlimited."
+          />
+
+          <RepoCheckRefusal
+            v-if="refusal"
+            :refusal="refusal"
+            :chosen="repoChoices"
+            :busy="busy"
+            @choose="choose"
           />
 
           <q-banner v-if="serverError" dense class="os-bg-tint-error text-negative">

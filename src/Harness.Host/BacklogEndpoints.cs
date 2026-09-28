@@ -607,6 +607,7 @@ public static class BacklogEndpoints
             IUserStore users,
             IMessageLog log,
             TenantLogging audit,
+            TeamRepoSetup repoSetup,
             CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
@@ -684,9 +685,30 @@ public static class BacklogEndpoints
                 });
             }
 
+            // THE SAME REPOSITORY PATH AS `POST /api/teams` (B001F), asked before the team is made:
+            // every URL read with `git ls-remote`, one that cannot be read refused with the caller's
+            // choices, a team left with no repository given its local one - and an agent never let
+            // create on GitHub or attach anyway. A refusal here leaves no team, row, folder or clone.
+            NewTeamRepos newRepos;
+            try
+            {
+                newRepos = await repoSetup.PlanNewTeamAsync(
+                    request.Repos, upstreams: null, request.RepoChoices,
+                    person: principal.Kind is PrincipalKind.User, request.LocalRepository, ct);
+            }
+            catch (RepoSetupRefusedException refused)
+            {
+                return Results.Json(refused.Body, statusCode: refused.Status);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+
             TeamSummary created;
             string? repoSetupInstruction = null;
             bool repoSetupFailed = false;
+            var teamCreated = false;
 
             try
             {
@@ -697,7 +719,7 @@ public static class BacklogEndpoints
                     memberAgent: null,
                     memberAgents: request.MemberAgents,
                     root: request.Root,
-                    repos: request.Repos,
+                    repos: newRepos.Repos,
                     ct: ct,
                     handleRepoSetup: outcomes =>
                     {
@@ -708,7 +730,17 @@ public static class BacklogEndpoints
                         if (repoSetupFailed) return false;
                         repoSetupInstruction = RepoSetupMessage.For(outcomes);
                         return true;
-                    });
+                    },
+
+                    // ONE UNIT WITH THE TEAM, as on `POST /api/teams`: a repository that cannot be
+                    // made refuses the create, naming why.
+                    addRepo: newRepos.AddRepoAsync);
+                teamCreated = true;
+                await newRepos.LogAsync(audit, context, created.Id, ct);
+            }
+            catch (RepoSetupRefusedException refused)
+            {
+                return Results.Json(refused.Body, statusCode: refused.Status);
             }
             catch (TeamNameTakenException)
             {
@@ -719,6 +751,10 @@ public static class BacklogEndpoints
                 // `CreateAsync` refuses a missing Agent by name, an illegal root, and a
                 // repo URL it cannot parse. All of those are answerable by the caller, so 400.
                 return Results.BadRequest(new { error = ex.Message });
+            }
+            finally
+            {
+                await newRepos.ForgetUnlessCreatedAsync(teamCreated);
             }
 
             if (repoSetupFailed)
@@ -748,6 +784,10 @@ public static class BacklogEndpoints
                 teamName = created.Name,
                 correlation,
                 dispatch = dispatchId,
+                localRepository = newRepos.LocalRepository is { } local
+                    ? new { name = local.Name, reference = local.Reference, created = local.Created }
+                    : null,
+                createdOnGitHub = newRepos.CreatedOnGitHub.Count == 0 ? null : newRepos.CreatedOnGitHub,
             });
         })
             .RequirePermit(Permits.CreateTeam)
@@ -766,6 +806,13 @@ public static class BacklogEndpoints
                 + "chosen rather than 'pick something sensible'.\n\n"
                 + "The NAME is required and is not derived here. The screen derives a default from "
                 + "the item's title so a person can edit it before committing.\n\n"
+                + "**Repositories (B001F), exactly as `POST /api/teams`.** Every URL in `repos` is read with "
+                + "`git ls-remote` before the team is made; one that cannot be read is refused with 422 "
+                + "`{ error, code: \"repo-check-failed\", repos: [{ url, failure, reason, choices }] }` and no team "
+                + "is created or item dispatched. Answer it with `repoChoices`; an agent is offered `use-local` "
+                + "only and refused `create-on-github` and `attach-anyway` with 403. A team left with no "
+                + "repository gets `local:<team id>` unless `localRepository` is false, reported as "
+                + "`localRepository`; when it cannot be made, no team is created.\n\n"
                 + "If the dispatch fails after the team is made, THE TEAM IS LEFT. An empty team is "
                 + "visible and deletable; a create that undid itself would be the destructive "
                 + "direction.");
@@ -1248,8 +1295,20 @@ internal sealed record NewTeamDispatch(
     IReadOnlyList<string>? MemberAgents = null,
     [property: Description("Where the team's folder goes. Null is under the instance root.")]
     string? Root = null,
-    [property: Description("Repositories the platform clones for the team.")]
-    IReadOnlyList<string>? Repos = null);
+    [property: Description(
+        "Repositories the platform clones for the team. Each URL is read with `git ls-remote` first, "
+        + "exactly as on `POST /api/teams`.")]
+    IReadOnlyList<string>? Repos = null,
+    [property: Description(
+        "Whether a team left with no repository gets a local repository named after it, attached as "
+        + "`local:<team id>`. Omitted means true. Ignored when `repos` names any repository.")]
+    bool? LocalRepository = null,
+    [property: Description(
+        "What to do with a URL in `repos` that `git ls-remote` could not read, keyed by that URL: "
+        + "`use-local`, `create-on-github` (a person only; github.com only) or `attach-anyway` (a person "
+        + "only; a network failure only). A URL with no choice that cannot be read refuses the dispatch "
+        + "and no team is created.")]
+    IReadOnlyDictionary<string, string>? RepoChoices = null);
 
 internal sealed record CreateBacklogItem(
     [property: Description("What the work is, in a line.")] string Title,
