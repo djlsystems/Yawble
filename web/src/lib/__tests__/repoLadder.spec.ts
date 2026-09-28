@@ -1159,10 +1159,22 @@ describe('a local team branch ahead of main is not pushed, and Push is offered f
     expect(step.action).toBe('push')
   })
 
-  it('still offers PUSH when main is NOT on the team ref, which is a different shape', () => {
-    // cloneMainOnTeamBranch false means main carries something the team ref lacks - pushing main
-    // is exactly what publishes it.
-    expect(nextStep(localTeamAhead({ cloneMainOnTeamBranch: false }), true).action).toBe('push')
+  it('still offers PUSH when main is NOT on the team ref, from a Host that does not say', () => {
+    // cloneMainOnTeamBranch false means main carries something the team ref lacks. An older Host
+    // sends no teamBranchUnpushed and its Push published main there, so the caption says main.
+    const step = nextStep(localTeamAhead({ cloneMainOnTeamBranch: false }), true)
+    expect(step.action).toBe('push')
+    expect(step.reason).toContain("push publishes this clone's main to team/alpha")
+  })
+
+  it('says Push publishes the LOCAL team branch when main has moved and the server reports it unpushed', () => {
+    // Push always publishes a local team/{id} when one exists, whether or not it carries main, so
+    // a moved main must not turn the caption into "publishes this clone's main".
+    const step = nextStep(localTeamAhead({ cloneMainOnTeamBranch: false, teamBranchUnpushed: true }), true)
+    expect(step.action).toBe('push')
+    expect(step.reason).toMatch(/^team\/alpha is not pushed/)
+    expect(step.reason).toContain("push publishes this clone's local team/alpha")
+    expect(step.reason).not.toContain("publishes this clone's main")
   })
 
   it('NULL is not measured and must not trigger the refusal', () => {

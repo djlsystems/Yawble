@@ -242,9 +242,9 @@ export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): Ladder
   if (!workIsOnMain && merge.verdict !== 'merged') {
     if (status.teamPushed !== true) {
       // A LOCAL TEAM BRANCH ORIGIN LACKS IS "NOT PUSHED", SAID IN ITS OWN NAME. Where a local
-      // `team/{id}` exists the server answers `teamPushed` about THAT branch, and `push` publishes
-      // it when it carries main (otherwise main, as before), so the flag and the action talk about
-      // the same ref and one click advances the rung. It used to publish main only, which left a
+      // `team/{id}` exists the server answers `teamPushed` about THAT branch, and `push` always
+      // publishes it - main only when there is no local team branch - so the flag and the action
+      // talk about the same ref and one click advances the rung. It used to publish main only, which left a
       // Manager's merged-but-unpushed team branch as a dead end with no button.
       if (teamBranchNotPushed(status)) {
         return {
@@ -252,7 +252,8 @@ export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): Ladder
           action: 'push',
           reason:
             `${status.teamBranch} is not pushed: origin does not have its latest commits, so push it ` +
-            `first - Merge to ${main} integrates the branch on origin, and nothing past this rung is ` +
+            `first - push publishes this clone's local ${status.teamBranch}, Merge to ${main} ` +
+            `integrates the branch on origin, and nothing past this rung is ` +
             'offered until it is there',
         }
       }
@@ -272,7 +273,8 @@ export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): Ladder
       // WHAT THE PUSH UNLOCKS IS AN ENDPOINT PRECONDITION, not merely this ladder's order:
       // `MergeToMainAsync` answers 400 - "Team branch team/{id} does not exist locally or on
       // origin" - when neither ref resolves, and publishing main to `team/{id}` is what creates
-      // the branch it then integrates. SAID ONCE FOR BOTH VERDICTS: the clause above them differs
+      // the branch it then integrates. A clone WITH a local team branch the server reports
+      // unpushed never reaches this sentence: the arm above says Push publishes that branch. SAID ONCE FOR BOTH VERDICTS: the clause above them differs
       // because pushed-ness differs, but the button does the same thing either way.
       const publishes =
         `push publishes this clone's ${main} to ${status.teamBranch}, which is the branch Merge to ` +
@@ -439,12 +441,14 @@ export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): Ladder
 
 /**
  * WHETHER THE LOCAL TEAM BRANCH IS WHAT IS MISSING FROM ORIGIN: the server's `teamBranchUnpushed`,
- * or - from a Host that does not send it - a local team ref strictly ahead of main. Either way Push
- * publishes that ref, because it carries main. `cloneMainOnTeamBranch === false` is never this
- * state: Push would publish main there, not the team ref.
+ * or - from a Host that does not send it - a local team ref strictly ahead of main. The server
+ * sends the field only when a local `team/{id}` exists, and Push always publishes that ref when it
+ * does, so the field is followed even when the clone's main has moved off the team ref
+ * (`cloneMainOnTeamBranch === false`). Only the fallback for an older Host, whose Push published
+ * main there, still reads that state as not this one.
  */
 export function teamBranchNotPushed(status: RepoStatus): boolean {
-  if (status.teamPushed === true || status.cloneMainOnTeamBranch === false) return false
+  if (status.teamPushed === true) return false
   if (status.teamBranchUnpushed != null) return status.teamBranchUnpushed
   return status.cloneMainOnTeamBranch === true
     && status.teamSha !== null
