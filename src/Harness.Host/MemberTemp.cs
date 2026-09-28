@@ -5,7 +5,7 @@ namespace Harness.Host;
 
 /// <summary>
 /// A MEMBER'S OWN TEMPORARY FOLDER, handed to its child as <c>TMPDIR</c>:
-/// <c>&lt;Host temp&gt;/member-&lt;random&gt;</c>, owner-only, recorded by a link
+/// <c>/tmp/member-&lt;random&gt;</c>, owner-only, recorded by a link
 /// <c>&lt;workspace&gt;/.tmpdir</c> that points at it.
 ///
 /// <para>
@@ -30,7 +30,7 @@ namespace Harness.Host;
 /// <para>
 /// THE LINK IN THE WORKSPACE IS WHICH FOLDER IS THIS MEMBER'S. The name is random, so a member
 /// removed and made again under the same name starts with a new, empty folder, never its
-/// predecessor's; a link that names anything but a folder of that shape in the Host's temp folder
+/// predecessor's; a link that names anything but a folder of that shape in /tmp
 /// is replaced. Both are made by the launch on first use: AS THE AGENT, through the same
 /// <see cref="AgentLaunchUser.Prefix"/> every agent child gets, when the Host switches users, so
 /// the agent owns them and keeps no capability; otherwise by the Host, whose user is the agent's.
@@ -45,7 +45,7 @@ public static partial class MemberTemp
     /// <summary>The folder's name inside the member's workspace, on Windows.</summary>
     public const string WindowsFolderName = ".tmp";
 
-    /// <summary>The start of every member folder's name in the Host's temp folder.</summary>
+    /// <summary>The start of every member folder's name in <see cref="Root"/>.</summary>
     public const string FolderPrefix = "member-";
 
     /// <summary>The variable the child reads it from.</summary>
@@ -107,12 +107,20 @@ public static partial class MemberTemp
         return FolderNamedBy(link);
     }
 
-    /// <summary>The Host's temp folder, where every member folder is made.</summary>
-    private static string Root => Path.TrimEndingDirectorySeparator(Path.GetTempPath());
+    /// <summary>
+    /// Where every member folder is made: <c>/tmp</c>, never the Host's own temp folder. When the
+    /// Host switches users the AGENT makes the folder, so the place must be one every user can
+    /// write; <c>/tmp</c> is <c>1777</c> in the image (the entrypoint sees to it) and short enough
+    /// for socket paths. The Host's <c>TMPDIR</c> may name a folder the agent cannot write - the
+    /// release suite's scratch folder does - and a member there would never start.
+    /// </summary>
+    public static string Root => OperatingSystem.IsWindows()
+        ? Path.TrimEndingDirectorySeparator(Path.GetTempPath())
+        : "/tmp";
 
     /// <summary>
-    /// The folder <paramref name="link"/> names, when it is a link to a real member folder in the
-    /// Host's temp folder; null for anything else.
+    /// The folder <paramref name="link"/> names, when it is a link to a real member folder in
+    /// <see cref="Root"/>; null for anything else.
     /// </summary>
     private static string? FolderNamedBy(string link)
     {

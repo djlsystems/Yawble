@@ -13,7 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// B0018 B and C on the real Host: a person installs a built plugin version from a folder already
+/// On the real Host, a person installs a built plugin version from a folder already
 /// inside the instance (the route, and the operator CLI's <c>.install</c> request file, one
 /// <see cref="PluginInstaller"/>), and edits a plugin member's settings after hire. Both are a
 /// person's acts: a Manager's credential is refused.
@@ -23,7 +23,7 @@ public sealed class PluginInstallRouteTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";
     private const string Password = "correct horse battery";
-    private const string TokenKey = "B0018_SETTINGS_TOKEN";
+    private const string TokenKey = "PLUGIN_SETTINGS_ROUTE_TOKEN";
     private const string TokenValue = "a-real-secret-value";
 
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-plugin-install-{Guid.NewGuid():N}");

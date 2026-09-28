@@ -5,7 +5,7 @@ using Harness.Host;
 namespace Harness.Tests;
 
 /// <summary>
-/// B0018 D and E, the manifest's own rules: a <c>list</c> setting (strings, default <c>[]</c>, an
+/// The manifest's own rules: a <c>list</c> setting (strings, default <c>[]</c>, an
 /// optional <c>enum</c> limiting each item) and <c>requires</c> (the runtimes the image provides,
 /// checked on the Host's PATH when the catalog loads or rescans). The older types' rules are unchanged.
 /// </summary>

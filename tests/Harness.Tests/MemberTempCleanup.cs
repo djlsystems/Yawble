@@ -11,7 +11,7 @@ namespace Harness.Tests;
 public static class MemberTempCleanup
 {
     /// <summary>Deletes every member folder a <c>.tmpdir</c> link under <paramref name="root"/>
-    /// names. Only a <c>member-</c> folder directly in the temp folder is touched, whatever a link
+    /// names. Only a <c>member-</c> folder directly in <see cref="MemberTemp.Root"/> is touched, whatever a link
     /// says.</summary>
     public static void Remove(string root)
     {
@@ -23,7 +23,7 @@ public static class MemberTempCleanup
             IgnoreInaccessible = true,
             AttributesToSkip = 0,
         };
-        var temp = Path.TrimEndingDirectorySeparator(Path.GetTempPath());
+        var temp = MemberTemp.Root;
 
         foreach (var link in Directory.EnumerateFileSystemEntries(root, MemberTemp.LinkName, options))
         {

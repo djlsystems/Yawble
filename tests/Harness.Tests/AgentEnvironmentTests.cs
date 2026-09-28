@@ -251,6 +251,12 @@ public sealed class AgentEnvironmentTests : IDisposable
                 File.GetUnixFileMode(tmpdir) & (UnixFileMode)0x1FF);
             Assert.Equal(tmpdir, new FileInfo(MemberTemp.LinkFor(workspace)).LinkTarget);
 
+            // In /tmp, never the Host's own TMPDIR: when the Host switches users the agent makes
+            // this folder, and the Host's TMPDIR may be a folder only root can write (the release
+            // suite's is), where a member would never start.
+            Assert.Equal("/tmp", MemberTemp.Root);
+            Assert.Equal(MemberTemp.Root, Path.GetDirectoryName(tmpdir));
+
             // The .NET runtime's named pipes, which test platforms, build servers and the compiler
             // server use, are Unix sockets at TMPDIR/CoreFxPipe_<name>, and a socket path holds 103
             // bytes. The name here is as long as the test platform's.
