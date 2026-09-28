@@ -98,6 +98,11 @@
   --os-kanban-red-tint: #fdf1f1;
   --os-kanban-teal-tint: #eff8f6;
   --os-kanban-green-tint: #f1f8f1;
+
+  // A PLUGIN MEMBER'S TILE. A hue nothing else on the board uses - violet - so a plugin reads as a
+  // different kind of member at a glance: a tinted ground and a stronger edge, in both themes.
+  --os-plugin-surface: #f3f0fc;
+  --os-plugin-accent: #6a5acd;
 }
 
 // The dark theme. Only what differs from light is here.
@@ -105,6 +110,8 @@
 // Paper and surface are the front door's own ground and card; the front door reads these tokens
 // rather than keeping a copy.
 body.body--dark {
+  --os-plugin-surface: #221c33;
+  --os-plugin-accent: #9d8fef;
   --os-ink: #ece7e3;
   --os-ink-muted: #b3aaa3;
   --os-ink-faint: #8a7f77;

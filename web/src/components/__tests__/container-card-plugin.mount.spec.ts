@@ -87,6 +87,17 @@ const eye = '[aria-label="Watch this member"]';
 const history = '[aria-label="Earlier runs"]';
 
 describe('the member card for a plugin', () => {
+  /** A plugin's tile has its own ground and edge (the theme's plugin tokens); an agent's does not. */
+  it('marks a plugin member\'s tile so it looks different from an agent\'s', async () => {
+    const pluginCard = await mountCard(plugin());
+    expect(document.body.querySelector('.container-window')!.classList).toContain('container-window-plugin');
+    pluginCard.unmount();
+
+    const agentCard = await mountCard(plugin({ kind: 'agent', agent: 'claude-headless' }));
+    expect(document.body.querySelector('.container-window')!.classList).not.toContain('container-window-plugin');
+    agentCard.unmount();
+  });
+
   it('shows no live view, even when the snapshot says watchable, running or idle', async () => {
     for (const over of [{}, { watchable: true }, { state: 'Running' as const, watchable: true }]) {
       const wrapper = await mountCard(plugin(over));

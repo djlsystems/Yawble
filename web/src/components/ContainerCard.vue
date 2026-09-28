@@ -176,7 +176,7 @@ async function stop() {
     :plugin="isPlugin"
   />
 
-  <q-card flat bordered class="container-window">
+  <q-card flat bordered class="container-window" :class="{ 'container-window-plugin': isPlugin }">
     <q-card-section class="q-pb-xs">
       <div class="row items-center no-wrap q-gutter-sm">
         <!-- THE LABEL, AND ONLY THE LABEL. `snapshot.name` is NOT the identifier - `Containers.cs`
@@ -459,6 +459,13 @@ async function stop() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* A PLUGIN MEMBER LOOKS LIKE ONE: its own ground and a violet edge, from the theme's plugin tokens
+   so light and dark each get a pair that stands apart from an agent's tile. */
+.container-window.container-window-plugin {
+  background: var(--os-plugin-surface);
+  border-left: 4px solid var(--os-plugin-accent);
 }
 
 .container-window-feed {
