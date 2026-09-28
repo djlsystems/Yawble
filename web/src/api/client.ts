@@ -844,7 +844,7 @@ export const dispatchBacklogItemToNewTeam = (
     repos: string[]
 
     /** As on `createTeam`: with no `repos`, false makes no local repository. Omitted otherwise. */
-    localRepository?: boolean
+    localRepository?: boolean | undefined
 
     /** As on `createTeam`: the answer to a refused repository check. Omitted when empty. */
     repoChoices?: Record<string, RepoChoice>
