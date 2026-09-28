@@ -175,8 +175,9 @@ public sealed partial class ProcessAgentRunner(
             return new AgentResult(
                 -1,
                 string.Empty,
-                $"This member's temporary folder '{MemberTemp.PathFor(invocation.WorkingDirectory)}' could not be "
-                + "created, so this member was not started. Check that its workspace can be written.");
+                $"This member's temporary folder, or the link '{MemberTemp.LinkFor(invocation.WorkingDirectory)}' "
+                + "that names it, could not be created, so this member was not started. Check that its "
+                + "workspace and the Host's temp folder can be written, and that nothing else sits at that name.");
         }
 
         // History first, then the instruction that woke it - the order a human would read them in,
