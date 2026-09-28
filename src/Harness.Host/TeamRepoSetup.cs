@@ -345,7 +345,7 @@ public sealed class TeamRepoSetup(
             if (!answer.Answered)
             {
                 var failure = new RepoCheckFailure(url, RepoCheckFailures.NotFound, answer.Refusal!);
-                var sentence = $"{url} could not be created on GitHub: {answer.Refusal} Nothing was created. "
+                var sentence = $"{url} could not be created on GitHub: {Sentence(answer.Refusal!)} Nothing was created. "
                     + "Create it yourself, or use a local repository instead.";
                 throw new RepoSetupRefusedException(
                     StatusCodes.Status422UnprocessableEntity,
@@ -368,7 +368,8 @@ public sealed class TeamRepoSetup(
         {
             var choices = new List<string>();
             var gitHubRepository = GitHubRepository.From(failure.Url);
-            if (person && gitHubRepository is not null && await CanCreateAsync(gitHubRepository.Owner, ct))
+            var canCreate = gitHubRepository is not null && await CanCreateAsync(gitHubRepository.Owner, ct);
+            if (person && canCreate)
             {
                 choices.Add(RepoChoices.CreateOnGitHub);
             }
@@ -379,8 +380,8 @@ public sealed class TeamRepoSetup(
 
             entries.Add(Entry(failure, choices));
             sentences.Add(person
-                ? $"{failure.Url} could not be read: {failure.Reason} Choose: {PersonChoices(choices)}."
-                : $"{failure.Url} could not be read: {failure.Reason} {AgentChoices(gitHubRepository is not null, unreachable)}");
+                ? $"{failure.Url} could not be read: {Sentence(failure.Reason)} Choose: {PersonChoices(choices)}."
+                : $"{failure.Url} could not be read: {Sentence(failure.Reason)} {AgentChoices(canCreate, unreachable)}");
         }
 
         var sentence = string.Join(" ", sentences) + " Nothing was created.";
@@ -411,9 +412,17 @@ public sealed class TeamRepoSetup(
         return words.Count == 1 ? words[0] : string.Join(", ", words[..^1]) + ", or " + words[^1];
     }
 
-    private static string AgentChoices(bool gitHubUrl, bool unreachable)
+    // git's reason is quoted as it came; it must end as a sentence before the next one starts.
+    private static string Sentence(string reason)
     {
-        var personOnly = (gitHubUrl, unreachable) switch
+        var trimmed = reason.Trim();
+        return trimmed.Length == 0 || trimmed[^1] is '.' or '!' or '?' ? trimmed : trimmed + ".";
+    }
+
+    // The GitHub create is named only when a person would be offered it: a github.com URL the token can create.
+    private static string AgentChoices(bool canCreateOnGitHub, bool unreachable)
+    {
+        var personOnly = (canCreateOnGitHub, unreachable) switch
         {
             (true, true) => "A person can create it on GitHub (private) or attach it anyway; you may not. ",
             (true, false) => "A person can create it on GitHub (private); you may not. ",
