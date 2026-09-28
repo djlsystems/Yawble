@@ -106,7 +106,28 @@ public sealed record PersistedMember(
     /// Rotation counts by this value and by Agent, so a member hired as `tester` does not affect
     /// `developer` balancing.
     /// </summary>
-    string? HiredFor = null);
+    string? HiredFor = null,
+
+    /// <summary>
+    /// Who last set <see cref="SystemPrompt"/>, or null when nobody is known to have: a member
+    /// from before `auth-009`, or a plugin. See <see cref="SystemPromptSetter"/>.
+    /// </summary>
+    SystemPromptSetter? SystemPromptSetBy = null);
+
+/// <summary>
+/// Who last set a member's own instructions, and when. Written at hire - the hiring principal -
+/// and by every edit that CHANGES the text; a clear is a change.
+/// </summary>
+/// <param name="By">A Manager's member id (its identifier on the team, e.g. <c>Manager</c>) when
+/// <paramref name="Kind"/> is <see cref="Manager"/>; a person's email, as the tenant log names
+/// them, when it is <see cref="Person"/>.</param>
+/// <param name="Kind"><see cref="Manager"/> or <see cref="Person"/>.</param>
+/// <param name="At">When, in UTC.</param>
+public sealed record SystemPromptSetter(string By, string Kind, DateTimeOffset At)
+{
+    public const string Manager = "manager";
+    public const string Person = "person";
+}
 
 /// <summary>
 /// One team repository's default branch, as stored. <paramref name="Repo"/> is the

@@ -33,13 +33,14 @@ public sealed class FreshVolumeTests : IDisposable
     /// Data), never an edit. `auth-002` is `tenant_settings`; `auth-003` is the nullable Concierge
     /// agent; `auth-004` is team additional instructions; `auth-005` is the folder-trigger columns;
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
-    /// settings; `auth-008` is a plugin member's configuration and secret bindings.
+    /// settings; `auth-008` is a plugin member's configuration and secret bindings; `auth-009` is who
+    /// last set a member's own instructions, and when.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "skill-001", "skill-002", "skill-003", "backlog-001"],
+            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "skill-001", "skill-002", "skill-003", "backlog-001"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -51,7 +52,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "backlog-001", "messages-001", "skill-001", "skill-002", "skill-003"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "backlog-001", "messages-001", "skill-001", "skill-002", "skill-003"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -144,6 +145,77 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Empty(await new SqliteTeamStore(Database).RepoContributorsAsync(Ct));
+    }
+
+    /// <summary>
+    /// `auth-009` on an empty volume: a member's row carries who last set its own instructions and
+    /// when, and one saved with nobody reads back with nobody.
+    /// </summary>
+    [Fact]
+    public async Task The_instructions_author_step_applies_to_an_empty_volume_and_round_trips()
+    {
+        await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct: Ct);
+
+        Assert.Superset(
+            new HashSet<string> { "system_prompt_set_by", "system_prompt_set_by_kind", "system_prompt_set_at" },
+            (await ColumnAsync("SELECT name FROM pragma_table_info('team_members')")).ToHashSet());
+
+        var store = new SqliteTeamStore(Database);
+        await store.SaveTeamAsync(new PersistedTeam("Alpha", null, "claude-headless", ["claude-headless"], null), Ct);
+
+        var at = new DateTimeOffset(2026, 9, 28, 10, 11, 12, TimeSpan.Zero);
+        await store.SaveMemberAsync(
+            new PersistedMember("Alpha", "Writer", null, "claude-headless", "Write docs.", [], [], 0,
+                SystemPromptSetBy: new SystemPromptSetter("Manager", SystemPromptSetter.Manager, at)), Ct);
+        await store.SaveMemberAsync(
+            new PersistedMember("Alpha", "Nobody", null, "claude-headless", null, [], [], 0), Ct);
+
+        var members = (await store.MembersAsync(Ct)).ToDictionary(m => m.Name);
+
+        Assert.Equal(new SystemPromptSetter("Manager", "manager", at), members["Writer"].SystemPromptSetBy);
+        Assert.Null(members["Nobody"].SystemPromptSetBy);
+    }
+
+    /// <summary>
+    /// A member hired before `auth-009` keeps its instructions and has NOBODY recorded as their
+    /// author - nothing is backfilled - until it is next edited.
+    /// </summary>
+    [Fact]
+    public async Task A_member_from_before_the_instructions_author_step_has_nobody_until_edited()
+    {
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "auth-009")], ct: Ct);
+
+        await ExecuteAsync(
+            """
+            INSERT INTO teams (id, created_utc) VALUES ('old-team', '2026-09-01T00:00:00Z');
+            INSERT INTO team_members
+                (team, name, agent, system_prompt, subscribes, permits, floor_seq, created_utc)
+            VALUES
+                ('old-team', 'Writer', 'claude-headless', 'Write docs.', '[]', '[]', 0,
+                 '2026-09-01T00:00:00Z');
+            """);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        var store = new SqliteTeamStore(Database);
+        var before = Assert.Single(await store.MembersAsync(Ct));
+
+        Assert.Equal("Write docs.", before.SystemPrompt);
+        Assert.Null(before.SystemPromptSetBy);
+
+        var at = new DateTimeOffset(2026, 9, 28, 10, 11, 12, TimeSpan.Zero);
+        await store.SaveMemberAsync(
+            before with
+            {
+                SystemPrompt = "Write better docs.",
+                SystemPromptSetBy = new SystemPromptSetter("person@example.test", SystemPromptSetter.Person, at),
+            },
+            Ct);
+
+        Assert.Equal(
+            new SystemPromptSetter("person@example.test", "person", at),
+            Assert.Single(await store.MembersAsync(Ct)).SystemPromptSetBy);
     }
 
     [Fact]

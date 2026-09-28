@@ -237,18 +237,21 @@ public sealed class SqliteTeamStore : ITeamStore
             """
             INSERT INTO team_members
                 (team, name, label, agent, system_prompt, subscribes, permits, floor_seq, hired_for,
-                 created_utc)
+                 system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at, created_utc)
             VALUES
                 ($team, $name, $label, $agent, $systemPrompt, $subscribes, $permits,
-                 $floorSeq, $hiredFor, $createdUtc)
+                 $floorSeq, $hiredFor, $setBy, $setByKind, $setAt, $createdUtc)
             ON CONFLICT(team, name) DO UPDATE SET
-                label         = excluded.label,
-                agent         = excluded.agent,
-                system_prompt = excluded.system_prompt,
-                subscribes    = excluded.subscribes,
-                permits       = excluded.permits,
-                floor_seq     = excluded.floor_seq,
-                hired_for     = excluded.hired_for
+                label                     = excluded.label,
+                agent                     = excluded.agent,
+                system_prompt             = excluded.system_prompt,
+                subscribes                = excluded.subscribes,
+                permits                   = excluded.permits,
+                floor_seq                 = excluded.floor_seq,
+                hired_for                 = excluded.hired_for,
+                system_prompt_set_by      = excluded.system_prompt_set_by,
+                system_prompt_set_by_kind = excluded.system_prompt_set_by_kind,
+                system_prompt_set_at      = excluded.system_prompt_set_at
             """;
 
         command.Parameters.AddWithValue("$team", member.Team);
@@ -260,6 +263,12 @@ public sealed class SqliteTeamStore : ITeamStore
         command.Parameters.AddWithValue("$permits", JsonSerializer.Serialize(member.Permits.ToArray()));
         command.Parameters.AddWithValue("$floorSeq", member.FloorSeq);
         command.Parameters.AddWithValue("$hiredFor", (object?)member.HiredFor ?? DBNull.Value);
+        command.Parameters.AddWithValue("$setBy", (object?)member.SystemPromptSetBy?.By ?? DBNull.Value);
+        command.Parameters.AddWithValue("$setByKind", (object?)member.SystemPromptSetBy?.Kind ?? DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$setAt",
+            (object?)member.SystemPromptSetBy?.At.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)
+                ?? DBNull.Value);
         command.Parameters.AddWithValue("$createdUtc", DateTimeOffset.UtcNow.ToString("O"));
 
         await command.ExecuteNonQueryAsync(ct);
@@ -339,7 +348,8 @@ public sealed class SqliteTeamStore : ITeamStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            "SELECT team, name, label, agent, system_prompt, subscribes, permits, floor_seq, hired_for "
+            "SELECT team, name, label, agent, system_prompt, subscribes, permits, floor_seq, hired_for, "
+            + "system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at "
             + "FROM team_members";
 
         var members = new List<PersistedMember>();
@@ -356,7 +366,18 @@ public sealed class SqliteTeamStore : ITeamStore
                 JsonSerializer.Deserialize<string[]>(reader.GetString(5)) ?? [],
                 JsonSerializer.Deserialize<string[]>(reader.GetString(6)) ?? [],
                 reader.GetInt64(7),
-                reader.IsDBNull(8) ? null : reader.GetString(8)));
+                reader.IsDBNull(8) ? null : reader.GetString(8),
+
+                // All three or none: they are written together. A row from before `auth-009`
+                // holds NULL in each and reads as nobody known.
+                reader.IsDBNull(9) || reader.IsDBNull(10) || reader.IsDBNull(11)
+                    ? null
+                    : new SystemPromptSetter(
+                        reader.GetString(9),
+                        reader.GetString(10),
+                        DateTimeOffset.Parse(
+                            reader.GetString(11), CultureInfo.InvariantCulture,
+                            DateTimeStyles.RoundtripKind))));
         }
 
         return members;

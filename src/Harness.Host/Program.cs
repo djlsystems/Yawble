@@ -3700,7 +3700,8 @@ app.MapPost("/api/teams/{team}/containers", async (
     [Description(Describe.Team)] string team,
     CreateContainer request, TeamRegistry teams, ITeamStore teamStore, AgentCatalog catalog,
     TenantLogging audit, AgentInstallProbe probe, HttpContext context, ISecretStore secretStore,
-    IPluginMemberSettingsStore pluginSettings, PluginCatalog plugins, CancellationToken ct) =>
+    IPluginMemberSettingsStore pluginSettings, PluginCatalog plugins, IUserStore users,
+    CancellationToken ct) =>
 {
     // `name` is free text here too, exactly as it is for a team: the identifier is derived inside
     // TeamRegistry and never asked for. A member called "Data Ingest" is `DataIngest` on disk.
@@ -3860,7 +3861,11 @@ app.MapPost("/api/teams/{team}/containers", async (
                 ? null
                 : new PluginMemberSettings(
                     request.Config ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
-                    request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal)));
+                    request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal)),
+
+            // THE HIRER wrote the member's own instructions: a Manager through the `member` tool,
+            // or a person.
+            promptSetBy: await SystemPromptSetters.ForAsync(context, users, ct));
 
         // Said in the BODY as well as the header: the body is what the `member` tool hands the
         // Manager, and a substitution said only in a header is never seen by anyone who hired.
@@ -3979,6 +3984,9 @@ app.MapGet("/api/teams/{team}/containers/{name}", async (
             id = member.Name,
             name = member.Label ?? member.Name,
             systemPrompt = member.SystemPrompt,
+            systemPromptSetBy = member.SystemPromptSetBy?.By,
+            systemPromptSetByKind = member.SystemPromptSetBy?.Kind,
+            systemPromptSetAt = SystemPromptSetAt(member.SystemPromptSetBy),
         });
     }
     catch (InvalidOperationException exception)
@@ -3994,6 +4002,11 @@ app.MapGet("/api/teams/{team}/containers/{name}", async (
         + "its agent actually receives (not exposed anywhere). `systemPrompt` is the role line the "
         + "member was hired with, appended after the built-in role prompt, or null when it has none. "
         + "There is no prompt choice: the prompt is chosen by role.\n\n"
+        + "`systemPromptSetBy` names who last set `systemPrompt` - a Manager's member id, or a "
+        + "person's email - and `systemPromptSetByKind` which (`manager` or `person`); "
+        + "`systemPromptSetAt` is when, ISO-8601 UTC. Set at hire and by every PATCH that changes the "
+        + "text, a clear included. All three are null for a member nobody is known to have set: one "
+        + "from before they were recorded, until it is next edited, or a plugin.\n\n"
         + "404 for an unknown team or member.");
 
 // One member's own recent activity - the message log filtered to one (team, member), newest first.
@@ -4506,12 +4519,14 @@ app.MapPatch("/api/teams/{team}/containers/{name}", async (
     [Description(Describe.Team)] string team,
     [Description("The member's current identifier, as addressed in its route.")] string name,
     UpdateContainer request, TeamRegistry teams, TenantLogging audit, AgentInstallProbe probe,
-    AgentCatalog catalog, HttpContext context, CancellationToken ct) =>
+    AgentCatalog catalog, HttpContext context, IUserStore users, CancellationToken ct) =>
 {
     try
     {
-        var updated = await teams.UpdateContainerAsync(
-            team, name, request.Name, request.SystemPrompt, request.Agent, ct);
+        var update = await teams.UpdateMemberAsync(
+            team, name, request.Name, request.SystemPrompt, request.Agent,
+            await SystemPromptSetters.ForAsync(context, users, ct), ct);
+        var updated = update.Snapshot;
 
         // WHICH fields moved, not what they moved to. A prompt is a person's words and can be long;
         // recording that one changed keeps the log readable and still answers "who touched this".
@@ -4538,16 +4553,38 @@ app.MapPatch("/api/teams/{team}/containers/{name}", async (
             {
                 team = updated.Team,
                 renamed = request.Name is not null,
-                promptChanged = request.SystemPrompt is not null,
+                promptChanged = update.PromptChanged,
                 agent = request.Agent,
             },
             ct);
+
+        // ITS OWN ROW when the member's own instructions changed, so "who told this member to be
+        // what it is" is found by name. Who and whether cleared - never the words.
+        if (update.PromptChanged)
+        {
+            await audit.WriteAsync(
+                context, TenantActions.MemberInstructionsChanged, $"{updated.Team}/{updated.Id}",
+                updated.Name,
+                new
+                {
+                    team = updated.Team,
+                    setBy = update.Row.SystemPromptSetBy?.By,
+                    setByKind = update.Row.SystemPromptSetBy?.Kind,
+                    cleared = update.Row.SystemPrompt is null,
+                },
+                ct);
+        }
 
         // Serialize updated to JsonNode and add unresolvedAgents
         var node = JsonSerializer.SerializeToNode(updated, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
         if (node is JsonObject obj)
         {
             obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+
+            // The same three the GET answers, so a client that just saved need not read back.
+            obj["systemPromptSetBy"] = update.Row.SystemPromptSetBy?.By;
+            obj["systemPromptSetByKind"] = update.Row.SystemPromptSetBy?.Kind;
+            obj["systemPromptSetAt"] = SystemPromptSetAt(update.Row.SystemPromptSetBy);
         }
         return Results.Json(node, statusCode: 200);
     }
@@ -4591,6 +4628,10 @@ app.MapPatch("/api/teams/{team}/containers/{name}", async (
         + "and the words are ADDED to the composed System Prompt rather than substituted for it. "
         + "Relabelling a manager and repointing its Prompt is how a team takes on a ROLE - an "
         + "`Auditor Manager`, a `Security Manager` - with no second mechanism behind it.\n\n"
+        + "A change to `systemPrompt` - a clear included, a resend of the same words not - records "
+        + "the person as who last set it (`systemPromptSetBy`, `systemPromptSetByKind`, "
+        + "`systemPromptSetAt`, answered here and on GET) and appends `member.instructions-changed` "
+        + "to the tenant log. People only: a Manager sets a member's instructions once, at hire.\n\n"
         + "400 when `agent` names a preset this tenant does not have, or an interactive one.\n\n"
         + "404 for an unknown team or member.");
 
@@ -6623,6 +6664,10 @@ static async Task<IResult> DocumentsAsync(Func<Task<IResult>> action)
         return Results.Conflict(new { error = ex.Message });
     }
 }
+
+// ISO-8601 UTC, `Z`-suffixed, as the member routes answer it.
+static string? SystemPromptSetAt(SystemPromptSetter? setter) =>
+    setter?.At.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
 
 static bool TeamHasMember(TeamRegistry teams, string team, string member) =>
     teams.ContainerIdsOf(team).Any(id => string.Equals(id.Name, member, StringComparison.OrdinalIgnoreCase));
