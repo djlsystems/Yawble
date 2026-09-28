@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -583,10 +584,7 @@ func TestBackupRefusesAnUnwritableOutputBeforeStoppingAnything(t *testing.T) {
 	for _, program := range []string{"podman", "docker"} {
 		t.Run(program, func(t *testing.T) {
 			readOnly := t.TempDir()
-			if err := os.Chmod(readOnly, 0o500); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = os.Chmod(readOnly, 0o700) })
+			makeUnwritable(t, readOnly)
 			existingDir := t.TempDir()
 			existing := filepath.Join(existingDir, "b.tar.gz")
 			if err := os.WriteFile(existing, []byte("keep"), 0o400); err != nil {
@@ -633,10 +631,7 @@ func TestRestoreReplaceRefusesAnUnwritableSafetyBackupBeforeStopping(t *testing.
 			deps := restoreDeps(t, s, program)
 			dir := t.TempDir()
 			file := backupFile(t, dir, "2026.09.24.1")
-			if err := os.Chmod(dir, 0o500); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+			makeUnwritable(t, dir)
 			code, out, errOut := run(t, deps, "restore", file, "--replace", "--yes")
 			if code == 0 || !strings.Contains(errOut, "nothing was stopped or changed") {
 				t.Errorf("exit %d out %q err %q", code, out, errOut)
@@ -674,7 +669,10 @@ func TestRestoreReplaceThatFailsAfterClearingSaysHowToPutItBack(t *testing.T) {
 			if before == "" || !filepath.IsAbs(before) {
 				t.Fatalf("no safety backup in %v", entries)
 			}
-			for _, want := range []string{"was cleared", "incomplete", before, "yawble restore " + before + " --replace"} {
+			// The command as the hint writes it for the OS this run claims to be, quoted for that shell.
+			hint := cli.RecoverHintForTest(before, deps.GOOS)
+			command := hint[strings.LastIndex(hint, "yawble restore "):]
+			for _, want := range []string{"was cleared", "incomplete", before, command} {
 				if !strings.Contains(errOut, want) {
 					t.Errorf("error lacks %q:\n%s", want, errOut)
 				}
@@ -683,5 +681,38 @@ func TestRestoreReplaceThatFailsAfterClearingSaysHowToPutItBack(t *testing.T) {
 				t.Errorf("a partial volume was started:\n%s", calls(s))
 			}
 		})
+	}
+}
+
+// makeUnwritable makes dir a folder this user cannot create a file in, the way each OS does it: a
+// mode on Unix, and on Windows, where a folder's mode bits are ignored, an access rule denying write
+// to everyone. The rule is removed before the folder is cleaned up.
+func makeUnwritable(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command("icacls", dir, "/deny", "*S-1-1-0:(W)").CombinedOutput(); err != nil {
+			t.Skipf("cannot deny write on %s: %v %s", dir, err, out)
+		}
+		t.Cleanup(func() { _ = exec.Command("icacls", dir, "/remove:d", "*S-1-1-0").Run() })
+		return
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+}
+
+// The recovery hint is a command the person can paste into their own shell: PowerShell on Windows
+// (a backslash needs no quoting, a quote is doubled), a POSIX shell elsewhere.
+func TestTheRecoveryHintQuotesForThePersonsShell(t *testing.T) {
+	for _, tc := range []struct{ goos, path, want string }{
+		{"windows", `C:\Users\dana\b.tar.gz`, `yawble restore C:\Users\dana\b.tar.gz --replace`},
+		{"windows", `C:\Users\Dana O'Neil\b.tar.gz`, `yawble restore 'C:\Users\Dana O''Neil\b.tar.gz' --replace`},
+		{"linux", "/home/dana/b.tar.gz", "yawble restore /home/dana/b.tar.gz --replace"},
+		{"darwin", "/Users/Dana O'Neil/b.tar.gz", `yawble restore '/Users/Dana O'\''Neil/b.tar.gz' --replace`},
+	} {
+		if got := cli.RecoverHintForTest(tc.path, tc.goos); !strings.Contains(got, tc.want) {
+			t.Errorf("%s %q: %q lacks %q", tc.goos, tc.path, got, tc.want)
+		}
 	}
 }

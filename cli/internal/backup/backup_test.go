@@ -104,7 +104,11 @@ func TestTheArchiveIsReadableWithTar(t *testing.T) {
 		t.Skip("no tar on this machine")
 	}
 	path := write(t, t.TempDir(), backup.Manifest{})
-	out, err := exec.Command(tarPath, "-tzf", path).CombinedOutput()
+	// By its name, from its own folder: Git for Windows' tar reads `C:` in an absolute path as a
+	// remote host.
+	list := exec.Command(tarPath, "-tzf", filepath.Base(path))
+	list.Dir = filepath.Dir(path)
+	out, err := list.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
@@ -212,6 +216,12 @@ func TestGNUTarAppliesTheExcludesAndRestoresTheTree(t *testing.T) {
 	}
 	if out, _ := exec.Command(tarPath, "--version").Output(); !strings.Contains(string(out), "GNU tar") {
 		t.Skip("the image's tar is GNU tar; this machine's is not")
+	}
+	if runtime.GOOS == "windows" {
+		// Git for Windows ships a GNU tar, but it reads `C:\...` as a remote host and cannot take the
+		// absolute paths this test hands it. The archive is only ever written and read by the
+		// container's own GNU tar, on Linux, which is what this test stands for.
+		t.Skip("GNU tar runs inside the Linux container; the Windows build of it cannot take Windows paths")
 	}
 	src := t.TempDir()
 	files := []string{

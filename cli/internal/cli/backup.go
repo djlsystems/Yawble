@@ -317,7 +317,7 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 			return fmt.Errorf("%w; nothing was replaced", err)
 		}
 		if _, err := e.RunHelper(ctx, onVolume(false, "find", "/data", "-mindepth", "1", "-maxdepth", "1", "-exec", "rm", "-rf", "{}", "+")); err != nil {
-			return fmt.Errorf("clearing %s failed (%w); %s", instance.VolumeName, err, recoverHint(safety))
+			return fmt.Errorf("clearing %s failed (%w); %s", instance.VolumeName, err, recoverHint(safety, goosOf(deps)))
 		}
 	}
 
@@ -334,7 +334,7 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 	pr.CloseWithError(runErr)
 	if err := errors.Join(<-counted, runErr); err != nil {
 		if safety != "" {
-			return fmt.Errorf("restoring %s into %s failed: %w\nThe instance's data on %s was cleared first, so it is now incomplete. %s", path, instance.VolumeName, err, instance.VolumeName, recoverHint(safety))
+			return fmt.Errorf("restoring %s into %s failed: %w\nThe instance's data on %s was cleared first, so it is now incomplete. %s", path, instance.VolumeName, err, instance.VolumeName, recoverHint(safety, goosOf(deps)))
 		}
 		return fmt.Errorf("restoring %s into %s failed: %w", path, instance.VolumeName, err)
 	}
@@ -350,12 +350,24 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 
 // recoverHint names the backup restore wrote of the volume before clearing it, and the command
 // that puts it back.
-func recoverHint(safety string) string {
-	arg := safety
-	if strings.ContainsAny(arg, " '\"$`\\") {
-		arg = "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
+func recoverHint(safety, goos string) string {
+	return fmt.Sprintf("The backup of what was on it before is %s; to put it back, run:\n  yawble restore %s --replace", safety, shellArg(safety, goos))
+}
+
+// shellArg writes a path the way the shell a person types the command into needs it: PowerShell on
+// Windows, where a backslash is an ordinary character and a quote inside single quotes is doubled,
+// and a POSIX shell elsewhere. A path that needs no quoting is left as it is.
+func shellArg(arg, goos string) string {
+	if goos == "windows" {
+		if strings.ContainsAny(arg, " '\"$`&;(){}@#,") {
+			return "'" + strings.ReplaceAll(arg, "'", "''") + "'"
+		}
+		return arg
 	}
-	return fmt.Sprintf("The backup of what was on it before is %s; to put it back, run:\n  yawble restore %s --replace", safety, arg)
+	if strings.ContainsAny(arg, " '\"$`\\") {
+		return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
+	}
+	return arg
 }
 
 // checkVersion refuses a backup from a newer Yawble than image: its database may hold schema
