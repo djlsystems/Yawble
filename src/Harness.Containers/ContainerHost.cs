@@ -165,6 +165,13 @@ public sealed class ContainerHost : IAsyncDisposable
     /// second write path in production. A fixture that
     /// means to exercise delivery MUST supply one.
     /// </param>
+    /// <summary>
+    /// Whether an event or folder trigger's DAILY TOKEN CAP stops this fire, the skip recorded by
+    /// the callee when it does. Null (a fixture) is never capped. Asked in
+    /// <see cref="ResolveDeliveryAsync"/> after the trigger's filter matched, before it appends.
+    /// </summary>
+    private readonly Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? _triggerCapped;
+
     public ContainerHost(
         IMessageLog log,
         ICursors cursors,
@@ -179,8 +186,10 @@ public sealed class ContainerHost : IAsyncDisposable
         WipLedger? wip = null,
         Func<long>? workflowSpendLimitNow = null,
         Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? worktrees = null,
-        Func<string, bool>? watchable = null)
+        Func<string, bool>? watchable = null,
+        Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? triggerCapped = null)
     {
+        _triggerCapped = triggerCapped;
         _watchable = watchable;
         _workflowSpendLimitNow = workflowSpendLimitNow;
         _worktrees = worktrees;
@@ -606,10 +615,20 @@ public sealed class ContainerHost : IAsyncDisposable
                 // every subscriber that would be woken by it is woken only because it is a
                 // `completed` row, so all are passed over. A failure is never quiet, and what the run
                 // published or handed back wakes on its own row. See PayloadFields.Quiet.
+                //
+                // A TRIGGER'S RUN WAKES THE MANAGER ONLY AS ITS TRIGGER CHOSE. A run a schedule, event
+                // or folder trigger started closes on a row carrying that trigger's choice when it is
+                // not `always` (PayloadFields.WakeManager). `onHandbackOrFailure` passes over the
+                // Manager on the `completed` row - a hand-back woke it on its own row, and a run that
+                // found nothing wakes nobody - and `never` on the `failed` row too. "The Manager" is a
+                // subscriber holding the type in its BASE set: an event trigger naming
+                // `completed` is a person's own explicit choice, and still fires. See WakeManagerPolicy.
                 var isCompleted = string.Equals(message.Type, MessageTypes.Completed, StringComparison.Ordinal);
-                var alreadyWoken = isCompleted
+                var alreadyWoken = (isCompleted
                     && ((types.Contains(MessageTypes.Handback) && CompletionSays(message.Payload, PayloadFields.HandedBack))
-                        || CompletionSays(message.Payload, PayloadFields.Quiet));
+                        || CompletionSays(message.Payload, PayloadFields.Quiet)))
+                    || (container.HasBaseSubscription(message.Type)
+                        && WakeManagerPolicy.PassesOver(message.Type, TerminalWakeManager(message.Payload)));
 
                 if (!alreadyWoken
                     && !string.Equals(message.Source, container.Id.ToString(), StringComparison.OrdinalIgnoreCase)
@@ -752,6 +771,28 @@ public sealed class ContainerHost : IAsyncDisposable
         catch (JsonException)
         {
             return false;
+        }
+    }
+
+    /// <summary>A terminal row's <see cref="PayloadFields.WakeManager"/>, or null when it carries
+    /// none (every row but a trigger's run that chose other than `always`) or does not parse - the
+    /// wake happens, which is the behaviour before the field existed.</summary>
+    private static string? TerminalWakeManager(string payload)
+    {
+        if (!payload.Contains(PayloadFields.WakeManager, StringComparison.Ordinal)) return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty(PayloadFields.WakeManager, out var value)
+                && value.ValueKind == JsonValueKind.String
+                    ? value.GetString()
+                    : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
@@ -956,12 +997,21 @@ public sealed class ContainerHost : IAsyncDisposable
             // it. `EventFieldsOf` is what keeps a payload field's own value from being rescanned for
             // tokens: it is looked up once by PromptTokens' MatchEvaluator and the result is written
             // straight into the replacement, which .NET's Regex.Replace never revisits.
+            // THE DAILY CAP, the same rule the sweep applies to a schedule: an event storm is the
+            // same bill. A capped trigger fires nothing; another governing trigger still may.
+            if (trigger.DailyTokenCap is not null
+                && _triggerCapped is not null
+                && await _triggerCapped(trigger, container.Id, message, ct))
+            {
+                continue;
+            }
+
             var instruction = PromptTokens.ResolveEventTokens(trigger.Instruction, EventFieldsOf(message));
 
             var appended = await _log.AppendAsync(
                 new NewMessage(
                     MessageTypes.InstructionFor(container.Id),
-                    JsonSerializer.Serialize(new { instruction }),
+                    WakeManagerPolicy.InstructionPayload(instruction, trigger.WakeManager),
                     $"trigger:{trigger.Id}",
                     message.Seq),
                 ct);

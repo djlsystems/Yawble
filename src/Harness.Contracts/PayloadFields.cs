@@ -41,6 +41,14 @@ public static class PayloadFields
     public const string Quiet = "quiet";
 
     /// <summary>
+    /// On a trigger's instruction, and on the `completed` or `failed` row that closes it: the
+    /// trigger's <see cref="WakeManagerPolicy"/> choice, written only when it is not `always`. The
+    /// pump passes over the Manager on a `completed` row carrying `onHandbackOrFailure` or `never`,
+    /// and on a `failed` row carrying `never`. Absent on every other row.
+    /// </summary>
+    public const string WakeManager = "wakeManager";
+
+    /// <summary>
     /// On a `completed` or `failed` row that closes a delivery its run shared with others: the
     /// causation seq of the row in the same batch that carries the run's token figures. This row
     /// carries none, and the spend queries skip it, so a run is billed once however many deliveries

@@ -33,12 +33,14 @@ public sealed class SqliteTriggerStore : ITriggerStore
                 (id, team, container, name, instruction, kind, expression, timezone,
                  interval_seconds, fire_at, idle_only, enabled, next_due_at, last_fired_at,
                  last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
-                 watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds, min_interval_seconds)
+                 watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds, min_interval_seconds,
+                 wake_manager, daily_token_cap)
             VALUES
                 ($id, $team, $container, $name, $instruction, $kind, $expression, $timezone,
                  $intervalSeconds, $fireAt, $idleOnly, $enabled, $nextDueAt, $lastFiredAt,
                  $lastOutcome, $lastSeq, $missedCount, $createdAt, $createdBy, $eventType, $filter,
-                 $watchRoot, $watchPath, $watchGlob, $pollSeconds, $quietSeconds, $minIntervalSeconds)
+                 $watchRoot, $watchPath, $watchGlob, $pollSeconds, $quietSeconds, $minIntervalSeconds,
+                 $wakeManager, $dailyTokenCap)
             ON CONFLICT(id) DO UPDATE SET
                 team             = excluded.team,
                 container        = excluded.container,
@@ -82,7 +84,9 @@ public sealed class SqliteTriggerStore : ITriggerStore
                 watch_glob           = excluded.watch_glob,
                 poll_seconds         = excluded.poll_seconds,
                 quiet_seconds        = excluded.quiet_seconds,
-                min_interval_seconds = excluded.min_interval_seconds
+                min_interval_seconds = excluded.min_interval_seconds,
+                wake_manager         = excluded.wake_manager,
+                daily_token_cap      = excluded.daily_token_cap
             """;
 
         BindSave(command, row);
@@ -102,7 +106,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint
+                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap
             FROM triggers
             WHERE team = $team COLLATE NOCASE
             ORDER BY created_at, id
@@ -124,7 +128,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint
+                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap
             FROM triggers
             WHERE id = $id
             """;
@@ -146,7 +150,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint
+                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap
             FROM triggers
             WHERE enabled = 1
               AND next_due_at IS NOT NULL
@@ -245,6 +249,19 @@ public sealed class SqliteTriggerStore : ITriggerStore
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task RecordSkipAsync(string id, string outcome, long seq, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText = "UPDATE triggers SET last_outcome = $outcome, last_seq = $seq WHERE id = $id";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$outcome", outcome);
+        command.Parameters.AddWithValue("$seq", seq);
+
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default)
     {
         await using var connection = Open();
@@ -310,7 +327,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint
+                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap
             FROM triggers
             WHERE team = $team COLLATE NOCASE
               AND container = $container COLLATE NOCASE
@@ -444,7 +461,9 @@ public sealed class SqliteTriggerStore : ITriggerStore
                 ReadNullableInt(reader, 29),
                 ReadNullableString(reader, 30),
                 ReadNullableDate(reader, 31),
-                ReadNullableString(reader, 32)));
+                ReadNullableString(reader, 32),
+                reader.GetString(33),
+                ReadNullableLong(reader, 34)));
         }
 
         return rows;
@@ -483,6 +502,9 @@ public sealed class SqliteTriggerStore : ITriggerStore
         command.Parameters.AddWithValue("$quietSeconds", (object?)row.QuietSeconds ?? DBNull.Value);
         command.Parameters.AddWithValue(
             "$minIntervalSeconds", (object?)row.MinIntervalSeconds ?? DBNull.Value);
+        command.Parameters.AddWithValue("$wakeManager", row.WakeManager);
+        command.Parameters.AddWithValue(
+            "$dailyTokenCap", row.DailyTokenCap is null ? DBNull.Value : row.DailyTokenCap.Value);
     }
 
     private static object ToDbValue(DateTimeOffset? value) =>

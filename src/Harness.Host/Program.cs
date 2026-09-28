@@ -624,6 +624,11 @@ builder.Services.AddSingleton(sp => new ContainerHost(
     // live so a repository added to a team after its members were created is named on the next wake.
     worktrees: (member, key) => sp.GetRequiredService<TeamRegistry>().WorktreesFor(member, key),
 
+    // AN EVENT OR FOLDER TRIGGER'S DAILY TOKEN CAP, asked by the pump before it fires one. Late-
+    // bound for the reason above: TriggerCost's tenant log is registered below this line.
+    triggerCapped: (trigger, member, cause, ct) => sp.GetRequiredService<TriggerCost>()
+        .SkipIfCappedAsync(trigger, member, DateTimeOffset.UtcNow, nextDueAt: null, cause.Seq, ct),
+
     // Whether a member's card shows the eye: its preset has a live view this Host can read.
     // Asked per snapshot, so a catalog edit or a repoint shows on the next one.
     watchable: agent => LiveView.Watchable(
@@ -1084,6 +1089,7 @@ builder.Services.AddSingleton(sp => new FolderWatch(
         ? maxWatches
         : FolderWatch.DefaultMaximumWatches,
     sp.GetRequiredService<ILogger<FolderWatch>>()));
+builder.Services.AddSingleton<TriggerCost>();
 builder.Services.AddSingleton<TriggerSweep>();
 if (scheduleRunnerEnabled)
 {
@@ -2629,6 +2635,7 @@ app.MapGet("/api/teams/{team}/triggers", async (
     [Description(Describe.Team)] string team,
     TeamRegistry teams,
     ITriggerStore schedules,
+    TriggerCost cost,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -2636,13 +2643,14 @@ app.MapGet("/api/teams/{team}/triggers", async (
         return Results.NotFound(new { error = $"No team '{team}'." });
     }
 
-    return Results.Ok(await schedules.ListForTeamAsync(stored, ct));
+    return Results.Ok(await cost.ViewsAsync(await schedules.ListForTeamAsync(stored, ct), DateTimeOffset.UtcNow, ct));
 })
     .WithTags("Teams")
     .HumansOnly()
     .WithSummary("List this team's triggers")
     .WithDescription(
-        "Every trigger row currently stored for this team, oldest first.\n\n"
+        "Every trigger row currently stored for this team, oldest first, each with its read-only "
+        + TriggerCost.SpendDescription + "\n\n"
         + "404 for an unknown team.");
 
 // THE PER-CONTAINER ROUTE IS WHAT THE CARD DIALOG READS. It declares {team}, so TeamGate covers
@@ -2655,13 +2663,15 @@ app.MapGet("/api/teams/{team}/containers/{name}/triggers", async (
     [Description("The member's current identifier, as addressed in its route.")] string name,
     TeamRegistry teams,
     ITriggerStore schedules,
+    TriggerCost cost,
     CancellationToken ct) =>
 {
     try
     {
         var member = await teams.MemberAsync(team, name, ct);
 
-        return Results.Ok(await schedules.ListForContainerAsync(member.Team, member.Name, ct));
+        return Results.Ok(await cost.ViewsAsync(
+            await schedules.ListForContainerAsync(member.Team, member.Name, ct), DateTimeOffset.UtcNow, ct));
     }
     catch (InvalidOperationException exception)
     {
@@ -2673,7 +2683,40 @@ app.MapGet("/api/teams/{team}/containers/{name}/triggers", async (
     .WithSummary("List one member's triggers")
     .WithDescription(
         "Every trigger row currently stored for this one member, oldest first - what the member "
-        + "card's own dialog reads, separately from its teammates'.\n\n"
+        + "card's own dialog reads, separately from its teammates', each with its read-only "
+        + TriggerCost.SpendDescription + "\n\n"
+        + "404 for an unknown team or member.");
+
+// WHAT A MEMBER'S RUNS ACTUALLY COST, for the trigger dialog before a person saves. Measured only:
+// nothing here projects a day, and a member nobody has measured says so with a null median.
+app.MapGet("/api/teams/{team}/containers/{name}/cost", async (
+    [Description(Describe.Team)] string team,
+    [Description("The member's current identifier, as addressed in its route.")] string name,
+    TeamRegistry teams,
+    TriggerCost cost,
+    CancellationToken ct) =>
+{
+    try
+    {
+        var member = await teams.MemberAsync(team, name, ct);
+
+        return Results.Ok(await cost.RecentAsync(
+            new ContainerId(member.Team, member.Name), MemberRef.KindOf(member.Agent), ct));
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.NotFound(new { error = exception.Message });
+    }
+})
+    .WithTags("Teams")
+    .RequirePermit(Permits.Read)
+    .WithSummary("A member's measured recent cost")
+    .WithDescription(
+        "What this member's last runs (up to 10) actually cost: `lastRuns`, how many of them were "
+        + "measured (`measuredRuns`) and not (`unmeasuredRuns`), the median `BillableTokens` of the "
+        + "measured ones (`medianBillableTokens`, null when none was), and `kind` (`agent` or "
+        + "`plugin`). Nothing is estimated. A run is one terminal row carrying its run's figures, so "
+        + "a batched run counts once.\n\n"
         + "404 for an unknown team or member.");
 
 app.MapPost("/api/teams/{team}/triggers", async (
@@ -2681,6 +2724,7 @@ app.MapPost("/api/teams/{team}/triggers", async (
     CreateSchedule request,
     TeamRegistry teams,
     ITriggerStore schedules,
+    TriggerCost cost,
     FolderWatch folders,
     AgentCatalog catalog,
     EffectiveSubscriptions effective,
@@ -2705,6 +2749,14 @@ app.MapPost("/api/teams/{team}/triggers", async (
     if (instruction.Length == 0) return Results.BadRequest(new { error = "A schedule needs an instruction." });
     if (container.Length == 0) return Results.BadRequest(new { error = "A schedule needs a member name." });
     if (kind.Length == 0) return Results.BadRequest(new { error = "A schedule needs a kind." });
+
+    // A NEW TRIGGER WAKES THE MANAGER ONLY WHEN ITS RUN HANDS BACK OR FAILS, unless a person chose
+    // otherwise. A trigger from before the choice existed keeps `always` (the column's default).
+    var wakeManager = request.WakeManager is null
+        ? WakeManagerPolicy.OnHandbackOrFailure
+        : WakeManagerPolicy.Parse(request.WakeManager);
+    if (wakeManager is null) return Results.BadRequest(new { error = TriggerCost.WakeManagerRefusal });
+    if (request.DailyTokenCap is < 1) return Results.BadRequest(new { error = TriggerCost.DailyTokenCapRefusal });
 
     if (!TeamHasMember(teams, stored, container))
     {
@@ -2838,6 +2890,8 @@ app.MapPost("/api/teams/{team}/triggers", async (
         PollSeconds = folderKind ? request.PollSeconds : null,
         QuietSeconds = folderKind ? request.QuietSeconds : null,
         MinIntervalSeconds = folderKind ? request.MinIntervalSeconds : null,
+        WakeManager = wakeManager,
+        DailyTokenCap = request.DailyTokenCap,
     };
 
     await schedules.SaveAsync(row, ct);
@@ -2860,7 +2914,7 @@ app.MapPost("/api/teams/{team}/triggers", async (
         new { team = row.Team, member = row.Container },
         ct);
 
-    return Results.Created($"/api/teams/{row.Team}/triggers/{row.Id}", row);
+    return Results.Created($"/api/teams/{row.Team}/triggers/{row.Id}", await cost.ViewAsync(row, DateTimeOffset.UtcNow, ct));
 })
     .WithTags("Teams")
     .HumansOnly()
@@ -2875,6 +2929,8 @@ app.MapPost("/api/teams/{team}/triggers", async (
         + "`eventType` is always `file.changed`. A folder outside those roots, a symbolic link, one "
         + "holding more than 10,000 entries, or one past the instance's watch cap is refused with "
         + "a sentence.\n\n"
+        + "`wakeManager` defaults to `onHandbackOrFailure`; `dailyTokenCap` defaults to no cap. The "
+        + "row returned carries the read-only " + TriggerCost.SpendDescription + "\n\n"
         + "400 for invalid input; 404 for an unknown team.");
 
 app.MapPatch("/api/teams/{team}/triggers/{id}", async (
@@ -2883,6 +2939,7 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
     JsonElement body,
     TeamRegistry teams,
     ITriggerStore schedules,
+    TriggerCost cost,
     FolderWatch folders,
     AgentCatalog catalog,
     EffectiveSubscriptions effective,
@@ -3045,7 +3102,7 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
         new { team = candidate.Team, member = candidate.Container },
         ct);
 
-    return Results.Ok(candidate);
+    return Results.Ok(await cost.ViewAsync(candidate, DateTimeOffset.UtcNow, ct));
 })
     .Accepts<UpdateSchedule>("application/json")
     .WithTags("Teams")
@@ -3054,7 +3111,8 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
     .WithDescription(
         "PATCH semantics: absent means leave alone; present with a value stores that value; present "
         + "as null or blank clears nullable fields (`expression`, `timezone`, `intervalSeconds`, "
-        + "`fireAt`, `nextDueAt`, `eventType`, `filter`).\n\n"
+        + "`fireAt`, `nextDueAt`, `eventType`, `filter`, `dailyTokenCap`). `wakeManager` may not be "
+        + "null. The row returned carries the read-only " + TriggerCost.SpendDescription + "\n\n"
         + "400 for invalid input, a member this team does not hold, (for `kind: event`) an "
         + "`eventType` the catalog does not declare, or a `filter` naming a field that event type "
         + "does not carry; 404 for an unknown team or trigger.");
@@ -6793,7 +6851,9 @@ static bool TryReadSchedulePatch(JsonElement body, out SchedulePatch patch, out 
         body.TryGetProperty("watchGlob", out _), typed.WatchGlob,
         body.TryGetProperty("pollSeconds", out _), typed.PollSeconds,
         body.TryGetProperty("quietSeconds", out _), typed.QuietSeconds,
-        body.TryGetProperty("minIntervalSeconds", out _), typed.MinIntervalSeconds);
+        body.TryGetProperty("minIntervalSeconds", out _), typed.MinIntervalSeconds,
+        body.TryGetProperty("wakeManager", out _), typed.WakeManager,
+        body.TryGetProperty("dailyTokenCap", out _), typed.DailyTokenCap);
 
     return true;
 }
@@ -6897,6 +6957,32 @@ static bool ApplySchedulePatch(
 
     if (patch.HasNextDueAt) nextDueAt = patch.NextDueAt;
 
+    var wakeManager = existing.WakeManager;
+    if (patch.HasWakeManager)
+    {
+        if (WakeManagerPolicy.Parse(patch.WakeManager) is not { } chosen)
+        {
+            updated = existing;
+            error = TriggerCost.WakeManagerRefusal;
+            return false;
+        }
+
+        wakeManager = chosen;
+    }
+
+    var dailyTokenCap = existing.DailyTokenCap;
+    if (patch.HasDailyTokenCap)
+    {
+        if (patch.DailyTokenCap is < 1)
+        {
+            updated = existing;
+            error = TriggerCost.DailyTokenCapRefusal;
+            return false;
+        }
+
+        dailyTokenCap = patch.DailyTokenCap;
+    }
+
     // RE-ARMED WHEN THE SHAPE MOVED, and armed when it was never armed at all.
     //
     // Two cases, and both would otherwise be dead ends. Changing an interval from a day to ten
@@ -6946,6 +7032,8 @@ static bool ApplySchedulePatch(
         PollSeconds = patch.HasPollSeconds ? patch.PollSeconds : existing.PollSeconds,
         QuietSeconds = patch.HasQuietSeconds ? patch.QuietSeconds : existing.QuietSeconds,
         MinIntervalSeconds = patch.HasMinIntervalSeconds ? patch.MinIntervalSeconds : existing.MinIntervalSeconds,
+        WakeManager = wakeManager,
+        DailyTokenCap = dailyTokenCap,
     };
 
     return true;
@@ -6970,7 +7058,9 @@ internal readonly record struct SchedulePatch(
     bool HasWatchGlob = false, string? WatchGlob = null,
     bool HasPollSeconds = false, int? PollSeconds = null,
     bool HasQuietSeconds = false, int? QuietSeconds = null,
-    bool HasMinIntervalSeconds = false, int? MinIntervalSeconds = null);
+    bool HasMinIntervalSeconds = false, int? MinIntervalSeconds = null,
+    bool HasWakeManager = false, string? WakeManager = null,
+    bool HasDailyTokenCap = false, long? DailyTokenCap = null);
 
 /// <summary>
 /// Public so WebApplicationFactory&lt;Program&gt; can find it. Note the asymmetry with
@@ -7263,7 +7353,11 @@ internal sealed record CreateSchedule(
     [property: Description(WatchDescriptions.Quiet)]
     int? QuietSeconds = null,
     [property: Description(WatchDescriptions.MinInterval)]
-    int? MinIntervalSeconds = null);
+    int? MinIntervalSeconds = null,
+    [property: Description(WatchDescriptions.WakeManager + " Defaults to `onHandbackOrFailure`.")]
+    string? WakeManager = null,
+    [property: Description(WatchDescriptions.DailyTokenCap + " Omit or null for no cap.")]
+    long? DailyTokenCap = null);
 
 /// <summary>The folder-trigger field descriptions, shared by the create, update and test-folder bodies.</summary>
 internal static class WatchDescriptions
@@ -7286,6 +7380,18 @@ internal static class WatchDescriptions
 
     public const string MinInterval =
         "`kind: folderChange` only. The shortest gap in seconds between two fires. Default 60.";
+
+    public const string WakeManager =
+        "What a run this trigger started does to the Manager when it ends: `always` (every finished "
+        + "run wakes it), `onHandbackOrFailure` (only a hand-back or a failure), or `never` (not even a "
+        + "failure; the run is still recorded and shown). Work the Manager sent, and a person's tell, "
+        + "are not affected.";
+
+    public const string DailyTokenCap =
+        "Billable tokens this trigger's runs may spend per day in its timezone (UTC when it has "
+        + "none), the Manager runs they woke included; measured usage only. A fire once it is reached "
+        + "is skipped with `schedule.skipped` (reason `daily token cap reached`) and fires again the "
+        + "next day. A whole number of at least 1.";
 }
 
 /// <summary>"Test this folder".</summary>
@@ -7343,7 +7449,11 @@ internal sealed record UpdateSchedule(
     [property: Description(WatchDescriptions.Quiet)]
     int? QuietSeconds = null,
     [property: Description(WatchDescriptions.MinInterval)]
-    int? MinIntervalSeconds = null);
+    int? MinIntervalSeconds = null,
+    [property: Description(WatchDescriptions.WakeManager + " May not be null.")]
+    string? WakeManager = null,
+    [property: Description(WatchDescriptions.DailyTokenCap + " Null clears the cap.")]
+    long? DailyTokenCap = null);
 
 internal sealed record CreateContainer(
     [property: Description(

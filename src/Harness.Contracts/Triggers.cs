@@ -55,7 +55,17 @@ public sealed record TriggerRow(
     /// <summary>When this watch last PUBLISHED `file.changed`. <see cref="LastFiredAt"/> is when
     /// that event last woke the member, which the event path records.</summary>
     DateTimeOffset? LastChangeAt = null,
-    string? LastFingerprint = null);
+    string? LastFingerprint = null,
+
+    /// <summary>What a run this trigger started does to the Manager when it ends - one of
+    /// <see cref="WakeManagerPolicy"/>'s values. `always` for a row from before the column, which is
+    /// today's behaviour; the create route gives a new trigger
+    /// <see cref="WakeManagerPolicy.OnHandbackOrFailure"/>.</summary>
+    string WakeManager = WakeManagerPolicy.Always,
+
+    /// <summary>Billable tokens this trigger's runs may spend per day in its timezone, the Manager
+    /// runs they woke included. NULL is no cap.</summary>
+    long? DailyTokenCap = null);
 
 /// <summary>
 /// What a folder watch remembers between polls that the trigger row does not show: the listing the
@@ -123,6 +133,12 @@ public interface ITriggerStore
     /// </summary>
     Task RecordFireAsync(
         string id, DateTimeOffset firedAt, string outcome, long seq, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records a fire that did not happen - a daily cap reached on an event or folder trigger - by
+    /// touching only last_outcome and last_seq. Its due time and last fire are not this skip's.
+    /// </summary>
+    Task RecordSkipAsync(string id, string outcome, long seq, CancellationToken ct = default);
 
     Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default);
     Task DeleteAsync(string id, CancellationToken ct = default);

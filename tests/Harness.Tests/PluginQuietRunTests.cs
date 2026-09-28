@@ -85,6 +85,8 @@ public sealed class PluginQuietRunTests : IAsyncLifetime
     /// </summary>
     private async Task<Message> ScheduleAndFireAsync(string instruction)
     {
+        // `always`: what `quiet` means is pinned under the wake choice that behaves as before it
+        // existed. Under the default a finished run wakes nobody anyway (TriggerCostControlTests).
         var created = await _person.PostAsJsonAsync($"/api/teams/{_team}/triggers", new
         {
             name = "Poll",
@@ -92,6 +94,7 @@ public sealed class PluginQuietRunTests : IAsyncLifetime
             container = "Echo",
             intervalSeconds = 300,
             instruction,
+            wakeManager = WakeManagerPolicy.Always,
         }, Ct);
         Assert.True(created.IsSuccessStatusCode, await created.Content.ReadAsStringAsync(Ct));
 

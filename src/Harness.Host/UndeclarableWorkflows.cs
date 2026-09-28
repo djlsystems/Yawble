@@ -85,8 +85,15 @@ public sealed class UndeclarableWorkflows(
         var owner = await WorkflowOwner.OfAsync(log, correlation, ct)
             ?? new ContainerId(stored, TeamRegistry.DefaultManagerName);
 
-        // AN OWNER THAT CAN DECLARE DECLARES FOR ITSELF. This is the whole of the scope.
-        if (host.Find(owner) is not { } declarer || declarer.Permits.Contains(Permits.Progress)) return false;
+        // AN OWNER THAT CAN DECLARE DECLARES FOR ITSELF. This is the whole of the scope - with one
+        // addition: a workflow a TRIGGER rooted whose trigger chose not to be told of a run that
+        // simply finishes (`onHandbackOrFailure`, `never`). Its run ending without a hand-back is
+        // the end of it, as the trigger said; the idle offer is not spent on it (see
+        // `IdleWorkflowOffer`), so it is declared here or left open on every fire.
+        if (host.Find(owner) is not { } declarer) return false;
+
+        var quietTrigger = await RootedByQuietTriggerAsync(log, correlation, ct);
+        if (declarer.Permits.Contains(Permits.Progress) && !quietTrigger) return false;
 
         if (!(await log.OpenWorkflowsAmongAsync([correlation], ct)).Contains(correlation)) return false;
 
@@ -115,8 +122,11 @@ public sealed class UndeclarableWorkflows(
 
         // The team's branches were put on origin by `TerminalPublish`, which runs before this in
         // the same run-ending hook - the ordering `workflow-complete` keeps by publishing first.
-        var delivered = $"{declarer.Snapshot().Name} cannot declare its own workflows, so the platform declared this one: "
-            + "a run in it completed and nothing is left working it.";
+        var delivered = quietTrigger
+            ? "A trigger started this workflow and chose not to wake the Manager when its run simply "
+              + "finishes, so the platform declared it: a run in it completed and nothing is left working it."
+            : $"{declarer.Snapshot().Name} cannot declare its own workflows, so the platform declared this one: "
+              + "a run in it completed and nothing is left working it.";
 
         await WorkflowDeclaration.AppendAsync(
             stored, correlation, owner, waking,
@@ -135,4 +145,14 @@ public sealed class UndeclarableWorkflows(
 
         return true;
     }
+
+    /// <summary>
+    /// Whether <paramref name="correlation"/>'s root is a trigger's fire carrying a
+    /// <see cref="WakeManagerPolicy"/> other than `always` - a workflow whose run finishing is, by
+    /// the trigger's choice, nobody's business. Read off the root row, which the log never changes.
+    /// </summary>
+    public static async Task<bool> RootedByQuietTriggerAsync(IMessageLog log, long correlation, CancellationToken ct) =>
+        await log.FindAsync(correlation, ct) is { } root
+        && root.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)
+        && WakeManagerPolicy.OfInstruction(root.Source, root.Payload) is not null;
 }
