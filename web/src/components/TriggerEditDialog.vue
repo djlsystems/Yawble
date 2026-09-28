@@ -16,6 +16,7 @@ import {
   eventTypeSelectOptions,
   formatPollDuration,
   fromDateTimeLocalValue,
+  instructionFieldText,
   cronPreviewForDraft,
   measuredCostLine,
   needsShortScheduleConfirmation,
@@ -81,13 +82,15 @@ const props = withDefaults(defineProps<{
   /** From the member's snapshot; absent is an agent, as everywhere else. A short schedule on an
    *  agent asks for confirmation, and on a plugin it does not. */
   memberKind?: 'agent' | 'plugin'
+  /** The member's Agent reference (`plugin:<id>` for a plugin), to name the plugin's skill. */
+  memberAgent?: string
 
   /** What the member's recent runs actually cost, or null while it has not been read. */
   measuredCost?: MemberMeasuredCost | null
 
   /** Why the measured cost could not be read; shown in place of the line. */
   measuredCostError?: string
-}>(), { watchRoots: () => [], refusal: '', testFolder: null, memberKind: 'agent', measuredCost: null, measuredCostError: '' })
+}>(), { watchRoots: () => [], refusal: '', testFolder: null, memberKind: 'agent', memberAgent: '', measuredCost: null, measuredCostError: '' })
 
 const emit = defineEmits<{ save: [TriggerDraft] }>()
 
@@ -244,6 +247,9 @@ const asCount = (value: unknown) => (value === '' || value === null || value ===
 
 const nameRules = [fieldRule('name', (value) => ({ name: asText(value) }))]
 const instructionRules = [fieldRule('instruction', (value) => ({ instruction: asText(value) }))]
+
+/** "Instruction" for an agent, "Command" for a plugin, with a hint naming the plugin's skill. */
+const instructionField = computed(() => instructionFieldText(props.memberKind, props.memberAgent))
 const everyCountRules = [positiveInt, fieldRule('everyCount', (value) => ({ everyCount: asCount(value) }))]
 const cronExpressionRules = [fieldRule('cronExpression', (value) => ({ cronExpression: asText(value) }))]
 const cronTimezoneRules = [timezone, fieldRule('cronTimezone', (value) => ({ cronTimezone: asText(value) }))]
@@ -782,7 +788,7 @@ function insertToken(token: string) {
         />
 
         <div>
-          <div class="text-caption os-text-muted q-mb-xs">Instruction</div>
+          <div class="text-caption os-text-muted q-mb-xs">{{ instructionField.label }}</div>
           <!-- Two branches rather than one `:tokens="instructionTokens"` binding: the prop is
                optional so `TokenPicker` can fall back to its own default list, and
                `exactOptionalPropertyTypes` treats an explicit `undefined` differently from the
@@ -799,7 +805,7 @@ function insertToken(token: string) {
             autogrow
             lazy-rules
             :rules="instructionRules"
-            hint="What the member is told when this fires."
+            :hint="instructionField.hint"
           />
         </div>
 

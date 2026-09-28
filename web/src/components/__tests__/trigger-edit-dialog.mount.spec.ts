@@ -58,6 +58,29 @@ async function type(element: HTMLInputElement | HTMLTextAreaElement, value: stri
 }
 
 describe('TriggerEditDialog, mounted', () => {
+  /** A plugin is handed the same text as its work, as a command its skill documents. */
+  it('calls the box a Command for a plugin member and names the plugin\'s skill', async () => {
+    const wrapper = await mountDialog(TriggerEditDialog, {
+      ...baseProps, container: 'Echo', memberKind: 'plugin', memberAgent: 'plugin:sample-echo',
+    });
+
+    expect(bodyText()).toContain('Command');
+    expect(bodyText()).toContain("Sent to the plugin as its instruction, in the plugin's own command syntax: see its skill plugin-sample-echo.");
+    expect(bodyText()).not.toContain('What the member is told when this fires.');
+
+    wrapper.unmount();
+  });
+
+  it('keeps Instruction and its hint for an agent member', async () => {
+    const wrapper = await mountDialog(TriggerEditDialog, baseProps);
+
+    expect(bodyText()).toContain('Instruction');
+    expect(bodyText()).toContain('What the member is told when this fires.');
+    expect(bodyText()).not.toContain("the plugin's own command syntax");
+
+    wrapper.unmount();
+  });
+
   it('opens on a draft the lib function rejects, and disables Save', async () => {
     // Asserted rather than assumed: if a fresh draft ever became valid, every case below would be
     // testing the enabled path while claiming to test the disabled one.

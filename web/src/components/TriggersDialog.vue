@@ -53,7 +53,9 @@ const props = withDefaults(defineProps<{
   subscribes: string[]
   /** The member's kind from its snapshot; absent is an agent, from an older Host. */
   memberKind?: 'agent' | 'plugin'
-}>(), { memberKind: 'agent' })
+  /** The member's Agent reference from its snapshot (`plugin:<id>` for a plugin). */
+  memberAgent?: string
+}>(), { memberKind: 'agent', memberAgent: '' })
 
 const $q = useQuasar()
 const board = useConsoleStore()
@@ -418,6 +420,7 @@ watch(open, (showing) => {
       :refusal="saveRefusal"
       :test-folder="testFolder"
       :member-kind="memberKind"
+      :member-agent="memberAgent"
       :measured-cost="measuredCost"
       :measured-cost-error="measuredCostError"
       @save="save"

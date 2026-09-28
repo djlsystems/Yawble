@@ -1498,3 +1498,34 @@ export function shortScheduleConfirmation(draft: TriggerDraft, cost: MemberMeasu
   return `This fires ${often}, and every fire is a paid model run. ${perRun} `
     + 'A plugin can watch for free and publish an event when it finds something; an event trigger then wakes this member only when something happened.'
 }
+
+/**
+ * A plugin member's skill, named from its Agent reference: `plugin:<id>` is `plugin-<id>`, the name
+ * the platform forces on a plugin's skill and the `hiring` tool lists. Null for anything else.
+ */
+export function pluginSkillFor(agent: string | null | undefined): string | null {
+  const match = /^plugin:(.+)$/.exec((agent ?? '').trim())
+  return match ? `plugin-${match[1]}` : null
+}
+
+/**
+ * The instruction box's heading and hint. An agent is TOLD something; a plugin is handed the same
+ * text as its work, and reads it as a command in its own syntax, which its skill documents - so
+ * for a plugin the box is a Command and the hint names where the commands are described.
+ */
+export function instructionFieldText(
+  memberKind: 'agent' | 'plugin',
+  memberAgent: string | null | undefined,
+): { label: string; hint: string } {
+  if (memberKind !== 'plugin') {
+    return { label: 'Instruction', hint: 'What the member is told when this fires.' }
+  }
+
+  const skill = pluginSkillFor(memberAgent)
+  return {
+    label: 'Command',
+    hint: skill
+      ? `Sent to the plugin as its instruction, in the plugin's own command syntax: see its skill ${skill}.`
+      : "Sent to the plugin as its instruction, in the plugin's own command syntax: see its skill.",
+  }
+}
