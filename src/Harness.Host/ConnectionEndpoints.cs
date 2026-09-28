@@ -130,8 +130,21 @@ public static class ConnectionEndpoints
             [Description("The provider's reason.")] string? error_description,
             Connections connections, CancellationToken ct) =>
         {
-            var (connection, reconnected, refusal) = await connections.CompleteAsync(
-                state, code, actor: null, viaCallback: true, error, error_description, ct);
+            ConnectionRecord? connection;
+            bool reconnected;
+            string? refusal;
+
+            try
+            {
+                (connection, reconnected, refusal) = await connections.CompleteAsync(
+                    state, code, actor: null, viaCallback: true, error, error_description, ct);
+            }
+            catch (SqliteException exception)
+            {
+                // ALWAYS A REDIRECT: the person lands on the console with the reason, never a 500 page.
+                (connection, reconnected, refusal) = (null, false,
+                    $"The connection could not be stored ({exception.SqliteErrorCode}). Start again.");
+            }
 
             return Results.Redirect(refusal is not null
                 ? $"/console?connection=refused&reason={Uri.EscapeDataString(refusal)}"
@@ -151,8 +164,18 @@ public static class ConnectionEndpoints
         app.MapPost("/api/connections/complete", async (
             CompleteConnection request, Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
         {
-            var (connection, _, error) = await connections.CompleteAsync(
-                request.State, request.Code, Actor(context), viaCallback: false, ct: ct);
+            ConnectionRecord? connection;
+            string? error;
+
+            try
+            {
+                (connection, _, error) = await connections.CompleteAsync(
+                    request.State, request.Code, Actor(context), viaCallback: false, ct: ct);
+            }
+            catch (SqliteException exception)
+            {
+                return Unrecorded("The connection was not stored", exception);
+            }
 
             if (error is not null) return Results.BadRequest(new { error });
 
@@ -207,9 +230,9 @@ public static class ConnectionEndpoints
             .HumansOnly()
             .WithSummary("Disconnect an account")
             .WithDescription(
-                "Refused 409 while a member binds it, naming them (`usedBy`). Otherwise revokes at the "
-                + "provider where it supports that (a failed revoke is recorded, never blocking), deletes "
-                + "the tokens and the connection, and answers 204.");
+                "Refused 409 while a member binds it, naming them (`usedBy`). Otherwise deletes the tokens "
+                + "and the connection, then revokes at the provider where it supports that, best effort: "
+                + "the result is a `connections.revoked` tenant row, and a failed revoke never blocks. 204.");
     }
 
     /// <summary>The route's and the operator exchange's disconnect: (204, null), or a status and body.</summary>
@@ -221,31 +244,50 @@ public static class ConnectionEndpoints
             return (StatusCodes.Status404NotFound, new { error = $"There is no connection '{id}'." });
         }
 
-        var used = await connections.Store.UsedByAsync(id, ct);
-        if (used.Count > 0) return InUse(connection, used, teams);
-
-        // REVOKED FIRST, best effort: a provider that cannot be reached must not keep a person from
-        // deleting the tokens here. Whatever happened is in the tenant row.
-        string? revoke = null;
         var tokens = await connections.Store.TokensAsync(id, ct);
         var provider = await connections.ProviderAsync(connection.Provider, ct);
+        var revokes = provider is { Revokes: true } && (tokens?.RefreshToken ?? tokens?.AccessToken) is not null;
 
-        if (provider is { Revokes: true } && (tokens?.RefreshToken ?? tokens?.AccessToken) is { } token)
-        {
-            revoke = await connections.Endpoints.RevokeAsync(provider, token, ct) ?? "revoked";
-        }
-
+        // DELETED FIRST, the in-use check inside the same transaction: a binding made meanwhile
+        // refuses the delete, and nothing is revoked for a connection that stays.
         try
         {
             var (deleted, stillUsed) = await connections.Store.DeleteAsync(id, actor.Row(
                 TenantActions.ConnectionDisconnected, id, connection.Name,
-                new { connection = id, provider = connection.Provider, account = connection.Account, revoke = revoke ?? "not supported" }), ct);
+                new { connection = id, provider = connection.Provider, account = connection.Account, revoke = revokes ? "follows" : "not supported" }), ct);
 
-            if (!deleted && stillUsed.Count > 0) return InUse(connection, stillUsed, teams);
+            if (!deleted)
+            {
+                return stillUsed.Count > 0
+                    ? InUse(connection, stillUsed, teams)
+                    : (StatusCodes.Status404NotFound, new { error = $"There is no connection '{id}'." });
+            }
         }
         catch (SqliteException exception)
         {
             return (StatusCodes.Status500InternalServerError, new { error = $"The connection was not disconnected: its record could not be written ({exception.Message})." });
+        }
+
+        connections.Forget(id);
+
+        // THEN REVOKED, best effort: the tokens are already gone here, and a provider that cannot be
+        // reached changes nothing for the person. What happened is its own tenant row.
+        if (revokes)
+        {
+            // Not the request's token: a person who closes the page after the delete still gets the revoke.
+            var result = await connections.Endpoints.RevokeAsync(
+                provider!, (tokens!.RefreshToken ?? tokens.AccessToken)!, CancellationToken.None) ?? "revoked";
+
+            try
+            {
+                await connections.Store.RecordAsync(actor.Row(
+                    TenantActions.ConnectionRevoked, id, connection.Name,
+                    new { connection = id, provider = connection.Provider, account = connection.Account, revoke = result }), CancellationToken.None);
+            }
+            catch (SqliteException)
+            {
+                // The disconnect itself is recorded; only the revoke's result is lost.
+            }
         }
 
         return (StatusCodes.Status204NoContent, null);

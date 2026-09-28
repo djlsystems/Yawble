@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 
 namespace Harness.Host;
@@ -18,8 +19,8 @@ namespace Harness.Host;
 ///
 /// <para>
 /// WHO CAN ASK: whoever can write in that folder, which is the Host's own, mode 0700 - root at the
-/// engine and the Host. An agent cannot: a folder any other user can write in is refused and
-/// nothing in it is answered. The requester is the fixed operator principal; a state it started is
+/// engine and the Host. An agent cannot: a folder that is a link, is owned by another user, or that
+/// any other user can write in is refused and nothing in it is answered. The requester is the fixed operator principal; a state it started is
 /// finished only through this same exchange, and no report carries a token or a secret.
 /// </para>
 /// </summary>
@@ -37,6 +38,8 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private string? _answered;
+
+    private string? _warned;
 
     public string Root => Path.Combine(dataRoot, Folder);
 
@@ -84,13 +87,16 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
 
         if (!File.Exists(request)) return false;
 
-        // THE FOLDER IS THE CREDENTIAL: one another user could write in answers nobody.
-        if (!OperatingSystem.IsWindows()
-            && (File.GetUnixFileMode(Root) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+        // THE FOLDER IS THE CREDENTIAL: one another user could write in, or own, answers nobody.
+        if (FolderRefusal() is { } refusal)
         {
-            logger.LogWarning("The connections folder is writable by others; connect requests are not answered until it is 0700.");
+            // Said once, not every tick; said again if it is put right and then goes wrong.
+            if (_warned != refusal) logger.LogWarning("Connect requests are not answered: {Refusal}", refusal);
+            _warned = refusal;
             return false;
         }
+
+        _warned = null;
 
         if (new FileInfo(request).LinkTarget is not null) return false;
 
@@ -132,6 +138,48 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
 
         return true;
     }
+
+    /// <summary>Why the folder cannot be trusted, or null: it must be a real folder (not a link), owned
+    /// by the Host's own user, that no group or other user can write in.</summary>
+    public string? FolderRefusal()
+    {
+        if (OperatingSystem.IsWindows()) return null;
+
+        if (new DirectoryInfo(Root).LinkTarget is not null) return $"{Root} is a symbolic link; it must be the Host's own folder.";
+
+        if ((File.GetUnixFileMode(Root) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+        {
+            return $"{Root} is writable by others; it must be 0700.";
+        }
+
+        var owner = OwnerOf(Root);
+        if (owner is null) return $"{Root}'s owner could not be read.";
+        if (owner != geteuid()) return $"{Root} is owned by uid {owner}, not the Host's uid {geteuid()}.";
+
+        return null;
+    }
+
+    /// <summary>The owner's uid, from <c>statx</c> (its layout is the same on every architecture),
+    /// not following a link.</summary>
+    private static uint? OwnerOf(string path)
+    {
+        const int AtFdCwd = -100;
+        const int AtSymlinkNoFollow = 0x100;
+        const uint StatxUid = 0x8;
+        const int UidOffset = 20;
+
+        var buffer = new byte[256];
+        if (statx(AtFdCwd, path, AtSymlinkNoFollow, StatxUid, buffer) != 0) return null;
+        if ((BitConverter.ToUInt32(buffer, 0) & StatxUid) == 0) return null;
+
+        return BitConverter.ToUInt32(buffer, UidOffset);
+    }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int statx(int dirfd, string pathname, int flags, uint mask, byte[] statxbuf);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern uint geteuid();
 
     private async Task<object> StartAsync(string nonce, JsonElement root, CancellationToken ct)
     {

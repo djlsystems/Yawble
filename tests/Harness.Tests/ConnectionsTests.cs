@@ -71,7 +71,8 @@ public sealed class ConnectionsTests : IAsyncLifetime
             {
                 services.AddSingleton<IAgentRunner>(new FakeAgent());
                 services.AddSingleton<IOAuthEndpoints>(_provider);
-                services.AddSingleton(sp => new Connections(sp.GetRequiredService<ConnectionStore>(), _provider, _clock));
+                services.AddSingleton(sp => new Connections(
+                    sp.GetRequiredService<ConnectionStore>(), _provider, _clock, sp.GetRequiredService<IUserStore>()));
             }));
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
@@ -246,7 +247,9 @@ public sealed class ConnectionsTests : IAsyncLifetime
             (HttpMethod.Post, "/api/connections/start"),
             (HttpMethod.Post, "/api/connections/complete"),
             (HttpMethod.Delete, $"/api/connections/{id}"),
+            (HttpMethod.Patch, $"/api/connections/{id}"),
             (HttpMethod.Put, "/api/connections/providers/google"),
+            (HttpMethod.Delete, "/api/connections/providers/custom-acme"),
         })
         {
             using var request = new HttpRequestMessage(method, path);
@@ -532,6 +535,296 @@ public sealed class ConnectionsTests : IAsyncLifetime
         Assert.Contains(rows, r => r.Action == TenantActions.ConnectionConnected && r.ActorEmail == ConnectionActor.Operator.Email);
     }
 
+    // ---- races and failures -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_refresh_in_flight_across_a_reconnect_neither_overwrites_its_tokens_nor_marks_it_refused()
+    {
+        var id = await ConnectAsync();
+        var store = Services.GetRequiredService<ConnectionStore>();
+        var connections = Services.GetRequiredService<Connections>();
+
+        foreach (var refused in new[] { true, false })
+        {
+            _provider.RefuseRefresh = refused;
+            _provider.Rotates = !refused;
+            _clock.Advance(TimeSpan.FromHours(2));
+
+            // The refresh reaches the provider with the old refresh token, and is held there.
+            var held = _provider.HoldRefresh();
+            var grant = Task.Run(() => connections.GrantAsync(id, "mail", Ct), Ct);
+            await held.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+
+            // Meanwhile a person reconnects: the exchange is done, the write waits for the refresh.
+            var reconnect = await StartAsync([], reconnectId: id);
+            var exchanges = _provider.Exchanges.Count;
+            var callback = Task.Run(() => CallbackLocationAsync(reconnect.GetProperty("state").GetString()!), Ct);
+            await WaitUntilAsync(() => _provider.Exchanges.Count > exchanges);
+            await Task.Delay(200, Ct);
+            var reconnected = _provider.Issued[^1];
+
+            held.Release.SetResult();
+            await grant;
+            Assert.Contains("connection=reconnected", await callback);
+
+            var listed = Assert.Single((await GetAsync("/api/connections")).EnumerateArray());
+            Assert.Equal("ok", listed.GetProperty("status").GetString());
+
+            var tokens = (await store.TokensAsync(id, Ct))!;
+            Assert.Equal(reconnected.Access, tokens.AccessToken);
+            Assert.Equal(reconnected.Refresh, tokens.RefreshToken);
+        }
+    }
+
+    [Fact]
+    public async Task A_disconnect_deletes_first_and_then_revokes_recording_the_result()
+    {
+        var id = await ConnectAsync();
+        var store = Services.GetRequiredService<ConnectionStore>();
+        _provider.OnRevoke = () => store.GetAsync(id, Ct).GetAwaiter().GetResult() is null ? "gone" : "still stored";
+
+        // Its tenant row cannot be written: nothing is deleted, and nothing is revoked.
+        await ExecuteAsync("ALTER TABLE tenant_events RENAME TO tenant_events_away");
+        var unrecorded = await SendAsync(HttpMethod.Delete, $"/api/connections/{id}", null);
+        await ExecuteAsync("ALTER TABLE tenant_events_away RENAME TO tenant_events");
+        Assert.Equal(HttpStatusCode.InternalServerError, unrecorded.Status);
+        Assert.Empty(_provider.Revoked);
+        Assert.NotNull(await store.TokensAsync(id, Ct));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(HttpMethod.Delete, $"/api/connections/{id}", null)).Status);
+        Assert.Equal(_provider.Issued[0].Refresh, Assert.Single(_provider.Revoked));
+        Assert.Equal(["gone"], _provider.RevokedWhen);
+
+        var rows = (await TenantRowsAsync()).Select(r => r.Action).ToList();
+        var disconnected = rows.IndexOf(TenantActions.ConnectionDisconnected);
+        Assert.True(disconnected >= 0 && rows.IndexOf(TenantActions.ConnectionRevoked) > disconnected, string.Join(", ", rows));
+
+        // A provider that refuses the revoke changes nothing for the person: the result is recorded.
+        var second = await ConnectAsync();
+        _provider.RevokeRefusal = "the provider answered 503";
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(HttpMethod.Delete, $"/api/connections/{second}", null)).Status);
+        Assert.Contains(await TenantDetailsAsync(TenantActions.ConnectionRevoked), d => d.Contains("the provider answered 503"));
+    }
+
+    [Fact]
+    public async Task A_callback_whose_connection_cannot_be_stored_redirects_with_the_reason()
+    {
+        await ExecuteAsync("CREATE TRIGGER refuse_insert BEFORE INSERT ON connections BEGIN SELECT RAISE(ABORT, 'refused by the test'); END");
+
+        var start = await StartAsync([MailScope]);
+        var location = await CallbackLocationAsync(start.GetProperty("state").GetString()!);
+
+        Assert.StartsWith("/console?connection=refused&reason=", location);
+        Assert.Contains("could not be stored", Uri.UnescapeDataString(location));
+        Assert.Empty((await GetAsync("/api/connections")).EnumerateArray());
+    }
+
+    [Fact]
+    public async Task A_database_failure_other_than_storing_a_refresh_blocks_the_run_with_a_generic_sentence()
+    {
+        var id = await ConnectAsync();
+        await HireAsync("Inbox", id);
+
+        // The refused refresh's needs-reconnect mark is the write that fails, not a refresh's store.
+        _provider.RefuseRefresh = true;
+        _clock.Advance(TimeSpan.FromHours(2));
+        await ExecuteAsync("CREATE TRIGGER refuse_mark BEFORE UPDATE ON connections BEGIN SELECT RAISE(ABORT, 'refused by the test'); END");
+
+        var row = await TellAndAwaitAsync("Inbox");
+
+        Assert.Equal(MessageTypes.Failed, row.Type);
+        Assert.Contains("could not be read or updated", Words(row));
+        Assert.DoesNotContain("was refreshed", Words(row));
+    }
+
+    // ---- tenant rows ------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Every_connections_write_lands_with_its_tenant_row_naming_the_person()
+    {
+        var saved = await SendAsync(HttpMethod.Put, "/api/connections/providers/custom-acme", new
+        {
+            clientId = "acme-client", clientSecret = "acme-secret-value", authorizeUrl = "https://acme.example/authorize",
+            tokenUrl = "https://acme.example/token", defaultScopes = new[] { "read" },
+        });
+        Assert.Equal(HttpStatusCode.OK, saved.Status);
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(HttpMethod.Delete, "/api/connections/providers/custom-acme", null)).Status);
+
+        var id = await ConnectAsync();
+        var reconnect = await StartAsync([], reconnectId: id);
+        Assert.Contains("connection=reconnected", await CallbackLocationAsync(reconnect.GetProperty("state").GetString()!));
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Patch, $"/api/connections/{id}", new { name = "Work mail" })).Status);
+
+        await HireAsync("Inbox", id);
+        var clone = await SendAsync(HttpMethod.Post, $"/api/teams/{_team}/clone", new { name = "Mail copy" });
+        Assert.True((int)clone.Status is >= 200 and < 300, clone.Body);
+
+        var rows = await TenantRowsAsync();
+
+        foreach (var action in new[]
+        {
+            TenantActions.ConnectionProviderSaved, TenantActions.ConnectionProviderRemoved, TenantActions.ConnectionConnected,
+            TenantActions.ConnectionReconnected, TenantActions.ConnectionRenamed,
+        })
+        {
+            // The web callback carries no session; the row still names the person the state was issued to.
+            Assert.Contains(rows, r => r.Action == action && r.ActorEmail == Email);
+        }
+
+        var bindings = rows.Where(r => r.Action == TenantActions.MemberConnectionsChanged).ToList();
+        Assert.Contains(bindings, r => r.ActorEmail == Email && r.Subject == $"{_team}/Inbox");
+        var copy = JsonDocument.Parse(clone.Body).RootElement.GetProperty("team").GetProperty("id").GetString()!;
+        Assert.Contains(bindings, r => r.Subject == $"{copy}/Inbox");
+
+        // The clone carries the binding: the same connection id, never a token.
+        var cloned = await GetAsync($"/api/teams/{copy}/members/Inbox/plugin-settings");
+        Assert.Equal(id, cloned.GetProperty("connections").GetProperty("mail").GetString());
+
+        Assert.Equal(HttpStatusCode.Conflict, (await SendAsync(HttpMethod.Delete, $"/api/connections/{id}", null)).Status);
+        foreach (var team in new[] { _team, copy })
+        {
+            await SendAsync(HttpMethod.Put, $"/api/teams/{team}/members/Inbox/plugin-settings", new
+            {
+                config = new { }, secrets = new { }, connections = new Dictionary<string, string>(),
+            });
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(HttpMethod.Delete, $"/api/connections/{id}", null)).Status);
+        Assert.Contains(await TenantRowsAsync(), r => r.Action == TenantActions.ConnectionDisconnected && r.ActorEmail == Email);
+    }
+
+    // ---- binding, more ----------------------------------------------------------------------------
+
+    [Fact]
+    public async Task An_agent_hired_with_connections_is_refused()
+    {
+        var id = await ConnectAsync();
+
+        var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new
+        {
+            name = "Helper",
+            agent = "claude-headless",
+            connections = new Dictionary<string, string> { ["mail"] = id },
+        }, Ct);
+
+        Assert.Equal(HttpStatusCode.BadRequest, hired.StatusCode);
+        Assert.Contains("an Agent gets no connection and no token", await hired.Content.ReadAsStringAsync(Ct));
+        Assert.Null(Services.GetRequiredService<Harness.Containers.ContainerHost>().Find(new ContainerId(_team, "Helper")));
+    }
+
+    [Fact]
+    public async Task The_hiring_view_names_bound_connections_without_their_account()
+    {
+        var id = await ConnectAsync();
+        await HireAsync("Inbox", id);
+
+        // A connection's name starts as its account; a person names it something else here.
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Patch, $"/api/connections/{id}", new { name = "Team mailbox" })).Status);
+
+        var (status, body) = await SendAsync(HttpMethod.Get, $"/api/teams/{_team}/hiring", null);
+        Assert.Equal(HttpStatusCode.OK, status);
+
+        var offered = Assert.Single(JsonDocument.Parse(body).RootElement.GetProperty("connections").EnumerateArray());
+        Assert.Equal(id, offered.GetProperty("id").GetString());
+        Assert.Equal("Team mailbox", offered.GetProperty("name").GetString());
+        Assert.False(offered.TryGetProperty("account", out _));
+        Assert.DoesNotContain(Account, body);
+    }
+
+    [Fact]
+    public void A_manifest_with_a_malformed_slot_name_is_refused()
+    {
+        var (manifest, why) = PluginManifest.Parse(PluginInstall.Manifest("bad", edit: m => m["connections"] = JsonNode.Parse(
+            """{"my mail!":{"providers":["google"]}}""")).ToJsonString());
+
+        Assert.Null(manifest);
+        Assert.Contains("`connections.my mail!` is not a usable slot name", why);
+    }
+
+    [Fact]
+    public async Task A_state_started_by_one_person_cannot_be_completed_by_another()
+    {
+        const string Other = "other@example.test";
+        await Services.GetRequiredService<IUserStore>().CreateAsync(Other, Password, ct: Ct);
+        using var other = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        (await other.PostAsJsonAsync("/api/auth/login", new { email = Other, password = Password }, Ct)).EnsureSuccessStatusCode();
+
+        var (status, body) = await SendAsync(HttpMethod.Post, "/api/connections/start",
+            new { provider = "google", scopes = new[] { MailScope }, redirectUri = "http://127.0.0.1:53121/" });
+        Assert.Equal(HttpStatusCode.OK, status);
+        var state = JsonDocument.Parse(body).RootElement.GetProperty("state").GetString()!;
+
+        var stolen = await other.PostAsJsonAsync("/api/connections/complete", new { state, code = FakeProvider.GoodCode }, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, stolen.StatusCode);
+        Assert.Empty(_provider.Exchanges);
+        Assert.Empty((await GetAsync("/api/connections")).EnumerateArray());
+
+        // Still the first person's to finish.
+        var mine = await SendAsync(HttpMethod.Post, "/api/connections/complete", new { state, code = FakeProvider.GoodCode });
+        Assert.True(mine.Status == HttpStatusCode.OK, mine.Body);
+    }
+
+    // ---- the operator exchange's folder -----------------------------------------------------------
+
+    [Fact]
+    public async Task A_connect_request_in_a_folder_others_can_write_or_through_a_link_is_not_answered()
+    {
+        var root = Path.Combine(_outside, "exchange");
+        var logger = new Warnings();
+        var exchange = new ConnectRequests(Services.GetRequiredService<Connections>(), root, logger);
+        exchange.Prepare();
+
+        var folder = exchange.Root;
+        var report = Path.Combine(folder, ConnectRequests.ReportFile);
+        async Task Ask(string path) => await File.WriteAllTextAsync(path, $$"""{"request":"{{Guid.NewGuid():N}}","op":"list"}""", Ct);
+
+        // Group-writable: refused, and said once however often it is looked at.
+        File.SetUnixFileMode(folder, File.GetUnixFileMode(folder) | UnixFileMode.GroupWrite | UnixFileMode.GroupRead | UnixFileMode.GroupExecute);
+        await Ask(Path.Combine(folder, ConnectRequests.RequestFile));
+        Assert.False(await exchange.AnswerAsync(Ct));
+        Assert.False(await exchange.AnswerAsync(Ct));
+        Assert.False(File.Exists(report));
+        Assert.Contains("writable by others", Assert.Single(logger.Lines));
+
+        // Put right, it is answered.
+        File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Assert.True(await exchange.AnswerAsync(Ct));
+        Assert.True(File.Exists(report));
+        File.Delete(report);
+
+        // A request that is a link to a file elsewhere is not read.
+        var elsewhere = Path.Combine(_outside, "planted.json");
+        await Ask(elsewhere);
+        File.CreateSymbolicLink(Path.Combine(folder, ConnectRequests.RequestFile), elsewhere);
+        Assert.False(await exchange.AnswerAsync(Ct));
+        Assert.False(File.Exists(report));
+        File.Delete(Path.Combine(folder, ConnectRequests.RequestFile));
+
+        // Nor is the folder itself a link to one another user made.
+        var planted = Path.Combine(_outside, "planted-folder");
+        Directory.CreateDirectory(planted, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Directory.Delete(folder, recursive: true);
+        Directory.CreateSymbolicLink(folder, planted);
+        await Ask(Path.Combine(planted, ConnectRequests.RequestFile));
+        Assert.False(await exchange.AnswerAsync(Ct));
+        Assert.False(File.Exists(Path.Combine(planted, ConnectRequests.ReportFile)));
+        Assert.Contains(logger.Lines, l => l.Contains("symbolic link"));
+    }
+
+    [Fact]
+    public async Task Removing_by_a_name_two_connections_share_is_refused_naming_the_id_way()
+    {
+        var first = await ConnectAsync();
+        var second = await ConnectAsync();
+        Assert.NotEqual(first, second);
+
+        var removed = await ExchangeAsync(new { op = "remove", id = Account });
+
+        Assert.Equal(409, removed.GetProperty("status").GetInt32());
+        Assert.Contains("remove it by id", removed.GetProperty("error").GetString());
+        Assert.Equal(2, (await GetAsync("/api/connections")).GetArrayLength());
+    }
+
     // ---- no leaks ---------------------------------------------------------------------------------
 
     [Fact]
@@ -777,16 +1070,42 @@ public sealed class ConnectionsTests : IAsyncLifetime
 
     private async Task<IReadOnlyList<string>> TenantActionsAsync() => [.. (await TenantRowsAsync()).Select(r => r.Action)];
 
-    private async Task<IReadOnlyList<(string Action, string? ActorEmail)>> TenantRowsAsync()
+    private async Task<IReadOnlyList<string>> TenantDetailsAsync(string action) =>
+        [.. (await TenantRowsAsync()).Where(r => r.Action == action).Select(r => r.Detail ?? "")];
+
+    private async Task<IReadOnlyList<(string Action, string? ActorEmail, string? Subject, string? Detail)>> TenantRowsAsync()
     {
         await using var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=False");
         await connection.OpenAsync(Ct);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT action, actor_email FROM tenant_events ORDER BY seq";
-        var rows = new List<(string, string?)>();
+        command.CommandText = "SELECT action, actor_email, subject, detail FROM tenant_events ORDER BY seq";
+        var rows = new List<(string, string?, string?, string?)>();
         await using var reader = await command.ExecuteReaderAsync(Ct);
-        while (await reader.ReadAsync(Ct)) rows.Add((reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1)));
+        while (await reader.ReadAsync(Ct))
+        {
+            rows.Add((reader.GetString(0), Nullable(reader, 1), Nullable(reader, 2), Nullable(reader, 3)));
+        }
+
         return rows;
+
+        static string? Nullable(SqliteDataReader reader, int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
+    }
+
+    /// <summary>The warnings a service logged, as a person would read them.</summary>
+    private sealed class Warnings : Microsoft.Extensions.Logging.ILogger<ConnectRequests>
+    {
+        public readonly List<string> Lines = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= Microsoft.Extensions.Logging.LogLevel.Warning) Lines.Add(formatter(state, exception));
+        }
     }
 
     private async Task ExecuteAsync(string sql)
@@ -825,6 +1144,20 @@ public sealed class ConnectionsTests : IAsyncLifetime
         public bool Rotates;
         public bool RefuseRefresh;
         public TimeSpan RefreshDelay = TimeSpan.Zero;
+        public string? RevokeRefusal;
+        public Func<string>? OnRevoke;
+        public readonly List<string> RevokedWhen = [];
+
+        private Held? _held;
+
+        /// <summary>A refresh held at the provider until released: one in flight, on purpose.</summary>
+        public sealed class Held
+        {
+            public readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public Held HoldRefresh() => _held = new Held();
 
         public readonly List<(string Access, string Refresh)> Issued = [];
         public readonly List<(string? Secret, string RedirectUri, string Verifier)> Exchanges = [];
@@ -850,6 +1183,12 @@ public sealed class ConnectionsTests : IAsyncLifetime
         {
             if (RefreshDelay > TimeSpan.Zero) await Task.Delay(RefreshDelay, ct);
 
+            if (Interlocked.Exchange(ref _held, null) is { } held)
+            {
+                held.Entered.SetResult();
+                await held.Release.Task.WaitAsync(ct);
+            }
+
             lock (_lock)
             {
                 Refreshes.Add((clientSecret, refreshToken));
@@ -869,8 +1208,13 @@ public sealed class ConnectionsTests : IAsyncLifetime
 
         public Task<string?> RevokeAsync(OAuthProvider provider, string token, CancellationToken ct)
         {
-            lock (_lock) Revoked.Add(token);
-            return Task.FromResult<string?>(null);
+            lock (_lock)
+            {
+                Revoked.Add(token);
+                if (OnRevoke is not null) RevokedWhen.Add(OnRevoke());
+            }
+
+            return Task.FromResult(RevokeRefusal);
         }
 
         private (string Access, string Refresh) Issue(bool newRefresh, string? current = null)
