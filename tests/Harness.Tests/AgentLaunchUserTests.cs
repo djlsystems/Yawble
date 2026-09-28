@@ -156,7 +156,11 @@ public sealed class AgentLaunchUserLaunchTests : IDisposable
         // The workspace belongs to the agent in the image; here it only has to let `nobody` in.
         File.SetUnixFileMode(_workspace, (UnixFileMode)0b111_111_111);
 
-    public void Dispose() => Directory.Delete(_workspace, recursive: true);
+    public void Dispose()
+    {
+        MemberTempCleanup.Remove(_workspace);
+        Directory.Delete(_workspace, recursive: true);
+    }
 
     private static AgentLaunchUser SwitchingOrSkip()
     {

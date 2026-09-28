@@ -18,5 +18,17 @@ internal static class GrokHomeIsolation
     {
         Directory.CreateDirectory(Root);
         Environment.SetEnvironmentVariable("GROK_HOME", Root);
+
+        // Gone with the run, and the shared parent with it once no other run is using it.
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            try
+            {
+                Directory.Delete(Root, recursive: true);
+                Directory.Delete(Path.GetDirectoryName(Root)!);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        };
     }
 }

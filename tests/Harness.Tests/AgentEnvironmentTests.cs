@@ -204,6 +204,82 @@ public sealed class AgentEnvironmentTests : IDisposable
         Assert.Contains("KEY " + principals.Minted, lines);
     }
 
+    [Fact]
+    public async Task A_member_gets_its_own_short_TMPDIR_and_two_members_never_share_one()
+    {
+        // A real child printing what it was handed. A handed-in TMPDIR naming the shared /tmp is
+        // there to show it cannot win: the member's own folder is set after every merge.
+        var bin = Path.Combine(_directory, "bin");
+        Directory.CreateDirectory(bin);
+        await TestExecutable.WriteAsync(Path.Combine(bin, "grok"), "#!/bin/sh\necho \"TMPDIR=$TMPDIR\"\n");
+
+        using var restore = new EnvironmentScope(
+            [new("PATH", bin + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"))]);
+
+        var catalog = new AgentCatalog(
+            [new AgentDefinition("grok", AgentMode.Headless, new AgentLaunch("grok", []))]);
+        var runner = new ProcessAgentRunner(catalog, new RunHeartbeat());
+
+        // A workspace path as long as a real team's, well past what a socket path can hold once a
+        // tool puts its pipe in TMPDIR.
+        var workspaces = Path.Combine(_directory, "teams", "a-team-with-a-long-descriptive-name", "workspaces");
+
+        async Task<string> TmpdirOf(string member)
+        {
+            var workspace = Path.Combine(workspaces, member);
+            Directory.CreateDirectory(workspace);
+            var result = await runner.RunAsync(
+                new AgentInvocation(
+                    new ContainerId("Alpha", member), "You are a member.", "print TMPDIR",
+                    workspace, new Dictionary<string, string> { ["TMPDIR"] = "/tmp" }, Agent: "grok"),
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, result.ExitCode);
+            var tmpdir = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Single(line => line.StartsWith("TMPDIR=", StringComparison.Ordinal))["TMPDIR=".Length..];
+            Assert.True(Directory.Exists(tmpdir), $"{tmpdir} was not created");
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Equal(Path.Combine(workspace, MemberTemp.WindowsFolderName), tmpdir);
+                return tmpdir;
+            }
+
+            // A real folder, owner-only, and the one the workspace's link names.
+            Assert.Null(new DirectoryInfo(tmpdir).LinkTarget);
+            Assert.Equal(
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                File.GetUnixFileMode(tmpdir) & (UnixFileMode)0x1FF);
+            Assert.Equal(tmpdir, new FileInfo(MemberTemp.LinkFor(workspace)).LinkTarget);
+
+            // The .NET runtime's named pipes, which test platforms, build servers and the compiler
+            // server use, are Unix sockets at TMPDIR/CoreFxPipe_<name>, and a socket path holds 103
+            // bytes. The name here is as long as the test platform's.
+            var socket = Path.Combine(tmpdir, "CoreFxPipe_" + new string('p', 36));
+            Assert.True(
+                System.Text.Encoding.UTF8.GetByteCount(socket) <= 103,
+                $"'{socket}' is {System.Text.Encoding.UTF8.GetByteCount(socket)} bytes, over a socket path's 103");
+
+            return tmpdir;
+        }
+
+        var rowan = await TmpdirOf("DeveloperRowan");
+        var tomas = await TmpdirOf("DeveloperTomas");
+
+        Assert.NotEqual(rowan, tomas);
+        Assert.Equal(rowan, await TmpdirOf("DeveloperRowan"));
+
+        // Not a folder by path: a member made again under the same name starts empty.
+        var link = MemberTemp.LinkFor(Path.Combine(workspaces, "DeveloperRowan"));
+        File.Delete(link);
+        var successor = await TmpdirOf("DeveloperRowan");
+        Assert.NotEqual(rowan, successor);
+
+        foreach (var folder in new[] { rowan, tomas, successor })
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     /// <summary>What the platform itself sets, spelled exactly. Any other HARNESS_ key, in any
     /// case, came from a catalog or team entry that should have been dropped.</summary>
     private static readonly HashSet<string> PlatformAssigned = new(StringComparer.Ordinal)
@@ -218,6 +294,7 @@ public sealed class AgentEnvironmentTests : IDisposable
     {
         try
         {
+            MemberTempCleanup.Remove(_directory);
             Directory.Delete(_directory, recursive: true);
         }
         catch (IOException)

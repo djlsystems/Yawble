@@ -234,6 +234,30 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
             .GetProperty(UndeclarableWorkflows.DeclaredByPlatformField).GetBoolean());
     }
 
+    /// <summary>The pump moves a member's cursor only after its batch, so a quick run can end
+    /// while its own wake still reads as undelivered. The team is paused here to hold the cursor
+    /// there for certain, where a loaded host only sometimes does.</summary>
+    [Fact]
+    public async Task A_quiet_run_ending_before_the_pump_moves_its_cursor_is_still_declared()
+    {
+        var host = Services.GetRequiredService<Harness.Containers.ContainerHost>();
+        await host.SetPausedAsync(_team, true);
+
+        var wake = await Log.AppendAsync(new NewMessage(
+            MessageTypes.InstructionFor(Dev),
+            WakeManagerPolicy.InstructionPayload("look", WakeManagerPolicy.OnHandbackOrFailure),
+            "schedule:held"), Ct);
+        Assert.True(await Services.GetRequiredService<ICursors>().PositionAsync(Dev, Ct) < wake.Seq);
+
+        var declared = await Services.GetRequiredService<UndeclarableWorkflows>()
+            .OnRunEndingAsync(Dev, wake.Seq, succeeded: true, Ct);
+
+        Assert.True(declared);
+        Assert.Contains(
+            await Log.ReadCorrelationAsync(wake.CorrelationId, Ct),
+            m => m.Type == MessageTypes.WorkflowCompleted);
+    }
+
     [Fact]
     public async Task The_same_run_handing_back_wakes_the_manager_exactly_once()
     {

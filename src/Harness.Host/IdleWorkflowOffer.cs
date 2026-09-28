@@ -297,7 +297,7 @@ public sealed class IdleWorkflowOffer(
 
         // AND THE HALF THE BUSY LIST CANNOT SEE. See <see cref="UndeliveredAsync"/>: without it
         // the very first legitimate wait gets nagged.
-        if (await UndeliveredAsync(stored, thread, ct)) return false;
+        if (await UndeliveredAsync(stored, thread, member, waking, ct)) return false;
 
         // THE LOOP BOUND, on the message about to be written rather than on its parent - the `tell`
         // route's own arithmetic. See the `causationDepthLimit` parameter for why it is asked here.
@@ -437,16 +437,27 @@ public sealed class IdleWorkflowOffer(
     /// advances a cursor over everything it reads, so anything this check can see, it will
     /// eventually see delivered.
     /// </para>
+    ///
+    /// <para>
+    /// <b>THE ENDING RUN'S OWN WAKE WAS DELIVERED, WHATEVER ITS CURSOR SAYS.</b> The pump offers a
+    /// message and moves the cursor only after its whole batch, so a run that finishes quickly -
+    /// on a loaded host, or a run with nothing to do - ends while its own member's cursor is still
+    /// below the row that woke it. Read literally, that row is "still coming" to the very member
+    /// it already ran, the check says no, and it is never asked again: the workflow stays open for
+    /// good. The pump hands a member its rows in order, so everything up to
+    /// <paramref name="wokenBy"/> has been dealt with for <paramref name="ending"/>, and its cursor
+    /// counts as at least that far.
+    /// </para>
     /// </summary>
     private Task<bool> UndeliveredAsync(
-        string team, IReadOnlyList<Message> thread, CancellationToken ct) =>
-        UndeliveredAsync(host, subscriptions, cursors, diagnostics, team, thread, ct);
+        string team, IReadOnlyList<Message> thread, ContainerId ending, long wokenBy, CancellationToken ct) =>
+        UndeliveredAsync(host, subscriptions, cursors, diagnostics, team, thread, ending, wokenBy, ct);
 
     /// <summary>The same question for a caller holding its own collaborators -
     /// <see cref="UndeclarableWorkflows"/> asks it at the same moment, for the same reason.</summary>
     internal static async Task<bool> UndeliveredAsync(
         ContainerHost host, ISubscriptions subscriptions, ICursors cursors, ILogger? diagnostics,
-        string team, IReadOnlyList<Message> thread, CancellationToken ct)
+        string team, IReadOnlyList<Message> thread, ContainerId ending, long wokenBy, CancellationToken ct)
     {
         foreach (var snapshot in host.Snapshots().Where(s =>
                      string.Equals(s.Team, team, StringComparison.OrdinalIgnoreCase)))
@@ -463,6 +474,10 @@ public sealed class IdleWorkflowOffer(
 
             var subscribed = new HashSet<string>(types, StringComparer.Ordinal);
             var position = await cursors.PositionAsync(subscriber, ct);
+            if (string.Equals(subscriber.ToString(), ending.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                position = Math.Max(position, wokenBy);
+            }
 
             foreach (var row in thread)
             {

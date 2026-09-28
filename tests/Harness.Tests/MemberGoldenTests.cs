@@ -106,7 +106,7 @@ public sealed class MemberGoldenTests
 
     /// <summary>
     /// THE CARD'S `failed` MARK, for the two arms whose words moved out of the runtime and into
-    /// <see cref="AgentMemberRunner"/> (card 621 verification, F4). Recorded after that move, as a
+    /// <see cref="AgentMemberRunner"/>. Recorded after that move, as a
     /// NEW golden, so the rows goldens above stay exactly as step 0 recorded them.
     /// </summary>
     [Theory]
@@ -288,6 +288,7 @@ public sealed class MemberGoldenTests
         }
         finally
         {
+            MemberTempCleanup.Remove(workspace);
             Directory.Delete(workspace, recursive: true);
         }
     }
@@ -362,6 +363,7 @@ public sealed class MemberGoldenTests
         finally
         {
             await factory.DisposeAsync();
+            MemberTempCleanup.Remove(dataRoot);
             try { Directory.Delete(dataRoot, recursive: true); }
             catch (IOException) { }
         }

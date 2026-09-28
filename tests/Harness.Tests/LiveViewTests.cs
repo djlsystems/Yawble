@@ -327,7 +327,11 @@ public sealed class LiveViewRunnerTests : IDisposable
         Directory.CreateDirectory(Workspace);
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose()
+    {
+        MemberTempCleanup.Remove(_root);
+        Directory.Delete(_root, recursive: true);
+    }
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 

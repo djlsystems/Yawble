@@ -316,7 +316,11 @@ public sealed class TranscriptRecordedRunnerTests : IDisposable
         Directory.CreateDirectory(Workspace);
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose()
+    {
+        MemberTempCleanup.Remove(_root);
+        Directory.Delete(_root, recursive: true);
+    }
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -521,7 +525,7 @@ public sealed class EarlierRunsRouteTests(CrossTeamFixture host) : IClassFixture
         var source = new ContainerId(team, member ?? host.ManagerName).ToString();
         await Log.AppendAsync(new NewMessage(MessageTypes.Started, """{"trigger":"x"}""", source), Ct);
         if (blocked) await Log.AppendAsync(new NewMessage(MessageTypes.Blocked, """{"reason":"stuck"}""", source), Ct);
-        if (blockedItem) await Log.AppendAsync(new NewMessage(MessageTypes.Blocked, """{"reason":"card stuck","item":"B000Z"}""", source), Ct);
+        if (blockedItem) await Log.AppendAsync(new NewMessage(MessageTypes.Blocked, """{"reason":"card stuck","item":"B000H"}""", source), Ct);
 
         var payload = JsonSerializer.Serialize(new { exitCode = 0, output = "done", handedBack });
         if (transcript is not null)

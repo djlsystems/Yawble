@@ -165,6 +165,21 @@ public sealed partial class ProcessAgentRunner(
                 $"setsid is not in a root-owned system directory ({string.Join(", ", SystemCommand.Directories)}), so this member could not be started.");
         }
 
+        // THE MEMBER'S OWN TEMPORARY FOLDER, never the /tmp every member and the Host share.
+        // Refused rather than falling back to /tmp when the workspace is there but the folder
+        // cannot be made: a member quietly back in the shared folder is the failure this closes.
+        var memberTemp = await MemberTemp.EnsureAsync(invocation.WorkingDirectory, runAs, ct);
+
+        if (memberTemp is null && Directory.Exists(invocation.WorkingDirectory))
+        {
+            return new AgentResult(
+                -1,
+                string.Empty,
+                $"This member's temporary folder, or the link '{MemberTemp.LinkFor(invocation.WorkingDirectory)}' "
+                + "that names it, could not be created, so this member was not started. Check that its "
+                + "workspace and the Host's temp folder can be written, and that nothing else sits at that name.");
+        }
+
         // History first, then the instruction that woke it - the order a human would read them in,
         // and the order that keeps the stable part at the front, which is what a prompt cache
         // matches on. Composed ONCE, here, because it now has two possible destinations.
@@ -356,6 +371,9 @@ public sealed partial class ProcessAgentRunner(
         // Only this command's own provider key, and any the caller handed in deliberately. The
         // Host holds every provider's key and `start.Environment` inherited all of them.
         AgentEnvironment.ScopeProviderKeys(start.Environment, command.FileName, invocation.Environment);
+
+        // After the merge, so neither the catalog nor a team's env can point it elsewhere.
+        if (memberTemp is not null) start.Environment[MemberTemp.Variable] = memberTemp;
 
         // Written to a file rather than an argument: a system prompt contains newlines and quotes,
         // and a command line is the one place those become someone else's problem.

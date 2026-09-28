@@ -5,7 +5,7 @@ using Harness.Host;
 namespace Harness.Tests;
 
 /// <summary>
-/// A4 (card 621 verification, F2): a plugin member runs as the `agent` user, as an agent does, and
+/// A4: a plugin member runs as the `agent` user, as an agent does, and
 /// can read its installed directory, which is the Host's and <c>0750</c> to the agent's group - the
 /// layout <c>docs/plugins.md</c> installs. A REAL SWITCH: where this process cannot start a child
 /// as `agent` (no such user, no capability, no setpriv) it skips and says which. The release suite

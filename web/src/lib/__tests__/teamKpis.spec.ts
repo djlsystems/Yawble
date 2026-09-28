@@ -140,7 +140,7 @@ describe('teamKpis', () => {
    */
   it('does not count a member that handed its work back as stopped', () => {
     const kpis = teamKpis([
-      container({ id: 'Writer', name: 'Writer', state: 'Idle', handedBack: 'card 4539' }),
+      container({ id: 'Writer', name: 'Writer', state: 'Idle', handedBack: 'the finished draft' }),
     ])
 
     expect(kpis.stopped).toBe(0)
@@ -1773,7 +1773,7 @@ describe('containerMark', () => {
    * `handedBack` never clears, would leave it there permanently.
    */
   it('shows nothing for a member that handed its finished work back', () => {
-    expect(containerMark(container({ handedBack: 'card 4539' }))).toBeNull()
+    expect(containerMark(container({ handedBack: 'the finished draft' }))).toBeNull()
   })
 
   /**

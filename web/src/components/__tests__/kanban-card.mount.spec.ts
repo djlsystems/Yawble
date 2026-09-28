@@ -7,7 +7,7 @@
 // the same `#2226`.
 //
 // THE ID IS THE HANDLE EVERY AGENT USES. The `tell` and `kanban` MCP tools address a card by id,
-// and a member's progress line quotes it back ("B0005 card 2237: read spec"). The workflow seq is
+// and a member's progress line quotes it back ("B000H card 2237: read spec"). The workflow seq is
 // what GROUPS cards and stays. Both are asserted here, in one element, so a change that showed one
 // INSTEAD of the other is caught rather than read as tidying.
 import { afterEach, describe, expect, it } from 'vitest';
@@ -52,10 +52,10 @@ function render(props: Card): HTMLElement {
 
 describe('a card names itself', () => {
   it('shows the linked platform backlog item with the B prefix', () => {
-    const el = render(card({ id: '2316', workflowSeq: 2226, item: 5 }));
+    const el = render(card({ id: '2316', workflowSeq: 2226, item: 17 }));
 
-    // `B0005`, NOT `B5`: the id is Crockford base 32, zero-padded to four.
-    expect(el.querySelector('.k-card-item')?.textContent?.trim()).toBe('B0005');
+    // `B000H`, NOT `BH`: the id is Crockford base 32, zero-padded to four.
+    expect(el.querySelector('.k-card-item')?.textContent?.trim()).toBe('B000H');
   });
 
   /**

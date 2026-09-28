@@ -8,8 +8,26 @@ namespace Harness.Tests;
 /// host in the container shares /tmp, so a path like /tmp/harness-mcp/&lt;member name&gt; would let
 /// a test run overwrite the live Concierge's file with a fake key and another host's port.
 /// </summary>
-public sealed class McpLaunchConfigTests
+public sealed class McpLaunchConfigTests : IDisposable
 {
+    /// <summary>Every folder a test here made in the temp folder, deleted when it ends.</summary>
+    private readonly List<string> _folders = [];
+
+    public void Dispose()
+    {
+        foreach (var folder in _folders)
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    private string Folder(string prefix)
+    {
+        var folder = Directory.CreateTempSubdirectory(prefix).FullName;
+        _folders.Add(folder);
+        return folder;
+    }
+
     [Fact]
     public void Two_launches_for_one_name_never_share_a_file()
     {
@@ -42,9 +60,12 @@ public sealed class McpLaunchConfigTests
 
             if (!OperatingSystem.IsWindows())
             {
+                // Who may read, write and enter it. A setgid bit inherited from a setgid temp folder
+                // grants nobody anything, so it is not compared.
+                var access = (UnixFileMode)Convert.ToInt32("777", 8);
                 Assert.Equal(
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-                    File.GetUnixFileMode(Path.GetDirectoryName(config.JsonPath)!));
+                    File.GetUnixFileMode(Path.GetDirectoryName(config.JsonPath)!) & access);
             }
         }
         finally
@@ -160,7 +181,7 @@ public sealed class McpLaunchConfigTests
     [Fact]
     public void A_missing_grok_config_is_created_with_the_entry()
     {
-        var path = Path.Combine(Path.GetTempPath(), "grok-" + Guid.NewGuid().ToString("N"), "config.toml");
+        var path = Path.Combine(Folder("grok-"), ".grok", "config.toml");
 
         McpLaunchConfig.EnsureGrokConfig("http://127.0.0.1:8080/mcp", path);
 
@@ -179,7 +200,7 @@ public sealed class McpLaunchConfigTests
     {
         if (OperatingSystem.IsWindows()) return;
 
-        var home = Directory.CreateTempSubdirectory("grok-home-").FullName;
+        var home = Folder("grok-home-");
         var path = Path.Combine(home, ".grok", "config.toml");
 
         McpLaunchConfig.EnsureGrokConfig("http://127.0.0.1:8080/mcp", path);
@@ -211,7 +232,7 @@ public sealed class McpLaunchConfigTests
     public void A_grok_config_that_cannot_be_written_is_reported_and_the_launch_goes_on()
     {
         // A regular file where the .grok directory should be: refused even for root.
-        var home = Directory.CreateTempSubdirectory("grok-home-").FullName;
+        var home = Folder("grok-home-");
         File.WriteAllText(Path.Combine(home, ".grok"), "not a directory");
         var warnings = new List<string>();
 
@@ -238,11 +259,9 @@ public sealed class McpLaunchConfigTests
         Assert.Equal(Path.Combine(GrokHomeIsolation.Root, "config.toml"), McpLaunchConfig.GrokConfigPath());
     }
 
-    private static string GrokConfigIn(string text)
+    private string GrokConfigIn(string text)
     {
-        var directory = Path.Combine(Path.GetTempPath(), "grok-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "config.toml");
+        var path = Path.Combine(Folder("grok-"), "config.toml");
         File.WriteAllText(path, text);
         return path;
     }

@@ -109,6 +109,7 @@ public sealed class BoundedRunOutputTests : IDisposable
     {
         try
         {
+            MemberTempCleanup.Remove(_directory);
             Directory.Delete(_directory, recursive: true);
         }
         catch (IOException)
