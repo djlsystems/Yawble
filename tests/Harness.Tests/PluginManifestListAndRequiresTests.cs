@@ -93,11 +93,20 @@ public sealed class PluginManifestListAndRequiresTests : IDisposable
 
         var (bad, refusal) = PluginManifest.Parse(PluginInstall.Manifest(edit: m => m["requires"] = new JsonArray("ruby")).ToJsonString());
         Assert.Null(bad);
-        Assert.Contains("'ruby'", refusal);
+        // The CLI's pre-check refuses in these same words (cli/internal/plugin).
+        Assert.Equal("`requires` names 'ruby', which is not a runtime this Host knows (dotnet, node, python3).", refusal);
 
         var (notList, shapeRefusal) = PluginManifest.Parse(PluginInstall.Manifest(edit: m => m["requires"] = "dotnet").ToJsonString());
         Assert.Null(notList);
-        Assert.Contains("`requires`", shapeRefusal);
+        Assert.Equal("`requires` must be an array of runtime names.", shapeRefusal);
+    }
+
+    [Fact]
+    public void A_nested_config_type_is_refused_in_the_words_the_CLI_uses()
+    {
+        var (field, refusal) = PluginConfigField.Parse("x", Value("""{"type":"object"}"""));
+        Assert.Null(field);
+        Assert.Equal("`config.x.type` must be string, number, bool or list - v1 has no nested configuration.", refusal);
     }
 
     [Fact]
