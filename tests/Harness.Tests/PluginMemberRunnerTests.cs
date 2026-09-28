@@ -105,6 +105,26 @@ public sealed class PluginMemberRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_list_setting_is_delivered_in_the_requests_config_and_defaults_to_empty()
+    {
+        var bound = new Dictionary<string, JsonElement>
+        {
+            ["allow"] = JsonSerializer.SerializeToElement(new[] { "a@example.test", "b@example.test" }),
+        };
+
+        var (bed, _, row) = await RunAsync(
+            """req=$(cat); printf '%s\n' "$req" > request.json; echo '{"t":"result","ok":true,"output":"read"}'""",
+            manifest: m => m["config"] = JsonNode.Parse("""{"allow":{"type":"list"},"scopes":{"type":"list","enum":["read","send"]}}"""),
+            settings: new Settings(new PluginMemberSettings(bound, new Dictionary<string, string>())));
+        await using var _ = bed;
+
+        Assert.Equal(MessageTypes.Completed, row.Type);
+        var config = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(_dataRoot, "request.json"), Ct))!["config"]!;
+        Assert.Equal("""["a@example.test","b@example.test"]""", config["allow"]!.ToJsonString());
+        Assert.Equal("[]", config["scopes"]!.ToJsonString());
+    }
+
+    [Fact]
     public async Task Reports_on_stdout_have_the_same_effects_as_the_routes()
     {
         var (bed, member, _) = await RunAsync("""

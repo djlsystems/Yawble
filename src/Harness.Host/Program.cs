@@ -453,6 +453,14 @@ var pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"));
 PluginEndpoints.Report(pluginCatalog.Rescan(), Console.Out);
 builder.Services.AddSingleton(pluginCatalog);
 
+// INSTALLING FROM A FOLDER INSIDE THE INSTANCE, for a person's route and the operator CLI's request
+// file alike. Files are given the agent's group, which runs every plugin, when the Host switches to it.
+builder.Services.AddSingleton(sp =>
+{
+    var runAs = sp.GetRequiredService<AgentLaunchUser>();
+    return new PluginInstaller(pluginCatalog, dataRoot, runAs.Switches ? runAs.Gid : -1);
+});
+
 // THE EVENTS THE INSTALLED PLUGINS DECLARE join the platform's in every lookup - triggers, filters,
 // `{event.*}` tokens, the high-volume rule, `GET /api/events` - read off the catalog on each call,
 // so a rescan is seen at once. Released when this Host stops.

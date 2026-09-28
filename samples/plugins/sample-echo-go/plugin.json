@@ -1,11 +1,15 @@
 {
   "schemaVersion": 1,
-  "id": "sample-echo",
-  "name": "Sample Echo",
-  "description": "Deterministic test plugin: transforms each instruction's text (upper-case or reversed).",
+  "id": "sample-echo-go",
+  "name": "Sample Echo (Go)",
+  "description": "Deterministic test plugin written in Go: transforms each instruction's text (upper-case or reversed).",
   "version": "0.1.0",
   "protocol": "harness.member/1",
-  "executable": { "path": "sample-echo", "args": [] },
+  "executable": { "path": "bin/linux-x64/sample-echo-go", "args": [] },
+  "platforms": {
+    "linux-x64": "bin/linux-x64/sample-echo-go",
+    "linux-arm64": "bin/linux-arm64/sample-echo-go"
+  },
   "timeoutSeconds": 60,
   "config": {
     "mode": {
@@ -33,15 +37,5 @@
       }
     ]
   },
-  "skills": ["skills/sample-echo.md"],
-  "requires": ["dotnet"],
-
-  "platforms": null,
-  "actions": null,
-  "consumes": null,
-  "health": null,
-  "signature": null,
-  "publisher": null,
-  "minHostVersion": null,
-  "permits": null
+  "skills": ["skills/sample-echo-go.md"]
 }

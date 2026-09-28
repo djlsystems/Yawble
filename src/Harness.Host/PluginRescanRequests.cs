@@ -27,14 +27,29 @@ namespace Harness.Host;
 /// host folder, and inotify does not see every write made from outside the container. One stat a
 /// second is the whole cost.
 /// </para>
+///
+/// <para>
+/// THE OPERATOR'S INSTALL FROM INSIDE THE INSTANCE (<c>plugin install --from-instance</c>) is the same
+/// seam: the CLI writes <c>{"request": nonce, "path": ..., "replace": bool}</c> to
+/// <c>&lt;plugins&gt;/.install</c>, and this service runs <see cref="PluginInstaller"/> - the code
+/// <c>POST /api/plugins/install</c> runs - and answers in <c>&lt;plugins&gt;/.install-report.json</c>,
+/// so both install paths check, write and answer alike.
+/// </para>
 /// </summary>
 public sealed class PluginRescanRequests(
-    PluginCatalog plugins, TeamRegistry teams, TenantLogging audit, ILogger<PluginRescanRequests> logger)
+    PluginCatalog plugins, TeamRegistry teams, TenantLogging audit, ILogger<PluginRescanRequests> logger,
+    PluginInstaller installer)
     : BackgroundService
 {
     public const string RequestFile = ".rescan";
 
     public const string ReportFile = ".rescan-report.json";
+
+    public const string InstallRequestFile = ".install";
+
+    public const string InstallReportFile = ".install-report.json";
+
+    private string? _installAnswered;
 
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(1);
 
@@ -51,6 +66,7 @@ public sealed class PluginRescanRequests(
             try
             {
                 await AnswerAsync(stoppingToken);
+                await AnswerInstallAsync(stoppingToken);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -102,17 +118,82 @@ public sealed class PluginRescanRequests(
                 }),
         };
 
-        // A .tmp then a rename, so the CLI never reads half a report. The Host's alone (0600): it
-        // names members of every team, and agent can read the plugins directory. The CLI reads it
-        // as root.
-        var target = Path.Combine(plugins.Root, ReportFile);
+        await WriteReportAsync(ReportFile, report, ct);
+
+        _answered = nonce;
+        Remove(request);
+
+        return true;
+    }
+
+    /// <summary>Answers a pending install request, if there is one. Returns whether it did.</summary>
+    public async Task<bool> AnswerInstallAsync(CancellationToken ct)
+    {
+        var request = Path.Combine(plugins.Root, InstallRequestFile);
+
+        if (!File.Exists(request)) return false;
+
+        string? nonce = null;
+        string? path = null;
+        var replace = false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(request, ct));
+            var root = document.RootElement;
+            nonce = root.TryGetProperty("request", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+            path = root.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+            replace = root.TryGetProperty("replace", out var r) && r.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            // Unreadable: answered below as a refusal with no nonce, which no CLI waits for.
+        }
+
+        if (string.IsNullOrWhiteSpace(nonce) || nonce == _installAnswered) return false;
+
+        var result = await installer.InstallAsync(path, replace, ct);
+
+        if (result.Status == 200)
+        {
+            await audit.WriteAsAsync(
+                null, null, TenantActions.PluginInstalled, result.Id, result.Id,
+                new { by = "operator", id = result.Id, version = result.Version, source = path, replaced = result.Replaced, installed = result.Installed, reason = result.Reason },
+                ct);
+        }
+
+        await WriteReportAsync(InstallReportFile, new
+        {
+            request = nonce,
+            at = DateTimeOffset.UtcNow,
+            status = result.Status,
+            id = result.Id,
+            version = result.Version,
+            installed = result.Installed,
+            replaced = result.Replaced,
+            reason = result.Reason,
+        }, ct);
+
+        _installAnswered = nonce;
+        Remove(request);
+
+        return true;
+    }
+
+    /// <summary>A .tmp then a rename, so the CLI never reads half a report. The Host's alone (0600): a
+    /// rescan report names members of every team, and agent can read the plugins directory. The CLI
+    /// reads it as root.</summary>
+    private async Task WriteReportAsync(string name, object report, CancellationToken ct)
+    {
+        var target = Path.Combine(plugins.Root, name);
         var temporary = target + ".tmp";
         await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(report, Json) + "\n", ct);
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         File.Move(temporary, target, overwrite: true);
+    }
 
-        _answered = nonce;
-
+    private static void Remove(string request)
+    {
         try
         {
             File.Delete(request);
@@ -121,7 +202,5 @@ public sealed class PluginRescanRequests(
         {
             // The nonce is remembered, so a request that stays is not answered twice.
         }
-
-        return true;
     }
 }

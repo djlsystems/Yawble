@@ -59,7 +59,7 @@ yawble agents             per agent: installed, signed in, and how to sign in if
 yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
 yawble config get|set     port, engine, memory, cpus, running limit, image
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
-yawble plugin install <folder> [--force] | list | remove <id> [--version <v>]   plugins members can be hired on; see below
+yawble plugin install <folder> | --from-instance <path> [--force] | list | remove <id> [--version <v>]   plugins members can be hired on; see below
 yawble github             guided GitHub token setup: the gh login or a pasted fine-grained token, checked with GitHub
 yawble uninstall          removes the instance and yawble's settings. The volume only with --data and a typed confirmation.
 yawble version
@@ -78,6 +78,16 @@ yawble plugin install ~/plugins-build/sample-echo/0.1.0
 ```
 
 That is the whole install. The manifest is checked with the Host's rules before anything is copied, and a bad field is named. The folder is copied to `/data/plugins/<id>/<version>/` through the engine, `/data/plugins` is created if it is missing, and ownership and modes are set: `harness:agent`, directories `0750`, files `0640`, and the manifest's executable `0750`. The executable bit is set even when the folder came from Windows without one. `active` is pointed at the version, and earlier versions are kept. The Host then rescans with no restart and no API key, and the command prints its verdict: installed, or refused with the reason. An existing version is refused unless `--force` is given.
+
+**A plugin built inside the instance** (by a team in its worktree, or by the Concierge in its workspace) is installed where it is, with no copy to this computer and back:
+
+```
+yawble plugin install --from-instance /data/teams/acme/repos/Tools/main/build/sample-echo-go/0.1.0
+```
+
+`<path>` is the folder's absolute path inside the container. The CLI does not install it itself: it writes the request to `/data/plugins/.install` through the engine, and the running Host installs the folder with the same installer as Admin → Plugins → "Install from a folder…", then answers in `/data/plugins/.install-report.json`. So the checks and their sentences are the Host's: it refuses, before anything is written, a folder outside the data root (`/data`), one reached through a symlink out of it, one holding a symlink that leaves the folder, and a manifest it would refuse; an installed version is refused unless `--force` is given. Otherwise the folder is laid out with the modes above and made active, and the command prints the Host's verdict (exit 1 on a refusal). A Host that does not answer within 60 seconds (an image from before this option) is reported, and the request is withdrawn.
+
+**Language, and what a plugin may rely on.** Go is the default for connectors to REST APIs, clouds, databases, queues and mail (template: `samples/plugins/sample-echo-go`, one static binary per processor). Use .NET when the best SDK for the target system is .NET (template: `samples/plugins/sample-echo`), and Python when the library exists only in Python. A plugin is self-contained: the image guarantees the .NET runtime, Node and Python 3, and everything else the plugin needs is in its own folder (Go libraries compiled in, NuGet packages published beside the build, Python packages in a virtual environment in the folder). Nothing is ever added to the image for a plugin. The manifest's `requires` names the runtimes it needs from the image. `docs/plugins.md` has the details.
 
 `yawble plugin list` shows each version, active or not, and installed or refused (`--json` too). `yawble plugin remove <id>` asks first (`--yes` answers) and refuses while a member is hired on the plugin, naming the members. `--version <v>` removes one kept version; the active one cannot be removed while others are kept.
 
