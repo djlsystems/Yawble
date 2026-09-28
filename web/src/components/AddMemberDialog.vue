@@ -16,6 +16,7 @@ import {
   settingsBody,
   type PluginFieldValues,
 } from '../lib/pluginSettings';
+import { initialBindings } from '../lib/connections';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 import { MemberInstructionsHint, MemberInstructionsLabel } from '../lib/memberInstructions';
 
@@ -116,10 +117,13 @@ function optionLabel(option: string) {
 /** The chosen plugin's config values and secret keys, reset to its manifest whenever the choice changes. */
 const pluginConfig = ref<PluginFieldValues>({});
 const pluginSecrets = ref<Record<string, string>>({});
+/** Slot -> connection id, for a plugin that declares connection slots. */
+const pluginConnections = ref<Record<string, string>>({});
 
 watch(plugin, (chosen) => {
   pluginConfig.value = chosen ? initialConfig(chosen) : {};
   pluginSecrets.value = chosen ? initialSecrets(chosen) : {};
+  pluginConnections.value = chosen ? initialBindings(chosen.connections) : {};
 });
 
 const pluginMissing = computed(() =>
@@ -216,7 +220,7 @@ async function submit() {
           props.team,
           name.value.trim(),
           agent.value!,
-          settingsBody(plugin.value, pluginConfig.value, pluginSecrets.value),
+          settingsBody(plugin.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value),
         )
       : await addMember(props.team, name.value.trim(), agent.value!, undefined, instructions.value.trim() || undefined);
 
@@ -323,6 +327,7 @@ async function submit() {
           <PluginSettingsForm
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"
+            v-model:connections="pluginConnections"
             :shape="plugin"
           />
         </div>

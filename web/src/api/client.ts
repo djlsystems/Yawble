@@ -35,6 +35,11 @@ import type {
   MemberMeasuredCost,
   MemberRunsPage,
   PluginHire,
+  Connection,
+  ConnectionProvider,
+  ConnectionProviderSave,
+  ConnectionStart,
+  ConnectionStartRequest,
   PluginList,
   PluginInstallResult,
   PluginMemberSettings,
@@ -1183,7 +1188,9 @@ export const addMember = (
     // on an Agent.
     body: JSON.stringify(
       plugin
-        ? { name, agent, config: plugin.config, secrets: plugin.secrets }
+        ? plugin.connections
+          ? { name, agent, config: plugin.config, secrets: plugin.secrets, connections: plugin.connections }
+          : { name, agent, config: plugin.config, secrets: plugin.secrets }
         : systemPrompt
           ? { name, agent, systemPrompt }
           : { name, agent },
@@ -1236,6 +1243,48 @@ export const savePluginSettings = (team: string, member: string, settings: Plugi
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(settings),
   }).then(() => undefined)
+
+// --- Connections: OAuth accounts the Host holds for plugins. Every route is a person's. ----------
+
+/** Google, Microsoft (always listed, set up or not), then each custom provider. Never a client secret. */
+export const listConnectionProviders = () => json<ConnectionProvider[]>('/api/connections/providers')
+
+/** Sets up a provider's client, or creates a custom provider. An omitted `clientSecret` keeps the stored one. */
+export const saveConnectionProvider = (id: string, body: ConnectionProviderSave) =>
+  json<ConnectionProvider>(`/api/connections/providers/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+/** Removes a custom provider; refused (409) while any of its connections exists. */
+export const deleteConnectionProvider = (id: string) =>
+  send(`/api/connections/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => undefined)
+
+/** Every connected account, with its status and the members that use it. */
+export const listConnections = () => json<Connection[]>('/api/connections')
+
+/**
+ * Starts a web flow: the answer's `authorizationUrl` is where the browser goes. The provider comes
+ * back to the Host's `/api/connections/callback`, which answers a redirect to the Console.
+ */
+export const startConnection = (body: ConnectionStartRequest) =>
+  json<ConnectionStart>('/api/connections/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+export const renameConnection = (id: string, name: string) =>
+  json<Connection>(`/api/connections/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+
+/** Refused (409, naming the members in `usedBy`) while any member binds it. */
+export const disconnectConnection = (id: string) =>
+  send(`/api/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => undefined)
 
 /**
  * The STORED row behind a member - its label, its own instructions and who last set them.

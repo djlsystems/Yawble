@@ -306,6 +306,7 @@ Content-Type: application/json
 | `timeoutSeconds` | optional | An **idle** clock: this long with no `progress` record ends the run. Default 300. |
 | `config` | optional | Name → `{type: string, number, bool or list; enum; default; required; setBy; description}`. Flat in v1. A `list` is a list of strings, default `[]`. See [List settings](#list-settings). |
 | `secrets` | optional | Name → `{description, required}`. A `value` key is refused. |
+| `connections` | optional | Slot name → `{description, providers, scopes, required}`: an OAuth account the plugin acts on, which the Host holds and refreshes. See [Connections](#connections-oauth-accounts). |
 | `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `inLedger` is not read in v1: a plugin event always reaches the ledger. See [Events](#events). |
 | `skills` | optional | Files inside the plugin, in the same front-matter format as a skill. Indexed at load and on every rescan. See [Skills](#skills). |
 | `requires` | optional | The runtimes the plugin needs from the image: `dotnet`, `node`, `python3`. See [Runtimes](#runtimes-requires). |
@@ -330,6 +331,44 @@ manifest gives none, so the plugin always receives an array in the request's `co
 
 Every other type keeps its rules. A Host from before list settings refuses a manifest that uses one,
 naming the field, as it refuses any unknown type. The web's settings editor shows a list as chips.
+
+### Connections: OAuth accounts
+
+A plugin that acts on a person's account at an OAuth service (Gmail, Outlook, Google Drive,
+Microsoft Graph, anything that speaks OAuth 2.0 with authorization code and PKCE) declares a
+**slot** per account it needs. It writes no OAuth code: the Host holds the client and the refresh
+token, refreshes and rotates, and hands the plugin a fresh access token on each run. See
+[connections.md](connections.md) for connecting an account.
+
+```json
+"connections": {
+  "mail": {
+    "description": "The mailbox to read and send from.",
+    "providers": ["google", "microsoft", "custom"],
+    "scopes": {
+      "google": ["https://mail.google.com/"],
+      "microsoft": ["https://outlook.office.com/IMAP.AccessAsUser.All", "https://outlook.office.com/SMTP.Send", "offline_access"]
+    },
+    "required": true
+  }
+}
+```
+
+| Key | Rule |
+|---|---|
+| slot name | The key the plugin reads in the request's `connections`. Same form as a config field's name. |
+| `description` | One line, shown beside the slot's picker. |
+| `providers` | Which providers' connections may be bound: `google`, `microsoft`, `custom`. At least one. An unknown provider refuses the plugin, with the reason on the Plugins screen. |
+| `scopes` | Provider → the scopes the slot needs. A connection lacking one of them is refused at binding, with a sentence that offers Reconnect. |
+| `required` | Default false. An unbound required slot blocks the member's runs with a sentence naming the slot, as a missing required secret does. |
+
+- **Without `connections`** a manifest behaves exactly as before.
+- **A malformed slot** refuses the plugin with its reason on the Plugins screen, as other manifest
+  faults do.
+- **The Plugins screen** shows each slot ("needs a Google or Microsoft connection").
+- **Binding.** A person picks a connection per slot when hiring the member and in Member settings.
+  The member stores the connection's id, never a token. A Manager or Concierge hire may name a
+  connection only when a person has already bound that same connection to a member of the same team.
 
 ### Runtimes: `requires`
 
@@ -371,6 +410,10 @@ name. The install checks the same before it writes.
   ],
   "config": { "mode": "reverse" },
   "secrets": { "token": "…resolved now…" },
+  "connections": {
+    "mail": { "provider": "google", "account": "person@example.com", "accessToken": "…fresh now…",
+              "expiresAt": "2026-09-28T21:05:00Z", "scopes": ["https://mail.google.com/"] }
+  },
   "workingDirectory": "/data/teams/Mixed/workspaces/Echo",
   "worktrees": []
 }
@@ -380,6 +423,11 @@ name. The install checks the same before it writes.
   run.
 - **`config`** is the manifest's defaults with this member's own values on top.
 - **`secrets`** holds only the secrets this member binds, resolved at the moment the run starts.
+- **`connections`** holds one entry per slot this member has bound: the provider, the account name,
+  a fresh access token, when it expires and the scopes it was granted. The Host refreshes the token
+  before the run when it would expire within 5 minutes, so a run always starts with at least that
+  long. It is absent for a plugin with no slots; a plugin that ignores it is unaffected. The refresh
+  token and the client secret never reach a plugin.
 
 **stdout**: JSON Lines, one record per line.
 
@@ -510,6 +558,21 @@ slot like any member's.
   - A bound value shorter than 4 characters cannot be redacted without mangling the text around
     it, so it is refused: at hire if it is already set, and on every run
     (`A_secret_too_short_to_redact_is_refused_before_launch`).
+- **OAuth is a connection, never a secret.** A plugin that needs a person's account at an OAuth
+  service declares a `connections` slot (see [Connections](#connections-oauth-accounts)) and reads
+  `connections.<slot>.accessToken` on stdin. It never asks the person for a token, never takes a
+  refresh token as a secret, and never ships an "authorize" command of its own.
+  - The access token is added to the run's redaction set with the bound secrets, and every rule
+    above applies to it.
+  - It is never put in argv or the environment, and the plugin must not write it to its workspace:
+    the next run gets a new one.
+  - **Long runs.** A token lives about an hour. A plugin whose run could outlast it (a long sync)
+    should do a bounded amount of work, keep its place in its workspace, finish, and let the next
+    run pick up with a new token. A run never refreshes a token itself. On a 401 it fails in its
+    own words; if the provider has revoked the grant, the Host marks the connection `needs
+    reconnect` at the next run and blocks it with a sentence saying to reconnect it from
+    Admin, Connections.
+  - A refresh the provider refuses blocks the run before it starts, naming the connection.
 - **Worked example.** An Azure Storage plugin would declare `config.account`, `config.container`
   and `secrets.accountKey`. Its member would store
   `{"config": {"account": "acme", "container": "invoices"}, "secrets": {"accountKey": "ACME_STORAGE_KEY"}}`.
@@ -519,13 +582,15 @@ slot like any member's.
 
 ### Changing a plugin member's settings after hire
 
-A person changes a plugin member's configuration and secret bindings without hiring a new member:
+A person changes a plugin member's configuration, secret bindings and connection bindings without hiring a new member:
 **Member settings → Settings**, the same form Add member shows, filled with what is stored. It is
 generated from the manifest: one typed input per `config` field (text, number box, toggle, dropdown
 for an `enum`, chips for a `list`), each with its description, default, whether it is required, and
 "Set by a person only" for a `setBy: person` field; "Reset to default" per field; secrets as key-name
 inputs; and a read-only view of the JSON that will be stored. It saves only the fields that differ from
-their default.
+their default. Each connection slot is a picker listing the connections of the providers the slot
+allows; a connection lacking a scope the slot asks for is refused with a sentence that offers
+Reconnect.
 
 - `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the stored
   `config`, `secrets` as logical keys (never a value), and the manifest's `fields` and `secretFields`.
@@ -732,7 +797,15 @@ plugin declares none.
   verdict for a good folder, a refused manifest, an installed version without and with `--force`,
   and a folder outside the data root, and a request the Host never answers being withdrawn; its
   request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side.
-  `cli/internal/plugin` pins the manifest rules against both samples.
+  `cli/internal/plugin` pins the manifest rules against the samples, the `connections` slot rules
+  included.
+- **Connections, the web and the CLI.** The mount specs `connections-dialog`, `connection-picker`
+  (the binding picker at hire and in Member settings) and `plugins-dialog` (each slot on the Plugins
+  screen). `cli/internal/cli/connect_test.go` runs `yawble connect` against a scripted Host and a real
+  loopback listener: the start request, the browser's round trip, a redirect with another state
+  ignored, the provider's refusal, reconnect by name, the code never on a command line, `list`,
+  `remove` refused naming the members, and a request no Host answers withdrawn.
+  `samples/plugins/sample-whoami-go` has its own `go test` against a userinfo double.
   `PluginRescanRequestTests` shows a plugin installed after start is listed with no restart, and pins
   the report's refusals, its hired members and its `0600` mode. `PrepareVolumeTests` pins
   `/data/plugins` as `harness:agent 0750`, created when missing.

@@ -188,6 +188,11 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.Contains("Plugins are self-contained.", skill.Body, StringComparison.Ordinal);
         Assert.Contains("Nothing a plugin needs is ever added", skill.Body, StringComparison.Ordinal);
 
+        // OAuth is a connection: the platform holds the tokens, and nobody asks a person for one.
+        Assert.Contains("OAuth accounts are connections, never secrets", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("Never ask the person for a token", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("Never write an \"authorize\" or \"login\" command", skill.Body, StringComparison.Ordinal);
+
         // `plugin-` is the namespace plugin skills are forced into; a built-in there could collide
         // with an installed plugin's skill (a plugin with id `authoring` would ship `plugin-authoring`).
         Assert.DoesNotContain(BuiltInSkills.All, s => s.Name.StartsWith("plugin-", StringComparison.Ordinal));

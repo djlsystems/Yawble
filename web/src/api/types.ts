@@ -2300,6 +2300,8 @@ export interface InstalledPlugin {
   requires: string[]
   /** The members hired on it, team by team. Empty to a machine principal. */
   members: PluginMemberRef[]
+  /** Its connection slots, by slot name; `{}` when the manifest declares none. Absent from a Host older than connections. */
+  connections?: Record<string, ConnectionSlot>
   /** Manifest keys reserved for a later Host, and unknown keys it ignored. */
   reserved: string[]
   ignored: string[]
@@ -2360,12 +2362,116 @@ export interface PluginMemberSettings {
   secrets: Record<string, string>
   fields: Record<string, PluginConfigField>
   secretFields: Record<string, PluginSecretField>
+  /** Each slot's bound connection id. Never a token. */
+  connections?: Record<string, string>
+  /** The manifest's connection slots, as `GET /api/plugins` lists them. */
+  connectionFields?: Record<string, ConnectionSlot>
 }
 
 /** A plugin member's settings on hire: config values, and each secret bound to a LOGICAL KEY. */
 export interface PluginHire {
   config: Record<string, PluginSettingValue>
   secrets: Record<string, string>
+  /** Slot -> connection id. Sent only for a plugin that declares slots; `{}` unbinds every slot. */
+  connections?: Record<string, string>
+}
+
+/**
+ * One connection slot a plugin's manifest declares, as `GET /api/plugins` lists it: which providers'
+ * connections it takes and the scopes it needs from each, normalised to the object form.
+ */
+export interface ConnectionSlot {
+  description: string | null
+  /** `google`, `microsoft`, `custom` (any custom provider) or one `custom-<id>`. */
+  providers: string[]
+  /** Provider (or `custom`) -> the scopes the slot needs from a connection of it. */
+  scopes: Record<string, string[]>
+  required: boolean
+  /** The Host's own words: "needs a Google or Microsoft connection". */
+  summary: string
+}
+
+/** `google`, `microsoft`, or `custom` for any provider a person defined. */
+export type ConnectionProviderKind = 'google' | 'microsoft' | 'custom'
+
+/**
+ * A provider and its OAuth client, as `GET /api/connections/providers` lists it. The client SECRET
+ * is never sent: `clientSecretSet` says only whether there is one.
+ */
+export interface ConnectionProvider {
+  /** `google`, `microsoft` or `custom-<id>`. */
+  id: string
+  kind: ConnectionProviderKind
+  name: string
+  clientId: string | null
+  clientSecretSet: boolean
+  /** Its client is set up (and, for a custom one, its URLs): Connect is possible. */
+  configured: boolean
+  authorizeUrl: string | null
+  tokenUrl: string | null
+  userinfoUrl: string | null
+  /** Disconnect revokes the grant at the provider. */
+  revokes: boolean
+  defaultScopes: string[]
+  /** One line: which client type to create and which redirect URI to register. */
+  help: string
+  /** Microsoft's tenant, when one is set. */
+  tenant?: string | null
+}
+
+/**
+ * `PUT /api/connections/providers/{id}`. `clientSecret` omitted keeps the stored one; `""` clears it.
+ * The URLs, name and default scopes are a custom provider's.
+ */
+export interface ConnectionProviderSave {
+  clientId: string
+  clientSecret?: string
+  tenant?: string
+  name?: string
+  authorizeUrl?: string
+  tokenUrl?: string
+  userinfoUrl?: string
+  defaultScopes?: string[]
+}
+
+/** A member using a connection, and in which slot. */
+export interface ConnectionUse {
+  team: string
+  member: string
+  label: string
+  slot: string
+}
+
+/** One connected account, as `GET /api/connections` lists it. No token is ever on it. */
+export interface Connection {
+  id: string
+  name: string
+  provider: string
+  providerKind: ConnectionProviderKind
+  account: string
+  scopes: string[]
+  connectedAt: string
+  refreshedAt: string | null
+  status: 'ok' | 'needs-reconnect'
+  statusReason: string | null
+  usedBy: ConnectionUse[]
+}
+
+/** `POST /api/connections/start`. */
+export interface ConnectionStartRequest {
+  provider?: string
+  scopes: string[]
+  name?: string | null
+  reconnectId?: string | null
+  redirectUri?: string | null
+}
+
+/** Its answer: where to send the browser. The PKCE verifier stays on the Host. */
+export interface ConnectionStart {
+  authorizationUrl: string
+  state: string
+  redirectUri: string
+  expiresAt: string
 }
 
 /**

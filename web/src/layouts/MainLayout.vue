@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
@@ -33,7 +33,9 @@ import LocalReposDialog from '../components/LocalReposDialog.vue';
 import ConciergePanel from '../components/ConciergePanel.vue';
 import StatusStrip from '../components/StatusStrip.vue';
 import VersionTag from '../components/VersionTag.vue';
-import { DocumentsAction, PluginsAction, RepositoriesAction, TenantSettingsAction } from '../lib/ribbon';
+import ConnectionsDialog from '../components/ConnectionsDialog.vue';
+import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
+import { ConnectionsAction, DocumentsAction, PluginsAction, RepositoriesAction, TenantSettingsAction } from '../lib/ribbon';
 
 const board = useConsoleStore();
 const { connected } = storeToRefs(board);
@@ -115,6 +117,25 @@ watch(
 const skillsOpen = ref(false);
 /** Admin > Plugins. */
 const pluginsOpen = ref(false);
+/** Admin > Connections. */
+const connectionsOpen = ref(false);
+/** What the provider's round trip came back with, shown once in the Connections dialog. */
+const connectionNotice = ref<CallbackOutcome | null>(null);
+
+/**
+ * BACK FROM A PROVIDER'S CONSENT PAGE. The Host's callback answers a redirect to
+ * `/console?connection=…`; the Connections dialog opens with what it says, and the query is taken
+ * off the address so a reload does not say it again. Opened AFTER mount, so the dialog's
+ * `watch(open)` sees the opening edge and loads.
+ */
+onMounted(() => {
+  const returned = callbackOutcome(router.currentRoute.value.query);
+  if (!returned) return;
+
+  connectionNotice.value = returned;
+  connectionsOpen.value = true;
+  void router.replace({ query: {} });
+});
 const repositoriesOpen = ref(false);
 const resetOpen = ref(false);
 const backlogOpen = ref(false);
@@ -231,6 +252,10 @@ function onRibbonAction(action: string) {
   else if (action === 'admin-skills') skillsOpen.value = true;
   else if (action === 'admin-keys') keysOpen.value = true;
   else if (action === PluginsAction) pluginsOpen.value = true;
+  else if (action === ConnectionsAction) {
+    connectionNotice.value = null;
+    connectionsOpen.value = true;
+  }
   else if (action === RepositoriesAction) repositoriesOpen.value = true;
   else if (action === TenantSettingsAction) tenantSettingsOpen.value = true;
 }
@@ -481,6 +506,7 @@ async function signOut() {
     />
     <SkillsDialog v-model="skillsOpen" />
     <PluginsDialog v-model="pluginsOpen" />
+    <ConnectionsDialog v-model="connectionsOpen" :notice="connectionNotice" />
     <LocalReposDialog v-model="repositoriesOpen" />
     <!-- Guarded on there BEING an active team, because the dialog reads that team's members and
          addresses it by id. The ribbon disables a `team-` action without one, so this is a

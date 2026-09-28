@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as ribbonModule from '../ribbon'
-import { DocumentsAction, PluginsAction, RepositoriesAction, Ribbon, needsActiveWorkTeam } from '../ribbon'
+import { ConnectionsAction, DocumentsAction, PluginsAction, RepositoriesAction, Ribbon, TenantSettingsAction, needsActiveWorkTeam } from '../ribbon'
 
 describe('the ribbon', () => {
   /**
@@ -136,6 +136,16 @@ describe('the ribbon', () => {
     expect(actions.indexOf(RepositoriesAction)).toBe(actions.indexOf('admin-diagnostics') + 1)
     expect(actions.indexOf(RepositoriesAction)).toBe(actions.indexOf(PluginsAction) - 1)
     expect(needsActiveWorkTeam(RepositoriesAction, undefined)).toBe(false)
+  })
+
+  /** Admin › Connections: directly after Plugins, Settings after it, needing no active team. */
+  it('puts Connections directly after Plugins and before Settings, needing no active team', () => {
+    const admin = Ribbon.tabs.find((tab) => tab.id === 'admin')
+    const actions = admin?.items.map((item) => item.action) ?? []
+
+    expect(actions.indexOf(ConnectionsAction)).toBe(actions.indexOf(PluginsAction) + 1)
+    expect(actions.indexOf(TenantSettingsAction)).toBe(actions.indexOf(ConnectionsAction) + 1)
+    expect(needsActiveWorkTeam(ConnectionsAction, undefined)).toBe(false)
   })
 
   /** Projects sits BEFORE Admin. */

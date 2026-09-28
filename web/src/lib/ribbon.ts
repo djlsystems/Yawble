@@ -59,6 +59,12 @@ export const DocumentsAction = 'documents-manage';
 /** Admin > Plugins, the installed plugins and installing one from a folder inside the instance. */
 export const PluginsAction = 'admin-plugins';
 
+/**
+ * Admin > Connections, the OAuth accounts the Host holds for plugins and each provider's client.
+ * Directly after Plugins: what a plugin acts on, beside the plugins themselves.
+ */
+export const ConnectionsAction = 'admin-connections';
+
 /** Admin > Repositories, the instance's local repositories: listed, and deleted after asking. */
 export const RepositoriesAction = 'admin-repositories';
 
@@ -136,10 +142,12 @@ export const Ribbon: RibbonSpec = {
         // machine principal on `GET /api/diagnostics` outright.
         { kind: 'button', action: 'admin-diagnostics', label: 'Diagnostics', icon: 'monitor_heart', size: 'large' },
         // The instance's local repositories - git kept on the volume, which a team names as
-        // `local:<name>`. Before Plugins, which stays directly before Settings.
+        // `local:<name>`. Before Plugins.
         { kind: 'button', action: RepositoriesAction, label: 'Repositories', icon: 'account_tree', size: 'large' },
-        // DIRECTLY BEFORE Settings: what is installed on the instance, beside how it is configured.
+        // What is installed on the instance, then the accounts it acts on, then how it is configured.
         { kind: 'button', action: PluginsAction, label: 'Plugins', icon: 'extension', size: 'large' },
+        // DIRECTLY AFTER Plugins, and Settings follows: the OAuth accounts plugins act on.
+        { kind: 'button', action: ConnectionsAction, label: 'Connections', icon: 'link', size: 'large' },
         // THE GEAR. Every instance-wide setting - the WIP limit among them - in one dialog. The
         // Active Team group's own Settings is that team's; this one names no team.
         {

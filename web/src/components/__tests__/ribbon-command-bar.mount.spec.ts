@@ -17,7 +17,7 @@ vi.mock('../../lib/useAgentInstallations', () => ({
 
 import RibbonBar from '../RibbonBar.vue';
 import RibbonMobileMenu from '../RibbonMobileMenu.vue';
-import { DocumentsAction, PluginsAction, Ribbon, TenantSettingsAction, ribbonEntries } from '../../lib/ribbon';
+import { ConnectionsAction, DocumentsAction, PluginsAction, Ribbon, TenantSettingsAction, ribbonEntries } from '../../lib/ribbon';
 import '../../test/mountQuasar';
 
 const EntryWidth = 100;
@@ -112,27 +112,34 @@ describe('the mobile drawer', () => {
 });
 
 describe('the Admin group', () => {
-  /** Plugins sits DIRECTLY before Settings, with the `extension` icon, and opens the Plugins screen. */
-  it('has Plugins directly before Settings, and runs it from the bar', async () => {
+  /**
+   * Plugins, then Connections DIRECTLY after it, then Settings: what is installed, the accounts it
+   * acts on, how the instance is configured. Each opens its own screen from the bar.
+   */
+  it('has Plugins, then Connections, then Settings, and runs each from the bar', async () => {
     const wrapper = await render(entries.length * EntryWidth);
 
     const admin = entries.filter((entry) => entry.tab.id === 'admin').map((entry) => entry.item);
     const plugins = admin.findIndex((item) => item.action === PluginsAction);
     expect(plugins).toBeGreaterThan(-1);
-    expect(admin[plugins + 1]?.action).toBe(TenantSettingsAction);
+    expect(admin[plugins + 1]?.action).toBe(ConnectionsAction);
+    expect(admin[plugins + 2]?.action).toBe(TenantSettingsAction);
     expect(admin[plugins]).toMatchObject({ label: 'Plugins', icon: 'extension' });
+    expect(admin[plugins + 1]).toMatchObject({ label: 'Connections', icon: 'link' });
 
-    // As rendered: the button labelled Plugins is the one before the Admin group's Settings.
+    // As rendered: Plugins, Connections, then the Admin group's Settings.
     const labels = wrapper.findAll('.ribbon-entry').map((entry) => {
       const block = entry.find('.block');
       return block.exists() ? block.text().trim() : '';
     });
     const rendered = labels.lastIndexOf('Plugins');
     expect(rendered).toBeGreaterThan(-1);
-    expect(labels[rendered + 1]).toBe('Settings');
+    expect(labels[rendered + 1]).toBe('Connections');
+    expect(labels[rendered + 2]).toBe('Settings');
     expect(wrapper.findAll('.ribbon-entry')[rendered]!.html()).toContain('extension');
 
     await wrapper.findAll('.ribbon-entry')[rendered]!.find('button').trigger('click');
-    expect(wrapper.emitted('action')).toEqual([[PluginsAction]]);
+    await wrapper.findAll('.ribbon-entry')[rendered + 1]!.find('button').trigger('click');
+    expect(wrapper.emitted('action')).toEqual([[PluginsAction], [ConnectionsAction]]);
   });
 });

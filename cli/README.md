@@ -60,6 +60,7 @@ yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
 yawble config get|set     port, engine, memory, cpus, running limit, image
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
 yawble plugin install <folder> | --from-instance <path> [--force] | list | remove <id> [--version <v>]   plugins members can be hired on; see below
+yawble connect <provider> [--scopes …] [--name …] [--port …] | list | remove <name>   connect an OAuth account (Google, Microsoft, custom) for plugins; see below
 yawble repo list | clone <name> [folder]   the instance's local repositories; clone one onto this computer (no pushing back)
 yawble github             guided GitHub token setup: the gh login or a pasted fine-grained token, checked with GitHub
 yawble uninstall          removes the instance and yawble's settings. The volume only with --data and a typed confirmation.
@@ -69,6 +70,27 @@ yawble version
 Tab completion for a shell is there but not listed in `yawble --help`: `yawble completion powershell | Out-String | Invoke-Expression` turns it on in PowerShell (add that line to `$PROFILE` to keep it), and `yawble completion --help` shows bash, zsh and fish.
 
 The engine is the one configured, else the one installed (asked when both are); `config set engine podman|docker` sets it.
+
+## Connections
+
+A connection is an account at an OAuth service that plugin members act on; the Host keeps its
+refresh token and hands a plugin only a fresh access token per run (`docs/connections.md` at the
+repository root). The web UI connects one from Admin → Connections; `connect` does it from this
+computer, for an instance the provider will not redirect to (a tunnel, a private address):
+
+```
+yawble connect google --scopes https://mail.google.com/ --name "Work mail"
+yawble connect list
+yawble connect remove "Work mail"
+```
+
+`connect` asks the Host to start the flow, listens on `http://127.0.0.1:<free port>` (`--port` to
+choose it), opens the browser at the provider's consent page, catches the code and hands it to the
+Host, which does the exchange: the client secret never leaves the Host and no token reaches this
+computer. `--name` of an existing connection of that provider reconnects it. Like
+`plugin install --from-instance`, it reaches the Host through the container engine with a request
+file the Host answers (`/data/connections/.connect`, harness-only), so nothing is signed in. The
+provider's client is set up first in Admin → Connections.
 
 ## Plugins
 
