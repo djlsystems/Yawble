@@ -49,7 +49,7 @@ public static class LiveViewEndpoints
             .WithDescription(
                 "This member's finished runs that recorded the agent's own transcript, newest first, "
                 + $"{RunsPage} at a time: `{{ \"runs\": [ {{ \"seq\", \"workflow\", \"startedAt\", "
-                + "\"endedAt\", \"durationMs\", \"outcome\", \"output\", \"reason\" } ], \"nextBefore\" }`. `seq` is the run's "
+                + "\"endedAt\", \"durationMs\", \"outcome\", \"output\", \"reason\", \"quiet\" } ], \"nextBefore\" }`. `seq` is the run's "
                 + "terminal row, `workflow` its correlation, `outcome` one of `completed`, "
                 + "`handedBack`, `blocked` and `failed`. `startedAt` and `durationMs` are null when the "
                 + "run's start is not in the log. Pass `nextBefore` as `before` for the next page; it "
@@ -63,6 +63,8 @@ public static class LiveViewEndpoints
                 + "and `reason` that row's reason. `reason` is null on every other run. While the member "
                 + "is running, an item its current run has blocked is not listed: that run is not "
                 + "over, and it is listed once it is.\n\n"
+                + "`quiet` is true for a run that finished quiet: its `completed` row is marked "
+                + "`quiet` and woke nobody. It is false for every other run, a failure always.\n\n"
                 + "Runs from before transcripts were recorded are not listed.\n\n"
                 + "Writes nothing.\n\n"
                 + "**A person's action; no machine principal.**");
@@ -192,6 +194,9 @@ public static class LiveViewEndpoints
             outcome = Outcome(run),
             output = plugin && run.Terminal.Type != MessageTypes.Blocked ? RunOutput(run.Terminal.Payload) : null,
             reason = run.Terminal.Type == MessageTypes.Blocked ? Field(run.Terminal.Payload, PayloadFields.Reason) : null,
+
+            // A quiet run woke nobody; its `completed` row says so. A failure is never quiet.
+            quiet = run.Terminal.Type == MessageTypes.Completed && Bool(run.Terminal.Payload, PayloadFields.Quiet),
         }).ToList();
 
         return Results.Ok(new
