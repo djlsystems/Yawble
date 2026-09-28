@@ -10,6 +10,10 @@ public interface IPluginMemberSettingsStore : IPluginMemberSettings
 {
     Task SaveAsync(ContainerId member, PluginMemberSettings settings, CancellationToken ct = default);
 
+    /// <summary>Saves a change a person made after hire and its <c>tenant_events</c> row IN ONE
+    /// TRANSACTION: a change with no record of who made it does not land.</summary>
+    Task SaveAsync(ContainerId member, PluginMemberSettings settings, TriggerAudit audit, CancellationToken ct = default);
+
     /// <summary>Every logical key bound by a member currently on <paramref name="team"/> - the keys a
     /// person has already bound there, which is all a Manager may bind (see the hire route).</summary>
     Task<IReadOnlySet<string>> KeysBoundOnAsync(string team, CancellationToken ct = default);
@@ -46,7 +50,43 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
     public async Task SaveAsync(ContainerId member, PluginMemberSettings settings, CancellationToken ct = default)
     {
         await using var connection = Open();
+        await UpsertAsync(connection, null, member, settings, ct);
+    }
+
+    public async Task SaveAsync(ContainerId member, PluginMemberSettings settings, TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await UpsertAsync(connection, transaction, member, settings, ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                INSERT INTO tenant_events
+                    (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
+                VALUES ($at, $actorId, $actorEmail, $action, $subject, $subjectName, $detail)
+                """;
+            command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            command.Parameters.AddWithValue("$actorId", (object?)audit.ActorId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$actorEmail", (object?)audit.ActorEmail ?? DBNull.Value);
+            command.Parameters.AddWithValue("$action", audit.Action);
+            command.Parameters.AddWithValue("$subject", audit.Subject);
+            command.Parameters.AddWithValue("$subjectName", (object?)audit.SubjectName ?? DBNull.Value);
+            command.Parameters.AddWithValue("$detail", (object?)audit.Detail ?? DBNull.Value);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await transaction.CommitAsync(ct);
+    }
+
+    private static async Task UpsertAsync(
+        SqliteConnection connection, SqliteTransaction? transaction, ContainerId member, PluginMemberSettings settings, CancellationToken ct)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText =
             """
             INSERT INTO team_member_config (team, name, config_json, secrets_json)

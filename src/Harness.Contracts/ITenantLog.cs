@@ -110,6 +110,15 @@ public static class TenantActions
     /// registered without a restart.</summary>
     public const string PluginsRescanned = "plugins.rescanned";
 
+    /// <summary>A person installed a plugin version from a folder inside the instance (the web app's
+    /// route, or the operator CLI's <c>--from-instance</c>). Subject is the plugin id; detail names the
+    /// version, the source folder, whether it replaced one, and the Host's verdict.</summary>
+    public const string PluginInstalled = "plugins.installed";
+
+    /// <summary>A person changed a plugin member's settings after hire. Detail names the plugin and
+    /// the field and secret NAMES that changed - never a value.</summary>
+    public const string MemberPluginSettingsChanged = "member.plugin-settings-changed";
+
     /// <summary>A custom skill was created, changed or deleted. Built-ins are never written.</summary>
     public const string SkillCreated = "skill.created";
     public const string SkillChanged = "skill.changed";
