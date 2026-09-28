@@ -1,4 +1,5 @@
 import type { TeamRepoContributor } from '../api/types'
+import { isLocalRepoReference } from './rules'
 
 /**
  * Contributor mode, per repository. A repository with an upstream URL is one the team
@@ -49,6 +50,10 @@ function withoutGitSuffix(url: string): string {
 export function upstreamUrlProblem(upstream: string, originUrl: string | undefined): string | null {
   const value = upstream.trim()
   if (value === '') return null
+
+  if (originUrl && isLocalRepoReference(originUrl)) {
+    return 'Contributor mode does not apply to a local repository: there is no upstream to contribute to. Leave this empty.'
+  }
 
   let parsed: URL
   try {
