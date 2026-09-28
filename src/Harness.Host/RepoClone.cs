@@ -59,7 +59,9 @@ public interface IRepoClone
 /// is fake a success: a disabled instance reports <see cref="RepoCloneResult.NotAttempted"/> and the
 /// Manager is told the paths WITHOUT being told they hold anything.
 /// </param>
-public sealed class RepoClone(GitRunner git, bool enabled = true) : IRepoClone
+/// <param name="localRepos">Where a <c>local:&lt;name&gt;</c> repository is. Without one, such a
+/// repository cannot be cloned and says so.</param>
+public sealed class RepoClone(GitRunner git, bool enabled = true, LocalRepos? localRepos = null) : IRepoClone
 {
     /// <summary>Every repository in the list, in order. Never throws: a clone that fails is an
     /// OUTCOME, because a team whose creation 500s over an unreachable remote is worse than a team
@@ -112,7 +114,21 @@ public sealed class RepoClone(GitRunner git, bool enabled = true) : IRepoClone
             return new RepoCloneOutcome(url, path, RepoCloneResult.Failed, exception.Message);
         }
 
-        var run = await git.CloneAsync(parent, url, leaf, ct);
+        // A LOCAL REPOSITORY IS CLONED FROM ITS FOLDER, found by name and never by a path the
+        // reference carries; the clone's origin is that folder.
+        var source = url;
+        if (LocalRepos.IsLocal(url))
+        {
+            if (localRepos?.PathForReference(url) is not { } bare)
+            {
+                return new RepoCloneOutcome(
+                    url, path, RepoCloneResult.Failed, $"'{url}' names no local repository on this instance.");
+            }
+
+            source = bare;
+        }
+
+        var run = await git.CloneAsync(parent, source, leaf, ct, noLocal: !ReferenceEquals(source, url));
 
         if (run.ExitCode != 0)
         {

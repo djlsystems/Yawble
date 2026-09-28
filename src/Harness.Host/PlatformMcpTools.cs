@@ -134,7 +134,7 @@ public sealed partial class PlatformMcpTools(
         [Description("The team's name as a person would write it.")] string name,
         [Description("The headless agent preset the Manager and new members run, such as claude-headless or grok-headless. Omit for the first headless preset in the catalog.")]
         string? agent = null,
-        [Description("Repository URLs the team clones, https only. Omit for a team with no repository.")]
+        [Description("Repository URLs the team clones, https only, or local:<name> for one of this instance's local repositories. Omit for a team with no repository.")]
         string[]? repos = null,
         [Description(
             "Instructions from the person for this team, appended after the Manager's and members' "

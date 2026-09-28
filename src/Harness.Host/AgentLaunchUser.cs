@@ -66,6 +66,15 @@ public sealed record AgentLaunchUser(
             : [];
 
     /// <summary>
+    /// What goes in front of a command the Host runs AS ITSELF on its own files (a local
+    /// repository's git): no switch, and every inheritable and ambient capability cleared whenever
+    /// the Host holds any - always when it switches, since switching needs them.
+    /// </summary>
+    public IReadOnlyList<string> HostPrefix => Switches || ClearsCapabilities
+        ? [SetprivPath, "--inh-caps=-all", "--ambient-caps=-all", "--"]
+        : [];
+
+    /// <summary>
     /// FAIL CLOSED: the agent user exists and is somebody else, but this Host cannot
     /// start a child as it (no capabilities, no setpriv, or no share with its group). Launching as
     /// the Host instead would run agent-installed CLIs, and git with agent-written config, as the
