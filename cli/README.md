@@ -85,7 +85,7 @@ yawble connect remove "Work mail"
 ```
 
 `connect` asks the Host to start the flow, listens on `http://127.0.0.1:<free port>` (`--port` to
-choose it), opens the browser at the provider's consent page, catches the code and hands it to the
+choose it; Microsoft is sent it as `http://localhost:<port>/`, the loopback form Entra takes), opens the browser at the provider's consent page, catches the code and hands it to the
 Host, which does the exchange: the client secret never leaves the Host and no token reaches this
 computer. `--name` of an existing connection of that provider reconnects it. Like
 `plugin install --from-instance`, it reaches the Host through the container engine with a request

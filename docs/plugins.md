@@ -426,7 +426,8 @@ name. The install checks the same before it writes.
 - **`connections`** holds one entry per slot this member has bound: the provider, the account name,
   a fresh access token, when it expires and the scopes it was granted. The Host refreshes the token
   before the run when it would expire within 5 minutes, so a run always starts with at least that
-  long. It is absent for a plugin with no slots; a plugin that ignores it is unaffected. The refresh
+  long. It is `{}` when the manifest declares no slot or the member has none bound; a plugin that ignores it
+  is unaffected. The refresh
   token and the client secret never reach a plugin.
 
 **stdout**: JSON Lines, one record per line.
@@ -593,8 +594,12 @@ allows; a connection lacking a scope the slot asks for is refused with a sentenc
 Reconnect.
 
 - `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the stored
-  `config`, `secrets` as logical keys (never a value), and the manifest's `fields` and `secretFields`.
-- `PUT` the same route with `{ "config": {...}, "secrets": {...} }` replaces both. It is validated
+  `config`, `secrets` as logical keys (never a value), the manifest's `fields` and `secretFields`,
+  `connections` (slot → bound connection id) and `connectionFields` (each slot as `/api/plugins`
+  describes it).
+- `PUT` the same route with `{ "config": {...}, "secrets": {...}, "connections": {...} }` replaces
+  them. `connections` given replaces the bindings (`{}` unbinds every slot); **omitted, the stored
+  bindings are kept**, so a client that knows nothing of connections cannot unbind them. It is validated
   exactly as a hire is - field and secret names, types, `enum` (per item for a list), required fields,
   the key's form, a reserved or provider key, a required secret not set on this Host, a value too short
   to redact - and refused with a 400 naming the field, with nothing written.

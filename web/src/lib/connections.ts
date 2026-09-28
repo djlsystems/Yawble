@@ -30,7 +30,7 @@ const builtInHelp: Record<string, string> = {
   google:
     'Google: a "Desktop app" client accepts http://127.0.0.1:<port> without registering it; a "Web application" client needs the redirect URI above registered exactly.',
   microsoft:
-    'Microsoft: in the app registration add the redirect URI above under the "Web" platform, and create a client secret (copy its Value).',
+    'Microsoft: in the app registration add the redirect URI above under the "Web" platform (for the CLI, http://localhost there too), and create a client secret (copy its Value).',
 };
 
 export function providerHelp(provider: Pick<ConnectionProvider, 'id' | 'kind' | 'help'>): string {
