@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -36,8 +37,8 @@ var (
 	configName  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 	eventSuffix = regexp.MustCompile(`^[a-z][a-z0-9.-]{0,63}$`)
 	// connectionProvider is a provider a connection slot may name: a built-in, any custom
-	// provider, or one custom provider by id.
-	connectionProvider = regexp.MustCompile(`^(google|microsoft|custom|custom-[a-z0-9][a-z0-9-]{0,39})$`)
+	// provider, or one custom provider by id (at most 40 characters in all, as the Host).
+	connectionProvider = regexp.MustCompile(`^(google|microsoft|custom|custom-[a-z0-9][a-z0-9-]{0,32})$`)
 )
 
 // ValidID is MemberRef.IsValidPluginId.
@@ -275,6 +276,22 @@ func parse(root map[string]any) (Manifest, []string, string) {
 	return Manifest{ID: id, Name: name, Version: version, Executables: executables}, skills, ""
 }
 
+// scopeList is a list of scopes as the Host takes one: strings, none empty and none with white
+// space in it.
+func scopeList(value any) bool {
+	list, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range list {
+		scope, ok := item.(string)
+		if !ok || strings.TrimSpace(scope) == "" || strings.IndexFunc(scope, unicode.IsSpace) >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // connectionSlot checks one `connections` slot as the Host does: a usable name, a non-empty list
 // of known providers, scopes as a list or keyed by a provider the slot names, and the types of
 // `description` and `required`.
@@ -301,16 +318,16 @@ func connectionSlot(name string, value any) string {
 	if scopes, present := slot["scopes"]; present && scopes != nil {
 		switch v := scopes.(type) {
 		case []any:
-			if !stringArray(v) {
-				return fmt.Sprintf("`connections.%s.scopes` must be a list of scopes, or an object of provider to scopes.", name)
+			if !scopeList(v) {
+				return fmt.Sprintf("`connections.%s.scopes` must hold scope strings, each one word.", name)
 			}
 		case map[string]any:
 			for _, key := range orderedKeys(v) {
 				if !containsString(providers, key) {
 					return fmt.Sprintf("`connections.%s.scopes` has scopes for '%s', which the slot's providers do not name.", name, key)
 				}
-				if !stringArray(v[key]) {
-					return fmt.Sprintf("`connections.%s.scopes.%s` must be a list of scopes.", name, key)
+				if !scopeList(v[key]) {
+					return fmt.Sprintf("`connections.%s.scopes.%s` must be a list of scope strings, each one word.", name, key)
 				}
 			}
 		default:
@@ -322,7 +339,7 @@ func connectionSlot(name string, value any) string {
 			return fmt.Sprintf("`connections.%s.description` must be text.", name)
 		}
 	}
-	if r, present := slot["required"]; present && r != nil {
+	if r, present := slot["required"]; present {
 		if _, ok := r.(bool); !ok {
 			return fmt.Sprintf("`connections.%s.required` must be true or false.", name)
 		}
