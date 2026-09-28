@@ -35,6 +35,9 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
     private const string Missing = "https://github.com/acme/job-tracker";
     private const string Unreachable = "https://127.0.0.1:1/acme/widget.git";
 
+    // GitHub's own not-found reason ends without a full stop; git over a local folder does not say it that way.
+    private const string GoneOnGitHub = "https://github.com/acme/gone";
+
     private readonly string _root = Directory.CreateTempSubdirectory("harness-forgiving-repos-").FullName;
     private readonly string _dataRoot;
     private readonly string _gitHub;
@@ -64,6 +67,8 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
             {
                 services.AddSingleton<IAgentRunner>(new FakeAgent());
                 services.Replace(ServiceDescriptor.Singleton<IGitHubContributor>(_fakeGitHub));
+                services.Replace(ServiceDescriptor.Singleton<IRemoteRepoCheck>(sp =>
+                    new GitHubSaysNotFound(new RemoteRepoCheck(sp.GetRequiredService<GitRunner>()))));
             }));
     }
 
@@ -210,6 +215,7 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         Assert.Contains("does not appear to be a git repository", error, StringComparison.Ordinal);
         Assert.Contains("create it on GitHub (private)", error, StringComparison.Ordinal);
         Assert.Contains("use a local repository instead", error, StringComparison.Ordinal);
+        AssertReasonEndsBeforeTheChoices(error);
         Assert.Equal("repo-check-failed", body.GetProperty("code").GetString());
         var entry = Assert.Single(body.GetProperty("repos").EnumerateArray());
         Assert.Equal(Missing, entry.GetProperty("url").GetString());
@@ -294,6 +300,7 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         Assert.Equal("unreachable", entry.GetProperty("failure").GetString());
         Assert.Equal(["use-local", "attach-anyway"], Strings(entry.GetProperty("choices")));
         Assert.Contains("attach it anyway", refused.GetProperty("error").GetString(), StringComparison.Ordinal);
+        AssertReasonEndsBeforeTheChoices(refused.GetProperty("error").GetString()!);
 
         var attached = await CreateTeamAsync(person, new
         {
@@ -348,6 +355,7 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         Assert.Contains("A person can create it on GitHub (private)", error, StringComparison.Ordinal);
         Assert.Contains("local repository", error, StringComparison.Ordinal);
         Assert.Contains("ask them to create the remote", error, StringComparison.Ordinal);
+        AssertReasonEndsBeforeTheChoices(error);
 
         foreach (var (url, choice) in new[] { (Missing, "create-on-github"), (Unreachable, "attach-anyway") })
         {
@@ -372,6 +380,59 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         Assert.Equal(["local:AgentTeam"], Teams.ReposFor("AgentTeam"));
     }
 
+    [Fact]
+    public async Task An_agents_refusal_names_the_github_create_only_when_the_token_can_create_repositories()
+    {
+        await PersonAsync();
+        _fakeGitHub.CanCreate = false;
+        var concierge = await ConciergeClientAsync();
+
+        var refused = await concierge.PostAsJsonAsync("/api/teams", new
+        {
+            name = "Agent Team", agent = Agent(), memberAgents = new[] { Agent() }, repos = new[] { Missing },
+        }, Ct);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var body = await JsonAsync(refused);
+        Assert.Equal(["use-local"], Strings(Assert.Single(body.GetProperty("repos").EnumerateArray()).GetProperty("choices")));
+        var error = body.GetProperty("error").GetString()!;
+        Assert.DoesNotContain("GitHub", error.Replace(Missing, "", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Contains("ask them to create the remote", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_reason_without_a_full_stop_gets_one_before_the_next_sentence_on_create_attach_and_dispatch()
+    {
+        var person = await PersonAsync();
+        _fakeGitHub.CanCreate = true;
+        var concierge = await ConciergeClientAsync();
+        var body = new { name = "Gone", agent = Agent(), memberAgents = new[] { Agent() }, repos = new[] { GoneOnGitHub } };
+
+        var created = await JsonAsync(await CreateTeamAsync(person, body));
+        var told = await JsonAsync(await concierge.PostAsJsonAsync("/api/teams", body, Ct));
+        var dispatched = await JsonAsync(await DispatchToNewAsync(person, await ReadyItemAsync(person), body));
+        var team = (await JsonAsync(await CreateTeamAsync(person, new
+        {
+            name = "Settings", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = false,
+        }))).GetProperty("id").GetString()!;
+        var attached = await JsonAsync(await person.PutAsJsonAsync($"/api/teams/{team}/repos", new[] { GoneOnGitHub }, Ct));
+
+        foreach (var refusal in new[] { created, told, dispatched, attached })
+        {
+            var error = refusal.GetProperty("error").GetString()!;
+            Assert.Contains($"repository '{GoneOnGitHub}/' not found. ", error, StringComparison.Ordinal);
+            AssertReasonEndsBeforeTheChoices(error);
+        }
+    }
+
+    // git's reason is followed by the next sentence ("Choose: ..." for a person, "A person can ..." or
+    // "Offer ..." for an agent); it must end with a full stop first, not run into it.
+    private static void AssertReasonEndsBeforeTheChoices(string error)
+    {
+        Assert.Matches(@"\. (Choose: |A person can |Offer the person )", error);
+        Assert.DoesNotMatch(@"[^.!?] (Choose: |A person can |Offer the person )", error);
+    }
+
     // ---- attach in Team settings ----
 
     [Fact]
@@ -385,7 +446,9 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
 
         var refused = await person.PutAsJsonAsync($"/api/teams/{team}/repos", new[] { Missing }, Ct);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
-        Assert.Contains(Missing, (await JsonAsync(refused)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        var refusal = (await JsonAsync(refused)).GetProperty("error").GetString()!;
+        Assert.Contains(Missing, refusal, StringComparison.Ordinal);
+        AssertReasonEndsBeforeTheChoices(refusal);
         Assert.Empty(Teams.ReposFor(team));
         Assert.False(Directory.Exists(ClonePath(team, "job-tracker")));
 
@@ -576,6 +639,7 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         var body = await JsonAsync(refused);
         Assert.Equal("repo-check-failed", body.GetProperty("code").GetString());
         Assert.Contains(Missing, body.GetProperty("error").GetString(), StringComparison.Ordinal);
+        AssertReasonEndsBeforeTheChoices(body.GetProperty("error").GetString()!);
         var entry = Assert.Single(body.GetProperty("repos").EnumerateArray());
         Assert.Equal("not-found", entry.GetProperty("failure").GetString());
         Assert.Equal(["create-on-github", "use-local"], Strings(entry.GetProperty("choices")));
@@ -779,6 +843,14 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
 
     /// <summary>GitHub, answered locally: a create makes the bare repository the rewritten URL names,
     /// with a README on main, as <c>--add-readme</c> does. Every call is written down.</summary>
+    private sealed class GitHubSaysNotFound(IRemoteRepoCheck real) : IRemoteRepoCheck
+    {
+        public Task<RepoCheckFailure?> CheckAsync(string url, CancellationToken ct) => url == GoneOnGitHub
+            ? Task.FromResult<RepoCheckFailure?>(new RepoCheckFailure(
+                url, RepoCheckFailures.NotFound, $"fatal: repository '{GoneOnGitHub}/' not found \n"))
+            : real.CheckAsync(url, ct);
+    }
+
     private sealed class FakeGitHub(string root) : IGitHubContributor
     {
         public List<string> Calls { get; } = [];
