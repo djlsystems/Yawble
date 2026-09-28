@@ -2071,6 +2071,9 @@ public static partial class RepoEndpoints
         // `MapWorktreesAsync`. Every command it runs is local, like everything else here.
         var worktrees = await MapWorktreesAsync(gitRunner, gitStatus.Worktrees, clonePath, originMain, openKeys, ct);
 
+        // The Manager's delivery rule, measured: work left on the clone's default branch. See `DefaultBranchMove`.
+        var movedTo = await DefaultBranchMove.MovedToAsync(gitRunner, clonePath, branch, ct);
+
         var originCheckedAtStr = gitStatus.OriginCheckedAt.HasValue
             ? gitStatus.OriginCheckedAt.Value.ToString("O")
             : null;
@@ -2098,7 +2101,8 @@ public static partial class RepoEndpoints
             DefaultBranch: branch,
             DefaultBranchSource: DefaultBranchSource(defaultBranch),
             OriginUrl: GitOutputRedaction.RedactUserInfo(originUrl),
-            UpstreamUrl: GitOutputRedaction.RedactUserInfo(contributor?.UpstreamUrl));
+            UpstreamUrl: GitOutputRedaction.RedactUserInfo(contributor?.UpstreamUrl),
+            DefaultBranchMoved: movedTo is null ? null : DefaultBranchMove.Sentence(branch!, movedTo, storedTeamId));
     }
 
     /// <summary>'person', 'remote', or null when not known. See <see cref="RepoStatus.DefaultBranchSource"/>.</summary>

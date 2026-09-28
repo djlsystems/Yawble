@@ -329,6 +329,16 @@ public static class MessageTypes
     public const string RepoForkSynced = "repo.forkSynced";
 
     /// <summary>
+    /// A MANAGER'S RUN LEFT THE CLONE'S DEFAULT BRANCH WHERE ORIGIN'S IS NOT: the stored default
+    /// branch in <c>repos/&lt;Repo&gt;/main</c> holds commits <c>origin/&lt;default&gt;</c> lacks.
+    /// The Manager's work belongs on <c>team/{id}</c>; the Git dialog lands it from there. Checked
+    /// at the end of every Manager run and appended before its terminal row, so it lands on the
+    /// Manager's card and in the feed. The platform reports it and resets nothing. Source is the
+    /// Manager.
+    /// </summary>
+    public const string RepoDefaultBranchMoved = "repo.defaultBranchMoved";
+
+    /// <summary>
     /// A PERSON OPENED A PULL REQUEST UPSTREAM from the Git dialog's Open pull request, for
     /// team/{id} on a contributor-mode repository's fork. Appended AFTER GitHub opened it, never
     /// before. The platform never opens one by itself, and <c>workflow_complete</c> does not.

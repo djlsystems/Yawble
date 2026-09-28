@@ -521,6 +521,13 @@ function worktreeWho(wt: { member: string | null; path: string }): string {
       <span>{{ headline.text }}</span>
     </p>
 
+    <!-- THE MANAGER MOVED THE CLONE'S DEFAULT BRANCH. The server's own sentence, the one the
+         Manager's card and the feed carry; the platform resets nothing, so it names where the work is. -->
+    <p v-if="repo.defaultBranchMoved" class="repo-moved" role="alert">
+      <q-icon name="warning" size="18px" />
+      <span class="repo-moved-text">{{ repo.defaultBranchMoved }}</span>
+    </p>
+
     <!-- A GRID, NOT A ROW OF GAPS. A hard first column is what lines the refs up under each other;
          a flex row lets every value begin wherever the previous string happened to end, and the
          card reads as text scattered across whitespace. -->
@@ -878,6 +885,21 @@ function worktreeWho(wt: { member: string | null; path: string }): string {
    shout on every healthy repository. */
 .repo-attention {
   color: var(--q-warning);
+}
+
+/* The clone's default branch was moved: a person has to act, and nothing will act for them. */
+.repo-moved {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--q-warning);
+  overflow-wrap: anywhere;
+}
+
+.repo-moved-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 /* A REFRESH THAT DID NOT LAND. Muted rather than red: nothing is broken and nothing was lost, the

@@ -85,7 +85,10 @@ public sealed record RepoStatus(
     string? ClaSignedNote = null,
 
     [property: Description("The pull request recorded for team/{id} in contributor mode, as GitHub last described it - asked at most once a minute. Null when none is recorded or the repository is owned.")]
-    RepoPullRequestStatus? PullRequest = null);
+    RepoPullRequestStatus? PullRequest = null,
+
+    [property: Description("Set when the clone's default branch holds commits origin/<DefaultBranch> lacks - a Manager moved it, which the delivery rule forbids: \"moved <default> in the clone; the work is on <commit>; the team branch is team/{id}\". Measured on every read and never reset by the platform. Null when it has not moved or could not be measured (default branch not known, no clone, no origin ref).")]
+    string? DefaultBranchMoved = null);
 
 /// <summary>
 /// The recorded pull request, as the Git dialog shows it: GitHub's last answer and when it

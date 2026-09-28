@@ -1786,6 +1786,10 @@ export interface RepoStatus {
   claSignedNote?: string | null
   /**The pull request recorded for the team branch, as GitHub last described it. */
   pullRequest?: RepoPullRequestStatus | null
+  /**Set when the clone's default branch holds commits origin's lacks - a Manager moved it: "moved
+   * <default> in the clone; the work is on <commit>; the team branch is team/<id>". Measured on
+   * every read; the platform resets nothing. Null when unmoved or not measured. */
+  defaultBranchMoved?: string | null
 }
 
 /**
