@@ -275,6 +275,70 @@ public sealed class FolderRemovalTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_reset_retry_keeps_what_the_member_wrote_since_into_a_directory_the_reset_named()
+    {
+        await CreateAlphaAsync();
+        var workspace = _paths.WorkspaceFor(new ContainerId("Alpha", "Manager"));
+        var tmp = Path.Combine(workspace, "tmp");
+        var cache = Path.Combine(workspace, "cache");
+        var old = await WriteAsync(Path.Combine(tmp, "old.bin"));
+        await WriteAsync(Path.Combine(cache, "old.bin"));
+        _deletes.Refuse(tmp);
+        _deletes.Refuse(cache);
+
+        var reset = await _reset.ResetAsync(
+            "Alpha", new TeamResetOptions(["Manager"], ForgetHistory: false, ClearWorkspaces: true), Ct);
+
+        // Emptied, but the directories themselves could not go.
+        Assert.NotNull(reset);
+        Assert.Equal([cache, tmp], reset.Remaining);
+        Assert.False(File.Exists(old));
+
+        // The team is live again: the member works in tmp. cache stays as the reset left it.
+        var since = await WriteSinceAsync(Path.Combine(tmp, "new-work.md"));
+        _deletes.Allow(tmp);
+        _deletes.Allow(cache);
+        var retried = Assert.Single(await _retry.RetryAsync(ct: Ct));
+
+        Assert.True(retried.Finished);
+        Assert.True(File.Exists(since), "the retry removed work written after the reset");
+        Assert.False(Directory.Exists(cache));
+        Assert.Null(await _unfinished.FindAsync(workspace, Ct));
+    }
+
+    [Fact]
+    public async Task A_reset_retry_of_a_folder_it_could_not_list_stays_unfinished_until_it_can_be_emptied()
+    {
+        await CreateAlphaAsync();
+        var workspace = _paths.WorkspaceFor(new ContainerId("Alpha", "Manager"));
+        var left = await WriteAsync(Path.Combine(workspace, "left.md"));
+        _deletes.RefuseListing(workspace);
+
+        var reset = await _reset.ResetAsync(
+            "Alpha", new TeamResetOptions(["Manager"], ForgetHistory: false, ClearWorkspaces: true), Ct);
+
+        Assert.NotNull(reset);
+        Assert.Equal([workspace], reset.Remaining);
+
+        // Still unlistable: named again, kept, never reported finished.
+        var still = Assert.Single(await _retry.RetryAsync(ct: Ct));
+
+        Assert.False(still.Finished);
+        Assert.True(File.Exists(left));
+        Assert.Equal([workspace], (await _unfinished.FindAsync(workspace, Ct))!.Remaining);
+
+        // Listable at last: what the reset left goes, what was written since stays.
+        _deletes.AllowListing(workspace);
+        var since = await WriteSinceAsync(Path.Combine(workspace, "since.md"));
+        var retried = Assert.Single(await _retry.RetryAsync(ct: Ct));
+
+        Assert.True(retried.Finished);
+        Assert.False(File.Exists(left));
+        Assert.True(File.Exists(since));
+        Assert.Null(await _unfinished.FindAsync(workspace, Ct));
+    }
+
+    [Fact]
     public async Task Creating_a_team_over_the_unfinished_removal_of_a_deleted_team_finishes_it_first()
     {
         await CreateAlphaAsync();
@@ -323,6 +387,16 @@ public sealed class FolderRemovalTests : IAsyncDisposable
         return path;
     }
 
+    /// <summary>Written after a reset. The file system stamps times from a coarse clock that can
+    /// lag the one the row's time is read from by a few milliseconds, so the time is set plainly
+    /// after it.</summary>
+    private static async Task<string> WriteSinceAsync(string path)
+    {
+        await WriteAsync(path);
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
+        return path;
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _host.DisposeAsync();
@@ -341,10 +415,12 @@ public sealed class FolderRemovalTests : IAsyncDisposable
     }
 
     /// <summary>The Host's deletes, failing for the paths it is told to refuse, and logging what
-    /// each removal removed, in order.</summary>
+    /// each removal removed, in order; and its listing, failing for the directories it is told
+    /// cannot be listed.</summary>
     private sealed class FlakyDeletes
     {
         private readonly HashSet<string> _refused = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _unlistable = new(StringComparer.Ordinal);
 
         public List<string> Log { get; } = [];
 
@@ -360,11 +436,18 @@ public sealed class FolderRemovalTests : IAsyncDisposable
                 Check(path);
                 Directory.Delete(path, recursive: false);
                 Log.Add(path);
-            });
+            },
+            path => _unlistable.Contains(path)
+                ? throw new UnauthorizedAccessException($"Access to the path '{path}' is denied.")
+                : Directory.EnumerateFileSystemEntries(path));
 
         public void Refuse(string path) => _refused.Add(path);
 
         public void Allow(string path) => _refused.Remove(path);
+
+        public void RefuseListing(string path) => _unlistable.Add(path);
+
+        public void AllowListing(string path) => _unlistable.Remove(path);
 
         private void Check(string path)
         {

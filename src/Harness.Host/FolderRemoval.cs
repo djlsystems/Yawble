@@ -32,7 +32,7 @@ public sealed record FolderRemovalReport(IReadOnlyList<string> Remaining, string
 /// removed, then the root. Anything left keeps the marker.</item>
 /// <item><b>What the Host cannot remove is removed as the agent</b>, when the Host launches agents
 /// as a separate user: <c>rm -rf --one-file-system</c>, on the entry of the folder that holds each
-/// leftover (on the leftover itself when only named paths may go), through the same
+/// leftover (on a reset's retry, only on paths already decided old), through the same
 /// <see cref="AgentLaunchUser.Prefix"/> every agent child gets, so it can do nothing the agent
 /// could not already do, and adds no privilege. A path is handed to it only when it resolves
 /// inside the folder being removed with no symbolic link on the way; <c>rm</c> removes a link
@@ -52,13 +52,19 @@ public sealed class FolderRemoval(
     private readonly HostDeletes _host = host ?? HostDeletes.Real;
 
     /// <summary>
-    /// How the Host itself removes one file or link, and one empty directory. A seam, so the suite
-    /// can make the Host fail where the product's Host would (it cannot write inside an agent's
-    /// owner-only directory) even when the suite runs as root.
+    /// How the Host itself removes one file or link and one empty directory, and lists a directory.
+    /// A seam, so the suite can make the Host fail where the product's Host would (it can neither
+    /// list nor write inside an agent's owner-only directory) even when the suite runs as root.
     /// </summary>
-    public sealed record HostDeletes(Action<string> DeleteFile, Action<string> DeleteEmptyDirectory)
+    public sealed record HostDeletes(
+        Action<string> DeleteFile,
+        Action<string> DeleteEmptyDirectory,
+        Func<string, IEnumerable<string>>? List = null)
     {
         public static HostDeletes Real { get; } = new(File.Delete, path => Directory.Delete(path, recursive: false));
+
+        public List<string> Entries(string directory) =>
+            (List ?? Directory.EnumerateFileSystemEntries)(directory).ToList();
     }
 
     /// <summary>The store rows are recorded in, when this was given one.</summary>
@@ -195,23 +201,150 @@ public sealed class FolderRemoval(
                 return await RemoveWorkspaceAsync(row.Path, row.Team, row.Member ?? "", ct);
 
             default:
-                var boundary = row.Path;
-
-                if (!Directory.Exists(boundary) || IsLink(boundary))
-                {
-                    await ForgetAsync(boundary, ct);
-                    return FolderRemovalReport.Done;
-                }
-
-                var named = row.Remaining.Where(path => Confined(boundary, path)).ToList();
-                var remaining = await PassesAsync(boundary, left =>
-                {
-                    foreach (var path in named.Where(Exists)) RemoveAsHost(path, left);
-                }, ct, wholeEntries: false);
-
-                return await SettleAsync(boundary, RemovalKinds.Emptied, row.Team, null, remaining, ct);
+                return await RetryEmptiedAsync(row, ct);
         }
     }
+
+    /// <summary>
+    /// Finishes a folder a reset emptied and kept. The team is live again, so the member may have
+    /// written into it since; A RETRY REMOVES ONLY WHAT THE RESET NAMED, NEVER WHAT WAS WRITTEN
+    /// SINCE:
+    /// <list type="bullet">
+    /// <item>a named file or link is removed;</item>
+    /// <item>a named directory - one the reset emptied but could not remove, or one it could not
+    /// even list, the folder itself included - has removed from it only the entries in which
+    /// nothing was written after the reset (the row's first <c>RecordedAt</c>), and goes itself
+    /// only once empty. Anything newer is the member's and is left, and no longer counted;</item>
+    /// <item>a named directory the Host still cannot list stays unfinished: it is named again and
+    /// retried again, never reported finished.</item>
+    /// </list>
+    /// What is decided old is decided before anything is removed, so the retry's own deletes never
+    /// make an entry look new. The agent is handed only paths already decided old.
+    /// <para>
+    /// KNOWN LIMITS. Age is the modification time: a file copied in since with its old time kept
+    /// (<c>cp -p</c>, <c>tar -x</c>) counts as old. And the Host's pass resolves a directory by
+    /// path after checking it is not a link, so an agent process swapping it for a link in between
+    /// could point the Host's deletes elsewhere; the window is small (Reset refuses busy members,
+    /// and the start retry runs before members start) and closing it needs handle-relative
+    /// (<c>openat</c>, <c>O_NOFOLLOW</c>) deletes.
+    /// </para>
+    /// </summary>
+    private async Task<FolderRemovalReport> RetryEmptiedAsync(UnfinishedRemoval row, CancellationToken ct)
+    {
+        var boundary = Path.TrimEndingDirectorySeparator(Path.GetFullPath(row.Path));
+
+        if (!Directory.Exists(boundary) || IsLink(boundary))
+        {
+            await ForgetAsync(boundary, ct);
+            return FolderRemovalReport.Done;
+        }
+
+        var remaining = new List<string>();
+        var old = new List<string>();
+        var directories = new List<string>();
+
+        foreach (var path in row.Remaining.Select(p => Path.TrimEndingDirectorySeparator(Path.GetFullPath(p))).Distinct(StringComparer.Ordinal))
+        {
+            var isBoundary = string.Equals(path, boundary, StringComparison.Ordinal);
+
+            if (!isBoundary && !Confined(boundary, path) || !Exists(path)) continue;
+
+            if (!isBoundary && (IsLink(path) || !Directory.Exists(path)))
+            {
+                old.Add(path);
+                continue;
+            }
+
+            List<string> entries;
+
+            try
+            {
+                entries = _host.Entries(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Still cannot be listed: still unfinished.
+                remaining.Add(path);
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                switch (NothingWrittenSince(entry, row.RecordedAt))
+                {
+                    case true: old.Add(entry); break;
+                    case null: remaining.Add(entry); break;
+                }
+            }
+
+            if (!isBoundary) directories.Add(path);
+        }
+
+        var left = new List<string>();
+        foreach (var path in old) RemoveAsHost(path, left);
+
+        if (left.Count > 0 && runAs is { Switches: true } agent)
+        {
+            await RemoveAsAgentAsync(agent, boundary, left, ct);
+
+            left = [];
+            foreach (var path in old.Where(Exists)) RemoveAsHost(path, left);
+        }
+
+        remaining.AddRange(left);
+
+        // A named directory goes once it is empty; one the member has written into is theirs.
+        foreach (var directory in directories.Where(d => Directory.Exists(d) && !remaining.Any(r => Within(d, r))))
+        {
+            try
+            {
+                if (_host.Entries(directory).Count == 0) _host.DeleteEmptyDirectory(directory);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                remaining.Add(directory);
+            }
+        }
+
+        return await SettleAsync(boundary, RemovalKinds.Emptied, row.Team, null, remaining, ct);
+    }
+
+    /// <summary>
+    /// Whether nothing at or under <paramref name="path"/> was modified after
+    /// <paramref name="since"/>, without following links; null when that cannot be told because
+    /// something under it cannot be listed.
+    /// </summary>
+    private bool? NothingWrittenSince(string path, DateTimeOffset since)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+
+            if (info.LinkTarget is not null || !Directory.Exists(path)) return info.LastWriteTimeUtc <= since.UtcDateTime;
+            if (Directory.GetLastWriteTimeUtc(path) > since.UtcDateTime) return false;
+
+            var answer = (bool?)true;
+
+            foreach (var entry in _host.Entries(path))
+            {
+                switch (NothingWrittenSince(entry, since))
+                {
+                    case false: return false;
+                    case null: answer = null; break;
+                }
+            }
+
+            return answer;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static bool Within(string directory, string path) =>
+        string.Equals(directory, path, StringComparison.Ordinal)
+        || path.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.Ordinal);
 
     /// <summary>
     /// For creating team <paramref name="team"/> at <paramref name="root"/>, which already exists:
@@ -263,19 +396,16 @@ public sealed class FolderRemoval(
     /// pass over what is left and the Host's pass again for what the agent emptied.
     /// </summary>
     private async Task<List<string>> PassesAsync(
-        string boundary, Action<List<string>> hostPass, CancellationToken ct, string? keep = null, bool wholeEntries = true)
+        string boundary, Action<List<string>> hostPass, CancellationToken ct, string? keep = null)
     {
         var remaining = new List<string>();
         hostPass(remaining);
 
         if (remaining.Count == 0 || runAs is not { Switches: true } agent) return remaining;
 
-        // What the agent is handed. When the whole folder is going, the entry of the folder that
-        // holds each leftover, so an agent directory nested in one of the Host's is removed in one
-        // pass; when only named paths may go, those paths and nothing around them.
-        var targets = wholeEntries
-            ? remaining.Select(path => TopLevel(boundary, path)).OfType<string>()
-            : remaining;
+        // What the agent is handed: the entry of the folder that holds each leftover, so an agent
+        // directory nested in one of the Host's is removed in one pass.
+        var targets = remaining.Select(path => TopLevel(boundary, path)).OfType<string>();
 
         await RemoveAsAgentAsync(
             agent, boundary, [.. targets.Where(path => !string.Equals(path, keep, StringComparison.Ordinal))], ct);
@@ -302,7 +432,7 @@ public sealed class FolderRemoval(
 
         try
         {
-            entries = Directory.EnumerateFileSystemEntries(directory).ToList();
+            entries = _host.Entries(directory);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
