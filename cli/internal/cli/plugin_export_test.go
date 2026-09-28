@@ -1,6 +1,9 @@
 package cli
 
-import "time"
+import (
+	"os/exec"
+	"time"
+)
 
 // FastRescan makes the plugin commands wait briefly and name their rescan request nonce, so a
 // scripted report can answer it. The returned func restores the defaults.
@@ -21,3 +24,15 @@ const (
 	PluginInstallReportScript   = installReportScript
 	PluginInstallWithdrawScript = installWithdrawScript
 )
+
+// The script `repo list` runs in the container, and a way to make git missing on this computer.
+const RepoListScript = repoListScript
+
+func NoGit() func() {
+	was := lookGit
+	lookGit = func(string) (string, error) { return "", exec.ErrNotFound }
+	return func() { lookGit = was }
+}
+
+// How `repo list` prints a size in bytes.
+var RepoHumanSize = humanSize

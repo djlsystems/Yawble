@@ -114,6 +114,7 @@ export const skillName: Rule = (value) => {
  * https URL.
  */
 export function repoFolderName(url: string): string | null {
+  if (isLocalRepoReference(url)) return localRepoNameOf(url)
   const parsed = parseHttpUrl(url)
   if (!parsed) return null
   const leaf = parsed.pathname.split('/').pop() ?? ''
@@ -148,12 +149,58 @@ function isLegalFolderName(name: string): boolean {
   )
 }
 
-/** One repository URL on its own: absolute http or https, ending in a usable folder name. */
+/** The prefix a team's repository list names one of the instance's local repositories with. */
+export const LOCAL_REPO_SCHEME = 'local:'
+
+/** `LocalRepos.IsLegalName`: what a local repository may be called. */
+export const LOCAL_REPO_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
+
+/** Whether a repository list entry is `local:<name>` rather than a URL. */
+export function isLocalRepoReference(value: string): boolean {
+  return value.trim().toLowerCase().startsWith(LOCAL_REPO_SCHEME)
+}
+
+/** The name in `local:<name>`, unchecked. */
+export function localRepoNameOf(value: string): string {
+  return value.trim().slice(LOCAL_REPO_SCHEME.length)
+}
+
+/** `LocalRepos.IllegalName`'s rule for a local repository name, as one sentence. */
+export const LOCAL_REPO_NAME_RULE =
+  "Use 1 to 100 letters, digits, '.', '_' or '-', starting with a letter or digit, not ending in '.git' or '.lock', with no '..'."
+
+/** Whether `name` is a legal local repository name: `LocalRepos.IsLegalName`'s rule. */
+export function isLegalLocalRepoName(name: string): boolean {
+  return LOCAL_REPO_NAME_PATTERN.test(name)
+    && !name.includes('..')
+    && !name.toLowerCase().endsWith('.git')
+    && !name.toLowerCase().endsWith('.lock')
+}
+
+/** The problem with a local repository name, or null, naming the name as the URL field and the API do. */
+export function localRepoNameProblem(name: string): string | null {
+  if (name.length === 0) return 'A local repository needs a name.'
+  return isLegalLocalRepoName(name) ? null : `'${name}' is not a local repository name. ${LOCAL_REPO_NAME_RULE}`
+}
+
+/** A local repository's name, as the Create a local repository field checks it. */
+export const localRepoName: Rule = (value) => localRepoNameProblem(text(value).trim()) ?? true
+
+/**
+ * One repository URL on its own: absolute http or https, ending in a usable folder name - or
+ * `local:<name>` naming one of the instance's local repositories. Whether that one exists is the
+ * server's answer.
+ */
 export const repoUrl: Rule = (value) => {
   const url = text(value).trim()
   if (url.length === 0) return 'Enter a repository URL, or remove this row.'
+  if (isLocalRepoReference(url)) {
+    return isLegalLocalRepoName(localRepoNameOf(url))
+      ? true
+      : `'${url}' is not a local repository name. ${LOCAL_REPO_NAME_RULE}`
+  }
   const name = repoFolderName(url)
-  if (name === null) return 'Use an absolute http or https URL, such as https://github.com/owner/repo.git.'
+  if (name === null) return 'Use an absolute http or https URL, such as https://github.com/owner/repo.git, or local:<name> for a local repository.'
   if (!isLegalFolderName(name)) {
     return name.length === 0
       ? 'The URL must end in the repository name.'

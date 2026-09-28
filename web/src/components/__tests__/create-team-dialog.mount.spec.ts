@@ -7,10 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, type VueWrapper } from '@vue/test-utils';
 
-const { createTeam, fileSystemRoots, listCatalog } = vi.hoisted(() => ({
+const { createTeam, fileSystemRoots, listCatalog, listLocalRepos, createLocalRepo } = vi.hoisted(() => ({
   createTeam: vi.fn(),
   fileSystemRoots: vi.fn(),
   listCatalog: vi.fn(),
+  listLocalRepos: vi.fn(),
+  createLocalRepo: vi.fn(),
 }));
 
 const fetchUnexpected = vi.fn();
@@ -25,6 +27,8 @@ vi.mock('../../api/client', async (importOriginal) => ({
   createTeam,
   fileSystemRoots,
   listCatalog,
+  listLocalRepos,
+  createLocalRepo,
 }));
 
 import CreateTeamDialog from '../CreateTeamDialog.vue';
@@ -49,6 +53,9 @@ beforeEach(() => {
   listCatalog.mockResolvedValue({
     agents: [{ name: 'claude-headless', mode: 'Headless' }],
   });
+  listLocalRepos.mockReset();
+  listLocalRepos.mockResolvedValue([]);
+  createLocalRepo.mockReset();
 });
 
 afterEach(() => {
@@ -91,6 +98,16 @@ function button(label: string): HTMLButtonElement {
   if (!found) throw new Error(`no ${label} button in the rendered dialog`);
 
   return found as HTMLButtonElement;
+}
+
+function localRepo(name: string) {
+  return { name, reference: `local:${name}`, sizeBytes: 1, defaultBranch: 'main', lastCommit: null, teams: [] };
+}
+
+function chip(label: string): HTMLElement {
+  const found = document.body.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+  if (!found) throw new Error(`no ${label} chip in the rendered dialog`);
+  return found;
 }
 
 async function validated() {
@@ -226,6 +243,46 @@ describe('CreateTeamDialog validation', () => {
     expect(createTeam.mock.calls[0]![7]).toEqual({
       'https://github.com/fork-owner/app.git': 'https://github.com/project/app.git',
     });
+  });
+
+  // A local repository joins the list as `local:<name>` - picked from the instance's, or created
+  // beside the URL field - is sent as it is, and offers no upstream: contributor mode does not apply.
+  it('attaches an existing local repository and a newly created one, and sends both as local:<name>', async () => {
+    listLocalRepos.mockResolvedValue([localRepo('widget')]);
+    createLocalRepo.mockResolvedValue(localRepo('gadget'));
+
+    const wrapper = await open();
+    await field(wrapper, 'Team name').setValue('Beta');
+    await validated();
+
+    chip('Attach local:widget').click();
+    await validated();
+    expect(chip('local:widget is attached').classList.contains('disabled')).toBe(true);
+
+    await field(wrapper, 'Create a local repository').setValue('gadget');
+    await validated();
+    button('Create').click();
+    await validated();
+
+    expect(createLocalRepo).toHaveBeenCalledWith('gadget');
+    expect(() => field(wrapper, 'Upstream URL for local:widget')).toThrow();
+
+    button('Create team').click();
+    await validated();
+
+    expect(createTeam).toHaveBeenCalledTimes(1);
+    expect(createTeam.mock.calls[0]![4]).toEqual(['local:widget', 'local:gadget']);
+  });
+
+  it('refuses an illegal local repository name on the field and creates nothing', async () => {
+    const wrapper = await open();
+    await field(wrapper, 'Create a local repository').setValue('../escape');
+    await validated();
+
+    expect(bodyText()).toContain("'../escape' is not a local repository name. Use 1 to 100 letters, digits, '.', '_' or '-'");
+    expect(bodyText()).toContain("with no '..'");
+    expect(button('Create').hasAttribute('disabled')).toBe(true);
+    expect(createLocalRepo).not.toHaveBeenCalled();
   });
 
   it('shows a taken name in the dialog and marks the name field', async () => {

@@ -76,6 +76,10 @@ type Engine interface {
 	// Exec runs a program inside a running container and answers its output. A non-zero exit
 	// is an error carrying stderr, as for every other verb.
 	Exec(ctx context.Context, name string, args ...string) (Result, error)
+	// ExecTo is Exec with the program's output streamed into stdout as it is produced, stderr
+	// collected in the Result: how a bare repository leaves the instance as a tar stream, which
+	// must never be held in memory.
+	ExecTo(ctx context.Context, name string, stdout io.Writer, args ...string) (Result, error)
 	// CopyTo copies a folder on this computer into a container, as dst there. dst must not exist:
 	// the folder's contents become dst. Ownership and modes are the caller's to set afterwards.
 	CopyTo(ctx context.Context, name, src, dst string) error
@@ -148,6 +152,22 @@ func runHelper(ctx context.Context, r Runner, program string, s HelperSpec) (Res
 	}
 	if res.ExitCode != 0 {
 		return res, fmt.Errorf("%s run %s %s: %s (exit %d)", program, s.Image, s.Entrypoint, strings.TrimSpace(res.Stderr), res.ExitCode)
+	}
+	return res, nil
+}
+
+// execTo is ExecTo for both engines: `exec` takes the same arguments on each.
+func execTo(ctx context.Context, r Runner, program, name string, stdout io.Writer, args []string) (Result, error) {
+	pipe, ok := r.(PipeRunner)
+	if !ok {
+		return Result{}, errors.New("this runner cannot stream from a container")
+	}
+	res, err := pipe.RunPipe(ctx, nil, stdout, program, append([]string{"exec", name}, args...)...)
+	if err != nil {
+		return res, &NotRunnable{Err: err}
+	}
+	if res.ExitCode != 0 {
+		return res, fmt.Errorf("%s exec %s: %s (exit %d)", program, name, strings.TrimSpace(res.Stderr), res.ExitCode)
 	}
 	return res, nil
 }

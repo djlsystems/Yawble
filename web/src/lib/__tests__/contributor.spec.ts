@@ -26,6 +26,11 @@ describe('contributor settings rules', () => {
     expect(upstreamUrlProblem('https://github.com/fork-owner/Widget', fork)).toContain('own URL')
   })
 
+  it('refuses any upstream on a local repository, which has nothing to contribute to', () => {
+    expect(upstreamUrlProblem('', 'local:widget')).toBeNull()
+    expect(upstreamUrlProblem('https://github.com/project/Widget.git', 'local:widget')).toContain('does not apply to a local repository')
+  })
+
   it('takes an account name for the fork owner, or blank', () => {
     expect(forkOwnerProblem('')).toBeNull()
     expect(forkOwnerProblem('fork-owner')).toBeNull()

@@ -227,6 +227,63 @@ public sealed class PrepareVolumeTests : IDisposable
     }
 
     [Fact]
+    public void A_local_repository_is_harness_agent_readable_by_agent_and_nothing_in_it_writable_by_agent()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        var repos = Path.Combine(_data, "repos");
+        var bare = Path.Combine(repos, "widget.git");
+        Directory.CreateDirectory(repos);
+        Exec("git", ["init", "--quiet", "--bare", "-b", "main", bare]);
+        var content = Path.Combine(_root, "content.txt");
+        File.WriteAllText(content, "widget\n");
+        var blob = Exec("git", ["--git-dir", bare, "hash-object", "-w", content]).Output.Trim();
+        var loose = Path.Combine("repos", "widget.git", "objects", blob[..2], blob[2..]);
+        // What a careless umask or a hand copy may leave: group- and world-writable, setuid.
+        File.SetUnixFileMode(Path.Combine(bare, "refs"), (UnixFileMode)Convert.ToInt32("2777", 8));
+        File.SetUnixFileMode(Path.Combine(bare, "config"), (UnixFileMode)Convert.ToInt32("4666", 8));
+        File.SetUnixFileMode(Path.Combine(bare, "HEAD"), (UnixFileMode)Convert.ToInt32("600", 8));
+
+        var output = Run("ownership");
+
+        var chowned = ChownedPaths();
+        foreach (var path in new[] { "repos", "repos/widget.git", "repos/widget.git/config", loose })
+        {
+            Assert.True(chowned.TryGetValue(Path.Combine(_data, path), out var owner), $"{path} was not handed over. {output}");
+            Assert.Equal("10001:10002", owner);
+        }
+
+        Assert.Equal("2750", Mode("repos"));
+        Assert.Equal("2750", Mode("repos/widget.git"));
+        Assert.Equal("2750", Mode("repos/widget.git/refs"));
+        Assert.Equal("640", Mode("repos/widget.git/config"));
+        Assert.Equal("640", Mode("repos/widget.git/HEAD"));
+        // git's own read-only object keeps its owner bits and gains group read, nothing else.
+        Assert.Equal("440", Mode(loose));
+
+        // NOTHING under repos is writable by agent (the group) or by anybody else.
+        var writable = Exec("find", [repos, "(", "-perm", "/022", "-o", "-perm", "/6000", "!", "-type", "d", ")", "-print"]).Output.Trim();
+        Assert.True(writable.Length == 0, $"writable by agent or others: {writable}");
+
+        Assert.Contains("ownership set: 0 change(s)", Run("ownership", new Dictionary<string, string>
+        {
+            ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
+            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
+        }));
+    }
+
+    [Fact]
+    public void A_missing_repos_directory_is_created_for_harness_and_readable_by_agent()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+
+        var output = Run("ownership");
+
+        Assert.True(Directory.Exists(Path.Combine(_data, "repos")), output);
+        Assert.Equal("10001:10002", ChownedPaths()[Path.Combine(_data, "repos")]);
+        Assert.Equal("2750", Mode("repos"));
+    }
+
+    [Fact]
     public void A_second_start_changes_nothing()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");

@@ -4,7 +4,13 @@ namespace Harness.Host;
 /// Public so its tests can reach it: there is no <c>InternalsVisibleTo</c> from this assembly.</summary>
 public static class RepoUrls
 {
-    public static IReadOnlyList<string> Validate(IReadOnlyList<string>? urls)
+    /// <summary>
+    /// Every entry checked, trimmed, in order. An entry is an absolute http or https URL, or
+    /// <c>local:&lt;name&gt;</c> for one of the instance's local repositories (<see cref="LocalRepos"/>):
+    /// its name must be legal and <paramref name="localExists"/> must say it is there - with no
+    /// such check given, every <c>local:</c> entry is refused. Each refusal names the entry.
+    /// </summary>
+    public static IReadOnlyList<string> Validate(IReadOnlyList<string>? urls, Func<string, bool>? localExists = null)
     {
         var validated = new List<string>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -13,7 +19,23 @@ public static class RepoUrls
         {
             var url = supplied?.Trim() ?? "";
 
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            if (LocalRepos.IsLocal(url))
+            {
+                var local = LocalRepos.NameOf(url);
+                if (!LocalRepos.IsLegalName(local))
+                {
+                    throw new ArgumentException($"'{supplied}': {LocalRepos.IllegalName(local)}");
+                }
+
+                if (localExists is null || !localExists(local))
+                {
+                    throw new ArgumentException(
+                        $"'{supplied}' names no local repository on this instance. Create '{local}' first, or pick one that exists.");
+                }
+
+                url = LocalRepos.ReferenceFor(local);
+            }
+            else if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
                 || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             {
                 throw new ArgumentException($"'{supplied}' is not an absolute http or https repository URL.");
@@ -39,6 +61,8 @@ public static class RepoUrls
 
     public static string DeriveName(string url)
     {
+        if (LocalRepos.IsLocal(url)) return LocalRepos.NameOf(url);
+
         var uri = new Uri(url, UriKind.Absolute);
         var escapedPath = uri.GetComponents(UriComponents.Path, UriFormat.UriEscaped);
         var escapedLeaf = escapedPath.Split('/').LastOrDefault() ?? "";

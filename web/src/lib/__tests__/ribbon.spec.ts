@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as ribbonModule from '../ribbon'
-import { DocumentsAction, Ribbon, needsActiveWorkTeam } from '../ribbon'
+import { DocumentsAction, PluginsAction, RepositoriesAction, Ribbon, needsActiveWorkTeam } from '../ribbon'
 
 describe('the ribbon', () => {
   /**
@@ -125,6 +125,17 @@ describe('the ribbon', () => {
     // And it needs no active team - the store is per-INSTANCE and has no team column at all, so a
     // `team-` prefix would be the wrong requirement rather than a stricter one.
     expect(needsActiveWorkTeam('admin-diagnostics', undefined)).toBe(false)
+  })
+
+  /** Admin › Repositories, the instance's local repositories: after Diagnostics, before Plugins. */
+  it('puts Repositories in the Admin group, before Plugins, needing no active team', () => {
+    const admin = Ribbon.tabs.find((tab) => tab.id === 'admin')
+    const actions = admin?.items.map((item) => item.action) ?? []
+
+    expect(actions).toContain(RepositoriesAction)
+    expect(actions.indexOf(RepositoriesAction)).toBe(actions.indexOf('admin-diagnostics') + 1)
+    expect(actions.indexOf(RepositoriesAction)).toBe(actions.indexOf(PluginsAction) - 1)
+    expect(needsActiveWorkTeam(RepositoriesAction, undefined)).toBe(false)
   })
 
   /** Projects sits BEFORE Admin. */

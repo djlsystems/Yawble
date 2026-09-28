@@ -60,6 +60,7 @@ yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
 yawble config get|set     port, engine, memory, cpus, running limit, image
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
 yawble plugin install <folder> | --from-instance <path> [--force] | list | remove <id> [--version <v>]   plugins members can be hired on; see below
+yawble repo list | clone <name> [folder]   the instance's local repositories; clone one onto this computer (no pushing back)
 yawble github             guided GitHub token setup: the gh login or a pasted fine-grained token, checked with GitHub
 yawble uninstall          removes the instance and yawble's settings. The volume only with --data and a typed confirmation.
 yawble version
@@ -90,6 +91,17 @@ yawble plugin install --from-instance /data/teams/acme/repos/Tools/main/build/sa
 **Language, and what a plugin may rely on.** Go is the default for connectors to REST APIs, clouds, databases, queues and mail (template: `samples/plugins/sample-echo-go`, one static binary per processor). Use .NET when the best SDK for the target system is .NET (template: `samples/plugins/sample-echo`), and Python when the library exists only in Python. A plugin is self-contained: the image guarantees the .NET runtime, Node and Python 3, and everything else the plugin needs is in its own folder (Go libraries compiled in, NuGet packages published beside the build, Python packages in a virtual environment in the folder). Nothing is ever added to the image for a plugin. The manifest's `requires` names the runtimes it needs from the image. `docs/plugins.md` has the details.
 
 `yawble plugin list` shows each version, active or not, and installed or refused (`--json` too). `yawble plugin remove <id>` asks first (`--yes` answers) and refuses while a member is hired on the plugin, naming the members. `--version <v>` removes one kept version; the active one cannot be removed while others are kept.
+
+## Local repositories
+
+A local repository is a git repository that lives only on the instance, as a bare repository at `/data/repos/<name>.git` on the volume, with no hosting service. A team works on it as `local:<name>` ([docs/local-repositories.md](../docs/local-repositories.md)). People create, attach and delete them in the web app. The CLI gets the code out:
+
+```
+yawble repo list [--json]
+yawble repo clone my-plugin [~/code/my-plugin]
+```
+
+`list` shows each one: name, `local:<name>`, default branch, last commit and size. `clone` streams `/data/repos/<name>.git` out of the running instance through the engine (`exec ... tar`, Podman or Docker) and clones it with this computer's git into the folder (default `./<name>`). Every branch becomes a local branch and the default branch is checked out. The clone has no remote, because pushing back is not supported. A folder that already exists is refused and left alone. An illegal name (the Host's rule: 1 to 100 letters, digits, `.`, `_` or `-`, starting with a letter or digit, not ending in `.git` or `.lock`, with no `..`) or one the instance does not have is refused and named. Size is the total length of the repository's files, as Admin → Repositories shows it.
 
 ## Backup and restore
 
