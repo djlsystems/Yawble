@@ -1,6 +1,9 @@
 package engine
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // Result is one finished command.
 type Result struct {
@@ -20,4 +23,11 @@ type Runner interface {
 // so a credential never appears on a command line, where every process on the machine can read it.
 type InputRunner interface {
 	RunInput(ctx context.Context, stdin string, name string, args ...string) (Result, error)
+}
+
+// PipeRunner is a Runner that streams: stdin from a reader (nil for none) and stdout into a
+// writer as it is produced, stderr collected in the Result. A backup is gigabytes of tar, which
+// must never be held in memory.
+type PipeRunner interface {
+	RunPipe(ctx context.Context, stdin io.Reader, stdout io.Writer, name string, args ...string) (Result, error)
 }

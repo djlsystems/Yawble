@@ -313,3 +313,7 @@ func (p podman) stream(ctx context.Context, out io.Writer, args ...string) error
 	}
 	return nil
 }
+
+func (p podman) RunHelper(ctx context.Context, spec HelperSpec) (Result, error) {
+	return runHelper(ctx, p.r, "podman", spec)
+}

@@ -94,6 +94,10 @@ func Changes(label string, s Settings) []string {
 	return out
 }
 
+// PortOf is the port a container's settings label records, else fallback: where a container
+// that exists answers, whatever the config now says.
+func PortOf(label string, fallback int) int { return portOf(label, fallback) }
+
 func portOf(label string, fallback int) int {
 	var was applied
 	if label != "" && json.Unmarshal([]byte(label), &was) == nil && was.Port != 0 {

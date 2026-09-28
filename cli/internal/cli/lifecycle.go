@@ -158,62 +158,12 @@ func newUpCommand(deps Deps) *cobra.Command {
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			showLogo(deps, cmd.OutOrStdout())
-			c, err := loadConfig(deps)
+			e, s, err := upReady(cmd, deps, yes)
 			if err != nil {
 				return err
 			}
-			s, _, err := settingsFor(deps, c, instance.Machine{})
-			if err != nil {
-				return err
-			}
-			// Before the engine, the machine or an install is touched: with nothing to run there is
-			// nothing to prepare the computer for.
-			if s.Image == "" {
-				return instance.ErrNoImage
-			}
-			if err := supportedPlatform(deps); err != nil {
-				return err
-			}
-			// The engine installed (asked when both are); yawble installs none.
-			name, err := chooseEngine(deps, c, yes, cmd.OutOrStdout())
-			if err != nil {
-				return err
-			}
-			c.Engine = name
-			info, err := preflight(cmd.Context(), deps, yes, name, containerMemoryMB(c.Memory), cmd.OutOrStdout(), cmd.ErrOrStderr())
-			if err != nil {
-				return err
-			}
-			// The port, once the engine answers and before anything is created.
-			port, err := ensurePort(cmd.Context(), deps, c, yes, cmd.OutOrStdout())
-			if err != nil {
-				return err
-			}
-			c.Port = port
-			// Now the machine the container runs in is known: derive the limits from it. On Linux
-			// that is the host; on macOS and Windows the Podman machine that just came up; with
-			// Docker, what Docker says it can give (Docker Desktop's VM, or the host).
-			m := instance.Measure()
-			switch {
-			case name == "docker":
-				if measured := dockerMachine(cmd.Context(), runnerOf(deps)); measured.Measured {
-					m = measured
-				}
-			case info.Applies:
-				m = machineOf(info)
-			}
-			// Asked once, before the settings are read, so a token saved now reaches the container
-			// on this same run.
-			offerGitHub(cmd.Context(), deps, c, yes, cmd.OutOrStdout())
-			s, notes, err := settingsFor(deps, c, m)
-			if err != nil {
-				return err
-			}
-			for _, n := range notes {
-				fmt.Fprintln(cmd.ErrOrStderr(), "note:", n)
-			}
-			noteRestart(cmd.Context(), engineOf(deps, c), s, cmd.OutOrStdout())
-			if err := instance.Up(cmd.Context(), engineOf(deps, c), s, healthChecker(deps.HTTP), cmd.OutOrStdout()); err != nil {
+			noteRestart(cmd.Context(), e, s, cmd.OutOrStdout())
+			if err := instance.Up(cmd.Context(), e, s, healthChecker(deps.HTTP), cmd.OutOrStdout()); err != nil {
 				return err
 			}
 			gitHubHint(deps, cmd.OutOrStdout())
@@ -319,4 +269,65 @@ func goosOf(deps Deps) string {
 		return deps.GOOS
 	}
 	return runtime.GOOS
+}
+
+// upReady is `up` up to the start: the image pin, the platform, the engine (asked when both are
+// installed), its machine, the port, and the settings measured from the machine the container
+// will run in. `restore` makes the same preparations before it writes into the volume.
+func upReady(cmd *cobra.Command, deps Deps, yes bool) (engine.Engine, instance.Settings, error) {
+	c, err := loadConfig(deps)
+	if err != nil {
+		return nil, instance.Settings{}, err
+	}
+	s, _, err := settingsFor(deps, c, instance.Machine{})
+	if err != nil {
+		return nil, instance.Settings{}, err
+	}
+	// Before the engine, the machine or an install is touched: with nothing to run there is
+	// nothing to prepare the computer for.
+	if s.Image == "" {
+		return nil, instance.Settings{}, instance.ErrNoImage
+	}
+	if err := supportedPlatform(deps); err != nil {
+		return nil, instance.Settings{}, err
+	}
+	// The engine installed (asked when both are); yawble installs none.
+	name, err := chooseEngine(deps, c, yes, cmd.OutOrStdout())
+	if err != nil {
+		return nil, instance.Settings{}, err
+	}
+	c.Engine = name
+	info, err := preflight(cmd.Context(), deps, yes, name, containerMemoryMB(c.Memory), cmd.OutOrStdout(), cmd.ErrOrStderr())
+	if err != nil {
+		return nil, instance.Settings{}, err
+	}
+	// The port, once the engine answers and before anything is created.
+	port, err := ensurePort(cmd.Context(), deps, c, yes, cmd.OutOrStdout())
+	if err != nil {
+		return nil, instance.Settings{}, err
+	}
+	c.Port = port
+	// Now the machine the container runs in is known: derive the limits from it. On Linux
+	// that is the host; on macOS and Windows the Podman machine that just came up; with
+	// Docker, what Docker says it can give (Docker Desktop's VM, or the host).
+	m := instance.Measure()
+	switch {
+	case name == "docker":
+		if measured := dockerMachine(cmd.Context(), runnerOf(deps)); measured.Measured {
+			m = measured
+		}
+	case info.Applies:
+		m = machineOf(info)
+	}
+	// Asked once, before the settings are read, so a token saved now reaches the container
+	// on this same run.
+	offerGitHub(cmd.Context(), deps, c, yes, cmd.OutOrStdout())
+	s, notes, err := settingsFor(deps, c, m)
+	if err != nil {
+		return nil, instance.Settings{}, err
+	}
+	for _, n := range notes {
+		fmt.Fprintln(cmd.ErrOrStderr(), "note:", n)
+	}
+	return engineOf(deps, c), s, nil
 }

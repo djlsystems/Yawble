@@ -69,3 +69,19 @@ func (s *Scripted) Stream(ctx context.Context, out io.Writer, name string, args 
 	_, _ = io.WriteString(out, r.Stdout)
 	return r.ExitCode, nil
 }
+
+// RunPipe records the line like Run, keeps all of stdin in Inputs, and writes the answer's
+// Stdout to stdout (a scripted helper's tar stream).
+func (s *Scripted) RunPipe(ctx context.Context, stdin io.Reader, stdout io.Writer, name string, args ...string) (Result, error) {
+	if stdin != nil {
+		data, _ := io.ReadAll(stdin)
+		s.Inputs = append(s.Inputs, string(data))
+	}
+	r, err := s.Run(ctx, name, args...)
+	if err != nil || stdout == nil {
+		return r, err
+	}
+	_, _ = io.WriteString(stdout, r.Stdout)
+	r.Stdout = ""
+	return r, nil
+}

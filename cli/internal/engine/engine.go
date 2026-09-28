@@ -5,7 +5,10 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -90,6 +93,63 @@ type Engine interface {
 	// FollowSince follows the log from a moment on, until ctx ends: `up` shows a first start's
 	// progress without replaying an earlier run.
 	FollowSince(ctx context.Context, name string, since time.Time, out io.Writer) error
+	// RunHelper runs a short-lived container from an image already on this machine with a volume
+	// mounted, and removes it when it exits: how backup and restore read and write the data
+	// volume on both engines (Docker has no `volume export`). A nil Stdout collects the output
+	// in the Result.
+	RunHelper(ctx context.Context, spec HelperSpec) (Result, error)
+}
+
+// HelperSpec is one helper container. It runs as root (the volume's files belong to two users),
+// with no network and without pulling: the image is the instance's own, already here.
+type HelperSpec struct {
+	Image      string
+	Volume     string // mounted at Target
+	Target     string
+	ReadOnly   bool
+	Entrypoint string
+	Args       []string
+	// Stdin, when set, is handed to the program (the container runs with -i); Stdout, when set,
+	// receives its output as it is produced.
+	Stdin  io.Reader
+	Stdout io.Writer
+}
+
+// helperArgs is the one command line for both engines: `run` takes the same flags on each.
+func helperArgs(s HelperSpec) []string {
+	args := []string{"run", "--rm"}
+	if s.Stdin != nil {
+		args = append(args, "-i")
+	}
+	mount := s.Volume + ":" + s.Target
+	if s.ReadOnly {
+		mount += ":ro"
+	}
+	args = append(args, "--pull", "never", "--network", "none", "--user", "0", "--entrypoint", s.Entrypoint, "-v", mount, s.Image)
+	return append(args, s.Args...)
+}
+
+// runHelper runs a helper with the program given, streaming when the spec asks and the runner can.
+func runHelper(ctx context.Context, r Runner, program string, s HelperSpec) (Result, error) {
+	args := helperArgs(s)
+	var res Result
+	var err error
+	if s.Stdin != nil || s.Stdout != nil {
+		pipe, ok := r.(PipeRunner)
+		if !ok {
+			return Result{}, errors.New("this runner cannot stream to a helper container")
+		}
+		res, err = pipe.RunPipe(ctx, s.Stdin, s.Stdout, program, args...)
+	} else {
+		res, err = r.Run(ctx, program, args...)
+	}
+	if err != nil {
+		return res, &NotRunnable{Err: err}
+	}
+	if res.ExitCode != 0 {
+		return res, fmt.Errorf("%s run %s %s: %s (exit %d)", program, s.Image, s.Entrypoint, strings.TrimSpace(res.Stderr), res.ExitCode)
+	}
+	return res, nil
 }
 
 // NotRunnable is the engine's program not starting at all: not on PATH, not executable. It is a

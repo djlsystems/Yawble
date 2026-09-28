@@ -11,14 +11,16 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/djlsystems/yawble/cli/internal/backup"
 	"github.com/djlsystems/yawble/cli/internal/config"
 	"github.com/djlsystems/yawble/cli/internal/instance"
 	"github.com/djlsystems/yawble/cli/internal/remote"
 )
 
 // settingsFiles are the files yawble writes into its config directory: preferences, the secrets
-// `secret set` stores, and remote access. Uninstall removes these and nothing else it cannot vouch for.
-var settingsFiles = []string{config.FileName, "env", remote.FileName, remote.EnvFileName}
+// `secret set` stores, remote access, and the note of the newest backup. Uninstall removes these
+// and nothing else it cannot vouch for.
+var settingsFiles = []string{config.FileName, "env", remote.FileName, remote.EnvFileName, backup.RecordName}
 
 func newUninstallCommand(deps Deps) *cobra.Command {
 	var data, yes, keepSettings bool

@@ -16,6 +16,7 @@ func ExecRunner() interface {
 	Runner
 	Streamer
 	InputRunner
+	PipeRunner
 } {
 	return execRunner{}
 }
@@ -59,4 +60,25 @@ func (execRunner) Stream(ctx context.Context, out io.Writer, name string, args .
 	default:
 		return -1, err
 	}
+}
+
+func (execRunner) RunPipe(ctx context.Context, stdin io.Reader, stdout io.Writer, name string, args ...string) (Result, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = stdin
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+	err := cmd.Run()
+	res := Result{Stdout: out.String(), Stderr: errb.String()}
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+	case errors.As(err, &exit):
+		res.ExitCode = exit.ExitCode()
+	default:
+		return res, err
+	}
+	return res, nil
 }

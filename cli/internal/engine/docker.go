@@ -220,3 +220,7 @@ func (d docker) stream(ctx context.Context, out io.Writer, args ...string) error
 	}
 	return nil
 }
+
+func (d docker) RunHelper(ctx context.Context, spec HelperSpec) (Result, error) {
+	return runHelper(ctx, d.r, "docker", spec)
+}
