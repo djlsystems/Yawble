@@ -27,6 +27,7 @@ public sealed class AgentLaunchFailClosedTests : IDisposable
 
     public void Dispose()
     {
+        MemberTempCleanup.Remove(_root);
         try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
     }
 

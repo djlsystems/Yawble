@@ -288,6 +288,7 @@ public sealed class MemberGoldenTests
         }
         finally
         {
+            MemberTempCleanup.Remove(workspace);
             Directory.Delete(workspace, recursive: true);
         }
     }
@@ -362,6 +363,7 @@ public sealed class MemberGoldenTests
         finally
         {
             await factory.DisposeAsync();
+            MemberTempCleanup.Remove(dataRoot);
             try { Directory.Delete(dataRoot, recursive: true); }
             catch (IOException) { }
         }

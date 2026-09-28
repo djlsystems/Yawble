@@ -28,7 +28,11 @@ public sealed class SystemCommandTests : IDisposable
         }
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose()
+    {
+        MemberTempCleanup.Remove(_root);
+        Directory.Delete(_root, recursive: true);
+    }
 
     private EnvironmentScope FakeFirstOnPath() =>
         new([new("PATH", FakeBin + ":" + Environment.GetEnvironmentVariable("PATH")), new("HOME", _root)]);

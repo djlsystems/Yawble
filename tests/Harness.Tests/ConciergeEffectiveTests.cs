@@ -127,6 +127,7 @@ public sealed class ConciergeEffectiveTests : IDisposable
     {
         try
         {
+            MemberTempCleanup.Remove(_dataRoot);
             Directory.Delete(_dataRoot, recursive: true);
         }
         catch (IOException)

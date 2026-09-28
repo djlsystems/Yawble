@@ -16,7 +16,11 @@ public sealed class CopilotMcpWiringTests : IDisposable
 
     private readonly string _workspace = Directory.CreateTempSubdirectory("harness-copilot-mcp-").FullName;
 
-    public void Dispose() => Directory.Delete(_workspace, recursive: true);
+    public void Dispose()
+    {
+        MemberTempCleanup.Remove(_workspace);
+        Directory.Delete(_workspace, recursive: true);
+    }
 
     [Theory]
     [InlineData("copilot")]
