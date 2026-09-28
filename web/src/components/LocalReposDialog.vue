@@ -134,8 +134,11 @@ async function confirmDelete() {
                 <span v-else class="os-text-muted">none</span>
               </td>
               <td class="text-left">
-                <template v-if="repo.teams.length > 0">{{ repo.teams.map(teamName).join(', ') }}</template>
-                <span v-else class="os-text-muted">none</span>
+                <template v-if="!(repo.unused ?? repo.teams.length === 0)">{{ repo.teams.map(teamName).join(', ') }}</template>
+                <!-- UNUSED, said as such: a deleted team's local repository is kept, and this is
+                     where a person finds it and deletes it. The Host's flag, with the empty list
+                     as the answer from a Host that predates it. -->
+                <span v-else class="os-text-muted" data-local-repo-unused>unused - no team uses it</span>
               </td>
               <td class="text-right">
                 <q-btn

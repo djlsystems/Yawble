@@ -26,6 +26,7 @@ import {
   type TeamSort,
 } from '../lib/teamsTable';
 import type { Team, TeamDeleted, TeamId } from '../api/types';
+import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
 
 const board = useConsoleStore();
@@ -205,6 +206,13 @@ async function retryUnfinished() {
  * not the team's name - when there is. `confirmed` is vacuously true in the ordinary case, which is
  * what keeps the button live for a batch delete.
  */
+/**
+ * The doomed team's local repositories, which deletion KEEPS: they live outside the team's folder
+ * and show as unused in Admin -> Repositories, where a person may delete them. Said in the dialog,
+ * because "permanently removes" above would otherwise read as including them.
+ */
+const keptLocalRepos = computed(() => (doomed.value?.repos ?? []).filter(isLocalRepoReference));
+
 const confirmed = computed(() =>
   doomed.value !== null
   && (deletionConfirmation.value === null || typed.value.trim() === deletionConfirmation.value));
@@ -256,7 +264,10 @@ async function remove() {
       $q.notify({
         type: 'positive',
         timeout: 5000,
-        message: `${team.name} and its ${removed.containers} Agent Container(s) were deleted.`,
+        message: `${team.name} and its ${removed.containers} Agent Container(s) were deleted.`
+          + ((removed.localRepositoriesKept?.length ?? 0) > 0
+            ? ` Kept: ${removed.localRepositoriesKept!.join(', ')} - delete it from Admin → Repositories.`
+            : ''),
       });
     }
 
@@ -581,6 +592,12 @@ async function setPaused(team: Team | null, paused: boolean) {
             <li>its documents, its members' working folders, and its transcripts</li>
             <li>every account's access to it</li>
           </ul>
+          <p v-if="keptLocalRepos.length > 0" class="os-body" data-local-repos-kept>
+            {{ keptLocalRepos.length === 1 ? 'Its local repository' : 'Its local repositories' }}
+            <span class="mono">{{ keptLocalRepos.join(', ') }}</span>
+            {{ keptLocalRepos.length === 1 ? 'is' : 'are' }} kept, and can be deleted from
+            Admin → Repositories.
+          </p>
           <p class="os-body os-text-muted">
             The message log keeps its history — those messages are a record of what happened, and
             other teams' messages are linked to them.
