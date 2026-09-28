@@ -272,7 +272,7 @@ describe('MemberSettingsDialog, the member\'s own instructions', () => {
     wrapper.unmount();
   });
 
-  it('names the person who last edited them, and the day', async () => {
+  it('names the person who last set them, and the day', async () => {
     getMember.mockResolvedValue(detail({
       systemPrompt: 'You review pull requests.',
       systemPromptSetBy: 'admin@example.com',
@@ -281,7 +281,7 @@ describe('MemberSettingsDialog, the member\'s own instructions', () => {
     }));
     const wrapper = await mountSettings();
 
-    expect(writtenBy()).toBe('Edited by admin@example.com, 2026-09-27');
+    expect(writtenBy()).toBe('Set by admin@example.com, 2026-09-27');
 
     wrapper.unmount();
   });
@@ -293,7 +293,24 @@ describe('MemberSettingsDialog, the member\'s own instructions', () => {
     expect(field('Instructions (optional)').value).toBe('Written before this was recorded.');
     expect(writtenBy()).toBeNull();
     expect(bodyText()).not.toContain('Written by');
-    expect(bodyText()).not.toContain('Edited by');
+    expect(bodyText()).not.toContain('Set by');
+
+    wrapper.unmount();
+  });
+
+  /** A Manager that hired with no instructions wrote nothing: the empty field makes no claim. */
+  it('says nothing about the Manager when it hired the member with no instructions', async () => {
+    getMember.mockResolvedValue(detail({
+      systemPrompt: null,
+      systemPromptSetBy: 'Manager',
+      systemPromptSetByKind: 'manager',
+      systemPromptSetAt: '2026-09-20T08:15:00Z',
+    }));
+    const wrapper = await mountSettings();
+
+    expect(field('Instructions (optional)').value).toBe('');
+    expect(writtenBy()).toBeNull();
+    expect(bodyText()).not.toContain('Written by the Manager');
 
     wrapper.unmount();
   });

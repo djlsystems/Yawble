@@ -288,6 +288,7 @@ async function submit() {
             v-model="instructions"
             type="textarea"
             autogrow
+            :input-style="{ minHeight: '6em' }"
             outlined
             dense
             :label="MemberInstructionsLabel"

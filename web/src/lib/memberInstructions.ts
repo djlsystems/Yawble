@@ -21,6 +21,7 @@ export const MemberInstructionsTakesEffect = 'Takes effect on its next run.'
 
 /** Who last set a member's instructions, as `GET /api/teams/{team}/containers/{name}` answers it. */
 export interface InstructionsProvenance {
+  systemPrompt?: string | null
   systemPromptSetBy?: string | null
   systemPromptSetByKind?: 'manager' | 'person' | null
   systemPromptSetAt?: string | null
@@ -30,17 +31,23 @@ export interface InstructionsProvenance {
  * The line under the field: who last set it and when, or null when nobody is recorded - a member
  * from before the platform kept this shows nothing until it is next edited.
  *
+ * A Manager that hired with no instructions wrote nothing, so an empty field says nothing about
+ * the Manager. A person's line says "Set by" for a hire and an edit alike: the row does not tell
+ * the two apart, and "Edited" would be wrong for a person's own hire.
+ *
  * The date is the UTC calendar day of `systemPromptSetAt`, so the line reads the same wherever it
  * is opened.
  */
 export function instructionsWrittenBy(provenance: InstructionsProvenance | null | undefined): string | null {
   if (!provenance) return null
 
-  if (provenance.systemPromptSetByKind === 'manager') return 'Written by the Manager when hiring'
+  if (provenance.systemPromptSetByKind === 'manager') {
+    return provenance.systemPrompt?.trim() ? 'Written by the Manager when hiring' : null
+  }
 
   if (provenance.systemPromptSetByKind === 'person' && provenance.systemPromptSetBy) {
     const day = calendarDay(provenance.systemPromptSetAt)
-    return day ? `Edited by ${provenance.systemPromptSetBy}, ${day}` : `Edited by ${provenance.systemPromptSetBy}`
+    return day ? `Set by ${provenance.systemPromptSetBy}, ${day}` : `Set by ${provenance.systemPromptSetBy}`
   }
 
   return null

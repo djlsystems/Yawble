@@ -1017,6 +1017,7 @@ watch(open, (showing) => {
               v-model="additionalInstructions"
               type="textarea"
               autogrow
+              :input-style="{ minHeight: '9em' }"
               outlined
               dense
               class="q-mt-xs"
