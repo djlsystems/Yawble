@@ -5,7 +5,7 @@ using Harness.Host;
 namespace Harness.Tests;
 
 /// <summary>
-/// DEVIATION #7 PINNED (card 621 verification, F5). An agent member's ledger history is built
+/// A CONTEXT FAILURE ENDS THE RUN ONCE. An agent member's ledger history is built
 /// INSIDE the runner call now, so a context builder that throws, or one a person's Stop cancels,
 /// ends that run the ordinary way: exactly one failed row after its `started`, and the member takes
 /// its next instruction. Before, the build ran outside the try - a throw left `started` with no
