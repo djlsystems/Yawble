@@ -527,6 +527,165 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
 
     // ---- helpers ----
 
+    // ---- backlog dispatch-to-new: the same path as create ----
+
+    [Fact]
+    public async Task Dispatching_to_a_new_team_with_no_repository_gives_it_its_local_repository_and_localRepository_false_gives_none()
+    {
+        var person = await PersonAsync();
+
+        var dispatched = await DispatchToNewAsync(person, await ReadyItemAsync(person), new
+        {
+            name = "Dispatched", agent = Agent(), memberAgents = new[] { Agent() },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, dispatched.StatusCode);
+        var body = await JsonAsync(dispatched);
+        var team = body.GetProperty("team").GetString()!;
+        Assert.Equal($"local:{team}", body.GetProperty("localRepository").GetProperty("reference").GetString());
+        Assert.True(body.GetProperty("localRepository").GetProperty("created").GetBoolean());
+        Assert.Equal([$"local:{team}"], Teams.ReposFor(team));
+        Assert.True(Directory.Exists(Path.Combine(ClonePath(team, team), ".git")), "the platform did not clone");
+        Assert.Equal("main", Teams.DefaultBranchFor(team, team).Branch);
+        Assert.Equal(team, Assert.Single(await TenantRowsAsync(TenantActions.LocalRepoCreated)).Subject);
+        Assert.Single(await TenantRowsAsync(TenantActions.BacklogItemDispatched));
+
+        var bare = await DispatchToNewAsync(person, await ReadyItemAsync(person), new
+        {
+            name = "DispatchedBare", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = false,
+        });
+        Assert.Equal(HttpStatusCode.OK, bare.StatusCode);
+        var bareTeam = (await JsonAsync(bare)).GetProperty("team").GetString()!;
+        Assert.Empty(Teams.ReposFor(bareTeam));
+        Assert.False(Directory.Exists(Bare(bareTeam)));
+    }
+
+    [Fact]
+    public async Task Dispatching_to_a_new_team_with_a_missing_url_is_refused_with_its_choices_leaving_nothing_and_use_local_ends_with_a_cloned_dispatched_team()
+    {
+        var person = await PersonAsync();
+        _fakeGitHub.CanCreate = true;
+        var item = await ReadyItemAsync(person);
+
+        var refused = await DispatchToNewAsync(person, item, new
+        {
+            name = "JobTracker", agent = Agent(), memberAgents = new[] { Agent() }, repos = new[] { Missing },
+        });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var body = await JsonAsync(refused);
+        Assert.Equal("repo-check-failed", body.GetProperty("code").GetString());
+        Assert.Contains(Missing, body.GetProperty("error").GetString(), StringComparison.Ordinal);
+        var entry = Assert.Single(body.GetProperty("repos").EnumerateArray());
+        Assert.Equal("not-found", entry.GetProperty("failure").GetString());
+        Assert.Equal(["create-on-github", "use-local"], Strings(entry.GetProperty("choices")));
+        Assert.Empty(Teams.All());
+        Assert.Empty(await _factory.Services.GetRequiredService<ITeamStore>().TeamsAsync(Ct));
+        Assert.False(Directory.Exists(Path.Combine(_dataRoot, "teams", "JobTracker")));
+        Assert.Empty(await TenantRowsAsync(TenantActions.TeamCreated));
+        Assert.Empty(await TenantRowsAsync(TenantActions.BacklogItemDispatched));
+
+        var local = await DispatchToNewAsync(person, item, new
+        {
+            name = "JobTracker", agent = Agent(), memberAgents = new[] { Agent() }, repos = new[] { Missing },
+            repoChoices = new Dictionary<string, string> { [Missing] = "use-local" },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, local.StatusCode);
+        var team = (await JsonAsync(local)).GetProperty("team").GetString()!;
+        Assert.Equal([$"local:{team}"], Teams.ReposFor(team));
+        Assert.True(Directory.Exists(Path.Combine(ClonePath(team, team), ".git")));
+        Assert.Single(await TenantRowsAsync(TenantActions.BacklogItemDispatched));
+    }
+
+    [Fact]
+    public async Task Dispatching_to_a_new_team_on_github_create_makes_it_private_through_the_faked_interface_and_ends_with_a_cloned_team()
+    {
+        var person = await PersonAsync();
+        _fakeGitHub.CanCreate = true;
+
+        var created = await DispatchToNewAsync(person, await ReadyItemAsync(person), new
+        {
+            name = "JobTracker", agent = Agent(), memberAgents = new[] { Agent() }, repos = new[] { Missing },
+            repoChoices = new Dictionary<string, string> { [Missing] = "create-on-github" },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var body = await JsonAsync(created);
+        var team = body.GetProperty("team").GetString()!;
+        Assert.Contains("create acme/job-tracker private", _fakeGitHub.Calls);
+        Assert.Equal([Missing], Strings(body.GetProperty("createdOnGitHub")));
+        Assert.Equal([Missing], Teams.ReposFor(team));
+        Assert.True(Directory.Exists(Path.Combine(ClonePath(team, "job-tracker"), ".git")));
+    }
+
+    [Fact]
+    public async Task When_a_dispatched_teams_local_repository_cannot_be_made_no_team_is_created_and_nothing_is_dispatched()
+    {
+        var person = await PersonAsync();
+        var item = await ReadyItemAsync(person);
+        File.WriteAllText(Path.Combine(_dataRoot, "repos"), "not a folder");
+
+        var refused = await DispatchToNewAsync(person, item, new { name = "Doomed", agent = Agent(), memberAgents = new[] { Agent() } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("could not be created", (await JsonAsync(refused)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Empty(Teams.All());
+        Assert.False(Directory.Exists(Path.Combine(_dataRoot, "teams", "Doomed")));
+        Assert.Empty(await TenantRowsAsync(TenantActions.TeamCreated));
+        Assert.Empty(await TenantRowsAsync(TenantActions.BacklogItemDispatched));
+    }
+
+    [Fact]
+    public async Task An_agent_dispatching_to_a_new_team_is_offered_only_a_local_repository_and_refused_github_create_and_attach_anyway()
+    {
+        var person = await PersonAsync();
+        _fakeGitHub.CanCreate = true;
+        var item = await ReadyItemAsync(person);
+        var concierge = await ConciergeClientAsync();
+
+        var refused = await DispatchToNewAsync(concierge, item, new
+        {
+            name = "AgentTeam", agent = Agent(), memberAgents = new[] { Agent() }, repos = new[] { Missing },
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var body = await JsonAsync(refused);
+        Assert.Equal(["use-local"], Strings(Assert.Single(body.GetProperty("repos").EnumerateArray()).GetProperty("choices")));
+        Assert.Contains("A person can create it on GitHub (private)", body.GetProperty("error").GetString(), StringComparison.Ordinal);
+
+        foreach (var (url, choice) in new[] { (Missing, "create-on-github"), (Unreachable, "attach-anyway") })
+        {
+            var forbidden = await DispatchToNewAsync(concierge, item, new
+            {
+                name = "AgentTeam", agent = Agent(), memberAgents = new[] { Agent() }, repos = new[] { url },
+                repoChoices = new Dictionary<string, string> { [url] = choice },
+            });
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+            Assert.Contains("person's choice", await forbidden.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+        }
+
+        Assert.Empty(Teams.All());
+        Assert.DoesNotContain(_fakeGitHub.Calls, c => c.StartsWith("create", StringComparison.Ordinal));
+        Assert.Empty(await TenantRowsAsync(TenantActions.BacklogItemDispatched));
+
+        // Its choice - no repos - is a team on its local repository with the item on its board.
+        var local = await DispatchToNewAsync(concierge, item, new { name = "AgentTeam", agent = Agent(), memberAgents = new[] { Agent() } });
+        Assert.Equal(HttpStatusCode.OK, local.StatusCode);
+        Assert.Equal(["local:AgentTeam"], Teams.ReposFor("AgentTeam"));
+    }
+
+    private static async Task<long> ReadyItemAsync(HttpClient person)
+    {
+        var created = await person.PostAsJsonAsync("/api/backlog", new { title = "An item", body = "A spec." }, Ct);
+        created.EnsureSuccessStatusCode();
+        var id = (await JsonAsync(created)).GetProperty("id").GetInt64();
+        (await person.PatchAsJsonAsync($"/api/backlog/{id}", new { state = "ready" }, Ct)).EnsureSuccessStatusCode();
+        return id;
+    }
+
+    private static async Task<HttpResponseMessage> DispatchToNewAsync(HttpClient client, long item, object body) =>
+        await client.PostAsJsonAsync($"/api/backlog/{item}/dispatch-to-new", body, Ct);
+
     private string MakeGitHubRepository(string owner, string name)
     {
         var bare = Path.Combine(_gitHub, owner, name + ".git");

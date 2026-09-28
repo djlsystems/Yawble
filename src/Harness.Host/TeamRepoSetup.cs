@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using Harness.Contracts;
+using Harness.Host.Auth;
 
 namespace Harness.Host;
 
@@ -89,6 +91,46 @@ public sealed class RepoSetupRefusedException(int status, object body, string me
     public int Status { get; } = status;
 
     public object Body { get; } = body;
+}
+
+/// <summary>
+/// A new team's checked repositories (<see cref="TeamRepoSetup.PlanNewTeamAsync"/>), and what
+/// creating it made of them. <see cref="AddRepoAsync"/> runs inside the create, after every check on
+/// the team and before any write, so a repository that cannot be made refuses the create; a create
+/// that fails after it calls <see cref="ForgetUnlessCreatedAsync"/> so nothing is left behind.
+/// </summary>
+public sealed class NewTeamRepos(TeamRepoSetup setup, RepoPlan plan, bool wantsLocal)
+{
+    /// <summary>The URLs the team is created with.</summary>
+    public IReadOnlyList<string> Repos => plan.Kept;
+
+    /// <summary>The team's local repository, once made or reused; null when it has none.</summary>
+    public TeamLocalRepository? LocalRepository { get; private set; }
+
+    /// <summary>The github.com repositories created for it.</summary>
+    public IReadOnlyList<string> CreatedOnGitHub { get; private set; } = [];
+
+    public async Task<string?> AddRepoAsync(string team, CancellationToken ct)
+    {
+        CreatedOnGitHub = await setup.CreateOnGitHubAsync(plan, ct);
+        if (!wantsLocal) return null;
+
+        LocalRepository = await setup.EnsureLocalAsync(team, ct);
+        return LocalRepository.Reference;
+    }
+
+    /// <summary>The <c>local-repo.created</c> tenant row, when the create made one.</summary>
+    public async Task LogAsync(TenantLogging audit, HttpContext context, string team, CancellationToken ct)
+    {
+        if (LocalRepository is not { Created: true } made) return;
+        await audit.WriteAsync(
+            context, TenantActions.LocalRepoCreated, made.Name, made.Name,
+            new { reference = made.Reference, defaultBranch = LocalRepos.InitialBranch, team }, ct);
+    }
+
+    /// <summary>A local repository made for a create that then failed is not left behind.</summary>
+    public Task ForgetUnlessCreatedAsync(bool teamCreated) =>
+        teamCreated ? Task.CompletedTask : setup.ForgetAsync(LocalRepository, CancellationToken.None);
 }
 
 /// <summary>What a checked list of URLs becomes: the URLs kept, whether the local repository is
@@ -267,6 +309,26 @@ public sealed class TeamRepoSetup(
         if (unresolved.Count > 0) throw await RefusalAsync(unresolved, person, ct);
 
         return new RepoPlan(kept, useLocal, create);
+    }
+
+    /// <summary>
+    /// The repositories of a team about to be created, checked: <paramref name="urls"/> and
+    /// <paramref name="upstreams"/> validated (400 as <see cref="ArgumentException"/>), then read and
+    /// answered by <see cref="PlanAsync"/>. ONE PATH FOR EVERY ROUTE THAT CREATES A TEAM -
+    /// <c>POST /api/teams</c> and backlog dispatch-to-new - so neither can skip the check or the
+    /// default. Nothing is created here; hand <see cref="NewTeamRepos.AddRepoAsync"/> to
+    /// <see cref="TeamRegistry.CreateAsync"/> as its <c>addRepo</c>.
+    /// </summary>
+    public async Task<NewTeamRepos> PlanNewTeamAsync(
+        IReadOnlyList<string>? urls, IReadOnlyDictionary<string, string>? upstreams,
+        IReadOnlyDictionary<string, string>? choices, bool person, bool? localRepository, CancellationToken ct)
+    {
+        teams().ValidateRepos(urls, upstreams);
+        var plan = await PlanAsync(urls ?? [], choices, person, alreadyAttached: [], ct);
+
+        // A team that ends up with no repository gets a local one named after it, unless the caller
+        // said not to; `use-local` asks for the same one in place of a URL.
+        return new NewTeamRepos(this, plan, plan.UseLocal || (plan.Kept.Count == 0 && localRepository != false));
     }
 
     /// <summary>
