@@ -1804,20 +1804,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         command.CommandText =
             $"""
-            SELECT
-                {BillableSum},
-                COALESCE(SUM(CASE
-                    WHEN ((json_extract(payload, '$.tokensIn') IS NOT NULL
-                      AND json_extract(payload, '$.tokensOut') IS NOT NULL)
-                      OR json_extract(payload, '$.tokensTotal') IS NOT NULL)
-                      AND COALESCE(json_extract(payload, '$.tokensSource'), '') <> $excluded
-                    THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(CASE
-                    WHEN (json_extract(payload, '$.tokensIn') IS NULL
-                      OR json_extract(payload, '$.tokensOut') IS NULL)
-                      AND json_extract(payload, '$.tokensTotal') IS NULL
-                      OR COALESCE(json_extract(payload, '$.tokensSource'), '') = $excluded
-                    THEN 1 ELSE 0 END), 0)
+            SELECT {BillableSum}, {MeasuredCount}
             FROM messages
             WHERE correlation_id = $id
               AND type IN ($completed, $failed)
@@ -1850,6 +1837,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         command.Parameters.AddWithValue("$completed", MessageTypes.Completed);
         command.Parameters.AddWithValue("$failed", MessageTypes.Failed);
         command.Parameters.AddWithValue("$excluded", UsageSource.ExcludedEstimate);
+        command.Parameters.AddWithValue("$noModel", UsageSource.NoModel);
 
         await using var reader = await command.ExecuteReaderAsync(ct);
 
@@ -1865,8 +1853,11 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     }
 
     /// <summary>
-    /// Measured and unmeasured, counted the way <see cref="SpendAsync"/> counts them. Shared by the
-    /// trigger spend so a trigger's figure cannot drift from a workflow's.
+    /// Measured and unmeasured runs, the two columns after <see cref="BillableSum"/>. Shared by the
+    /// workflow spend and the trigger spend so a trigger's figure cannot drift from a workflow's.
+    /// A row carrying <see cref="UsageSource.NoModel"/> ran no model (a plugin's run): it is MEASURED,
+    /// and <see cref="BillableSum"/> adds nothing for it because it carries no figures. Any other row
+    /// with no figures is unmeasured, never a zero. Binds <c>$excluded</c> and <c>$noModel</c>.
     /// </summary>
     private const string MeasuredCount =
         """
@@ -1875,12 +1866,14 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
               AND json_extract(payload, '$.tokensOut') IS NOT NULL)
               OR json_extract(payload, '$.tokensTotal') IS NOT NULL)
               AND COALESCE(json_extract(payload, '$.tokensSource'), '') <> $excluded
+              OR COALESCE(json_extract(payload, '$.tokensSource'), '') = $noModel
             THEN 1 ELSE 0 END), 0),
         COALESCE(SUM(CASE
-            WHEN (json_extract(payload, '$.tokensIn') IS NULL
+            WHEN ((json_extract(payload, '$.tokensIn') IS NULL
               OR json_extract(payload, '$.tokensOut') IS NULL)
               AND json_extract(payload, '$.tokensTotal') IS NULL
-              OR COALESCE(json_extract(payload, '$.tokensSource'), '') = $excluded
+              OR COALESCE(json_extract(payload, '$.tokensSource'), '') = $excluded)
+              AND COALESCE(json_extract(payload, '$.tokensSource'), '') <> $noModel
             THEN 1 ELSE 0 END), 0)
         """;
 
@@ -1933,6 +1926,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         command.Parameters.AddWithValue("$failed", MessageTypes.Failed);
         command.Parameters.AddWithValue("$handback", MessageTypes.Handback);
         command.Parameters.AddWithValue("$excluded", UsageSource.ExcludedEstimate);
+        command.Parameters.AddWithValue("$noModel", UsageSource.NoModel);
 
         await using var reader = await command.ExecuteReaderAsync(ct);
 

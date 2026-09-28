@@ -15,7 +15,9 @@ namespace Harness.Host;
 ///
 /// MEASURED ONLY. Spend is <see cref="InvocationUsage.BillableTokens"/>, summed by the log with the
 /// weights the workflow budget uses. A run that reported no usage is counted as UNMEASURED, beside
-/// the figure: it is never a zero and never an estimate, and it never convicts a cap.
+/// the figure: it is never a zero and never an estimate, and it never convicts a cap. A run that ran
+/// NO MODEL (a plugin's, <see cref="UsageSource.NoModel"/>) is not that: its cost is known, and it is
+/// counted as a measured run of 0.
 /// </summary>
 public sealed class TriggerCost(
     IMessageLog log,
@@ -182,8 +184,8 @@ public sealed class TriggerCost(
 
     /// <summary>
     /// One terminal row's <see cref="InvocationUsage.BillableTokens"/>, or null when it measured
-    /// nothing (no split and no combined total, or an excluded estimate) - the same rule the spend
-    /// SQL counts by.
+    /// nothing (no split and no combined total, or an excluded estimate); 0 for a run that ran no
+    /// model - the same rule the spend SQL counts by.
     /// </summary>
     public static long? BillableOf(string payload)
     {
@@ -199,6 +201,9 @@ public sealed class TriggerCost(
             {
                 return null;
             }
+
+            // A run that ran no model (a plugin's) is measured, and it cost nothing.
+            if (source.ValueKind == JsonValueKind.String && source.GetString() == UsageSource.NoModel) return 0;
 
             var tokensIn = Int(root, "tokensIn");
             var tokensOut = Int(root, "tokensOut");

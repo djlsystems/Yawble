@@ -19,6 +19,7 @@ import {
   instructionFieldText,
   cronPreviewForDraft,
   measuredCostLine,
+  NoModelCostLine,
   needsShortScheduleConfirmation,
   shortScheduleConfirmation,
   triggerDraftProblem,
@@ -299,8 +300,9 @@ function confirmSave() {
   emit('save', draft.value)
 }
 
-/** The cost line under the title - measured only, never a projection. */
+/** The cost line under the title - measured only, never a projection. A plugin runs no model. */
 const costLine = computed(() => {
+  if (props.memberKind === 'plugin') return NoModelCostLine
   if (props.measuredCostError) return `Measured cost not available: ${props.measuredCostError}`
   if (props.measuredCost === null) return 'Reading what its recent runs cost…'
   return measuredCostLine(props.measuredCost)

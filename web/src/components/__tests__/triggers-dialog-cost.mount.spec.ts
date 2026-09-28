@@ -148,6 +148,20 @@ describe('TriggersDialog, the measured cost line', () => {
     wrapper.unmount();
   });
 
+  it('says a plugin member runs no model, instead of a median', async () => {
+    vi.mocked(getMemberMeasuredCost).mockResolvedValue({
+      lastRuns: 4, measuredRuns: 4, unmeasuredRuns: 0, medianBillableTokens: 0, kind: 'plugin',
+    });
+    const wrapper = await mountDialog(TriggersDialog, { ...props, container: 'Echo', memberKind: 'plugin' });
+    await openNewTrigger();
+
+    const line = document.body.querySelector('.measured-cost')?.textContent ?? '';
+    expect(line).toContain('Runs no model: no token cost');
+    expect(line).not.toMatch(/median|not measured/i);
+
+    wrapper.unmount();
+  });
+
   it('says so when the cost could not be read, and guesses nothing', async () => {
     vi.mocked(getMemberMeasuredCost).mockRejectedValue(new Error('No such member.'));
     const wrapper = await mountDialog(TriggersDialog, props);

@@ -20,7 +20,8 @@ When you add or edit a trigger, the dialog shows what this member's recent runs 
 > Median 41,250 billable tokens per run, over its last 10 runs (7 measured, 3 not measured).
 
 - It is the **median billable tokens** of the member's last 10 runs (fewer when it has run fewer times), over the runs that reported their usage.
-- Runs that reported no usage are counted as **not measured**. They are never shown as zero cost and never guessed at. A plugin run reports no usage, so a plugin's runs are all not measured.
+- Runs that reported no usage are counted as **not measured**. They are never shown as zero cost and never guessed at.
+- **A plugin member's line says "Runs no model: no token cost"** instead of a median. A plugin runs no model, so its token cost is known, and it is zero: its run's terminal row carries `tokensSource: "none"`, the reason no token figures follow. The trigger's spent-today, the member's recent cost and the workflow spend all count such a run as a **measured run of 0 billable tokens**, not as not measured. Only a plugin's run is marked this way; an agent run that reports no usage stays not measured. Plugin runs recorded before the marker existed carry no marker and still count as not measured.
 - A member with no measured run says **No runs measured yet**.
 - There is no projected daily figure. How often a trigger will fire, and what each fire will cost, is not known in advance, so the dialog does not estimate it.
 
