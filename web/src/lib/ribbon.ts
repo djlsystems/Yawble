@@ -56,6 +56,9 @@ export interface RibbonSpec {
  */
 export const DocumentsAction = 'documents-manage';
 
+/** Admin > Plugins, the installed plugins and installing one from a folder inside the instance. */
+export const PluginsAction = 'admin-plugins';
+
 /** Admin > Settings, the instance-wide Tenant Settings dialog. */
 export const TenantSettingsAction = 'admin-settings';
 
@@ -129,6 +132,8 @@ export const Ribbon: RibbonSpec = {
         // `AgentsAction`/`SkillsAction` constants are spelled with it. The server refuses a
         // machine principal on `GET /api/diagnostics` outright.
         { kind: 'button', action: 'admin-diagnostics', label: 'Diagnostics', icon: 'monitor_heart', size: 'large' },
+        // DIRECTLY BEFORE Settings: what is installed on the instance, beside how it is configured.
+        { kind: 'button', action: PluginsAction, label: 'Plugins', icon: 'extension', size: 'large' },
         // THE GEAR. Every instance-wide setting - the WIP limit among them - in one dialog. The
         // Active Team group's own Settings is that team's; this one names no team.
         {

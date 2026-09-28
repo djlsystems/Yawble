@@ -46,7 +46,15 @@ import { hostFileBrowser, type HostBrowser } from '../lib/fileSystemSource';
  * out to be needed.
  */
 
-withDefaults(defineProps<{ mode?: 'folder' }>(), { mode: 'folder' });
+/**
+ * `instanceOnly` offers the instance's own data root and no other root - for a caller whose Host
+ * route refuses a path anywhere else, so a person is never led to a folder that cannot be used.
+ */
+const props = withDefaults(defineProps<{ mode?: 'folder'; instanceOnly?: boolean; title?: string }>(), {
+  mode: 'folder',
+  instanceOnly: false,
+  title: 'Choose a folder',
+});
 
 const open = defineModel<boolean>({ required: true });
 
@@ -82,7 +90,7 @@ const atRoots = computed(() => here.value === '');
  */
 function goToRoots() {
   here.value = null;
-  browser.value = hostFileBrowser();
+  browser.value = hostFileBrowser({ instanceOnly: props.instanceOnly });
 }
 
 /**
@@ -113,9 +121,9 @@ watch(open, (showing) => {
     <q-card class="host-path-picker-card os-dialog-md">
       <q-card-section class="q-pb-none row items-center">
         <div>
-          <div class="os-dialog-title">Choose a folder</div>
+          <div class="os-dialog-title">{{ title }}</div>
           <div class="text-caption os-text-muted">
-            {{ activeRoot ? activeRoot.name : 'A folder on the Host itself' }}
+            {{ activeRoot ? activeRoot.name : instanceOnly ? 'A folder inside this instance' : 'A folder on the Host itself' }}
           </div>
         </div>
         <q-space />

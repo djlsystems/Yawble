@@ -17,7 +17,7 @@ vi.mock('../../lib/useAgentInstallations', () => ({
 
 import RibbonBar from '../RibbonBar.vue';
 import RibbonMobileMenu from '../RibbonMobileMenu.vue';
-import { DocumentsAction, Ribbon, ribbonEntries } from '../../lib/ribbon';
+import { DocumentsAction, PluginsAction, Ribbon, TenantSettingsAction, ribbonEntries } from '../../lib/ribbon';
 import '../../test/mountQuasar';
 
 const EntryWidth = 100;
@@ -108,5 +108,31 @@ describe('the mobile drawer', () => {
     for (const entry of entries) {
       if (entry.item.label) expect(wrapper.text()).toContain(entry.item.label);
     }
+  });
+});
+
+describe('the Admin group', () => {
+  /** Plugins sits DIRECTLY before Settings, with the `extension` icon, and opens the Plugins screen. */
+  it('has Plugins directly before Settings, and runs it from the bar', async () => {
+    const wrapper = await render(entries.length * EntryWidth);
+
+    const admin = entries.filter((entry) => entry.tab.id === 'admin').map((entry) => entry.item);
+    const plugins = admin.findIndex((item) => item.action === PluginsAction);
+    expect(plugins).toBeGreaterThan(-1);
+    expect(admin[plugins + 1]?.action).toBe(TenantSettingsAction);
+    expect(admin[plugins]).toMatchObject({ label: 'Plugins', icon: 'extension' });
+
+    // As rendered: the button labelled Plugins is the one before the Admin group's Settings.
+    const labels = wrapper.findAll('.ribbon-entry').map((entry) => {
+      const block = entry.find('.block');
+      return block.exists() ? block.text().trim() : '';
+    });
+    const rendered = labels.lastIndexOf('Plugins');
+    expect(rendered).toBeGreaterThan(-1);
+    expect(labels[rendered + 1]).toBe('Settings');
+    expect(wrapper.findAll('.ribbon-entry')[rendered]!.html()).toContain('extension');
+
+    await wrapper.findAll('.ribbon-entry')[rendered]!.find('button').trigger('click');
+    expect(wrapper.emitted('action')).toEqual([[PluginsAction]]);
   });
 });
