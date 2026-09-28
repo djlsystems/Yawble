@@ -34,6 +34,7 @@
     ]
   },
   "skills": ["skills/sample-echo.md"],
+  "requires": ["dotnet"],
 
   "platforms": null,
   "actions": null,

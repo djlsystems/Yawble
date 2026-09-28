@@ -897,9 +897,21 @@ public static class BuiltInSkills
 
             The manifest names: `id` (stable forever; members name it `plugin:<id>`), `version`,
             `protocol` (`harness.member/1`), the executable, `timeoutSeconds` (an idle clock: this long
-            with no progress ends the run), `config` fields (each with a type - string, number or
-            bool - and optionally an enum, a default and `required`), `secrets` by logical key name,
-            `events.publishes` (each event's suffix and fields), and its skill files.
+            with no progress ends the run), `config` fields (each with a type - string, number, bool
+            or list - and optionally an enum, a default and `required`), `secrets` by logical key
+            name, `events.publishes` (each event's suffix and fields), its skill files, and
+            `requires`.
+
+            A `list` setting is a list of strings, such as an allowlist of addresses or a set of
+            scopes. Its default is an empty list unless the spec gives one, and an `enum` on it limits
+            each item. A person edits it as chips. Use it wherever a setting holds several values;
+            never pack them into one string.
+
+            `requires` names the runtimes the plugin needs from the image, from exactly `dotnet`,
+            `node` and `python3`; a self-contained binary needs none. The platform refuses a plugin
+            whose runtime is not installed, naming it, when it is installed or rescanned, so its first
+            run never fails for that. Anything else the plugin needs ships inside its own folder. The
+            spec states `requires` for the language chosen.
 
             A run reads one request and writes records, one per line:
 
@@ -922,6 +934,11 @@ public static class BuiltInSkills
             value. The value reaches the plugin only on its input when a run starts. The platform
             redacts bound values from what a plugin writes, but that is a net, not a guarantee: the
             plugin must never write a secret out.
+
+            A person can change a plugin member's settings and secret bindings after hire, in the
+            member's settings; the change is checked exactly as a hire is and takes effect on the
+            member's next run. A Manager cannot change them after hire: to run a plugin with other
+            settings, it hires another member.
 
             ## 4. One plugin, several members
 
