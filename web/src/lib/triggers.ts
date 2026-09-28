@@ -671,6 +671,37 @@ export function outcomeBadge(outcome: string | null | undefined): OutcomeBadge {
   }
 }
 
+/**
+ * What the daily cap is holding, in one line: a schedule asleep until the next day says when it
+ * resumes, in its own timezone (UTC when it has none); otherwise how many fires the cap skipped
+ * today. Null when the cap is holding nothing.
+ */
+export function cappedLine(row: Pick<TeamTrigger, 'cappedUntil' | 'skippedToday' | 'timezone'>): string | null {
+  const until = row.cappedUntil ? new Date(row.cappedUntil) : null
+  if (until && !Number.isNaN(until.getTime())) {
+    const zone = row.timezone && isValidTimezone(row.timezone) ? row.timezone : 'UTC'
+    return `Capped until ${formatZonedMinute(until, zone)}`
+  }
+
+  return row.skippedToday ? `skipped today: ${row.skippedToday}` : null
+}
+
+/** `2026-09-29 00:00 Asia/Tokyo`: an instant to the minute, as the clock in `zone` reads it. */
+function formatZonedMinute(instant: Date, zone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(instant)
+  const read = (name: string) => parts.find((p) => p.type === name)?.value ?? ''
+
+  return `${read('year')}-${read('month')}-${read('day')} ${read('hour')}:${read('minute')} ${zone}`
+}
+
 export function isValidTimezone(zone: string): boolean {
   try {
     Intl.DateTimeFormat('en-US', { timeZone: zone })

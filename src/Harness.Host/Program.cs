@@ -2944,7 +2944,6 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
     AgentCatalog catalog,
     EffectiveSubscriptions effective,
     TriggerWakeSignal wake,
-    TenantLogging audit,
     HttpContext context,
     CancellationToken ct) =>
 {
@@ -3074,7 +3073,40 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
         return Results.BadRequest(new { error = filterRefusal });
     }
 
-    await schedules.SaveAsync(candidate, ct);
+    // A PERSON'S CHANGE WAKES A SCHEDULE ASLEEP ON ITS CAP. Raised above today's spend, or cleared,
+    // the cap no longer stops it, so it fires at its next occurrence from now rather than tomorrow.
+    // Lowering it wakes nothing. An edit to the schedule itself has already re-armed it from now
+    // (see ApplySchedulePatch), and an explicit `nextDueAt` still wins.
+    var now = DateTimeOffset.UtcNow;
+    if (patch.HasDailyTokenCap
+        && !patch.HasNextDueAt
+        && existing.LastOutcome == "capped"
+        && Enum.TryParse<TriggerKind>(candidate.Kind, ignoreCase: true, out var clockKind)
+        && clockKind is TriggerKind.Cron or TriggerKind.Every or TriggerKind.Once)
+    {
+        var spent = await cost.SpentTodayAsync(existing, now, ct);
+        if (TriggerCost.CapReached(existing, spent) && !TriggerCost.CapReached(candidate, spent))
+        {
+            candidate = candidate with
+            {
+                NextDueAt = FirstOccurrence(
+                    candidate.Kind, candidate.Expression, candidate.Timezone, candidate.IntervalSeconds, candidate.FireAt, now),
+            };
+        }
+    }
+
+    // The row and its tenant_events row are one transaction: a change with no record of who made
+    // it does not land.
+    await schedules.SaveAsync(
+        candidate,
+        new TriggerAudit(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+            context.User.FindFirstValue(ClaimTypes.Email),
+            TenantActions.ScheduleChanged,
+            candidate.Id,
+            candidate.Name,
+            JsonSerializer.Serialize(new { team = candidate.Team, member = candidate.Container })),
+        ct);
 
     // The edit can change EITHER the trigger's event type/enabled state OR which container holds
     // it. Both sides are recomputed: the target container (which may have gained or lost this
@@ -3093,14 +3125,6 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
     // sit unnoticed for a minute - which reads as the feature being broken rather than
     // slow. Signalled AFTER the write, so waking early cannot read a row that is not there.
     wake.Signal();
-
-    await audit.WriteAsync(
-        context,
-        TenantActions.ScheduleChanged,
-        candidate.Id,
-        candidate.Name,
-        new { team = candidate.Team, member = candidate.Container },
-        ct);
 
     return Results.Ok(await cost.ViewAsync(candidate, DateTimeOffset.UtcNow, ct));
 })
@@ -7390,8 +7414,10 @@ internal static class WatchDescriptions
     public const string DailyTokenCap =
         "Billable tokens this trigger's runs may spend per day in its timezone (UTC when it has "
         + "none), the Manager runs they woke included; measured usage only. A fire once it is reached "
-        + "is skipped with `schedule.skipped` (reason `daily token cap reached`) and fires again the "
-        + "next day. A whole number of at least 1.";
+        + "is skipped: the first skip of the day writes `schedule.skipped` (reason `daily token cap "
+        + "reached`, and for a schedule `; resumes at <time>`) and a tenant row, and later ones are "
+        + "only counted. A schedule sleeps until its first occurrence of the next day; raising the "
+        + "cap above today's spend or clearing it wakes it. A whole number of at least 1.";
 }
 
 /// <summary>"Test this folder".</summary>

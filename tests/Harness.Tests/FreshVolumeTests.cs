@@ -35,13 +35,13 @@ public sealed class FreshVolumeTests : IDisposable
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
     /// settings; `auth-008` is a plugin member's configuration and secret bindings; `auth-009` is who
     /// last set a member's own instructions, and when; `auth-010` is a trigger's wake choice and daily
-    /// token cap.
+    /// token cap; `auth-011` is how many fires the cap skipped today.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "skill-001", "skill-002", "skill-003", "backlog-001"],
+            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "skill-001", "skill-002", "skill-003", "backlog-001"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -53,7 +53,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "backlog-001", "messages-001", "skill-001", "skill-002", "skill-003"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "backlog-001", "messages-001", "skill-001", "skill-002", "skill-003"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -253,6 +253,48 @@ public sealed class FreshVolumeTests : IDisposable
 
         Assert.Equal(WakeManagerPolicy.Never, saved.WakeManager);
         Assert.Equal(50_000, saved.DailyTokenCap);
+    }
+
+    /// <summary>
+    /// A trigger made before `auth-011` has skipped nothing today, and a save never writes the
+    /// count: only a capped skip does.
+    /// </summary>
+    [Fact]
+    public async Task A_trigger_from_before_the_capped_skip_step_has_skipped_nothing_today()
+    {
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "auth-011")], ct: Ct);
+
+        await ExecuteAsync(
+            """
+            INSERT INTO teams (id, created_utc) VALUES ('old-team', '2026-09-01T00:00:00Z');
+            INSERT INTO triggers
+                (id, team, container, name, instruction, kind, interval_seconds, idle_only, enabled,
+                 missed_count, created_at, created_by, daily_token_cap)
+            VALUES
+                ('t1', 'old-team', 'Manager', 'Poll', 'look', 'event', NULL, 1, 1, 0,
+                 '2026-09-01T00:00:00Z', 'person', 1000);
+            """);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        var store = new SqliteTriggerStore(Database);
+        var old = (await store.FindAsync("t1", Ct))!;
+        Assert.Null(old.CappedSkipsDay);
+        Assert.Equal(0, old.CappedSkips);
+
+        var day = new DateTimeOffset(2026, 9, 28, 0, 0, 0, TimeSpan.Zero);
+        Assert.Equal(1, await store.CountCappedSkipAsync("t1", day, rearm: false, nextDueAt: null, Ct));
+        Assert.Equal(2, await store.CountCappedSkipAsync("t1", day, rearm: false, nextDueAt: null, Ct));
+
+        // A stale whole-row save does not put the count back.
+        await store.SaveAsync(old with { Name = "Renamed" }, Ct);
+        var saved = (await store.FindAsync("t1", Ct))!;
+        Assert.Equal(2, saved.CappedSkips);
+        Assert.Equal(day, saved.CappedSkipsDay);
+
+        // The next day counts from one.
+        Assert.Equal(1, await store.CountCappedSkipAsync("t1", day.AddDays(1), rearm: false, nextDueAt: null, Ct));
     }
 
     [Fact]

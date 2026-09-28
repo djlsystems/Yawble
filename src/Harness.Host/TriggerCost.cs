@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Harness.Containers;
 using Harness.Contracts;
-using Harness.Host.Auth;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
 
@@ -22,7 +21,6 @@ namespace Harness.Host;
 public sealed class TriggerCost(
     IMessageLog log,
     ITriggerStore triggers,
-    TenantLogging tenant,
     IOptions<JsonOptions> json)
 {
     public const string WakeManagerRefusal =
@@ -35,7 +33,9 @@ public sealed class TriggerCost(
     public const string SpendDescription =
         "`spentToday` (`billableTokens`, `measuredRuns`, `unmeasuredRuns`: what the runs it started "
         + "today in its timezone cost, the Manager runs they woke included; an unmeasured run is "
-        + "counted as such, never as zero) and `capReachedToday`.";
+        + "counted as such, never as zero), `capReachedToday`, `cappedUntil` (a schedule asleep on "
+        + "its cap: the time it resumes, else null) and `skippedToday` (fires the cap skipped today; "
+        + "only the first was logged).";
 
     /// <summary>How many of a member's latest runs the dialog's measured cost looks at.</summary>
     public const int RecentRuns = 10;
@@ -51,20 +51,62 @@ public sealed class TriggerCost(
     /// </summary>
     public static DateTimeOffset StartOfDay(string? timezone, DateTimeOffset now)
     {
-        var zone = TimeZoneInfo.Utc;
+        var zone = ZoneOf(timezone);
+        return Midnight(zone, TimeZoneInfo.ConvertTime(now, zone).Date);
+    }
+
+    /// <summary>Midnight at the end of today in <paramref name="timezone"/>: the start of the next
+    /// day by the same boundary <see cref="StartOfDay"/> draws.</summary>
+    public static DateTimeOffset StartOfNextDay(string? timezone, DateTimeOffset now)
+    {
+        var zone = ZoneOf(timezone);
+        return Midnight(zone, TimeZoneInfo.ConvertTime(now, zone).Date.AddDays(1));
+    }
+
+    /// <summary>
+    /// When a clock trigger capped at <paramref name="now"/> fires again: its first occurrence on or
+    /// after the start of the next day in its timezone, in UTC. <paramref name="next"/> is the
+    /// occurrence it would have fired at next; an every-N with no anchor keeps that phase. Null when
+    /// it has no occurrence left (a one-off).
+    /// </summary>
+    public static DateTimeOffset? ResumeAt(TriggerRow row, DateTimeOffset now, DateTimeOffset? next)
+    {
+        if (next is null || !Enum.TryParse<TriggerKind>(row.Kind, ignoreCase: true, out var kind)) return null;
+
+        var boundary = StartOfNextDay(row.Timezone, now);
+        if (next.Value >= boundary) return next.Value.ToUniversalTime();
+
+        var anchor = kind == TriggerKind.Every ? row.FireAt ?? next : row.FireAt;
+        return Triggers.NextOccurrence(
+            kind, row.Expression, row.Timezone, row.IntervalSeconds, anchor, boundary.AddTicks(-1))?.ToUniversalTime();
+    }
+
+    /// <summary>The skip reason of a schedule asleep on its cap: when it resumes, in its own
+    /// timezone's offset.</summary>
+    public static string CapReason(string? timezone, DateTimeOffset resumesAt) =>
+        $"{MessageTypes.ScheduleSkippedCapReason}; resumes at "
+        + TimeZoneInfo.ConvertTime(resumesAt, ZoneOf(timezone))
+            .ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture);
+
+    private static TimeZoneInfo ZoneOf(string? timezone)
+    {
         if (!string.IsNullOrWhiteSpace(timezone))
         {
             try
             {
-                zone = TimeZoneInfo.FindSystemTimeZoneById(timezone);
+                return TimeZoneInfo.FindSystemTimeZoneById(timezone);
             }
             catch (Exception exception) when (exception is TimeZoneNotFoundException or InvalidTimeZoneException)
             {
             }
         }
 
-        var local = TimeZoneInfo.ConvertTime(now, zone);
-        var midnight = DateTime.SpecifyKind(local.Date, DateTimeKind.Unspecified);
+        return TimeZoneInfo.Utc;
+    }
+
+    private static DateTimeOffset Midnight(TimeZoneInfo zone, DateTime date)
+    {
+        var midnight = DateTime.SpecifyKind(date, DateTimeKind.Unspecified);
 
         while (zone.IsInvalidTime(midnight)) midnight = midnight.AddMinutes(15);
 
@@ -80,10 +122,15 @@ public sealed class TriggerCost(
 
     /// <summary>
     /// Whether <paramref name="row"/>'s next fire is stopped by its daily cap, and when it is, the
-    /// skip recorded: a `schedule.skipped` row with <see cref="MessageTypes.ScheduleSkippedCapReason"/>,
-    /// the trigger's outcome `capped`, and a `tenant_events` row. The caller fires nothing.
-    /// <paramref name="nextDueAt"/> is what the sweep re-arms a clock trigger to; null for an event
-    /// or folder trigger, whose due time is not this fire's to move.
+    /// skip recorded. The caller fires nothing.
+    ///
+    /// SAID ONCE A DAY. The first skip of the day writes a `schedule.skipped` row and a
+    /// `tenant_events` row and sets the outcome `capped`; every later one that day is only counted
+    /// (`skippedToday`). A clock trigger also SLEEPS: its stored `next_due_at` becomes its first
+    /// occurrence of the next day (<see cref="ResumeAt"/>), and the reason names that time. Nothing
+    /// is held in memory, so a restart waits for the stored time like any other.
+    /// <paramref name="nextDueAt"/> is the occurrence the sweep would re-arm a clock trigger to;
+    /// null for an event or folder trigger, whose due time is not this fire's to move.
     /// </summary>
     public async Task<bool> SkipIfCappedAsync(
         TriggerRow row,
@@ -98,44 +145,46 @@ public sealed class TriggerCost(
         var spent = await SpentTodayAsync(row, now, ct);
         if (!CapReached(row, spent)) return false;
 
-        var source = TriggerKindIsClock(row.Kind) ? $"schedule:{row.Id}" : $"trigger:{row.Id}";
+        var clock = TriggerKindIsClock(row.Kind);
+        var resumesAt = clock ? ResumeAt(row, now, nextDueAt) : null;
+
+        var skippedToday = await triggers.CountCappedSkipAsync(
+            row.Id, StartOfDay(row.Timezone, now), rearm: clock, resumesAt, ct);
+        if (skippedToday > 1) return true;
+
+        var reason = resumesAt is { } resumes ? CapReason(row.Timezone, resumes) : MessageTypes.ScheduleSkippedCapReason;
+        var source = clock ? $"schedule:{row.Id}" : $"trigger:{row.Id}";
         var skipped = await log.AppendAsync(
             new NewMessage(
                 MessageTypes.ScheduleSkipped,
                 JsonSerializer.Serialize(new
                 {
                     member = member.ToString(),
-                    reason = MessageTypes.ScheduleSkippedCapReason,
+                    reason,
                 }),
                 source,
                 cause),
             ct);
 
-        if (TriggerKindIsClock(row.Kind))
-        {
-            await triggers.RecordOutcomeAsync(row.Id, firedAt: null, nextDueAt, "capped", skipped.Seq, row.MissedCount, ct);
-        }
-        else
-        {
-            await triggers.RecordSkipAsync(row.Id, "capped", skipped.Seq, ct);
-        }
-
-        await tenant.WriteAsAsync(
-            source,
-            actorEmail: null,
-            TenantActions.ScheduleSkipped,
+        await triggers.RecordCappedSkipAsync(
             row.Id,
-            row.Name,
-            new
-            {
-                team = member.Team,
-                container = member.Name,
-                reason = MessageTypes.ScheduleSkippedCapReason,
-                dailyTokenCap = row.DailyTokenCap,
-                spentToday = spent.TokensSpent,
-                skippedAt = now.ToString("O", CultureInfo.InvariantCulture),
-                nextDueAt = nextDueAt?.ToString("O", CultureInfo.InvariantCulture),
-            },
+            skipped.Seq,
+            new TriggerAudit(
+                source,
+                ActorEmail: null,
+                TenantActions.ScheduleSkipped,
+                row.Id,
+                row.Name,
+                JsonSerializer.Serialize(new
+                {
+                    team = member.Team,
+                    container = member.Name,
+                    reason,
+                    dailyTokenCap = row.DailyTokenCap,
+                    spentToday = spent.TokensSpent,
+                    skippedAt = now.ToString("O", CultureInfo.InvariantCulture),
+                    nextDueAt = (clock ? resumesAt : null)?.ToString("O", CultureInfo.InvariantCulture),
+                })),
             ct);
 
         return true;
@@ -154,7 +203,24 @@ public sealed class TriggerCost(
             ["measuredRuns"] = spent.RunsWithMeasuredUsage,
             ["unmeasuredRuns"] = spent.RunsWithoutUsage,
         };
-        view["capReachedToday"] = CapReached(row, spent);
+        var reached = CapReached(row, spent);
+        view["capReachedToday"] = reached;
+
+        // Asleep on the cap: a schedule whose last fire the cap skipped, still over it today, and
+        // due later. A cap raised or cleared since ends it, and so does the next day.
+        view["cappedUntil"] = TriggerKindIsClock(row.Kind)
+            && reached
+            && row.LastOutcome == "capped"
+            && row.NextDueAt is { } due
+            && due > now
+                ? due.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)
+                : null;
+
+        view["skippedToday"] = row.CappedSkipsDay == StartOfDay(row.Timezone, now) ? row.CappedSkips : 0;
+
+        // The count's own columns are read through `skippedToday`, which knows which day they are.
+        view.Remove("cappedSkipsDay");
+        view.Remove("cappedSkips");
 
         return view;
     }

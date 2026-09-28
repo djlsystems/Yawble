@@ -22,6 +22,7 @@ import type {
 } from '../api/types'
 import {
   builtInWakeSources,
+  cappedLine,
   createTriggerRequestFromDraft,
   folderPollSummary,
   instructionWakeSource,
@@ -315,6 +316,10 @@ watch(open, (showing) => {
                 </q-item-label>
                 <q-item-label v-if="isFolder(row) && row.lastPollError" caption class="text-negative folder-poll-error">
                   {{ row.lastPollError }}
+                </q-item-label>
+                <!-- What the daily cap is holding: when a schedule resumes, or how many fires it skipped. -->
+                <q-item-label v-if="cappedLine(row)" caption class="trigger-capped text-negative">
+                  {{ cappedLine(row) }}
                 </q-item-label>
                 <!-- Spent today against the cap; runs that reported no usage are said as such. -->
                 <q-item-label

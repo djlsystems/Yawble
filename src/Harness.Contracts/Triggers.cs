@@ -65,7 +65,28 @@ public sealed record TriggerRow(
 
     /// <summary>Billable tokens this trigger's runs may spend per day in its timezone, the Manager
     /// runs they woke included. NULL is no cap.</summary>
-    long? DailyTokenCap = null);
+    long? DailyTokenCap = null,
+
+    /// <summary>The start of the day, in the trigger's timezone, that <see cref="CappedSkips"/>
+    /// counts. Written only by <see cref="ITriggerStore.CountCappedSkipAsync"/>; a save never
+    /// touches it.</summary>
+    DateTimeOffset? CappedSkipsDay = null,
+
+    /// <summary>How many fires the daily cap skipped on <see cref="CappedSkipsDay"/>. Only the first
+    /// of them wrote a `schedule.skipped` row and a tenant row.</summary>
+    int CappedSkips = 0);
+
+/// <summary>
+/// The `tenant_events` row a trigger write appends in the SAME transaction as the write, so a
+/// change with no record of it cannot land.
+/// </summary>
+public sealed record TriggerAudit(
+    string? ActorId,
+    string? ActorEmail,
+    string Action,
+    string Subject,
+    string? SubjectName,
+    string? Detail);
 
 /// <summary>
 /// What a folder watch remembers between polls that the trigger row does not show: the listing the
@@ -93,6 +114,10 @@ public sealed record FolderPollRecord(
 public interface ITriggerStore
 {
     Task SaveAsync(TriggerRow row, CancellationToken ct = default);
+
+    /// <summary>Saves <paramref name="row"/> and appends <paramref name="audit"/> to
+    /// `tenant_events` in one transaction: both land or neither does.</summary>
+    Task SaveAsync(TriggerRow row, TriggerAudit audit, CancellationToken ct = default);
     Task<IReadOnlyList<TriggerRow>> ListForTeamAsync(string team, CancellationToken ct = default);
     Task<TriggerRow?> FindAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<TriggerRow>> DueAsync(DateTimeOffset now, CancellationToken ct = default);
@@ -139,6 +164,21 @@ public interface ITriggerStore
     /// touching only last_outcome and last_seq. Its due time and last fire are not this skip's.
     /// </summary>
     Task RecordSkipAsync(string id, string outcome, long seq, CancellationToken ct = default);
+
+    /// <summary>
+    /// Counts one fire skipped for the daily cap on the day starting <paramref name="dayStart"/>,
+    /// and returns how many that day has skipped, this one included - 1 means it is the first,
+    /// the one that is logged. Sets the outcome `capped`. A clock trigger (<paramref name="rearm"/>)
+    /// also stores <paramref name="nextDueAt"/>, the time it sleeps until; an event or folder
+    /// trigger's due time is not the skip's to move. One statement, so two skips cannot both be
+    /// the first.
+    /// </summary>
+    Task<int> CountCappedSkipAsync(
+        string id, DateTimeOffset dayStart, bool rearm, DateTimeOffset? nextDueAt, CancellationToken ct = default);
+
+    /// <summary>Records the logged capped skip's row as the trigger's last, and appends
+    /// <paramref name="audit"/> to `tenant_events`, in one transaction.</summary>
+    Task RecordCappedSkipAsync(string id, long seq, TriggerAudit audit, CancellationToken ct = default);
 
     Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default);
     Task DeleteAsync(string id, CancellationToken ct = default);

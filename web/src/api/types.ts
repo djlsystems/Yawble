@@ -491,6 +491,13 @@ export interface TeamTrigger {
 
   /** The cap was reached today, so fires are skipped until the next day. Read-only. */
   capReachedToday?: boolean
+
+  /** A schedule asleep on its daily cap: the instant it resumes (its first occurrence of the next
+   *  day in its timezone). Null or absent when the cap is not holding it. Read-only. */
+  cappedUntil?: string | null
+
+  /** How many fires the daily cap skipped today. Only the first was logged. Read-only. */
+  skippedToday?: number
 }
 
 /**
