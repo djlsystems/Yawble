@@ -1467,6 +1467,16 @@ public sealed class MemberRuntime : IAsyncDisposable
                     payload = payload[..^1] + $",\"{PayloadFields.Quiet}\":true}}";
                 }
 
+                // THE TRIGGER'S WAKE CHOICE, the same way: one key, only when the delivery this row
+                // closes is a trigger's fire that chose other than `always`. The pump passes over
+                // the Manager on it; see WakeManagerPolicy. A Manager's `tell` and a person's never
+                // carry it, so work somebody is waiting on wakes as it always has.
+                if (WakeManagerPolicy.OfInstruction(message.Source, message.Payload) is { } wakeManager)
+                {
+                    payload = payload[..^1]
+                        + $",\"{PayloadFields.WakeManager}\":{JsonSerializer.Serialize(wakeManager)}}}";
+                }
+
                 await SafeAppendAsync(new NewMessage(
                     result.Succeeded ? MessageTypes.Completed : MessageTypes.Failed,
                     payload,

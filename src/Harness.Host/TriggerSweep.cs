@@ -18,7 +18,8 @@ public sealed class TriggerSweep(
     IMessageLog log,
     TenantLogging tenant,
     FolderWatch folders,
-    ILogger<TriggerSweep> logger)
+    ILogger<TriggerSweep> logger,
+    TriggerCost? cost = null)
 {
     public async Task FireDueAsync(DateTimeOffset now, CancellationToken ct = default)
     {
@@ -173,10 +174,18 @@ public sealed class TriggerSweep(
             return;
         }
 
+        // THE DAILY CAP, asked last: a skip for a paused team or a busy member says why better,
+        // and neither costs anything. Skipped, re-armed, and fired again on its next due time -
+        // which, once the day has turned in the trigger's timezone, counts from zero.
+        if (cost is not null && await cost.SkipIfCappedAsync(row, found, now, next, cause: null, ct))
+        {
+            return;
+        }
+
         var instruction = await log.AppendAsync(
             new NewMessage(
                 MessageTypes.InstructionFor(found),
-                JsonSerializer.Serialize(new { instruction = row.Instruction }),
+                WakeManagerPolicy.InstructionPayload(row.Instruction, row.WakeManager),
                 source),
             ct);
 

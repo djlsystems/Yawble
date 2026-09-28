@@ -333,6 +333,27 @@ public interface IMessageLog
     Task<WorkflowSpend> GetSpendSinceNudgeAsync(long correlationId, CancellationToken ct = default);
 
     /// <summary>
+    /// What one trigger's runs have cost since <paramref name="since"/>: the runs whose instruction
+    /// was appended by one of <paramref name="sources"/> (`schedule:&lt;id&gt;`, `trigger:&lt;id&gt;`)
+    /// at or after that instant, plus the runs those runs WOKE - a Manager's run closing the
+    /// `completed`, `failed` or `handback` row of one of them. Weighted exactly as
+    /// <see cref="GetWorkflowSpendAsync"/> weights a run (<see cref="InvocationUsage.BillableTokens"/>);
+    /// a run that reported no usage is counted in <see cref="WorkflowSpend.RunsWithoutUsage"/> and
+    /// adds nothing, never a zero and never an estimate. A batched run's extra rows
+    /// (`usageCountedOn`) are skipped, so a run is counted once.
+    /// </summary>
+    Task<WorkflowSpend> GetTriggerSpendAsync(
+        IReadOnlyCollection<string> sources, DateTimeOffset since, CancellationToken ct = default);
+
+    /// <summary>
+    /// The terminal rows of <paramref name="member"/>'s last <paramref name="max"/> runs, newest
+    /// first: its `completed` and `failed` rows that carry their run's figures (or its unknown
+    /// usage), never a batched run's extra rows. What the trigger dialog's measured cost reads.
+    /// </summary>
+    Task<IReadOnlyList<Message>> ReadRecentRunsAsync(
+        string member, int max, CancellationToken ct = default);
+
+    /// <summary>
     /// Every message after <paramref name="afterSeq"/>, oldest first, at most
     /// <paramref name="max"/>, REGARDLESS OF TYPE.
     ///

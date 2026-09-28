@@ -34,13 +34,14 @@ public sealed class FreshVolumeTests : IDisposable
     /// agent; `auth-004` is team additional instructions; `auth-005` is the folder-trigger columns;
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
     /// settings; `auth-008` is a plugin member's configuration and secret bindings; `auth-009` is who
-    /// last set a member's own instructions, and when.
+    /// last set a member's own instructions, and when; `auth-010` is a trigger's wake choice and daily
+    /// token cap.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "skill-001", "skill-002", "skill-003", "backlog-001"],
+            ["messages-001", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "skill-001", "skill-002", "skill-003", "backlog-001"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -52,7 +53,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "backlog-001", "messages-001", "skill-001", "skill-002", "skill-003"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "backlog-001", "messages-001", "skill-001", "skill-002", "skill-003"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -216,6 +217,42 @@ public sealed class FreshVolumeTests : IDisposable
         Assert.Equal(
             new SystemPromptSetter("person@example.test", "person", at),
             Assert.Single(await store.MembersAsync(Ct)).SystemPromptSetBy);
+    }
+
+    /// <summary>
+    /// A trigger made before `auth-010` keeps `always` - today's behaviour - and no cap, so nothing
+    /// changes under anyone until a person chooses otherwise. A new row round-trips both.
+    /// </summary>
+    [Fact]
+    public async Task A_trigger_from_before_the_wake_choice_step_keeps_always_and_no_cap()
+    {
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "auth-010")], ct: Ct);
+
+        await ExecuteAsync(
+            """
+            INSERT INTO teams (id, created_utc) VALUES ('old-team', '2026-09-01T00:00:00Z');
+            INSERT INTO triggers
+                (id, team, container, name, instruction, kind, interval_seconds, idle_only, enabled,
+                 missed_count, created_at, created_by)
+            VALUES
+                ('t1', 'old-team', 'Manager', 'Poll', 'look', 'every', 300, 1, 1, 0,
+                 '2026-09-01T00:00:00Z', 'person');
+            """);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        var store = new SqliteTriggerStore(Database);
+        var old = (await store.FindAsync("t1", Ct))!;
+
+        Assert.Equal(WakeManagerPolicy.Always, old.WakeManager);
+        Assert.Null(old.DailyTokenCap);
+
+        await store.SaveAsync(old with { WakeManager = WakeManagerPolicy.Never, DailyTokenCap = 50_000 }, Ct);
+        var saved = (await store.FindAsync("t1", Ct))!;
+
+        Assert.Equal(WakeManagerPolicy.Never, saved.WakeManager);
+        Assert.Equal(50_000, saved.DailyTokenCap);
     }
 
     [Fact]

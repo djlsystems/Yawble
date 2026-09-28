@@ -356,6 +356,13 @@ public static class MessageTypes
     /// </summary>
     public const string ScheduleSkippedPausedReason =
         "Skipped because this team is paused.";
+
+    /// <summary>
+    /// The exact skip reason published in <see cref="ScheduleSkipped"/> rows, and written on the
+    /// `tenant_events` row, for a trigger whose runs have spent its daily token cap. It fires again
+    /// the next day in its timezone.
+    /// </summary>
+    public const string ScheduleSkippedCapReason = "daily token cap reached";
 }
 
 /// <summary>

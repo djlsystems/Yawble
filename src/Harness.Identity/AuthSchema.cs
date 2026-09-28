@@ -327,5 +327,17 @@ public static class AuthSchema
             ALTER TABLE team_members ADD COLUMN system_prompt_set_by_kind TEXT NULL;
             ALTER TABLE team_members ADD COLUMN system_prompt_set_at      TEXT NULL;
             """),
+
+        // WHAT A TRIGGER'S RUNS COST, AND WHOM THEY WAKE. `wake_manager` is what a run the trigger
+        // started does to the Manager when it ends: `always`, `onHandbackOrFailure` or `never`.
+        // Every row from before this step keeps `always` - today's behaviour - through the column
+        // default; a new trigger is given `onHandbackOrFailure` by the create route, not here.
+        // `daily_token_cap` is billable tokens per day in the trigger's timezone, NULL for none.
+        new MigrationStep(
+            "auth-010",
+            """
+            ALTER TABLE triggers ADD COLUMN wake_manager    TEXT    NOT NULL DEFAULT 'always';
+            ALTER TABLE triggers ADD COLUMN daily_token_cap INTEGER NULL;
+            """),
     ];
 }

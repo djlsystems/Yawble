@@ -244,6 +244,12 @@ public sealed class IdleWorkflowOffer(
         // would be handed prose it cannot answer, and run it as work.
         if (!declarer.Permits.Contains(Permits.Progress)) return false;
 
+        // A TRIGGER THAT CHOSE NOT TO BE TOLD OF A FINISHED RUN is not offered another turn on its
+        // behalf: its run ending without a hand-back is the end of it, as the trigger said, and an
+        // offer would spend a second invocation whose completion wakes the Manager anyway.
+        // `UndeclarableWorkflows` declares such a workflow instead.
+        if (await UndeclarableWorkflows.RootedByQuietTriggerAsync(log, correlation, ct)) return false;
+
         // STILL OPEN - `WorkflowOpenSql.NotClosed`, the same predicate the board reads and the same
         // one `UNDECLARED` renders. A workflow somebody declared or closed is finished with, and
         // nothing may nag one.
