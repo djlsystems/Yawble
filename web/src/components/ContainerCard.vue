@@ -164,6 +164,7 @@ async function stop() {
     :team="snapshot.team"
     :container="snapshot.id"
     :subscribes="snapshot.subscribes"
+    :member-kind="snapshot.kind ?? 'agent'"
   />
   <LiveViewDialog
     v-model="watchOpen"

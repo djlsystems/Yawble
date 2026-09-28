@@ -931,6 +931,10 @@ public static class BuiltInSkills
 
             ## 5. Watching something outside
 
+            Poll with plugins, spend models only when something happened. A plugin watches for free
+            and publishes an event when it finds something; an agent reacts to that event. A model
+            member on a short schedule is almost always better as a plugin plus an event trigger.
+
             - A schedule trigger wakes the plugin member every N minutes.
             - It checks what is new since its last run, keeping its place in its own workspace or by
               marking items in the outside system.
@@ -939,7 +943,21 @@ public static class BuiltInSkills
             - An event trigger on the Manager, on that event type and filtered to that member (for
               example `source eq <team>/<member>`), wakes the Manager with the item in front of it.
 
-            A person adds both triggers in the team's Triggers dialog.
+            A person adds both triggers in the team's Triggers dialog. Each trigger has two more
+            settings, and a spec should say what to choose:
+
+            - Wake the Manager when a run ends: "Only if it hands back or fails" (the default for a new
+              trigger), "Always" (every completion wakes it; how older triggers behave) or "Never" (not
+              even a failure wakes it, though the failure still shows on the card and in the feed).
+              Under the default a poll that finds nothing wakes nobody, and an agent that found
+              something hands back.
+            - Daily token cap: the most billable tokens the trigger's runs, and the Manager runs they
+              woke, may spend in a day; once reached, fires are skipped until the next day. Only
+              measured runs count, and a plugin run is never measured, so the cap belongs on the
+              agent's trigger.
+
+            The dialog asks a person to confirm a schedule more frequent than every 5 minutes on an
+            agent member, naming what one of its runs has cost. A plugin member has no minimum.
 
             ## 6. Doing something with it
 
@@ -993,6 +1011,8 @@ public static class BuiltInSkills
             - For anything outward: the default mode, the real mode, the allowlist setting and the
               scope settings.
             - The polling interval, what counts as new, and the quiet case.
+            - The triggers: the plugin's schedule, the agent's event trigger on the published event,
+              and for each its wake choice and daily token cap.
             - The failure words: what it says when it is blocked, refused or fails.
             - How the building team tests it without a real account: a fake of the outside system,
               recorded responses, or a test mailbox.
