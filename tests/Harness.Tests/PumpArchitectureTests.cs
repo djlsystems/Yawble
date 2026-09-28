@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace Harness.Tests;
 
 /// <summary>
-/// P7 MADE STRUCTURAL (card 621 verification, F1; hardened for R2-F1). <see cref="PluginMemberEndToEndTests.P7_Nothing_plugin_specific_is_in_the_pump"/>
+/// P7 MADE STRUCTURAL. <see cref="PluginMemberEndToEndTests.P7_Nothing_plugin_specific_is_in_the_pump"/>
 /// scans the words of Harness.Containers; this reads its COMPILED IL, so a kind check cannot hide
 /// behind a name that does not say "plugin":
 ///

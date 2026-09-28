@@ -42,9 +42,12 @@ public sealed class McpLaunchConfigTests
 
             if (!OperatingSystem.IsWindows())
             {
+                // Who may read, write and enter it. A setgid bit inherited from a setgid temp folder
+                // grants nobody anything, so it is not compared.
+                var access = (UnixFileMode)Convert.ToInt32("777", 8);
                 Assert.Equal(
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-                    File.GetUnixFileMode(Path.GetDirectoryName(config.JsonPath)!));
+                    File.GetUnixFileMode(Path.GetDirectoryName(config.JsonPath)!) & access);
             }
         }
         finally

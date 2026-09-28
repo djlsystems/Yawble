@@ -58,7 +58,7 @@ function timing(over: Partial<TeamWorkflowTiming> = {}): TeamWorkflowTiming {
     members: [],
     lastActivityAt: '2026-09-20T11:59:00Z',
     awaitingFrom: null,
-    subject: 'Execute B0001',
+    subject: 'Execute B001F',
     pausedAt: null,
     pausedReason: null,
     pausedLimit: null,

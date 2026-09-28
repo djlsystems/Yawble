@@ -260,7 +260,7 @@ public sealed class PluginMemberRunnerTests : IDisposable
         Assert.DoesNotContain(value, await File.ReadAllTextAsync(Path.Combine(_dataRoot, "argv.txt"), Ct), StringComparison.Ordinal);
     }
 
-    /// <summary>D1 (card 621 verification): a bound secret written into a REPORT record - not only
+    /// <summary>D1: a bound secret written into a REPORT record - not only
     /// the result - must not reach the ledger, the snapshot or the Manager it wakes.</summary>
     [Theory]
     [InlineData("progress", "status")]

@@ -107,13 +107,13 @@ public sealed class PullRequestTests : IAsyncDisposable
         var (team, person) = await ContributorTeamAsync("Gamma");
         PushTeamBranch(team, $"team work\n\n{Trailer}");
 
-        var response = await OpenAsync(person, team, "Widget: the change", "What was delivered.\n\nBacklog B0001");
+        var response = await OpenAsync(person, team, "Widget: the change", "What was delivered.\n\nBacklog B001F");
         var text = await response.Content.ReadAsStringAsync(Ct);
 
         Assert.True(response.StatusCode == HttpStatusCode.OK, text);
         var create = Assert.Single(_gitHub.Calls, c => c.StartsWith("create", StringComparison.Ordinal));
         Assert.Equal($"create {UpstreamUrl} fork-owner:team/{team} base=trunk title=Widget: the change", create);
-        Assert.Equal("What was delivered.\n\nBacklog B0001", _gitHub.LastBody);
+        Assert.Equal("What was delivered.\n\nBacklog B001F", _gitHub.LastBody);
 
         // No row existed while GitHub was being asked; one exists after.
         Assert.Equal(0, _gitHub.RowsSeenAtCreate);

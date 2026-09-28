@@ -42,6 +42,7 @@ public sealed class PrepareVolumeTests : IDisposable
     public void An_all_root_volume_gets_the_host_files_for_harness_and_everything_else_for_agent()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        RootOrSkip();
         SeedExistingVolume();
 
         var output = Run("ownership");
@@ -121,6 +122,7 @@ public sealed class PrepareVolumeTests : IDisposable
     public void A_file_browser_root_outside_the_volume_is_agents_and_a_system_directory_is_refused()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        RootOrSkip();
         var elsewhere = Path.Combine(_root, "elsewhere");
         Directory.CreateDirectory(Path.Combine(elsewhere, "teams", "beta"));
         File.WriteAllText(Path.Combine(elsewhere, "teams", "beta", "README.md"), "x");
@@ -688,6 +690,15 @@ public sealed class PrepareVolumeTests : IDisposable
         Exec("stat", ["-c", format, Path.Combine(_data, relative)]).Output.Trim();
 
     private static string Id(string flag) => Exec("id", [flag]).Output.Trim();
+
+    /// <summary>
+    /// The script hands over only what is not already its owner's. Files seeded as root are
+    /// nobody's here, as on a fresh volume; seeded as another user they may already be agent's or
+    /// harness's (as a team's own run, uid 10002, they are), and nothing is handed over to record.
+    /// </summary>
+    private static void RootOrSkip() =>
+        Assert.SkipUnless(Id("-u") == "0",
+            $"Needs root: the seeded volume must be root's, and this process is uid {Id("-u")}.");
 
     // ---- Running the script ----
 

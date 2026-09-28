@@ -484,7 +484,7 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// D2 (card 621 verification): a CLONE of the team re-hires the plugin member WITH its
+    /// D2: a CLONE of the team re-hires the plugin member WITH its
     /// configuration and its secret bindings - logical keys, never values - so the clone's Echo
     /// reverses, as the source's does, and still reaches its secret. Before, it came back
     /// upper-casing with no secret, and the clone reported no failure.
