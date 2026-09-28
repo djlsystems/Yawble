@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "sample-whoami-go",
+  "name": "Sample Who Am I (Go)",
+  "description": "End-to-end check for connections: reads the account and scopes of the Google connection bound to it, from the provider's userinfo.",
+  "version": "0.1.0",
+  "protocol": "harness.member/1",
+  "executable": { "path": "bin/linux-x64/sample-whoami-go", "args": [] },
+  "platforms": {
+    "linux-x64": "bin/linux-x64/sample-whoami-go",
+    "linux-arm64": "bin/linux-arm64/sample-whoami-go"
+  },
+  "timeoutSeconds": 60,
+  "config": {
+    "userinfoUrl": {
+      "type": "string",
+      "default": "https://openidconnect.googleapis.com/v1/userinfo",
+      "description": "Where the access token is sent to read the account. Change it only to point at a test double.",
+      "setBy": "person"
+    }
+  },
+  "connections": {
+    "account": {
+      "description": "The Google account to report on.",
+      "providers": ["google"],
+      "scopes": { "google": ["openid", "email"] },
+      "required": true
+    }
+  },
+  "skills": ["skills/sample-whoami-go.md"]
+}

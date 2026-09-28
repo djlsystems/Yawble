@@ -1,4 +1,5 @@
-import type { PluginConfigField, PluginHire, PluginSecretField, PluginSettingValue } from '../api/types';
+import type { ConnectionSlot, PluginConfigField, PluginHire, PluginSecretField, PluginSettingValue } from '../api/types';
+import { bindingsBody } from './connections';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, AS A FORM: what each manifest field starts as, whether it is still at
@@ -16,7 +17,12 @@ import type { PluginConfigField, PluginHire, PluginSecretField, PluginSettingVal
 export interface PluginSettingsShape {
   config: Record<string, PluginConfigField>;
   secrets: Record<string, PluginSecretField>;
+  /** Its connection slots. Absent or `{}` for a plugin that declares none. */
+  connections?: Record<string, ConnectionSlot>;
 }
+
+/** Whether the plugin declares any connection slot, so the body carries `connections` at all. */
+export const hasSlots = (shape: PluginSettingsShape) => Object.keys(shape.connections ?? {}).length > 0;
 
 /**
  * What a person has typed or chosen, per field: text for a string or number box, a boolean for a
@@ -117,7 +123,10 @@ export function defaultLabel(field: PluginConfigField): string | null {
 export const setByPerson = (field: PluginConfigField) => field.setBy === 'person';
 
 /**
- * A required field left empty, or a required secret with no key: the names, in order. A bool is
+ * A required field left empty, or a required secret with no key: the names, in order. A required
+ * connection slot left unbound is NOT here: the Host hires and saves a member without it and blocks
+ * its runs instead, so a person may hire first and connect the account later - the slot's picker
+ * says what the runs will be blocked with. A bool is
  * never empty - it is on or off - and a list is never missing: the Host defaults one to `[]`, so a
  * required list left empty saves, exactly as the Host takes it.
  */
@@ -152,6 +161,7 @@ export function settingsBody(
   shape: PluginSettingsShape,
   config: PluginFieldValues,
   secrets: Record<string, string>,
+  connections: Record<string, string> = {},
 ): PluginHire {
   const body: PluginHire = { config: {}, secrets: {} };
 
@@ -180,6 +190,10 @@ export function settingsBody(
     const key = (secrets[name] ?? '').trim();
     if (key !== '') body.secrets[name] = key;
   }
+
+  // Connection ids per slot, never a token. Sent whole for a plugin with slots - the route replaces
+  // the bindings, so `{}` unbinds every slot - and not at all for one without, as before.
+  if (hasSlots(shape)) body.connections = bindingsBody(shape.connections, connections);
 
   return body;
 }

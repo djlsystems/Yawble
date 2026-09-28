@@ -33,7 +33,8 @@ public sealed class PluginMemberRunner(
     RunHeartbeat heartbeat,
     AgentLaunchUser? runAs = null,
     IPluginMemberSettings? settings = null,
-    ISecretStore? secrets = null) : IMemberRunner
+    ISecretStore? secrets = null,
+    Connections? connections = null) : IMemberRunner
 {
     /// <summary>The only variables a plugin child inherits from the Host. Everything else - provider
     /// keys, HARNESS_*, CLAUDE_*, GROK_* - is absent because it was never copied.</summary>
@@ -94,6 +95,12 @@ public sealed class PluginMemberRunner(
         var (resolvedSecrets, secretRefusal) = ResolveSecrets(manifest, bound);
         if (secretRefusal is not null) return MemberResult.NotRun(secretRefusal);
 
+        var (grants, connectionRefusal) = await GrantConnectionsAsync(manifest, bound, ct);
+        if (connectionRefusal is not null) return MemberResult.NotRun(connectionRefusal);
+
+        // THE REDACTION SET: every bound secret AND every access token this run is handed.
+        IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.Select(g => g.AccessToken)];
+
         if (ChildProcess.StartInfo(plugin.Executable, invocation.WorkingDirectory, runAs) is not { } start)
         {
             return MemberResult.NotRun(
@@ -112,7 +119,7 @@ public sealed class PluginMemberRunner(
 
         start.Environment[CausationVariable] = invocation.Causation.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        var request = Request(invocation, manifest, config, resolvedSecrets);
+        var request = Request(invocation, manifest, config, resolvedSecrets, grants);
 
         // The run's record, gathered as the lines arrive.
         var gathered = new Gathered();
@@ -130,7 +137,7 @@ public sealed class PluginMemberRunner(
                 request,
                 clock.Stopping,
                 onStdoutLine: line => OnLineAsync(
-                    invocation.Member, manifest, invocation.Context.Limits, line, gathered, resolvedSecrets.Values, ct));
+                    invocation.Member, manifest, invocation.Context.Limits, line, gathered, redacted, ct));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -179,14 +186,14 @@ public sealed class PluginMemberRunner(
             output.Append(outcome.Stderr);
         }
 
-        var text = Redact(output.ToString().Trim(), resolvedSecrets.Values);
+        var text = Redact(output.ToString().Trim(), redacted);
 
         string? reason = gathered.Result switch
         {
             null => $"The plugin exited {outcome.ExitCode} without a result record.",
             { Ok: false } failed => Redact(
                 string.IsNullOrWhiteSpace(failed.Error) ? "The plugin reported that it failed." : failed.Error!,
-                resolvedSecrets.Values),
+                redacted),
             _ when outcome.ExitCode != 0 => $"The plugin exited {outcome.ExitCode}.",
             _ => null,
         };
@@ -205,7 +212,8 @@ public sealed class PluginMemberRunner(
     /// <summary>The request document: protocol v1's whole input, one JSON object on stdin.</summary>
     internal static string Request(
         MemberInvocation invocation, PluginManifest manifest,
-        IReadOnlyDictionary<string, JsonNode?> config, IReadOnlyDictionary<string, string> resolvedSecrets)
+        IReadOnlyDictionary<string, JsonNode?> config, IReadOnlyDictionary<string, string> resolvedSecrets,
+        IReadOnlyDictionary<string, ConnectionGrant>? grants = null)
     {
         var work = new JsonArray();
 
@@ -264,6 +272,16 @@ public sealed class PluginMemberRunner(
             ["secrets"] = new JsonObject(resolvedSecrets.Select(s => KeyValuePair.Create(s.Key, (JsonNode?)JsonValue.Create(s.Value)))),
             ["workingDirectory"] = invocation.WorkingDirectory,
             ["worktrees"] = worktrees,
+
+            // EACH BOUND SLOT'S FRESH ACCESS TOKEN - never the refresh token, never the client secret.
+            ["connections"] = new JsonObject((grants ?? new Dictionary<string, ConnectionGrant>()).Select(g => KeyValuePair.Create(g.Key, (JsonNode?)new JsonObject
+            {
+                ["provider"] = g.Value.Provider,
+                ["account"] = g.Value.Account,
+                ["accessToken"] = g.Value.AccessToken,
+                ["expiresAt"] = g.Value.ExpiresAt?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+                ["scopes"] = new JsonArray([.. g.Value.Scopes.Select(scope => (JsonNode?)JsonValue.Create(scope))]),
+            }))),
         };
 
         return document.ToJsonString() + "\n";
@@ -376,6 +394,68 @@ public sealed class PluginMemberRunner(
         }
 
         return (resolved, null);
+    }
+
+    /// <summary>
+    /// Each connection slot's fresh access token, fetched NOW (and refreshed when it is within 5
+    /// minutes of expiry), or the sentence the run is blocked with: a required slot unbound, a
+    /// connection gone, needing reconnect, or lacking a scope the slot asks for.
+    /// </summary>
+    private async Task<(IReadOnlyDictionary<string, ConnectionGrant> Grants, string? Refusal)> GrantConnectionsAsync(
+        PluginManifest manifest, PluginMemberSettings bound, CancellationToken ct)
+    {
+        var grants = new Dictionary<string, ConnectionGrant>(StringComparer.Ordinal);
+
+        foreach (var (slot, declared) in manifest.Connections)
+        {
+            if (!bound.Connections.TryGetValue(slot, out var connectionId))
+            {
+                if (declared.Required)
+                {
+                    return (grants, $"This member has no connection bound for the plugin's required slot `{slot}`. "
+                        + "A person binds one in the member's settings.");
+                }
+
+                continue;
+            }
+
+            if (connections is null)
+            {
+                return (grants, $"This Host holds no connections, so slot `{slot}` could not be given its account.");
+            }
+
+            if (await connections.Store.GetAsync(connectionId, ct) is { } record
+                && Connections.ScopeRefusal(slot, declared, record) is { } scopeRefusal)
+            {
+                return (grants, scopeRefusal.Error);
+            }
+
+            ConnectionGrant? grant;
+            string? refusal;
+
+            try
+            {
+                (grant, refusal) = await connections.GrantAsync(connectionId, slot, ct);
+            }
+            catch (RefreshNotStoredException exception)
+            {
+                // A REFRESHED TOKEN THAT COULD NOT BE STORED IS NOT HANDED OUT: a rotated refresh token
+                // lost here would strand the connection, so the run does not start.
+                return (grants, $"The connection bound for slot `{slot}` was refreshed but could not be stored "
+                    + $"({exception.SqliteErrorCode}), so this run did not start. The next run tries again.");
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException exception)
+            {
+                return (grants, $"The connection bound for slot `{slot}` could not be read or updated "
+                    + $"({exception.SqliteErrorCode}), so this run did not start. The next run tries again.");
+            }
+
+            if (refusal is not null) return (grants, refusal);
+
+            grants[slot] = grant!;
+        }
+
+        return (grants, null);
     }
 
     private static string ShortSecret(string key, string name) =>
@@ -647,6 +727,11 @@ public sealed record PluginMemberSettings(
     IReadOnlyDictionary<string, JsonElement> Config,
     IReadOnlyDictionary<string, string> Secrets)
 {
+    /// <summary>The manifest's connection slot to a CONNECTION ID (see <see cref="ConnectionStore"/>).
+    /// Never a token: the token is fetched, and refreshed, at each run. Only a person binds one.</summary>
+    public IReadOnlyDictionary<string, string> Connections { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     public static readonly PluginMemberSettings None = new(
         new Dictionary<string, JsonElement>(StringComparer.Ordinal),
         new Dictionary<string, string>(StringComparer.Ordinal));

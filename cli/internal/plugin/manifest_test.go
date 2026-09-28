@@ -89,3 +89,53 @@ func TestListSettingsAndRequires(t *testing.T) {
 		}
 	}
 }
+
+// The connections sample binds a Google slot; the install accepts it as it is.
+func TestTheWhoamiSampleManifestIsAccepted(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "samples", "plugins", "sample-whoami-go", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, skills, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ID != "sample-whoami-go" || len(skills) != 1 {
+		t.Errorf("%+v %v", m, skills)
+	}
+}
+
+func TestConnectionSlots(t *testing.T) {
+	manifest := func(extra string) []byte {
+		return []byte(`{"schemaVersion":1,"id":"p","name":"n","description":"d","version":"1","protocol":"harness.member/1",
+			"executable":{"path":"run"}` + extra + `}`)
+	}
+	for extra, want := range map[string]string{
+		`,"connections":{"mail":{"providers":["google","microsoft","custom"],"scopes":{"google":["https://mail.google.com/"]},"required":true}}`: "",
+		`,"connections":{"mail":{"providers":["custom-acme"],"scopes":["read"],"description":"x"}}`:                                              "",
+		`,"connections":null`: "",
+		`,"connections":[]`:   "`connections` must be an object of slot name to slot.",
+		`,"connections":{"1mail":{"providers":["google"]}}`:                                "`connections.1mail` is not a usable slot name.",
+		`,"connections":{"mail":{"providers":[]}}`:                                         "`connections.mail.providers` must be a non-empty list",
+		`,"connections":{"mail":{"providers":["yahoo"]}}`:                                  "names 'yahoo', which is not a provider",
+		`,"connections":{"mail":{"providers":["google"],"scopes":{"microsoft":[]}}}`:       "has scopes for 'microsoft', which the slot's providers do not name.",
+		`,"connections":{"mail":{"providers":["google"],"scopes":"email"}}`:                "`connections.mail.scopes` must be a list of scopes",
+		`,"connections":{"mail":{"providers":["google"],"required":"yes"}}`:                "`connections.mail.required` must be true or false.",
+		`,"connections":{"mail":{"providers":["google"],"required":null}}`:                 "`connections.mail.required` must be true or false.",
+		`,"connections":{"mail":{"providers":["google"],"scopes":[""]}}`:                   "`connections.mail.scopes` must hold scope strings",
+		`,"connections":{"mail":{"providers":["google"],"scopes":["  "]}}`:                 "`connections.mail.scopes` must hold scope strings",
+		`,"connections":{"mail":{"providers":["google"],"scopes":["a b"]}}`:                "`connections.mail.scopes` must hold scope strings",
+		`,"connections":{"mail":{"providers":["google"],"scopes":{"google":[" "]}}}`:       "`connections.mail.scopes.google` must be a list of scope strings",
+		`,"connections":{"mail":{"providers":["custom-` + strings.Repeat("a", 34) + `"]}}`: "which is not a provider",
+		`,"connections":{"mail":{"providers":["custom-` + strings.Repeat("a", 33) + `"]}}`: "",
+	} {
+		_, _, err := Parse(manifest(extra))
+		got := ""
+		if err != nil {
+			got = err.Error()
+		}
+		if (want == "" && got != "") || (want != "" && !strings.Contains(got, want)) {
+			t.Errorf("%s: got %q, want %q", extra, got, want)
+		}
+	}
+}

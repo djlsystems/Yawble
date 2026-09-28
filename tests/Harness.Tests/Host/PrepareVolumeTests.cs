@@ -55,6 +55,7 @@ public sealed class PrepareVolumeTests : IDisposable
                      "messages.db", "messages.db-wal", "messages.db-shm", "keys", "keys/key-1.xml", "agents.json",
                      "agents.json.before-builtins", "agent-launch.json", "agent-launch.json.tmp", "logs", "logs/host.log",
                      "backups", "backups/old.db", "host.lock", "system-packages",
+                     "connections", "connections/.connect-report.json",
                  })
         {
             Assert.True(chowned.TryGetValue(Path.Combine(_data, host), out var owner), $"{host} was not handed over. {output}");
@@ -84,6 +85,9 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Equal("600", Mode("agent-launch.json.tmp"));
         Assert.Equal("700", Mode("logs"));
         Assert.Equal("600", Mode("logs/host.log"));
+        // The operator CLI's `connect` exchange: the host answers only while nobody else can write here.
+        Assert.Equal("700", Mode("connections"));
+        Assert.Equal("600", Mode("connections/.connect-report.json"));
         Assert.Equal("750", Mode("."));
 
         // Agent's trees: the host writes through the group, and what it makes stays in the group.
@@ -697,6 +701,7 @@ public sealed class PrepareVolumeTests : IDisposable
                      "agent-home/.ssh/id_ed25519", "agent-home/.gitconfig", "agent-home/.grok/config.toml",
                      "agent-home/.grok/bin/grok", "npm-global/bin/claude", "bin/tool",
                      "steering/user.txt", "cli-versions.jsonl", "tenant-interactive-agent-workspaces/u/AGENTS.md",
+                     "connections/.connect-report.json",
                  })
         {
             var path = Path.Combine(_data, file);

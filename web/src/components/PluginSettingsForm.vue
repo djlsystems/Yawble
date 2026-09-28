@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { listConnectionProviders, listConnections } from '../api/client';
+import type { Connection, ConnectionProvider } from '../api/types';
 import {
   addToList,
   defaultLabel,
   defaultValue,
+  hasSlots,
   isDefault,
   missingRequired,
   setByPerson,
@@ -11,6 +14,7 @@ import {
   type PluginFieldValues,
   type PluginSettingsShape,
 } from '../lib/pluginSettings';
+import ConnectionPicker from './ConnectionPicker.vue';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, GENERATED FROM ITS MANIFEST. The one editor Add member (a hire) and
@@ -22,7 +26,8 @@ import {
  * add, × to remove, limited to the `enum` when there is one) - so the shape saved is always one the
  * plugin accepts. Each field says its default, whether it is required and whether only a person may
  * set it, and can be put back to its default. Secrets are KEY NAMES, the logical key set with
- * `secret set`, never a value: no route carries one.
+ * `secret set`, never a value: no route carries one. Connection slots are one picker each
+ * (`ConnectionPicker`), storing a connection's id, never a token.
  *
  * The "as JSON" view is read-only, and it is exactly `settingsBody` - what will be stored - for
  * checking, never for editing.
@@ -31,10 +36,35 @@ const props = defineProps<{ shape: PluginSettingsShape }>();
 
 const config = defineModel<PluginFieldValues>('config', { required: true });
 const secrets = defineModel<Record<string, string>>('secrets', { required: true });
+/** Slot -> the chosen connection's id. Only a plugin that declares slots has any. */
+const connections = defineModel<Record<string, string>>('connections', { default: () => ({}) });
 
 const missing = computed(() => missingRequired(props.shape, config.value, secrets.value));
 
-const body = computed(() => settingsBody(props.shape, config.value, secrets.value));
+const body = computed(() => settingsBody(props.shape, config.value, secrets.value, connections.value));
+
+/**
+ * THE CONNECTIONS A SLOT CAN TAKE, read when the plugin has slots and not otherwise - a plugin
+ * without them makes no connections call at all. A failure is said under the slots, not thrown: the
+ * rest of the form is still usable.
+ */
+const available = ref<Connection[]>([]);
+const providers = ref<ConnectionProvider[]>([]);
+const connectionsProblem = ref('');
+
+async function loadConnections() {
+  if (!hasSlots(props.shape)) return;
+
+  connectionsProblem.value = '';
+  try {
+    [available.value, providers.value] = await Promise.all([listConnections(), listConnectionProviders()]);
+  } catch (cause) {
+    connectionsProblem.value = `The connections could not be read: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+}
+
+onMounted(() => void loadConnections());
+watch(() => props.shape, () => void loadConnections());
 
 const showJson = ref(false);
 const json = computed(() => JSON.stringify(body.value, null, 2));
@@ -198,6 +228,24 @@ function secretHint(description: string | null | undefined, required: boolean) {
         spellcheck="false"
         @update:model-value="(value) => (secrets = { ...secrets, [key]: value === null ? '' : String(value) })"
       />
+    </template>
+
+    <!-- CONNECTION SLOTS: one picker each, listing connections of an allowed provider. The member
+         stores the connection's id, never a token. -->
+    <template v-if="hasSlots(shape)">
+      <ConnectionPicker
+        v-for="(declared, key) in shape.connections"
+        :key="`connection-${key}`"
+        :model-value="connections[key] ?? ''"
+        :slot-name="String(key)"
+        :spec="declared"
+        :connections="available"
+        :providers="providers"
+        @update:model-value="(value: string) => (connections = { ...connections, [key]: value })"
+      />
+      <div v-if="connectionsProblem" class="text-caption text-negative" data-connections-problem>
+        {{ connectionsProblem }}
+      </div>
     </template>
 
     <div>

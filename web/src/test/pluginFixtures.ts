@@ -1,4 +1,7 @@
 import type {
+  Connection,
+  ConnectionProvider,
+  ConnectionSlot,
   InstalledPlugin,
   PluginConfigField,
   PluginList,
@@ -85,5 +88,48 @@ export function hostSettings(
     fields: plugin.config,
     secretFields: plugin.secrets,
     ...settings,
+  };
+}
+
+/**
+ * A connection slot as `GET /api/plugins` lists it (connections-api.md §3): scopes normalised to
+ * the object form, and the Host's own `summary`.
+ */
+export function hostSlot(slot: Partial<ConnectionSlot> & Pick<ConnectionSlot, 'providers'>): ConnectionSlot {
+  return { description: null, scopes: {}, required: false, summary: `needs a ${slot.providers.join(' or ')} connection`, ...slot };
+}
+
+/** One entry of `GET /api/connections` (§2). No token: the Host never sends one. */
+export function hostConnection(connection: Partial<Connection> & Pick<Connection, 'id' | 'provider'>): Connection {
+  return {
+    name: connection.id,
+    providerKind: connection.provider.startsWith('custom-') ? 'custom' : (connection.provider as 'google' | 'microsoft'),
+    account: 'person@example.com',
+    scopes: ['openid', 'email'],
+    connectedAt: '2026-09-28T10:00:00Z',
+    refreshedAt: null,
+    status: 'ok',
+    statusReason: null,
+    usedBy: [],
+    ...connection,
+  };
+}
+
+/** One entry of `GET /api/connections/providers` (§1). The client secret reads only as `clientSecretSet`. */
+export function hostProvider(provider: Partial<ConnectionProvider> & Pick<ConnectionProvider, 'id'>): ConnectionProvider {
+  const kind = provider.id === 'google' || provider.id === 'microsoft' ? provider.id : 'custom';
+  return {
+    kind,
+    name: provider.id === 'google' ? 'Google' : provider.id === 'microsoft' ? 'Microsoft' : provider.id,
+    clientId: null,
+    clientSecretSet: false,
+    configured: false,
+    authorizeUrl: null,
+    tokenUrl: null,
+    userinfoUrl: null,
+    revokes: provider.id === 'google',
+    defaultScopes: kind === 'microsoft' ? ['openid', 'email', 'offline_access'] : ['openid', 'email'],
+    help: '',
+    ...provider,
   };
 }

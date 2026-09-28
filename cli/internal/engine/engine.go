@@ -80,6 +80,10 @@ type Engine interface {
 	// collected in the Result: how a bare repository leaves the instance as a tar stream, which
 	// must never be held in memory.
 	ExecTo(ctx context.Context, name string, stdout io.Writer, args ...string) (Result, error)
+	// ExecInput is Exec with text handed to the program on stdin (`exec -i`): how a request
+	// carrying something that must not be on a command line - an authorization code - reaches a
+	// file in the container.
+	ExecInput(ctx context.Context, name, stdin string, args ...string) (Result, error)
 	// CopyTo copies a folder on this computer into a container, as dst there. dst must not exist:
 	// the folder's contents become dst. Ownership and modes are the caller's to set afterwards.
 	CopyTo(ctx context.Context, name, src, dst string) error
@@ -163,6 +167,21 @@ func execTo(ctx context.Context, r Runner, program, name string, stdout io.Write
 		return Result{}, errors.New("this runner cannot stream from a container")
 	}
 	res, err := pipe.RunPipe(ctx, nil, stdout, program, append([]string{"exec", name}, args...)...)
+	if err != nil {
+		return res, &NotRunnable{Err: err}
+	}
+	if res.ExitCode != 0 {
+		return res, fmt.Errorf("%s exec %s: %s (exit %d)", program, name, strings.TrimSpace(res.Stderr), res.ExitCode)
+	}
+	return res, nil
+}
+
+func execInput(ctx context.Context, r Runner, program, name, stdin string, args []string) (Result, error) {
+	in, ok := r.(InputRunner)
+	if !ok {
+		return Result{}, errors.New("this runner cannot hand a container input")
+	}
+	res, err := in.RunInput(ctx, stdin, program, append([]string{"exec", "-i", name}, args...)...)
 	if err != nil {
 		return res, &NotRunnable{Err: err}
 	}

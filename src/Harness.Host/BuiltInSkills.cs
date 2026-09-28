@@ -913,8 +913,8 @@ public static class BuiltInSkills
             `protocol` (`harness.member/1`), the executable, `timeoutSeconds` (an idle clock: this long
             with no progress ends the run), `config` fields (each with a type - string, number, bool
             or list - and optionally an enum, a default and `required`), `secrets` by logical key
-            name, `events.publishes` (each event's suffix and fields), its skill files, and
-            `requires`.
+            name, `connections` slots for OAuth accounts (see 3), `events.publishes` (each event's
+            suffix and fields), its skill files, and `requires`.
 
             A `list` setting is a list of strings, such as an allowlist of addresses or a set of
             scopes. Its default is an empty list unless the spec gives one, and an `enum` on it limits
@@ -953,6 +953,28 @@ public static class BuiltInSkills
             member's settings; the change is checked exactly as a hire is and takes effect on the
             member's next run. A Manager cannot change them after hire: to run a plugin with other
             settings, it hires another member.
+
+            ### OAuth accounts are connections, never secrets
+
+            A plugin that acts on a person's account at an OAuth service - Gmail, Outlook, Google
+            Drive, Microsoft Graph, anything with an authorize step - uses a **connection**. The
+            manifest declares a `connections` slot per account it needs: which providers it takes
+            (`google`, `microsoft`, `custom`), the scopes it needs from each, and whether it is
+            required. The platform holds the OAuth client and the refresh token, refreshes and
+            rotates them, and hands the plugin a fresh access token on its input at each run. The
+            plugin writes no OAuth code.
+
+            - A person connects the account in Admin, Connections (or with the operator CLI's connect
+              command) and binds it to the member's slot in the member's settings. A Manager may
+              name only a connection a person has already bound on its team.
+            - Never ask the person for a token, a refresh token or a client secret, and never ask
+              them to paste one into a message, a setting or a secret.
+            - Never write an "authorize" or "login" command into a plugin or a spec: the platform
+              does that step, and the plugin only reads the token it is handed.
+            - A run that could outlast the token (about an hour) does a bounded amount of work,
+              keeps its place, finishes, and lets the next run get a new token.
+            - When a connection needs reconnecting, the platform blocks the member's runs with a
+              sentence saying so; tell the person to reconnect it in Admin, Connections.
 
             ## 4. One plugin, several members
 
@@ -1041,6 +1063,8 @@ public static class BuiltInSkills
 
             - The commands, and the text syntax of each.
             - The settings (type, default, required) and the secrets by key name.
+            - Each OAuth account it acts on, as a connection slot: its providers and the scopes it
+              needs from each. Never a token setting or an authorize command.
             - The events it publishes, and the fields of each payload.
             - For anything outward: the default mode, the real mode, the allowlist setting and the
               scope settings.

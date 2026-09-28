@@ -4,6 +4,7 @@ import { ActionRefused, getPluginManifest, installPlugin, listPlugins, rescanPlu
 import type { ContainerSnapshot, PluginInstallResult, PluginList, PluginMemberRef } from '../api/types';
 import { formatManifest, pluginEvents, pluginRows, pluginSkill, type PluginRow } from '../lib/plugins';
 import { defaultLabel, setByPerson } from '../lib/pluginSettings';
+import { slotSummary } from '../lib/connections';
 import { useConsoleStore } from '../stores/console';
 import HostPathPicker from './HostPathPicker.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
@@ -13,7 +14,8 @@ import MemberSettingsDialog from './MemberSettingsDialog.vue';
  * installed, or refused with the Host's own sentence - from `GET /api/plugins`.
  *
  * For an installed version: its description, its settings as the manifest declares them, its
- * secrets BY NAME (no route carries a value), the events it publishes, its skill, and the members
+ * secrets BY NAME (no route carries a value), its connection slots ("needs a Google or Microsoft
+ * connection"), the events it publishes, its skill, and the members
  * hired on it - each a link to that member's settings, where a plugin member's settings are edited.
  *
  * Rescan re-reads the directory; View manifest shows `plugin.json` read-only; Install from a folder
@@ -282,6 +284,17 @@ const verdictText = computed(() => {
               <dd data-secrets>
                 <template v-if="Object.keys(row.plugin.secrets).length === 0">None</template>
                 <span v-for="(secret, key) in row.plugin.secrets" :key="key" class="mono q-mr-sm">{{ key }}</span>
+              </dd>
+
+              <dt>Connections</dt>
+              <dd data-connections>
+                <template v-if="Object.keys(row.plugin.connections ?? {}).length === 0">None</template>
+                <div v-for="(wanted, key) in row.plugin.connections ?? {}" :key="key" :data-connection-slot="key">
+                  <span class="mono">{{ key }}</span>
+                  <span class="os-text-muted"> · {{ slotSummary(wanted) }}</span>
+                  <span v-if="wanted.required" class="os-text-muted"> · Required</span>
+                  <span v-if="wanted.description" class="os-text-muted"> · {{ wanted.description }}</span>
+                </div>
               </dd>
 
               <dt>Events</dt>

@@ -204,6 +204,10 @@ func (p podman) ExecTo(ctx context.Context, name string, stdout io.Writer, args 
 	return execTo(ctx, p.r, "podman", name, stdout, args)
 }
 
+func (p podman) ExecInput(ctx context.Context, name, stdin string, args ...string) (Result, error) {
+	return execInput(ctx, p.r, "podman", name, stdin, args)
+}
+
 func (p podman) CopyTo(ctx context.Context, name, src, dst string) error {
 	_, err := p.run(ctx, "cp", src, name+":"+dst)
 	return err

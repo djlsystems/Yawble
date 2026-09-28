@@ -13,7 +13,9 @@
 # THE OWNERSHIP MAP. The data root itself is harness:agent 0750 (agents may pass through it, not
 # create in it). These top-level entries are the host's and nobody else's - harness:harness, 700
 # for directories and 600 for everything else, all the way down:
-#   messages.db*  keys  agents.json*  agent-launch.json*  logs  backups  host.lock*  system-packages*  .healthz-*
+#   messages.db*  keys  agents.json*  agent-launch.json*  logs  backups  host.lock*  system-packages*  .healthz-*  connections
+# connections is the operator CLI's `connect` exchange: a request there carries an authorization code
+# and the host answers only while no other user can write in it, so it is never agent's.
 # agent-launch.json is what --doctor reports as agentLaunch; an agent that could write it could make
 # the doctor say launches are allowed. Nothing is pre-created for it: the host writes it at every
 # start (a .tmp then a rename) into the data root, which agent cannot write, with umask 0007, so it
@@ -78,7 +80,7 @@ set_owner() { # path uid gid
 
 is_host_entry() {
   case "$1" in
-    messages.db|messages.db-*|keys|agents.json|agents.json.*|agent-launch.json|agent-launch.json.*|logs|backups|host.lock|host.lock.*|system-packages|system-packages.*|.healthz-*)
+    messages.db|messages.db-*|keys|agents.json|agents.json.*|agent-launch.json|agent-launch.json.*|logs|backups|host.lock|host.lock.*|system-packages|system-packages.*|.healthz-*|connections)
       return 0 ;;
   esac
   return 1

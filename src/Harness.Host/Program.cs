@@ -472,6 +472,21 @@ var pluginEvents = EventCatalog.Register(pluginCatalog);
 builder.Services.AddSingleton<ISecretStore>(new EnvironmentSecretStore());
 builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlitePluginMemberSettings(database));
 
+// CONNECTIONS: OAuth accounts the Host holds for plugins (see Connections). The client secret and
+// every token are Data Protection ciphertext under `<dataRoot>/keys`; the provider is reached only
+// through IOAuthEndpoints, which the tests replace.
+builder.Services.AddSingleton(sp => new ConnectionStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
+builder.Services.AddHttpClient(nameof(HttpOAuthEndpoints), client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddSingleton<IOAuthEndpoints>(sp => new HttpOAuthEndpoints(
+    sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(HttpOAuthEndpoints))));
+builder.Services.AddSingleton(sp => new Connections(
+    sp.GetRequiredService<ConnectionStore>(), sp.GetRequiredService<IOAuthEndpoints>(), sp.GetRequiredService<TimeProvider>(),
+    sp.GetRequiredService<IUserStore>()));
+builder.Services.AddSingleton(sp => new ConnectRequests(
+    sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
+    sp.GetRequiredService<TeamRegistry>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ConnectRequests>());
+
 if (unmeasuredHeadlessPresets.Count > 0)
 {
     Console.WriteLine(
@@ -547,7 +562,8 @@ builder.Services.AddSingleton(sp => new PluginMemberRunner(
     sp.GetRequiredService<RunHeartbeat>(),
     sp.GetRequiredService<AgentLaunchUser>(),
     sp.GetRequiredService<IPluginMemberSettingsStore>(),
-    sp.GetRequiredService<ISecretStore>()));
+    sp.GetRequiredService<ISecretStore>(),
+    sp.GetRequiredService<Connections>()));
 builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
     sp.GetRequiredService<AgentMemberRunner>(),
     sp.GetRequiredService<PluginMemberRunner>()));
@@ -1805,6 +1821,7 @@ AuthEndpoints.Map(app);
 UserEndpoints.Map(app);
 AgentEndpoints.Map(app, dataRoot);
 PluginEndpoints.Map(app);
+ConnectionEndpoints.Map(app);
 RepoEndpoints.Map(app);
 KeyEndpoints.Map(app);
 FileSystemEndpoints.Map(app);
@@ -3800,12 +3817,23 @@ app.MapGet("/api/teams/{team}/hiring", async (
     ITeamStore teamStore,
     AgentCatalog catalog,
     PluginCatalog plugins,
+    ConnectionStore connectionStore,
     CancellationToken ct) =>
 {
     if (!teams.Exists(team))
     {
         return Results.NotFound(new { error = $"No team '{team}'." });
     }
+
+    // THE CONNECTIONS A PERSON HAS BOUND ON THIS TEAM: the only ones a Manager's hire may name. By id,
+    // name and provider - never an account's token, and not the account itself.
+    var uses = await connectionStore.AllUsesAsync(ct);
+    var boundHere = (await connectionStore.ListAsync(ct))
+        .SelectMany(c => uses[c.Id]
+            .Where(u => string.Equals(u.Team, team, StringComparison.OrdinalIgnoreCase))
+            .Select(u => new { id = c.Id, name = c.Name, provider = c.Provider, slot = u.Slot }))
+        .Distinct()
+        .ToArray();
 
     var allowlist = teams.MemberAgentsFor(team) ?? [];
     var members = (await teamStore.MembersAsync(ct))
@@ -3849,7 +3877,10 @@ app.MapGet("/api/teams/{team}/hiring", async (
             reference = MemberRef.ForPlugin(p.Manifest.Id),
             description = p.Manifest.Description,
             skill = PluginSkills.SkillOf(p),
+            connections = p.Manifest.Connections.ToDictionary(c => c.Key, c => c.Value.Summary),
         }).ToArray(),
+
+        connections = boundHere,
     });
 })
     .WithTags("Teams")
@@ -3859,15 +3890,17 @@ app.MapGet("/api/teams/{team}/hiring", async (
         "Returns only this team's member-agent allowlist in order, each entry's tags, and the "
         + "current per-tag counts on this team, plus `uncoveredTags`: the hire roles (developer, "
         + "tester, researcher) that no allowed agent carries, and `plugins`: every plugin installed "
-        + "on this Host (id, reference, one line, and its skill's name).\n\n"
-        + "This route never returns command lines, `env`, or Agents outside this team's allowlist.");
+        + "on this Host (id, reference, one line, its skill's name, and what each connection slot "
+        + "needs), and `connections`: each connection a person has bound on this team (`id`, `name`, "
+        + "`provider`, `slot`) - the only ones a Manager's hire may name.\n\n"
+        + "This route never returns command lines, `env`, a token, or Agents outside this team's allowlist.");
 
 app.MapPost("/api/teams/{team}/containers", async (
     [Description(Describe.Team)] string team,
     CreateContainer request, TeamRegistry teams, ITeamStore teamStore, AgentCatalog catalog,
     TenantLogging audit, AgentInstallProbe probe, HttpContext context, ISecretStore secretStore,
     IPluginMemberSettingsStore pluginSettings, PluginCatalog plugins, IUserStore users,
-    CancellationToken ct) =>
+    Connections connections, CancellationToken ct) =>
 {
     // `name` is free text here too, exactly as it is for a team: the identifier is derived inside
     // TeamRegistry and never asked for. A member called "Data Ingest" is `DataIngest` on disk.
@@ -3983,6 +4016,31 @@ app.MapPost("/api/teams/{team}/containers", async (
             }
         }
 
+        // CONNECTIONS ARE A PERSON'S CHOICE. A binding points a plugin at somebody's mailbox, so an
+        // agent's hire (a Manager's credential, or a Concierge's) may name only a connection a PERSON
+        // has already bound on a member of this same team - otherwise incoming content could steer an
+        // agent into pointing a plugin at an account nobody chose for this team. Every hire's binding
+        // must exist, suit the slot's providers and hold the slot's scopes; the refusal offers
+        // Reconnect when only scopes are missing.
+        if (request.Connections is { Count: > 0 } connectionBindings)
+        {
+            if (request.Agent is not { } boundAgent || !MemberRef.IsPlugin(boundAgent.Trim(), out var boundPluginId))
+            {
+                return Results.BadRequest(new { error = "`connections` belong to a plugin member; an Agent gets no connection and no token." });
+            }
+
+            if (plugins.For(boundPluginId) is { } boundPlugin)
+            {
+                var agentHire = hirer is { Kind: PrincipalKind.Container or PrincipalKind.Concierge or PrincipalKind.TenantConcierge };
+                var boundOnTeam = agentHire ? await pluginSettings.ConnectionsBoundOnAsync(team, ct) : null;
+
+                if (await connections.BindingRefusalAsync(boundPlugin.Manifest, connectionBindings, boundOnTeam, ct) is { } bindingRefusal)
+                {
+                    return Results.BadRequest(bindingRefusal.Body());
+                }
+            }
+        }
+
         if (request.Agent is { } named
             && !managerHiresPlugin
             && hirer
@@ -4023,11 +4081,24 @@ app.MapPost("/api/teams/{team}/containers", async (
             chosenByTag.Item1,
             request.SystemPrompt ?? "",
             request.Subscribes ?? [], hiredFor: requestedTag, ct: ct,
-            settings: request.Config is null && request.Secrets is null
+            settings: request.Config is null && request.Secrets is null && request.Connections is null
                 ? null
                 : new PluginMemberSettings(
                     request.Config ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
-                    request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal)),
+                    request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal))
+                {
+                    Connections = request.Connections ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                },
+
+            // THE BINDING'S ROW lands in the same transaction as the member's settings.
+            connectionsAudit: request.Connections is { Count: > 0 } hiredBindings
+                && request.Agent is { } hiredAgent && MemberRef.IsPlugin(hiredAgent.Trim(), out var hiredId)
+                ? member => TenantLogging.Row(
+                    context, TenantActions.MemberConnectionsChanged, $"{member.Team}/{member.Name}", name,
+                    PluginEndpoints.ConnectionsChangedDetail(
+                        member, hiredId, hiredBindings.Keys.Order(StringComparer.Ordinal), PluginMemberSettings.None,
+                        PluginMemberSettings.None with { Connections = hiredBindings }))
+                : null,
 
             // THE HIRER wrote the member's own instructions: a Manager through the `member` tool,
             // or a person.
@@ -7599,7 +7670,13 @@ internal sealed record CreateContainer(
         "A PLUGIN member's secret bindings: each secret its manifest names, to a LOGICAL KEY set on "
         + "the Host with `secret set` - never a value. A required secret whose key is not set is "
         + "refused. Refused for an Agent.")]
-    Dictionary<string, string>? Secrets = null);
+    Dictionary<string, string>? Secrets = null,
+    [property: Description(
+        "A PLUGIN member's connection bindings: each connection slot its manifest declares, to a "
+        + "CONNECTION ID (Admin > Connections) - never a token. The connection must suit the slot's "
+        + "providers and hold its scopes. A Manager or a Concierge may name only a connection a person "
+        + "has already bound on a member of this team. Refused for an Agent.")]
+    Dictionary<string, string>? Connections = null);
 
 /// <summary>A repository's contributor settings. See the route.</summary>
 internal sealed record SetRepoContributor(
