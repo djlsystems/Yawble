@@ -147,7 +147,7 @@ const pluginSaved = ref('');
 const pluginProblem = ref<string | null>(null);
 
 const pluginMissing = computed(() =>
-  pluginShape.value ? missingRequired(pluginShape.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value) : [],
+  pluginShape.value ? missingRequired(pluginShape.value, pluginConfig.value, pluginSecrets.value) : [],
 );
 
 const pluginBody = computed(() =>

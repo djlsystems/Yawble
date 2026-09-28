@@ -114,16 +114,6 @@ export function slotSummary(slot: ConnectionSlot, providers: ConnectionProvider[
   return `needs a ${list} connection`;
 }
 
-/** Required slots with nothing bound, in the manifest's order. */
-export function unboundRequired(
-  slots: Record<string, ConnectionSlot> | undefined,
-  bound: Record<string, string>,
-): string[] {
-  return Object.entries(slots ?? {})
-    .filter(([name, slot]) => slot.required && (bound[name] ?? '') === '')
-    .map(([name]) => name);
-}
-
 /** The bindings to send: each slot with a connection chosen. An unbound slot is left out. */
 export function bindingsBody(
   slots: Record<string, ConnectionSlot> | undefined,

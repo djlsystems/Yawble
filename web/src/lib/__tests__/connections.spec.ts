@@ -7,7 +7,6 @@ import {
   parseScopes,
   redirectUriFor,
   slotSummary,
-  unboundRequired,
 } from '../connections'
 import { hostConnection, hostProvider, hostSlot } from '../../test/pluginFixtures'
 
@@ -34,9 +33,8 @@ describe('connections', () => {
     )
   })
 
-  it('names unbound required slots and leaves unbound optional ones out of the body', () => {
+  it('leaves an unbound slot out of the body', () => {
     const slots = { mail: hostSlot({ providers: ['google'], required: true }), drive: hostSlot({ providers: ['google'] }) }
-    expect(unboundRequired(slots, { mail: '', drive: '' })).toEqual(['mail'])
     expect(bindingsBody(slots, { mail: 'c1', drive: '' })).toEqual({ mail: 'c1' })
   })
 

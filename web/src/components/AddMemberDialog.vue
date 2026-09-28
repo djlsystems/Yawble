@@ -127,7 +127,7 @@ watch(plugin, (chosen) => {
 });
 
 const pluginMissing = computed(() =>
-  plugin.value ? missingRequired(plugin.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value) : [],
+  plugin.value ? missingRequired(plugin.value, pluginConfig.value, pluginSecrets.value) : [],
 );
 
 async function loadPlugins() {

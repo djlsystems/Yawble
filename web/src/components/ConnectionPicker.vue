@@ -19,8 +19,9 @@ import {
  * lists the connections of the providers the slot allows and stores the chosen connection's ID;
  * no token is anywhere near it.
  *
- * It says, before the save, what the Host would refuse: a required slot left unbound (the sentence
- * the member's runs would be blocked with), and a connection that lacks a scope the slot needs -
+ * It says, before the save, what the Host would say: a required slot left unbound (the sentence the
+ * member's runs will be blocked with - the Host still hires and saves, so the account can be
+ * connected later), and a connection that lacks a scope the slot needs (refused at the save) -
  * with Reconnect, which asks the Host for that connection's consent page with the missing scopes
  * added and sends the browser there. The Host is still the check: it refuses the save in the same
  * words.

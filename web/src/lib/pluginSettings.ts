@@ -1,5 +1,5 @@
 import type { ConnectionSlot, PluginConfigField, PluginHire, PluginSecretField, PluginSettingValue } from '../api/types';
-import { bindingsBody, unboundRequired } from './connections';
+import { bindingsBody } from './connections';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, AS A FORM: what each manifest field starts as, whether it is still at
@@ -123,8 +123,10 @@ export function defaultLabel(field: PluginConfigField): string | null {
 export const setByPerson = (field: PluginConfigField) => field.setBy === 'person';
 
 /**
- * A required field left empty, a required secret with no key, or a required connection slot with
- * nothing bound: the names, in order. A bool is
+ * A required field left empty, or a required secret with no key: the names, in order. A required
+ * connection slot left unbound is NOT here: the Host hires and saves a member without it and blocks
+ * its runs instead, so a person may hire first and connect the account later - the slot's picker
+ * says what the runs will be blocked with. A bool is
  * never empty - it is on or off - and a list is never missing: the Host defaults one to `[]`, so a
  * required list left empty saves, exactly as the Host takes it.
  */
@@ -132,7 +134,6 @@ export function missingRequired(
   shape: PluginSettingsShape,
   config: PluginFieldValues,
   secrets: Record<string, string>,
-  connections: Record<string, string> = {},
 ): string[] {
   const missing: string[] = [];
 
@@ -146,8 +147,6 @@ export function missingRequired(
   for (const [name, secret] of Object.entries(shape.secrets)) {
     if (secret.required && (secrets[name] ?? '').trim() === '') missing.push(name);
   }
-
-  missing.push(...unboundRequired(shape.connections, connections));
 
   return missing;
 }

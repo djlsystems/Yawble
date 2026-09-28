@@ -39,7 +39,7 @@ const secrets = defineModel<Record<string, string>>('secrets', { required: true 
 /** Slot -> the chosen connection's id. Only a plugin that declares slots has any. */
 const connections = defineModel<Record<string, string>>('connections', { default: () => ({}) });
 
-const missing = computed(() => missingRequired(props.shape, config.value, secrets.value, connections.value));
+const missing = computed(() => missingRequired(props.shape, config.value, secrets.value));
 
 const body = computed(() => settingsBody(props.shape, config.value, secrets.value, connections.value));
 

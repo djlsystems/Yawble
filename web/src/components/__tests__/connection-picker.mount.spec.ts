@@ -163,13 +163,18 @@ describe('the binding picker, at hire', () => {
     wrapper.unmount();
   });
 
-  it("holds Add member while the required slot is unbound, with the Host's sentence", async () => {
+  it("says what an unbound required slot's runs will be blocked with, and still hires", async () => {
     const wrapper = await mountHire();
 
     expect(refusal()).toBe(
       "This member has no connection bound for the plugin's required slot `mail`. A person binds one in the member's settings.",
     );
-    expect(isDisabled('Add member')).toBe(true);
+    // The Host hires a member with the slot unbound and blocks its runs instead.
+    expect(isDisabled('Add member')).toBe(false);
+    button('Add member').click();
+    await settle();
+
+    expect(addMember).toHaveBeenCalledWith('alpha', 'Inbox', 'plugin:mailer', { config: {}, secrets: {}, connections: {} });
 
     wrapper.unmount();
   });
@@ -248,7 +253,7 @@ describe('the binding picker, in Member settings', () => {
         team: 'alpha',
         member: 'Inbox',
         connections: bound,
-        connectionFields: mailer.connections,
+        connectionFields: mailer.connections ?? {},
       }),
     );
     updateMember.mockResolvedValue({ ...inbox });

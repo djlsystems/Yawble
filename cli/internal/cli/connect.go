@@ -479,10 +479,10 @@ const (
 	connectRequestScript = `set -e
 umask 077
 mkdir -p "$1"
-chown harness:harness "$1"
+chown harness "$1"
 chmod 0700 "$1"
 cat > "$1/.connect.tmp"
-chown harness:harness "$1/.connect.tmp"
+chown harness "$1/.connect.tmp"
 chmod 0600 "$1/.connect.tmp"
 mv -f "$1/.connect.tmp" "$1/.connect"`
 
