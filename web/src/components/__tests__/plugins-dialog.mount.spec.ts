@@ -301,6 +301,9 @@ describe('PluginsDialog, installing from a folder', () => {
     await settle();
 
     expect(bodyFind('[data-install-verdict]')?.textContent).toContain('The folder has no plugin.json.');
+    // The folder WAS copied and the catalog rescanned before it refused: the list is read again,
+    // so the new version shows with its verdict without a Rescan.
+    expect(listPlugins).toHaveBeenCalledTimes(2);
 
     wrapper.unmount();
   });

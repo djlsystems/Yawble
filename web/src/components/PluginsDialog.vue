@@ -162,7 +162,9 @@ async function install() {
     installing.value = false;
   }
 
-  if (verdict.value?.installed) await load();
+  // AFTER EVERY INSTALL, whatever the verdict: a 200 with `installed: false` copied the folder and
+  // rescanned before the catalog refused it, so the list has a new row to show with its reason.
+  await load();
 }
 
 const verdictText = computed(() => {
