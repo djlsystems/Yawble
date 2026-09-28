@@ -17,7 +17,7 @@ vi.mock('../../lib/useAgentInstallations', () => ({
 
 import RibbonBar from '../RibbonBar.vue';
 import RibbonMobileMenu from '../RibbonMobileMenu.vue';
-import { DocumentsAction, PluginsAction, Ribbon, TenantSettingsAction, ribbonEntries } from '../../lib/ribbon';
+import { DocumentsAction, PluginsAction, Ribbon, SitesAction, TenantSettingsAction, ribbonEntries } from '../../lib/ribbon';
 import '../../test/mountQuasar';
 
 const EntryWidth = 100;
@@ -134,5 +134,28 @@ describe('the Admin group', () => {
 
     await wrapper.findAll('.ribbon-entry')[rendered]!.find('button').trigger('click');
     expect(wrapper.emitted('action')).toEqual([[PluginsAction]]);
+  });
+
+  /** Sites sits in the Admin group before Settings, and opens the Sites screen. */
+  it('has Sites before Settings, and runs it from the bar', async () => {
+    const wrapper = await render(entries.length * EntryWidth);
+
+    const admin = entries.filter((entry) => entry.tab.id === 'admin').map((entry) => entry.item);
+    const sites = admin.findIndex((item) => item.action === SitesAction);
+    expect(sites).toBeGreaterThan(-1);
+    expect(sites).toBeLessThan(admin.findIndex((item) => item.action === TenantSettingsAction));
+    expect(admin[sites]).toMatchObject({ label: 'Sites', icon: 'public' });
+
+    // As rendered: the LAST button labelled Sites is the Admin group's; Active Team has its own.
+    const labels = wrapper.findAll('.ribbon-entry').map((entry) => {
+      const block = entry.find('.block');
+      return block.exists() ? block.text().trim() : '';
+    });
+    const rendered = labels.lastIndexOf('Sites');
+    expect(rendered).toBeGreaterThan(-1);
+    expect(rendered).toBeLessThan(labels.lastIndexOf('Settings'));
+
+    await wrapper.findAll('.ribbon-entry')[rendered]!.find('button').trigger('click');
+    expect(wrapper.emitted('action')).toEqual([[SitesAction]]);
   });
 });

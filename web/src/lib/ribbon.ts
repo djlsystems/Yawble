@@ -62,6 +62,12 @@ export const PluginsAction = 'admin-plugins';
 /** Admin > Repositories, the instance's local repositories: listed, and deleted after asking. */
 export const RepositoriesAction = 'admin-repositories';
 
+/** Admin > Sites, every team's published sites: opened, rolled back, unpublished, deleted. */
+export const SitesAction = 'admin-sites';
+
+/** Active Team > Sites, the same screen filtered to the active team. `team-`, so it needs one. */
+export const TeamSitesAction = 'team-sites';
+
 /** Admin > Settings, the instance-wide Tenant Settings dialog. */
 export const TenantSettingsAction = 'admin-settings';
 
@@ -88,6 +94,7 @@ export const Ribbon: RibbonSpec = {
         { kind: 'button', action: 'team-members', label: 'Members', icon: 'groups', size: 'small' },
         { kind: 'button', action: 'team-kanban', label: 'Kanban', icon: 'view_kanban', size: 'small' },
         { kind: 'button', action: 'team-git', label: 'Git', icon: 'account_tree', size: 'small' },
+        { kind: 'button', action: TeamSitesAction, label: 'Sites', icon: 'public', size: 'small' },
         { kind: 'button', action: 'team-settings', label: 'Settings', icon: 'settings', size: 'small' },
         { kind: 'button', action: 'team-reset', label: 'Reset', icon: 'restart_alt', size: 'small' },
       ],
@@ -136,8 +143,11 @@ export const Ribbon: RibbonSpec = {
         // machine principal on `GET /api/diagnostics` outright.
         { kind: 'button', action: 'admin-diagnostics', label: 'Diagnostics', icon: 'monitor_heart', size: 'large' },
         // The instance's local repositories - git kept on the volume, which a team names as
-        // `local:<name>`. Before Plugins, which stays directly before Settings.
+        // `local:<name>`. Directly after Diagnostics.
         { kind: 'button', action: RepositoriesAction, label: 'Repositories', icon: 'account_tree', size: 'large' },
+        // Every team's published sites. After Repositories, before Plugins, which stays directly
+        // before Settings.
+        { kind: 'button', action: SitesAction, label: 'Sites', icon: 'public', size: 'large' },
         // DIRECTLY BEFORE Settings: what is installed on the instance, beside how it is configured.
         { kind: 'button', action: PluginsAction, label: 'Plugins', icon: 'extension', size: 'large' },
         // THE GEAR. Every instance-wide setting - the WIP limit among them - in one dialog. The

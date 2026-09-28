@@ -1755,6 +1755,7 @@ PrincipalLogScope.Use(app);
 app.MapMcp("/mcp").NoPermitRequired();
 SurfaceEndpoints.Map(app, dataRoot);
 SiteEndpoints.Map(app);
+SiteApiEndpoints.Map(app);
 TenantSettingsEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);

@@ -228,8 +228,67 @@ trigger's fire joins the action's workflow. An action widens nothing the team ca
 and what follows is the ordinary trigger path. A plugin's outward-acting settings still need their
 person-only allowlist.
 
-## For agents and plugins
+## For agents: the `site` tool
 
-Agents reach sites through `SiteService` (the `site` MCP tool is built on it); a member or plugin
-acts as a `SiteActor` bound to its own team, and another team's site answers as a missing one does.
-A plugin writes with the `site.put` and `site.delete` records, for its own team's sites only.
+A team's Manager, its members and the Concierge (which passes `team`) use the `site` MCP tool; the
+built-in skill `building-sites` teaches it. A member or Manager acts on its own team's sites only.
+
+| Tool call | What it does |
+|---|---|
+| `site action: create site: triage` | An empty site. |
+| `site action: publish site: triage folder: <absolute path>` | A new version from the folder, live once copied. |
+| `site action: list` | The team's sites. |
+| `site action: show site: triage` | Its versions, collections, data size and the path a person opens. |
+| `site action: rollback site: triage [version: n]` | An earlier kept version made live. |
+| `site action: unpublish site: triage` | Stops serving it; keeps files and data. |
+| `site action: data op: list\|get\|put\|delete site: triage collection: items [id: t1] [doc: {...}]` | The data store. |
+| `site action: actions site: triage [take: 20]` | The recent `site.action` rows, read only. |
+
+The tool has no delete: **deleting a site is a person's action**, in Admin → Sites.
+
+### The routes behind it
+
+The tool relays to these with the caller's own key; Admin → Sites calls them with the cookie.
+
+| Route | Marker |
+|---|---|
+| `GET /api/teams/{team}/sites`, `GET …/sites/{site}`, `GET …/sites/{site}/data/{collection}[/{id}]`, `GET …/sites/{site}/actions?take=` | `Read` |
+| `POST /api/teams/{team}/sites` `{name}`, `POST …/{site}/publish` `{folder}`, `POST …/{site}/rollback` `{version?}`, `POST …/{site}/unpublish`, `PUT …/{site}/data/{collection}/{id}` (the document's JSON), `DELETE …/{site}/data/{collection}/{id}` | `Sites` |
+| `GET /api/sites` (every team, for Admin → Sites), `DELETE /api/teams/{team}/sites/{site}[?confirm=true]` | `HumansOnly` |
+
+`Sites` is its own permit. A team's Manager, every agent member and the Concierge hold it by default;
+`TeamGate` bounds a container to its own team, and another team's site answers what a missing team
+does. The delete answers 409 with what would be lost until it is confirmed.
+
+## Admin → Sites
+
+The Admin group's **Sites** button lists every site across teams: name, team, live version,
+published at and by, and data size. Each row has **Open** (a new tab, through the entry above),
+**Versions** (roll back), **Unpublish** (keeps files and data), **Delete** (asks first, showing what
+would be lost) and a read-only view of each collection. The Active Team group's **Sites** button opens
+the same list filtered to that team.
+
+## For plugins
+
+A plugin member writes with the `site.put` and `site.delete` records, for its own team's sites only
+(see [plugins.md](plugins.md)); another team's site, a missing one or a limit drops the record with
+one progress warning.
+
+## A complete example: `samples/sites/triage`
+
+[`samples/sites/triage`](../samples/sites/triage) is a triage queue over the `items` collection with
+**Done** and **Assign** actions, and the end-to-end check for everything above:
+
+1. **Publish** from an agent: `site action: create site: triage`, then
+   `site action: publish site: triage folder: <worktree>/samples/sites/triage`.
+2. **Seed** from a plugin of the team, one record per line:
+   `{"t":"site.put","site":"triage","collection":"items","id":"t1","doc":{"title":"Printer on 3 is jammed","status":"open"}}`
+   (or `site action: data op: put …` from an agent).
+3. **Wire** an event trigger in the team's Triggers dialog: event type `site.action`, filter
+   `siteAction eq triage/done`, the member to wake, and an instruction such as
+   `A person marked {event.payload} done on the triage site ({event.by}). Read that item with the site tool, set its status to "done" and put it back.`
+4. **Click** Done on the page. One `site.action` row roots a workflow, the trigger wakes the member,
+   its run writes `"status":"done"`, and the page shows the item under Done on its next read.
+
+The page includes only `/sites/_sdk/site.js` and its own `app.js` and `site.css`, renders every
+field with `textContent`, and keeps what it has asked for in memory, since it has no `localStorage`.

@@ -22,6 +22,7 @@ public sealed class ConciergeLaunchFactory(
             Permits.Read, Permits.Tell, Permits.CreateContainer,
             Permits.CreateTeam,
             Permits.Skills,
+            Permits.Sites,
         };
 
     /// <summary>

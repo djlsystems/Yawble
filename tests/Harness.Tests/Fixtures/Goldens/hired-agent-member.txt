@@ -1,5 +1,5 @@
 --- row
-label= agent=claude-headless prompt= subscribes=[] permits=[Progress,Read,Skills] hiredFor=
+label= agent=claude-headless prompt= subscribes=[] permits=[Progress,Read,Sites,Skills] hiredFor=
 --- invocation
 agent=claude-headless cwd=<root>/teams/Golden/workspaces/Worker unreachable=
 --- environment
@@ -42,7 +42,7 @@ Follow it. If it does not load, call the MCP tool blocked with the reason
 
 Platform tools are MCP tools on the server named harness: skills_get, skills_search, tell,
 progress, blocked, handback, needs_decision, workflow_complete, workflow_show, team_list,
-team_current, wip, status, hiring, member, kanban, backlog, and repo. There is no shell
+team_current, wip, status, hiring, member, kanban, backlog, repo, and site. There is no shell
 command and no HTTP fallback. Call progress while you work. Pass HARNESS_CAUSATION as
 causation on every tell.
 
@@ -65,6 +65,7 @@ The platform itself runs in the same container as you. Stop only the processes y
 
 Load one with skills_get when the work calls for it; skills_search finds them by text.
 
+- `building-sites` - Use when a person needs a working page - a tracker, a queue, an approval screen, a dashboard over a plugin's data: the site model, the helper script, the security limits and the site tool.
 - `member` - Use when doing implementation work as a team member.
 - `team-setup` - Use when creating a team workspace or changing repository/worktree layout.
 - `test-credentials` - Use when signing in to, bootstrapping, or testing against anything that needs a credential.

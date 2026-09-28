@@ -437,6 +437,36 @@ public sealed class SiteService(
         return new NewMessage(MessageTypes.SiteAction, body.ToJsonString(), SourceOf(team, site));
     }
 
+    /// <summary>
+    /// The newest <paramref name="take"/> <c>site.action</c> rows this site posted, oldest first. Walks
+    /// the action rows forward and keeps the tail, rather than filtering a capped window of the
+    /// newest rows, which degrades to nothing once other sites' actions fill it. Actions are a
+    /// person's clicks, so the walk is short.
+    /// </summary>
+    public static async Task<IReadOnlyList<Message>> RecentActionsAsync(
+        IMessageLog log, string team, string site, int take, CancellationToken ct = default)
+    {
+        const int page = 500;
+        var source = SourceOf(team, site);
+        var kept = new Queue<Message>();
+        long after = 0;
+
+        while (true)
+        {
+            var rows = await log.ReadAfterAsync(after, [MessageTypes.SiteAction], page, ct);
+
+            foreach (var row in rows)
+            {
+                if (!string.Equals(row.Source, source, StringComparison.OrdinalIgnoreCase)) continue;
+                kept.Enqueue(row);
+                if (kept.Count > take) kept.Dequeue();
+            }
+
+            if (rows.Count < page) return kept.ToList();
+            after = rows[^1].Seq;
+        }
+    }
+
     /// <summary>The source every <c>site.action</c> row of a site carries.</summary>
     public static string SourceOf(string team, string site) => $"site:{team}/{site}";
 

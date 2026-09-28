@@ -1,0 +1,478 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue';
+import {
+  SiteDeletionConfirmationRequired,
+  deleteSite,
+  getSite,
+  listSiteDocuments,
+  listSites,
+  rollbackSite,
+  unpublishSite,
+  type Site,
+  type SiteDetail,
+  type SiteDocument,
+} from '../api/sites';
+import { useConsoleStore } from '../stores/console';
+
+/**
+ * ADMIN > SITES: every site across teams, from `GET /api/sites` - its team, live version, who
+ * published it and when, and how much data it holds. Open shows it in a new tab; Versions lists
+ * the kept versions and rolls back to one; Unpublish takes it down and keeps its files and data;
+ * Data reads its collections, read-only. Delete asks first, with the Host's own sentence saying
+ * what would be lost. Every refusal is shown as the Host worded it.
+ *
+ * `team` is the Active Team group's way in: the same list, filtered to that team, with a way back
+ * to all of them.
+ */
+const open = defineModel<boolean>({ required: true });
+
+const props = defineProps<{ team?: string | null }>();
+
+const board = useConsoleStore();
+
+const sites = ref<Site[]>([]);
+const loading = ref(false);
+const error = ref('');
+
+/** The team the list is narrowed to. Taken from `team` on each open, cleared by All teams. */
+const only = ref<string | null>(null);
+
+/** The last refusal from a row action, in the Host's words. Cleared on each open. */
+const problem = ref('');
+/** `team/name` of the row whose action is in flight. */
+const busy = ref('');
+
+const shown = computed(() => (only.value ? sites.value.filter((site) => site.team === only.value) : sites.value));
+
+async function load() {
+  loading.value = true;
+  error.value = '';
+
+  try {
+    sites.value = await listSites();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    loading.value = false;
+  }
+}
+
+watch(open, (showing) => {
+  if (!showing) return;
+
+  only.value = props.team || null;
+  problem.value = '';
+  void load();
+}, { immediate: true });
+
+/** Bytes as a person reads them. */
+function size(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+function when(at: string | null) {
+  return at ? new Date(at).toLocaleString() : '';
+}
+
+function teamName(id: string) {
+  return board.teams.find((team) => team.id === id)?.name ?? id;
+}
+
+function documents(count: number) {
+  return count === 1 ? '1 document' : `${count} documents`;
+}
+
+const key = (site: Site) => `${site.team}/${site.name}`;
+
+// --- Row actions ---------------------------------------------------------------------------------
+
+/** Same origin: the Host issues the site's capability itself when the tab asks for it. */
+function openSite(site: Site) {
+  window.open(site.url, '_blank', 'noopener');
+}
+
+async function unpublish(site: Site) {
+  busy.value = key(site);
+  problem.value = '';
+
+  try {
+    await unpublishSite(site.team, site.name);
+    await load();
+  } catch (cause) {
+    problem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    busy.value = '';
+  }
+}
+
+// --- Delete, which asks first, in the Host's words -----------------------------------------------
+
+/** The site and the Host's sentence saying what deleting it would lose. */
+const confirming = ref<{ site: Site; sentence: string } | null>(null);
+const deleting = ref(false);
+const deleteProblem = ref('');
+
+/**
+ * The first DELETE carries no `confirm`, so the Host refuses it with the sentence the person is
+ * then asked with. Nothing is deleted until they press Delete in that question.
+ */
+async function askDelete(site: Site) {
+  busy.value = key(site);
+  problem.value = '';
+  deleteProblem.value = '';
+
+  try {
+    await deleteSite(site.team, site.name);
+    // The Host deleted it without asking. Not what it does, but the list must say so if it did.
+    await load();
+  } catch (cause) {
+    if (cause instanceof SiteDeletionConfirmationRequired) confirming.value = { site, sentence: cause.message };
+    else problem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    busy.value = '';
+  }
+}
+
+async function confirmDelete() {
+  const site = confirming.value?.site;
+  if (!site || deleting.value) return;
+
+  deleting.value = true;
+  deleteProblem.value = '';
+
+  try {
+    await deleteSite(site.team, site.name, true);
+    confirming.value = null;
+    await load();
+  } catch (cause) {
+    deleteProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    deleting.value = false;
+  }
+}
+
+// --- Versions and data, one site at a time -------------------------------------------------------
+
+const detailOpen = ref(false);
+const detailView = ref<'versions' | 'data'>('versions');
+const detailSite = ref<Site | null>(null);
+const detail = ref<SiteDetail | null>(null);
+const detailProblem = ref('');
+
+const collection = ref('');
+const docs = ref<SiteDocument[]>([]);
+const docsLoading = ref(false);
+
+async function showDetail(site: Site, view: 'versions' | 'data') {
+  detailSite.value = site;
+  detailView.value = view;
+  detail.value = null;
+  detailProblem.value = '';
+  collection.value = '';
+  docs.value = [];
+  detailOpen.value = true;
+
+  try {
+    detail.value = await getSite(site.team, site.name);
+  } catch (cause) {
+    detailProblem.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+const rollingBack = ref<number | null>(null);
+
+async function rollback(version: number) {
+  const site = detailSite.value;
+  if (!site || rollingBack.value !== null) return;
+
+  rollingBack.value = version;
+  detailProblem.value = '';
+
+  try {
+    await rollbackSite(site.team, site.name, version);
+    detail.value = await getSite(site.team, site.name);
+    await load();
+  } catch (cause) {
+    detailProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    rollingBack.value = null;
+  }
+}
+
+async function pickCollection(name: string) {
+  const site = detailSite.value;
+  if (!site) return;
+
+  collection.value = name;
+  docs.value = [];
+  docsLoading.value = true;
+  detailProblem.value = '';
+
+  try {
+    docs.value = await listSiteDocuments(site.team, site.name, name);
+  } catch (cause) {
+    detailProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    docsLoading.value = false;
+  }
+}
+
+/** A document as TEXT. It is whatever the site stored, so it is never rendered as markup. */
+function pretty(doc: unknown) {
+  return JSON.stringify(doc, null, 2);
+}
+</script>
+
+<template>
+  <q-dialog v-model="open">
+    <q-card class="os-dialog-xl" data-sites-dialog>
+      <q-card-section class="row items-center q-pb-none">
+        <div class="os-dialog-title">Sites<template v-if="only"> · {{ teamName(only) }}</template></div>
+        <q-space />
+        <q-btn v-if="only" flat dense no-caps icon="groups" label="All teams" @click="only = null" />
+        <q-btn flat dense no-caps icon="refresh" label="Refresh" :loading="loading" @click="load" />
+        <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
+      </q-card-section>
+
+      <q-card-section>
+        <div class="os-body os-text-muted q-mb-sm">
+          A team publishes a site from its members' work. Unpublishing takes it down and keeps its files
+          and data; deleting removes all of it.
+        </div>
+
+        <div v-if="problem" class="os-body text-negative q-mb-sm" data-sites-problem>{{ problem }}</div>
+
+        <div v-if="error" class="os-body text-negative">Could not list the sites: {{ error }}</div>
+        <div v-else-if="!loading && shown.length === 0" class="os-body os-text-muted">
+          No sites yet.
+        </div>
+
+        <q-markup-table v-else flat bordered dense separator="horizontal">
+          <thead>
+            <tr>
+              <th class="text-left">Name</th>
+              <th class="text-left">Team</th>
+              <th class="text-left">Live version</th>
+              <th class="text-left">Published</th>
+              <th class="text-right">Data</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="site in shown" :key="key(site)" :data-site="key(site)">
+              <td class="text-left mono">{{ site.name }}</td>
+              <td class="text-left">{{ teamName(site.team) }}</td>
+              <td class="text-left">
+                <template v-if="site.liveVersion !== null">v{{ site.liveVersion }}</template>
+                <span v-else class="os-text-muted">Not published</span>
+              </td>
+              <td class="text-left">
+                <template v-if="site.liveVersion !== null">
+                  {{ when(site.publishedAt) }}
+                  <div v-if="site.publishedBy" class="text-caption os-text-muted">by {{ site.publishedBy }}</div>
+                </template>
+              </td>
+              <td class="text-right">
+                {{ documents(site.documents) }}
+                <div class="text-caption os-text-muted">{{ size(site.dataBytes) }}</div>
+              </td>
+              <td class="text-right text-no-wrap">
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="open_in_new"
+                  :aria-label="`Open ${site.name}`"
+                  :disable="site.liveVersion === null"
+                  @click="openSite(site)"
+                >
+                  <q-tooltip>Open the live site in a new tab</q-tooltip>
+                </q-btn>
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="history"
+                  :aria-label="`Versions of ${site.name}`"
+                  @click="showDetail(site, 'versions')"
+                >
+                  <q-tooltip>The kept versions, and rolling back to one</q-tooltip>
+                </q-btn>
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="dataset"
+                  :aria-label="`Data of ${site.name}`"
+                  @click="showDetail(site, 'data')"
+                >
+                  <q-tooltip>The site's collections, read-only</q-tooltip>
+                </q-btn>
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="unpublished"
+                  :aria-label="`Unpublish ${site.name}`"
+                  :disable="site.liveVersion === null || busy !== ''"
+                  :loading="busy === key(site)"
+                  @click="unpublish(site)"
+                >
+                  <q-tooltip>Take the site down. Its files and data are kept</q-tooltip>
+                </q-btn>
+                <q-btn
+                  flat
+                  dense
+                  round
+                  color="negative"
+                  icon="delete"
+                  :aria-label="`Delete ${site.name}`"
+                  :disable="busy !== ''"
+                  @click="askDelete(site)"
+                >
+                  <q-tooltip>Delete the site, its versions and its data</q-tooltip>
+                </q-btn>
+              </td>
+            </tr>
+          </tbody>
+        </q-markup-table>
+      </q-card-section>
+    </q-card>
+  </q-dialog>
+
+  <!-- DELETE: the Host's own sentence, from the first DELETE it refused, is the question. -->
+  <q-dialog :model-value="confirming !== null" @update:model-value="(showing) => showing || (confirming = null)">
+    <q-card v-if="confirming" class="os-dialog-sm" data-site-delete>
+      <q-card-section>
+        <div class="os-dialog-title">Delete {{ confirming.site.name }}?</div>
+        <div class="os-body q-mt-sm" data-site-delete-sentence>{{ confirming.sentence }}</div>
+        <div v-if="deleteProblem" class="os-body text-negative q-mt-sm">{{ deleteProblem }}</div>
+      </q-card-section>
+      <q-card-actions align="right">
+        <q-btn flat no-caps label="Cancel" @click="confirming = null" />
+        <q-btn
+          unelevated
+          no-caps
+          color="negative"
+          :label="`Delete ${confirming.site.name}`"
+          :loading="deleting"
+          @click="confirmDelete"
+        />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
+
+  <!-- VERSIONS AND DATA: one site's kept versions, or its collections read-only. -->
+  <q-dialog v-model="detailOpen">
+    <q-card v-if="detailSite" class="os-dialog-lg" data-site-detail>
+      <q-card-section class="row items-center q-pb-none">
+        <div>
+          <div class="os-dialog-title">{{ detailView === 'versions' ? 'Versions' : 'Data' }}</div>
+          <div class="text-caption os-text-muted mono">{{ key(detailSite) }}</div>
+        </div>
+        <q-space />
+        <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
+      </q-card-section>
+
+      <q-card-section class="site-detail-body">
+        <div v-if="detailProblem" class="os-body text-negative q-mb-sm" data-site-detail-problem>{{ detailProblem }}</div>
+
+        <template v-if="detail && detailView === 'versions'">
+          <div v-if="detail.versions.length === 0" class="os-body os-text-muted">No versions kept.</div>
+          <q-markup-table v-else flat bordered dense separator="horizontal">
+            <thead>
+              <tr>
+                <th class="text-left">Version</th>
+                <th class="text-left">Published</th>
+                <th class="text-left">Source</th>
+                <th class="text-right">Files</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="version in detail.versions" :key="version.version" :data-site-version="version.version">
+                <td class="text-left">
+                  v{{ version.version }}
+                  <q-badge v-if="version.live" color="positive" label="Live" class="q-ml-xs" />
+                </td>
+                <td class="text-left">
+                  {{ when(version.publishedAt) }}
+                  <div class="text-caption os-text-muted">by {{ version.publishedBy }}</div>
+                </td>
+                <td class="text-left mono">{{ version.source }}</td>
+                <td class="text-right">
+                  {{ version.files }}
+                  <div class="text-caption os-text-muted">{{ size(version.bytes) }}</div>
+                </td>
+                <td class="text-right">
+                  <q-btn
+                    v-if="!version.live"
+                    flat
+                    dense
+                    no-caps
+                    icon="undo"
+                    :label="`Roll back to v${version.version}`"
+                    :loading="rollingBack === version.version"
+                    :disable="rollingBack !== null"
+                    @click="rollback(version.version)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </q-markup-table>
+        </template>
+
+        <template v-else-if="detail">
+          <div v-if="detail.collections.length === 0" class="os-body os-text-muted">No collections.</div>
+          <div v-else class="row q-gutter-xs q-mb-sm">
+            <q-btn
+              v-for="name in detail.collections"
+              :key="name"
+              dense
+              no-caps
+              :flat="collection !== name"
+              :unelevated="collection === name"
+              :color="collection === name ? 'primary' : undefined"
+              :label="name"
+              @click="pickCollection(name)"
+            />
+          </div>
+
+          <div v-if="collection && !docsLoading && docs.length === 0" class="os-body os-text-muted">
+            No documents in {{ collection }}.
+          </div>
+          <div v-for="doc in docs" :key="doc.id" class="q-mb-md" :data-site-doc="doc.id">
+            <div class="text-caption">
+              <span class="mono">{{ doc.id }}</span>
+              <span class="os-text-muted"> · {{ when(doc.updatedAt) }} by {{ doc.updatedBy }}</span>
+            </div>
+            <pre class="site-doc mono">{{ pretty(doc.doc) }}</pre>
+          </div>
+        </template>
+      </q-card-section>
+    </q-card>
+  </q-dialog>
+</template>
+
+<style scoped>
+.site-detail-body {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.site-doc {
+  margin: 0;
+  max-height: 30vh;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre;
+}
+</style>

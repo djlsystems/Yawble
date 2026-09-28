@@ -288,7 +288,7 @@ public static class SiteEndpoints
         Results.Json(new { error = sentence }, statusCode: status);
 
     /// <summary>The body as text, or null when it is longer than <paramref name="limit"/> bytes.</summary>
-    private static async Task<string?> ReadBodyAsync(HttpRequest request, int limit, CancellationToken ct)
+    internal static async Task<string?> ReadBodyAsync(HttpRequest request, int limit, CancellationToken ct)
     {
         if (request.ContentLength > limit) return null;
 

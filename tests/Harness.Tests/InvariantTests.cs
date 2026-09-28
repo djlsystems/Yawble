@@ -114,6 +114,7 @@ public sealed class McpContractTests
             Assert.Contains("`kanban`", body, StringComparison.Ordinal);
             Assert.Contains("`backlog`", body, StringComparison.Ordinal);
             Assert.Contains("`repo`", body, StringComparison.Ordinal);
+            Assert.Contains("`site`", body, StringComparison.Ordinal);
             Assert.Contains("`skills_get`", body, StringComparison.Ordinal);
             Assert.Contains("`skills_search`", body, StringComparison.Ordinal);
             Assert.Contains("`tell`", body, StringComparison.Ordinal);
