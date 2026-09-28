@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -18,15 +19,21 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/plugin"
 )
 
-// pluginsRoot is where the Host reads plugins in the image: <data root>/plugins.
-const pluginsRoot = "/data/plugins"
+// dataRoot is the instance's data root in the image; pluginsRoot is where the Host reads plugins,
+// <data root>/plugins.
+const (
+	dataRoot    = "/data"
+	pluginsRoot = dataRoot + "/plugins"
+)
 
 // The Host answers a rescan request within a second (PluginRescanRequests polls once a second);
 // the wait allows for a busy Host. Tests shorten both and fix the nonce.
 var (
 	rescanWait = 20 * time.Second
 	rescanPoll = 500 * time.Millisecond
-	newNonce   = func() string {
+	// An install copies the folder before it answers, so it is given longer than a rescan.
+	installWait = 60 * time.Second
+	newNonce    = func() string {
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		return hex.EncodeToString(b)
@@ -46,65 +53,168 @@ func newPluginCommand(deps Deps) *cobra.Command {
 }
 
 func newPluginInstallCommand(deps Deps) *cobra.Command {
-	var force bool
+	var force, fromInstance bool
 	cmd := &cobra.Command{
 		Use:   "install <folder>",
-		Short: "Copy a built plugin version into the instance and make it the active one",
+		Short: "Install a built plugin version into the instance and make it the active one",
 		Long: "<folder> is one built version of a plugin: it holds plugin.json and everything the manifest names. " +
 			"The manifest is checked with the Host's rules before anything is copied. The folder goes to " +
 			"/data/plugins/<id>/<version>/, owned harness:agent with directories 0750, files 0640 and the " +
 			"manifest's executable 0750, whatever the modes were here (a folder from Windows has no execute bit). " +
-			"That version becomes active; earlier versions are kept. Then the Host rescans, and its verdict is printed.",
-		Example: "  yawble plugin install ~/plugins-build/sample-echo/0.1.0\n  yawble plugin install .\\sample-echo\\0.2.0 --force",
-		Args:    cobra.ExactArgs(1),
+			"That version becomes active; earlier versions are kept. Then the Host rescans, and its verdict is printed.\n\n" +
+			"With --from-instance, <folder> is an absolute path inside the instance (a plugin a team built in its worktree, or " +
+			"the Concierge in its workspace) and nothing is copied from this computer: the running Host installs it with the " +
+			"installer Admin → Plugins uses, which checks the folder (under " + dataRoot + ", no symlink leaving it, a manifest " +
+			"it accepts), lays it out with the same modes and makes it active. --force replaces an installed version; the " +
+			"Host's verdict is printed.",
+		Example: "  yawble plugin install ~/plugins-build/sample-echo/0.1.0\n  yawble plugin install .\\sample-echo\\0.2.0 --force\n" +
+			"  yawble plugin install --from-instance /data/teams/acme/repos/Tools/main/build/sample-echo-go/0.1.0",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromInstance {
+				return installFromInstance(cmd, deps, args[0], force)
+			}
 			m, err := plugin.Read(args[0])
 			if err != nil {
 				return fmt.Errorf("%s was not installed: %w", args[0], err)
 			}
-			ctx, out := cmd.Context(), cmd.OutOrStdout()
+			ctx := cmd.Context()
 			e, err := runningEngine(ctx, deps, "plugin install")
 			if err != nil {
 				return err
 			}
-			dir := pluginsRoot + "/" + m.ID
-			target := dir + "/" + m.Version
-			stage := dir + "/.incoming-" + m.Version
-
-			res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", prepareScript, "sh", pluginsRoot, m.ID, m.Version, flag01(force))
-			if err != nil {
-				return err
-			}
-			if strings.TrimSpace(res.Stdout) == "exists" {
-				return fmt.Errorf("%s %s is already installed in the instance (%s); run again with --force to replace it", m.ID, m.Version, target)
-			}
-			if err := e.CopyTo(ctx, instance.ContainerName, args[0], stage); err != nil {
-				_, _ = e.Exec(ctx, instance.ContainerName, "rm", "-rf", stage)
-				return err
-			}
-			place := append([]string{"sh", "-c", placeScript, "sh", pluginsRoot, m.ID, m.Version}, m.Executables...)
-			if _, err := e.Exec(ctx, instance.ContainerName, place...); err != nil {
-				_, _ = e.Exec(ctx, instance.ContainerName, "rm", "-rf", stage)
-				return err
-			}
-			fmt.Fprintf(out, "copied %s %s to %s and made it the active version\n", m.ID, m.Version, target)
-
-			report, err := rescan(ctx, e)
-			if err != nil {
-				return err
-			}
-			if reason, refused := report.refusal(m.ID); refused {
-				return fmt.Errorf("the Host refused %s: %s", m.ID, reason)
-			}
-			if v, ok := report.installed(m.ID); !ok || v != m.Version {
-				return fmt.Errorf("the Host does not list %s %s after the rescan (it lists %q)", m.ID, m.Version, v)
-			}
-			fmt.Fprintf(out, "the Host reports %s %s installed; hire it as plugin:%s\n", m.ID, m.Version, m.ID)
-			return nil
+			return install(ctx, cmd.OutOrStdout(), e, m, force, func(stage string) error {
+				return e.CopyTo(ctx, instance.ContainerName, args[0], stage)
+			})
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "replace this version if it is already installed")
+	cmd.Flags().BoolVar(&fromInstance, "from-instance", false, "<folder> is a path inside the instance, under "+dataRoot+"; the Host installs it where it is")
 	return cmd
+}
+
+// installFromInstance asks the running Host to install a folder that is already inside the
+// instance, through the request file PluginRescanRequests answers. The Host runs the one installer
+// POST /api/plugins/install runs (PluginInstaller), so every check, refusal sentence, mode and the
+// verdict are the Host's; the CLI only carries the request and prints the report.
+func installFromInstance(cmd *cobra.Command, deps Deps, folder string, force bool) error {
+	ctx, out := cmd.Context(), cmd.OutOrStdout()
+	e, err := runningEngine(ctx, deps, "plugin install --from-instance")
+	if err != nil {
+		return err
+	}
+	nonce := newNonce()
+	request, _ := json.Marshal(installRequest{Request: nonce, Path: folder, Replace: force})
+	if _, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", installRequestScript, "sh", pluginsRoot, string(request)); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(installWait)
+	for {
+		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", installReportScript, "sh", pluginsRoot)
+		if err != nil {
+			return err
+		}
+		var r installReport
+		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.Request == nonce {
+			return r.verdict(out, folder)
+		}
+		if time.Now().After(deadline) {
+			// A request no Host answered must not be carried out later, by a Host started after an upgrade.
+			_, _ = e.Exec(ctx, instance.ContainerName, "sh", "-c", installWithdrawScript, "sh", pluginsRoot, nonce)
+			return fmt.Errorf("the Host did not answer the install request within %s, and the request was withdrawn. "+
+				"An image from before `plugin install --from-instance` does not answer; `yawble plugin list` shows what the instance holds", installWait)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(rescanPoll):
+		}
+	}
+}
+
+// installRequest is <plugins>/.install; installReport is <plugins>/.install-report.json, the
+// Host's answer, with the status POST /api/plugins/install would give.
+type installRequest struct {
+	Request string `json:"request"`
+	Path    string `json:"path"`
+	Replace bool   `json:"replace"`
+}
+
+type installReport struct {
+	Request   string  `json:"request"`
+	Status    int     `json:"status"`
+	ID        *string `json:"id"`
+	Version   *string `json:"version"`
+	Installed bool    `json:"installed"`
+	Replaced  bool    `json:"replaced"`
+	Reason    *string `json:"reason"`
+}
+
+// verdict prints an install the Host made active and listed; anything else is an error carrying
+// the Host's own sentence (400 refused, 409 installed already without --force, 200 written but
+// refused by the catalog).
+func (r installReport) verdict(out io.Writer, folder string) error {
+	reason, id, version := deref(r.Reason), deref(r.ID), deref(r.Version)
+	switch {
+	case r.Status == 200 && r.Installed:
+		verb := "installed"
+		if r.Replaced {
+			verb = "replaced"
+		}
+		fmt.Fprintf(out, "the Host %s %s %s from %s and made it the active version; hire it as plugin:%s\n", verb, id, version, folder, id)
+		return nil
+	case r.Status == 200:
+		return fmt.Errorf("the Host wrote %s %s but refuses it: %s", id, version, reason)
+	default:
+		return fmt.Errorf("%s was not installed: %s", folder, reason)
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// install is what both install paths share once the folder has passed its checks: refuse an
+// installed version without force, put the folder in a staging folder (copy), give it the Host's
+// modes and make it active, then print the Host's verdict.
+func install(ctx context.Context, out io.Writer, e engine.Engine, m plugin.Manifest, force bool, copy func(stage string) error) error {
+	dir := pluginsRoot + "/" + m.ID
+	target := dir + "/" + m.Version
+	stage := dir + "/.incoming-" + m.Version
+
+	res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", prepareScript, "sh", pluginsRoot, m.ID, m.Version, flag01(force))
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(res.Stdout) == "exists" {
+		return fmt.Errorf("%s %s is already installed in the instance (%s); run again with --force to replace it", m.ID, m.Version, target)
+	}
+	if err := copy(stage); err != nil {
+		_, _ = e.Exec(ctx, instance.ContainerName, "rm", "-rf", stage)
+		return err
+	}
+	place := append([]string{"sh", "-c", placeScript, "sh", pluginsRoot, m.ID, m.Version}, m.Executables...)
+	if _, err := e.Exec(ctx, instance.ContainerName, place...); err != nil {
+		_, _ = e.Exec(ctx, instance.ContainerName, "rm", "-rf", stage)
+		return err
+	}
+	fmt.Fprintf(out, "copied %s %s to %s and made it the active version\n", m.ID, m.Version, target)
+
+	report, err := rescan(ctx, e)
+	if err != nil {
+		return err
+	}
+	if reason, refused := report.refusal(m.ID); refused {
+		return fmt.Errorf("the Host refused %s: %s", m.ID, reason)
+	}
+	if v, ok := report.installed(m.ID); !ok || v != m.Version {
+		return fmt.Errorf("the Host does not list %s %s after the rescan (it lists %q)", m.ID, m.Version, v)
+	}
+	fmt.Fprintf(out, "the Host reports %s %s installed; hire it as plugin:%s\n", m.ID, m.Version, m.ID)
+	return nil
 }
 
 func newPluginListCommand(deps Deps) *cobra.Command {
@@ -315,6 +425,22 @@ for d in */; do
 done`
 
 	reportScript = `cat "$1/.rescan-report.json" 2>/dev/null || true`
+
+	// $1 root, $2 the request's JSON: the install PluginRescanRequests answers, owned and moded as
+	// .rescan, written beside it and moved in so the Host never reads half of it.
+	installRequestScript = `set -e
+mkdir -p "$1"
+chown harness:agent "$1"
+chmod u=rwx,g=rx,o=,ug-s "$1"
+printf '%s\n' "$2" > "$1/.install.tmp"
+chown harness:agent "$1/.install.tmp"
+chmod 0640 "$1/.install.tmp"
+mv -f "$1/.install.tmp" "$1/.install"`
+
+	installReportScript = `cat "$1/.install-report.json" 2>/dev/null || true`
+
+	// $1 root, $2 nonce: removes the install request if it is still this one.
+	installWithdrawScript = `grep -qF "$2" "$1/.install" 2>/dev/null && rm -f "$1/.install"; true`
 )
 
 // hostReport is .rescan-report.json, which PluginRescanRequests writes.

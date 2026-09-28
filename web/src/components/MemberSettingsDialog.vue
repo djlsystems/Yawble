@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { getMember, listCatalog, updateMember } from '../api/client';
+import { getMember, getPluginSettings, listCatalog, listPlugins, savePluginSettings, updateMember } from '../api/client';
 import {
   agentsForMode,
   isManagerContainer,
   type Agent,
   type ContainerSnapshot,
   type MemberDetail,
+  type PluginMemberSettings,
 } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -22,6 +23,15 @@ import {
   MemberInstructionsTakesEffect,
   instructionsWrittenBy,
 } from '../lib/memberInstructions';
+import {
+  initialConfig,
+  initialSecrets,
+  missingRequired,
+  settingsBody,
+  type PluginFieldValues,
+  type PluginSettingsShape,
+} from '../lib/pluginSettings';
+import PluginSettingsForm from './PluginSettingsForm.vue';
 
 /**
  * Settings for an existing member — the card's way into `PATCH /api/teams/{team}/containers/{name}`.
@@ -33,6 +43,11 @@ import {
  * THE INSTRUCTIONS ARE ONE FIELD, VISIBLE AND EDITABLE, on every agent member's card - the Manager's
  * too. When a Manager hired the member it shows exactly what the Manager wrote, and what is saved is
  * what the member gets. A plugin member has no prompt, so the field is absent for one.
+ *
+ * A PLUGIN MEMBER HAS A SETTINGS SECTION instead: the same manifest-shaped editor Add member shows,
+ * filled with what is stored for it, saved through `PUT .../plugin-settings` - a person's route,
+ * validated by the Host exactly as a hire is, taking effect on the member's next run. Its secrets are
+ * key names; no value is ever read or shown.
  *
  * The Agent IS editable. The preset is resolved by name on every invocation, so a repoint is a
  * single write and takes effect on the member’s next wake, with no Host restart. The manager can be repointed like any other member.
@@ -117,11 +132,79 @@ async function loadInstructions() {
   }
 }
 
+/**
+ * A PLUGIN MEMBER'S SETTINGS. `pluginShape` is the manifest of the version it runs - from the
+ * settings route when the Host sends it, else from the plugins list - and null until both answer.
+ * `pluginSaved` is the body as loaded, so Save writes the settings only when they moved.
+ */
+const isPlugin = computed(() => props.snapshot.kind === 'plugin');
+const pluginShape = ref<PluginSettingsShape | null>(null);
+const pluginConfig = ref<PluginFieldValues>({});
+const pluginSecrets = ref<Record<string, string>>({});
+const pluginSaved = ref('');
+const pluginProblem = ref<string | null>(null);
+
+const pluginMissing = computed(() =>
+  pluginShape.value ? missingRequired(pluginShape.value, pluginConfig.value, pluginSecrets.value) : [],
+);
+
+const pluginBody = computed(() =>
+  pluginShape.value ? settingsBody(pluginShape.value, pluginConfig.value, pluginSecrets.value) : null,
+);
+
+const pluginChanged = computed(
+  () => pluginBody.value !== null && JSON.stringify(pluginBody.value) !== pluginSaved.value,
+);
+
+/** The declarations the settings route carried, under whichever name it used. */
+function declaredShape(settings: PluginMemberSettings): PluginSettingsShape | null {
+  const config = settings.fields ?? settings.configFields ?? settings.manifest?.config ?? null;
+  const secrets = settings.secretFields ?? settings.manifest?.secrets ?? null;
+
+  return config ? { config, secrets: secrets ?? {} } : null;
+}
+
+async function loadPluginSettings() {
+  pluginShape.value = null;
+  pluginProblem.value = null;
+
+  if (!isPlugin.value) return;
+
+  try {
+    const settings = await getPluginSettings(props.snapshot.team, props.snapshot.id);
+    let shape = declaredShape(settings);
+
+    if (!shape) {
+      const id = settings.plugin.replace(/^plugin:/, '');
+      const installed = (await listPlugins()).plugins ?? [];
+      shape =
+        installed.find((entry) => entry.id === id && entry.version === settings.version) ??
+        installed.find((entry) => entry.id === id) ??
+        null;
+    }
+
+    if (!shape) {
+      pluginProblem.value = `The plugin ${settings.plugin} is not installed, so its settings cannot be edited.`;
+      return;
+    }
+
+    pluginConfig.value = initialConfig(shape, settings.config ?? {});
+    pluginSecrets.value = initialSecrets(shape, settings.secrets ?? {});
+    pluginShape.value = shape;
+    pluginSaved.value = JSON.stringify(settingsBody(shape, pluginConfig.value, pluginSecrets.value));
+  } catch (cause) {
+    pluginProblem.value = `Could not read this member's settings: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+}
+
 const valid = computed(
   () =>
     passes(name.value, nameRules) &&
     passes(agent.value, agentRules) &&
-    allowlistIncludes(teamAllowlist.value, agent.value),
+    // A plugin member kept on its plugin is not held to the team's Agent allowlist - a person may
+    // hire any installed plugin, and editing its settings is not a repoint.
+    ((isPlugin.value && agent.value === props.snapshot.agent) || allowlistIncludes(teamAllowlist.value, agent.value)) &&
+    pluginMissing.value.length === 0,
 );
 
 /** Why the Agent picker cannot be used, as its own error state. Null while it has choices. */
@@ -169,6 +252,7 @@ watch(open, (showing) => {
 
   void loadAgents();
   void loadInstructions();
+  void loadPluginSettings();
 }, { immediate: true });
 
 const busy = ref(false);
@@ -190,6 +274,13 @@ async function submit() {
   refusedName.value = name.value.trim();
 
   try {
+    // THE SETTINGS FIRST, and only when they moved: the Host validates them as it does a hire, and
+    // a refusal naming a field should leave the rest of the dialog unsaved too.
+    if (pluginShape.value && pluginChanged.value && pluginBody.value) {
+      await savePluginSettings(props.snapshot.team, props.snapshot.id, pluginBody.value);
+      pluginSaved.value = JSON.stringify(pluginBody.value);
+    }
+
     const body: { name?: string; agent?: string; systemPrompt?: string } = { name: name.value.trim() };
 
     // Sent only when it actually moved. The server treats an unchanged Agent as a no-op anyway,
@@ -301,6 +392,21 @@ async function submit() {
           <div class="text-caption os-text-muted" :class="writtenBy ? '' : 'q-mt-lg'">
             {{ MemberInstructionsTakesEffect }}
           </div>
+        </div>
+
+        <!-- A PLUGIN MEMBER'S SETTINGS: the manifest-shaped editor Add member shows, filled with
+             what is stored. Secrets are key names only. -->
+        <div v-if="isPlugin" class="q-gutter-sm" data-member-plugin-settings>
+          <div class="text-subtitle2">Settings</div>
+          <PluginSettingsForm
+            v-if="pluginShape"
+            v-model:config="pluginConfig"
+            v-model:secrets="pluginSecrets"
+            :shape="pluginShape"
+          />
+          <div v-else-if="pluginProblem" class="text-negative text-caption">{{ pluginProblem }}</div>
+          <div v-else class="text-caption os-text-muted">Reading its settings…</div>
+          <div class="text-caption os-text-muted">A change takes effect on the member's next run.</div>
         </div>
 
           <q-banner v-if="error" dense class="os-bg-tint-error text-negative">

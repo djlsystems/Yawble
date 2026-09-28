@@ -1,4 +1,5 @@
 using Harness.Contracts;
+using Harness.Pty;
 
 namespace Harness.Host;
 
@@ -25,7 +26,9 @@ namespace Harness.Host;
 /// A manifest that is wrong is REFUSED BY NAME, with the field, in <see cref="Refused"/> - never
 /// half-loaded.
 /// </summary>
-public sealed class PluginCatalog(string root) : IPluginEventRegistry
+/// <param name="runtimeFound">Whether a runtime a manifest <c>requires</c> is on this Host's PATH.
+/// Null is <see cref="PathSearch.Find"/>; a test passes its own.</param>
+public sealed class PluginCatalog(string root, Func<string, bool>? runtimeFound = null) : IPluginEventRegistry
 {
     public const string ActiveFile = "active";
 
@@ -69,7 +72,7 @@ public sealed class PluginCatalog(string root) : IPluginEventRegistry
 
         try
         {
-            var scan = Scan(root);
+            var scan = Scan(root, runtimeFound);
             _scan = scan;
             await FollowAsync(_followers, scan);
             return scan;
@@ -128,7 +131,13 @@ public sealed class PluginCatalog(string root) : IPluginEventRegistry
             : $"'{MemberRef.ForPlugin(id)}' is not installed on this Host. Install it under {root}/{id}/<version>/ and rescan plugins.";
     }
 
-    public static PluginScan Scan(string root)
+    /// <summary>Whether a runtime a manifest <c>requires</c> is on this Host: <see cref="PathSearch.Find"/>
+    /// unless a test said otherwise.</summary>
+    public bool RuntimeFound(string runtime) => (runtimeFound ?? OnPath)(runtime);
+
+    private static bool OnPath(string runtime) => PathSearch.Find(runtime) is not null;
+
+    public static PluginScan Scan(string root, Func<string, bool>? runtimeFound = null)
     {
         var plugins = new List<InstalledPlugin>();
         var refused = new List<PluginRefused>();
@@ -145,7 +154,7 @@ public sealed class PluginCatalog(string root) : IPluginEventRegistry
                 continue;
             }
 
-            var (plugin, reason) = Load(pluginDirectory, id);
+            var (plugin, reason) = Load(pluginDirectory, id, runtimeFound ?? OnPath);
 
             if (plugin is not null) plugins.Add(plugin);
             else refused.Add(new PluginRefused(id, pluginDirectory, reason!));
@@ -154,7 +163,7 @@ public sealed class PluginCatalog(string root) : IPluginEventRegistry
         return new PluginScan(plugins, refused);
     }
 
-    private static (InstalledPlugin? Plugin, string? Reason) Load(string pluginDirectory, string id)
+    private static (InstalledPlugin? Plugin, string? Reason) Load(string pluginDirectory, string id, Func<string, bool> runtimeFound)
     {
         string version;
         var active = Path.Combine(pluginDirectory, ActiveFile);
@@ -205,6 +214,27 @@ public sealed class PluginCatalog(string root) : IPluginEventRegistry
         if (manifest.Id != id) return (null, $"the manifest's `id` is '{manifest.Id}' but its directory is '{id}'.");
         if (manifest.Version != version) return (null, $"the manifest's `version` is '{manifest.Version}' but its directory is '{version}'.");
 
+        return Check(directory, version, manifest, runtimeFound, requireExecutableBit: true);
+    }
+
+    /// <summary>
+    /// Everything the catalog checks of one version folder beyond its manifest's own rules and its
+    /// place in the tree: the executable and skills inside it after symlinks, the executable bit
+    /// (not for a folder about to be installed, whose modes the install sets), the skills' files, and
+    /// every runtime it <c>requires</c>. The install runs this on the source folder BEFORE writing,
+    /// so it refuses exactly what a rescan would. <paramref name="version"/> names the folder in a
+    /// refusal.
+    /// </summary>
+    internal static (InstalledPlugin? Plugin, string? Reason) Check(
+        string directory, string version, PluginManifest manifest, Func<string, bool> runtimeFound, bool requireExecutableBit)
+    {
+        // A RUNTIME THE IMAGE DOES NOT HAVE refuses the plugin now, naming it, rather than letting
+        // its first run fail.
+        foreach (var runtime in manifest.Requires)
+        {
+            if (!runtimeFound(runtime)) return (null, $"it needs {runtime}, which is not installed on this instance.");
+        }
+
         // INSIDE ITS OWN DIRECTORY AFTER SYMLINKS ARE RESOLVED. A manifest's relative path is
         // checked for `..` when it is parsed; a symlink is the other way out, and it is only
         // visible here.
@@ -215,7 +245,7 @@ public sealed class PluginCatalog(string root) : IPluginEventRegistry
 
         if (!File.Exists(executable)) return (null, $"its executable {manifest.ExecutableForThisPlatform} does not exist.");
 
-        if (!OperatingSystem.IsWindows()
+        if (requireExecutableBit && !OperatingSystem.IsWindows()
             && (File.GetUnixFileMode(executable) & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) == 0)
         {
             return (null, $"its executable {manifest.ExecutableForThisPlatform} is not executable (chmod +x it).");
@@ -245,6 +275,9 @@ public sealed class PluginCatalog(string root) : IPluginEventRegistry
 
         return candidate.StartsWith(prefix, StringComparison.Ordinal) ? candidate : null;
     }
+
+    /// <summary><paramref name="path"/> made absolute with every symlink on it resolved.</summary>
+    internal static string Resolved(string path) => Resolve(Path.GetFullPath(path));
 
     private static string Resolve(string path)
     {

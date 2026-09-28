@@ -2223,17 +2223,32 @@ export interface MemberRunsPage {
 
 /** One configuration field a plugin's manifest declares, as `GET /api/plugins` lists it. */
 export interface PluginConfigField {
-  type: 'string' | 'number' | 'bool'
+  /** `list` is a list of strings, default `[]`, its values limited by `enum` when one is given. */
+  type: 'string' | 'number' | 'bool' | 'list'
   description?: string | null
   required: boolean
-  default?: string | number | boolean | null
+  default?: string | number | boolean | string[] | null
   enum?: string[] | null
+  /** `person`: only a person may set it - a Manager hiring on the plugin cannot. Absent: anyone. */
+  setBy?: string | null
 }
 
 /** One secret a plugin's manifest names. Its NAME only: no route ever carries a value. */
 export interface PluginSecretField {
   description?: string | null
   required: boolean
+}
+
+/** A member hired on a plugin, as the plugins list names it. */
+export interface PluginMemberRef {
+  team: string
+  member: string
+}
+
+/** An event a plugin publishes: its full type, and the manifest's one line on it. */
+export interface PluginEvent {
+  type: string
+  summary?: string | null
 }
 
 /** An installed plugin a person can hire, as `GET /api/plugins` lists it. */
@@ -2246,16 +2261,87 @@ export interface InstalledPlugin {
   version: string
   config: Record<string, PluginConfigField>
   secrets: Record<string, PluginSecretField>
+  /** Whether this is the version `active` points at. Absent from an older Host: read as active. */
+  active?: boolean
+  verdict?: 'installed'
+  /** Runtimes it needs from the image: `dotnet`, `node`, `python3`. */
+  requires?: string[] | null
+  /** The events it publishes. `publishes` is the older Host's name for the same list. */
+  events?: (PluginEvent | string)[] | null
+  publishes?: (PluginEvent | string)[] | null
+  /** Its skill's name, or null. `skills` is the list of skill files an older Host sent instead. */
+  skill?: string | null
+  skills?: string[] | null
+  /** The members hired on it, team by team. */
+  members?: PluginMemberRef[] | null
+}
+
+/** A plugin version the Host did NOT load, with its sentence saying why. */
+export interface RefusedPlugin {
+  id: string
+  reason: string
+  name?: string | null
+  version?: string | null
+  active?: boolean
+}
+
+/**
+ * One version folder under the plugins directory and the Host's verdict on it: `installed` for the
+ * active version it loaded, `refused` (with `reason`) for an active version it would not load,
+ * `inactive` for a version kept on disk and not in use.
+ */
+export interface PluginVersion {
+  id: string
+  version: string | null
+  name?: string | null
+  active: boolean
+  verdict: 'installed' | 'refused' | 'inactive'
+  reason?: string | null
 }
 
 /** `GET /api/plugins`: the installed plugins, and the directories that were not loaded. */
 export interface PluginList {
   plugins: InstalledPlugin[]
-  refused: { id: string; reason: string }[]
+  refused: RefusedPlugin[]
+  /** Every version folder. Absent from an older Host, which listed only `plugins` and `refused`. */
+  versions?: PluginVersion[] | null
+}
+
+/** `POST /api/plugins/install`: what the Host made of the folder. */
+export interface PluginInstallResult {
+  id?: string | null
+  version?: string | null
+  installed: boolean
+  /** Whether it went over a version already installed (Replace ticked). */
+  replaced?: boolean
+  reason?: string | null
+}
+
+/** One stored setting value: a string, number or bool, or a `list` field's strings. */
+export type PluginSettingValue = string | number | boolean | string[]
+
+/**
+ * `GET /api/teams/{team}/members/{member}/plugin-settings`: the member's stored settings (only
+ * those that differ from default) and each secret's LOGICAL KEY - never a value - beside the
+ * manifest's own declarations, so the editor is shaped by the version the member runs.
+ */
+export interface PluginMemberSettings {
+  plugin: string
+  version: string
+  config: Record<string, PluginSettingValue>
+  secrets: Record<string, string>
+  /** The manifest's declarations. Absent when the Host leaves them to `GET /api/plugins`. */
+  fields?: Record<string, PluginConfigField> | null
+  configFields?: Record<string, PluginConfigField> | null
+  secretFields?: Record<string, PluginSecretField> | null
+  manifest?: {
+    config?: Record<string, PluginConfigField> | null
+    secrets?: Record<string, PluginSecretField> | null
+  } | null
 }
 
 /** A plugin member's settings on hire: config values, and each secret bound to a LOGICAL KEY. */
 export interface PluginHire {
-  config: Record<string, string | number | boolean>
+  config: Record<string, PluginSettingValue>
   secrets: Record<string, string>
 }

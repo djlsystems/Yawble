@@ -28,7 +28,17 @@ marketplace, downloading, signing and updating are out of scope.
 
 ## Install a plugin
 
-Install a built plugin version with the operator CLI:
+There are two install paths. Both check the same rules, lay the plugin out the same way, set the
+same owner and modes, switch `active` to it and print the Host's verdict:
+
+- **From your computer.** `yawble plugin install <folder>` copies a version you built on the machine
+  that runs the instance into it (below).
+- **From inside the instance.** A plugin a team built in its worktree, or the Concierge in its
+  workspace, is already in the container. `yawble plugin install --from-instance <path>` installs it
+  where it is, with no copy out of the container and back
+  ([Install from a folder inside the instance](#install-from-a-folder-inside-the-instance)).
+
+Install a built plugin version from your computer with the operator CLI:
 
 ```sh
 yawble plugin install <folder>
@@ -65,6 +75,53 @@ report back. Only the Host user and root can write in `/data/plugins` (`harness:
 agent cannot ask for a rescan. The report names members of every team, so the Host writes it `0600`.
 An image from before this command does not answer. The CLI says so after 20 seconds, and a restart
 (`yawble down`, `yawble up`) loads the files it has already put in place.
+
+### Install from a folder inside the instance
+
+A plugin built inside the instance - by a team in its worktree, or by the Concierge in its workspace -
+is installed where it is, with no copy out to the operator's computer. Both ways are a person's:
+
+- **The web app:** Admin → Plugins → "Install from a folder…" picks the built version folder and calls
+  `POST /api/plugins/install` with `{ "path": "<absolute folder>", "replace": false }` (humans-only).
+- **The operator CLI:** `yawble plugin install --from-instance <path>` asks the running Host through a
+  request file, the same seam as the rescan. Through `podman exec` (or `docker exec`), which runs as
+  root, it writes `{"request": "<nonce>", "path": ..., "replace": ...}` to `/data/plugins/.install`,
+  owned `harness:agent` `0640` like `.rescan`: the Host user reads and removes it, and an agent can
+  neither write it nor create it. The Host answers in `/data/plugins/.install-report.json` (`0600`,
+  the Host user's; the CLI reads it as root) with that nonce, `status` (200, 400 or 409), `id`,
+  `version`, `installed`, `replaced` and `reason`. `--force` is `replace`. The CLI prints the verdict
+  and exits 1 on a refusal; a Host that does not answer within 60 seconds is reported and the
+  request withdrawn.
+
+The route and the request file share one implementation (`PluginInstaller`), so they check, write and answer alike:
+
+1. **Refused before anything is written**, each with a sentence naming why:
+   - a path that is not absolute, not a folder, or outside the data root (`/data`);
+   - a path through a symlink that leads out of the data root;
+   - a symlink inside the folder that leads out of it, or that is absolute (a copy of it would still
+     point at the source, which the agent that built it can change);
+   - a folder already under `/data/plugins`;
+   - a manifest the catalog would refuse, by the catalog's own check: its rules, the executable and
+     every skill inside the folder after symlinks, and every runtime it `requires`;
+   - an id and version already installed, unless replacing was asked for (409).
+2. **The layout, ownership and modes** of the CLI's install: `/data/plugins/<id>/<version>/`, owned by
+   the Host user with the `agent` group, directories `0750`, files `0640`, the manifest's executable and
+   every `platforms` entry `0750`. The copy is staged beside the target and moved into place.
+3. **`active`** names the new version, and the catalog is rescanned.
+4. **The Host's verdict** is the answer: installed, or refused with its reason.
+5. **A `plugins.installed` row** is appended to `tenant_events`: who, the id and version, the source
+   folder, whether it replaced one, and the verdict (`by: "operator"` for the CLI).
+
+An agent still cannot install: the route is humans-only, and only root and the Host user can write the
+request file.
+
+```sh
+yawble plugin install --from-instance /data/teams/<team>/repos/<repo>/<tree>/build/<id>/<version> [--force]
+```
+
+The CLI prints the Host's verdict and exits 1 on a refusal (400), an installed version without
+`--force` (409), or `installed: false`. If the Host does not answer within 60 seconds (an image from
+before this command), it says so and withdraws the request, so a later Host never carries it out.
 
 The layout the Host reads, whatever put it there:
 
@@ -142,6 +199,26 @@ What has been verified, and what has not:
   (`chown` was a stub), and a build made on Windows. In particular, not yet run: what
   `podman cp`/`docker cp` do with a folder from a Windows host, and a hired sample-echo running after
   this install on a real instance.
+
+### Example: sample-echo-go
+
+`samples/plugins/sample-echo-go` is the same plugin in Go, and the template for a connector (see
+[Choosing a language](#choosing-a-language)). `build.sh` builds two static binaries
+(`CGO_ENABLED=0`, `GOOS=linux`, `GOARCH=amd64` and `arm64`) into `bin/linux-x64/` and
+`bin/linux-arm64/`, which the manifest's `platforms` map names; the Host runs the one for its
+processor. It needs no runtime from the image, so its manifest has no `requires`.
+
+```sh
+# From the repository root, on your computer or inside the instance.
+samples/plugins/sample-echo-go/build.sh ~/plugins-build/sample-echo-go/0.1.0
+yawble plugin install ~/plugins-build/sample-echo-go/0.1.0
+
+# Built inside the instance, in a team's tree: install it where it is.
+yawble plugin install --from-instance /data/teams/<team>/repos/<repo>/<tree>/build/sample-echo-go/0.1.0
+```
+
+`PluginGoTemplateEndToEndTests` builds both binaries, checks each is a static ELF for its processor,
+installs the folder, hires it and runs it on the Host's processor.
 
 ### Hire it into a team
 
@@ -227,15 +304,47 @@ Content-Type: application/json
 | `protocol` | required | `harness.member/1`, the only protocol this Host speaks. |
 | `executable.path`, `executable.args` | required / optional | A relative path inside the version directory. `args` is a fixed argv with no substitution. |
 | `timeoutSeconds` | optional | An **idle** clock: this long with no `progress` record ends the run. Default 300. |
-| `config` | optional | Name → `{type: string, number or bool; enum; default; required; description}`. Flat in v1. |
+| `config` | optional | Name → `{type: string, number, bool or list; enum; default; required; setBy; description}`. Flat in v1. A `list` is a list of strings, default `[]`. See [List settings](#list-settings). |
 | `secrets` | optional | Name → `{description, required}`. A `value` key is refused. |
 | `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `inLedger` is not read in v1: a plugin event always reaches the ledger. See [Events](#events). |
 | `skills` | optional | Files inside the plugin, in the same front-matter format as a skill. Indexed at load and on every rescan. See [Skills](#skills). |
+| `requires` | optional | The runtimes the plugin needs from the image: `dotnet`, `node`, `python3`. See [Runtimes](#runtimes-requires). |
 | `platforms` | reserved, validated | `{"linux-x64": "bin/x64/p", "linux-arm64": "bin/arm64/p"}`. When present it takes precedence over `executable.path` for this machine. |
 | `actions`, `consumes`, `health`, `signature`, `publisher`, `minHostVersion`, `permits` | reserved | Kept, and not acted on. |
 
 Any other key is ignored and named on the start-up line. This lets a manifest written for a later
 Host still load.
+
+### List settings
+
+`"type": "list"` holds a list of strings: an allowlist, a set of scopes. Its default is `[]` when the
+manifest gives none, so the plugin always receives an array in the request's `config`. An optional
+`enum` limits each item, and a value holding anything else is refused naming the item:
+
+```json
+"config": {
+  "sendAllowlist": { "type": "list", "setBy": "person", "description": "Addresses it may send to." },
+  "scopes":        { "type": "list", "enum": ["read", "send"], "default": ["read"] }
+}
+```
+
+Every other type keeps its rules. A Host from before list settings refuses a manifest that uses one,
+naming the field, as it refuses any unknown type. The web's settings editor shows a list as chips.
+
+### Runtimes: `requires`
+
+A plugin is self-contained: beyond what the image guarantees, everything it needs lives in its own
+folder. `requires` names what it needs from the image, from exactly these: `dotnet`, `node`,
+`python3`. A self-contained binary (Go) needs none and omits it.
+
+```json
+"requires": ["dotnet"]
+```
+
+The catalog looks each one up on the Host's `PATH` when it loads and at every rescan, and refuses a
+plugin whose runtime is missing, naming it ("it needs python3, which is not installed on this
+instance"), rather than letting its first run fail. A name outside the list is refused naming the
+name. The install checks the same before it writes.
 
 ## Protocol `harness.member/1`
 
@@ -408,6 +517,28 @@ slot like any member's.
 - **Swapping the store.** Only the resolver (`ISecretStore`) knows where values live. An encrypted
   store can replace it later, and no plugin or binding changes.
 
+### Changing a plugin member's settings after hire
+
+A person changes a plugin member's configuration and secret bindings without hiring a new member:
+**Member settings → Settings**, the same form Add member shows, filled with what is stored. It is
+generated from the manifest: one typed input per `config` field (text, number box, toggle, dropdown
+for an `enum`, chips for a `list`), each with its description, default, whether it is required, and
+"Set by a person only" for a `setBy: person` field; "Reset to default" per field; secrets as key-name
+inputs; and a read-only view of the JSON that will be stored. It saves only the fields that differ from
+their default.
+
+- `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the stored
+  `config`, `secrets` as logical keys (never a value), and the manifest's `fields` and `secretFields`.
+- `PUT` the same route with `{ "config": {...}, "secrets": {...} }` replaces both. It is validated
+  exactly as a hire is - field and secret names, types, `enum` (per item for a list), required fields,
+  the key's form, a reserved or provider key, a required secret not set on this Host, a value too short
+  to redact - and refused with a 400 naming the field, with nothing written.
+- The save and its `member.plugin-settings-changed` row in `tenant_events` (the plugin and the NAMES of
+  the fields and secrets that changed, never a value) are one transaction.
+- It takes effect on the member's next run: the runner reads the settings at every run.
+- Both routes are humans-only. A Manager cannot change a member's settings after hire, as it cannot
+  change a member's instructions.
+
 ## Skills
 
 A plugin's `skills` files tell a Manager how to use it. They are indexed whenever the plugins are
@@ -531,6 +662,38 @@ setting below.
 The built-in skill `authoring-plugins` (offered to the Concierge and the Manager) carries this rule
 in plain words, with the checklist for writing a plugin's spec as a backlog item.
 
+## Choosing a language
+
+The protocol is JSON on stdin and stdout, so a plugin may be written in any language whose program
+runs in the image. Every run is a new process, so start-up is paid on every run.
+
+- **Go is the default** for connectors to REST APIs, clouds, databases, queues and mail: one small
+  static binary per processor, no runtime, a start measured in milliseconds. Template:
+  `samples/plugins/sample-echo-go`.
+- **.NET** when the best or only SDK for the target system is .NET: SharePoint, Dynamics, Exchange
+  on-premises, SAP, heavy Office documents. Template: `samples/plugins/sample-echo`.
+- **Python** when the library the plugin needs exists only in Python.
+
+A plugin's spec says which language and why: find which language has the official SDK for the
+target system, and record the choice and the reason. The built-in `authoring-plugins` skill carries
+these rules.
+
+### Self-contained plugins
+
+The image guarantees the .NET runtime, Node and Python 3, and nothing else. Everything a plugin needs
+beyond that lives in its own folder:
+
+- **Go:** libraries are compiled into the binary; build with `CGO_ENABLED=0` so it links nothing
+  from the image.
+- **.NET:** `dotnet publish` puts every NuGet package into the plugin's folder beside its build.
+- **Python:** packages go in a virtual environment inside the plugin's folder, and the launcher runs
+  that environment's interpreter.
+
+Nothing a plugin needs is ever added to the image, and a plugin must not rely on a system package
+someone happened to install. The runtimes it does need from the image are named in the manifest's
+`requires` (`"dotnet"`, `"node"`, `"python3"`); the .NET template declares `["dotnet"]`, and a Go
+plugin declares none.
+
 ## Where it is pinned
 
 - **Agents are unchanged.** `MemberGoldenTests` pins an agent member's rows, prompt, context,
@@ -538,6 +701,7 @@ in plain words, with the checklist for writing a plugin's spec as a backlog item
   only with `HARNESS_UPDATE_GOLDENS=1`, and only for a change that is meant to be visible.
 - **The end-to-end proof of concept.** `PluginMemberEndToEndTests` installs and hires sample-echo on
   the real Host. It also asserts that the pump (`Harness.Containers`) has no code naming plugins.
+  `PluginGoTemplateEndToEndTests` does the same for sample-echo-go, built for both processors.
 - **The pump stays generic, structurally.** `PumpArchitectureTests` reads the pump's compiled IL:
   `MemberRef` is used only by `KindOf` in `MemberRuntime.Snapshot`, and a member's implementation -
   `ContainerDefinition.Agent`, `ContainerSnapshot.Agent` and `Kind`, `MemberRef.KindOf` - is
@@ -563,7 +727,20 @@ in plain words, with the checklist for writing a plugin's spec as a backlog item
 - **The install.** `cli/internal/cli/plugin_test.go` pins each `yawble plugin` command and each
   refusal against a scripted engine, including an install from a folder whose launcher has no execute
   bit. It also runs the container scripts under a real `sh`: the modes, a setgid parent, `active`, and
-  a kept version. `cli/internal/plugin` pins the manifest rules against the sample.
+  a kept version. `plugin install --from-instance` is pinned against a faked request/report exchange:
+  the request it writes (`replace` only with `--force`), no copy or rescan of its own, the Host's
+  verdict for a good folder, a refused manifest, an installed version without and with `--force`,
+  and a folder outside the data root, and a request the Host never answers being withdrawn; its
+  request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side.
+  `cli/internal/plugin` pins the manifest rules against both samples.
   `PluginRescanRequestTests` shows a plugin installed after start is listed with no restart, and pins
   the report's refusals, its hired members and its `0600` mode. `PrepareVolumeTests` pins
   `/data/plugins` as `harness:agent 0750`, created when missing.
+- **Install from inside the instance, settings after hire.** `PluginInstallRouteTests` installs a built
+  folder from inside the data root through the route (modes, `active`, the tenant row) and through the
+  `.install` request file, and pins each refusal: outside the data root, a symlink out of it, a symlink
+  inside leaving the folder, an existing version without replace, and a manifest the catalog refuses;
+  a Manager is refused. It pins the settings route: validated like a hire, never a secret value, the
+  tenant row, and a Manager refused. `PluginManifestListAndRequiresTests` pins list settings and
+  `requires`; `PluginMemberRunnerTests.A_list_setting_is_delivered_in_the_requests_config_and_defaults_to_empty`
+  pins a list reaching the plugin.
