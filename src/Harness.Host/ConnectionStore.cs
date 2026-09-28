@@ -299,9 +299,11 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
 
     /// <summary>
     /// A successful refresh: the new access token, and a ROTATED refresh token when the provider
-    /// issued one, committed before the caller hands the access token to anyone - a crash after
-    /// this line loses nothing, a crash before it leaves the old refresh token, which the provider
-    /// has not yet seen used. Not a person's act, so no tenant row: every refresh would flood it.
+    /// issued one, committed before the caller hands the access token to anyone: a run never holds a
+    /// token whose rotation the Host has not kept. (A write that fails after the provider rotated
+    /// loses the new refresh token; the next refresh is then refused and the connection asks to be
+    /// reconnected - said, never silent.) Not a person's act, so no tenant row: every refresh would
+    /// flood it.
     /// </summary>
     public async Task StoreRefreshAsync(string id, ConnectionTokens tokens, CancellationToken ct = default)
     {

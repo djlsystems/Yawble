@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Harness.Host;
 
 /// <summary>
-/// THE OPERATOR'S <c>yawble connect</c>: the CLI reaches the Host the way every command that talks to
+/// THE OPERATOR CLI'S <c>connect</c>: the CLI reaches the Host the way every command that talks to
 /// a running instance does - through the container engine, trading a request file for a report file
 /// (as <see cref="PluginRescanRequests"/> does for installs) - never over HTTP with a person's key.
 ///

@@ -430,7 +430,21 @@ public sealed class PluginMemberRunner(
                 return (grants, scopeRefusal.Error);
             }
 
-            var (grant, refusal) = await connections.GrantAsync(connectionId, slot, ct);
+            ConnectionGrant? grant;
+            string? refusal;
+
+            try
+            {
+                (grant, refusal) = await connections.GrantAsync(connectionId, slot, ct);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException exception)
+            {
+                // A REFRESHED TOKEN THAT COULD NOT BE STORED IS NOT HANDED OUT: a rotated refresh token
+                // lost here would strand the connection, so the run does not start.
+                return (grants, $"The connection bound for slot `{slot}` was refreshed but could not be stored "
+                    + $"({exception.SqliteErrorCode}), so this run did not start. The next run tries again.");
+            }
+
             if (refusal is not null) return (grants, refusal);
 
             grants[slot] = grant!;

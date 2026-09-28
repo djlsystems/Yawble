@@ -24,8 +24,8 @@ public sealed record ConnectionStart(string AuthorizationUrl, string State, stri
 /// <summary>Who acts: a person's id and email, or the operator at the engine.</summary>
 public sealed record ConnectionActor(string Id, string? Email)
 {
-    /// <summary>The operator's `yawble connect`, through the file exchange: root on the instance.</summary>
-    public static readonly ConnectionActor Operator = new("operator", "operator (yawble connect)");
+    /// <summary>The operator CLI's `connect`, through the file exchange: root on the instance.</summary>
+    public static readonly ConnectionActor Operator = new("operator", "operator (CLI connect)");
 
     public TriggerAudit Row(string action, string? subject, string? subjectName, object detail) =>
         new(this == Operator ? null : Id, Email, action, subject, subjectName, JsonSerializer.Serialize(detail));
@@ -261,7 +261,7 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
         if (flow.Loopback == viaCallback)
         {
             return (null, false, viaCallback
-                ? "This sign-in was started by `yawble connect`; it finishes there, not in the browser. Start again."
+                ? "This sign-in was started by the operator CLI's `connect`; it finishes there, not in the browser. Start again."
                 : "This sign-in was started in the browser; it finishes at the Host's callback. Start again.");
         }
 
