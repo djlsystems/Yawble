@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ActionRefused, getPluginManifest, installPlugin, listPlugins, rescanPlugins } from '../api/client';
+import { ActionRefused, getPluginManifest, installPlugin, listPlugins, removePlugin, rescanPlugins } from '../api/client';
 import type { ContainerSnapshot, PluginInstallResult, PluginList, PluginMemberRef } from '../api/types';
 import { formatManifest, pluginEvents, pluginRows, pluginSkill, type PluginRow } from '../lib/plugins';
 import { defaultLabel, setByPerson } from '../lib/pluginSettings';
@@ -21,8 +21,11 @@ import MemberSettingsDialog from './MemberSettingsDialog.vue';
  * Rescan re-reads the directory; View manifest shows `plugin.json` read-only; Install from a folder
  * installs a built plugin that is already inside the instance - chosen with the host folder picker,
  * offered the data root only, because the Host refuses a path anywhere else - and shows the Host's
- * verdict, which refuses an existing version unless Replace is ticked. Every one of these is a
- * person's: the routes that change anything are humans-only.
+ * verdict, which refuses an existing version unless Replace is ticked. Remove takes one version, or
+ * the whole plugin, with `yawble plugin remove`'s rules: it asks first, and the Host refuses the
+ * whole plugin while members are hired on it (naming them) and the active version while others are
+ * kept - its sentence is shown in the question. Every one of these is a person's: the routes that
+ * change anything are humans-only.
  */
 const open = defineModel<boolean>({ required: true });
 
@@ -48,6 +51,7 @@ async function load() {
 }
 
 watch(open, (showing) => {
+  removed.value = '';
   if (showing) void load();
 });
 
@@ -170,6 +174,69 @@ async function install() {
   await load();
 }
 
+// --- Remove --------------------------------------------------------------------------------------
+
+/** How many version rows each plugin has: with one, removing it is removing the plugin. */
+const versionCounts = computed(() => {
+  const counts = new Map<string, number>();
+  for (const row of rows.value) if (row.version) counts.set(row.id, (counts.get(row.id) ?? 0) + 1);
+  return counts;
+});
+
+/** The first row of each plugin carries Remove plugin. */
+function firstOfPlugin(row: PluginRow) {
+  return rows.value.find((candidate) => candidate.id === row.id) === row;
+}
+
+/** What is about to be removed: a version, or the whole plugin when `version` is null. */
+const removing = ref<{ id: string; name: string; version: string | null; versions: string[] } | null>(null);
+const removeBusy = ref(false);
+const removeRefusal = ref('');
+const removed = ref('');
+
+function askRemove(row: PluginRow, wholePlugin: boolean) {
+  const versions = rows.value.filter((candidate) => candidate.id === row.id && candidate.version).map((candidate) => candidate.version!);
+  removing.value = {
+    id: row.id,
+    name: row.name,
+    // One version left is the whole plugin, as the Host reads it.
+    version: wholePlugin || versions.length <= 1 ? null : row.version,
+    versions,
+  };
+  removeRefusal.value = '';
+}
+
+const removeQuestion = computed(() => {
+  const target = removing.value;
+  if (!target) return '';
+
+  return target.version
+    ? `Remove version ${target.version} of ${target.name} (${target.id}) from the instance?`
+    : `Remove the plugin ${target.name} (${target.id})${target.versions.length > 0 ? `, with ${target.versions.length === 1 ? 'its version' : 'all its versions'} ${target.versions.join(', ')},` : ''} from the instance?`;
+});
+
+async function confirmRemove() {
+  const target = removing.value;
+  if (!target || removeBusy.value) return;
+
+  removeBusy.value = true;
+  removeRefusal.value = '';
+
+  try {
+    const result = await removePlugin(target.id, target.version);
+    removed.value = result.whole
+      ? `Removed the plugin ${target.id}.`
+      : `Removed version ${result.version} of ${target.id}.`;
+    removing.value = null;
+    await load();
+  } catch (cause) {
+    // The Host's sentence: in use by whom, or the active version. Nothing was removed.
+    removeRefusal.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    removeBusy.value = false;
+  }
+}
+
 const verdictText = computed(() => {
   const result = verdict.value;
   if (!result) return '';
@@ -221,6 +288,10 @@ const verdictText = computed(() => {
         <q-banner v-if="memberProblem" dense class="os-bg-tint-error text-negative q-mb-md">
           {{ memberProblem }}
         </q-banner>
+        <q-banner v-if="removed" dense class="os-bg-tint-ok text-positive q-mb-md" data-remove-done>
+          <template #avatar><q-icon name="check_circle" /></template>
+          {{ removed }}
+        </q-banner>
 
         <div v-if="loading && !list" class="os-text-muted">Reading the plugins…</div>
         <div v-else-if="list && rows.length === 0" class="os-text-muted" data-no-plugins>
@@ -253,6 +324,30 @@ const verdictText = computed(() => {
               icon="description"
               label="View manifest"
               @click="viewManifest(row.id, row.version!)"
+            />
+            <q-btn
+              v-if="row.version && (versionCounts.get(row.id) ?? 0) > 1"
+              flat
+              dense
+              no-caps
+              size="sm"
+              color="negative"
+              icon="delete_outline"
+              label="Remove version"
+              data-remove-version
+              @click="askRemove(row, false)"
+            />
+            <q-btn
+              v-if="firstOfPlugin(row)"
+              flat
+              dense
+              no-caps
+              size="sm"
+              color="negative"
+              icon="delete"
+              label="Remove plugin"
+              data-remove-plugin
+              @click="askRemove(row, true)"
             />
           </q-card-section>
 
@@ -328,6 +423,39 @@ const verdictText = computed(() => {
           </q-card-section>
         </q-card>
       </q-card-section>
+    </q-card>
+  </q-dialog>
+
+  <!-- REMOVE: asked first. A refusal is the Host's sentence - who is hired on it, or that it is the
+       active version - and nothing was removed. -->
+  <q-dialog :model-value="removing !== null" @update:model-value="removing = null">
+    <q-card class="os-dialog-sm" data-remove-dialog>
+      <q-card-section class="os-dialog-title">{{ removing?.version ? 'Remove version' : 'Remove plugin' }}</q-card-section>
+      <q-card-section class="q-pt-none">
+        <p data-remove-question>{{ removeQuestion }}</p>
+        <p class="os-body os-text-muted">
+          {{ removing?.version
+            ? 'Its files are deleted. The active version is not changed.'
+            : 'Its files are deleted and it can no longer be hired. The Host refuses while any member is hired on it.' }}
+        </p>
+        <q-banner v-if="removeRefusal" dense class="os-bg-tint-error text-negative" data-remove-refusal>
+          <template #avatar><q-icon name="error" /></template>
+          {{ removeRefusal }}
+        </q-banner>
+      </q-card-section>
+      <q-card-actions align="right">
+        <q-btn flat no-caps label="Cancel" :disable="removeBusy" @click="removing = null" />
+        <q-btn
+          color="negative"
+          unelevated
+          no-caps
+          label="Remove"
+          data-remove-confirm
+          :loading="removeBusy"
+          :disable="removeBusy"
+          @click="confirmRemove"
+        />
+      </q-card-actions>
     </q-card>
   </q-dialog>
 

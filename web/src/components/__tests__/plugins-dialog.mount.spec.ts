@@ -4,7 +4,8 @@
 // its reason - with, for an installed one, its settings, secrets by name, events, skill and the
 // members hired on it (each a link to that member's settings); Rescan; View manifest read-only and
 // formatted; and Install from a folder, which shows the Host's verdict and is refused over an
-// existing version without Replace.
+// existing version without Replace; and Remove, asked first, which shows the Host's refusal while
+// members are hired and removes otherwise.
 //
 // THE MOCK IS OF `api/client`: this file asks what the dialog does with what the routes answer,
 // not what the Host does - that is pinned server-side.
@@ -16,6 +17,7 @@ const {
   rescanPlugins,
   getPluginManifest,
   installPlugin,
+  removePlugin,
   getPluginSettings,
   getMember,
   listCatalog,
@@ -26,6 +28,7 @@ const {
   rescanPlugins: vi.fn(),
   getPluginManifest: vi.fn(),
   installPlugin: vi.fn(),
+  removePlugin: vi.fn(),
   getPluginSettings: vi.fn(),
   getMember: vi.fn(),
   listCatalog: vi.fn(),
@@ -39,6 +42,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   rescanPlugins,
   getPluginManifest,
   installPlugin,
+  removePlugin,
   getPluginSettings,
   getMember,
   listCatalog,
@@ -103,7 +107,7 @@ const echoMember = {
 } as unknown as ContainerSnapshot;
 
 beforeEach(() => {
-  for (const mock of [listPlugins, rescanPlugins, getPluginManifest, installPlugin, getPluginSettings, getMember, listCatalog, fileSystemRoots, browseFileSystem]) {
+  for (const mock of [listPlugins, rescanPlugins, getPluginManifest, installPlugin, removePlugin, getPluginSettings, getMember, listCatalog, fileSystemRoots, browseFileSystem]) {
     mock.mockReset();
   }
   listPlugins.mockResolvedValue(list);
@@ -379,6 +383,98 @@ describe('PluginsDialog, installing from a folder', () => {
     expect(bodyText()).toContain('Choose the plugin folder');
     expect(bodyText()).toContain('Instance data');
     expect(bodyText()).not.toContain('Host home');
+
+    wrapper.unmount();
+  });
+
+  it('offers Remove plugin once per plugin and Remove version only where a plugin has more than one', async () => {
+    const wrapper = await mountPlugins();
+
+    expect(document.body.querySelectorAll('[data-plugin="sample-echo"] [data-remove-plugin]')).toHaveLength(1);
+    expect(document.body.querySelectorAll('[data-plugin="sample-echo"] [data-remove-version]')).toHaveLength(2);
+    expect(row('broken')!.querySelector('[data-remove-plugin]')).not.toBeNull();
+    expect(row('broken')!.querySelector('[data-remove-version]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('asks before removing a plugin, and shows the Host refusing while members are hired, naming them', async () => {
+    const wrapper = await mountPlugins();
+
+    (row('sample-echo', '0.1.0')!.querySelector('[data-remove-plugin]') as HTMLElement).click();
+    await settle();
+
+    // Asked first: nothing is sent until Remove is pressed.
+    expect(bodyFind('[data-remove-question]')?.textContent).toContain(
+      'Remove the plugin Sample Echo (sample-echo), with all its versions 0.1.0, 0.2.0, from the instance?');
+    expect(removePlugin).not.toHaveBeenCalled();
+
+    const sentence = 'Plugin sample-echo is in use by Alpha Team / Echo; remove those members first.';
+    removePlugin.mockRejectedValueOnce(new ActionRefused(sentence, {
+      error: sentence,
+      members: [{ team: 'alpha', member: 'Echo', teamName: 'Alpha Team', memberName: 'Echo' }],
+    }));
+    (bodyFind('[data-remove-confirm]') as HTMLElement).click();
+    await settle();
+
+    expect(removePlugin).toHaveBeenCalledWith('sample-echo', null);
+    expect(bodyFind('[data-remove-refusal]')?.textContent).toContain(sentence);
+    // Still asking, and the list was not re-read: nothing was removed.
+    expect(bodyFind('[data-remove-dialog]')).not.toBeNull();
+    expect(bodyFind('[data-remove-done]')).toBeNull();
+    expect(listPlugins).toHaveBeenCalledTimes(1);
+
+    wrapper.unmount();
+  });
+
+  it('cancelling the question removes nothing', async () => {
+    const wrapper = await mountPlugins();
+
+    (row('sample-echo', '0.1.0')!.querySelector('[data-remove-version]') as HTMLElement).click();
+    await settle();
+    button('Cancel').click();
+    await settle();
+
+    expect(removePlugin).not.toHaveBeenCalled();
+    expect(bodyFind('[data-remove-dialog]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('removes one version once confirmed, says so, and reads the list again', async () => {
+    const wrapper = await mountPlugins();
+
+    (row('sample-echo', '0.1.0')!.querySelector('[data-remove-version]') as HTMLElement).click();
+    await settle();
+    expect(bodyFind('[data-remove-question]')?.textContent).toContain(
+      'Remove version 0.1.0 of Sample Echo (sample-echo) from the instance?');
+
+    removePlugin.mockResolvedValueOnce({ id: 'sample-echo', version: '0.1.0', whole: false, versions: ['0.1.0'] });
+    listPlugins.mockResolvedValue({ ...list, versions: list.versions.filter((v) => v.version !== '0.1.0') });
+    (bodyFind('[data-remove-confirm]') as HTMLElement).click();
+    await settle();
+
+    expect(removePlugin).toHaveBeenCalledWith('sample-echo', '0.1.0');
+    expect(bodyFind('[data-remove-done]')?.textContent).toContain('Removed version 0.1.0 of sample-echo.');
+    expect(bodyFind('[data-remove-dialog]')).toBeNull();
+    expect(listPlugins).toHaveBeenCalledTimes(2);
+    expect(row('sample-echo', '0.1.0')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('removes a whole plugin nobody is hired on once confirmed', async () => {
+    const wrapper = await mountPlugins();
+
+    (row('broken')!.querySelector('[data-remove-plugin]') as HTMLElement).click();
+    await settle();
+
+    removePlugin.mockResolvedValueOnce({ id: 'broken', version: null, whole: true, versions: ['1.0.0'] });
+    (bodyFind('[data-remove-confirm]') as HTMLElement).click();
+    await settle();
+
+    expect(removePlugin).toHaveBeenCalledWith('broken', null);
+    expect(bodyFind('[data-remove-done]')?.textContent).toContain('Removed the plugin broken.');
 
     wrapper.unmount();
   });

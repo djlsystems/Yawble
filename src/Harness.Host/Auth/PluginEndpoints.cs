@@ -109,6 +109,35 @@ public static class PluginEndpoints
                 + "`plugins.installed` tenant row appended. Answers `{ id, version, installed, replaced, "
                 + "reason }`: `installed` is the Host's verdict after the rescan.");
 
+        app.MapDelete("/api/plugins/{id}", async (
+            [Description("The plugin's id.")] string id,
+            [Description("Only this version; the whole plugin when omitted.")] string? version,
+            PluginRemover remover, HttpContext context, CancellationToken ct) =>
+        {
+            var result = await remover.RemoveAsync(
+                id, version, TenantLogging.Row(context, TenantActions.PluginRemoved, id, id, null), ct);
+
+            var members = result.Members.Select(m => new { team = m.Team, member = m.Member, teamName = m.TeamName, memberName = m.MemberName });
+
+            return result.Status == StatusCodes.Status200OK
+                ? Results.Ok(new { id = result.Id, version = result.Version, whole = result.Whole, versions = result.Versions })
+                : Results.Json(
+                    new { error = result.Reason, reason = result.Reason, id = result.Id, version = result.Version, members },
+                    statusCode: result.Status);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Remove a plugin, or one version of it")
+            .WithDescription(
+                "The rules of `yawble plugin remove`. Without `version`, or when it names the only version, the "
+                + "whole plugin goes, and that is REFUSED 409 while any member is hired on it, naming each "
+                + "(`members`: team, member and their names): remove those members first. With `version`, "
+                + "that kept version goes; the active version is refused 409 while others are kept. 404 for "
+                + "a plugin or version that is not there, 400 for a malformed id or version. On success the "
+                + "folder is gone, a `plugins.removed` tenant row is appended in the same transaction, and the "
+                + "catalog is rescanned. Answers `{ id, version, whole, versions }`. Deleting a team never "
+                + "removes a plugin.");
+
         app.MapGet("/api/teams/{team}/members/{member}/plugin-settings", async (
             [Description(Describe.Team)] string team,
             [Description("The member, as addressed in its route.")] string member,

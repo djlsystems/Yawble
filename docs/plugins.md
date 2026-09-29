@@ -66,6 +66,17 @@ The command:
 of it. `yawble plugin remove <id> [--version <v>]` removes a plugin or one kept version. It asks first
 (`--yes` answers), and it refuses while a member is hired on the plugin, naming the members.
 
+**Remove in the web UI.** Admin → Plugins has **Remove plugin** on each plugin and **Remove version** on
+each version of a plugin that has more than one, with the same rules (`DELETE /api/plugins/{id}[?version=<v>]`,
+a person's). It asks first. The whole plugin, or its only version, is refused while a member is hired
+on it, naming each member. The active version is refused while other versions are kept. A kept version
+is removed even while members are hired on the plugin, because no member runs it. A `plugins.removed`
+tenant row is written in the same transaction as the removal, and the catalog is rescanned.
+
+**Deleting a team never removes a plugin.** A plugin is the instance's, not a team's. When a team was
+installed from a solution package, its delete dialog names the package's plugins, says they stay
+installed, and points to Admin → Plugins to remove them.
+
 **How the Host is told, without a person's key.** The CLI writes a nonce to `/data/plugins/.rescan`
 through the engine, as root in the container. The Host (`PluginRescanRequests`) looks for that file
 once a second. When it finds one, it calls the same `PluginCatalog.Rescan` that `POST /api/plugins/rescan`
