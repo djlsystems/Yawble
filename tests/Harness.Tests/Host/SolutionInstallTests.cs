@@ -138,7 +138,7 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         Assert.Equal(apply.Id, record.Triggers["Apply pressed"]);
         Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.SolutionInstalled, team, Ct));
 
-        // The team delete dialog's read (card 2072's ITeamSolutions): which package it came from.
+        // The team delete dialog's read (ITeamSolutions): which package it came from.
         var from = Get<ITeamSolutions>().For(team)!;
         Assert.Equal(("job-tracker", "Job Tracker", "1.0.0"), (from.Id, from.Name, from.Version));
         Assert.Equal(["job-board"], from.Plugins);

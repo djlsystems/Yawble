@@ -2544,7 +2544,7 @@ export interface TeamLocalRepository {
   created: boolean
 }
 
-// --- Solution packages: check, preview, install, update (card 2073) ------------------------------
+// --- Solution packages: check, preview, install, update ------------------------------------------
 //
 // The wire shapes of `/api/solutions/*` and `GET /api/teams/{team}/solution`, key for key as the
 // Host writes them (camelCase). Kept together at the end of this file so another card appending

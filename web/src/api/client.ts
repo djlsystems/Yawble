@@ -1733,7 +1733,7 @@ export const deleteRepoRemoteBranchAsync = (team: TeamId, repo: string) =>
     { method: 'POST' },
   )
 
-// --- Solution packages: check, preview, install, update (card 2073) ------------------------------
+// --- Solution packages: check, preview, install, update ------------------------------------------
 //
 // Every `/api/solutions/*` call and a team's own package record. A person's routes (the Concierge
 // and members are refused), except `teamSolution`, which a team's members may read too. Kept

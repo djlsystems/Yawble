@@ -494,7 +494,7 @@ public static class AuthSchema
             );
             """),
 
-        // WHICH SOLUTION PACKAGE A TEAM CAME FROM (B001H): one row per team installed from a
+        // WHICH SOLUTION PACKAGE A TEAM CAME FROM: one row per team installed from a
         // package, keyed by the team's stored id. `manifest` is the package's `solution.json` as
         // installed, and `digests` the SHA-256 of each skill, site and tool file it installed, so an
         // update can show what changed without the earlier folder. `members` maps each package
