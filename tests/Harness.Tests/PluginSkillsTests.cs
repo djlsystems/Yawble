@@ -59,7 +59,7 @@ public sealed class PluginSkillsTests : IDisposable
     [Fact]
     public async Task The_schema_step_keeps_every_existing_skill_and_its_search()
     {
-        await new SchemaMigrator(Database).ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "skill-003")], ct: Ct);
+        await new SchemaMigrator(Database).ApplyAsync([.. SchemaModules.All.Where(s => s.Id is not ("skill-003" or "skill-004"))], ct: Ct);
 
         // Written as skill-002 left the table: no `source` column.
         await using (var connection = new SqliteConnection($"Data Source={Database};Pooling=False"))

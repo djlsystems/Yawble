@@ -124,7 +124,8 @@ public sealed class TeamDeletion(
     TeamPaths paths,
     GitRunner git,
     FolderRemoval? removal = null,
-    SiteService? sites = null)
+    SiteService? sites = null,
+    TeamSkills? skills = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -227,6 +228,20 @@ public sealed class TeamDeletion(
             catch (Exception ex)
             {
                 failures.Add($"sites: {ex.Message}");
+            }
+        }
+
+        // The team's own skills, one tenant row per skill, in one transaction. Keyed by the stored
+        // spelling, so a same-name successor is offered none of them.
+        if (skills is not null)
+        {
+            try
+            {
+                await skills.DeleteTeamAsync(stored, ct);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"skills: {ex.Message}");
             }
         }
 

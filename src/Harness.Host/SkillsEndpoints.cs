@@ -13,6 +13,12 @@ namespace Harness.Host;
 /// reads through <c>/api/me/skills</c>, which the MCP tools <c>skills_get</c> and
 /// <c>skills_search</c> call, and sees only the skills offered to its role - a role the server reads
 /// from the credential, never from anything the agent says.
+///
+/// A TEAM SKILL (<see cref="TeamSkills"/>) is offered only to that team's members of its roles, the
+/// team read from the credential too: another team's member, and the Concierge, are refused it by
+/// <c>skills_get</c> with a sentence and never find it by <c>skills_search</c>. A person manages a
+/// team's skills through <c>/api/teams/{team}/skills</c>; <c>/api/skills/{name}</c> addresses an
+/// instance-wide skill only.
 /// </summary>
 public static class SkillsEndpoints
 {
@@ -44,6 +50,10 @@ public static class SkillsEndpoints
             PrincipalKind.Container => SkillRoles.Member,
             _ => null,
         };
+
+    /// <summary>The team a caller's team skills come from: a container's own; null for everyone else.</summary>
+    public static string? TeamOf(Principal principal) =>
+        principal.Kind == PrincipalKind.Container && ContainerId.TryParse(principal.Id, out var id) ? id.Team : null;
 
     private static async Task<IResult> CreateAsync(
         string name, SkillWrite request, HttpContext context, ISkillStore skills,
@@ -106,7 +116,9 @@ public static class SkillsEndpoints
                 "Newest row first, keyed by `id`: pass the last row's `id` as `before` for the next "
                 + "page. Custom skills by default. Each row carries `name`, `description`, `roles`, "
                 + "`kind` (`builtin`, `custom` or `plugin`), `body`, `updatedAt`, `updatedBy` (null for a "
-                + "built-in or a plugin's skill) and `source` (the plugin id of a plugin's skill, else null).");
+                + "built-in or a plugin's skill), `source` (the plugin id of a plugin's skill, else null) and "
+                + "`team` (the team a team skill belongs to, else null). Team skills are custom skills and "
+                + "are listed beside the instance-wide ones.");
 
         app.MapGet("/api/skills/{name}", async (
             [Description("The skill's name.")] string name, ISkillStore skills, CancellationToken ct) =>
@@ -115,7 +127,8 @@ public static class SkillsEndpoints
                 : Results.NotFound(new { error = $"There is no skill named '{name}'." }))
             .WithTags(Area)
             .HumansOnly()
-            .WithSummary("Read one skill, built-in or custom");
+            .WithSummary("Read one instance-wide skill, built-in or custom")
+            .WithDescription("A team's skill is read through `/api/teams/{team}/skills`.");
 
         app.MapPost("/api/skills", async (
             SkillWrite request, HttpContext context, ISkillStore skills, SkillDirectory directory,
@@ -233,7 +246,9 @@ public static class SkillsEndpoints
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
 
             var role = RoleOf(principal);
-            var rows = await skills.ListAsync(SkillKindFilter.All, q, role, null, 200, ct);
+            var rows = role is null
+                ? await skills.ListAsync(SkillKindFilter.All, q, null, null, 200, ct)
+                : await skills.ListOfferedAsync(role, TeamOf(principal), q, 200, ct);
 
             return Results.Ok(rows
                 .OrderBy(s => s.Name, StringComparer.Ordinal)
@@ -244,7 +259,8 @@ public static class SkillsEndpoints
             .WithSummary("The skills offered to the caller's role")
             .WithDescription(
                 "What the MCP tool skills_search answers. The role is the credential's: the tenant "
-                + "Concierge, a team's Manager, or a member.");
+                + "Concierge, a team's Manager, or a member. A team's own skills are listed only to "
+                + "that team's members of their roles.");
 
         app.MapGet("/api/me/skills/{name}", async (
             [Description("The skill to load.")] string name,
@@ -252,7 +268,33 @@ public static class SkillsEndpoints
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
 
-            var skill = await skills.GetAsync(name, ct);
+            var role = RoleOf(principal);
+            var callerTeam = TeamOf(principal);
+            var found = await skills.FindAllAsync(name, ct);
+
+            // A person sees every skill; an agent its team's own, else the instance-wide one.
+            var skill = role is null
+                ? found.FirstOrDefault()
+                : found.FirstOrDefault(s => s.Team is not null && callerTeam is not null
+                        && string.Equals(s.Team, callerTeam, StringComparison.OrdinalIgnoreCase))
+                    ?? found.FirstOrDefault(s => s.Team is null);
+
+            if (skill is null && found is [var teamSkill, ..])
+            {
+                // Another team's skill. A container is bound to its own team, so the sentence does
+                // not name the other one; the Concierge, who reaches every team, is told which.
+                return Results.Json(
+                    new
+                    {
+                        error = callerTeam is not null
+                            ? $"The skill '{teamSkill.Name}' belongs to another team and is offered only to "
+                                + "that team's members, so it was not loaded."
+                            : $"The skill '{teamSkill.Name}' belongs to team {teamSkill.Team} and is offered only to "
+                                + "that team's members, so it was not loaded.",
+                    },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             if (skill is null)
             {
                 return Results.NotFound(new
@@ -261,7 +303,7 @@ public static class SkillsEndpoints
                 });
             }
 
-            if (RoleOf(principal) is { } role && !SkillRoles.Offers(skill.Roles, role))
+            if (role is not null && !SkillRoles.Offers(skill.Roles, role))
             {
                 return Results.Json(
                     new
@@ -279,8 +321,136 @@ public static class SkillsEndpoints
             .WithSummary("Load one skill offered to the caller's role")
             .WithDescription(
                 "What the MCP tool skills_get answers: the skill's name, description and roles, then "
-                + "its body. 403 with a sentence naming the role when the skill is not offered to it.");
+                + "its body. 403 with a sentence naming the role when the skill is not offered to it, "
+                + "and with a sentence when it is another team's skill.");
+
+        MapTeamSkills(app);
     }
+
+    /// <summary>Team settings → Skills: a person's list, create, edit and delete of one team's skills.</summary>
+    private static void MapTeamSkills(WebApplication app)
+    {
+        app.MapGet("/api/teams/{team}/skills", async (
+            [Description("The team.")] string team, TeamSkills teamSkills, CancellationToken ct) =>
+            await teamSkills.ListAsync(team, ct) is { } rows
+                ? Results.Ok(rows.Select(Dto))
+                : Results.NotFound(new { error = $"There is no team named '{team}'." }))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("List a team's own skills")
+            .WithDescription(
+                "The team's skills by name, each shaped as `GET /api/skills` shapes a row, with `team` set. "
+                + "A team skill is offered only to that team's members of its roles.");
+
+        app.MapPost("/api/teams/{team}/skills", async (
+            [Description("The team.")] string team,
+            SkillWrite request, HttpContext context, TeamSkills teamSkills, CancellationToken ct) =>
+        {
+            if (request.Roles is not { Count: > 0 })
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"A team skill must say who it is for: roles, any of {string.Join(", ", SkillRoles.All)}.",
+                });
+            }
+
+            var draft = new SkillDraft(request.Name ?? "", request.Description ?? "", request.Roles, request.Body ?? "");
+
+            return await TeamWriteAsync(team, teamSkills, async stored =>
+            {
+                var created = await teamSkills.CreateAsync(
+                    stored, draft, WhoIs(context.User),
+                    TenantLogging.Row(context, TenantActions.SkillCreated, stored, draft.Name,
+                        new { team = stored, name = draft.Name, roles = draft.Roles }), ct);
+
+                return Results.Created($"/api/teams/{stored}/skills/{created.Name}", Dto(created));
+            });
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Create a team skill")
+            .WithDescription(
+                "`name`, `description`, `roles` and `body` as for `POST /api/skills`. 201 with the skill; "
+                + "404 for no such team; 409 when the team already has the name, or it is a built-in's, a "
+                + "plugin's or an instance-wide custom skill's, or begins `plugin-`; 400 for an illegal name, a "
+                + "missing description, body or role, or an unknown role. The tenant row lands with it.");
+
+        app.MapPut("/api/teams/{team}/skills/{name}", async (
+            [Description("The team.")] string team,
+            [Description("The team skill's current name.")] string name,
+            SkillWrite request, HttpContext context, TeamSkills teamSkills, ISkillStore skills, CancellationToken ct) =>
+            await TeamWriteAsync(team, teamSkills, async stored =>
+            {
+                var existing = (await skills.ListTeamAsync(stored, ct))
+                    .FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (existing is null) return NoTeamSkill(stored, name);
+
+                var draft = new SkillDraft(
+                    string.IsNullOrWhiteSpace(request.Name) ? existing.Name : request.Name.Trim(),
+                    request.Description ?? existing.Description,
+                    request.Roles is { Count: > 0 } roles ? roles : existing.Roles,
+                    request.Body ?? existing.Body);
+
+                var updated = await teamSkills.UpdateAsync(
+                    stored, existing.Name, draft, WhoIs(context.User),
+                    TenantLogging.Row(context, TenantActions.SkillChanged, stored, existing.Name,
+                        new { team = stored, name = existing.Name, to = draft.Name, roles = draft.Roles }), ct);
+
+                return updated is null ? NoTeamSkill(stored, name) : Results.Ok(Dto(updated));
+            }))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Edit or rename a team skill")
+            .WithDescription(
+                "Any field left out keeps its value; a different `name` renames it. 200 with the skill; 404 "
+                + "for no such team or team skill; 409 when the new name is taken; 400 as for create.");
+
+        app.MapDelete("/api/teams/{team}/skills/{name}", async (
+            [Description("The team.")] string team,
+            [Description("The team skill to delete.")] string name,
+            HttpContext context, TeamSkills teamSkills, CancellationToken ct) =>
+            await TeamWriteAsync(team, teamSkills, async stored =>
+                await teamSkills.DeleteAsync(
+                    stored, name,
+                    TenantLogging.Row(context, TenantActions.SkillDeleted, stored, name, new { team = stored, name }), ct)
+                    ? Results.NoContent()
+                    : NoTeamSkill(stored, name)))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Delete a team skill")
+            .WithDescription("204; 404 for no such team or team skill. The tenant row lands with it.");
+    }
+
+    /// <summary>One team skill write: 404 for no team, the store's refusals as 409 and 400.</summary>
+    private static async Task<IResult> TeamWriteAsync(
+        string team, TeamSkills teamSkills, Func<string, Task<IResult>> write)
+    {
+        if (teamSkills.TeamOf(team) is not { } stored)
+        {
+            return Results.NotFound(new { error = $"There is no team named '{team}'." });
+        }
+
+        try
+        {
+            return await write(stored);
+        }
+        catch (SkillRefusedException refused)
+        {
+            return Results.Conflict(new { error = refused.Message });
+        }
+        catch (ArgumentException invalid)
+        {
+            return Results.BadRequest(new { error = invalid.Message });
+        }
+        catch (KeyNotFoundException missing)
+        {
+            return Results.NotFound(new { error = missing.Message });
+        }
+    }
+
+    private static IResult NoTeamSkill(string team, string name) =>
+        Results.NotFound(new { error = $"Team {team} has no skill named '{name}'." });
+
 
     /// <summary>What an agent reads: a short header, then the body.</summary>
     public static string Render(Skill skill) =>
@@ -305,6 +475,7 @@ public static class SkillsEndpoints
         skill.UpdatedAt,
         skill.UpdatedBy,
         skill.Source,
+        skill.Team,
     };
 
     public static string KindName(SkillKind kind) => kind switch

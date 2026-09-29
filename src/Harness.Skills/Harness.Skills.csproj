@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Harness.Contracts\Harness.Contracts.csproj" />
+    <ProjectReference Include="..\Harness.Identity\Harness.Identity.csproj" />
   </ItemGroup>
 
 </Project>

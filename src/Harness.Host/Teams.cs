@@ -777,7 +777,7 @@ public sealed class TeamRegistry(
     }
 
     /// <summary>Re-composes the prompt of every container on one team from its stored member row.</summary>
-    private async Task RepromptTeamAsync(string team, CancellationToken ct)
+    public async Task RepromptTeamAsync(string team, CancellationToken ct = default)
     {
         var members = (await teams.MembersAsync(ct))
             .Where(m => string.Equals(m.Team, team, StringComparison.OrdinalIgnoreCase))
@@ -3154,7 +3154,7 @@ public sealed class TeamRegistry(
         var role = IsManager(id) ? SkillRoles.Manager : SkillRoles.Member;
 
         var template = BuiltInPrompts.Compose(
-            role, systemPrompt, AdditionalInstructionsFor(id.Team), _skills.For(role));
+            role, systemPrompt, AdditionalInstructionsFor(id.Team), _skills.For(role, id.Team));
 
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {

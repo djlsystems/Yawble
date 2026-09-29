@@ -1536,6 +1536,34 @@ export const deleteSkill = async (name: string) => {
   await send(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
 
+/** A team's own skills, by name - Team settings → Skills. Each carries `team`. */
+export const listTeamSkills = (team: TeamId) =>
+  json<SkillRecord[]>(`/api/teams/${encodeURIComponent(team)}/skills`)
+
+/**
+ * Creates a TEAM SKILL, offered only to that team's members of its roles. A name an instance-wide
+ * skill holds, or one the team already has, is refused with a sentence.
+ */
+export const createTeamSkill = (team: TeamId, draft: SkillDraft) =>
+  json<SkillRecord>(`/api/teams/${encodeURIComponent(team)}/skills`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(draft),
+  })
+
+/** Edits a team skill, addressed by the name it had. A changed `draft.name` renames it. */
+export const updateTeamSkill = (team: TeamId, name: string, draft: SkillDraft) =>
+  json<SkillRecord>(`/api/teams/${encodeURIComponent(team)}/skills/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(draft),
+  })
+
+/** Deletes a team skill. */
+export const deleteTeamSkill = async (team: TeamId, name: string) => {
+  await send(`/api/teams/${encodeURIComponent(team)}/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
 /** REPLACES the whole catalog - human-only. 400 with `{ error }` naming what would break:
  *  an empty array, a duplicate or illegal name, an Agent with neither launch kind, an `env` key
  *  beginning `HARNESS_`, or removing an Agent a member or a team's console still uses. */

@@ -2,8 +2,8 @@ namespace Harness.Skills;
 
 /// <summary>
 /// A `SKILL.md` file on the volume: YAML-ish frontmatter (`name`, `description`, an optional
-/// `roles`, and a `metadata:` block) then the body. Read only by the first-start import;
-/// nothing writes this format.
+/// `roles`, and a `metadata:` block) then the body. Read by the first-start import and by a team
+/// skill's registration from a file (<c>TeamSkills.RegisterFileAsync</c>); nothing writes this format.
 /// </summary>
 public static class SkillFile
 {

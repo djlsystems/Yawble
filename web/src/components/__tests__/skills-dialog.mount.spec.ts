@@ -5,11 +5,13 @@
 // skill store's rule, and the server's refusal sentence is shown as written.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listSkillsPage, createSkill, updateSkill, deleteSkill } = vi.hoisted(() => ({
+const { listSkillsPage, createSkill, updateSkill, deleteSkill, updateTeamSkill, deleteTeamSkill } = vi.hoisted(() => ({
   listSkillsPage: vi.fn(),
   createSkill: vi.fn(),
   updateSkill: vi.fn(),
   deleteSkill: vi.fn(),
+  updateTeamSkill: vi.fn(),
+  deleteTeamSkill: vi.fn(),
 }));
 
 vi.mock('../../api/client', async (importOriginal) => ({
@@ -18,10 +20,13 @@ vi.mock('../../api/client', async (importOriginal) => ({
   createSkill,
   updateSkill,
   deleteSkill,
+  updateTeamSkill,
+  deleteTeamSkill,
 }));
 
 import SkillsDialog from '../SkillsDialog.vue';
-import type { SkillKindFilter, SkillRecord } from '../../api/types';
+import type { SkillKindFilter, SkillRecord, TeamId } from '../../api/types';
+import { useConsoleStore } from '../../stores/console';
 import { flushPromises } from '@vue/test-utils';
 import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { blur, button, field, hasError, isDisabled, settle, type } from '../../test/formProbe';
@@ -35,6 +40,7 @@ async function layout() {
 
 async function mountSkills() {
   const wrapper = await mountDialog(SkillsDialog);
+  useConsoleStore().$patch({ teams: [{ id: 'job-hunt' as TeamId, name: 'Job Hunt' }] as never });
   await layout();
   return wrapper;
 }
@@ -48,6 +54,18 @@ const custom: SkillRecord = {
   body: 'Read the diff.',
   updatedAt: '2026-09-20T10:00:00Z',
   updatedBy: 'kofi@example.com',
+};
+
+const teamSkill: SkillRecord = {
+  id: 25,
+  name: 'job-playbook',
+  description: 'Running the job hunt',
+  roles: ['manager'],
+  kind: 'custom',
+  body: 'Apply weekly.',
+  updatedAt: '2026-09-21T10:00:00Z',
+  updatedBy: 'kofi@example.com',
+  team: 'job-hunt' as TeamId,
 };
 
 const builtIn: SkillRecord = {
@@ -64,7 +82,7 @@ const builtIn: SkillRecord = {
 beforeEach(() => {
   listSkillsPage.mockReset();
   listSkillsPage.mockImplementation(async (query: { kind: SkillKindFilter }) =>
-    query.kind === 'custom' ? [custom] : [custom, builtIn],
+    query.kind === 'custom' ? [teamSkill, custom] : [teamSkill, custom, builtIn],
   );
   createSkill.mockReset();
   createSkill.mockResolvedValue(custom);
@@ -72,6 +90,10 @@ beforeEach(() => {
   updateSkill.mockResolvedValue(custom);
   deleteSkill.mockReset();
   deleteSkill.mockResolvedValue(undefined);
+  updateTeamSkill.mockReset();
+  updateTeamSkill.mockResolvedValue(teamSkill);
+  deleteTeamSkill.mockReset();
+  deleteTeamSkill.mockResolvedValue(undefined);
 });
 
 afterEach(resetBody);
@@ -111,16 +133,17 @@ async function openCreate() {
 }
 
 describe('SkillsDialog table, mounted', () => {
-  it('is a table of Name, Description, Roles, Kind and Last modified', async () => {
+  it('is a table of Name, Description, Roles, Team, Kind and Last modified', async () => {
     const wrapper = await mountSkills();
 
-    expect(headers()).toEqual(['Name', 'Description', 'Roles', 'Kind', 'Last modified']);
+    expect(headers()).toEqual(['Name', 'Description', 'Roles', 'Team', 'Kind', 'Last modified']);
     const cells = [...row('code-review').querySelectorAll('td')].map((td) => td.textContent?.trim());
     expect(cells[0]).toBe('code-review');
     expect(cells[1]).toBe('Reviewing a diff');
     expect(cells[2]).toBe('Member');
-    expect(cells[3]).toBe('Custom');
-    expect(cells[4]).toContain('by kofi@example.com');
+    expect(cells[3]).toBe('All teams');
+    expect(cells[4]).toBe('Custom');
+    expect(cells[5]).toContain('by kofi@example.com');
 
     wrapper.unmount();
   });
@@ -158,11 +181,49 @@ describe('SkillsDialog table, mounted', () => {
     wrapper.unmount();
   });
 
-  it('offers no Scope, Team, gated or drift controls', async () => {
+  it('names the team next to a team skill, by the name a person reads', async () => {
+    const wrapper = await mountSkills();
+
+    const cells = [...row('job-playbook').querySelectorAll('td')].map((td) => td.textContent?.trim());
+    expect(cells[3]).toBe('Job Hunt');
+
+    wrapper.unmount();
+  });
+
+  it('writes a team skill through its team, never the instance-wide routes', async () => {
+    const wrapper = await mountSkills();
+
+    row('job-playbook').click();
+    await settle();
+    await type('Description', 'Running the job hunt well');
+    button('Save').click();
+    await settle();
+
+    expect(updateTeamSkill).toHaveBeenCalledWith('job-hunt', 'job-playbook', {
+      name: 'job-playbook',
+      description: 'Running the job hunt well',
+      roles: ['manager'],
+      body: 'Apply weekly.',
+    });
+    expect(updateSkill).not.toHaveBeenCalled();
+
+    row('job-playbook').click();
+    await settle();
+    button('Delete').click();
+    await settle();
+
+    expect(deleteTeamSkill).toHaveBeenCalledWith('job-hunt', 'job-playbook');
+    expect(deleteSkill).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+
+  it('offers no Scope, team picker, gated or drift controls in the editor', async () => {
     const wrapper = await openCreate();
 
-    expect(bodyText()).not.toContain('Scope');
-    expect(bodyText()).not.toContain('Team');
+    const editor = [...document.body.querySelectorAll('.q-dialog .q-card')].at(-1)?.textContent ?? '';
+    expect(editor).not.toContain('Scope');
+    expect(editor).not.toContain('Team');
     expect(bodyText()).not.toMatch(/gated/i);
     expect(bodyText()).not.toContain('differs from this build');
     expect(hasButton('Reindex')).toBe(false);

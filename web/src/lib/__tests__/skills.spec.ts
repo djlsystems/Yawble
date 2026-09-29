@@ -6,7 +6,9 @@ import {
   lastModified,
   normaliseRoles,
   rolesLabel,
+  teamLabel,
 } from '../skills'
+import type { TeamId } from '../../api/types'
 
 describe('skill roles', () => {
   it('defaults a new skill to member', () => {
@@ -50,5 +52,19 @@ describe('lastModified', () => {
 
   it('says a built-in changed with the build rather than leaving a blank', () => {
     expect(lastModified({ kind: 'builtin', updatedAt: null, updatedBy: null }, format)).toBe('With this build')
+  })
+})
+
+describe('teamLabel', () => {
+  const teams = [{ id: 'job-hunt' as TeamId, name: 'Job Hunt' }]
+
+  it('reads "All teams" for an instance-wide skill', () => {
+    expect(teamLabel(null, teams)).toBe('All teams')
+    expect(teamLabel(undefined, teams)).toBe('All teams')
+  })
+
+  it("names a team skill's team by the name a person reads, and by its id when it is not listed", () => {
+    expect(teamLabel('job-hunt' as TeamId, teams)).toBe('Job Hunt')
+    expect(teamLabel('gone' as TeamId, teams)).toBe('gone')
   })
 })

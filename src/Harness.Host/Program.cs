@@ -523,6 +523,12 @@ builder.Services.AddSingleton(new AgentCatalog(loadedCatalog, () => tenantSettin
 // the custom skills at start, before any team is restored, and refreshed after every skill write.
 builder.Services.AddSingleton(new SkillDirectory());
 
+// Team skills: a team's own custom skills, offered only to its members. What an installer calls.
+builder.Services.AddSingleton(sp => new TeamSkills(
+    sp.GetRequiredService<ISkillStore>(),
+    sp.GetRequiredService<SkillDirectory>(),
+    sp.GetRequiredService<TeamRegistry>()));
+
 // Whether the CLI a preset names is on this machine at all. A SINGLETON because the few-second
 // cache is the whole reason it is a class rather than a static method: a per-request instance would
 // walk PATH once per preset on every render, and one that lived forever would go on reporting a
@@ -872,7 +878,8 @@ builder.Services.AddSingleton(sp => new TeamDeletion(
     sp.GetRequiredService<TeamPaths>(),
     sp.GetRequiredService<GitRunner>(),
     sp.GetRequiredService<FolderRemoval>(),
-    sp.GetRequiredService<SiteService>()));
+    sp.GetRequiredService<SiteService>(),
+    sp.GetRequiredService<TeamSkills>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a reset would silently skip
 // if it were optional. A TeamReset missing its pending-delivery store cannot tell a member that has
