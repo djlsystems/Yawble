@@ -483,9 +483,18 @@ export function teamLogFromTiming(timing: TeamWorkflowTiming | null): TeamLog | 
   const occurredAt = timing.lastActivityAt ?? timing.startedAt ?? '';
   const lastTerminal: Record<string, MemberTerminal> = {};
 
+  // A FAILURE INSIDE A WORKFLOW ITS OWNER DECLARED COMPLETE, OR A PERSON CLOSED, IS HISTORY. The
+  // declaration is the decision that the work is done - typically after the failed run's work was
+  // redone elsewhere, as a re-check sent in a second workflow is - so the member reads as completed
+  // like every other member that ran, rather than painting the team FAILED under a board whose own
+  // workflow panel says COMPLETED.
+  const settled = timing.state === 'Completed' || timing.state === 'Closed';
+
   // Marked members first, so a member that appears in `members` as well is not overwritten by the
   // inferred `completed` below.
-  for (const member of timing.failedMembers) lastTerminal[member] = { event: 'failed', occurredAt };
+  if (!settled) {
+    for (const member of timing.failedMembers) lastTerminal[member] = { event: 'failed', occurredAt };
+  }
   if (timing.blockedBy) lastTerminal[timing.blockedBy] = { event: 'blocked', occurredAt };
   if (timing.awaitingFrom) {
     lastTerminal[timing.awaitingFrom] = { event: 'needs-decision', occurredAt };

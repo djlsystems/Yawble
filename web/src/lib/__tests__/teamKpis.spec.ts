@@ -738,6 +738,32 @@ describe('teamLogFromTiming', () => {
     expect(log.lastTerminal['Worker']?.event).toBe('failed');
   });
 
+  // The owner declared the workflow complete after the failed run's work was done again in another
+  // workflow: the Teams list must not read FAILED while the board's own panel reads COMPLETED.
+  it.each(['Completed', 'Closed'])('reads a member that failed inside a %s workflow as completed, not failed', (state) => {
+    const log = teamLogFromTiming(timing({
+      state,
+      endedAt: '2026-09-07T09:20:00Z',
+      failedMembers: ['Worker'],
+      runsFailed: 1,
+      members: [
+        { member: 'Manager', runs: 3, executionSeconds: 60, unfinished: 0 },
+        { member: 'Worker', runs: 1, executionSeconds: 0, unfinished: 0 },
+      ],
+    }))!;
+
+    expect(log.lastTerminal['Worker']?.event).toBe('completed');
+    expect(teamStatus([container({ id: 'Manager' }), container({ id: 'Worker' })], log, Date.parse('2026-09-07T09:30:00Z'))).toBe('idle');
+  });
+
+  it('still reads a member that failed inside an open or failed workflow as failed', () => {
+    for (const state of ['Failed', 'Running', 'Blocked']) {
+      const log = teamLogFromTiming(timing({ state, failedMembers: ['Worker'] }))!;
+
+      expect(log.lastTerminal['Worker']?.event, state).toBe('failed');
+    }
+  });
+
   it('carries the blocked member and the one awaiting a decision', () => {
     const log = teamLogFromTiming(timing({ blockedBy: 'Worker', awaitingFrom: 'Manager' }))!;
 
