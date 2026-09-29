@@ -586,3 +586,65 @@ html:not(.icons-ready) .material-symbols-outlined {
   color: transparent !important;
   overflow: hidden;
 }
+
+// RESIZABLE TABLE COLUMNS (`lib/resizableColumns.ts`). The handle sits on the right edge of each
+// header cell, inside it, because a pinned table clips its cells. `:where` keeps the cell's
+// `position: relative` at zero specificity, so a table whose header is `position: sticky`
+// (Diagnostics) keeps its own rule; sticky positions the handle just as well.
+:where(th.os-col-resizable) {
+  position: relative;
+}
+
+.os-col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 25%;
+    bottom: 25%;
+    right: 3px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--os-rule-strong);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--os-primary);
+    outline-offset: -2px;
+  }
+}
+
+th:hover > .os-col-resizer::after,
+.os-col-resizer:focus-visible::after,
+body.os-col-resizing .os-col-resizer::after {
+  opacity: 1;
+}
+
+body.os-col-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+// A PINNED TABLE clips what does not fit its column rather than widening it: that is what a
+// narrowed column means. Text in a body cell wraps where it can, and ellipsis marks what cannot.
+table.os-cols-fixed {
+  th,
+  td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  td {
+    overflow-wrap: anywhere;
+  }
+}

@@ -90,6 +90,21 @@ describe('Admin > Repositories', () => {
     expect(bodyFind('[data-local-repo="widget"]')!.textContent).toContain('Alpha Team');
   });
 
+  // Every table's columns resize (lib/resizableColumns.ts); this pins that the dialog's table is one.
+  it('gives each column a resize handle and takes back the widths stored for this table', async () => {
+    localStorage.setItem('harness.columns.local-repos', JSON.stringify({ Name: 220 }));
+    try {
+      await open();
+
+      const headers = Array.from(document.body.querySelectorAll('thead th')) as HTMLElement[];
+      expect(headers.length).toBe(6);
+      expect(headers.every((th) => th.querySelector('.os-col-resizer'))).toBe(true);
+      expect(headers[0]?.style.width).toBe('220px');
+    } finally {
+      localStorage.removeItem('harness.columns.local-repos');
+    }
+  });
+
   it('asks before deleting, sends nothing on Cancel, and deletes and re-lists on confirm', async () => {
     await open();
 

@@ -28,6 +28,7 @@ import {
 import type { Team, TeamDeleted, TeamId } from '../api/types';
 import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
+import { vResizableColumns } from '../lib/resizableColumns';
 
 const board = useConsoleStore();
 const $q = useQuasar();
@@ -421,7 +422,7 @@ async function setPaused(team: Team | null, paused: boolean) {
       </div>
     </div>
 
-    <q-markup-table v-else flat bordered class="teams-table">
+    <q-markup-table v-else v-resizable-columns="'teams'" flat bordered class="teams-table">
       <thead>
         <tr>
           <!-- `aria-sort` ON THE HEADER CELL, which is where the ARIA table pattern puts it -
@@ -433,6 +434,7 @@ async function setPaused(team: Team | null, paused: boolean) {
           <th
             v-for="heading in Headings"
             :key="heading.key"
+            :data-col="heading.key"
             class="text-left"
             :aria-sort="sort.column === heading.key
               ? (sort.descending ? 'descending' : 'ascending')

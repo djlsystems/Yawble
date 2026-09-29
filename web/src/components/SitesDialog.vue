@@ -13,6 +13,7 @@ import {
   type SiteDocument,
 } from '../api/sites';
 import { useConsoleStore } from '../stores/console';
+import { vResizableColumns } from '../lib/resizableColumns';
 
 /**
  * ADMIN > SITES: every site across teams, from `GET /api/sites` - its team, live version, who
@@ -255,7 +256,7 @@ function pretty(doc: unknown) {
           No sites yet.
         </div>
 
-        <q-markup-table v-else flat bordered dense separator="horizontal">
+        <q-markup-table v-else v-resizable-columns="'sites'" flat bordered dense separator="horizontal">
           <thead>
             <tr>
               <th class="text-left">Name</th>
@@ -387,7 +388,7 @@ function pretty(doc: unknown) {
 
         <template v-if="detail && detailView === 'versions'">
           <div v-if="detail.versions.length === 0" class="os-body os-text-muted">No versions kept.</div>
-          <q-markup-table v-else flat bordered dense separator="horizontal">
+          <q-markup-table v-else v-resizable-columns="'site-versions'" flat bordered dense separator="horizontal">
             <thead>
               <tr>
                 <th class="text-left">Version</th>

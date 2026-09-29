@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import { deleteLocalRepo, listLocalRepos } from '../api/client';
 import type { LocalRepo } from '../api/types';
 import { useConsoleStore } from '../stores/console';
+import { vResizableColumns } from '../lib/resizableColumns';
 
 /**
  * ADMIN > REPOSITORIES: the instance's local repositories, from `GET /api/local-repos` - each one's
@@ -109,7 +110,7 @@ async function confirmDelete() {
           No local repositories yet.
         </div>
 
-        <q-markup-table v-else flat bordered dense separator="horizontal">
+        <q-markup-table v-else v-resizable-columns="'local-repos'" flat bordered dense separator="horizontal">
           <thead>
             <tr>
               <th class="text-left">Name</th>

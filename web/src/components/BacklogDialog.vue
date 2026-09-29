@@ -70,6 +70,7 @@ import {
   MAXIMUM_DOCUMENT_BYTES,
   type BacklogSort,
 } from '../lib/backlog';
+import { vResizableColumns } from '../lib/resizableColumns';
 
 /**
  * The tenant backlog.
@@ -999,7 +1000,7 @@ function down(index: number) {
       </q-card-section>
 
       <q-card-section class="backlog-list">
-        <q-markup-table dense flat class="backlog-table">
+        <q-markup-table v-resizable-columns="'backlog'" dense flat class="backlog-table">
           <thead>
             <tr>
               <th class="text-left backlog-index" @click="sortBy = 'position'">#</th>

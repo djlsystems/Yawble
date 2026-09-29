@@ -20,6 +20,7 @@ import {
 } from '../lib/diagnostics';
 import { useCursorList } from '../lib/useCursorList';
 import CursorSentinel from './CursorSentinel.vue';
+import { vResizableColumns } from '../lib/resizableColumns';
 
 /**
  * Admin › Diagnostics — what this instance was doing when it went wrong.
@@ -330,7 +331,7 @@ watch(open, (showing) => {
             host started outside the container does not.
           </div>
           <div v-else-if="cliStarts" class="d-cli-scroll">
-            <table class="d-cli-table">
+            <table v-resizable-columns="'diagnostics-cli'" class="d-cli-table">
               <thead>
                 <tr>
                   <th>Started</th>
