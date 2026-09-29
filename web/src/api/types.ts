@@ -897,7 +897,21 @@ export interface Team {
    *  write response if a chosen Agent did not resolve at the time. This is a WARNING - the write SUCCEEDED. */
   unresolvedAgents?: UnresolvedAgent[]
 
+  /**
+   * The solution package this team was installed from, or null/absent for a team made by hand. The
+   * delete dialog reads it: deleting the team never removes the package's plugins.
+   */
+  solution?: TeamSolution | null
+
   containers: ContainerSnapshot[]
+}
+
+/** The package a team was installed from: its id, name, version and the ids of its plugins. */
+export interface TeamSolution {
+  id: string
+  name: string
+  version: string
+  plugins: string[]
 }
 
 /** Which agents a skill is offered to. `any` is every role. */
@@ -2148,6 +2162,23 @@ export interface BacklogExecutionStats {
 
   /** Null when the workflow has not finished. NULL IS "NOT MEASURED" AND IS NOT ZERO. */
   elapsedSeconds: number | null
+
+  /**
+   * The platform's check of each solution package this workflow wrote, from its `solution.checked`
+   * rows. Null in stats frozen before the notice existed.
+   */
+  notices?: BacklogSolutionNotice[] | null
+}
+
+/** One package check, as the backlog item shows it: ready with its link, or the problems. */
+export interface BacklogSolutionNotice {
+  ok: boolean
+  text: string
+  folder: string
+  name: string | null
+  version: string | null
+  link: string | null
+  problems: string[]
 }
 
 export interface BacklogDispatchView {
@@ -2352,6 +2383,16 @@ export interface PluginInstallResult {
   /** Whether it went over a version already installed (Replace ticked). */
   replaced: boolean
   reason: string | null
+}
+
+/** `DELETE /api/plugins/{id}`: what went - the whole plugin, or one version. */
+export interface PluginRemoveResult {
+  id: string
+  /** The version removed; null when the whole plugin went. */
+  version: string | null
+  whole: boolean
+  /** Every version folder removed. */
+  versions: string[]
 }
 
 /** One stored setting value: a string, number or bool, or a `list` field's strings. */

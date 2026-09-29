@@ -143,6 +143,14 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         Assert.Equal(("job-tracker", "Job Tracker", "1.0.0"), (from.Id, from.Name, from.Version));
         Assert.Equal(["job-board"], from.Plugins);
 
+        // The Host's registration is the table, not the placeholder: the team's summary carries it,
+        // and a team made by hand carries none.
+        var carried = Get<TeamRegistry>().All().Single(t => t.Id == team).Solution!;
+        Assert.Equal(("job-tracker", "1.0.0"), (carried.Id, carried.Version));
+        Assert.Equal(["job-board"], carried.Plugins);
+        Assert.All(Get<TeamRegistry>().All().Where(t => t.Id != team && Get<ITeamSolutions>().For(t.Id) is null),
+            t => Assert.Null(t.Solution));
+
         // The required Resume/ was not given: the team waits for it, by name.
         var missing = Assert.Single(body.GetProperty("missing").EnumerateArray());
         Assert.Equal("Resume/", missing.GetProperty("name").GetString());

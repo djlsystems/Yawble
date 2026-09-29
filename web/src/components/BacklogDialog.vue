@@ -26,6 +26,7 @@ import {
 import {
   agentsForMode,
   asTeamId,
+  type BacklogExecutionStats,
   type RepoCheckRefusal as RepoCheckRefused,
   type RepoChoice,
 } from '../api/types';
@@ -70,6 +71,7 @@ import {
   MAXIMUM_DOCUMENT_BYTES,
   type BacklogSort,
 } from '../lib/backlog';
+import { solutionNotice, type SolutionNoticeView } from '../lib/solutionNotice';
 
 /**
  * The tenant backlog.
@@ -91,6 +93,13 @@ const open = defineModel<boolean>({ required: true });
 
 /** Copied once because `QBtnToggle` declares its `options` mutable; the source of truth is `lib/`. */
 const reviewOptions = [...REVIEW_OPTIONS];
+
+/** The package checks of one dispatch's workflow, as the item shows them. */
+function noticesOf(stats: BacklogExecutionStats | undefined): SolutionNoticeView[] {
+  return (stats?.notices ?? [])
+    .map((notice) => solutionNotice(notice))
+    .filter((notice): notice is SolutionNoticeView => notice !== null);
+}
 
 const $q = useQuasar();
 const board = useConsoleStore();
@@ -1291,6 +1300,17 @@ function down(index: number) {
             <span v-if="d.frozenAt" class="os-text-muted"> · frozen</span>
             <div v-if="(selected.stats[i]?.members.length ?? 0) > 0" class="text-caption os-text-muted">
               {{ selected.stats[i]!.members.join(', ') }}
+            </div>
+            <!-- The platform's check of each package this workflow wrote. Words interpolated; the
+                 one link is composed from the folder, and opens the review rather than installing. -->
+            <div
+              v-for="notice in noticesOf(selected.stats[i])"
+              :key="notice.folder"
+              class="backlog-notice text-caption"
+              :class="notice.ok ? 'text-positive' : 'text-negative'"
+            >
+              {{ notice.words }}
+              <a v-if="notice.href" class="text-weight-bold" :href="notice.href">Review and install</a>
             </div>
           </div>
         </div>

@@ -45,6 +45,7 @@ import type {
   ConnectionStartRequest,
   PluginList,
   PluginInstallResult,
+  PluginRemoveResult,
   PluginMemberSettings,
   ContainerSnapshot,
   MemberDeleted,
@@ -1292,6 +1293,17 @@ export const installPlugin = (path: string, replace: boolean) =>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ path, replace }),
   })
+
+/**
+ * Removes a plugin, or with `version` one version of it, with `plugin remove`'s rules: refused
+ * (409, `members` naming them) while a member is hired on the whole plugin, and refused for the
+ * active version while others are kept. A person's; ask first.
+ */
+export const removePlugin = (id: string, version?: string | null) =>
+  json<PluginRemoveResult>(
+    `/api/plugins/${encodeURIComponent(id)}${version ? `?version=${encodeURIComponent(version)}` : ''}`,
+    { method: 'DELETE' },
+  )
 
 const pluginSettingsPath = (team: string, member: string) =>
   `/api/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(member)}/plugin-settings`

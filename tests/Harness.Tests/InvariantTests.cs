@@ -122,8 +122,20 @@ public sealed class McpContractTests
             Assert.DoesNotMatch(cliVerb, body);
             Assert.DoesNotContain("curl ", body, StringComparison.Ordinal);
             Assert.DoesNotContain("wget ", body, StringComparison.Ordinal);
-            Assert.DoesNotContain("/api/", body, StringComparison.Ordinal);
+            // ONE QUOTED LINE IS NOT A URL TO FETCH: `packaging-solutions` tells the Concierge and
+            // the Manager to write "`/api/solutions/check` passes" into a spec's Done-when, and says
+            // the platform runs that check itself. Only that exact phrase is taken out before the ban.
+            Assert.DoesNotContain("/api/", body.Replace(PackageDoneWhen, "", StringComparison.Ordinal), StringComparison.Ordinal);
         }
+    }
+
+    private const string PackageDoneWhen = "\"`/api/solutions/check` passes\"";
+
+    [Fact]
+    public void The_package_done_when_line_is_quoted_only_in_packaging_solutions()
+    {
+        var holders = BuiltInSkills.All.Where(s => s.Body.Contains(PackageDoneWhen, StringComparison.Ordinal)).Select(s => s.Name);
+        Assert.Equal(["packaging-solutions"], holders);
     }
 }
 

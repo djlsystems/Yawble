@@ -115,6 +115,11 @@ public static class TenantActions
     /// version, the source folder, whether it replaced one, and the Host's verdict.</summary>
     public const string PluginInstalled = "plugins.installed";
 
+    /// <summary>A person removed a plugin, or one kept version of it, from the instance (the web app's
+    /// Remove, the same rules as <c>plugin remove</c>). Subject is the plugin id; detail names
+    /// whether it was the whole plugin and the versions removed. Written in the removal's transaction.</summary>
+    public const string PluginRemoved = "plugins.removed";
+
     /// <summary>A person changed a plugin member's settings after hire. Detail names the plugin and
     /// the field and secret NAMES that changed - never a value.</summary>
     public const string MemberPluginSettingsChanged = "member.plugin-settings-changed";

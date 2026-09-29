@@ -13,6 +13,7 @@ import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import LandingPage from '../LandingPage.vue';
 import SolutionInstallPage from '../SolutionInstallPage.vue';
 import { returnPath, sessionGuard } from '../../router/guard';
+import { installHref } from '../../lib/solutionNotice';
 import { bodyFind, bodyText, resetBody } from '../../test/mountQuasar';
 import { button, settle, type } from '../../test/formProbe';
 import { Folder, fakeHost, reply, sent, wizardRoutes, type Call, type Route } from '../../test/solutionFixtures';
@@ -136,6 +137,30 @@ describe('the install deep link', () => {
     expect(router.currentRoute.value.query.folder).toBe(Folder);
     expect(bodyFind('[data-solution-wizard]')).not.toBeNull();
     expect(sent(calls, 'POST', '/api/solutions/check')[0]!.body).toEqual({ folder: Folder, from: 'link' });
+    expect(sent(calls, 'POST', '/api/solutions/install')).toHaveLength(0);
+  });
+
+  it("accepts the board notice's own link, escaping and all, through sign-in", async () => {
+    // What the board notice builds (solutionNotice.ts), for a folder with every character its
+    // escaping touches: spaces, &, #, ?, +, %, = and a non-ASCII letter.
+    const awkward = '/data/documents/team one/Job Tracker & co #2?v=1+2 100% é-1.0.0';
+    const href = installHref(awkward);
+    expect(href.startsWith('#/solutions/install?folder=')).toBe(true);
+
+    signedIn = false;
+    const router = await app(href.slice(1));
+    expect(router.currentRoute.value.path).toBe('/');
+
+    await type('Email', 'dana@example.com');
+    await type('Password', 'correct horse');
+    button('Log in').click();
+    await settle();
+    await settle();
+
+    expect(router.currentRoute.value.path).toBe('/solutions/install');
+    expect(router.currentRoute.value.query.folder).toBe(awkward);
+    expect(bodyFind('[data-folder]')!.textContent).toBe(awkward);
+    expect(sent(calls, 'POST', '/api/solutions/check')[0]!.body).toEqual({ folder: awkward, from: 'link' });
     expect(sent(calls, 'POST', '/api/solutions/install')).toHaveLength(0);
   });
 
