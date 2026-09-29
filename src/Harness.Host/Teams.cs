@@ -143,7 +143,14 @@ public sealed record TeamSummary(
     /// for an owned repository), the fork's owner, whether commits are signed off (DCO), and the
     /// CLA note. The same trust as <see cref="Repos"/>, whose URLs ride the hub the same way.
     /// </summary>
-    IReadOnlyList<TeamRepoContributor>? Contributors = null);
+    IReadOnlyList<TeamRepoContributor>? Contributors = null,
+
+    /// <summary>
+    /// The solution package this team was installed from, or null for a team made by hand (see
+    /// <see cref="ITeamSolutions"/>). The delete dialog reads it to say the package's plugins stay
+    /// installed. Safe to ride the hub: a package's name, version and plugin ids are the team's own.
+    /// </summary>
+    TeamSolution? Solution = null);
 
 /// <summary>One repository's default branch as a screen sees it. See <see cref="RepoDefaultBranch"/>.</summary>
 public sealed record TeamRepoDefaultBranch(string Repo, string? Branch, string? FromRemote, string? SetByPerson);
@@ -379,7 +386,10 @@ public sealed class TeamRegistry(
 
     // The instance's local repositories, for `local:<name>`. Without one, every `local:` entry is
     // refused, as an unknown name is.
-    LocalRepos? localRepos = null)
+    LocalRepos? localRepos = null,
+
+    // Which solution package each team came from; none without one.
+    ITeamSolutions? solutions = null)
 {
     /// <summary>What each role is offered, for the "Available skills" list every prompt carries.
     /// A registry built without one lists the built-ins.</summary>
@@ -777,7 +787,7 @@ public sealed class TeamRegistry(
     }
 
     /// <summary>Re-composes the prompt of every container on one team from its stored member row.</summary>
-    private async Task RepromptTeamAsync(string team, CancellationToken ct)
+    public async Task RepromptTeamAsync(string team, CancellationToken ct = default)
     {
         var members = (await teams.MembersAsync(ct))
             .Where(m => string.Equals(m.Team, team, StringComparison.OrdinalIgnoreCase))
@@ -1489,7 +1499,8 @@ public sealed class TeamRegistry(
             BudgetFor(team),
             EffectiveWorkflowBudgetFor(team),
             DefaultBranchesFor(team).Select(b => new TeamRepoDefaultBranch(b.Repo, b.Branch, b.FromRemote, b.SetByPerson)).ToList(),
-            ContributorsFor(team).Select(c => new TeamRepoContributor(c.Repo, c.UpstreamUrl, c.ForkOwner, c.DcoSignOff, c.ClaSignedNote)).ToList());
+            ContributorsFor(team).Select(c => new TeamRepoContributor(c.Repo, c.UpstreamUrl, c.ForkOwner, c.DcoSignOff, c.ClaSignedNote)).ToList(),
+            solutions?.For(team));
 
     /// <summary>
     /// What this team is CALLED - its label, or its identifier when it has never been relabelled.
@@ -3153,8 +3164,10 @@ public sealed class TeamRegistry(
         // team's additional instructions and the skills its role is offered are ADDED after it.
         var role = IsManager(id) ? SkillRoles.Manager : SkillRoles.Member;
 
+        var tools = SolutionToolsFor(id.Team);
+
         var template = BuiltInPrompts.Compose(
-            role, systemPrompt, AdditionalInstructionsFor(id.Team), _skills.For(role));
+            role, systemPrompt, WithSolutionTools(AdditionalInstructionsFor(id.Team), tools), _skills.For(role, id.Team));
 
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -3185,7 +3198,39 @@ public sealed class TeamRegistry(
             values["shared"] = shared;
         }
 
+        // `{solution}` names the tools a solution package installed; without them it stays verbatim.
+        if (tools is not null) values["solution"] = tools;
+
         return PromptTokens.Resolve(template, values, environment);
+    }
+
+    /// <summary>
+    /// The tools a solution package installed for <paramref name="team"/> (its team folder's
+    /// <c>solution</c>), or null when it has none. Read from the disk at each composition, so a team
+    /// made by hand - every team before packages - composes exactly as it did.
+    /// </summary>
+    private string? SolutionToolsFor(string team)
+    {
+        try
+        {
+            var folder = Path.Combine(paths.RootFor(team), Solutions.SolutionPlan.InstalledToolsFolder);
+            return Directory.Exists(folder) ? folder : null;
+        }
+        catch (KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The team's additional instructions, then a sentence naming its installed tools.</summary>
+    private static string? WithSolutionTools(string? instructions, string? tools)
+    {
+        if (tools is null) return instructions;
+
+        var sentence = $"This team was installed from a solution package. Its tools are in `{tools}`: "
+            + "read and run them there, and never change them (they are read-only; an update of the package replaces them).";
+
+        return string.IsNullOrWhiteSpace(instructions) ? sentence : instructions + "\n\n" + sentence;
     }
 
     /// <summary>A plugin member's definition environment: empty. See AddContainerAsync.</summary>

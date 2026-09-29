@@ -20,6 +20,7 @@ using Harness.Backlog;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
+using Harness.Host.Solutions;
 using Harness.Identity;
 using Harness.Kanban;
 using Harness.Messaging;
@@ -472,6 +473,11 @@ builder.Services.AddSingleton(sp =>
     return new PluginInstaller(pluginCatalog, dataRoot, runAs.Switches ? runAs.Gid : -1);
 });
 
+// REMOVING A PLUGIN OR ONE VERSION, from the web app: `plugin remove`'s rules, the installer's
+// gate, and its tenant row in the same transaction as the move.
+builder.Services.AddSingleton(sp => new PluginRemover(
+    pluginCatalog, sp.GetRequiredService<PluginInstaller>(), sp.GetRequiredService<TeamRegistry>(), database));
+
 // THE EVENTS THE INSTALLED PLUGINS DECLARE join the platform's in every lookup - triggers, filters,
 // `{event.*}` tokens, the high-volume rule, `GET /api/events` - read off the catalog on each call,
 // so a rescan is seen at once. Released when this Host stops.
@@ -519,9 +525,91 @@ foreach (var agent in loadedCatalog)
 // The operator's tags for a built-in are read through the setting on every use.
 builder.Services.AddSingleton(new AgentCatalog(loadedCatalog, () => tenantSettings.AgentTags));
 
+// SOLUTION PACKAGES are checked against this Host's own catalogs - its Agent presets, its events
+// (installed plugins' included) and its runtimes - through one service the route, the install and the
+// board's notice share. See docs/solutions.md.
+builder.Services.AddSingleton(sp => new SolutionService(
+    new SolutionChecker(SolutionPlatform.For(sp.GetRequiredService<AgentCatalog>(), pluginCatalog)), dataRoot,
+
+    // A LINK opens only the instance's documents and the teams' folders.
+    () =>
+    {
+        var registry = sp.GetRequiredService<TeamRegistry>();
+        var paths = sp.GetRequiredService<TeamPaths>();
+        return registry.All().Select(t => paths.RootFor(t.Id)).Prepend(paths.TenantDocuments);
+    }));
+
+// WHICH SOLUTION PACKAGE EACH TEAM CAME FROM (`team_solutions`, auth-016), held in memory as well so
+// a team's summary reads it with no round trip. Written by the install and the update, swept by a
+// team's deletion.
+var teamSolutions = new TeamSolutionIndex(new SqliteTeamSolutionStore(database));
+await teamSolutions.LoadAsync();
+builder.Services.AddSingleton(teamSolutions);
+builder.Services.AddSingleton<ITeamSolutionStore>(teamSolutions);
+builder.Services.AddSingleton<ITeamSolutions>(teamSolutions);
+
+// THE INSTALL AND UPDATE OF A SOLUTION PACKAGE: the check, then the stores a person's own clicks
+// use, step by step, undone in reverse when a step fails. See SolutionInstaller.
+builder.Services.AddSingleton(sp =>
+{
+    var agents = sp.GetRequiredService<AgentCatalog>();
+    var probe = sp.GetRequiredService<AgentInstallProbe>();
+    var runAs = sp.GetRequiredService<AgentLaunchUser>();
+    var listPush = sp.GetRequiredService<TeamListPush>();
+
+    return new SolutionInstaller(
+        sp.GetRequiredService<SolutionService>(),
+        sp.GetRequiredService<PluginInstaller>(),
+        pluginCatalog,
+        sp.GetRequiredService<TeamRegistry>(),
+        sp.GetRequiredService<TeamRepoSetup>(),
+        sp.GetRequiredService<TeamDeletion>(),
+        sp.GetRequiredService<MemberDeletion>(),
+        sp.GetRequiredService<TeamSkills>(),
+        sp.GetRequiredService<TeamPaths>(),
+        sp.GetRequiredService<SiteService>(),
+        sp.GetRequiredService<TriggerCreation>(),
+        sp.GetRequiredService<ITeamSolutionStore>(),
+        sp.GetRequiredService<TeamDocuments>(),
+        sp.GetRequiredService<FolderWatch>(),
+        sp.GetRequiredService<TenantLogging>(),
+
+        // THE AGENT a package's agent members run when it names none: the first headless model
+        // preset installed on this machine, else the first in the catalog. The wizard may name one.
+        () =>
+        {
+            var headless = agents.Definitions.Where(d => d.Mode == AgentMode.Headless).ToList();
+            return (headless.FirstOrDefault(d => d.Launch.LanguageModel && probe.Probe(d).State is null)
+                ?? headless.FirstOrDefault(d => d.Launch.LanguageModel)
+                ?? headless.FirstOrDefault())?.Name;
+        },
+        sp.GetRequiredService<Connections>(),
+        sp.GetRequiredService<ConnectionStore>(),
+        sp.GetRequiredService<IPluginMemberSettingsStore>(),
+        new TeamAnnouncements(
+            team => listPush.AnnounceCreatedAsync(team),
+            async team =>
+            {
+                var viewers = (await listPush.EntitledViewerIdsAsync(team)).ToArray();
+                return () => listPush.AnnounceDeletedAsync(team, viewers);
+            }),
+        runAs.Switches ? runAs.Gid : -1);
+});
+
+// The board's notice for a package a workflow wrote, checked through that one door when the
+// workflow is declared complete.
+builder.Services.AddSingleton(sp => new SolutionNotice(
+    sp.GetRequiredService<SolutionService>(), sp.GetRequiredService<TeamDocuments>(), sp.GetRequiredService<IMessageLog>()));
+
 // What each role is offered, for the "Available skills" list in every system prompt. Filled with
 // the custom skills at start, before any team is restored, and refreshed after every skill write.
 builder.Services.AddSingleton(new SkillDirectory());
+
+// Team skills: a team's own custom skills, offered only to its members. What an installer calls.
+builder.Services.AddSingleton(sp => new TeamSkills(
+    sp.GetRequiredService<ISkillStore>(),
+    sp.GetRequiredService<SkillDirectory>(),
+    sp.GetRequiredService<TeamRegistry>()));
 
 // Whether the CLI a preset names is on this machine at all. A SINGLETON because the few-second
 // cache is the whole reason it is a class rather than a static method: a per-request instance would
@@ -792,7 +880,8 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
     pluginSettings: sp.GetRequiredService<IPluginMemberSettingsStore>(),
     secrets: sp.GetRequiredService<ISecretStore>(),
     removal: sp.GetRequiredService<FolderRemoval>(),
-    localRepos: sp.GetRequiredService<LocalRepos>()));
+    localRepos: sp.GetRequiredService<LocalRepos>(),
+    solutions: sp.GetRequiredService<ITeamSolutions>()));
 
 // THE INSTANCE'S LOCAL REPOSITORIES: bare, under <dataRoot>/repos, the Host's and read-only to the
 // agent. A team names one as `local:<name>`; see LocalRepos.
@@ -872,7 +961,9 @@ builder.Services.AddSingleton(sp => new TeamDeletion(
     sp.GetRequiredService<TeamPaths>(),
     sp.GetRequiredService<GitRunner>(),
     sp.GetRequiredService<FolderRemoval>(),
-    sp.GetRequiredService<SiteService>()));
+    sp.GetRequiredService<SiteService>(),
+    sp.GetRequiredService<TeamSkills>(),
+    sp.GetRequiredService<ITeamSolutionStore>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a reset would silently skip
 // if it were optional. A TeamReset missing its pending-delivery store cannot tell a member that has
@@ -1010,7 +1101,7 @@ builder.Services.AddSingleton(sp =>
         // The LABEL, resolved here rather than inside the factory - it has no TeamRegistry of
         // its own, and this delegate already holds one. LabelFor falls back to the identifier for
         // a team nobody has relabelled, so a never-relabelled team's console reads its identifier.
-        async (key, team, ct) =>
+        async (key, team, publicUrl, ct) =>
         {
             // THE CONCIERGE, ASKED WITHOUT NAMING A TEAM. ConciergeFor(team) throws when the
             // registry holds nothing, which is the empty instance GET /api/concierge/ws exists
@@ -1037,6 +1128,7 @@ builder.Services.AddSingleton(sp =>
                 await ConciergeAgentDefault.ResolveAsync(settings.Agent, catalog, probe, ct),
                 teams.EnvFor(stored ?? ""),
                 SteeringFile.Read(dataRoot, key.User),
+                publicUrl,
                 ct);
         },
         (key, ct) => launcher.RevokeAsync(key.User, ct));
@@ -1205,6 +1297,9 @@ builder.Services.AddSingleton(sp => new FolderWatch(
     sp.GetRequiredService<ILogger<FolderWatch>>()));
 builder.Services.AddSingleton<TriggerCost>();
 builder.Services.AddSingleton<TriggerSweep>();
+
+// THE ONE PATH A TRIGGER IS MADE BY: the Triggers dialog's route and a solution install.
+builder.Services.AddSingleton<TriggerCreation>();
 if (scheduleRunnerEnabled)
 {
     builder.Services.AddSingleton<IHostedService>(sp => new TriggerRunner(
@@ -1227,6 +1322,10 @@ builder.Services.AddHostedService<KanbanChangePush>();
 builder.Services.AddHostedService<DefaultBranchAtStart>();
 // The operator CLI's `plugin install` asks for a rescan by writing a file the Host polls: no restart, no API key.
 builder.Services.AddHostedService<PluginRescanRequests>();
+
+// THE OPERATOR CLI'S `solution install`: a request file only the Host and root can write, answered
+// by the installer the routes run.
+builder.Services.AddHostedService<SolutionRequests>();
 
 // SignalR has its OWN serialiser and does not read ConfigureHttpJsonOptions below. Configuring only
 // that one would let /api/overview answer `"state": "Idle"` while every containerChanged push
@@ -1846,6 +1945,7 @@ AuthEndpoints.Map(app);
 UserEndpoints.Map(app);
 AgentEndpoints.Map(app, dataRoot);
 PluginEndpoints.Map(app);
+SolutionEndpoints.Map(app);
 ConnectionEndpoints.Map(app);
 RepoEndpoints.Map(app);
 KeyEndpoints.Map(app);
@@ -2943,12 +3043,8 @@ app.MapPost("/api/teams/{team}/triggers", async (
     [Description(Describe.Team)] string team,
     CreateSchedule request,
     TeamRegistry teams,
-    ITriggerStore schedules,
+    TriggerCreation triggers,
     TriggerCost cost,
-    FolderWatch folders,
-    AgentCatalog catalog,
-    EffectiveSubscriptions effective,
-    TriggerWakeSignal wake,
     HttpContext context,
     CancellationToken ct) =>
 {
@@ -2957,179 +3053,22 @@ app.MapPost("/api/teams/{team}/triggers", async (
         return Results.NotFound(new { error = $"No team '{team}'." });
     }
 
-    var name = (request.Name ?? "").Trim();
-    var instruction = (request.Instruction ?? "").Trim();
-    var kind = (request.Kind ?? "").Trim();
-    var container = string.IsNullOrWhiteSpace(request.Container)
-        ? TeamRegistry.DefaultManagerName
-        : request.Container.Trim();
-
-    if (name.Length == 0) return Results.BadRequest(new { error = "A schedule needs a name." });
-    if (instruction.Length == 0) return Results.BadRequest(new { error = "A schedule needs an instruction." });
-    if (container.Length == 0) return Results.BadRequest(new { error = "A schedule needs a member name." });
-    if (kind.Length == 0) return Results.BadRequest(new { error = "A schedule needs a kind." });
-
-    // A NEW TRIGGER WAKES THE MANAGER ONLY WHEN ITS RUN HANDS BACK OR FAILS, unless a person chose
-    // otherwise. A trigger from before the choice existed keeps `always` (the column's default).
-    var wakeManager = request.WakeManager is null
-        ? WakeManagerPolicy.OnHandbackOrFailure
-        : WakeManagerPolicy.Parse(request.WakeManager);
-    if (wakeManager is null) return Results.BadRequest(new { error = TriggerCost.WakeManagerRefusal });
-    if (request.DailyTokenCap is < 1) return Results.BadRequest(new { error = TriggerCost.DailyTokenCapRefusal });
-
-    if (!TeamHasMember(teams, stored, container))
-    {
-        return Results.BadRequest(new { error = $"No member '{container}' on team '{stored}'." });
-    }
-
-    if (Triggers.Validate(
-        kind, request.Expression, request.Timezone, request.IntervalSeconds, request.FireAt,
-        onceMustFollow: DateTimeOffset.UtcNow)
-        is { } invalid)
-    {
-        return Results.BadRequest(new { error = invalid });
-    }
-
-    // A FOLDER TRIGGER IS AN EVENT TRIGGER ON `file.changed` THAT ALSO POLLS, so its event
-    // type is the server's to set, never the caller's. Its folder is checked here, where a person
-    // reads the refusal, rather than discovered unreachable on the first poll.
-    var folderKind = FolderWatch.IsFolderKind(kind);
-    var eventType = folderKind
-        ? FolderWatch.FileChangedEventType
-        : string.IsNullOrWhiteSpace(request.EventType) ? null : request.EventType.Trim();
-    WatchTarget? watchTarget = null;
-
-    if (folderKind)
-    {
-        request = request with
-        {
-            WatchGlob = FolderWatch.Glob(request.WatchGlob),
-            PollSeconds = request.PollSeconds ?? FolderWatch.DefaultPollSeconds,
-            QuietSeconds = request.QuietSeconds ?? FolderWatch.DefaultQuietSeconds,
-            MinIntervalSeconds = request.MinIntervalSeconds ?? FolderWatch.DefaultMinIntervalSeconds,
-        };
-
-        if (await folders.RefusalForAsync(
-                stored, request.WatchRoot, request.WatchPath, request.WatchGlob,
-                request.PollSeconds, request.QuietSeconds, request.MinIntervalSeconds,
-                counting: true, ct) is { } folderRefusal)
-        {
-            return Results.BadRequest(new { error = folderRefusal });
-        }
-
-        // Stored as RESOLVED - `Inbox/` and `./Inbox` are one folder, and the delivery pump
-        // compares the stored spelling against every `file.changed` path.
-        watchTarget = folders.Resolve(stored, request.WatchRoot, request.WatchPath, out _);
-    }
-
-    // AN EVENT TRIGGER NAMES A TYPE THE CATALOG DECLARES, or it can never fire. Refused rather than
-    // stored: a trigger that silently never matches is indistinguishable from one whose event has
-    // not happened yet, and a person would wait on it indefinitely.
-    if (string.Equals(kind, "event", StringComparison.OrdinalIgnoreCase))
-    {
-        if (string.IsNullOrWhiteSpace(request.EventType))
-        {
-            return Results.BadRequest(new { error = "An event trigger must name an event type." });
-        }
-
-        if (EventCatalog.For(request.EventType) is null)
-        {
-            return Results.BadRequest(new
-            {
-                error = $"\"{request.EventType}\" is not an event this platform publishes. "
-                    + "GET /api/events lists every type a trigger can name.",
-            });
-        }
-
-        // THE SAME RULE, REACHED BY A DIFFERENT DOOR. Without this a trigger is a way around the
-        // refusal AddContainerAsync already makes - the same illegal pair (a language model
-        // subscribed to a high-volume type) made through the trigger screen instead of the member
-        // one. `TeamHasMember` above already confirmed `container` exists on this team, so this
-        // lookup cannot 404.
-        var subscriber = await teams.MemberAsync(stored, container, ct);
-
-        if (catalog.For(subscriber.Agent) is { LanguageModel: true }
-            && EventCatalog.IsHighVolume(request.EventType))
-        {
-            return Results.BadRequest(
-                new { error = TeamRegistry.FirehoseRefusal(request.EventType, subscriber.Agent) });
-        }
-    }
-
-    if (TriggerFilter.RefusalFor(request.Filter, eventType ?? "") is { } filterRefusal)
-    {
-        return Results.BadRequest(new { error = filterRefusal });
-    }
-
-    var row = new TriggerRow(
-        Guid.NewGuid().ToString("N"),
+    // THE ONE PATH a trigger is made by, a person's here and a solution install's alike: every check,
+    // the row with its tenant row in one transaction, the subscriptions recomputed, the runner woken.
+    var created = await triggers.CreateAsync(
         stored,
-        container,
-        name,
-        instruction,
-        kind,
-        string.IsNullOrWhiteSpace(request.Expression) ? null : request.Expression.Trim(),
-        string.IsNullOrWhiteSpace(request.Timezone) ? null : request.Timezone.Trim(),
-        request.IntervalSeconds,
-        request.FireAt,
-        request.IdleOnly ?? true,
-        request.Enabled ?? true,
-
-        // ARMED HERE, and nothing else arms it. A schedule fires only when `next_due_at` is set
-        // and past - the store's due query says `next_due_at IS NOT NULL AND next_due_at <= $now`
-        // - and the ONLY other call to NextOccurrence is in the sweep, AFTER a fire. So a row
-        // created without one could never fire and could never be given one: it would need to fire
-        // to become firable, and would show `never fired` beside `not scheduled` forever.
-        //
-        // A test that passes `nextDueAt` explicitly arms the row by hand before exercising the
-        // sweep, so it cannot see this; the thing that starts a schedule needs its own coverage.
-        //
-        // A SUPPLIED VALUE STILL WINS, and that is a contract rather than a concession: it means
-        // "fire first at this time, then follow the shape", which is how a caller asks for 9am then
-        // hourly. Absent means "start from now", which is what a person ticking Enabled means.
-        request.NextDueAt ?? FirstOccurrence(
-            kind,
-            string.IsNullOrWhiteSpace(request.Expression) ? null : request.Expression.Trim(),
-            string.IsNullOrWhiteSpace(request.Timezone) ? null : request.Timezone.Trim(),
-            request.IntervalSeconds,
-            request.FireAt,
-            DateTimeOffset.UtcNow),
-        null,
-        null,
-        null,
-        0,
-        DateTimeOffset.UtcNow,
+        new NewTrigger(
+            request.Name, request.Container, request.Instruction, request.Kind, request.Expression,
+            request.Timezone, request.IntervalSeconds, request.FireAt, request.IdleOnly, request.Enabled,
+            request.NextDueAt, request.EventType, request.Filter, request.WatchRoot, request.WatchPath,
+            request.WatchGlob, request.PollSeconds, request.QuietSeconds, request.MinIntervalSeconds,
+            request.WakeManager, request.DailyTokenCap),
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown",
-        EventType: eventType,
-        Filter: request.Filter)
-    {
-        WatchRoot = watchTarget?.Root,
-        WatchPath = watchTarget?.Folder,
-        WatchGlob = folderKind ? request.WatchGlob : null,
-        PollSeconds = folderKind ? request.PollSeconds : null,
-        QuietSeconds = folderKind ? request.QuietSeconds : null,
-        MinIntervalSeconds = folderKind ? request.MinIntervalSeconds : null,
-        WakeManager = wakeManager,
-        DailyTokenCap = request.DailyTokenCap,
-    };
-
-    // The row and its tenant_events row are one transaction: a trigger with no record of who made
-    // it does not land.
-    await schedules.SaveAsync(
-        row,
-        TenantLogging.Row(
+        row => TenantLogging.Row(
             context, TenantActions.ScheduleCreated, row.Id, row.Name, new { team = row.Team, member = row.Container }),
         ct);
 
-    // A NEW event trigger changes what wakes its container, so the effective set is recomputed
-    // right after the row lands - a no-op for a clock-driven trigger, which contributes nothing.
-    await effective.RecomputeAsync(new ContainerId(stored, container), ct);
-
-    // The runner is asleep until whatever WAS due next. Without this it would not learn
-    // about this write until its heartbeat expires, so a schedule due in ten seconds could
-    // sit unnoticed for a minute - which reads as the feature being broken rather than
-    // slow. Signalled AFTER the write, so waking early cannot read a row that is not there.
-    wake.Signal();
+    if (created.Row is not { } row) return Results.BadRequest(new { error = created.Refusal });
 
     return Results.Created($"/api/teams/{row.Team}/triggers/{row.Id}", await cost.ViewAsync(row, DateTimeOffset.UtcNow, ct));
 })
@@ -5991,6 +5930,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
     HttpContext context, TeamRegistry teams, ContainerHost host, IMessageLog log,
     IPendingDeliveries pending, IBacklogStore backlog, ITeamPublisher publisher,
     KanbanStore kanban, WorktreeRemoval worktrees, TeamPaths paths, ILoggerFactory loggers,
+    SolutionNotice solutionNotice,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -6124,7 +6064,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
             ? new { delivered = request.Delivered.Trim(), dropped = (string?)null, looseEnds = (IReadOnlyList<string>?)null }
             : new { delivered = request.Delivered.Trim(), dropped, looseEnds = (IReadOnlyList<string>?)looseEnds }),
         log, backlog, host, kanban, worktrees, paths, teams.ReposFor(stored),
-        loggers.CreateLogger("WorktreeRemoval"), ct);
+        loggers.CreateLogger("WorktreeRemoval"), ct, solutionNotice);
 
     return Results.NoContent();
 })
@@ -6911,7 +6851,12 @@ app.MapGet("/api/concierge/ws", async (
     {
         // Attached AFTER the upgrade so that a launch failure can be reported in the terminal. A
         // refused upgrade shows an empty panel and puts the reason in devtools.
-        console = await consoles.AttachAsync(key, "", width, height, ct);
+        // THE ADDRESS THIS BROWSER REACHED US ON becomes the Concierge's HARNESS_PUBLIC_URL. The
+        // scheme is the tunnel's when one forwarded it (UseForwardedHeaders); the host is what the
+        // browser asked for.
+        console = await consoles.AttachAsync(
+            key, "", width, height, ct,
+            $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase.Value}");
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {

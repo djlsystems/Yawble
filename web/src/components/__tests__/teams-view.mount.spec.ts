@@ -156,6 +156,39 @@ describe('the team delete dialog', () => {
     expect(kept).toBe('Its local repository local:alpha is kept, and can be deleted from Admin → Repositories.');
   });
 
+  /** Deleting a team never removes a plugin; a package's team says where to remove them. */
+  it('says a package\'s plugins stay installed and are removed in Admin → Plugins', async () => {
+    await mountView([{
+      ...aTeam('alpha'),
+      solution: { id: 'job-tracker', name: 'Job Tracker', version: '1.0.0', plugins: ['job-board', 'mailer'] },
+    } as unknown as Team]);
+    await click('Delete this team');
+
+    const kept = document.body.querySelector('[data-solution-plugins-kept]')?.textContent?.replace(/\s+/g, ' ').trim();
+    expect(kept).toBe(
+      'Job Tracker 1.0.0 installed the plugins job-board, mailer. They stay installed after the team is deleted; '
+      + 'remove them in Admin → Plugins.');
+  });
+
+  it('names the one plugin a package installed', async () => {
+    await mountView([{
+      ...aTeam('alpha'),
+      solution: { id: 'job-tracker', name: 'Job Tracker', version: '1.0.0', plugins: ['job-board'] },
+    } as unknown as Team]);
+    await click('Delete this team');
+
+    expect(document.body.querySelector('[data-solution-plugins-kept]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'Job Tracker 1.0.0 installed the plugin job-board. It stays installed after the team is deleted; remove it in Admin → Plugins.');
+  });
+
+  it('says nothing about plugins for a team made by hand', async () => {
+    await mountView([aTeam('alpha')]);
+    await click('Delete this team');
+
+    expect(document.body.querySelector('[data-solution-plugins-kept]')).toBeNull();
+    expect(cardText('.teams-confirm-card')).not.toContain('Admin → Plugins');
+  });
+
   it('says nothing about a kept repository when the team has no local one', async () => {
     await mountView([{ ...aTeam('alpha'), repos: ['https://github.com/o/app.git'] } as unknown as Team]);
     await click('Delete this team');

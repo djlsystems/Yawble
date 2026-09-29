@@ -106,11 +106,15 @@ func NewRoot(deps Deps) *cobra.Command {
 	}
 	root.SetOut(deps.Stdout)
 	root.SetErr(deps.Stderr)
+	// Commands that ask more than yes/no (`solution install`) read their answers from here.
+	if deps.Stdin != nil {
+		root.SetIn(deps.Stdin)
+	}
 	root.AddCommand(
 		newUpCommand(deps), newDownCommand(deps), newStatusCommand(deps), newLogsCommand(deps),
 		newDoctorCommand(deps), newAgentsCommand(deps), newUpdateCommand(deps), newRemoteCommand(deps),
 		newBackupCommand(deps), newRestoreCommand(deps),
-		newUninstallCommand(deps), newConfigCommand(deps), newSecretCommand(deps), newGitHubCommand(deps), newPluginCommand(deps), newConnectCommand(deps), newRepoCommand(deps), newVersionCommand(deps),
+		newUninstallCommand(deps), newConfigCommand(deps), newSecretCommand(deps), newGitHubCommand(deps), newPluginCommand(deps), newSolutionCommand(deps), newConnectCommand(deps), newRepoCommand(deps), newVersionCommand(deps),
 	)
 	return root
 }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useSessionStore } from '../stores/session';
 import { doorFor } from '../lib/door';
+import { returnPath } from '../router/guard';
 import AuthForm from '../components/AuthForm.vue';
 import VersionTag from '../components/VersionTag.vue';
 import { productLogoFor, productTagline, productTitle } from '../presentation/product';
@@ -19,13 +20,17 @@ import { productLogoFor, productTagline, productTitle } from '../presentation/pr
 const $q = useQuasar();
 const session = useSessionStore();
 const router = useRouter();
+const route = useRoute();
+
+/** Where signing in continues to: the route a signed-out visitor asked for, else the Console. */
+const onward = () => router.replace(returnPath(route.query));
 
 const door = computed(() => doorFor(session));
 
 watch(
   door,
   (value) => {
-    if (value === 'console') void router.replace('/console');
+    if (value === 'console') void onward();
   },
   { immediate: true },
 );
@@ -55,7 +60,7 @@ const mode = computed<'create' | 'login'>(() => (door.value === 'create' ? 'crea
         </q-card-section>
 
         <q-card-section>
-          <AuthForm :mode="mode" @done="router.replace('/console')" />
+          <AuthForm :mode="mode" @done="onward" />
         </q-card-section>
       </q-card>
     </div>

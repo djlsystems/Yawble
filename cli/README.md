@@ -60,6 +60,8 @@ yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
 yawble config get|set     port, engine, memory, cpus, running limit, image
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
 yawble plugin install <folder> | --from-instance <path> [--force] | list | remove <id> [--version <v>]   plugins members can be hired on; see below
+yawble solution check <folder> | --from-instance <path> [--json]   what installing a solution package would create, or its problems; see below
+yawble solution install <folder> [--team <name>] [--from-instance] [--yes]   install a solution package as a team, or update one from an earlier version; see below
 yawble connect <provider> [--scopes …] [--name …] [--port …] | list | remove <name>   connect an OAuth account (Google, Microsoft, custom) for plugins; see below
 yawble repo list | clone <name> [folder]   the instance's local repositories; clone one onto this computer (no pushing back)
 yawble github             guided GitHub token setup: the gh login or a pasted fine-grained token, checked with GitHub
@@ -114,7 +116,29 @@ yawble plugin install --from-instance /data/teams/acme/repos/Tools/main/build/sa
 
 `yawble plugin list` shows each version, active or not, and installed or refused (`--json` too). `yawble plugin remove <id>` asks first (`--yes` answers) and refuses while a member is hired on the plugin, naming the members. `--version <v>` removes one kept version; the active one cannot be removed while others are kept.
 
-## Local repositories
+## Solution packages
+
+A solution package is a whole working team in one folder: `solution.json` beside its plugins, skills, sites and tools (`docs/solutions.md` at the repository root). Before installing one, check it:
+
+```
+yawble solution check samples/solutions/job-tracker
+```
+
+The folder is copied into a temporary folder in the container, the running Host checks it with the rules `POST /api/solutions/check` applies (through its own `--solution-check` switch, the way `doctor` reads `--doctor`), and the copy is removed. Nothing is installed and nothing is written. A package that passes is printed as its install would create it: the team, each member, each trigger with its schedule or event, the member it wakes, whether it wakes the Manager, its daily cap and its **whole instruction**, the team skills, the sites, the tools and what you will be asked for. One that does not is printed as its problems, each naming the file and the field (`solution.json triggers[1].member: ...`), and the command exits 1. `--json` prints the Host's answer as it is.
+
+A package already inside the instance (a team wrote it to its documents) is checked where it is, with nothing copied: `yawble solution check --from-instance /data/documents/<team>/job-tracker-1.0.0`.
+
+Then install it:
+
+```
+yawble solution install samples/solutions/job-tracker
+yawble solution install ./job-tracker-1.1.0 --team "Job Tracker"
+```
+
+The folder is copied to `/data/plugins/.solutions/<nonce>/<folder name>/` (`harness:agent`, directories `0750`, files `0640`), and the CLI asks the running Host through a request file, `/data/plugins/.solution`, answered in `/data/plugins/.solution-report.json` with what the matching route (`POST /api/solutions/preview`, `install`, `update`) answers. First the plan is printed as `solution check` prints it. Then the questions the web wizard asks: the team's name (`Team name [Job Tracker]:`, asked again while the Host refuses it), each setting only a person provides (its description, type and default; blank keeps the default; a list is comma-separated, a yes/no is `y` or `n`), a connection for each connection slot chosen by number from the instance's connections, and one file from this computer for each document input. Blank skips; a required input skipped leaves the team blocked until it is provided, and the command says so. After `Install <name> <version> as team <name>? [y/N]` (`--yes` answers it) the chosen files are copied to `/data/plugins/.solutions/<nonce>/.documents/<input folder>/`, the Host installs step by step and each step is printed done. A step that fails is printed as `Failed at step <n> (<title>): <reason>. Nothing was left behind.`, and the command exits 1. What is still missing is printed last, as the team board's `Blocked: waiting for ...` lines. The staged copy is always removed.
+
+`--team` naming a team installed from an earlier version of the same package updates it: the changes (members, plugins, triggers, skills, sites, tools added, changed and removed) are printed with the versions from and to, and the team keeps its settings, bindings, documents and site data. `--from-instance <path>` installs a package already inside the instance where it is. An image that does not answer (from before this command) is reported and the request withdrawn: run `yawble update`.
+
 
 A local repository is a git repository that lives only on the instance, as a bare repository at `/data/repos/<name>.git` on the volume, with no hosting service. A team works on it as `local:<name>` ([docs/local-repositories.md](../docs/local-repositories.md)). People create, attach and delete them in the web app. The CLI gets the code out:
 

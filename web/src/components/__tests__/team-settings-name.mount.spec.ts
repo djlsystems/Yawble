@@ -171,14 +171,14 @@ describe('TeamSettingsDialog, mounted, and the removed team rename', () => {
  * Manager too, so a box on General beside Dynamic members read as a setting for hired members only.
  */
 describe('TeamSettingsDialog, Team instructions', () => {
-  it('orders the tabs General, Members, Team instructions, GitHub Repos, Environment', async () => {
+  it('orders the tabs General, Members, Team instructions, Skills, GitHub Repos, Environment', async () => {
     const { wrapper } = await mountSettings();
 
     const labels = tabLabels();
-    expect(labels).toHaveLength(5);
+    expect(labels).toHaveLength(6);
     expect(labels[0]).toBe('General');
     expect(labels[1]).toMatch(/^Members \(\d+\)$/);
-    expect(labels.slice(2)).toEqual(['Team instructions', 'GitHub Repos', 'Environment']);
+    expect(labels.slice(2)).toEqual(['Team instructions', 'Skills', 'GitHub Repos', 'Environment']);
 
     wrapper.unmount();
   });

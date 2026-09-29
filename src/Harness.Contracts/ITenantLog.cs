@@ -115,6 +115,11 @@ public static class TenantActions
     /// version, the source folder, whether it replaced one, and the Host's verdict.</summary>
     public const string PluginInstalled = "plugins.installed";
 
+    /// <summary>A person removed a plugin, or one kept version of it, from the instance (the web app's
+    /// Remove, the same rules as <c>plugin remove</c>). Subject is the plugin id; detail names
+    /// whether it was the whole plugin and the versions removed. Written in the removal's transaction.</summary>
+    public const string PluginRemoved = "plugins.removed";
+
     /// <summary>A person changed a plugin member's settings after hire. Detail names the plugin and
     /// the field and secret NAMES that changed - never a value.</summary>
     public const string MemberPluginSettingsChanged = "member.plugin-settings-changed";
@@ -271,6 +276,20 @@ public static class TenantActions
     /// <summary>A site, its versions and its data were deleted - by a person who confirmed, or by
     /// its team's deletion (no actor, detail <c>reason: team deleted</c>).</summary>
     public const string SiteDeleted = "site.deleted";
+
+    /// <summary>A person installed a solution package as a new team. Subject is the team; detail
+    /// names the package id and version, the members, triggers, skills, sites and plugins it made.
+    /// Written in the same transaction as the team's <c>team_solutions</c> row.</summary>
+    public const string SolutionInstalled = "solution.installed";
+
+    /// <summary>A person updated a team to a newer version of the package it came from. Detail names
+    /// both versions and what was added, changed and removed. Written with the <c>team_solutions</c>
+    /// row it rewrites.</summary>
+    public const string SolutionUpdated = "solution.updated";
+
+    /// <summary>An install or update failed at a step and what it had made was undone. Detail names
+    /// the step, the reason and what was undone.</summary>
+    public const string SolutionFailed = "solution.failed";
 
     // ONLY ACTIONS SOMETHING WRITES ARE LISTED HERE. A tenant-log action nobody writes is a row type
     // that can never appear. Rows carrying a verb not listed here still read: this table is

@@ -44,13 +44,18 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
 
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public async Task<PluginInstallResult> InstallAsync(string? path, bool replace, CancellationToken ct = default)
+    public Task<PluginInstallResult> InstallAsync(string? path, bool replace, CancellationToken ct = default) =>
+        ExclusiveAsync(() => InstallLockedAsync(path, replace, ct), ct);
+
+    /// <summary>Runs <paramref name="work"/> while no install runs: <see cref="PluginRemover"/> takes the
+    /// same gate, so a version is never removed from under an install of it.</summary>
+    public async Task<T> ExclusiveAsync<T>(Func<Task<T>> work, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct);
 
         try
         {
-            return await InstallLockedAsync(path, replace, ct);
+            return await work();
         }
         finally
         {
@@ -83,7 +88,13 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
 
         if (!Directory.Exists(source)) return Refused($"{asked} is not a folder.");
 
-        if (IsUnder(source, PluginCatalog.Resolved(catalog.Root)) || source == PluginCatalog.Resolved(catalog.Root))
+        // A DOT-NAMED FOLDER UNDER IT IS STAGING, not an installed plugin: the operator CLI stages a
+        // solution package under `.solutions`, and its plugins are installed from there.
+        var pluginsRoot = PluginCatalog.Resolved(catalog.Root);
+        var staged = IsUnder(source, pluginsRoot)
+            && Path.GetRelativePath(pluginsRoot, source).Split(Path.DirectorySeparatorChar)[0].StartsWith('.');
+
+        if (!staged && (IsUnder(source, pluginsRoot) || source == pluginsRoot))
         {
             return Refused($"{asked} is already under the plugins folder; choose the folder the plugin was built into.");
         }

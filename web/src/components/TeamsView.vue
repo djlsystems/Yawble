@@ -600,6 +600,20 @@ async function setPaused(team: Team | null, paused: boolean) {
             {{ keptLocalRepos.length === 1 ? 'is' : 'are' }} kept, and can be deleted from
             Admin → Repositories.
           </p>
+          <!-- A PACKAGE'S PLUGINS ARE THE INSTANCE'S, not the team's: deleting the team never
+               removes one, and a person removes them in Admin -> Plugins. -->
+          <p v-if="doomed?.solution?.plugins.length" class="os-body" data-solution-plugins-kept>
+            <template v-if="doomed.solution.plugins.length === 1">
+              {{ doomed.solution.name }} {{ doomed.solution.version }} installed the plugin
+              <span class="mono">{{ doomed.solution.plugins[0] }}</span>. It stays installed after the
+              team is deleted; remove it in Admin → Plugins.
+            </template>
+            <template v-else>
+              {{ doomed.solution.name }} {{ doomed.solution.version }} installed the plugins
+              <span class="mono">{{ doomed.solution.plugins.join(', ') }}</span>. They stay installed after
+              the team is deleted; remove them in Admin → Plugins.
+            </template>
+          </p>
           <p class="os-body os-text-muted">
             The message log keeps its history — those messages are a record of what happened, and
             other teams' messages are linked to them.

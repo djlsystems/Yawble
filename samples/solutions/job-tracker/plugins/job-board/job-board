@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""The sample job board: a harness.member/1 plugin that never touches the network.
+
+It reads postings.json beside it, keeps the ids it has already reported in its workspace, and for
+each new posting whose title holds a keyword it writes the posting to the tracker site
+(`site.put`) and publishes `plugin.job-board.posting-found`. A run that found nothing new finishes
+quiet, so an hourly scan wakes nobody.
+"""
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SEEN = ".job-board-seen.json"
+
+
+def emit(record):
+    sys.stdout.write(json.dumps(record) + "\n")
+    sys.stdout.flush()
+
+
+def main():
+    request = json.load(sys.stdin)
+    config = request.get("config") or {}
+    keywords = [k.lower() for k in config.get("keywords") or []]
+    sources = config.get("sources") or []
+    workspace = request.get("workingDirectory") or "."
+
+    if "sample" not in sources:
+        emit({"t": "result", "ok": True, "quiet": True,
+              "output": "No board is allowed yet: a person ticks the sources this member may read."})
+        return
+
+    with open(os.path.join(HERE, "postings.json"), encoding="utf-8") as handle:
+        postings = json.load(handle)
+
+    seen_path = os.path.join(workspace, SEEN)
+    try:
+        with open(seen_path, encoding="utf-8") as handle:
+            seen = set(json.load(handle))
+    except (OSError, ValueError):
+        seen = set()
+
+    found = []
+    for posting in postings:
+        title = posting["title"].lower()
+        if posting["id"] in seen or (keywords and not any(k in title for k in keywords)):
+            continue
+        emit({"t": "site.put", "site": "tracker", "collection": "jobs", "id": posting["id"],
+              "doc": dict(posting, status="new")})
+        emit({"t": "publish", "type": "posting-found",
+              "payload": {k: posting[k] for k in ("id", "title", "company", "url")}})
+        seen.add(posting["id"])
+        found.append(posting["title"] + " at " + posting["company"])
+
+    with open(seen_path, "w", encoding="utf-8") as handle:
+        json.dump(sorted(seen), handle)
+
+    if found:
+        emit({"t": "result", "ok": True, "output": "New postings: " + "; ".join(found)})
+    else:
+        emit({"t": "result", "ok": True, "quiet": True, "output": "Nothing new."})
+
+
+if __name__ == "__main__":
+    main()

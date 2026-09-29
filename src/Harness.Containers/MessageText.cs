@@ -297,6 +297,9 @@ public static class MessageText
             // A person's click on a site. The payload is the page's, so it is quoted as JSON text.
             MessageTypes.SiteAction => SiteAction(payload),
 
+            // The platform's check of a package: the notice as a person reads it.
+            MessageTypes.SolutionChecked => Field(payload, PayloadFields.Text) ?? "A solution package was checked.",
+
             // An unrecognised type is passed through rather than dropped: a container may subscribe
             // to something this file has never heard of, and inventing a summary for it would be
             // worse than handing over what actually arrived.

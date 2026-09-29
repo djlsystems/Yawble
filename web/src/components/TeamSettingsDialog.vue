@@ -56,6 +56,7 @@ import {
 import AddMemberDialog from './AddMemberDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import ForkItForMe from './ForkItForMe.vue';
+import TeamSkillsPanel from './TeamSkillsPanel.vue';
 import LocalRepoPicker from './LocalRepoPicker.vue';
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
@@ -93,7 +94,7 @@ const open = defineModel<boolean>({ required: true });
  *  would have to live in a module of its own for the sake of one union that both ends already
  *  state. */
 const props = withDefaults(
-  defineProps<{ initialTab?: 'general' | 'members' | 'instructions' | 'repos' | 'env' }>(),
+  defineProps<{ initialTab?: 'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env' }>(),
   { initialTab: 'general' },
 );
 
@@ -105,7 +106,7 @@ const { installations } = useAgentInstallations();
 /** The tab's name: the heading without "(optional)", which a tab has no room for. */
 const TeamInstructionsTab = 'Team instructions';
 
-const tab = ref<'general' | 'members' | 'instructions' | 'repos' | 'env'>(props.initialTab);
+const tab = ref<'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env'>(props.initialTab);
 
 const team = computed(() => board.activeTeam);
 const containers = computed(() => team.value?.containers ?? []);
@@ -830,6 +831,7 @@ watch(open, (showing) => {
           <q-tab name="general" label="General" />
           <q-tab name="members" :label="`Members (${containers.length})`" />
           <q-tab name="instructions" :label="TeamInstructionsTab" />
+          <q-tab name="skills" label="Skills" />
           <q-tab name="repos" label="GitHub Repos" />
           <q-tab name="env" label="Environment" />
         </q-tabs>
@@ -1110,6 +1112,12 @@ watch(open, (showing) => {
               <template #avatar><q-icon name="error" /></template>
               {{ saveError }}
             </q-banner>
+          </q-tab-panel>
+
+          <!-- TEAM SKILLS: this team's own, offered only to its members. Each is saved by its own
+               editor, not by Save here. -->
+          <q-tab-panel name="skills">
+            <TeamSkillsPanel v-if="team" :team="team.id" />
           </q-tab-panel>
 
           <q-tab-panel name="repos">

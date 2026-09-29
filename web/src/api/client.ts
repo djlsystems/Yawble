@@ -45,6 +45,7 @@ import type {
   ConnectionStartRequest,
   PluginList,
   PluginInstallResult,
+  PluginRemoveResult,
   PluginMemberSettings,
   ContainerSnapshot,
   MemberDeleted,
@@ -1293,6 +1294,17 @@ export const installPlugin = (path: string, replace: boolean) =>
     body: JSON.stringify({ path, replace }),
   })
 
+/**
+ * Removes a plugin, or with `version` one version of it, with `plugin remove`'s rules: refused
+ * (409, `members` naming them) while a member is hired on the whole plugin, and refused for the
+ * active version while others are kept. A person's; ask first.
+ */
+export const removePlugin = (id: string, version?: string | null) =>
+  json<PluginRemoveResult>(
+    `/api/plugins/${encodeURIComponent(id)}${version ? `?version=${encodeURIComponent(version)}` : ''}`,
+    { method: 'DELETE' },
+  )
+
 const pluginSettingsPath = (team: string, member: string) =>
   `/api/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(member)}/plugin-settings`
 
@@ -1536,6 +1548,34 @@ export const deleteSkill = async (name: string) => {
   await send(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
 
+/** A team's own skills, by name - Team settings → Skills. Each carries `team`. */
+export const listTeamSkills = (team: TeamId) =>
+  json<SkillRecord[]>(`/api/teams/${encodeURIComponent(team)}/skills`)
+
+/**
+ * Creates a TEAM SKILL, offered only to that team's members of its roles. A name an instance-wide
+ * skill holds, or one the team already has, is refused with a sentence.
+ */
+export const createTeamSkill = (team: TeamId, draft: SkillDraft) =>
+  json<SkillRecord>(`/api/teams/${encodeURIComponent(team)}/skills`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(draft),
+  })
+
+/** Edits a team skill, addressed by the name it had. A changed `draft.name` renames it. */
+export const updateTeamSkill = (team: TeamId, name: string, draft: SkillDraft) =>
+  json<SkillRecord>(`/api/teams/${encodeURIComponent(team)}/skills/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(draft),
+  })
+
+/** Deletes a team skill. */
+export const deleteTeamSkill = async (team: TeamId, name: string) => {
+  await send(`/api/teams/${encodeURIComponent(team)}/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
 /** REPLACES the whole catalog - human-only. 400 with `{ error }` naming what would break:
  *  an empty array, a duplicate or illegal name, an Agent with neither launch kind, an `env` key
  *  beginning `HARNESS_`, or removing an Agent a member or a team's console still uses. */
@@ -1704,3 +1744,61 @@ export const deleteRepoRemoteBranchAsync = (team: TeamId, repo: string) =>
     `/api/teams/${encodeURIComponent(team)}/repos/${encodeURIComponent(repo)}/delete-remote-branch`,
     { method: 'POST' },
   )
+
+// --- Solution packages: check, preview, install, update ------------------------------------------
+//
+// Every `/api/solutions/*` call and a team's own package record. A person's routes (the Concierge
+// and members are refused), except `teamSolution`, which a team's members may read too. Kept
+// together at the end of this file so another card appending here does not collide with this block.
+
+import type {
+  InstalledSolution,
+  SolutionCheck,
+  SolutionInstallRequest,
+  SolutionInstallResult,
+  SolutionPreview,
+  SolutionUpdateRequest,
+  TeamSolution,
+} from './types'
+
+const postJson = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+})
+
+/**
+ * Checks a package folder: `ok` with the plan, or every refusal at once. `from: 'link'` is the deep
+ * link's: the Host then also refuses (400, thrown with its sentence) a folder outside the instance's
+ * documents and every team's folder.
+ */
+export const checkSolution = (folder: string, from?: 'link') =>
+  json<SolutionCheck>('/api/solutions/check', postJson(from ? { folder, from } : { folder }))
+
+/** Every team installed from a package, with the version it runs. */
+export const solutionsInstalled = () => json<InstalledSolution[]>('/api/solutions/installed')
+
+/**
+ * What installing (no `team`, or a name no team has) or updating (a team from an earlier version of
+ * the same package) would do. Writes nothing.
+ */
+export const previewSolution = (folder: string, team?: string) =>
+  json<SolutionPreview>('/api/solutions/preview', postJson(team ? { folder, team } : { folder }))
+
+/** Installs a package as a new team. A failed step undoes everything and answers `ok: false`. */
+export const installSolution = (body: SolutionInstallRequest) =>
+  json<SolutionInstallResult>('/api/solutions/install', postJson(body))
+
+/** Updates a team to the package's version, keeping the person's settings, bindings and documents. */
+export const updateSolution = (body: SolutionUpdateRequest) =>
+  json<SolutionInstallResult>('/api/solutions/update', postJson(body))
+
+/** The package a team was installed from and what it still waits for; `null` (a 404) for a team not from a package. */
+export async function teamSolution(team: string): Promise<TeamSolution | null> {
+  try {
+    return await json<TeamSolution>(`/api/teams/${encodeURIComponent(team)}/solution`)
+  } catch (cause) {
+    if ((cause as { status?: number }).status === 404) return null
+    throw cause
+  }
+}

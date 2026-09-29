@@ -148,6 +148,10 @@ public sealed class PluginCatalog(string root, Func<string, bool>? runtimeFound 
         {
             var id = Path.GetFileName(pluginDirectory);
 
+            // A DOT-NAMED FOLDER IS THE PLATFORM'S OWN - the operator CLI's staged solution packages
+            // (`.solutions`) - and never a plugin, so it is not listed as a refused one either.
+            if (id.StartsWith('.')) continue;
+
             if (!MemberRef.IsValidPluginId(id))
             {
                 refused.Add(new PluginRefused(id, pluginDirectory, "the directory name is not a plugin id."));
