@@ -676,6 +676,9 @@ public static class BuiltInSkills
             - Asked to finalise, finish, wrap up or clean up: follow "Wrapping up a round" below.
             - Asked to see, try or open something the team built: load the `running-a-tree` skill
               first.
+            - Planning work that includes a plugin, a site or triggers: load the
+              `packaging-solutions` skill. The delivery is a package the person installs in one
+              pass, and when it is ready you hand them its link.
             - Before you sign in to anything, or bootstrap anything, load the `test-credentials`
               skill.
 
@@ -767,6 +770,10 @@ public static class BuiltInSkills
 
             There may be no current team, and that is ordinary. Never pick a team on the person's
             behalf.
+
+            A team that will build a plugin, a site or triggers for the person is a build team: what
+            it delivers is a solution package, and installing that package creates the team that
+            runs it. Load the `packaging-solutions` skill before you write its spec.
             """),
         new(
             "team-setup",
@@ -912,6 +919,10 @@ public static class BuiltInSkills
             This is what you need to design a plugin with a person and write its spec as a backlog
             item. It is not the plugin's implementation guide: the team that builds it reads
             `docs/plugins.md` in the repository.
+
+            A plugin is delivered inside a solution package, with the members, triggers and skills
+            that use it, so a person installs the whole team in one pass. Load the
+            `packaging-solutions` skill for the package's folder, its Done-when and the hand-off.
 
             ## 1. A plugin or an agent member
 
@@ -1236,6 +1247,10 @@ public static class BuiltInSkills
             A site's name is a slug: lower-case letters, digits and single hyphens. It is unique
             within the team.
 
+            A site built for a person to use on another team - with its plugin and triggers - ships
+            in a solution package under `sites/<name>/`, and the install publishes it. The Concierge
+            and the Manager load the `packaging-solutions` skill for that.
+
             ## 2. The site tool
 
             You act on your own team's sites. A Concierge passes `team`.
@@ -1362,6 +1377,70 @@ public static class BuiltInSkills
             An action widens nothing: it is a person's click carried to the team. A member woken by
             one does only what it could do anyway, and a plugin's outward-acting settings still need
             their person-only allowlist.
+            """),
+        new(
+            "packaging-solutions",
+            "Use when a spec includes a plugin, a site or triggers: the delivery is a solution package "
+            + "a person reviews and installs in one pass, built by one team to run on another.",
+            [SkillRoles.Concierge, SkillRoles.Manager],
+            """
+            # Packaging solutions
+
+            A solution package is a whole working team in one folder: its members, what wakes them,
+            its team skills, its sites, its tools and what only a person can provide. A person
+            installs it in one pass from a review screen, instead of merging, installing, hiring,
+            pasting and adding triggers by hand. The format is `docs/solutions.md` in the platform's
+            repository; the team that builds the package reads it there.
+
+            ## 1. When the delivery is a package
+
+            When a spec includes a plugin, a site or triggers, the delivery is a package, not a list
+            of steps for a person. The team writes it to its documents folder, in a folder named
+            after the package's id and version:
+
+                <team documents>/<id>-<version>/solution.json
+
+            For example `job-tracker-1.0.0/`, holding `solution.json`, `plugins/<id>/`,
+            `skills/<name>.md`, `sites/<name>/`, `tools/` and a `README.md`. Its team skills, its
+            triggers' full instruction text and its daily caps are all in the package; nothing is
+            left for a person to type in except what `inputs` asks them for.
+
+            ## 2. Done when
+
+            A spec for a package names, in its Done-when:
+
+            - "`/api/solutions/check` passes" on the package folder;
+            - the folder is `<team documents>/<id>-<version>/`;
+            - what the person will be asked for at install: the person-only settings, the
+              connections to bind and the documents to upload.
+
+            A member cannot call the check itself, and does not need to. When the Manager declares
+            the workflow complete, the platform runs the check on every package written during that
+            workflow and posts a notice on the team's board and in the backlog item. It passes: the
+            notice reads "<name> <version> is ready. **Review and install**" with the link. It
+            fails: the notice names each problem by file and field, nothing is offered for install,
+            and the fix is a new round of the same work.
+
+            ## 3. The team that builds it is not the team that runs it
+
+            The build team writes code, a plugin and a package. The solution then runs on a new
+            team the install creates, named after the package, with the package's members, skills
+            and triggers and nothing else. Never tell the build team to hire the plugin, add the
+            triggers or register the skills on itself: that is what the install does, on the other
+            team, after a person has reviewed it.
+
+            ## 4. When the build finishes
+
+            The Concierge hands the person the deep link and one line on what they will be asked
+            for. Build the link on `HARNESS_PUBLIC_URL`, the address the person's browser uses,
+            never `HARNESS_URL`:
+
+                $HARNESS_PUBLIC_URL/#/solutions/install?folder=<absolute package folder>
+
+            For example: "Job Tracker 1.0.0 is ready: <link>. You will be asked for your reference
+            resume and to connect your mail account." The link opens the review; it never installs
+            by itself, and the person decides there. Take the folder from the board notice or the
+            Manager's delivery; `workflow_show` reads the thread back.
             """),
     ];
 

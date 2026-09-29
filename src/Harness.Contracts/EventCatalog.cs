@@ -531,6 +531,27 @@ public static class EventCatalog
             + "`site.action(name, payload)`. Each one roots its own workflow. Source is "
             + "`site:<team>/<site>`. Narrow a trigger with `site eq <site>` or "
             + "`siteAction eq <site>/<action>`."),
+
+        // OUT OF THE LEDGER: a notice for the person who installs, appended after the declaration
+        // that closed the workflow, so no member is waiting to act on it. Source is the declarer,
+        // a container id, so MessageTeam reads the team from it and the board files it on that card.
+        new(MessageTypes.SolutionChecked, EventPublisher.Platform, HighVolume: false, InLedger: false,
+            [
+                Source,
+                new(PayloadFields.Path, EventFieldKind.String, "The package folder, an absolute path in the team's documents folder."),
+                new(PayloadFields.Ok, EventFieldKind.Boolean, "Whether the package passed the check."),
+                new(PayloadFields.Solution, EventFieldKind.String, "The package's id, when solution.json could be read."),
+                new(PayloadFields.Name, EventFieldKind.String, "The package's name, or its folder's name."),
+                new(PayloadFields.Version, EventFieldKind.String, "The package's version, when it had one."),
+                new(PayloadFields.Text, EventFieldKind.String, "The notice, as a person reads it."),
+                new(PayloadFields.Link, EventFieldKind.String,
+                    "On a pass: the install wizard's link, `#/solutions/install?folder=<path>`."),
+                new(PayloadFields.Problems, EventFieldKind.List,
+                    "On a fail: each problem as `<file> <field>: <reason>`."),
+            ],
+            "A workflow was declared complete and a solution package written during it sits in the "
+            + "team's documents folder, so the platform checked it: ready to review and install, or "
+            + "the problems by file and field. Source is the member that declared."),
     ];
 
     public static IReadOnlySet<string> Types { get; } =

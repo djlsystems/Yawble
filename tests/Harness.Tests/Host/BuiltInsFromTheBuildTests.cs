@@ -232,6 +232,57 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.DoesNotContain($"- `{Name}` - ", await NewMemberPromptAsync("Plumber", "Fixes pipes."), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The packaging-solutions skill is for writing a spec whose delivery is a solution package and
+    /// handing the person its link, which the Concierge and the Manager do. It carries the four
+    /// points, and the skills that lead to it point there.
+    /// </summary>
+    [Fact]
+    public async Task The_packaging_skill_is_offered_to_the_concierge_and_manager_carries_its_four_points_and_is_pointed_to()
+    {
+        const string Name = "packaging-solutions";
+        var skill = BuiltInSkills.Find(Name)!;
+        Assert.Equal([SkillRoles.Concierge, SkillRoles.Manager], skill.Roles);
+
+        // Where the package goes, what the Done-when names, two teams, and the hand-off.
+        Assert.Contains("<team documents>/<id>-<version>/", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("\"`/api/solutions/check` passes\"", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("The team that builds it is not the team that runs it", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("$HARNESS_PUBLIC_URL/#/solutions/install?folder=", skill.Body, StringComparison.Ordinal);
+        Assert.Contains("one line on what they will be asked", skill.Body, StringComparison.Ordinal);
+
+        foreach (var pointer in new[] { "concierge", "new-team", "authoring-plugins", "building-sites" })
+        {
+            Assert.Contains($"`{Name}`", BuiltInSkills.Find(pointer)!.Body, StringComparison.Ordinal);
+        }
+
+        var principals = host.Services.GetRequiredService<IPrincipalStore>();
+        var person = await host.Services.GetRequiredService<IUserStore>().FindAsync("person@example.test", Ct);
+        var conciergeKey = await principals.MintAsync(
+            ConciergeLaunchFactory.PrincipalId(person!.Id), PrincipalKind.TenantConcierge, null,
+            ConciergeLaunchFactory.ConciergePermits, ownerUserId: person.Id, ct: Ct);
+        var managerKey = await principals.MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+
+        foreach (var key in new[] { conciergeKey, managerKey })
+        {
+            using var caller = host.Container(key);
+            Assert.Equal(HttpStatusCode.OK, (await caller.GetAsync($"/api/me/skills/{Name}", Ct)).StatusCode);
+
+            var found = await caller.GetFromJsonAsync<JsonElement[]>("/api/me/skills?q=package", Ct);
+            Assert.Contains(Name, found!.Select(r => r.GetProperty("name").GetString()));
+        }
+
+        using var member = host.Container(host.AlphaContainerKey);
+        var refused = await member.GetAsync($"/api/me/skills/{Name}", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Contains("not offered to the member role", await refused.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+
+        var manager = Container(host.Alpha, TeamRegistry.DefaultManagerName).SystemPrompt;
+        Assert.Contains($"- `{Name}` - {skill.Description}", manager, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_custom_member_skill_is_found_by_search_and_listed_in_a_new_members_prompt()
     {

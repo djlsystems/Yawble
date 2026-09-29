@@ -531,6 +531,11 @@ builder.Services.AddSingleton(new AgentCatalog(loadedCatalog, () => tenantSettin
 builder.Services.AddSingleton(sp => new SolutionService(
     new SolutionChecker(SolutionPlatform.For(sp.GetRequiredService<AgentCatalog>(), pluginCatalog)), dataRoot));
 
+// The board's notice for a package a workflow wrote, checked through that one door when the
+// workflow is declared complete.
+builder.Services.AddSingleton(sp => new SolutionNotice(
+    sp.GetRequiredService<SolutionService>(), sp.GetRequiredService<TeamDocuments>(), sp.GetRequiredService<IMessageLog>()));
+
 // What each role is offered, for the "Available skills" list in every system prompt. Filled with
 // the custom skills at start, before any team is restored, and refreshed after every skill write.
 builder.Services.AddSingleton(new SkillDirectory());
@@ -1034,7 +1039,7 @@ builder.Services.AddSingleton(sp =>
         // The LABEL, resolved here rather than inside the factory - it has no TeamRegistry of
         // its own, and this delegate already holds one. LabelFor falls back to the identifier for
         // a team nobody has relabelled, so a never-relabelled team's console reads its identifier.
-        async (key, team, ct) =>
+        async (key, team, publicUrl, ct) =>
         {
             // THE CONCIERGE, ASKED WITHOUT NAMING A TEAM. ConciergeFor(team) throws when the
             // registry holds nothing, which is the empty instance GET /api/concierge/ws exists
@@ -1061,6 +1066,7 @@ builder.Services.AddSingleton(sp =>
                 await ConciergeAgentDefault.ResolveAsync(settings.Agent, catalog, probe, ct),
                 teams.EnvFor(stored ?? ""),
                 SteeringFile.Read(dataRoot, key.User),
+                publicUrl,
                 ct);
         },
         (key, ct) => launcher.RevokeAsync(key.User, ct));
@@ -6016,6 +6022,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
     HttpContext context, TeamRegistry teams, ContainerHost host, IMessageLog log,
     IPendingDeliveries pending, IBacklogStore backlog, ITeamPublisher publisher,
     KanbanStore kanban, WorktreeRemoval worktrees, TeamPaths paths, ILoggerFactory loggers,
+    SolutionNotice solutionNotice,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -6149,7 +6156,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
             ? new { delivered = request.Delivered.Trim(), dropped = (string?)null, looseEnds = (IReadOnlyList<string>?)null }
             : new { delivered = request.Delivered.Trim(), dropped, looseEnds = (IReadOnlyList<string>?)looseEnds }),
         log, backlog, host, kanban, worktrees, paths, teams.ReposFor(stored),
-        loggers.CreateLogger("WorktreeRemoval"), ct);
+        loggers.CreateLogger("WorktreeRemoval"), ct, solutionNotice);
 
     return Results.NoContent();
 })
@@ -6936,7 +6943,12 @@ app.MapGet("/api/concierge/ws", async (
     {
         // Attached AFTER the upgrade so that a launch failure can be reported in the terminal. A
         // refused upgrade shows an empty panel and puts the reason in devtools.
-        console = await consoles.AttachAsync(key, "", width, height, ct);
+        // THE ADDRESS THIS BROWSER REACHED US ON becomes the Concierge's HARNESS_PUBLIC_URL. The
+        // scheme is the tunnel's when one forwarded it (UseForwardedHeaders); the host is what the
+        // browser asked for.
+        console = await consoles.AttachAsync(
+            key, "", width, height, ct,
+            $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase.Value}");
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {
