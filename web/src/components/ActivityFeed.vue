@@ -3,6 +3,7 @@ import { onBeforeUnmount, ref } from 'vue';
 import { getMessagesBefore } from '../api/client';
 import type { Message } from '../api/types';
 import { detail, label, ownerOf, summarise, timeOf } from '../lib/summarise';
+import { solutionNoticeOf } from '../lib/solutionNotice';
 import { useCursorList } from '../lib/useCursorList';
 import { useConsoleStore } from '../stores/console';
 import CursorSentinel from './CursorSentinel.vue';
@@ -125,6 +126,13 @@ const older = useCursorList<Message>(
   { take: 200 },
 );
 
+/** A package's check reads as its outcome: ready is calm, problems are loud. */
+function toneOf(message: Message): string {
+  const notice = solutionNoticeOf(message);
+  if (notice !== null) return notice.ok ? 'positive' : 'negative';
+  return tone(message.type);
+}
+
 /** Completed reads calm, failed and rejected read loud. Busy is normal; refused is not. */
 function tone(type: string): string {
   if (type.endsWith('failed')) return 'negative';
@@ -188,16 +196,16 @@ function tone(type: string): string {
         <div
           class="feed-card"
           :class="{
-            'feed-card-negative': tone(message.type) === 'negative',
-            'feed-card-warning': tone(message.type) === 'warning',
-            'feed-card-positive': tone(message.type) === 'positive',
-            'feed-card-primary': tone(message.type) === 'primary',
+            'feed-card-negative': toneOf(message) === 'negative',
+            'feed-card-warning': toneOf(message) === 'warning',
+            'feed-card-positive': toneOf(message) === 'positive',
+            'feed-card-primary': toneOf(message) === 'primary',
           }"
           @mouseenter="cancelClose"
           @mouseleave="onLeave"
         >
           <div class="feed-card-head">
-            <q-badge :color="tone(message.type)" :label="label(message.type)" />
+            <q-badge :color="toneOf(message)" :label="label(message.type)" />
             <span class="feed-card-source mono">{{ message.source }}</span>
             <span class="feed-card-spacer"></span>
             <span class="feed-card-meta mono">#{{ message.correlationId }}</span>
@@ -210,13 +218,18 @@ function tone(type: string): string {
         </div>
       </q-menu>
       <q-item-section side top>
-        <q-badge :color="tone(message.type)" :label="label(message.type)" />
+        <q-badge :color="toneOf(message)" :label="label(message.type)" />
       </q-item-section>
 
       <q-item-section>
         <!-- Interpolated, never innerHTML: agent output reaches this line and Vue
              escapes it. -->
         <q-item-label caption lines="2" class="feed-line">{{ summarise(message) || '—' }}</q-item-label>
+        <!-- A package ready to install: the wizard's link, composed from the folder and never read
+             from the row's text. It opens the review; nothing installs from here. -->
+        <q-item-label v-if="solutionNoticeOf(message)?.href" caption>
+          <a class="feed-install text-weight-bold" :href="solutionNoticeOf(message)!.href!">Review and install</a>
+        </q-item-label>
       </q-item-section>
 
       <!-- The workflow this message belongs to. A BUTTON rather than a label, because its job is to

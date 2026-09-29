@@ -58,7 +58,20 @@ public sealed record BacklogExecutionStats(
     /// figure against a Manager's own sense of how long the workflow took should expect it to run
     /// a little long when a straggler trails the declaration.
     /// </summary>
-    double? ElapsedSeconds = null);
+    double? ElapsedSeconds = null,
+
+    /// <summary>
+    /// The platform's check of each solution package this dispatch's workflow wrote, read off its
+    /// <c>solution.checked</c> rows: ready with its install link, or the problems. Null in a stats
+    /// blob frozen before the notice existed; empty when the workflow wrote no package.
+    /// </summary>
+    IReadOnlyList<BacklogSolutionNotice>? Notices = null);
+
+/// <summary>One <c>solution.checked</c> row, as the backlog item shows it.</summary>
+/// <param name="Link">The install wizard's link, on a pass only.</param>
+/// <param name="Problems">Each problem by file and field, on a fail only.</param>
+public sealed record BacklogSolutionNotice(
+    bool Ok, string Text, string Folder, string? Name, string? Version, string? Link, IReadOnlyList<string> Problems);
 
 /// <summary>
 /// Derives <see cref="BacklogExecutionStats"/> from the log, and freezes them when an item is
@@ -130,9 +143,16 @@ public static class BacklogExecutionRecord
         var members = new List<string>();
         var instructions = 0;
         var outcome = Unknown;
+        var notices = new List<BacklogSolutionNotice>();
 
         foreach (var row in rows)
         {
+            if (string.Equals(row.Type, MessageTypes.SolutionChecked, StringComparison.Ordinal)
+                && Notice(row) is { } notice)
+            {
+                notices.Add(notice);
+            }
+
             if (row.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal))
             {
                 instructions++;
@@ -186,8 +206,43 @@ public static class BacklogExecutionRecord
             spend.TokensSpent,
             spend.RunsWithMeasuredUsage,
             spend.RunsWithoutUsage,
-            elapsed);
+            elapsed,
+            notices);
     }
+
+    /// <summary>A <c>solution.checked</c> row's notice, or null for a payload that does not read as
+    /// one - which only the platform writes, so that is a fault to skip rather than show.</summary>
+    private static BacklogSolutionNotice? Notice(Message row)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(row.Payload);
+            var payload = json.RootElement;
+
+            if (payload.ValueKind != JsonValueKind.Object
+                || Text(payload, PayloadFields.Text) is not { } text
+                || Text(payload, PayloadFields.Path) is not { } folder)
+            {
+                return null;
+            }
+
+            var ok = payload.TryGetProperty(PayloadFields.Ok, out var passed) && passed.ValueKind == JsonValueKind.True;
+            var problems = payload.TryGetProperty(PayloadFields.Problems, out var listed) && listed.ValueKind == JsonValueKind.Array
+                ? listed.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.String).Select(p => p.GetString()!).ToList()
+                : [];
+
+            return new BacklogSolutionNotice(
+                ok, text, folder, Text(payload, PayloadFields.Name), Text(payload, PayloadFields.Version),
+                ok ? Text(payload, PayloadFields.Link) : null, problems);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? Text(JsonElement payload, string field) =>
+        payload.TryGetProperty(field, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>
     /// A WORKFLOW WAS DECLARED COMPLETE: move its backlog item to `declared`, ONCE.

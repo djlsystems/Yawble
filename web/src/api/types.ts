@@ -2162,6 +2162,23 @@ export interface BacklogExecutionStats {
 
   /** Null when the workflow has not finished. NULL IS "NOT MEASURED" AND IS NOT ZERO. */
   elapsedSeconds: number | null
+
+  /**
+   * The platform's check of each solution package this workflow wrote, from its `solution.checked`
+   * rows. Null in stats frozen before the notice existed.
+   */
+  notices?: BacklogSolutionNotice[] | null
+}
+
+/** One package check, as the backlog item shows it: ready with its link, or the problems. */
+export interface BacklogSolutionNotice {
+  ok: boolean
+  text: string
+  folder: string
+  name: string | null
+  version: string | null
+  link: string | null
+  problems: string[]
 }
 
 export interface BacklogDispatchView {

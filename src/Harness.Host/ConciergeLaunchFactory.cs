@@ -35,6 +35,23 @@ public sealed class ConciergeLaunchFactory(
     public static string PrincipalId(string user) => $"concierge-{user}";
 
     /// <summary>
+    /// The browser's address reduced to scheme, host, port and base path, or null when it is not an
+    /// absolute http(s) address. Nothing after the base path survives: links are built on it.
+    /// </summary>
+    public static string? PublicUrl(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address)
+            || !Uri.TryCreate(address.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrEmpty(uri.Host))
+        {
+            return null;
+        }
+
+        return uri.GetLeftPart(UriPartial.Authority) + uri.AbsolutePath.TrimEnd('/');
+    }
+
+    /// <summary>
     /// Under a tenant-level folder outside every team root. This
     /// is not team-owned state: one Concierge serves one person across teams.
     /// </summary>
@@ -81,6 +98,7 @@ public sealed class ConciergeLaunchFactory(
         string team, string teamLabel, string user, string login, string agent,
         IReadOnlyDictionary<string, string> teamEnv,
         string? steeringCausation = null,
+        string? publicUrl = null,
         CancellationToken ct = default)
     {
         // FAIL CLOSED, before a credential is minted: see AgentLaunchUser.Refuses.
@@ -148,6 +166,13 @@ public sealed class ConciergeLaunchFactory(
         // on. There is no HARNESS_SHARED for the identical reason: it is derived from the team.
         environment["HARNESS_URL"] = baseAddress;
         environment["HARNESS_KEY"] = credential;
+
+        // THE ADDRESS THE PERSON USES, for the links the Concierge hands them - a deep link into the
+        // install wizard, a site. HARNESS_URL is where the Host listens from inside this machine, and
+        // a person on a VM address or a tunnel cannot open it. Taken from the browser request that
+        // opened this session; the internal address when there was none. Members never get it: they
+        // hand nothing to a person's browser, and the container path does not set it.
+        environment["HARNESS_PUBLIC_URL"] = PublicUrl(publicUrl) ?? baseAddress;
 
         if (!string.IsNullOrWhiteSpace(steeringCausation))
         {

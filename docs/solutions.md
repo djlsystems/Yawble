@@ -124,8 +124,8 @@ showing it as blocked, naming it, until it is provided.
 ## The check
 
 The check reads a package and answers either **what an install would create** or **everything
-wrong with it**. It writes nothing. One validator serves every caller: the route, the CLI and, later,
-the install and the board's notice.
+wrong with it**. It writes nothing. One validator serves every caller: the route, the CLI, the board's notice and, later,
+the install.
 
 - **The route**: `POST /api/solutions/check` with `{ "folder": "<absolute folder inside the data root>" }`,
   for a person and the Concierge; a member is refused. It answers `{ ok: true, plan }` or
@@ -162,6 +162,24 @@ sentence saying what to change. Every refusal is reported at once, not only the 
 - **any path that escapes**: a folder trigger or document input outside the team's documents, a
   skill or site named by a path, a plugin's executable or skill outside its folder, and any link in
   the package that is absolute or leads out of it.
+
+## The board notice
+
+When a member declares a workflow complete, the platform looks in the team's documents folder for
+package folders - a folder directly inside it holding `solution.json` - with a file written since
+the workflow began, and checks each one exactly as the route does. For each it appends a
+`solution.checked` event inside the workflow, on the declaring member's card:
+
+- **It passes**: "Job Tracker 1.0.0 is ready. **Review and install**", and the link
+  `#/solutions/install?folder=<absolute path>` opens the install wizard on that folder. The link
+  never installs; the review is where the person decides.
+- **It fails**: the notice names each problem by file and field, and offers no install.
+
+The backlog item the workflow was dispatched from shows the same notice under that dispatch. A
+package written in an earlier workflow is not checked again. So a team delivering a package writes it
+to `<team documents>/<id>-<version>/`; the built-in skill `packaging-solutions` tells the Concierge
+and the Manager so, and the Concierge hands the person the link on the address their browser uses
+(`HARNESS_PUBLIC_URL`).
 
 ## The full example: Job Tracker
 
@@ -417,5 +435,8 @@ skill `interview-prep` and ships `job-board` 0.2.0. The tests make it the same w
   outside the data root or through a leaving link is refused, and nothing is created:
   `SolutionCheckRouteTests`. Its one marker is `RequirePermit(CreateTeam)`, the Concierge's and never
   a team's, and the handler refuses a member besides (`RouteMarkerTests` holds the one-marker rule).
+- The board notice: `SolutionNoticeTests` (a pass with its link on the board and the backlog item, a
+  fail naming file and field, and no notice for a package not written during the workflow); on the
+  web, `activity-feed-solution-notice.mount.spec.ts` and `backlog-dialog-solution-notice.mount.spec.ts`.
 - The CLI against Podman and Docker scripted engines: `cli/internal/cli/solution_test.go`, answered
   with what the Host really prints, which `SolutionCheckCliFixtureTests` keeps equal to the Host.

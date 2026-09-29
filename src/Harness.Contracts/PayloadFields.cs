@@ -296,4 +296,22 @@ public static class PayloadFields
 
     /// <summary>`site.action`: when the Host received it, ISO-8601 UTC.</summary>
     public const string At = "at";
+
+    /// <summary>`solution.checked`: whether the package passed its check.</summary>
+    public const string Ok = "ok";
+
+    /// <summary>`solution.checked`: the package's id, when <c>solution.json</c> could be read.</summary>
+    public const string Solution = "solution";
+
+    /// <summary>`solution.checked`: the package's name, or its folder's name when it had none.</summary>
+    public const string Name = "name";
+
+    /// <summary>`solution.checked`: the package's version, when it had one.</summary>
+    public const string Version = "version";
+
+    /// <summary>`solution.checked`: the install wizard's deep link for the folder, on a pass only.</summary>
+    public const string Link = "link";
+
+    /// <summary>`solution.checked`: each problem, <c>&lt;file&gt; &lt;field&gt;: &lt;reason&gt;</c>, on a fail only.</summary>
+    public const string Problems = "problems";
 }

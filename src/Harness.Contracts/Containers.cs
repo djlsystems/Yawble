@@ -361,6 +361,15 @@ public static class MessageTypes
     public const string SiteAction = "site.action";
 
     /// <summary>
+    /// THE PLATFORM CHECKED A SOLUTION PACKAGE THE TEAM WROTE. When a workflow is declared complete,
+    /// every folder holding <c>solution.json</c> directly in the team's documents folder and written
+    /// during that workflow is checked, and one of these is appended per package, inside the
+    /// workflow, with the declarer as its Source. It passed: it carries the install link. It failed:
+    /// it names each problem by file and field. A notice for people, so out of the ledger.
+    /// </summary>
+    public const string SolutionChecked = "solution.checked";
+
+    /// <summary>
     /// The exact skip reason published in <see cref="ScheduleSkipped"/> rows for idle-only schedules.
     /// Kept as one constant so every producer and assertion says the same sentence.
     /// </summary>

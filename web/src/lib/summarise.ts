@@ -1,5 +1,6 @@
 import type { Message } from '../api/types'
 import { failureClassWords, resumesAutomatically, resumeTimeText } from './failureClass'
+import { solutionNoticeOf } from './solutionNotice'
 
 /**
  * One line describing what a message was about, for a card's activity feed.
@@ -131,6 +132,13 @@ function textOf(message: Message): string {
   // without this arm it would render as a blank dash - a row that told you
   // something happened while refusing to say what. The trigger is the
   // interesting part: what woke it.
+  // THE PLATFORM'S CHECK OF A PACKAGE: its words without the markdown of the stored sentence. The
+  // feed row puts the install link beside them, built from the folder.
+  const notice = solutionNoticeOf(message)
+  if (notice !== null) {
+    return notice.words
+  }
+
   if (message.type === 'agentContainer.started') {
     const trigger = payload.trigger
     return trigger ? `woke on ${label(String(trigger))}` : 'woke'
