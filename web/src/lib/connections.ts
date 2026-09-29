@@ -22,6 +22,53 @@ export function redirectUriFor(origin: string): string {
   return `${origin.replace(/\/+$/, '')}${CallbackPath}`;
 }
 
+const Loopback = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * WHY A PROVIDER WILL REFUSE THE REDIRECT URI FOR THIS ADDRESS, or null when it will take it.
+ *
+ * Google and Microsoft never call the redirect URI themselves - they send the browser to it - so it
+ * need not be reachable from the internet. What they check is its SPELLING, when it is registered:
+ * `http` only for localhost, never a raw IP address other than loopback, and an `https` name that
+ * ends in a real top-level domain. A person on a LAN address (`http://192.168.1.20:8080`) would
+ * otherwise copy the URI shown, paste it at the provider, and only then be refused. `localhost`
+ * works on the machine running the container, where the same page is one address away.
+ *
+ * `cli` is the operator CLI's name, passed in because the brand lives in the presentation layer.
+ */
+export function redirectUriWarning(origin: string, cli: string): string | null {
+  let url: URL;
+
+  try {
+    url = new URL(origin);
+  } catch {
+    return null;
+  }
+
+  const host = url.hostname.toLowerCase();
+
+  if (Loopback.has(host)) return null;
+
+  const port = url.port ? `:${url.port}` : '';
+  const fix =
+    ` Open this page at http://localhost${port} on the machine running the container, where the `
+    + `providers accept http, and register that address instead; or connect from that machine with \`${cli} connect\`.`;
+
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith('[')) {
+    return `Google and Microsoft refuse a redirect URI on an IP address such as ${host}.${fix}`;
+  }
+
+  if (url.protocol === 'http:') {
+    return `Google and Microsoft accept a redirect URI over http only for localhost, and this address is ${host}.${fix}`;
+  }
+
+  if (!host.includes('.') || /\.(local|lan|internal|home|localdomain)$/.test(host)) {
+    return `Google refuses a redirect URI whose name does not end in a public top-level domain, such as ${host}.${fix}`;
+  }
+
+  return null;
+}
+
 /**
  * One line of help per built-in provider, for when the Host sends none. The Host's own `help` wins:
  * it knows the client type it expects.

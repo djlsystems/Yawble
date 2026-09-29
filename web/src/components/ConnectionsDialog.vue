@@ -18,6 +18,7 @@ import {
   providerHelp,
   providerName,
   redirectUriFor,
+  redirectUriWarning,
   statusLabel,
   usedByLabels,
   when,
@@ -69,6 +70,7 @@ watch(open, (showing) => {
 
 /** The redirect URI for the address the person is using now. */
 const redirectUri = computed(() => redirectUriFor(currentOrigin()));
+const redirectWarning = computed(() => redirectUriWarning(currentOrigin(), productCli));
 
 const nameOf = (id: string) => providerName(id, providers.value);
 
@@ -475,6 +477,7 @@ async function removeProvider(provider: ConnectionProvider) {
         <div class="connect-redirect" data-redirect-uri-block>
           <div class="text-caption os-text-muted">Redirect URI to register at the provider for this address:</div>
           <div class="mono" data-redirect-uri>{{ redirectUri }}</div>
+          <div v-if="redirectWarning" class="text-caption text-warning q-mt-xs" data-redirect-warning>{{ redirectWarning }}</div>
           <div v-if="chosenProvider" class="text-caption os-text-muted q-mt-xs" data-provider-help>
             {{ providerHelp(chosenProvider) }}
           </div>
@@ -585,6 +588,7 @@ async function removeProvider(provider: ConnectionProvider) {
         <div data-redirect-uri-block>
           <div class="text-caption os-text-muted">Redirect URI to register at the provider for this address:</div>
           <div class="mono">{{ redirectUri }}</div>
+          <div v-if="redirectWarning" class="text-caption text-warning q-mt-xs" data-redirect-warning>{{ redirectWarning }}</div>
           <div v-if="clientFor" class="text-caption os-text-muted q-mt-xs">{{ providerHelp(clientFor) }}</div>
         </div>
 

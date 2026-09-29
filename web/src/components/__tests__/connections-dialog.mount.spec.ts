@@ -42,9 +42,12 @@ vi.mock('../../api/client', async (importOriginal) => ({
   deleteConnectionProvider,
 }));
 
+// The address the page is on: a test sets another to see what a LAN address is told.
+const page = vi.hoisted(() => ({ origin: 'https://instance.example.test' }));
+
 vi.mock('../../lib/browserNavigation', () => ({
   goTo,
-  currentOrigin: () => 'https://instance.example.test',
+  currentOrigin: () => page.origin,
 }));
 
 import ConnectionsDialog from '../ConnectionsDialog.vue';
@@ -192,6 +195,7 @@ describe('ConnectionsDialog, connecting an account', () => {
 
     expect(bodyFind('[data-redirect-uri]')!.textContent).toBe('https://instance.example.test/api/connections/callback');
     expect(bodyFind('[data-provider-help]')!.textContent).toContain('"Desktop app" client');
+    expect(bodyFind('[data-redirect-warning]')).toBeNull();
 
     await type('Scopes', 'https://mail.google.com/, https://www.googleapis.com/auth/drive.readonly');
     await type('Name', 'Work mail');
@@ -206,6 +210,31 @@ describe('ConnectionsDialog, connecting an account', () => {
     expect(goTo).toHaveBeenCalledWith(authorizationUrl);
 
     wrapper.unmount();
+  });
+
+  // A provider checks the redirect URI's spelling when it is registered: a LAN address over http is
+  // refused, so the dialog says so, and how to get one that is accepted, before anyone copies it.
+  it('warns that a LAN address will be refused and names localhost on that port, in Connect and in Set up client', async () => {
+    page.origin = 'http://172.31.242.154:8080';
+    try {
+      const wrapper = await mountConnections();
+
+      button('Connect an account…').click();
+      await settle();
+      expect(bodyFind('[data-connect-dialog] [data-redirect-uri]')!.textContent).toBe('http://172.31.242.154:8080/api/connections/callback');
+      expect(bodyFind('[data-connect-dialog] [data-redirect-warning]')!.textContent).toContain('IP address such as 172.31.242.154');
+      expect(bodyFind('[data-connect-dialog] [data-redirect-warning]')!.textContent).toContain('http://localhost:8080');
+      button('Cancel').click();
+      await settle();
+
+      buttonIn(bodyFind('[data-provider="google"]')!, 'Set up client…').click();
+      await settle();
+      expect(bodyFind('[data-client-dialog] [data-redirect-warning]')!.textContent).toContain('http://localhost:8080');
+
+      wrapper.unmount();
+    } finally {
+      page.origin = 'https://instance.example.test';
+    }
   });
 
   it('holds Connect for a provider whose client is not set up, and sets it up first', async () => {

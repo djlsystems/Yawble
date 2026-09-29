@@ -8,6 +8,7 @@ import {
   providerReturnAddress,
   scopeRefusal,
   redirectUriFor,
+  redirectUriWarning,
   slotSummary,
 } from '../connections'
 import { hostConnection, hostProvider, hostSlot } from '../../test/pluginFixtures'
@@ -16,6 +17,32 @@ describe('connections', () => {
   it('builds the redirect URI the Host builds for the address in use', () => {
     expect(redirectUriFor('https://instance.example.test')).toBe('https://instance.example.test/api/connections/callback')
     expect(redirectUriFor('http://127.0.0.1:8080/')).toBe('http://127.0.0.1:8080/api/connections/callback')
+  })
+
+  // What Google and Microsoft check when a redirect URI is registered: its spelling, not whether
+  // the internet can reach it.
+  it('warns only for a redirect URI a provider will refuse, and names localhost on the same port', () => {
+    for (const accepted of [
+      'http://localhost:8080',
+      'http://127.0.0.1:8080',
+      'http://[::1]:8080',
+      'https://yawble.example.com',
+      'https://instance.example.test',
+    ]) {
+      expect(redirectUriWarning(accepted, 'cli'), accepted).toBeNull()
+    }
+
+    const lan = redirectUriWarning('http://192.168.1.20:8080', 'cli')!
+    expect(lan).toContain('IP address such as 192.168.1.20')
+    expect(lan).toContain('http://localhost:8080')
+    expect(lan).toContain('`cli connect`')
+
+    expect(redirectUriWarning('http://myserver:8080', 'cli')).toContain('over http only for localhost')
+    expect(redirectUriWarning('https://myserver', 'cli')).toContain('public top-level domain')
+    expect(redirectUriWarning('https://box.local', 'cli')).toContain('public top-level domain')
+    expect(redirectUriWarning('https://10.0.0.5', 'cli')).toContain('IP address')
+    expect(redirectUriWarning('http://[fd00::5]:8080', 'cli')).toContain('IP address')
+    expect(redirectUriWarning('http://192.168.1.20', 'cli')).toContain('http://localhost on the machine')
   })
 
   it('lets a `custom` slot take any custom provider, and asks the `custom` scopes of it', () => {
