@@ -332,7 +332,7 @@ const verdictText = computed(() => {
               no-caps
               size="sm"
               color="negative"
-              icon="delete_outline"
+              icon="delete"
               label="Remove version"
               data-remove-version
               @click="askRemove(row, false)"
