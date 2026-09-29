@@ -152,5 +152,64 @@ public static class SkillSchema
 
             INSERT INTO skills_fts(skills_fts) VALUES('rebuild');
             """),
+
+        // TEAM SKILLS: a custom skill may belong to one team (`team`, the team's stored id; NULL for
+        // every instance-wide skill, which is every row before this step). A name is unique among
+        // the instance-wide skills and within one team, so two teams installed from one package may
+        // each hold the same skill name; the store refuses a team skill an instance-wide name and
+        // the other way round, so nothing is shadowed. The column-level UNIQUE on name cannot be
+        // dropped in SQLite, so the table is rebuilt, every row and id kept, and the index with it.
+        new MigrationStep(
+            "skill-004",
+            """
+            DROP TRIGGER IF EXISTS skills_ai;
+            DROP TRIGGER IF EXISTS skills_ad;
+            DROP TRIGGER IF EXISTS skills_au;
+            DROP INDEX IF EXISTS skills_source;
+
+            CREATE TABLE skills_rebuilt (
+                id           INTEGER PRIMARY KEY,
+                name         TEXT NOT NULL COLLATE NOCASE,
+                kind         TEXT NOT NULL CHECK (kind IN ('builtin', 'custom', 'plugin')),
+                description  TEXT NOT NULL,
+                roles        TEXT NOT NULL,
+                body         TEXT NOT NULL,
+                updated_at   TEXT NOT NULL,
+                updated_by   TEXT,
+                source       TEXT NULL,
+                team         TEXT NULL COLLATE NOCASE,
+                CHECK ((kind = 'plugin') = (source IS NOT NULL)),
+                CHECK (team IS NULL OR kind = 'custom')
+            );
+
+            INSERT INTO skills_rebuilt (id, name, kind, description, roles, body, updated_at, updated_by, source, team)
+            SELECT id, name, kind, description, roles, body, updated_at, updated_by, source, NULL FROM skills;
+
+            DROP TABLE skills;
+            ALTER TABLE skills_rebuilt RENAME TO skills;
+
+            CREATE UNIQUE INDEX skills_instance_name ON skills(name) WHERE team IS NULL;
+            CREATE UNIQUE INDEX skills_team_name ON skills(team, name) WHERE team IS NOT NULL;
+            CREATE INDEX skills_source ON skills(source) WHERE source IS NOT NULL;
+
+            CREATE TRIGGER skills_ai AFTER INSERT ON skills BEGIN
+              INSERT INTO skills_fts(rowid, name, description, body)
+              VALUES (new.id, new.name, new.description, new.body);
+            END;
+
+            CREATE TRIGGER skills_ad AFTER DELETE ON skills BEGIN
+              INSERT INTO skills_fts(skills_fts, rowid, name, description, body)
+              VALUES('delete', old.id, old.name, old.description, old.body);
+            END;
+
+            CREATE TRIGGER skills_au AFTER UPDATE ON skills BEGIN
+              INSERT INTO skills_fts(skills_fts, rowid, name, description, body)
+              VALUES('delete', old.id, old.name, old.description, old.body);
+              INSERT INTO skills_fts(rowid, name, description, body)
+              VALUES (new.id, new.name, new.description, new.body);
+            END;
+
+            INSERT INTO skills_fts(skills_fts) VALUES('rebuild');
+            """),
     ];
 }

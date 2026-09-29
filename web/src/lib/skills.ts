@@ -1,4 +1,4 @@
-import type { SkillKind, SkillRecord, SkillRole } from '../api/types'
+import type { SkillKind, SkillRecord, SkillRole, TeamId } from '../api/types'
 
 /**
  * The roles a custom skill may be offered to, in the order the picker shows them. `any` is every
@@ -50,4 +50,16 @@ export function lastModified(
   if (!row.updatedAt) return row.kind === 'builtin' ? 'With this build' : '—'
   const when = format(row.updatedAt)
   return row.updatedBy ? `${when} by ${row.updatedBy}` : when
+}
+
+/**
+ * The Team cell: the team a team skill belongs to, by the name a person reads (its id when the team
+ * is not in the list), and "All teams" for an instance-wide skill.
+ */
+export function teamLabel(
+  team: TeamId | null | undefined,
+  teams: readonly { id: TeamId; name: string }[],
+): string {
+  if (!team) return 'All teams'
+  return teams.find((candidate) => candidate.id.toLowerCase() === team.toLowerCase())?.name ?? team
 }

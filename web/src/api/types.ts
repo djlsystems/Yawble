@@ -921,6 +921,12 @@ export interface SkillRecord {
   /** ISO-8601, and who by. Both null for a built-in, which only a build changes. */
   updatedAt: string | null
   updatedBy: string | null
+
+  /**
+   * The team a TEAM SKILL belongs to - offered only to that team's members of its roles - or null
+   * for an instance-wide skill. Written through `/api/teams/{team}/skills`.
+   */
+  team?: TeamId | null
 }
 
 /** What a create or an edit of a custom skill sends. A built-in is never sent. */

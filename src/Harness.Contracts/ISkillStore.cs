@@ -78,6 +78,8 @@ public static class SkillRoles
 /// <param name="UpdatedBy">Who last wrote a custom skill; null for a built-in, which only a code
 /// change writes.</param>
 /// <param name="Source">The id of the plugin that ships a plugin skill; null for every other kind.</param>
+/// <param name="Team">The stored id of the team a TEAM SKILL belongs to; null for every instance-wide
+/// skill. A team skill is always custom, and is offered only to that team's members of its roles.</param>
 public sealed record Skill(
     long Id,
     string Name,
@@ -87,7 +89,8 @@ public sealed record Skill(
     string Body,
     DateTimeOffset UpdatedAt,
     string? UpdatedBy,
-    string? Source = null)
+    string? Source = null,
+    string? Team = null)
 {
     /// <summary>
     /// Whether a person may edit, rename or delete it: only a custom skill. A built-in changes with
@@ -170,7 +173,9 @@ public interface ISkillStore
     /// <summary>
     /// One page, newest row first: rows with an id below <paramref name="before"/> (all when null),
     /// at most <paramref name="take"/>. <paramref name="query"/> narrows by full-text search over
-    /// name, description and body; <paramref name="role"/> narrows to what that role is offered.
+    /// name, description and body; <paramref name="role"/> narrows to what that role is offered
+    /// INSTANCE-WIDE, leaving out every team skill (<see cref="ListOfferedAsync"/> adds a team's).
+    /// With no role, team skills are listed beside the rest, each carrying its team.
     /// </summary>
     Task<IReadOnlyList<Skill>> ListAsync(
         SkillKindFilter kind,
@@ -180,7 +185,52 @@ public interface ISkillStore
         int take,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// What a member of <paramref name="team"/> in <paramref name="role"/> is offered: the
+    /// instance-wide skills of that role, and that team's own skills of that role. With no team (the
+    /// Concierge) no team skill is offered. <paramref name="query"/> narrows as in <see cref="ListAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<Skill>> ListOfferedAsync(
+        string role, string? team, string? query, int take, CancellationToken ct = default);
+
+    /// <summary>The instance-wide skill named <paramref name="name"/>; never a team skill.</summary>
     Task<Skill?> GetAsync(string name, CancellationToken ct = default);
+
+    /// <summary>Every skill named <paramref name="name"/>: the instance-wide one, or the team skills
+    /// of that name (one per team at most). Empty when there is none.</summary>
+    Task<IReadOnlyList<Skill>> FindAllAsync(string name, CancellationToken ct = default);
+
+    /// <summary>Team <paramref name="team"/>'s own skills, by name.</summary>
+    Task<IReadOnlyList<Skill>> ListTeamAsync(string team, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates team <paramref name="team"/>'s skill, or - with <paramref name="replace"/> - rewrites
+    /// the one of that name it already has; <paramref name="audit"/> is appended to
+    /// <c>tenant_events</c> in the same transaction, so the skill and its record land together or
+    /// not at all. Refused (<see cref="SkillRefusedException"/>) when the name is an instance-wide
+    /// skill's (a built-in's, a custom one's), begins <c>plugin-</c>, or - without replace - is
+    /// already this team's. The caller names the team by its STORED id.
+    /// </summary>
+    Task<Skill> PutTeamSkillAsync(
+        string team, SkillDraft draft, bool replace, string? by, TriggerAudit audit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Rewrites team <paramref name="team"/>'s skill <paramref name="name"/>; a different name in
+    /// <paramref name="draft"/> renames it. Null when the team has no skill by that name.
+    /// </summary>
+    Task<Skill?> UpdateTeamSkillAsync(
+        string team, string name, SkillDraft draft, string? by, TriggerAudit audit, CancellationToken ct = default);
+
+    /// <summary>Deletes team <paramref name="team"/>'s skill <paramref name="name"/>, with its tenant row.
+    /// False when the team has no skill by that name.</summary>
+    Task<bool> DeleteTeamSkillAsync(string team, string name, TriggerAudit audit, CancellationToken ct = default);
+
+    /// <summary>
+    /// A team deletion's step: every skill of <paramref name="team"/>, one tenant row per skill
+    /// (<paramref name="audit"/> given its name), in one transaction. Returns the names removed.
+    /// </summary>
+    Task<IReadOnlyList<string>> DeleteTeamSkillsAsync(
+        string team, Func<string, TriggerAudit> audit, CancellationToken ct = default);
 
     Task<Skill> CreateCustomAsync(SkillDraft draft, string? by, CancellationToken ct = default);
 
