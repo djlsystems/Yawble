@@ -493,5 +493,32 @@ public static class AuthSchema
                 PRIMARY KEY (team, site, collection, id)
             );
             """),
+
+        // WHICH SOLUTION PACKAGE A TEAM CAME FROM (B001H): one row per team installed from a
+        // package, keyed by the team's stored id. `manifest` is the package's `solution.json` as
+        // installed, and `digests` the SHA-256 of each skill, site and tool file it installed, so an
+        // update can show what changed without the earlier folder. `members` maps each package
+        // member name to the member it became, and `triggers` each trigger name to its row id, so an
+        // update changes those and nothing a person made by hand. `plugins` maps each of the package's
+        // plugin ids to the version it shipped. No foreign key to `teams`: a team deletion removes its row itself.
+        new MigrationStep(
+            "auth-016",
+            """
+            CREATE TABLE team_solutions (
+                team         TEXT NOT NULL COLLATE NOCASE PRIMARY KEY,
+                package_id   TEXT NOT NULL,
+                name         TEXT NOT NULL,
+                version      TEXT NOT NULL,
+                folder       TEXT NOT NULL,
+                installed_at TEXT NOT NULL,
+                installed_by TEXT NULL,
+                updated_at   TEXT NULL,
+                manifest     TEXT NOT NULL,
+                digests      TEXT NOT NULL DEFAULT '{}',
+                members      TEXT NOT NULL DEFAULT '{}',
+                triggers     TEXT NOT NULL DEFAULT '{}',
+                plugins      TEXT NOT NULL DEFAULT '{}'
+            );
+            """),
     ];
 }

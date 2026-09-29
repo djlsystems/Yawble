@@ -83,7 +83,13 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
 
         if (!Directory.Exists(source)) return Refused($"{asked} is not a folder.");
 
-        if (IsUnder(source, PluginCatalog.Resolved(catalog.Root)) || source == PluginCatalog.Resolved(catalog.Root))
+        // A DOT-NAMED FOLDER UNDER IT IS STAGING, not an installed plugin: the operator CLI stages a
+        // solution package under `.solutions`, and its plugins are installed from there.
+        var pluginsRoot = PluginCatalog.Resolved(catalog.Root);
+        var staged = IsUnder(source, pluginsRoot)
+            && Path.GetRelativePath(pluginsRoot, source).Split(Path.DirectorySeparatorChar)[0].StartsWith('.');
+
+        if (!staged && (IsUnder(source, pluginsRoot) || source == pluginsRoot))
         {
             return Refused($"{asked} is already under the plugins folder; choose the folder the plugin was built into.");
         }

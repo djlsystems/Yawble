@@ -2543,3 +2543,263 @@ export interface TeamLocalRepository {
   /** False when an unused one of that name was reused. */
   created: boolean
 }
+
+// --- Solution packages: check, preview, install, update (card 2073) ------------------------------
+//
+// The wire shapes of `/api/solutions/*` and `GET /api/teams/{team}/solution`, key for key as the
+// Host writes them (camelCase). Kept together at the end of this file so another card appending
+// here does not collide with this block.
+
+/** One thing wrong with a package: the file, the field in it, and a sentence saying what to change. */
+export interface SolutionRefusal {
+  file: string
+  field: string
+  reason: string
+}
+
+export interface SolutionPlanPackage {
+  id: string
+  name: string
+  version: string
+  description: string
+  folder: string
+  readme: boolean
+}
+
+export interface SolutionPlanMember {
+  name: string
+  kind: 'agent' | 'plugin'
+  role: 'manager' | 'member'
+  preset: string | null
+  instructions: string
+  pluginId: string | null
+  pluginVersion: string | null
+  settings: Record<string, unknown>
+}
+
+export interface SolutionPlanPlugin {
+  id: string
+  name: string
+  version: string
+  description: string
+  folder: string
+  events: string[]
+}
+
+export type SolutionWakeManager = 'always' | 'onHandbackOrFailure' | 'never'
+
+export interface SolutionPlanTrigger {
+  name: string
+  kind: 'schedule' | 'event' | 'folder'
+  platformKind: string
+  member: string
+  instruction: string
+  wakeManager: SolutionWakeManager
+  dailyTokenCap: number | null
+  idleOnly: boolean
+  /** The schedule in words, when the Host gave one. */
+  schedule: string | null
+  cron: string | null
+  timezone: string | null
+  everySeconds: number | null
+  eventType: string | null
+  filter: string | null
+  folderPath: string | null
+  folderGlob: string | null
+}
+
+export interface SolutionPlanSkill {
+  name: string
+  description: string
+  roles: string[]
+  file: string
+  body: string
+}
+
+export interface SolutionPlanSite {
+  name: string
+  folder: string
+  files: string[]
+}
+
+export interface SolutionPlanTools {
+  folder: string
+  installedAs: string
+  files: string[]
+}
+
+export interface SolutionSettingInput {
+  member: string
+  setting: string
+  description: string
+  required: boolean
+}
+
+export interface SolutionConnectionInput {
+  member: string
+  slot: string
+  description: string
+  required: boolean
+}
+
+export interface SolutionDocumentInput {
+  folder: string
+  description: string
+  required: boolean
+}
+
+/** A person-only setting the install asks for, with its manifest type, default and choices. */
+export interface SolutionPersonSetting {
+  member: string
+  setting: string
+  description: string
+  required: boolean
+  type: string | null
+  default: unknown
+  choices: string[] | null
+}
+
+/** What installing the package would create. */
+export interface SolutionPlan {
+  package: SolutionPlanPackage
+  team: { name: string; instructions: string }
+  members: SolutionPlanMember[]
+  plugins: SolutionPlanPlugin[]
+  triggers: SolutionPlanTrigger[]
+  skills: SolutionPlanSkill[]
+  sites: SolutionPlanSite[]
+  tools: SolutionPlanTools | null
+  inputs: {
+    settings: SolutionSettingInput[]
+    connections: SolutionConnectionInput[]
+    documents: SolutionDocumentInput[]
+  }
+  personSettings: SolutionPersonSetting[]
+  ignored: string[]
+}
+
+/** `POST /api/solutions/check`. A 400 (a refused folder) is thrown with the Host's sentence. */
+export type SolutionCheck =
+  | { ok: true; folder: string; plan: SolutionPlan; refusals: SolutionRefusal[] }
+  | { ok: false; folder: string; plan: null; refusals: SolutionRefusal[] }
+
+/** One row of `GET /api/solutions/installed`: a team installed from a package. */
+export interface InstalledSolution {
+  team: string
+  teamName: string
+  id: string
+  name: string
+  version: string
+  installedAt: string
+  installedBy: string
+  plugins: string[]
+}
+
+/** A connection a picker offers, as the preview lists it. */
+export interface SolutionConnectionOption {
+  id: string
+  name: string
+  provider: string
+  account: string
+  status: string
+}
+
+export interface SolutionDiffSection {
+  added: string[]
+  changed: string[]
+  removed: string[]
+}
+
+export interface SolutionDiff {
+  members: SolutionDiffSection
+  triggers: SolutionDiffSection
+  skills: SolutionDiffSection
+  sites: SolutionDiffSection
+  tools: SolutionDiffSection
+  plugins: SolutionDiffSection
+}
+
+/** `POST /api/solutions/preview`: what installing or updating would do. Writes nothing. */
+export type SolutionPreview =
+  | {
+      ok: true
+      mode: 'install'
+      teamName: string
+      nameRefusal: string | null
+      plan: SolutionPlan
+      connections: SolutionConnectionOption[]
+    }
+  | {
+      ok: true
+      mode: 'update'
+      team: string
+      teamName: string
+      from: string
+      to: string
+      plan: SolutionPlan
+      diff: SolutionDiff
+      connections: SolutionConnectionOption[]
+    }
+  | { ok: false; error?: string; refusals?: SolutionRefusal[] }
+
+/** The install's steps, in order: `plugins`, `team`, `members`, `skills`, `tools`, `sites`, `triggers`, `record`. */
+export interface SolutionStep {
+  step: string
+  number: number
+  title: string
+  done: boolean
+}
+
+/** An input still missing: while any is, the team shows as blocked. */
+export interface SolutionMissing {
+  kind: 'document' | 'connection' | 'setting'
+  name: string
+  member: string | null
+  description: string
+}
+
+/** Setting values and connection bindings, by the package's member name. */
+export interface SolutionInstallInputs {
+  settings?: Record<string, Record<string, unknown>>
+  connections?: Record<string, Record<string, string>>
+}
+
+export interface SolutionInstallRequest extends SolutionInstallInputs {
+  folder: string
+  teamName?: string
+  agent?: string
+  localRepository?: boolean
+}
+
+export interface SolutionUpdateRequest extends SolutionInstallInputs {
+  folder: string
+  team: string
+}
+
+/** `POST /api/solutions/install` and `/update`. A 409 or 400 is thrown with the Host's sentence. */
+export type SolutionInstallResult =
+  | {
+      ok: true
+      team: string
+      teamName: string
+      version: string
+      missing: SolutionMissing[]
+      steps: SolutionStep[]
+      diff?: SolutionDiff
+      from?: string
+      to?: string
+    }
+  | { ok: false; step: string; stepNumber: number; reason: string; steps: SolutionStep[] }
+  | { ok: false; refusals: SolutionRefusal[] }
+
+/** `GET /api/teams/{team}/solution`: the package a team came from and what it still waits for. */
+export interface TeamSolution {
+  team: string
+  id: string
+  name: string
+  version: string
+  installedAt: string
+  installedBy: string
+  plugins: string[]
+  missing: SolutionMissing[]
+}

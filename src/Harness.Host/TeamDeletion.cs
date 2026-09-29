@@ -125,7 +125,8 @@ public sealed class TeamDeletion(
     GitRunner git,
     FolderRemoval? removal = null,
     SiteService? sites = null,
-    TeamSkills? skills = null)
+    TeamSkills? skills = null,
+    ITeamSolutionStore? solutions = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -242,6 +243,20 @@ public sealed class TeamDeletion(
             catch (Exception ex)
             {
                 failures.Add($"skills: {ex.Message}");
+            }
+        }
+
+        // Which solution package it came from: a same-name successor was installed from none. The
+        // package's plugins stay installed - deleting a team never removes a plugin.
+        if (solutions is not null)
+        {
+            try
+            {
+                await solutions.DeleteAsync(stored, null, ct);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"solution record: {ex.Message}");
             }
         }
 
