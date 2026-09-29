@@ -44,13 +44,18 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
 
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public async Task<PluginInstallResult> InstallAsync(string? path, bool replace, CancellationToken ct = default)
+    public Task<PluginInstallResult> InstallAsync(string? path, bool replace, CancellationToken ct = default) =>
+        ExclusiveAsync(() => InstallLockedAsync(path, replace, ct), ct);
+
+    /// <summary>Runs <paramref name="work"/> while no install runs: <see cref="PluginRemover"/> takes the
+    /// same gate, so a version is never removed from under an install of it.</summary>
+    public async Task<T> ExclusiveAsync<T>(Func<Task<T>> work, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct);
 
         try
         {
-            return await InstallLockedAsync(path, replace, ct);
+            return await work();
         }
         finally
         {

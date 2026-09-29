@@ -473,6 +473,11 @@ builder.Services.AddSingleton(sp =>
     return new PluginInstaller(pluginCatalog, dataRoot, runAs.Switches ? runAs.Gid : -1);
 });
 
+// REMOVING A PLUGIN OR ONE VERSION, from the web app: `plugin remove`'s rules, the installer's
+// gate, and its tenant row in the same transaction as the move.
+builder.Services.AddSingleton(sp => new PluginRemover(
+    pluginCatalog, sp.GetRequiredService<PluginInstaller>(), sp.GetRequiredService<TeamRegistry>(), database));
+
 // THE EVENTS THE INSTALLED PLUGINS DECLARE join the platform's in every lookup - triggers, filters,
 // `{event.*}` tokens, the high-volume rule, `GET /api/events` - read off the catalog on each call,
 // so a rescan is seen at once. Released when this Host stops.
@@ -805,7 +810,12 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
     pluginSettings: sp.GetRequiredService<IPluginMemberSettingsStore>(),
     secrets: sp.GetRequiredService<ISecretStore>(),
     removal: sp.GetRequiredService<FolderRemoval>(),
-    localRepos: sp.GetRequiredService<LocalRepos>()));
+    localRepos: sp.GetRequiredService<LocalRepos>(),
+    solutions: sp.GetRequiredService<ITeamSolutions>()));
+
+// WHICH SOLUTION PACKAGE EACH TEAM CAME FROM, on its summary. None until the install wizard's
+// `team_solutions` record replaces this registration.
+builder.Services.AddSingleton<ITeamSolutions>(NoTeamSolutions.Instance);
 
 // THE INSTANCE'S LOCAL REPOSITORIES: bare, under <dataRoot>/repos, the Host's and read-only to the
 // agent. A team names one as `local:<name>`; see LocalRepos.

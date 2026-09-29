@@ -897,7 +897,21 @@ export interface Team {
    *  write response if a chosen Agent did not resolve at the time. This is a WARNING - the write SUCCEEDED. */
   unresolvedAgents?: UnresolvedAgent[]
 
+  /**
+   * The solution package this team was installed from, or null/absent for a team made by hand. The
+   * delete dialog reads it: deleting the team never removes the package's plugins.
+   */
+  solution?: TeamSolution | null
+
   containers: ContainerSnapshot[]
+}
+
+/** The package a team was installed from: its id, name, version and the ids of its plugins. */
+export interface TeamSolution {
+  id: string
+  name: string
+  version: string
+  plugins: string[]
 }
 
 /** Which agents a skill is offered to. `any` is every role. */
@@ -2352,6 +2366,16 @@ export interface PluginInstallResult {
   /** Whether it went over a version already installed (Replace ticked). */
   replaced: boolean
   reason: string | null
+}
+
+/** `DELETE /api/plugins/{id}`: what went - the whole plugin, or one version. */
+export interface PluginRemoveResult {
+  id: string
+  /** The version removed; null when the whole plugin went. */
+  version: string | null
+  whole: boolean
+  /** Every version folder removed. */
+  versions: string[]
 }
 
 /** One stored setting value: a string, number or bool, or a `list` field's strings. */
