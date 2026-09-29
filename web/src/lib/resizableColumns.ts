@@ -123,7 +123,7 @@ function horizontalExtras(cell: HTMLElement): number {
 
 /** A cell's rendered width, padding and border included. */
 function renderedWidth(cell: HTMLElement): number {
-  // ROUNDED UP. A natural width is fractional (58.4px); pinning it at 58 left "B001M" a fraction
+  // ROUNDED UP. A natural width is fractional (58.4px); pinning it at 58 left the widest id a fraction
   // short and its ellipsis showed on a column nobody had narrowed.
   return Math.ceil(cell.getBoundingClientRect().width);
 }
