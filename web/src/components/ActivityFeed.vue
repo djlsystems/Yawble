@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { getMessagesBefore } from '../api/client';
 import type { Message } from '../api/types';
 import { detail, label, ownerOf, summarise, timeOf } from '../lib/summarise';
@@ -15,63 +15,52 @@ import CursorSentinel from './CursorSentinel.vue';
 const props = defineProps<{ feed: Message[]; team?: string; name?: string; sinceSeq?: number }>();
 
 /**
- * Which row's hover card is open - one at a time, keyed by seq rather than held per row.
+ * THE MESSAGE THE DIALOG SHOWS, by seq - a click (or a tap) on a row opens it, and Previous / Next
+ * step through this card's rows in the order the card lists them, newest first.
  *
- * A boolean on every row would be a second store of what is already one fact ("the pointer is
- * over this row"), and two of them open at once is a state nothing would ever close.
+ * Held by seq rather than by index because the live feed grows at the top while the dialog is
+ * open: an index would slide the dialog onto whatever just arrived, and a person reading a report
+ * would find it replaced under them.
  */
-const openSeq = ref<number | null>(null);
-
-let closing: ReturnType<typeof setTimeout> | null = null;
-
-function cancelClose() {
-  if (closing === null) return;
-
-  clearTimeout(closing);
-  closing = null;
-}
+const shownSeq = ref<number | null>(null);
 
 /**
- * Opens the card only when the row is ACTUALLY cut off.
- *
- * Measured rather than guessed from a character count: the clamp is two lines at whatever width
- * the card happens to be, and a card is resizable per viewer, so any threshold in characters is
- * right at one width and wrong at every other. `scrollHeight > clientHeight` is exactly the
- * question the clamp answers, asked of the element that answered it.
- *
- * The point is that hovering a short row does nothing. A card that appears over every line,
- * including the ones already fully readable, is a card people learn to move the pointer around.
+ * The message as it was when shown. The card keeps a rolling window, so a row can fall out of
+ * `feed` while it is open; the dialog then keeps showing it, with no neighbours to step to, rather
+ * than vanishing mid-read.
  */
-function onEnter(event: MouseEvent, message: Message) {
-  cancelClose();
+const held = ref<Message | null>(null);
 
-  // NOT named `label`: that is the imported type-formatter this component's template calls, and
-  // shadowing it here would compile fine and read as the same thing to the next person.
-  const line = (event.currentTarget as HTMLElement | null)
-    ?.querySelector<HTMLElement>('.feed-line');
+const shownIndex = computed(() =>
+  shownSeq.value === null ? -1 : props.feed.findIndex((message) => message.seq === shownSeq.value));
 
-  // The +1 absorbs sub-pixel rounding, which otherwise reports a one-line row as clipped on some
-  // zoom levels and opens a card that repeats what is already on screen.
-  const clipped = !!line
-    && (line.scrollHeight > line.clientHeight + 1 || /\n/.test(detail(message)));
+const shown = computed<Message | null>(() =>
+  shownIndex.value >= 0 ? props.feed[shownIndex.value]! : shownSeq.value === null ? null : held.value);
 
-  openSeq.value = clipped ? message.seq : null;
+const newer = computed(() => (shownIndex.value > 0 ? props.feed[shownIndex.value - 1]! : null));
+const older = computed(() =>
+  shownIndex.value >= 0 && shownIndex.value < props.feed.length - 1 ? props.feed[shownIndex.value + 1]! : null);
+
+function show(message: Message | null) {
+  if (message === null) return;
+
+  shownSeq.value = message.seq;
+  held.value = message;
 }
 
-/**
- * Closes on a DELAY, and that delay is what makes the card reachable.
- *
- * Without it the card vanishes the instant the pointer leaves the row - including when it leaves
- * heading for the card itself, to scroll a long report or select a line out of it. The card
- * cancels this on its own mouseenter, which is the other half.
- */
-function onLeave() {
-  cancelClose();
-  closing = setTimeout(() => { openSeq.value = null; }, 180);
+function close() {
+  shownSeq.value = null;
+  held.value = null;
 }
 
-// A pending close outliving the component would fire against a disposed ref.
-onBeforeUnmount(cancelClose);
+/** Left and Right step, like the buttons; Up and Down stay with the body, which scrolls. */
+function onKey(event: KeyboardEvent) {
+  if (event.key === 'ArrowLeft') show(newer.value);
+  else if (event.key === 'ArrowRight') show(older.value);
+  else return;
+
+  event.preventDefault();
+}
 
 /**
  * The WORKFLOW number, made visible.
@@ -99,7 +88,7 @@ function floorSeq(): number {
  * container's first message is the last one there is to reach - or when the log has nothing older.
  * The live window's depth never trims what this reads: see `history` in the console store.
  */
-const older = useCursorList<Message>(
+const history = useCursorList<Message>(
   async (before, take) => {
     const team = props.team;
     const name = props.name;
@@ -161,62 +150,10 @@ function tone(type: string): string {
           board.highlightedWorkflow !== null
           && board.highlightedWorkflow !== message.correlationId,
       }"
-      @mouseenter="onEnter($event, message)"
-      @mouseleave="onLeave"
+      clickable
+      :aria-label="`Open ${label(message.type)} at ${timeOf(message.occurredAt)}`"
+      @click="show(message)"
     >
-      <!-- THE FULL TEXT, for a row the two-line clamp cut off. A QMenu rather than a QTooltip:
-           a tooltip is sized and styled for a few words of chrome help, and what lands here is a
-           manager's report or a whole dispatched instruction.
-
-           Driven by model-value rather than by QMenu's own hover handling, because the open
-           condition is not "the pointer is here" but "the pointer is here AND this row is
-           actually cut off" - see onEnter. -->
-      <q-menu
-        :model-value="openSeq === message.seq"
-        no-parent-event
-        no-focus
-        no-refocus
-        anchor="top right"
-        self="top left"
-        :offset="[10, 0]"
-        max-width="none"
-        transition-show="fade"
-        transition-hide="fade"
-        @update:model-value="(open: boolean) => { if (!open) openSeq = null; }"
-      >
-        <!-- Every rule below is on THIS element and its children, never on the q-menu root.
-             Quasar creates that root itself, so it carries no scope attribute and no scoped rule
-             can reach it - the same wall the Concierge dialog met from the other side.
-             Anything this card needs, it sizes itself. -->
-        <!-- The tone classes are written out LITERALLY rather than composed as
-             `feed-card-${tone(...)}`, which is what this was first. styles-match-templates greps
-             the template for each styled class, and a composed name is invisible to it - so the
-             convenient version silently opted every one of these rules out of the only check that
-             catches a dangling selector. The muted default lives on .feed-card itself. -->
-        <div
-          class="feed-card"
-          :class="{
-            'feed-card-negative': toneOf(message) === 'negative',
-            'feed-card-warning': toneOf(message) === 'warning',
-            'feed-card-positive': toneOf(message) === 'positive',
-            'feed-card-primary': toneOf(message) === 'primary',
-          }"
-          @mouseenter="cancelClose"
-          @mouseleave="onLeave"
-        >
-          <div class="feed-card-head">
-            <q-badge :color="toneOf(message)" :label="label(message.type)" />
-            <span class="feed-card-source mono">{{ message.source }}</span>
-            <span class="feed-card-spacer"></span>
-            <span class="feed-card-meta mono">#{{ message.correlationId }}</span>
-            <span class="feed-card-meta mono">{{ timeOf(message.occurredAt) }}</span>
-          </div>
-
-          <!-- Interpolated, exactly like the row it came from. Agent output reaches this, and a
-               markdown renderer here would be a way for a member to write into the page. -->
-          <div class="feed-card-body">{{ detail(message) || '—' }}</div>
-        </div>
-      </q-menu>
       <q-item-section side top>
         <q-badge :color="toneOf(message)" :label="label(message.type)" />
       </q-item-section>
@@ -228,7 +165,7 @@ function tone(type: string): string {
         <!-- A package ready to install: the wizard's link, composed from the folder and never read
              from the row's text. It opens the review; nothing installs from here. -->
         <q-item-label v-if="solutionNoticeOf(message)?.href" caption>
-          <a class="feed-install text-weight-bold" :href="solutionNoticeOf(message)!.href!">Review and install</a>
+          <a class="feed-install text-weight-bold" :href="solutionNoticeOf(message)!.href!" @click.stop>Review and install</a>
         </q-item-label>
       </q-item-section>
 
@@ -245,7 +182,7 @@ function tone(type: string): string {
           :class="{ 'feed-workflow-on': board.highlightedWorkflow === message.correlationId }"
           :label="`#${message.correlationId}`"
           :aria-label="`Follow workflow ${message.correlationId}`"
-          @click="board.toggleWorkflow(message.correlationId)"
+          @click.stop="board.toggleWorkflow(message.correlationId)"
         >
           <q-tooltip>
             {{ board.highlightedWorkflow === message.correlationId
@@ -272,14 +209,80 @@ function tone(type: string): string {
          the rows above it never move. -->
     <CursorSentinel
       v-if="team && name"
-      :loading="older.loading.value"
-      :exhausted="older.exhausted.value"
-      :error="older.error.value"
+      :loading="history.loading.value"
+      :exhausted="history.exhausted.value"
+      :error="history.error.value"
       :done-label="feed.length ? 'The first message.' : ''"
-      :manual="older.cursor.value === undefined"
-      @more="older.loadMore"
+      :manual="history.cursor.value === undefined"
+      @more="history.loadMore"
     />
   </q-list>
+
+  <!-- ONE MESSAGE, READ IN FULL. Opened by a click or a tap on a row - never by hover, which a phone
+       does not have and which put a card over every line the pointer crossed. -->
+  <q-dialog :model-value="shown !== null" @update:model-value="(open: boolean) => { if (!open) close(); }">
+    <!-- The tone classes are written out LITERALLY rather than composed as `feed-card-${tone}`:
+         styles-match-templates greps the template for each styled class, and a composed name is
+         invisible to it. The muted default lives on .feed-card itself. -->
+    <q-card
+      v-if="shown"
+      class="os-dialog-md feed-card"
+      :class="{
+        'feed-card-negative': toneOf(shown) === 'negative',
+        'feed-card-warning': toneOf(shown) === 'warning',
+        'feed-card-positive': toneOf(shown) === 'positive',
+        'feed-card-primary': toneOf(shown) === 'primary',
+      }"
+      data-feed-dialog
+      @keydown="onKey"
+    >
+      <q-card-section class="feed-card-nav">
+        <q-btn
+          flat
+          dense
+          no-caps
+          icon="chevron_left"
+          label="Previous"
+          :disable="newer === null"
+          aria-label="Previous: the newer message above"
+          data-feed-previous
+          @click="show(newer)"
+        />
+        <span class="feed-card-position os-text-muted" data-feed-position>
+          <template v-if="shownIndex >= 0">{{ shownIndex + 1 }} of {{ feed.length }}</template>
+        </span>
+        <q-btn
+          flat
+          dense
+          no-caps
+          icon-right="chevron_right"
+          label="Next"
+          :disable="older === null"
+          aria-label="Next: the older message below"
+          data-feed-next
+          @click="show(older)"
+        />
+        <span class="feed-card-spacer"></span>
+        <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
+      </q-card-section>
+
+      <q-card-section class="feed-card-head">
+        <q-badge :color="toneOf(shown)" :label="label(shown.type)" />
+        <span class="feed-card-source mono">{{ shown.source }}</span>
+        <span class="feed-card-spacer"></span>
+        <span class="feed-card-meta mono">#{{ shown.correlationId }}</span>
+        <span class="feed-card-meta mono">{{ timeOf(shown.occurredAt) }}</span>
+      </q-card-section>
+
+      <!-- Interpolated, exactly like the row it came from. Agent output reaches this, and a
+           markdown renderer here would be a way for a member to write into the page. -->
+      <q-card-section class="feed-card-body" data-feed-body>{{ detail(shown) || '—' }}</q-card-section>
+
+      <q-card-section v-if="solutionNoticeOf(shown)?.href" class="q-pt-none">
+        <a class="feed-install text-weight-bold" :href="solutionNoticeOf(shown)!.href!">Review and install</a>
+      </q-card-section>
+    </q-card>
+  </q-dialog>
 </template>
 
 <style scoped>
@@ -310,19 +313,35 @@ function tone(type: string): string {
   padding-left: 8px;
 }
 
-/* THE MEASURE is the whole design here. Agent output is prose written to be read once, and a
-   popup that grows to the width of its longest line is a popup nobody finishes: past about 75
-   characters the eye loses the start of the next line. 68ch against the body size lands a little
-   under that, and min-width stops a three-word progress line rendering as a sliver. */
+/* THE DIALOG'S WIDTH is the dialog scale's (`os-dialog-md`), never set here. What this sets is the
+   tone: a left rule, MUTED by default and overridden by the four tones below. A default of
+   `transparent` with a rule for every tone would need a class per Quasar colour name, and the two
+   muted ones are exactly the colours that have no --q- variable to name. */
 .feed-card {
-  min-width: 260px;
-  max-width: 68ch;
-  padding: 12px 14px 13px;
-
-  /* The MUTED default, overridden by the four tones below. A default of `transparent` with a rule
-     for every tone would need a class per Quasar colour name, and the two muted ones are exactly
-     the colours that have no --q- variable to name. */
   border-left: 3px solid var(--os-rule-strong);
+
+  /* ONE HEIGHT FOR EVERY MESSAGE, so Previous and Next stay under the pointer. The dialog is
+     centred, and a card that took each message's own height moved its header - and the buttons in
+     it - up and down the screen at every step. The body takes what is left and scrolls. */
+  height: min(78vh, 680px);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Previous and Next sit together at the top, where a thumb or a pointer finds them without moving
+   as the body below changes length from one message to the next. */
+.feed-card-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 0;
+}
+
+.feed-card-position {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 5.5em;
+  text-align: center;
 }
 
 /* Header and body are separated by a rule rather than by space alone: the header is metadata
@@ -333,7 +352,6 @@ function tone(type: string): string {
   align-items: center;
   gap: 8px;
   padding-bottom: 8px;
-  margin-bottom: 9px;
   border-bottom: 1px solid var(--os-rule);
 }
 
@@ -367,9 +385,11 @@ function tone(type: string): string {
   font-size: 13px;
   line-height: 1.55;
 
-  /* Bounded and scrollable rather than unbounded: a dispatched instruction runs to a couple of
-     thousand characters, and a popup taller than the window has a top nobody can reach. */
-  max-height: min(46vh, 420px);
+  /* The rest of the card's fixed height, scrolling: a dispatched instruction runs to a couple of
+     thousand characters. `min-height: 0` is what lets a flex child shrink below its content and
+     so scroll at all. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 
