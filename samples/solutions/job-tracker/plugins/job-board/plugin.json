@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "job-board",
+  "name": "Job Board (sample)",
+  "description": "A stand-in job board: reads the postings bundled with it, never the network, and reports the ones that match.",
+  "version": "0.1.0",
+  "protocol": "harness.member/1",
+  "executable": { "path": "job-board", "args": [] },
+  "timeoutSeconds": 60,
+  "requires": ["python3"],
+  "config": {
+    "keywords": {
+      "type": "list",
+      "description": "A posting matches when its title holds one of these words. Empty matches every posting.",
+      "default": []
+    },
+    "sources": {
+      "type": "list",
+      "enum": ["sample"],
+      "default": [],
+      "setBy": "person",
+      "description": "The boards this member may read. Empty reads none."
+    }
+  },
+  "events": {
+    "publishes": [
+      {
+        "type": "posting-found",
+        "summary": "A posting matched the keywords for the first time. Once per new posting.",
+        "fields": [
+          { "name": "id", "kind": "string", "summary": "The posting's id, and its document id in the tracker's jobs collection." },
+          { "name": "title", "kind": "string", "summary": "The job title." },
+          { "name": "company", "kind": "string", "summary": "The company." },
+          { "name": "url", "kind": "string", "summary": "Where the posting lives." }
+        ]
+      }
+    ]
+  }
+}
