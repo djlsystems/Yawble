@@ -23,6 +23,7 @@ const {
   listCatalog,
   fileSystemRoots,
   browseFileSystem,
+  checkSolution,
 } = vi.hoisted(() => ({
   listPlugins: vi.fn(),
   rescanPlugins: vi.fn(),
@@ -34,6 +35,10 @@ const {
   listCatalog: vi.fn(),
   fileSystemRoots: vi.fn(),
   browseFileSystem: vi.fn(),
+  // Install from a folder checks for a solution package first; these folders hold none.
+  checkSolution: vi.fn(async (folder: string) => ({
+    ok: false, folder, plan: null, refusals: [{ file: 'solution.json', field: '(file)', reason: 'No solution.json.' }],
+  })),
 }));
 
 vi.mock('../../api/client', async (importOriginal) => ({
@@ -48,6 +53,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   listCatalog,
   fileSystemRoots,
   browseFileSystem,
+  checkSolution,
 }));
 
 import PluginsDialog from '../PluginsDialog.vue';

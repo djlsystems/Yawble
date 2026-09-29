@@ -6,8 +6,9 @@ person can provide. It replaces the list of manual steps a person follows after 
 plugin, a site, a playbook and triggers: merge, install the plugin, hire it, paste a skill, add each
 trigger by hand, upload documents.
 
-This page covers the format (`solution.json`, format 1), the package layout, and the check. The
-install that turns a package into a team is described with it when it lands.
+This page covers the format (`solution.json`, format 1), the package layout, the check, the install
+that turns a package into a team, the update to a newer version, and the deep link that opens the
+install wizard.
 
 ## The layout
 
@@ -112,8 +113,9 @@ subscribed to a high-volume event, as the dialog refuses it too.
 
 ### Inputs
 
-What only a person provides. The install asks for each; a skipped required input leaves the team
-showing it as blocked, naming it, until it is provided.
+What only a person provides. The install asks for each; a skipped required document or connection
+leaves the team showing it as blocked, naming it, until it is provided. A required setting with no
+default cannot be skipped: its plugin member cannot be hired without it.
 
 | Field | Each entry |
 |---|---|
@@ -162,6 +164,91 @@ sentence saying what to change. Every refusal is reported at once, not only the 
 - **any path that escapes**: a folder trigger or document input outside the team's documents, a
   skill or site named by a path, a plugin's executable or skill outside its folder, and any link in
   the package that is absolute or leads out of it.
+
+## The install
+
+**Admin → Plugins → Install from a folder** opens the install wizard when the folder holds
+`solution.json` (a plain plugin folder installs as before). The wizard's steps:
+
+1. **Team**: a new team, named after the package by default (editable, and checked as any team name
+   is), with a new local repository unless unticked; or **update an existing team** that was
+   installed from an earlier version of the same package id.
+2. **Review**: every member with its full instructions, every trigger with its kind, schedule or
+   event and filter or folder, the member it wakes, its wake setting, its **daily cap** and its
+   **full instruction text**, every skill, site, plugin and tool. In an update, what is added and
+   changed is marked and what is removed is listed. Agent-written instructions become prompts, so
+   this is the safeguard: nothing runs before the person has seen it.
+3. **Your part**: the person-only settings, a connection picker per slot, and an upload box per
+   requested document folder. Skipping a required document or connection is allowed.
+4. **Install**: the steps below; on failure the wizard names the step and the reason.
+
+The install runs, in order, through the stores a person's own clicks use, each step appending its
+usual tenant row:
+
+| # | Step | What it makes |
+|---|---|---|
+| 1 | `plugins` | Each of the package's plugins, installed as `yawble plugin install` would. One already active at that version or newer is left alone: a plugin is the instance's, and an install never downgrades what other teams run. |
+| 2 | `team` | The team, with the package's team instructions and a new local repository (B001F). |
+| 3 | `members` | The Manager takes the package manager's name and instructions; every other member is hired. An agent member with no preset runs the Agent the wizard names (the instance's first installed model preset by default). |
+| 4 | `skills` | Each skill, registered as a **team skill** (`TeamSkills.RegisterAsync`). |
+| 5 | `tools` | `tools/` copied to `<team folder>/solution/`, read-only to agents (the Host's files with the agent's group: folders 0750, files 0640, executables 0750). Every agent member's prompt names the folder, and `{solution}` resolves to it. |
+| 6 | `sites` | Each site created and published (`site.created`, `site.published`). |
+| 7 | `triggers` | Each document input's folder, then each trigger, through the Triggers dialog's own path (`TriggerCreation`) with every check it makes. |
+| 8 | `record` | The package id and version in `team_solutions` (schema step `auth-016`), with the `solution.installed` row in the same transaction. |
+
+**When a step fails**, everything made so far is undone in reverse order - the triggers, the
+sites, the tools, the skills, the members, the team with its local repository and its empty
+documents folder, and each plugin version it installed (the previously active version made active
+again) - and the answer names the step, its number and the reason; `solution.failed` records what
+was undone.
+
+**Skipped required inputs.** `GET /api/teams/{team}/solution` answers which package and version the
+team came from and `missing`: each required document folder with no file in it and each required
+connection slot with nothing bound. The team board shows a blocked notice naming each one, with an
+upload box for a document, until it is provided. Nothing needs re-running: the notice is read live.
+
+**Update.** Installing a newer version of the same package id onto a team shows the diff first -
+members, triggers, skills, sites, tools and plugins, each added, changed or removed - and then:
+
+- adds what is new and rewrites what changed (a changed agent member's instructions and preset, a
+  changed skill, a changed site published as a new version, the tools replaced, a changed trigger
+  made again with its new text and cap);
+- removes what the package no longer has, last, once everything that can fail has: a member, a
+  trigger, a skill; a site is **unpublished, never deleted**, so its data stays the person's;
+- keeps the person's settings and connection bindings on the members it keeps, the uploaded
+  documents and every site's data;
+- rewrites the `team_solutions` row with `solution.updated`.
+
+Only a newer version updates: the same or an older one, or another package's id, is refused with a
+sentence.
+
+**Routes** (install, update and what they read are a person's only - `HumansOnly`; an agent never
+installs, and person-only settings stay person-only):
+
+| Route | |
+|---|---|
+| `POST /api/solutions/preview` `{ folder, team? }` | What installing would do, writing nothing: `mode: install` with the team name and why it cannot be used, or `mode: update` with `from`, `to` and the diff. |
+| `POST /api/solutions/install` `{ folder, teamName?, agent?, localRepository?, settings?, connections? }` | The install. `{ ok: true, team, missing, steps }`, or `{ ok: false, step, stepNumber, title, reason, undone }`. 409 for a taken name. |
+| `POST /api/solutions/update` `{ folder, team, settings?, connections? }` | The update, with `from` and `diff`. |
+| `GET /api/solutions/installed` | Every team installed from a package, with its id and version. |
+| `GET /api/teams/{team}/solution` | The package a team came from, and what it still waits for. `Read`: the team's own members may read it too. |
+
+**The deep link** `#/solutions/install?folder=<absolute path>` opens the wizard filled in with that
+folder. It never installs by itself: the person still reviews and presses Install. A signed-out
+visitor signs in first and lands in the wizard. The check it makes carries `from: "link"`, and a
+folder outside the instance's documents and every team's folder is refused with a sentence; a link
+is a convenience someone hands the person, and the review is the safeguard.
+
+**The CLI**: `yawble solution install <folder> [--team <name>] [--from-instance] [--yes]` asks the
+same questions in the terminal - the team name (or, with `--team` naming a team installed from an
+earlier version, the update and its diff), each person-only setting, each connection slot, a file
+for each document folder - and then installs, printing each step or the step that failed. It stages
+the folder under `<dataRoot>/plugins/.solutions/`, which only the Host and root can write, and
+hands the Host a request file (`<dataRoot>/plugins/.solution`) that `SolutionRequests` answers with
+exactly what the matching route answers. An agent cannot write there, so it cannot install.
+
+**Deleting the team** forgets its `team_solutions` row; the package's plugins stay installed
+(deleting a team never removes a plugin), and the delete dialog says so.
 
 ## The board notice
 
@@ -440,3 +527,28 @@ skill `interview-prep` and ships `job-board` 0.2.0. The tests make it the same w
   web, `activity-feed-solution-notice.mount.spec.ts` and `backlog-dialog-solution-notice.mount.spec.ts`.
 - The CLI against Podman and Docker scripted engines: `cli/internal/cli/solution_test.go`, answered
   with what the Host really prints, which `SolutionCheckCliFixtureTests` keeps equal to the Host.
+- The install, step by step: `SolutionInstallTests.A_person_installs_the_package_and_every_step_makes_what_it_says`
+  (the plugin, the team and its local repository, the Manager's name and instructions, the members,
+  the team skill, the read-only tools named in the prompt, the live site, every trigger with its
+  cap, wake setting and full instruction, the record and its row, and `ITeamSolutions.For`).
+- A failure at each step leaves nothing behind:
+  `SolutionInstallTests.A_failure_at_any_step_leaves_nothing_behind` (one row per step: no plugin,
+  team, member, skill, tools, site, trigger, record, folder or repository), and a step the platform
+  itself refuses is named with its sentence:
+  `SolutionInstallTests.A_step_the_platform_refuses_is_named_with_its_own_sentence_and_everything_before_it_undone`.
+- The update from 1.0.0 to 1.1.0: `SolutionInstallTests.Updating_from_1_0_0_to_1_1_0_shows_the_diff_keeps_the_persons_part_and_applies_it`.
+- A skipped required document blocks the team by name until provided:
+  `SolutionInstallTests.A_skipped_required_document_blocks_the_team_naming_it_until_it_is_provided`.
+- A person's only: `SolutionInstallTests.Install_update_preview_and_the_list_are_a_persons_only_and_an_agent_never_installs`.
+- The deep link's folder rule: `SolutionInstallTests.A_link_opens_only_a_folder_in_the_documents_or_a_teams_folder`.
+- The team skill offered to its team's Manager only: `SolutionInstallTests.Its_team_skill_is_offered_to_its_manager_and_refused_to_another_teams_manager`.
+- The operator's request file: `SolutionInstallTests.The_operator_clis_request_file_is_answered_with_the_routes_body_and_its_documents_are_copied_in`;
+  a team's deletion forgets its package: `SolutionInstallTests.Deleting_the_team_forgets_its_package_and_keeps_its_plugins`.
+- `auth-016`: `FreshVolumeTests.The_team_solutions_step_applies_to_an_empty_volume_and_round_trips`
+  and `ShippedSchemaStepsTests`.
+- The web wizard, one spec per step (`solution-wizard-team`, `-review`, `-inputs`, `-install`), the
+  Plugins dialog opening it (`plugins-dialog-solution`), the deep link through sign-in
+  (`web/src/pages/__tests__/solution-deep-link.mount.spec.ts`) and the blocked notice
+  (`solution-blocked-banner`), all `*.mount.spec.ts`.
+- `yawble solution install` against Podman and Docker scripted engines:
+  `cli/internal/cli/solution_install_test.go`.

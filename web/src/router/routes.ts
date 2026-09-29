@@ -28,6 +28,15 @@ const routes: RouteRecordRaw[] = [
     children: [{ path: '', component: () => import('@/pages/IndexPage.vue') }],
   },
 
+  // THE INSTALL DEEP LINK: `#/solutions/install?folder=<absolute path>` opens the solution wizard over
+  // the Console, filled in with that folder. It never installs by itself. Gated like the Console: a
+  // signed-out visitor signs in first and is returned here (see guard.ts).
+  {
+    path: '/solutions/install',
+    component: () => import('@/layouts/MainLayout.vue'),
+    children: [{ path: '', component: () => import('@/pages/SolutionInstallPage.vue') }],
+  },
+
   {
     path: '/board',
     redirect: '/console',

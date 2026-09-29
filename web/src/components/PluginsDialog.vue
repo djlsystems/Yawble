@@ -8,6 +8,10 @@ import { slotSummary } from '../lib/connections';
 import { useConsoleStore } from '../stores/console';
 import HostPathPicker from './HostPathPicker.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
+import SolutionWizard from './SolutionWizard.vue';
+import { checkSolution } from '../api/client';
+import { isNotAPackage } from '../lib/solutions';
+import type { SolutionCheck } from '../api/types';
 
 /**
  * ADMIN > PLUGINS: every plugin version under the plugins directory and what the Host made of it -
@@ -152,6 +156,16 @@ async function install() {
   installing.value = true;
   verdict.value = null;
 
+  // A FOLDER HOLDING solution.json IS A SOLUTION PACKAGE: the wizard installs it instead. Only the
+  // check's "no solution.json" refusal (or a refused folder) goes on to the plain plugin install.
+  const solution = await checkSolution(path).catch(() => null);
+  if (solution && (solution.ok || !isNotAPackage(solution.refusals))) {
+    installing.value = false;
+    installOpen.value = false;
+    Object.assign(wizard.value, { open: true, folder: path, check: solution });
+    return;
+  }
+
   try {
     verdict.value = await installPlugin(path, replace.value);
   } catch (cause) {
@@ -173,6 +187,8 @@ async function install() {
   // rescanned before the catalog refused it, so the list has a new row to show with its reason.
   await load();
 }
+
+const wizard = ref<{ open: boolean; folder: string; check: SolutionCheck | null }>({ open: false, folder: '', check: null });
 
 // --- Remove --------------------------------------------------------------------------------------
 
@@ -543,6 +559,8 @@ const verdictText = computed(() => {
     title="Choose the plugin folder"
     @chose="installPath = $event"
   />
+
+  <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :check="wizard.check" @opened="open = false" />
 
   <MemberSettingsDialog
     v-if="settingsSnapshot"

@@ -35,11 +35,11 @@ mkdir -p "$1"`
 func newSolutionCommand(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "solution",
-		Short: "Check solution packages: a whole working team in one folder",
+		Short: "Check and install solution packages: a whole working team in one folder",
 		Long: "A solution package is a folder holding solution.json and the plugins, skills, sites and tools a team " +
 			"needs (docs/solutions.md). These commands ask the running instance about one.",
 	}
-	cmd.AddCommand(newSolutionCheckCommand(deps))
+	cmd.AddCommand(newSolutionCheckCommand(deps), newSolutionInstallCommand(deps))
 	return cmd
 }
 
@@ -63,16 +63,8 @@ func newSolutionCheckCommand(deps Deps) *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			folder := args[0]
-			if !fromInstance {
-				info, err := os.Stat(folder)
-				if err != nil || !info.IsDir() {
-					return fmt.Errorf("%s is not a folder on this computer; give a solution package's folder, or --from-instance for a path inside the instance", folder)
-				}
-				if _, err := os.Stat(filepath.Join(folder, "solution.json")); err != nil {
-					return fmt.Errorf("%s holds no solution.json; a solution package has one at its root", folder)
-				}
-			} else if !strings.HasPrefix(folder, "/") {
-				return fmt.Errorf("with --from-instance, give the absolute path inside the instance (it starts with /)")
+			if err := packageFolder(folder, fromInstance); err != nil {
+				return err
 			}
 
 			ctx := cmd.Context()
@@ -123,6 +115,25 @@ func newSolutionCheckCommand(deps Deps) *cobra.Command {
 	cmd.Flags().BoolVar(&fromInstance, "from-instance", false, "<folder> is a path inside the instance; nothing is copied")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the Host's answer as JSON")
 	return cmd
+}
+
+// packageFolder refuses, before the engine is touched, a folder that cannot be a package: a local
+// one that is not a folder or holds no solution.json, or an instance path that is not absolute.
+func packageFolder(folder string, fromInstance bool) error {
+	if fromInstance {
+		if !strings.HasPrefix(folder, "/") {
+			return fmt.Errorf("with --from-instance, give the absolute path inside the instance (it starts with /)")
+		}
+		return nil
+	}
+	info, err := os.Stat(folder)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("%s is not a folder on this computer; give a solution package's folder, or --from-instance for a path inside the instance", folder)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "solution.json")); err != nil {
+		return fmt.Errorf("%s holds no solution.json; a solution package has one at its root", folder)
+	}
+	return nil
 }
 
 // hostCheck runs the Host's --solution-check on a folder inside the container and reads its last line.
@@ -227,10 +238,13 @@ type plan struct {
 		} `json:"documents"`
 	} `json:"inputs"`
 	PersonSettings []struct {
-		Member      string `json:"member"`
-		Setting     string `json:"setting"`
-		Description string `json:"description"`
-		Required    bool   `json:"required"`
+		Member      string          `json:"member"`
+		Setting     string          `json:"setting"`
+		Description string          `json:"description"`
+		Required    bool            `json:"required"`
+		Type        *string         `json:"type"`
+		Default     json.RawMessage `json:"default"`
+		Choices     []string        `json:"choices"`
 	} `json:"personSettings"`
 	Ignored []string `json:"ignored"`
 }

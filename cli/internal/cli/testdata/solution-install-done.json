@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "team": "job-hunt",
+  "teamName": "Job Hunt",
+  "version": "1.0.0",
+  "missing": [],
+  "steps": [
+    {
+      "step": "plugins",
+      "number": 1,
+      "title": "Install the plugins",
+      "done": true
+    },
+    {
+      "step": "team",
+      "number": 2,
+      "title": "Create the team",
+      "done": true
+    },
+    {
+      "step": "members",
+      "number": 3,
+      "title": "Hire the members",
+      "done": true
+    },
+    {
+      "step": "skills",
+      "number": 4,
+      "title": "Register the team skills",
+      "done": true
+    },
+    {
+      "step": "tools",
+      "number": 5,
+      "title": "Copy the tools",
+      "done": true
+    },
+    {
+      "step": "sites",
+      "number": 6,
+      "title": "Publish the sites",
+      "done": true
+    },
+    {
+      "step": "triggers",
+      "number": 7,
+      "title": "Create the triggers",
+      "done": true
+    },
+    {
+      "step": "record",
+      "number": 8,
+      "title": "Record the package",
+      "done": true
+    }
+  ]
+}

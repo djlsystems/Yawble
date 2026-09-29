@@ -12,6 +12,7 @@ import ContainerCard from '../components/ContainerCard.vue';
 import TeamKpiStrip from '../components/TeamKpiStrip.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
 import TeamsView from '../components/TeamsView.vue';
+import SolutionBlockedBanner from '../components/SolutionBlockedBanner.vue';
 import { useDisplayStore } from '../stores/display';
 import { useKanbanStore } from '../stores/kanban';
 import type { Team, TeamId } from '../api/types';
@@ -533,6 +534,9 @@ onUnmounted(() => {
           <q-tooltip>{{ teamPauseHint(activeTeam) }}</q-tooltip>
         </q-btn>
       </div>
+
+      <!-- A team installed from a solution package that still waits for its person. -->
+      <SolutionBlockedBanner :team="activeTeam.id" />
 
       <!-- Glance figures for the team being watched. Fed from the same snapshots the cards
            already hold, so a SignalR push updates the strip without a reload. -->
