@@ -1295,7 +1295,7 @@ export const installPlugin = (path: string, replace: boolean) =>
   })
 
 /**
- * Removes a plugin, or with `version` one version of it, with `yawble plugin remove`'s rules: refused
+ * Removes a plugin, or with `version` one version of it, with `plugin remove`'s rules: refused
  * (409, `members` naming them) while a member is hired on the whole plugin, and refused for the
  * active version while others are kept. A person's; ask first.
  */

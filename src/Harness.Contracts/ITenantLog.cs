@@ -116,7 +116,7 @@ public static class TenantActions
     public const string PluginInstalled = "plugins.installed";
 
     /// <summary>A person removed a plugin, or one kept version of it, from the instance (the web app's
-    /// Remove, the same rules as <c>yawble plugin remove</c>). Subject is the plugin id; detail names
+    /// Remove, the same rules as <c>plugin remove</c>). Subject is the plugin id; detail names
     /// whether it was the whole plugin and the versions removed. Written in the removal's transaction.</summary>
     public const string PluginRemoved = "plugins.removed";
 

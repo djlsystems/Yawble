@@ -12,7 +12,7 @@ namespace Harness.Tests;
 
 /// <summary>
 /// On the real Host, a person removes a plugin, or one version of it, from the web app with the rules
-/// of <c>yawble plugin remove</c>: refused while a member is hired on it (naming them), refused for the
+/// of <c>plugin remove</c>: refused while a member is hired on it (naming them), refused for the
 /// active version while others are kept, a <c>plugins.removed</c> tenant row with the removal. A
 /// Manager's credential is refused. Deleting a team never removes a plugin, and a team installed from
 /// a package carries that package on its summary for the delete dialog to say so.

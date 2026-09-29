@@ -22,7 +22,7 @@ import MemberSettingsDialog from './MemberSettingsDialog.vue';
  * installs a built plugin that is already inside the instance - chosen with the host folder picker,
  * offered the data root only, because the Host refuses a path anywhere else - and shows the Host's
  * verdict, which refuses an existing version unless Replace is ticked. Remove takes one version, or
- * the whole plugin, with `yawble plugin remove`'s rules: it asks first, and the Host refuses the
+ * the whole plugin, with `plugin remove`'s rules: it asks first, and the Host refuses the
  * whole plugin while members are hired on it (naming them) and the active version while others are
  * kept - its sentence is shown in the question. Every one of these is a person's: the routes that
  * change anything are humans-only.

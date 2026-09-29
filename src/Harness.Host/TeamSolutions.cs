@@ -10,7 +10,7 @@ public sealed record TeamSolution(string Id, string Name, string Version, IReadO
 
 /// <summary>
 /// WHICH PACKAGE A TEAM CAME FROM, for <see cref="TeamRegistry"/> to put on each team's summary. The
-/// install wizard's <c>team_solutions</c> record (B001H §4, step 8) implements this and replaces
+/// install wizard's <c>team_solutions</c> record implements this and replaces
 /// <see cref="NoTeamSolutions"/> in <c>Program.cs</c>. Read on every summary, so an implementation
 /// answers from memory - no database round trip per call - and null for a team made by hand.
 /// </summary>

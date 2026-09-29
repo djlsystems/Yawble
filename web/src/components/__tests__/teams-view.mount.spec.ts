@@ -156,7 +156,7 @@ describe('the team delete dialog', () => {
     expect(kept).toBe('Its local repository local:alpha is kept, and can be deleted from Admin → Repositories.');
   });
 
-  /** B001H §8: deleting a team never removes a plugin; a package's team says where to remove them. */
+  /** Deleting a team never removes a plugin; a package's team says where to remove them. */
   it('says a package\'s plugins stay installed and are removed in Admin → Plugins', async () => {
     await mountView([{
       ...aTeam('alpha'),

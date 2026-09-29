@@ -472,7 +472,7 @@ builder.Services.AddSingleton(sp =>
     return new PluginInstaller(pluginCatalog, dataRoot, runAs.Switches ? runAs.Gid : -1);
 });
 
-// REMOVING A PLUGIN OR ONE VERSION, from the web app: `yawble plugin remove`'s rules, the installer's
+// REMOVING A PLUGIN OR ONE VERSION, from the web app: `plugin remove`'s rules, the installer's
 // gate, and its tenant row in the same transaction as the move.
 builder.Services.AddSingleton(sp => new PluginRemover(
     pluginCatalog, sp.GetRequiredService<PluginInstaller>(), sp.GetRequiredService<TeamRegistry>(), database));

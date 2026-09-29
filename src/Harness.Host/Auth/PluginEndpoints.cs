@@ -129,7 +129,7 @@ public static class PluginEndpoints
             .HumansOnly()
             .WithSummary("Remove a plugin, or one version of it")
             .WithDescription(
-                "The rules of `yawble plugin remove`. Without `version`, or when it names the only version, the "
+                "The rules of `plugin remove`. Without `version`, or when it names the only version, the "
                 + "whole plugin goes, and that is REFUSED 409 while any member is hired on it, naming each "
                 + "(`members`: team, member and their names): remove those members first. With `version`, "
                 + "that kept version goes; the active version is refused 409 while others are kept. 404 for "

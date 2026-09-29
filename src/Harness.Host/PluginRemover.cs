@@ -24,7 +24,7 @@ public sealed record PluginRemoveResult(
 
 /// <summary>
 /// REMOVES A PLUGIN, OR ONE VERSION OF IT, from the plugins directory: the web app's half of
-/// <c>yawble plugin remove</c>, with the same rules (<c>cli/internal/cli/plugin.go</c>).
+/// the operator CLI's <c>plugin remove</c>, with the same rules (<c>cli/internal/cli/plugin.go</c>).
 ///
 /// <list type="bullet">
 /// <item>The whole plugin - asked for, or its only version - is REFUSED WHILE A MEMBER IS HIRED ON IT,
