@@ -146,7 +146,10 @@ so the review shows them whole.
 
 **Each refusal names the file and the field** - `solution.json triggers[1].member`,
 `plugins/job-board/plugin.json executable.path`, `skills/job-search-playbook.md roles` - with a
-sentence saying what to change. Every refusal is reported at once, not only the first. It refuses:
+sentence saying what to change. Every refusal is reported at once, not only the first: a refusal in
+`solution.json` leaves out the item it names, and the plugins, skills, sites, event types and inputs
+are still checked. Only a `solution.json` that cannot be read past its `format` stops the check. It
+refuses:
 
 - a missing or malformed field in `solution.json`, or a `format` it does not read;
 - a trigger naming a member the package does not have;
@@ -179,7 +182,11 @@ sentence saying what to change. Every refusal is reported at once, not only the 
    changed is marked and what is removed is listed. Agent-written instructions become prompts, so
    this is the safeguard: nothing runs before the person has seen it.
 3. **Your part**: the person-only settings, a connection picker per slot, and an upload box per
-   requested document folder. Skipping a required document or connection is allowed.
+   requested document folder. Skipping a required document or connection is allowed. In an update,
+   a kept member's settings and bindings are shown with their current values rather than asked
+   (the update never changes them), and a document folder names the files already in it; only an
+   empty required folder or an unbound required slot warns that the team will be blocked. The
+   preview's `kept` carries these, and `yawble solution install` shows them the same way.
 4. **Install**: the steps below; on failure the wizard names the step and the reason.
 
 The install runs, in order, through the stores a person's own clicks use, each step appending its
@@ -237,7 +244,8 @@ installs, and person-only settings stay person-only):
 folder. It never installs by itself: the person still reviews and presses Install. A signed-out
 visitor signs in first and lands in the wizard. The check it makes carries `from: "link"`, and a
 folder outside the instance's documents and every team's folder is refused with a sentence; a link
-is a convenience someone hands the person, and the review is the safeguard.
+is a convenience someone hands the person, and the review is the safeguard. Following a second link while the
+wizard is open reopens it on the new folder.
 
 **The CLI**: `yawble solution install <folder> [--team <name>] [--from-instance] [--yes]` asks the
 same questions in the terminal - the team name (or, with `--team` naming a team installed from an

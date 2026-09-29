@@ -294,6 +294,14 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         Assert.Equal(["job-board 0.1.0 → 0.2.0"], Names("plugins", "changed"));
         Assert.Equal("1.0.0", (await Get<ITeamSolutionStore>().FindAsync(team, Ct))!.Version);
 
+        // WHAT IS KEPT of the person's part, so Your part shows it rather than asking again.
+        var kept = preview.GetProperty("kept");
+        var sources = Assert.Single(kept.GetProperty("settings").EnumerateArray());
+        Assert.Equal(("Scout", "sources"), (sources.GetProperty("member").GetString(), sources.GetProperty("setting").GetString()));
+        Assert.Equal("[\"sample\"]", sources.GetProperty("value").GetRawText());
+        var resumeKept = Assert.Single(kept.GetProperty("documents").EnumerateArray(), d => d.GetProperty("folder").GetString() == "Resume");
+        Assert.Equal(["resume.md"], resumeKept.GetProperty("files").EnumerateArray().Select(f => f.GetString()!));
+
         // APPLIED.
         var response = await person.PostAsJsonAsync("/api/solutions/update", new { folder = newer, team }, Ct);
         var body = await JsonAsync(response);

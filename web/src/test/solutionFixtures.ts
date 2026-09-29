@@ -2,6 +2,7 @@ import type {
   InstalledSolution,
   SolutionCheck,
   SolutionDiff,
+  SolutionKept,
   SolutionPlan,
   SolutionPlanTrigger,
   SolutionPreview,
@@ -210,8 +211,19 @@ export const UpdateDiff: SolutionDiff = {
   plugins: { added: [], changed: ['job-board 0.1.0 -> 0.2.0'], removed: [] },
 };
 
-export function updatePreview(team = 'job-tracker', plan = hostPlan()): SolutionPreview {
-  return { ok: true, mode: 'update', team, teamName: 'Job Tracker', from: '1.0.0', to: plan.package.version, plan, diff: UpdateDiff, connections: Connections };
+export function updatePreview(team = 'job-tracker', plan = hostPlan(), kept?: SolutionKept): SolutionPreview {
+  return {
+    ok: true,
+    mode: 'update',
+    team,
+    teamName: 'Job Tracker',
+    from: '1.0.0',
+    to: plan.package.version,
+    plan,
+    diff: UpdateDiff,
+    connections: Connections,
+    ...(kept ? { kept } : {}),
+  };
 }
 
 export function installedRow(team: string, teamName: string, version: string, id = 'job-tracker'): InstalledSolution {

@@ -223,5 +223,12 @@ export function settingsBody(
   return body;
 }
 
+/** A kept setting's value in words: a list joined, nothing as "not set". */
+export function keptValueWords(value: unknown): string {
+  if (isBlank(value)) return 'not set';
+  if (Array.isArray(value)) return value.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join(', ');
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
 export const settingKey = (setting: { member: string; setting: string }) => `${setting.member}/${setting.setting}`;
 export const slotKey = (input: { member: string; slot: string }) => `${input.member}/${input.slot}`;

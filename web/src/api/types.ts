@@ -2780,8 +2780,22 @@ export type SolutionPreview =
       plan: SolutionPlan
       diff: SolutionDiff
       connections: SolutionConnectionOption[]
+      /** The person's part the update keeps (a Host before it answers without). */
+      kept?: SolutionKept
     }
   | { ok: false; error?: string; refusals?: SolutionRefusal[] }
+
+/**
+ * What an update keeps of the person's part: each kept member's person-only settings (null when
+ * unset) and connection slots (the bound connection's id, null when unbound), and the files already
+ * in each document folder the package asks for. An update never changes a kept member's settings
+ * or bindings.
+ */
+export interface SolutionKept {
+  settings: { member: string; setting: string; value: unknown }[]
+  connections: { member: string; slot: string; connection: string | null }[]
+  documents: { folder: string; files: string[] }[]
+}
 
 /** The install's steps, in order: `plugins`, `team`, `members`, `skills`, `tools`, `sites`, `triggers`, `record`. */
 export interface SolutionStep {

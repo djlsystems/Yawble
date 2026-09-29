@@ -74,6 +74,7 @@ public sealed class SolutionNoticeTests(HostFixture host) : IClassFixture<HostFi
         var text = payload.GetProperty(PayloadFields.Text).GetString()!;
         Assert.StartsWith("Job Tracker 1.0.0 did not pass the check: solution.json triggers[0].member:", text);
         Assert.DoesNotContain("Review and install", text);
+        Assert.EndsWith("Coordinator, Scout, Writer.", text);
 
         using var person = await host.PersonAsync();
         var detail = await person.GetFromJsonAsync<JsonElement>($"/api/backlog/{item}", Ct);
@@ -123,6 +124,14 @@ public sealed class SolutionNoticeTests(HostFixture host) : IClassFixture<HostFi
         await backlog.AddDispatchAsync(item.Id, team, name, root.CorrelationId, "person@example.test", Ct);
 
         return (team, root.CorrelationId, item.Id);
+    }
+
+    [Theory]
+    [InlineData("solution.json version: is required.", "Job Tracker 1.0.0 did not pass the check: solution.json version: is required.")]
+    [InlineData("solution.json version: is required", "Job Tracker 1.0.0 did not pass the check: solution.json version: is required.")]
+    public void The_failing_sentence_ends_in_one_full_stop(string problem, string expected)
+    {
+        Assert.Equal(expected, SolutionNotice.FailingText("Job Tracker", "1.0.0", [problem]));
     }
 
     /// <summary>The Manager's declaration, through the one sequence the route runs.</summary>

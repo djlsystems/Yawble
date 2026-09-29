@@ -78,6 +78,18 @@ public sealed record SolutionManifest(
     /// </summary>
     public static (SolutionManifest? Manifest, IReadOnlyList<SolutionRefusal> Refusals) Parse(string json)
     {
+        var read = Read(json);
+        return read.Refusals.Count > 0 ? (null, read.Refusals) : (read.Manifest, []);
+    }
+
+    /// <summary>
+    /// Reads <c>solution.json</c> as far as it can be read. Past the format gate the answer carries a
+    /// manifest even when there are refusals - the parts that read cleanly, with each refused item
+    /// left out - so the checker can go on to check what is left and report every refusal at once.
+    /// Only <see cref="Parse"/>'s whole manifest may be installed.
+    /// </summary>
+    public static SolutionManifestRead Read(string json)
+    {
         var read = new Reader();
         JsonDocument document;
 
@@ -88,7 +100,7 @@ public sealed record SolutionManifest(
         catch (JsonException exception)
         {
             read.Refuse("(file)", $"{FileName} is not JSON: {exception.Message}");
-            return (null, read.Refusals);
+            return read.Answer(null);
         }
 
         using (document)
@@ -98,7 +110,7 @@ public sealed record SolutionManifest(
             if (root.ValueKind != JsonValueKind.Object)
             {
                 read.Refuse("(file)", $"{FileName} must be a JSON object.");
-                return (null, read.Refusals);
+                return read.Answer(null);
             }
 
             // THE HARD GATE, and the only one that stops the read: a format this Host does not know may
@@ -107,13 +119,13 @@ public sealed record SolutionManifest(
                 || !formatElement.TryGetInt32(out var format))
             {
                 read.Refuse("format", $"`format` is required and must be a number ({CurrentFormat}).");
-                return (null, read.Refusals);
+                return read.Answer(null);
             }
 
             if (format != CurrentFormat)
             {
                 read.Refuse("format", $"`format` {format} is not one this Host reads (it reads {CurrentFormat}).");
-                return (null, read.Refusals);
+                return read.Answer(null);
             }
 
             var id = read.Required(root, "id", "id");
@@ -149,10 +161,8 @@ public sealed record SolutionManifest(
                 if (!KnownKeys.Contains(property.Name)) extra[property.Name] = property.Value.Clone();
             }
 
-            if (read.Refusals.Count > 0) return (null, read.Refusals);
-
-            return (new SolutionManifest(
-                format, id!, name!, version!, description!, team, members, triggers, skills, sites, inputs, extra), []);
+            return read.Answer(new SolutionManifest(
+                format, id ?? "", name ?? "", version ?? "", description ?? "", team, members, triggers, skills, sites, inputs, extra));
         }
     }
 
@@ -269,6 +279,7 @@ public sealed record SolutionManifest(
                 if (name is not null && pluginId is not null)
                 {
                     members.Add(new SolutionMember(name, MemberRef.PluginKind, RoleMember, null, "", pluginId, settings));
+                    read.Placed("members", index - 1);
                 }
 
                 continue;
@@ -303,6 +314,7 @@ public sealed record SolutionManifest(
                 members.Add(new SolutionMember(
                     name, MemberRef.AgentKind, role, preset, instructions, null,
                     new Dictionary<string, JsonElement>(StringComparer.Ordinal)));
+                read.Placed("members", index - 1);
             }
         }
 
@@ -415,6 +427,7 @@ public sealed record SolutionManifest(
             {
                 triggers.Add(new SolutionTrigger(
                     name!, kind!, member!, instruction!, wakeManager, cap, idleOnly, schedule, onEvent, folder));
+                read.Placed("triggers", index - 1);
             }
         }
 
@@ -563,6 +576,7 @@ public sealed record SolutionManifest(
             }
 
             names.Add(name);
+            read.Placed(key, index - 1);
         }
 
         return names;
@@ -594,6 +608,7 @@ public sealed record SolutionManifest(
             if (member is not null && setting is not null)
             {
                 settings.Add(new SolutionSettingInput(member, setting, description, RequiredFlag(read, item, at)));
+                read.Placed("inputs.settings", Position(at));
             }
         }
 
@@ -606,6 +621,7 @@ public sealed record SolutionManifest(
             if (member is not null && slot is not null)
             {
                 connections.Add(new SolutionConnectionInput(member, slot, description, RequiredFlag(read, item, at)));
+                read.Placed("inputs.connections", Position(at));
             }
         }
 
@@ -711,6 +727,10 @@ public sealed record SolutionManifest(
         return null;
     }
 
+    /// <summary>The index in a field such as <c>inputs.settings[3]</c>.</summary>
+    private static int Position(string at) =>
+        int.Parse(at[(at.LastIndexOf('[') + 1)..^1], System.Globalization.CultureInfo.InvariantCulture);
+
     private static bool IsVersion(string value) =>
         value.Length is > 0 and <= 64 && char.IsAsciiDigit(value[0])
         && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '+');
@@ -719,6 +739,19 @@ public sealed record SolutionManifest(
     private sealed class Reader
     {
         public List<SolutionRefusal> Refusals { get; } = [];
+
+        private readonly Dictionary<string, List<int>> positions = new(StringComparer.Ordinal);
+
+        /// <summary>Records that the item just kept in <paramref name="list"/> is item
+        /// <paramref name="index"/> of the file's array; a refused item before it shifts the two.</summary>
+        public void Placed(string list, int index)
+        {
+            if (!positions.TryGetValue(list, out var kept)) positions[list] = kept = [];
+            kept.Add(index);
+        }
+
+        public SolutionManifestRead Answer(SolutionManifest? manifest) =>
+            new(manifest, Refusals, positions.ToDictionary(p => p.Key, p => (IReadOnlyList<int>)p.Value, StringComparer.Ordinal));
 
         public void Refuse(string field, string reason) => Refusals.Add(new SolutionRefusal(FileName, field, reason));
 
@@ -752,6 +785,23 @@ public sealed record SolutionManifest(
             return string.IsNullOrWhiteSpace(value.GetString()) ? null : value.GetString()!.Trim();
         }
     }
+}
+
+/// <summary>
+/// What <see cref="SolutionManifest.Read"/> made of a file: the manifest as far as it read (null
+/// when nothing past the format gate could be read), every refusal, and where each kept item stood
+/// in the file, so a later refusal names the file's own index.
+/// </summary>
+public sealed record SolutionManifestRead(
+    SolutionManifest? Manifest,
+    IReadOnlyList<SolutionRefusal> Refusals,
+    IReadOnlyDictionary<string, IReadOnlyList<int>> Positions)
+{
+    /// <summary>The file's index for the <paramref name="kept"/>th item kept in <paramref name="list"/>
+    /// (<c>members</c>, <c>triggers</c>, <c>skills</c>, <c>sites</c>, <c>inputs.settings</c>,
+    /// <c>inputs.connections</c>).</summary>
+    public int At(string list, int kept) =>
+        Positions.TryGetValue(list, out var indexes) && kept < indexes.Count ? indexes[kept] : kept;
 }
 
 /// <summary>The team a package makes: its default name (the package's name when not given) and

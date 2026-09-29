@@ -252,6 +252,46 @@ func TestSolutionInstallWithTeamNamingAnInstalledTeamShowsTheDiffAndUpdates(t *t
 	}
 }
 
+func TestSolutionInstallUpdateShowsWhatItKeepsInsteadOfAskingAgain(t *testing.T) {
+	for _, program := range programs {
+		t.Run(program, func(t *testing.T) {
+			s := installScript(t, program,
+				hostReport(t, "n2", 200, routeBody(t, "solution-preview-update.json", func(b map[string]any) {
+					b["kept"] = map[string]any{
+						"settings":    []any{map[string]any{"member": "Scout", "setting": "sources", "value": []any{"sample"}}},
+						"connections": []any{map[string]any{"member": "Scout", "slot": "board", "connection": nil}},
+						"documents":   []any{map[string]any{"folder": "Resume", "files": []any{"resume.pdf"}}},
+					}
+				})),
+				hostReport(t, "n3", 200, routeBody(t, "solution-update-done.json", nil)),
+			)
+			// Only the documents are asked (blank keeps them), then yes.
+			code, out, errOut := run(t, installDeps(s, program, "\ny\n"), "solution", "install", solutionPackage(t), "--team", "Job Tracker")
+			if code != 0 {
+				t.Fatalf("exit %d: %s %s", code, out, errOut)
+			}
+			containsAll(t, "stdout", out,
+				"Scout's setting sources: kept: sample. The update keeps it; change it in the member's settings.",
+				"A connection for Scout's board: kept: not connected. The update keeps it; change it in the member's settings.",
+				"Documents in Resume/ (required): Your reference resume, .docx or PDF. The Writer starts every letter from it.\n"+
+					"  Already in Resume/: resume.pdf. The update keeps them.\n"+
+					"  Another file on this computer (blank keeps them): \n"+
+					"Update team Job Tracker from Job Tracker 1.0.0 to 1.1.0? [y/N] ",
+				"Updated team Job Tracker from Job Tracker 1.0.0 to 1.1.0.",
+			)
+			for _, asked := range []string{"Value, comma-separated", "Number (blank skips)", "Skipped: required"} {
+				if strings.Contains(out, asked) {
+					t.Errorf("a kept input was asked again (%q):\n%s", asked, out)
+				}
+			}
+			reqs := requests(t, s, program)
+			if len(reqs) != 2 || reqs[1].Action != "update" || len(reqs[1].Settings) != 0 || len(reqs[1].Connections) != 0 || len(reqs[1].Documents) != 0 {
+				t.Errorf("requests %+v", reqs)
+			}
+		})
+	}
+}
+
 func TestSolutionInstallFailureNamesTheStepAndExitsOne(t *testing.T) {
 	for _, program := range programs {
 		t.Run(program, func(t *testing.T) {

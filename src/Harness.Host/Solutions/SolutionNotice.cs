@@ -79,10 +79,20 @@ public sealed class SolutionNotice(SolutionService solutions, TeamDocuments docu
             [PayloadFields.Version] = version,
             [PayloadFields.Text] = ok
                 ? ReadyText(name, version)
-                : $"{Label(name, version)} did not pass the check: {string.Join("; ", problems)}.",
+                : FailingText(name, version, problems),
             [PayloadFields.Link] = ok ? LinkFor(folder) : null,
             [PayloadFields.Problems] = ok ? Array.Empty<string>() : problems,
         };
+    }
+
+    /// <summary>
+    /// The failing notice's sentence: the package, then its problems, ending in one full stop - a
+    /// reason that already ends a sentence is not given a second.
+    /// </summary>
+    public static string FailingText(string name, string? version, IReadOnlyList<string> problems)
+    {
+        var text = $"{Label(name, version)} did not pass the check: {string.Join("; ", problems)}".TrimEnd();
+        return text.EndsWith('.') || text.EndsWith('?') || text.EndsWith('!') ? text : text + ".";
     }
 
     /// <summary>

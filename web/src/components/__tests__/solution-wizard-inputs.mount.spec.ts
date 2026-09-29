@@ -13,7 +13,19 @@ import { QFile, QSelect } from 'quasar';
 import SolutionWizard from '../SolutionWizard.vue';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, field, settle, type } from '../../test/formProbe';
-import { Folder, fakeHost, reply, sent, steps, wizardRoutes, type Call } from '../../test/solutionFixtures';
+import {
+  Folder,
+  fakeHost,
+  hostPlan,
+  installedRow,
+  reply,
+  sent,
+  steps,
+  updatePreview,
+  wizardRoutes,
+  type Call,
+} from '../../test/solutionFixtures';
+import type { SolutionKept } from '../../api/types';
 
 let calls: Call[] = [];
 
@@ -145,5 +157,87 @@ describe('Solution wizard - Your part', () => {
     expect(form.get('path')).toBe('Resume');
     expect((form.get('file') as File).name).toBe('cv.pdf');
     expect(bodyText()).toContain('Uploaded cv.pdf to Resume/.');
+  });
+});
+
+describe('Solution wizard - Your part, on an update', () => {
+  const kept: SolutionKept = {
+    settings: [
+      { member: 'Scout', setting: 'sources', value: ['sample'] },
+      { member: 'Scout', setting: 'region', value: 'Europe' },
+      { member: 'Scout', setting: 'limit', value: null },
+    ],
+    connections: [{ member: 'Scout', slot: 'mail', connection: 'conn-1' }],
+    documents: [{ folder: 'Resume', files: ['resume.pdf'] }],
+  };
+
+  async function updateYourPart(answer: SolutionKept) {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        fakeHost(
+          [
+            (call) =>
+              call.url === '/api/solutions/preview' && (call.body as { team?: string }).team === 'job-tracker'
+                ? reply(200, updatePreview('job-tracker', hostPlan(), answer))
+                : undefined,
+            (call) =>
+              call.url === '/api/solutions/update'
+                ? reply(200, { ok: true, team: 'job-tracker', teamName: 'Job Tracker', version: '1.1.0', missing: [], steps: steps(8) })
+                : undefined,
+            (call) => (call.url === '/api/teams/job-tracker/solution' ? reply(200, { team: 'job-tracker', missing: [] }) : undefined),
+            ...wizardRoutes({ installed: [installedRow('job-tracker', 'Job Tracker', '1.0.0')] }),
+          ],
+          calls,
+        ),
+      ),
+    );
+
+    const wrapper = await mountDialog(SolutionWizard, { folder: Folder }, { pinia: false });
+    await settle();
+    (bodyFind('[data-update-team="job-tracker"] .q-radio') as HTMLElement).click();
+    await settle();
+    for (let index = 0; index < 2; index++) {
+      button('Next').click();
+      await settle();
+    }
+    expect(bodyFind('[data-step="inputs"]')).not.toBeNull();
+    return wrapper;
+  }
+
+  it("shows what the update keeps - settings, the binding, the documents present - instead of asking again", async () => {
+    const wrapper = await updateYourPart(kept);
+
+    expect(bodyFind('[data-person-setting="Scout/sources"] [data-kept-setting]')!.textContent).toContain('kept: sample');
+    expect(bodyFind('[data-person-setting="Scout/region"] [data-kept-setting]')!.textContent).toContain('kept: Europe');
+    expect(bodyFind('[data-person-setting="Scout/limit"] [data-kept-setting]')!.textContent).toContain('kept: not set');
+    expect(wrapper.findAllComponents(QSelect).find((select) => select.props('label') === 'Scout: sources')).toBeUndefined();
+    expect(bodyFind('[data-connection-input="Scout/mail"] [data-kept-connection]')!.textContent).toContain(
+      'kept: Work mail - dana@example.com (google)',
+    );
+    expect(bodyFind('[data-document-input="Resume"] [data-kept-files]')!.textContent).toContain('Already in Resume/: resume.pdf.');
+
+    // Nothing is missing, so nothing warns that the team will be blocked.
+    expect(bodyFind('[data-skipped-required]')).toBeNull();
+
+    button('Next').click();
+    await settle();
+    button('Update').click();
+    await settle();
+
+    // A kept member's settings and bindings are the Host's to keep, so none is sent.
+    expect(sent(calls, 'POST', '/api/solutions/update')[0]!.body).toEqual({ folder: Folder, team: 'job-tracker', settings: {}, connections: {} });
+  });
+
+  it('still warns about a required document folder that is empty, or a kept slot left unbound', async () => {
+    await updateYourPart({ ...kept, connections: [{ member: 'Scout', slot: 'mail', connection: null }], documents: [{ folder: 'Resume', files: [] }] });
+
+    expect(bodyFind('[data-connection-input="Scout/mail"] [data-kept-connection]')!.textContent).toContain('kept: not connected');
+    expect(bodyFind('[data-kept-files]')).toBeNull();
+    const skipped = bodyFind('[data-skipped-required]')!;
+    expect(skipped.textContent).toContain('the Scout connection mail');
+    expect(skipped.textContent).toContain('a document in Resume/');
+    expect(skipped.textContent).not.toContain('the Scout setting region');
   });
 });

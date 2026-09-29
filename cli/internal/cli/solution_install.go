@@ -160,6 +160,85 @@ type previewBody struct {
 	Plan        *plan           `json:"plan"`
 	Diff        *solutionDiff   `json:"diff"`
 	Connections []connectionRow `json:"connections"`
+	Kept        *keptPart       `json:"kept"`
+}
+
+// keptPart is what an update keeps of the person's part: a kept member's person-only settings
+// and bindings (never changed by an update) and the files already in each document folder.
+type keptPart struct {
+	Settings []struct {
+		Member  string          `json:"member"`
+		Setting string          `json:"setting"`
+		Value   json.RawMessage `json:"value"`
+	} `json:"settings"`
+	Connections []struct {
+		Member     string  `json:"member"`
+		Slot       string  `json:"slot"`
+		Connection *string `json:"connection"`
+	} `json:"connections"`
+	Documents []struct {
+		Folder string   `json:"folder"`
+		Files  []string `json:"files"`
+	} `json:"documents"`
+}
+
+// setting is a kept member's current value, and whether the update keeps it.
+func (k *keptPart) setting(member, setting string) (json.RawMessage, bool) {
+	if k != nil {
+		for _, s := range k.Settings {
+			if s.Member == member && s.Setting == setting {
+				return s.Value, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// connection is a kept member's bound connection id ("" when unbound), and whether it is kept.
+func (k *keptPart) connection(member, slot string) (string, bool) {
+	if k != nil {
+		for _, c := range k.Connections {
+			if c.Member == member && c.Slot == slot {
+				return deref(c.Connection), true
+			}
+		}
+	}
+	return "", false
+}
+
+// files are the files already in a document folder.
+func (k *keptPart) files(folder string) []string {
+	if k != nil {
+		for _, d := range k.Documents {
+			if d.Folder == folder {
+				return d.Files
+			}
+		}
+	}
+	return nil
+}
+
+// keptWords is a kept value in words: a list joined, nothing as "not set".
+func keptWords(raw json.RawMessage) string {
+	var list []any
+	switch {
+	case len(raw) == 0 || string(raw) == "null" || string(raw) == `""`:
+		return "not set"
+	case json.Unmarshal(raw, &list) == nil:
+		if len(list) == 0 {
+			return "not set"
+		}
+		items := make([]string, len(list))
+		for i, v := range list {
+			items[i] = fmt.Sprint(v)
+		}
+		return strings.Join(items, ", ")
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	return compact(raw)
 }
 
 type diffSection struct {
@@ -254,12 +333,12 @@ func (in *solutionInstall) run(fromInstance bool, team string, yes bool) error {
 		renderDiff(in.out, p)
 	}
 
-	settings, err := in.askSettings(p.Plan)
+	settings, err := in.askSettings(p.Plan, p.Kept)
 	if err != nil {
 		return err
 	}
-	connections := in.askConnections(p.Plan, p.Connections)
-	documents := in.askDocuments(p.Plan)
+	connections := in.askConnections(p.Plan, p.Connections, p.Kept)
+	documents := in.askDocuments(p.Plan, p.Kept)
 
 	question := fmt.Sprintf("Install %s %s as team %s?", p.Plan.Package.Name, p.Plan.Package.Version, p.TeamName)
 	if p.Mode == "update" {
@@ -468,10 +547,15 @@ func renderDiff(out io.Writer, p previewBody) {
 	}
 }
 
-// askSettings asks for each setting only a person provides. A blank answer keeps the default.
-func (in *solutionInstall) askSettings(p *plan) (map[string]map[string]any, error) {
+// askSettings asks for each setting only a person provides. A blank answer keeps the default. On
+// an update a kept member's setting is shown, not asked: the update keeps it.
+func (in *solutionInstall) askSettings(p *plan, kept *keptPart) (map[string]map[string]any, error) {
 	settings := map[string]map[string]any{}
 	for _, s := range p.PersonSettings {
+		if value, ok := kept.setting(s.Member, s.Setting); ok {
+			fmt.Fprintf(in.out, "\n%s's setting %s: kept: %s. The update keeps it; change it in the member's settings.\n", s.Member, s.Setting, keptWords(value))
+			continue
+		}
 		kind := deref(s.Type)
 		if kind == "" {
 			kind = "string"
@@ -574,9 +658,26 @@ func parseSetting(kind, answer string, choices []string) (any, error) {
 }
 
 // askConnections asks, for each connection slot, which of the instance's connections it uses.
-func (in *solutionInstall) askConnections(p *plan, available []connectionRow) map[string]map[string]string {
+// On an update a kept member's binding is shown, not asked: the update keeps it.
+func (in *solutionInstall) askConnections(p *plan, available []connectionRow, kept *keptPart) map[string]map[string]string {
 	chosen := map[string]map[string]string{}
 	for _, c := range p.Inputs.Connections {
+		if id, ok := kept.connection(c.Member, c.Slot); ok {
+			words := "not connected"
+			for _, a := range available {
+				if a.ID == id {
+					words = fmt.Sprintf("%s (%s, %s)", a.Name, a.Provider, a.Account)
+				}
+			}
+			if id != "" && words == "not connected" {
+				words = id
+			}
+			fmt.Fprintf(in.out, "\nA connection for %s's %s: kept: %s. The update keeps it; change it in the member's settings.\n", c.Member, c.Slot, words)
+			if id == "" {
+				in.blocked(c.Required)
+			}
+			continue
+		}
 		fmt.Fprintf(in.out, "\nA connection for %s's %s (%s): %s\n", c.Member, c.Slot, requirement(c.Required), c.Description)
 		if len(available) == 0 {
 			fmt.Fprintln(in.out, "  This instance has no connections yet: add one in Admin -> Connections or with `yawble connect`, then bind it in the member's settings.")
@@ -618,22 +719,28 @@ func (in *solutionInstall) blocked(required bool) {
 	}
 }
 
-// askDocuments asks, for each document input, for one file on this computer.
-func (in *solutionInstall) askDocuments(p *plan) map[string]string {
+// On an update the files already in the folder are named, and skipping keeps them.
+func (in *solutionInstall) askDocuments(p *plan, kept *keptPart) map[string]string {
 	chosen := map[string]string{}
 	for _, d := range p.Inputs.Documents {
 		fmt.Fprintf(in.out, "\nDocuments in %s/ (%s): %s\n", d.Folder, requirement(d.Required), d.Description)
+		present := kept.files(d.Folder)
+		prompt := "  A file on this computer (blank skips): "
+		if len(present) > 0 {
+			fmt.Fprintf(in.out, "  Already in %s/: %s. The update keeps them.\n", d.Folder, strings.Join(present, ", "))
+			prompt = "  Another file on this computer (blank keeps them): "
+		}
 		for {
-			fmt.Fprint(in.out, "  A file on this computer (blank skips): ")
+			fmt.Fprint(in.out, prompt)
 			answer, eof := in.ask()
 			if answer == "" {
-				in.blocked(d.Required)
+				in.blocked(d.Required && len(present) == 0)
 				break
 			}
 			if info, err := os.Stat(answer); err != nil || !info.Mode().IsRegular() {
 				fmt.Fprintf(in.out, "  %s is not a file on this computer.\n", answer)
 				if eof {
-					in.blocked(d.Required)
+					in.blocked(d.Required && len(present) == 0)
 					break
 				}
 				continue

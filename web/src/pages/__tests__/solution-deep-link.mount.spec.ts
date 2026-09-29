@@ -164,6 +164,27 @@ describe('the install deep link', () => {
     expect(sent(calls, 'POST', '/api/solutions/install')).toHaveLength(0);
   });
 
+  it('a second link in the same tab, while the wizard is open, reopens it on the new folder', async () => {
+    const router = await app(`/solutions/install?folder=${encodeURIComponent('/etc')}`);
+    expect(bodyFind('[data-folder]')!.textContent).toBe('/etc');
+
+    await router.push(Link);
+    await settle();
+    await settle();
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe('/solutions/install');
+    expect(router.currentRoute.value.query.folder).toBe(Folder);
+    expect(bodyFind('[data-solution-wizard]')).not.toBeNull();
+    expect(bodyFind('[data-folder]')!.textContent).toBe(Folder);
+    expect(sent(calls, 'POST', '/api/solutions/check').map((call) => call.body)).toEqual([
+      { folder: '/etc', from: 'link' },
+      { folder: Folder, from: 'link' },
+    ]);
+    expect(bodyFind('[data-step="team"]')).not.toBeNull();
+    expect(sent(calls, 'POST', '/api/solutions/install')).toHaveLength(0);
+  });
+
   it('closing the wizard leaves the link for the Console', async () => {
     const router = await app(Link);
 

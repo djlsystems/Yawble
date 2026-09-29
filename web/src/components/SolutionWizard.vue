@@ -17,6 +17,7 @@ import {
   type SolutionDiff,
   type SolutionDiffSection,
   type SolutionInstallResult,
+  type SolutionKept,
   type SolutionMissing,
   type SolutionPersonSetting,
   type SolutionPlan,
@@ -31,6 +32,7 @@ import {
   diffMark,
   failureSentence,
   isBlank,
+  keptValueWords,
   missingLine,
   refusalLine,
   removedItems,
@@ -296,6 +298,26 @@ function setValue(setting: SolutionPersonSetting, value: unknown) {
   values.value = { ...values.value, [settingKey(setting)]: value };
 }
 
+// WHAT AN UPDATE KEEPS is shown, not asked again: the Host never changes a kept member's settings
+// or bindings, and a document already in its folder does not leave the team blocked.
+const kept = computed<SolutionKept | null>(() => updatePreview.value?.kept ?? null);
+
+const keptSetting = (setting: SolutionPersonSetting) =>
+  kept.value?.settings.find((entry) => settingKey(entry) === settingKey(setting));
+
+const keptConnection = (input: { member: string; slot: string }) =>
+  kept.value?.connections.find((entry) => slotKey(entry) === slotKey(input));
+
+const keptFiles = (folder: string) => kept.value?.documents.find((entry) => entry.folder === folder)?.files ?? [];
+
+/** The settings still asked for: an update's kept members are not asked again. */
+const askedSettings = computed(() => (plan.value?.personSettings ?? []).filter((setting) => !keptSetting(setting)));
+
+function connectionWords(id: string | null): string {
+  if (!id) return 'not connected';
+  return connectionOptions.value.find((option) => option.value === id)?.label ?? id;
+}
+
 const connectionOptions = computed(() =>
   (okPreview.value?.connections ?? []).map((connection) => ({
     value: connection.id,
@@ -308,14 +330,14 @@ const skippedRequired = computed<string[]>(() => {
   const current = plan.value;
   if (!current) return [];
   return [
-    ...current.personSettings
+    ...askedSettings.value
       .filter((setting) => setting.required && isBlank(values.value[settingKey(setting)]))
       .map((setting) => `the ${setting.member} setting ${setting.setting}`),
     ...current.inputs.connections
-      .filter((input) => input.required && !bindings.value[slotKey(input)])
+      .filter((input) => input.required && (keptConnection(input) ? !keptConnection(input)!.connection : !bindings.value[slotKey(input)]))
       .map((input) => `the ${input.member} connection ${input.slot}`),
     ...current.inputs.documents
-      .filter((input) => input.required && !files.value[input.folder])
+      .filter((input) => input.required && !files.value[input.folder] && keptFiles(input.folder).length === 0)
       .map((input) => `a document in ${input.folder}/`),
   ];
 });
@@ -333,6 +355,7 @@ const nothingToProvide = computed(() => {
 function connectionsBody(): Record<string, Record<string, string>> {
   const body: Record<string, Record<string, string>> = {};
   for (const input of plan.value?.inputs.connections ?? []) {
+    if (keptConnection(input)) continue;
     const id = bindings.value[slotKey(input)];
     if (id) (body[input.member] ??= {})[input.slot] = id;
   }
@@ -390,7 +413,7 @@ async function install() {
   result.value = null;
   installError.value = '';
 
-  const settings = settingsBody(plan.value.personSettings, values.value);
+  const settings = settingsBody(askedSettings.value, values.value);
   const connections = connectionsBody();
 
   try {
@@ -472,7 +495,9 @@ function next() {
 </script>
 
 <template>
-  <q-dialog v-model="open" :persistent="installing">
+  <!-- A link's own query changing is the page's to handle (it reopens on the new folder), not a
+       route change that dismisses the wizard. -->
+  <q-dialog v-model="open" :persistent="installing" :no-route-dismiss="from === 'link'">
     <q-card class="os-dialog-lg solution-wizard" data-solution-wizard>
       <q-card-section class="row items-center q-pb-none">
         <div>
@@ -699,6 +724,14 @@ function next() {
                 class="q-mb-sm"
                 :data-person-setting="settingKey(setting)"
               >
+                <div v-if="keptSetting(setting)" data-kept-setting>
+                  <span class="text-weight-medium">{{ setting.member }}: {{ setting.setting }}</span>
+                  · kept: <span class="mono">{{ keptValueWords(keptSetting(setting)!.value) }}</span>
+                  <div class="text-caption os-text-muted">
+                    {{ setting.description }} The update keeps this; change it in the member's settings.
+                  </div>
+                </div>
+                <template v-else>
                 <q-toggle
                   v-if="settingInputKind(setting) === 'toggle'"
                   :model-value="values[settingKey(setting)] === true"
@@ -744,12 +777,21 @@ function next() {
                   <template v-if="setting.default !== null && setting.default !== undefined"> Default: {{ JSON.stringify(setting.default) }}.</template>
                   {{ setting.required ? 'Required.' : 'Optional.' }}
                 </div>
+                </template>
               </div>
             </section>
 
             <section v-if="plan.inputs.connections.length > 0" data-connections>
               <div class="solution-heading">Connections</div>
               <div v-for="input in plan.inputs.connections" :key="slotKey(input)" class="q-mb-sm" :data-connection-input="slotKey(input)">
+                <div v-if="keptConnection(input)" data-kept-connection>
+                  <span class="text-weight-medium">Connection for {{ input.member }}: {{ input.slot }}</span>
+                  · kept: {{ connectionWords(keptConnection(input)!.connection) }}
+                  <div class="text-caption os-text-muted">
+                    {{ input.description }} The update keeps this; change it in the member's settings.
+                  </div>
+                </div>
+                <template v-else>
                 <q-select
                   :model-value="bindings[slotKey(input)] || null"
                   :options="connectionOptions"
@@ -767,6 +809,7 @@ function next() {
                 <div v-if="connectionOptions.length === 0" class="text-caption os-text-muted" data-no-connections>
                   No connection yet. A person connects one in Admin → Connections.
                 </div>
+                </template>
               </div>
             </section>
 
@@ -786,6 +829,10 @@ function next() {
                 <div class="text-caption os-text-muted">
                   <span class="mono">{{ input.folder }}/</span> · {{ input.description }}
                   <span v-if="input.required" class="text-weight-medium" data-required> · required</span>
+                </div>
+                <div v-if="keptFiles(input.folder).length > 0" class="text-caption" data-kept-files>
+                  Already in {{ input.folder }}/: {{ keptFiles(input.folder).join(', ') }}. The update keeps them; upload
+                  only to add another.
                 </div>
               </div>
             </section>

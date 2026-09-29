@@ -423,6 +423,26 @@ public sealed class SolutionCheckTests : IDisposable
     }
 
     [Fact]
+    public void A_refusal_in_solution_json_does_not_hide_the_refusals_found_against_the_catalog_and_the_files()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m =>
+        {
+            m["triggers"]![1]!["member"] = "Nobody";
+            m["triggers"]![2]!["event"]!["type"] = "no.such.event";
+            m["members"]![1]!["pluginId"] = "linkedin-scraper";
+        });
+
+        var check = Check(folder);
+
+        Assert.Contains("'Nobody' names no member of this package", Refused(check, "solution.json", "triggers[1].member").Reason);
+        // The refused trigger is left out, and the next one is still named by its own index.
+        Assert.Contains("'no.such.event' is not an event type the catalog knows", Refused(check, "solution.json", "triggers[2].event.type").Reason);
+        Assert.Contains("'linkedin-scraper' is not a plugin in this package", Refused(check, "solution.json", "members[1].pluginId").Reason);
+        Assert.Equal(3, check.Refusals.Count);
+    }
+
+    [Fact]
     public void A_refusal_reads_as_its_file_its_field_and_its_sentence()
     {
         Assert.Equal("solution.json triggers[1].member: why", new SolutionRefusal("solution.json", "triggers[1].member", "why").ToString());

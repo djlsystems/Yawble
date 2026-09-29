@@ -154,23 +154,25 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
             return new SolutionCheck(root, null, null, refusals);
         }
 
-        var (manifest, parseRefusals) = SolutionManifest.Parse(json);
-        refusals.AddRange(parseRefusals);
+        // EVERY REFUSAL AT ONCE: a refusal in solution.json leaves the item it names out, and every
+        // other part is still checked. Only a file that cannot be read past its format stops here.
+        var read = SolutionManifest.Read(json);
+        refusals.AddRange(read.Refusals);
 
-        if (manifest is null || refusals.Count > 0)
+        if (read.Manifest is not { } manifest)
         {
             return new SolutionCheck(root, null, null, refusals);
         }
 
         var plugins = ReadPlugins(root, refusals);
-        var skills = ReadSkills(root, manifest, refusals);
-        var sites = ReadSites(root, manifest, refusals);
+        var skills = ReadSkills(root, read, refusals);
+        var sites = ReadSites(root, read, refusals);
         var toolsFolder = Path.Combine(root, ToolsFolderName);
         var tools = Directory.Exists(toolsFolder) ? FilesUnder(toolsFolder) : null;
 
-        CheckMembers(manifest, plugins, tools is not null, refusals);
-        CheckTriggers(manifest, plugins, tools is not null, refusals);
-        CheckInputs(manifest, plugins, refusals);
+        CheckMembers(read, plugins, tools is not null, refusals);
+        CheckTriggers(read, plugins, tools is not null, refusals);
+        CheckInputs(read, plugins, refusals);
 
         if (refusals.Count > 0) return new SolutionCheck(root, null, null, refusals);
 
@@ -237,14 +239,15 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         return plugins;
     }
 
-    private List<SolutionSkill> ReadSkills(string root, SolutionManifest manifest, List<SolutionRefusal> refusals)
+    private List<SolutionSkill> ReadSkills(string root, SolutionManifestRead read, List<SolutionRefusal> refusals)
     {
+        var manifest = read.Manifest!;
         var skills = new List<SolutionSkill>();
 
         for (var index = 0; index < manifest.Skills.Count; index++)
         {
             var name = manifest.Skills[index];
-            var at = $"skills[{index}]";
+            var at = $"skills[{read.At("skills", index)}]";
             var file = $"{SkillsFolder}/{name}.md";
 
             if (!SqliteSkillStore.IsLegalName(name))
@@ -327,14 +330,15 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         return skills;
     }
 
-    private static List<SolutionSite> ReadSites(string root, SolutionManifest manifest, List<SolutionRefusal> refusals)
+    private static List<SolutionSite> ReadSites(string root, SolutionManifestRead read, List<SolutionRefusal> refusals)
     {
+        var manifest = read.Manifest!;
         var sites = new List<SolutionSite>();
 
         for (var index = 0; index < manifest.Sites.Count; index++)
         {
             var name = manifest.Sites[index];
-            var at = $"sites[{index}]";
+            var at = $"sites[{read.At("sites", index)}]";
 
             if (!SiteRules.IsSlug(name))
             {
@@ -370,12 +374,14 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         return sites;
     }
 
-    private void CheckMembers(SolutionManifest manifest, List<SolutionPlugin> plugins, bool hasTools, List<SolutionRefusal> refusals)
+    private void CheckMembers(SolutionManifestRead read, List<SolutionPlugin> plugins, bool hasTools, List<SolutionRefusal> refusals)
     {
+        var manifest = read.Manifest!;
+
         for (var index = 0; index < manifest.Members.Count; index++)
         {
             var member = manifest.Members[index];
-            var at = $"members[{index}]";
+            var at = $"members[{read.At("members", index)}]";
 
             if (member.Kind == MemberRef.AgentKind)
             {
@@ -426,7 +432,9 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
 
             foreach (var (name, config) in plugin.Manifest.Config)
             {
-                if (config.Required && config.Default is null && !member.Settings.ContainsKey(name)
+                // AN ABSENCE IS JUDGED ON A WHOLE FILE ONLY: an input refused above may be the one
+                // that asks for it.
+                if (read.Refusals.Count == 0 && config.Required && config.Default is null && !member.Settings.ContainsKey(name)
                     && !manifest.Inputs.Settings.Any(s => SameMember(s.Member, member.Name) && s.Setting == name))
                 {
                     refusals.Add(new(SolutionManifest.FileName, $"{at}.settings", $"`{at}.settings` leaves '{name}' unset; plugin {plugin.Id} requires it. Set it here, or ask a person for it under `inputs.settings`."));
@@ -435,8 +443,10 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         }
     }
 
-    private void CheckTriggers(SolutionManifest manifest, List<SolutionPlugin> plugins, bool hasTools, List<SolutionRefusal> refusals)
+    private void CheckTriggers(SolutionManifestRead read, List<SolutionPlugin> plugins, bool hasTools, List<SolutionRefusal> refusals)
     {
+        var manifest = read.Manifest!;
+
         var packageEvents = plugins
             .SelectMany(p => p.Manifest.Publishes.Select(e => e.Definition(p.Id)))
             .ToDictionary(e => e.Type, StringComparer.Ordinal);
@@ -444,7 +454,7 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         for (var index = 0; index < manifest.Triggers.Count; index++)
         {
             var trigger = manifest.Triggers[index];
-            var at = $"triggers[{index}]";
+            var at = $"triggers[{read.At("triggers", index)}]";
             var member = manifest.Member(trigger.Member)!;
 
             if (!hasTools && trigger.Instruction.Contains(SolutionManifest.SolutionToken, StringComparison.Ordinal))
@@ -483,15 +493,17 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         }
     }
 
-    private static void CheckInputs(SolutionManifest manifest, List<SolutionPlugin> plugins, List<SolutionRefusal> refusals)
+    private static void CheckInputs(SolutionManifestRead read, List<SolutionPlugin> plugins, List<SolutionRefusal> refusals)
     {
+        var manifest = read.Manifest!;
+
         PluginManifest? PluginOf(string memberName) =>
             plugins.FirstOrDefault(p => p.Id == manifest.Member(memberName)?.PluginId)?.Manifest;
 
         for (var index = 0; index < manifest.Inputs.Settings.Count; index++)
         {
             var input = manifest.Inputs.Settings[index];
-            var at = $"inputs.settings[{index}].setting";
+            var at = $"inputs.settings[{read.At("inputs.settings", index)}].setting";
 
             if (PluginOf(input.Member) is not { } plugin) continue;
 
@@ -508,7 +520,7 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         for (var index = 0; index < manifest.Inputs.Connections.Count; index++)
         {
             var input = manifest.Inputs.Connections[index];
-            var at = $"inputs.connections[{index}].slot";
+            var at = $"inputs.connections[{read.At("inputs.connections", index)}].slot";
 
             if (PluginOf(input.Member) is { } plugin && !plugin.Connections.ContainsKey(input.Slot))
             {
@@ -517,7 +529,10 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
             }
         }
 
-        // A REQUIRED SLOT NOBODY IS ASKED FOR blocks the member's every run, so the package must ask.
+        // A REQUIRED SLOT NOBODY IS ASKED FOR blocks the member's every run, so the package must ask -
+        // judged on a whole file only, as an input refused above may be the one that asks.
+        if (read.Refusals.Count > 0) return;
+
         foreach (var member in manifest.Members.Where(m => m.Kind == MemberRef.PluginKind))
         {
             if (plugins.FirstOrDefault(p => p.Id == member.PluginId) is not { } plugin) continue;

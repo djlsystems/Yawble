@@ -297,6 +297,7 @@ public sealed class SolutionInstaller(
                 plan,
                 diff = Diff(row, package),
                 connections = available,
+                kept = await KeptAsync(stored, row, package, ct),
             });
         }
 
@@ -311,6 +312,53 @@ public sealed class SolutionInstaller(
             plan,
             connections = available,
         });
+    }
+
+    /// <summary>
+    /// WHAT AN UPDATE KEEPS of the person's part, so the wizard and the CLI show it instead of asking
+    /// again: each kept member's person-only settings (its current value, null when unset) and
+    /// connection slots (the bound connection's id, null when unbound), and the files already in
+    /// each document folder the package asks for. An update never changes a kept member's settings
+    /// or bindings; only a member the update adds is asked.
+    /// </summary>
+    private async Task<object> KeptAsync(string team, TeamSolutionRow row, SolutionPackage package, CancellationToken ct)
+    {
+        var manifest = package.Manifest;
+        var settings = new List<object>();
+        var connections = new List<object>();
+
+        async Task<PluginMemberSettings?> CurrentAsync(string member) =>
+            pluginSettings is not null && row.Members.TryGetValue(member, out var id) && MemberExists(team, id)
+                ? await pluginSettings.ForAsync(new ContainerId(team, id), ct)
+                : null;
+
+        foreach (var input in manifest.Inputs.Settings)
+        {
+            if (await CurrentAsync(input.Member) is not { } current) continue;
+            settings.Add(new { member = input.Member, setting = input.Setting, value = current.Config.TryGetValue(input.Setting, out var value) ? (JsonElement?)value : null });
+        }
+
+        foreach (var input in manifest.Inputs.Connections)
+        {
+            if (await CurrentAsync(input.Member) is not { } current) continue;
+            connections.Add(new { member = input.Member, slot = input.Slot, connection = current.Connections.GetValueOrDefault(input.Slot) });
+        }
+
+        var docs = documents.RootFor(team);
+        var present = manifest.Inputs.Documents.Select(input =>
+        {
+            var folder = Path.Combine(docs, input.Folder);
+            var files = Directory.Exists(folder)
+                ? Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+                    .Where(f => !Path.GetFileName(f).StartsWith('.'))
+                    .Select(f => Path.GetRelativePath(folder, f).Replace('\\', '/'))
+                    .Order(StringComparer.Ordinal)
+                    .ToList()
+                : [];
+            return (object)new { folder = input.Folder, files };
+        }).ToList();
+
+        return new { settings, connections, documents = present };
     }
 
     private async Task<IReadOnlyList<object>> ConnectionsAsync(CancellationToken ct) =>
