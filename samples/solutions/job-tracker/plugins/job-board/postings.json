@@ -1,0 +1,5 @@
+[
+  { "id": "acme-backend", "title": "Backend Engineer", "company": "Acme", "url": "https://jobs.example.com/acme-backend", "location": "Remote" },
+  { "id": "globex-web", "title": "Web Developer", "company": "Globex", "url": "https://jobs.example.com/globex-web", "location": "London" },
+  { "id": "initech-pm", "title": "Product Manager", "company": "Initech", "url": "https://jobs.example.com/initech-pm", "location": "Leeds" }
+]

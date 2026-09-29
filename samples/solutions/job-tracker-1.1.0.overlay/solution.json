@@ -1,0 +1,122 @@
+{
+  "format": 1,
+  "id": "job-tracker",
+  "name": "Job Tracker",
+  "version": "1.1.0",
+  "description": "Finds job postings that match your keywords, tracks them on a page, and drafts a cover letter from your resume when you press Apply.",
+  "team": {
+    "name": "Job Tracker",
+    "instructions": "This team runs a job search for one person. The postings live on the tracker site, collection `jobs`. The person's reference resume is in the Resume folder of the team's documents. Never apply anywhere yourself: drafts go to the Drafts folder of the team's documents for the person to send."
+  },
+  "members": [
+    {
+      "name": "Coordinator",
+      "role": "manager",
+      "instructions": "You coordinate the job search. Each weekday morning you read the tracker and tell the person, in one short note, what is new and what is waiting on them."
+    },
+    {
+      "name": "Scout",
+      "pluginId": "job-board",
+      "settings": {
+        "keywords": [
+          "engineer",
+          "developer"
+        ]
+      }
+    },
+    {
+      "name": "Writer",
+      "role": "member",
+      "instructions": "You write cover letters. Read the person's resume from the Resume folder, read the posting from the tracker, and start from the draft {solution}/make-cover-letter.py makes. Keep it to one page."
+    },
+    {
+      "name": "Reviewer",
+      "role": "member",
+      "instructions": "You read each draft letter in Drafts/ before the person sends it and add three review notes at its end."
+    }
+  ],
+  "triggers": [
+    {
+      "name": "Scan for postings",
+      "kind": "schedule",
+      "schedule": {
+        "everySeconds": 3600
+      },
+      "member": "Scout",
+      "instruction": "scan",
+      "wakeManager": "never",
+      "idleOnly": true
+    },
+    {
+      "name": "New posting",
+      "kind": "event",
+      "event": {
+        "type": "plugin.job-board.posting-found"
+      },
+      "member": "Writer",
+      "instruction": "A new posting matched: {event.title} at {event.company} ({event.url}). Read it from the tracker site (collection jobs, id {event.id}) and add a two-line `fit` note to that document saying how well the resume fits. Do not write a letter yet. If the posting names a salary, copy it into a `salary` field.",
+      "wakeManager": "never",
+      "dailyTokenCap": 250000
+    },
+    {
+      "name": "Apply pressed",
+      "kind": "event",
+      "event": {
+        "type": "site.action",
+        "filter": "siteAction eq tracker/apply"
+      },
+      "member": "Writer",
+      "instruction": "{event.by} pressed Apply on {event.payload}. Run `python3 {solution}/make-cover-letter.py` with that posting's JSON and the resume's path to get a first draft, then finish the letter and save it as Drafts/<job id>.md in the team's documents. Set the posting's status to `drafted` on the tracker and hand back naming the file.",
+      "wakeManager": "onHandbackOrFailure",
+      "dailyTokenCap": 400000
+    },
+    {
+      "name": "Morning summary",
+      "kind": "schedule",
+      "schedule": {
+        "cron": "0 0 8 * * 1-5",
+        "timezone": "Europe/London"
+      },
+      "member": "Coordinator",
+      "instruction": "Read the tracker site's jobs collection. Tell the person, in five lines at most, which postings are new since yesterday and which drafts are waiting to be sent.",
+      "wakeManager": "never",
+      "dailyTokenCap": 100000
+    },
+    {
+      "name": "Weekly review",
+      "kind": "schedule",
+      "schedule": {
+        "cron": "0 0 9 * * 1",
+        "timezone": "Europe/London"
+      },
+      "member": "Reviewer",
+      "instruction": "Review every draft in Drafts/ written this week.",
+      "wakeManager": "onHandbackOrFailure",
+      "dailyTokenCap": 150000
+    }
+  ],
+  "skills": [
+    "job-search-playbook",
+    "interview-prep"
+  ],
+  "sites": [
+    "tracker"
+  ],
+  "inputs": {
+    "settings": [
+      {
+        "member": "Scout",
+        "setting": "sources",
+        "description": "Which job boards the Scout may read. It reads only the boards you tick.",
+        "required": false
+      }
+    ],
+    "documents": [
+      {
+        "folder": "Resume",
+        "description": "Your reference resume, .docx or PDF. The Writer starts every letter from it.",
+        "required": true
+      }
+    ]
+  }
+}

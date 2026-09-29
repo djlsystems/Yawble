@@ -36,3 +36,6 @@ func NoGit() func() {
 
 // How `repo list` prints a size in bytes.
 var RepoHumanSize = humanSize
+
+// The script `solution check` runs to make its stage in the container.
+const SolutionStageScript = solutionStageScript

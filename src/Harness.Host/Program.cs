@@ -20,6 +20,7 @@ using Harness.Backlog;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
+using Harness.Host.Solutions;
 using Harness.Identity;
 using Harness.Kanban;
 using Harness.Messaging;
@@ -518,6 +519,12 @@ foreach (var agent in loadedCatalog)
 
 // The operator's tags for a built-in are read through the setting on every use.
 builder.Services.AddSingleton(new AgentCatalog(loadedCatalog, () => tenantSettings.AgentTags));
+
+// SOLUTION PACKAGES are checked against this Host's own catalogs - its Agent presets, its events
+// (installed plugins' included) and its runtimes - through one service the route, the install and the
+// board's notice share. See docs/solutions.md.
+builder.Services.AddSingleton(sp => new SolutionService(
+    new SolutionChecker(SolutionPlatform.For(sp.GetRequiredService<AgentCatalog>(), pluginCatalog)), dataRoot));
 
 // What each role is offered, for the "Available skills" list in every system prompt. Filled with
 // the custom skills at start, before any team is restored, and refreshed after every skill write.
@@ -1846,6 +1853,7 @@ AuthEndpoints.Map(app);
 UserEndpoints.Map(app);
 AgentEndpoints.Map(app, dataRoot);
 PluginEndpoints.Map(app);
+SolutionEndpoints.Map(app);
 ConnectionEndpoints.Map(app);
 RepoEndpoints.Map(app);
 KeyEndpoints.Map(app);

@@ -1,5 +1,6 @@
 using Harness.Identity;
 using Harness.Messaging;
+using Harness.Host.Solutions;
 
 namespace Harness.Host;
 
@@ -64,6 +65,7 @@ public static class OperatorCommands
         "--reset-password",
         "--list-users",
         "--doctor",
+        "--solution-check",
     };
 
     private const string Usage =
@@ -75,6 +77,7 @@ public static class OperatorCommands
           --reset-password <email>   Set a new random password and print it once.
           --list-users               List every account, so a lost one can be named.
           --doctor                   Print one JSON line describing this data root. Safe while a host runs.
+          --solution-check <folder>  Check a solution package; print one JSON line. Writes nothing.
         """;
 
     /// <summary>True when the arguments were an operator command and the host must not serve.</summary>
@@ -119,6 +122,11 @@ public static class OperatorCommands
 
             case "--doctor":
                 return await DoctorAsync(dataRoot, output, ct)
+                    ? OperatorOutcome.Completed
+                    : OperatorOutcome.Refused;
+
+            case "--solution-check":
+                return SolutionCheck(dataRoot, value, output)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
@@ -362,6 +370,32 @@ public static class OperatorCommands
     /// Safe against a live host for the same reason --backup is: it reads and never writes, and
     /// Program.cs runs operator commands before it takes the data-root lock.
     /// </summary>
+    /// <summary>
+    /// Checks a solution package against this data root's platform - its Agent presets, its installed
+    /// plugins' events, this machine's runtimes - with <see cref="SolutionChecker"/>, the validator
+    /// <c>POST /api/solutions/check</c> runs, and prints its answer as ONE JSON line, the route's own
+    /// body. A program reads it (the operator CLI's <c>solution check</c>), so it is the last line of
+    /// stdout. A package with refusals is a check that ran: only a missing folder argument refuses.
+    /// Safe while a host runs; reads the folder and the data root and writes nothing.
+    /// </summary>
+    private static bool SolutionCheck(string dataRoot, string? folder, TextWriter output)
+    {
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            output.WriteLine("--solution-check needs the path of a solution package folder.");
+            output.WriteLine();
+            output.WriteLine(Usage);
+            return false;
+        }
+
+        var check = new SolutionChecker(SolutionPlatform.ForDataRoot(dataRoot)).Check(folder);
+
+        output.WriteLine(System.Text.Json.JsonSerializer.Serialize(
+            SolutionEndpoints.Body(check), System.Text.Json.JsonSerializerOptions.Web));
+
+        return true;
+    }
+
     private static async Task<bool> DoctorAsync(string dataRoot, TextWriter output, CancellationToken ct)
     {
         var report = await HostDoctor.ReportAsync(dataRoot, ct);
