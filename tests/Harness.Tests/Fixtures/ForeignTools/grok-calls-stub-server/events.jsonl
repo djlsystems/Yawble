@@ -1,0 +1,6 @@
+{"ts":"2026-09-30T00:57:13.678Z","type":"mcp_config_resolved","servers":[{"name":"harness","transport":"http","source":"local"},{"name":"stubfs","transport":"stdio","source":"local"}],"disabled":[]}
+{"ts":"2026-09-30T00:57:13.719Z","type":"mcp_server_starting","server_name":"stubfs","transport":"stdio"}
+{"ts":"2026-09-30T00:57:13.719Z","type":"mcp_server_starting","server_name":"harness","transport":"http"}
+{"ts":"2026-09-30T00:57:13.732Z","type":"mcp_server_connected","server_name":"stubfs","transport":"stdio","tool_count":1,"tools":["echo"]}
+{"ts":"2026-09-30T00:57:13.757Z","type":"mcp_server_connected","server_name":"harness","transport":"http","tool_count":20,"tools":["workflow_complete","team_list","hiring","team_create","progress","needs_decision","wip","skills_search","handback","backlog","tell","status","workflow_show","kanban","repo","site","team_current","skills_get","member","blocked"]}
+{"ts":"2026-09-30T00:57:13.757Z","type":"mcp_init_completed","total_servers":2,"succeeded":2,"failed":0,"auth_required":0,"total_tools":21,"is_reinit":false}

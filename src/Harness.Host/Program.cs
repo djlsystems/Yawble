@@ -779,6 +779,12 @@ builder.Services.AddSingleton(sp => new ContainerHost(
     // workflow whose branches have not been pushed yet would be racing the push it is about to
     // accept - the same ordering argument `workflow-complete` makes for publishing before it
     // appends. See `IdleWorkflowOffer` for what it decides and every reason it decides not to.
+    // THE PER-RUN FOREIGN TOOLS CHECK, on the row that carries the run, inside the run: the
+    // transcript the agent wrote is read for tools the platform did not give it. Late-bound for
+    // the reason above. See ForeignToolsCheck.
+    onTerminal: async (terminal, ct) =>
+        await sp.GetRequiredService<ForeignToolsCheck>().CheckAsync(terminal, ct),
+
     onRunEnding: async (member, causation, succeeded, ct) =>
     {
         // THE PUBLISH IGNORES `succeeded` AND THAT IS THE WHOLE POINT: a run killed between
@@ -1322,6 +1328,13 @@ builder.Services.AddSingleton<PumpHeartbeat>();
 builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddHostedService<PumpService>();
 builder.Services.AddHostedService<KanbanChangePush>();
+
+// THE PER-RUN FOREIGN TOOLS CHECK, called by every member at the end of its run (`onTerminal`
+// above). What a preset allows is the catalog's isolation model (AgentCatalog.Allowance); a preset
+// that declares no allowed tools is not verified, and its runs are never reported clean. See
+// ForeignToolsCheck.
+builder.Services.AddSingleton(sp => new PresetAllowedTools(sp.GetRequiredService<AgentCatalog>().Allowance));
+builder.Services.AddSingleton<ForeignToolsCheck>();
 builder.Services.AddHostedService<DefaultBranchAtStart>();
 // The operator CLI's `plugin install` asks for a rescan by writing a file the Host polls: no restart, no API key.
 builder.Services.AddHostedService<PluginRescanRequests>();
