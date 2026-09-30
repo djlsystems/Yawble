@@ -279,6 +279,11 @@ public static class TenantActions
     /// happen when this row cannot be.</summary>
     public const string LocalRepoDeleted = "local-repo.deleted";
 
+    /// <summary>A local repository delete could not remove everything: its moved-aside
+    /// <c>.deleting-&lt;guid&gt;</c> folder and each path still in it are named, and it is retried as
+    /// an unfinished removal. Written AFTER the attempt. Subject is the name.</summary>
+    public const string LocalRepoDeleteIncomplete = "local-repo.delete-incomplete";
+
     /// <summary>A person asked GitHub to fork an upstream for a team repository.</summary>
     public const string RepoFork = "repo.fork";
 

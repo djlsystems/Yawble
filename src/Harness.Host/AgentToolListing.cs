@@ -150,6 +150,9 @@ public sealed class CliListingRunner(AgentLaunchUser? runAs = null) : IListingRu
         }
         finally
         {
+            // RECURSIVE DELETE REVIEWED: agents cannot write here. The Host made the scratch folder
+            // owner-only and AgentLaunchUser.Share gives the agent's group read and traverse, never
+            // write; the CLI runs in it but cannot create anything in it.
             try { Directory.Delete(scratch, recursive: true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
     }

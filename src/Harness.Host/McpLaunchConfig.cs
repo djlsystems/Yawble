@@ -91,6 +91,9 @@ public sealed record McpLaunchConfig(string Url, string JsonPath, string TomlPat
         try
         {
             var directory = Path.GetDirectoryName(JsonPath);
+            // RECURSIVE DELETE REVIEWED: agents cannot write here. The Host made this launch's directory
+            // owner-only and AgentLaunchUser.Share gives the agent's group read and traverse, never
+            // write, so everything in it is the Host's own.
             if (directory is not null && Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
         catch (IOException)

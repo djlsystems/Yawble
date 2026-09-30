@@ -68,8 +68,11 @@ public sealed class SiteService(
     Func<string, string?> teamName,
     TeamPaths paths,
     IMessageLog log,
-    Func<string, int, CancellationToken, Task>? copied = null)
+    Func<string, int, CancellationToken, Task>? copied = null,
+    FolderRemoval? removal = null)
 {
+    private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
+
     public const string NoSuchSite = "No such site.";
 
     public const string NotPublished = "This site is not published.";
@@ -172,8 +175,8 @@ public sealed class SiteService(
             var partial = Path.Combine(siteFolder, $".v{version}.partial");
             var target = VersionFolder(site.Team, site.Name, version);
 
-            RemoveFolder(partial);
-            RemoveFolder(target);
+            await RemoveFolderAsync(partial);
+            await RemoveFolderAsync(target);
             Directory.CreateDirectory(partial);
 
             try
@@ -182,7 +185,7 @@ public sealed class SiteService(
 
                 if (copy.Refusal is not null)
                 {
-                    RemoveFolder(partial);
+                    await RemoveFolderAsync(partial);
                     return new(null, copy.Refusal, 400);
                 }
 
@@ -210,14 +213,14 @@ public sealed class SiteService(
                     }),
                     ct);
 
-                foreach (var old in pruned) RemoveFolder(VersionFolder(site.Team, site.Name, old));
+                foreach (var old in pruned) await RemoveFolderAsync(VersionFolder(site.Team, site.Name, old));
 
                 return row;
             }
             catch
             {
-                RemoveFolder(partial);
-                RemoveFolder(target);
+                await RemoveFolderAsync(partial);
+                await RemoveFolderAsync(target);
                 throw;
             }
         }
@@ -300,7 +303,7 @@ public sealed class SiteService(
             return new(null, NoSuchSite, 404);
         }
 
-        RemoveFolder(Path.Combine(Root, site.Team, site.Name));
+        await RemoveFolderAsync(Path.Combine(Root, site.Team, site.Name));
         return site;
     }
 
@@ -312,7 +315,7 @@ public sealed class SiteService(
             name => new TriggerAudit(null, null, TenantActions.SiteDeleted, $"{team}/{name}", name,
                 JsonSerializer.Serialize(new { reason = "team deleted" })), ct);
 
-        RemoveFolder(Path.Combine(Root, team));
+        await RemoveFolderAsync(Path.Combine(Root, team));
         return names;
     }
 
@@ -596,12 +599,12 @@ public sealed class SiteService(
         }
     }
 
-    /// <summary>A folder the Host itself wrote under <see cref="Root"/>: its own files, so a plain
-    /// recursive delete is enough (none of an agent's owner-only folders are ever copied here).</summary>
-    private static void RemoveFolder(string folder)
-    {
-        if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
-    }
+    /// <summary>A folder under <see cref="Root"/>, through <see cref="FolderRemoval"/>: the Host
+    /// copies only its own files here, but the sites folder is agent's on the volume (group
+    /// writable), so an agent can put an owner-only folder anywhere under it. Not cancellable, as
+    /// the clean-up of a failed publish must not be. Throws naming what is left.</summary>
+    private Task RemoveFolderAsync(string folder) =>
+        _removal.RemoveInsideOrThrowAsync(Root, folder, CancellationToken.None);
 
     /// <summary>One publish at a time per site, so two cannot take the same version number.</summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> Gates = new();
