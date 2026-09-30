@@ -4,6 +4,8 @@
 // and a state badge - with Open only when the package has a primary site (a real link, new tab) and
 // Manage. Package text is text: a status that looks like HTML makes no element. Nothing installed
 // explains how solutions arrive.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import SolutionsLauncher from '../SolutionsLauncher.vue';
@@ -112,6 +114,31 @@ describe('the solutions launcher', () => {
     expect(first.querySelector('b')).toBeNull();
     expect(first.querySelector('[data-tile-name] i')).toBeNull();
     expect(first.querySelector('[data-tile-state]')?.textContent).toContain('<b>upload</b>');
+  });
+
+  it('cuts a long name inside its tile, keeping Open and Manage in the tile', async () => {
+    const long = 'Customer Onboarding and Support Knowledge Base Assistant Pro';
+    expect(long).toHaveLength(60);
+    await launcher([launcherRow({ name: long }), launcherRow({ team: 'news', teamName: 'News desk' })]);
+
+    const first = tile('job-tracker');
+    const name = first.querySelector('[data-tile-name]')!;
+    expect(name.textContent).toBe(long);
+    expect(name.getAttribute('title')).toBe(long);
+    expect([...name.classList]).toEqual(expect.arrayContaining(['ellipsis', 'solution-tile-name']));
+    expect(first.classList).toContain('solution-tile');
+    // The actions are the tile's own children, not pushed into a neighbour.
+    expect(first.querySelector('[data-tile-open]')).not.toBeNull();
+    expect(first.querySelector('[data-tile-manage]')).not.toBeNull();
+
+    // Scoped styles do not reach the test DOM, so the rules that make the name shrink are read
+    // from the component: without min-width 0 a grid item and a flex item grow to their content.
+    const source = readFileSync(join(import.meta.dirname, '../SolutionsLauncher.vue'), 'utf8');
+    const rule = (selector: string) => new RegExp(`\\${selector}\\s*\\{[^}]*\\}`).exec(source)?.[0] ?? '';
+    expect(rule('.solution-tile')).toMatch(/min-width:\s*0/);
+    expect(rule('.solution-tile')).toMatch(/overflow:\s*hidden/);
+    expect(rule('.solution-tile-name')).toMatch(/min-width:\s*0/);
+    expect(source).toMatch(/minmax\(min\(16rem, 100%\), 1fr\)/);
   });
 
   it('explains how solutions arrive when none is installed', async () => {

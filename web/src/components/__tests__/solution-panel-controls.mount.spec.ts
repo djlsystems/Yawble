@@ -12,6 +12,13 @@ import { fakeHost, reply, sent, type Call, type Route } from '../../test/solutio
 import { openSection, panelRead, panelRoutes } from '../../test/solutionPanelFixtures';
 import type { SolutionPanel as PanelShape } from '../../api/types';
 
+// The re-read after Run now waits a few milliseconds here instead of seconds, and gives up sooner.
+vi.mock('../../lib/solutionPanel', async (actual) => ({
+  ...(await actual<typeof import('../../lib/solutionPanel')>()),
+  RunWatchEveryMs: 5,
+  RunWatchTries: 3,
+}));
+
 let calls: Call[] = [];
 let read: PanelShape;
 
@@ -77,6 +84,58 @@ describe('the control panel: Controls', () => {
 
     expect(sent(calls, 'POST', '/api/teams/job-tracker/triggers/trg_scan/run')).toHaveLength(1);
     expect(bodyFind('[data-control-notice]')?.textContent).toBe('Scan for postings is running now.');
+  });
+
+  it('shows the run Run now started once it finishes, without Refresh', async () => {
+    const before = panelRead();
+    const finished: PanelShape = {
+      ...before,
+      status: '5 new jobs · last checked 2026-09-30T10:00:00Z',
+      members: before.members.map((member) =>
+        member.member === 'scout' ? { ...member, lastRun: { seq: 42, at: '2026-09-30T10:00:00Z', outcome: 'completed' } } : member,
+      ),
+      recentRuns: [
+        { ...before.recentRuns[0]!, seq: 42, endedAt: '2026-09-30T10:00:00Z', output: '5 new postings' },
+        ...before.recentRuns,
+      ],
+    };
+    // The run ends a moment after the route answered: the read as it answers still shows the old
+    // runs, every read after that has the finished one.
+    let readsSinceRun = -1;
+    serve([
+      (call) => {
+        if (call.method === 'POST' && call.url === '/api/teams/job-tracker/triggers/trg_scan/run') readsSinceRun = 0;
+        if (call.method === 'GET' && call.url === '/api/teams/job-tracker/solution/panel' && readsSinceRun >= 0)
+          return reply(200, readsSinceRun++ === 0 ? before : finished);
+        return undefined;
+      },
+    ]);
+    await controls();
+    expect(bodyFind('[data-panel-status]')?.textContent).not.toContain('5 new jobs');
+
+    await click('[data-control-trigger="trg_scan"] [data-run-now]');
+    await vi.waitFor(() => expect(bodyFind('[data-panel-status]')?.textContent).toBe('5 new jobs · last checked 2026-09-30T10:00:00Z'));
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settle();
+    // It stopped at the read that showed the new run: the one as the route answered, and one more.
+    expect(readsSinceRun).toBe(2);
+    await openSection('results');
+    expect(bodyFind('[data-run="42"] [data-run-output]')?.textContent).toBe('5 new postings');
+  });
+
+  it('stops re-reading after a bounded number of tries when no new run shows', async () => {
+    await controls();
+    const reads = () => sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length;
+    const readsBefore = reads();
+    await click('[data-control-trigger="trg_scan"] [data-run-now]');
+
+    // One read as the route answers, then the three bounded tries - and no more.
+    await vi.waitFor(() => expect(reads()).toBe(readsBefore + 1 + 3));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settle();
+
+    expect(reads()).toBe(readsBefore + 1 + 3);
   });
 
   it('says a skipped Run now as skipped, with why', async () => {
