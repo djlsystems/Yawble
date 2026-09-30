@@ -111,5 +111,24 @@ public static class BacklogSchema
                 PRIMARY KEY (dispatch, repo)
             );
             """),
+
+        // A START THAT WAS NOT RECORDED, per dispatch and repository: why, and the team branch and
+        // default branch as the clone held them at dispatch, unfetched. The retry records the start
+        // only while the team branch is unchanged since then; stopped_at ends it for good.
+        new MigrationStep(
+            "backlog-003",
+            """
+            -- No foreign key, for the reason backlog_dispatches has none. DeleteAsync removes these.
+            CREATE TABLE backlog_dispatch_missed_starts (
+                dispatch     INTEGER NOT NULL,
+                repo         TEXT    NOT NULL COLLATE NOCASE,
+                reason       TEXT    NOT NULL,
+                team_sha     TEXT    NULL,
+                default_sha  TEXT    NULL,
+                stopped_at   TEXT    NULL,
+                recorded_at  TEXT    NOT NULL,
+                PRIMARY KEY (dispatch, repo)
+            );
+            """),
     ];
 }
