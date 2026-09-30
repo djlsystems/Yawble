@@ -1,0 +1,4 @@
+Checking MCP server health…
+
+canary: /bin/true  - ✘ Failed to connect — CONNECTION_CLOSED: Connection closed
+web-canary: https://example.invalid/mcp (HTTP) - ✘ Failed to connect — ENOTFOUND: getaddrinfo ENOTFOUND example.invalid

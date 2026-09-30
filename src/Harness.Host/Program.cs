@@ -1361,6 +1361,14 @@ builder.Services.ConfigureHttpJsonOptions(options => ConfigureHostJson(options.S
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<AgentAuthProbe>();
+
+// THE PRE-FLIGHT: what each preset's CLI would load, listed by the CLI itself as the agent user,
+// once the Host is serving and again after every catalog save. Never on the start path.
+builder.Services.AddSingleton<IListingRunner>(sp => new CliListingRunner(sp.GetRequiredService<AgentLaunchUser>()));
+builder.Services.AddSingleton(sp => new AgentToolPreflight(
+    sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<IListingRunner>(), dataRoot,
+    sp.GetRequiredService<ILogger<AgentToolPreflight>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentToolPreflight>());
 builder.Services.AddMcpServer()
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
     .WithTools<PlatformMcpTools>();
