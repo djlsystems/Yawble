@@ -207,6 +207,14 @@ public static class BuiltInSkills
             found, naming the member and the reason, and either give the work to a member on a
             different Agent or report it and stop.
 
+            ## A program missing at launch is re-sent, not escalated
+
+            A run that failed with `[launch-missing]` never started: its agent's program was not
+            found on PATH when the run began. That is what an install or update in progress looks
+            like, and it is over in seconds. Re-send the same instruction to the same member, with
+            the same `card`; nobody has anything to repair. Only when the same member's launch has
+            already failed this way twice in this workflow, report it to the person and stop.
+
             If the team stopped part-way - a failed run, a spend limit, a restart - load the
             `recovery` skill before dispatching anything. If you are asked to finalise, finish, wrap
             up or clean up a round, load the `wrap-up` skill first. Before you sign in to anything,

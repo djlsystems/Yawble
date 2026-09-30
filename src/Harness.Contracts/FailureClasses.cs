@@ -79,6 +79,16 @@ public static class FailureClasses
     public const string Interrupted = "interrupted";
 
     /// <summary>
+    /// The agent's program was not on PATH when the run started, and still not after looking
+    /// again for about 30 seconds. NOTHING RAN AND NOTHING WAS SPENT, which is what separates it
+    /// from <see cref="AgentFault"/>: the shared install is replaced in place while a CLI updates,
+    /// so the likeliest cause is an install or update in progress, and re-sending the instruction
+    /// tries again. Not resumed by the platform: the Manager re-sends, and escalates only when it
+    /// has already happened twice.
+    /// </summary>
+    public const string LaunchMissing = "launch-missing";
+
+    /// <summary>
     /// NOBODY COULD CLASSIFY IT - the default, and a real class rather than an absence. Treated
     /// exactly as <see cref="AgentFault"/>: never resumed.
     /// </summary>
@@ -87,7 +97,7 @@ public static class FailureClasses
     /// <summary>Every class, for a test or a renderer that wants to enumerate them.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        Quota, Rate, Transport, AgentFault, Timeout, Interrupted, Unknown,
+        Quota, Rate, Transport, AgentFault, LaunchMissing, Timeout, Interrupted, Unknown,
     ];
 
     /// <summary>
@@ -126,6 +136,8 @@ public static class FailureClasses
         Rate => "The provider refused for sending too much too fast.",
         Transport => "The network failed, so how far this run got is not known.",
         AgentFault => "The agent itself failed, so re-running it would spend again to fail the same way.",
+        LaunchMissing => "The program was not found when the run started. It may be being installed "
+            + "or updated, so nothing ran and nothing was spent; re-sending the instruction will try again.",
         Timeout => "The idle clock fired.",
         Interrupted => "The run was cut off before it finished.",
         Unknown => "Nothing here could say why, so this is treated exactly as an agent fault and "

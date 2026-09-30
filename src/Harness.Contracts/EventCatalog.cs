@@ -191,8 +191,8 @@ public static class EventCatalog
                 new(PayloadFields.TokensSource, EventFieldKind.String, "Which brand's usage format was parsed, if any."),
                 new(PayloadFields.UsageCountedOn, EventFieldKind.Integer, "Set when this run answered several deliveries: the causation of the row that carries its token figures. This row carries none."),
                 new(PayloadFields.FailureClass, EventFieldKind.String,
-                    "What KIND of failure this was - quota, rate, transport, agent-fault, timeout, "
-                    + "interrupted, or unknown. Absent on every row written before classes existed; "
+                    "What KIND of failure this was - quota, rate, transport, agent-fault, launch-missing, "
+                    + "timeout, interrupted, or unknown. Absent on every row written before classes existed; "
                     + "`unknown` is the default and is treated exactly as agent-fault."),
                 new(PayloadFields.RetryAfter, EventFieldKind.String,
                     "When the provider said to come back, as an ISO-8601 instant. Absent, not "

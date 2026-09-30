@@ -34,13 +34,28 @@ public sealed partial class ProcessAgentRunner(
     ILogger<ProcessAgentRunner>? log = null,
     IDiagnosticsLog? diagnostics = null,
     AgentLaunchUser? runAs = null,
-    LiveRuns? live = null) : IAgentRunner
+    LiveRuns? live = null,
+    IMemberReports? reports = null,
+    LaunchLookup? lookup = null) : IAgentRunner
 {
+    /// <summary>How long a launch looks for a program missing from PATH; the Host's is ~30s.</summary>
+    private readonly LaunchLookup _lookup = lookup ?? LaunchLookup.Default;
+
     private const string ClaudeJson = "claude-json";
     private const string GrokJson = "grok-json";
     private const string CopilotUsageFile = "copilot-usage-file";
     private const string CodexTotal = "codex-total";
     private const string AntigravityJson = "antigravity-json";
+
+    /// <summary>
+    /// The launch error for a program that never appeared: what was looked for, for how long, and
+    /// that re-sending tries again. It asks nobody to repair anything.
+    /// </summary>
+    public static string LaunchMissingText(string fileName, LaunchLookup lookup) =>
+        $"`{fileName}` is not an executable file on PATH: it was not found when this run started"
+        + (lookup.Window > TimeSpan.Zero ? $", nor in the {lookup.WindowText} after" : string.Empty)
+        + ", so this member was not started. It may be being installed or updated; re-sending the "
+        + "instruction will try again.";
 
     public async Task<AgentResult> RunAsync(AgentInvocation invocation, CancellationToken ct = default)
     {
@@ -128,9 +143,31 @@ public sealed partial class ProcessAgentRunner(
                 + "costs money and answers noise.");
         }
 
-        // RESOLVED ONCE, HERE, so a miss is RECORDED and reported as a launch failure
-        // rather than surfacing later as a spawn error naming a bare command.
-        var resolvedFileName = PathSearch.Find(command.FileName);
+        // RESOLVED HERE, so a miss is RECORDED and reported as a launch failure rather than
+        // surfacing later as a spawn error naming a bare command. A miss is looked at again for
+        // about 30 seconds first: the shared install is replaced in place while a CLI updates, and
+        // a launch landing in that gap is not an agent fault. The only trace of a program that
+        // reappears is the one progress line saying the run waited for it.
+        var resolvedFileName = await ChildProcess.FindAsync(
+            command.FileName,
+            _lookup,
+            reports is null
+                ? null
+                : () => reports.ProgressAsync(
+                    invocation.Container,
+                    $"`{command.FileName}` was not on PATH when this run started; looking again for up to "
+                    + $"{_lookup.WindowText}, as it may be being installed or updated.",
+                    CancellationToken.None),
+            ct);
+
+        if (resolvedFileName is null && ct.IsCancellationRequested)
+        {
+            return new AgentResult(
+                -1,
+                string.Empty,
+                $"This run was stopped while it waited for `{command.FileName}` to appear on PATH, so it did not start.",
+                FailureClass: FailureClasses.Interrupted);
+        }
 
         if (resolvedFileName is null)
         {
@@ -149,10 +186,14 @@ public sealed partial class ProcessAgentRunner(
                     ct: ct);
             }
 
+            // NOT AN AGENT FAULT, AND NO REPAIR IS ASKED OF ANYBODY: nothing ran, and the likeliest
+            // cause is an install or update in progress, so the words say what is true and the
+            // class tells the Manager to re-send.
             return new AgentResult(
                 -1,
                 string.Empty,
-                $"`{command.FileName}` is not an executable file on PATH, so this member could not be started.");
+                LaunchMissingText(command.FileName, _lookup),
+                FailureClass: FailureClasses.LaunchMissing);
         }
 
         // From a system directory, never PATH: setsid runs before the agent prefix, so

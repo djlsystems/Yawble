@@ -179,7 +179,8 @@ public static class DiagnosticKinds
 
     // ---- Anything that went wrong: processes and launches -------------------------------------
 
-    /// <summary>The command a preset names is not an executable file on PATH. The run is reported
+    /// <summary>The command a preset names is not an executable file on PATH, still, after the launch
+    /// looked again for its window. The run is reported
     /// as a launch failure without spawning anything.</summary>
     public const string ProcessExecutableNotFound = "process.executable-not-found";
 

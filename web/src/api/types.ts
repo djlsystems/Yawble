@@ -159,8 +159,8 @@ export interface ContainerSnapshot {
   unresolvedAgents?: UnresolvedAgent[]
 
   /**
-   * WHAT KIND of failure `failed` was — `quota`, `rate`, `transport`, `agent-fault`, `timeout`,
-   * `interrupted` or `unknown` — and `null` when this member's last run did not fail.
+   * WHAT KIND of failure `failed` was — `quota`, `rate`, `transport`, `agent-fault`, `launch-missing`,
+   * `timeout`, `interrupted` or `unknown` — and `null` when this member's last run did not fail.
    *
    * A SECOND VALUE ON ONE MARK, not a second mark. It is set and cleared with `failed` on the same
    * lines, because a card wearing a class from one run beside a reason from another would be worse
