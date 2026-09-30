@@ -471,6 +471,18 @@ export interface RemovalRetried {
 
 export type TriggerKindWire = 'cron' | 'every' | 'once' | 'event' | 'folderChange'
 
+/**
+ * What `POST /api/teams/{team}/triggers/{id}/run` did: the fire the schedule makes, `fired`, or
+ * `skipped` (paused team, busy idle-only member), `capped` (its daily cap), `member-missing`.
+ * `trigger` is the row after it, as the list routes return it.
+ */
+export interface TriggerRunNowResult {
+  outcome: 'fired' | 'skipped' | 'capped' | 'member-missing'
+  reason: string | null
+  seq: number | null
+  trigger: TeamTrigger
+}
+
 export interface TeamTrigger {
   id: string
   team: TeamId

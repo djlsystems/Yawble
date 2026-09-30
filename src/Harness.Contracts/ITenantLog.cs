@@ -178,6 +178,10 @@ public static class TenantActions
     public const string ScheduleMissed = "schedule.missed";
     public const string ScheduleMemberMissing = "schedule.member-missing";
 
+    /// <summary>A person pressed Run now on a schedule. Detail carries the fire's `outcome`
+    /// (`fired`, `skipped`, `capped`, `member-missing`), its `reason` and the `seq` it appended.</summary>
+    public const string ScheduleRunNow = "schedule.run-now";
+
     /// <summary>A person minted a credential for themselves. The row carries the key's id, its
     /// label and its prefix - never the credential, which is the one thing this log must never
     /// hold.</summary>

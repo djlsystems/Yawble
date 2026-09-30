@@ -107,54 +107,9 @@ public sealed class TriggerSweep(
         // A scheduled message type is matched under BINARY collation while ContainerId equality folds
         // case, so every type and identity-bearing payload field is built from the FOUND container.
         var found = container.Id;
-        if (host.IsPaused(found.Team))
+        if (await SkipReasonAsync(row, container, ct) is { } reason)
         {
-            var skipped = await log.AppendAsync(
-                new NewMessage(
-                    MessageTypes.ScheduleSkipped,
-                    JsonSerializer.Serialize(new
-                    {
-                        member = found.ToString(),
-                        reason = MessageTypes.ScheduleSkippedPausedReason,
-                    }),
-                    source),
-                ct);
-
-            await schedules.RecordOutcomeAsync(row.Id, firedAt: null, next, "skipped", skipped.Seq, row.MissedCount, ct);
-            await tenant.WriteAsAsync(
-                source,
-                actorEmail: null,
-                TenantActions.ScheduleSkipped,
-                row.Id,
-                row.Name,
-                new
-                {
-                    team = found.Team,
-                    container = found.Name,
-                    dueAt = due.ToString("O", CultureInfo.InvariantCulture),
-                    nextDueAt = next?.ToString("O", CultureInfo.InvariantCulture),
-                },
-                ct);
-            return;
-        }
-
-        var busy = row.IdleOnly && await IsBusyAsync(container, ct);
-        if (busy)
-        {
-            var skipped = await log.AppendAsync(
-                new NewMessage(
-                    MessageTypes.ScheduleSkipped,
-                    // `member`, not `container`: this row's own Source is `schedule:<id>` (see
-                    // SourceOf below), never the member's identity, so this field is the ONLY
-                    // carrier of it - not a duplicate of the Source the way the other publishers'
-                    // copies are. See EventCatalog's ScheduleSkipped entry for the full reasoning.
-                    JsonSerializer.Serialize(new
-                    {
-                        member = found.ToString(),
-                        reason = MessageTypes.ScheduleSkippedBusyReason,
-                    }),
-                    source),
-                ct);
+            var skipped = await AppendSkippedAsync(found, reason, source, ct);
 
             await schedules.RecordOutcomeAsync(row.Id, firedAt: null, next, "skipped", skipped.Seq, row.MissedCount, ct);
             await tenant.WriteAsAsync(
@@ -182,12 +137,7 @@ public sealed class TriggerSweep(
             return;
         }
 
-        var instruction = await log.AppendAsync(
-            new NewMessage(
-                MessageTypes.InstructionFor(found),
-                WakeManagerPolicy.InstructionPayload(row.Instruction, row.WakeManager),
-                source),
-            ct);
+        var instruction = await AppendInstructionAsync(row, found, source, ct);
 
         var late = kind == TriggerKind.Once && due <= now;
         await schedules.RecordOutcomeAsync(row.Id, now, next, "fired", instruction.Seq, row.MissedCount, ct);
@@ -209,6 +159,108 @@ public sealed class TriggerSweep(
             },
             ct);
     }
+
+    /// <summary>
+    /// FIRES ONE CLOCK TRIGGER NOW, outside its schedule: a person's Run now, and a solution's
+    /// run-at-install. It is the fire the sweep makes - source `schedule:&lt;id&gt;`, the trigger's
+    /// instruction with its wakeManager, skipped for a paused team or a busy idle-only member, and
+    /// skipped with its `schedule.skipped` row when the daily cap is reached - but it is nobody's
+    /// due time: the stored `next_due_at` is left alone (a capped one sleeps, as the cap always
+    /// does), and nothing is counted as missed.
+    ///
+    /// WHO ASKED is written: one tenant row, <paramref name="action"/> by
+    /// <paramref name="actorId"/>, whatever the outcome, beside the rows the fire itself writes.
+    /// Null for an event or folder trigger, which has no instruction of its own to fire.
+    /// </summary>
+    public async Task<TriggerRunNow?> RunNowAsync(
+        TriggerRow row,
+        DateTimeOffset now,
+        string? actorId,
+        string? actorEmail,
+        string action,
+        CancellationToken ct = default)
+    {
+        if (!TryKind(row.Kind, out var kind) || kind is not (TriggerKind.Cron or TriggerKind.Every or TriggerKind.Once))
+        {
+            return null;
+        }
+
+        var source = SourceOf(row.Id);
+        var result = await RunNowOutcomeAsync(row, now, source, ct);
+
+        await tenant.WriteAsAsync(
+            actorId,
+            actorEmail,
+            action,
+            row.Id,
+            row.Name,
+            new
+            {
+                team = row.Team,
+                container = row.Container,
+                outcome = result.Outcome,
+                reason = result.Reason,
+                seq = result.Seq,
+                at = now.ToString("O", CultureInfo.InvariantCulture),
+            },
+            ct);
+
+        return result;
+    }
+
+    private async Task<TriggerRunNow> RunNowOutcomeAsync(TriggerRow row, DateTimeOffset now, string source, CancellationToken ct)
+    {
+        if (host.Find(new ContainerId(row.Team, row.Container)) is not { } container)
+        {
+            return new TriggerRunNow("member-missing", Seq: null, Reason: null);
+        }
+
+        var found = container.Id;
+        if (await SkipReasonAsync(row, container, ct) is { } reason)
+        {
+            var skipped = await AppendSkippedAsync(found, reason, source, ct);
+            await schedules.RecordSkipAsync(row.Id, "skipped", skipped.Seq, ct);
+            return new TriggerRunNow("skipped", skipped.Seq, reason);
+        }
+
+        if (cost is not null && await cost.SkipIfCappedAsync(row, found, now, row.NextDueAt, cause: null, ct))
+        {
+            // Its `schedule.skipped` row is the cap's, written once a day; a later one is counted.
+            return new TriggerRunNow("capped", Seq: null, MessageTypes.ScheduleSkippedCapReason);
+        }
+
+        var instruction = await AppendInstructionAsync(row, found, source, ct);
+        await schedules.RecordFireAsync(row.Id, now, "fired", instruction.Seq, ct);
+        return new TriggerRunNow("fired", instruction.Seq, Reason: null);
+    }
+
+    /// <summary>Why a fire of <paramref name="row"/> is skipped before its cap is asked: the team
+    /// is paused, or an idle-only trigger's member is busy. Null when neither.</summary>
+    private async Task<string?> SkipReasonAsync(TriggerRow row, MemberRuntime container, CancellationToken ct)
+    {
+        if (host.IsPaused(container.Id.Team)) return MessageTypes.ScheduleSkippedPausedReason;
+        if (row.IdleOnly && await IsBusyAsync(container, ct)) return MessageTypes.ScheduleSkippedBusyReason;
+        return null;
+    }
+
+    // `member`, not `container`: this row's own Source is `schedule:<id>` (see SourceOf below),
+    // never the member's identity, so this field is the ONLY carrier of it - not a duplicate of the
+    // Source the way the other publishers' copies are. See EventCatalog's ScheduleSkipped entry.
+    private Task<Message> AppendSkippedAsync(ContainerId found, string reason, string source, CancellationToken ct) =>
+        log.AppendAsync(
+            new NewMessage(
+                MessageTypes.ScheduleSkipped,
+                JsonSerializer.Serialize(new { member = found.ToString(), reason }),
+                source),
+            ct);
+
+    private Task<Message> AppendInstructionAsync(TriggerRow row, ContainerId found, string source, CancellationToken ct) =>
+        log.AppendAsync(
+            new NewMessage(
+                MessageTypes.InstructionFor(found),
+                WakeManagerPolicy.InstructionPayload(row.Instruction, row.WakeManager),
+                source),
+            ct);
 
     private async Task<bool> IsBusyAsync(MemberRuntime container, CancellationToken ct)
     {
@@ -272,3 +324,8 @@ public sealed class TriggerSweep(
         return candidate;
     }
 }
+
+/// <summary>What one <see cref="TriggerSweep.RunNowAsync"/> did: `fired`, `skipped` (paused team or
+/// busy idle-only member, <c>Reason</c> says which), `capped` or `member-missing`, and the seq of the
+/// instruction or `schedule.skipped` row it appended (null when capped: that row is the cap's).</summary>
+public sealed record TriggerRunNow(string Outcome, long? Seq, string? Reason);
