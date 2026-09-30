@@ -105,9 +105,12 @@ public sealed partial class PlatformMcpTools(
         OwnAsync("needs-decision", new { question }, cancellationToken);
 
     [McpServerTool(Name = "workflow_complete"), Description(
-        "Declare the workflow you own complete. Refused while that workflow still has work in "
+        "Declare the workflow you own complete; a Manager may also declare one its own member "
+        + "owns, once that member and every other member are idle in it (recorded as declaredBy the "
+        + "Manager on behalf of the owner). Refused while that workflow still has work in "
         + "flight, and while any of its cards is unfinished (to do, running, interrupted, failed or "
-        + "blocked); the refusal names them. Finish or re-send those cards, or pass dropped.")]
+        + "blocked); the refusal names them. Finish or re-send those cards, or pass dropped. "
+        + "Do not retry a refused declaration in the same run.")]
     public Task<string> WorkflowComplete(
         [Description("What the workflow delivered, in one short sentence.")] string delivered,
         [Description("Only when leaving cards unfinished on purpose: which, and why. Recorded on the declaration.")]
