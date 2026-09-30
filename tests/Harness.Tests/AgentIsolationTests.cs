@@ -4,7 +4,7 @@ using Harness.Host;
 namespace Harness.Tests;
 
 /// <summary>
-/// A MEMBER GETS ONLY THE TOOLS THE PLATFORM GIVES IT (B001K). Every built-in headless preset
+/// A MEMBER GETS ONLY THE TOOLS THE PLATFORM GIVES IT. Every built-in headless preset
 /// declares how its launch is isolated and which of its CLI's own tools it may use; the Concierge's
 /// presets declare nothing and launch exactly as before; a headless preset with no declaration is
 /// not verified. What each built-in declaration switches off was measured with real launches -
