@@ -142,6 +142,13 @@ const row = (id: string, version?: string) =>
     ? bodyFind(`[data-plugin="${id}"][data-plugin-version="${version}"]`)
     : bodyFind(`[data-plugin="${id}"][data-verdict="installed"]`) ?? bodyFind(`[data-plugin="${id}"]`);
 
+/** Opens a tile's Details and answers the dialog, where everything the version declares is. */
+async function details(id: string, version?: string): Promise<Element> {
+  (row(id, version)!.querySelector('[data-plugin-details]') as HTMLElement).click();
+  await settle();
+  return bodyFind('[data-plugin-details-dialog]')!;
+}
+
 describe('PluginsDialog', () => {
   it('lists every version with id, name, version, active and the verdict: installed, refused, inactive', async () => {
     const wrapper = await mountPlugins();
@@ -181,12 +188,14 @@ describe('PluginsDialog', () => {
     listPlugins.mockResolvedValue(hostList([mailer, sampleEcho]));
     const wrapper = await mountPlugins();
 
-    const slot = row('mailer')!.querySelector('[data-connection-slot="mail"]')!.textContent;
+    expect(row('mailer')!.querySelector('[data-plugin-summary]')!.textContent).toContain('1 connection');
+    const slot = (await details('mailer')).querySelector('[data-connection-slot="mail"]')!.textContent;
     expect(slot).toContain('mail');
     expect(slot).toContain('needs a Google or Microsoft connection');
     expect(slot).toContain('Required');
     expect(slot).toContain('The mailbox to read and send from.');
-    expect(row('sample-echo')!.querySelector('[data-connections]')!.textContent?.trim()).toBe('None');
+    expect(row('sample-echo')!.querySelector('[data-plugin-summary]')!.textContent).toContain('no connections');
+    expect((await details('sample-echo')).querySelector('[data-connections]')!.textContent?.trim()).toBe('None');
 
     wrapper.unmount();
   });
@@ -219,9 +228,16 @@ describe('PluginsDialog', () => {
 
   it("shows an installed plugin's description, settings, secret names, events, skill and members", async () => {
     const wrapper = await mountPlugins();
-    const installed = row('sample-echo')!;
+    const tile = row('sample-echo')!;
 
-    expect(installed.querySelector('[data-description]')?.textContent).toContain('Deterministic test plugin');
+    // THE TILE: the description, what it declares counted, and who is hired on it.
+    expect(tile.querySelector('[data-description]')?.textContent).toContain('Deterministic test plugin');
+    expect(tile.querySelector('[data-plugin-summary]')?.textContent).toMatch(/settings? · .*secrets? · .* · .*events? · a skill/);
+    expect(tile.querySelector('[data-member-link="alpha/Echo"]')?.textContent).toContain('Alpha Team / Echo');
+    expect(tile.querySelector('[data-config-field]')).toBeNull();
+
+    // DETAILS: the whole of it.
+    const installed = await details('sample-echo');
 
     const mode = installed.querySelector('[data-config-field="mode"]')?.textContent ?? '';
     expect(mode).toContain('string');

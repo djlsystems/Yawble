@@ -354,7 +354,7 @@ async function removeProvider(provider: ConnectionProvider) {
       </q-tabs>
       <q-separator />
 
-      <q-tab-panels v-model="tab" animated class="connections-body">
+      <q-tab-panels v-model="tab" class="connections-body">
         <q-tab-panel name="connections" data-connections-panel="connections">
           <div class="row items-center q-mb-sm">
             <q-space />
@@ -396,7 +396,7 @@ async function removeProvider(provider: ConnectionProvider) {
                 <dt>Scopes</dt>
                 <dd data-connection-scopes>
                   <template v-if="connection.scopes.length === 0">None</template>
-                  <span v-for="scope in connection.scopes" :key="scope" class="mono q-mr-sm">{{ scope }}</span>
+                  <div v-for="scope in connection.scopes" :key="scope" class="mono conn-scope">{{ scope }}</div>
                 </dd>
                 <dt>Connected</dt>
                 <dd data-connection-connected>{{ when(connection.connectedAt) }}</dd>
@@ -796,6 +796,11 @@ async function removeProvider(provider: ConnectionProvider) {
   column-gap: 16px;
   row-gap: 2px;
   margin: 0;
+}
+
+/* One scope a line, broken only where a URL has to be: a scope split across lines reads as two. */
+.conn-scope {
+  overflow-wrap: anywhere;
 }
 
 .conn-facts dt {

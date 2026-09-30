@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { ActionRefused, getPluginManifest, installPlugin, listPlugins, removePlugin, rescanPlugins } from '../api/client';
-import type { ContainerSnapshot, PluginInstallResult, PluginList, PluginMemberRef } from '../api/types';
+import type { ContainerSnapshot, InstalledPlugin, PluginInstallResult, PluginList, PluginMemberRef } from '../api/types';
 import { formatManifest, pluginEvents, pluginRows, pluginSkill, type PluginRow } from '../lib/plugins';
 import { defaultLabel, setByPerson } from '../lib/pluginSettings';
 import { slotSummary } from '../lib/connections';
@@ -72,6 +72,22 @@ watch(open, (showing) => {
   removed.value = '';
   if (showing) void load();
 });
+
+/** The installed version whose Details are open, or null. */
+const detailsRow = ref<PluginRow | null>(null);
+
+/** What an installed version declares, counted, for its tile: "3 settings · 1 secret · no events". */
+function declaresSummary(plugin: InstalledPlugin) {
+  const count = (n: number, one: string, many: string) => (n === 0 ? `no ${many}` : n === 1 ? `1 ${one}` : `${n} ${many}`);
+  const parts = [
+    count(Object.keys(plugin.config).length, 'setting', 'settings'),
+    count(Object.keys(plugin.secrets).length, 'secret', 'secrets'),
+    count(Object.keys(plugin.connections ?? {}).length, 'connection', 'connections'),
+    count(pluginEvents(plugin).length, 'event', 'events'),
+  ];
+  if (pluginSkill(plugin)) parts.push('a skill');
+  return parts.join(' · ');
+}
 
 /** The Host's verdict on a version, in words and never in colour alone. */
 const verdictLabel = { installed: 'Installed', refused: 'Refused', inactive: 'Inactive' } as const;
@@ -379,72 +395,44 @@ const verdictText = computed(() => {
             </div>
 
             <template v-else-if="row.verdict === 'installed'">
-              <div v-if="row.plugin.description" class="plugin-tile-line q-mt-xs" data-description>{{ row.plugin.description }}</div>
+              <div v-if="row.plugin.description" class="plugin-tile-line plugin-description q-mt-xs" data-description>{{ row.plugin.description }}</div>
 
-              <dl class="plugin-facts q-mt-xs">
-                <dt>Settings</dt>
-                <dd data-config>
-                  <template v-if="Object.keys(row.plugin.config).length === 0">None</template>
-                  <div v-for="(field, key) in row.plugin.config" :key="key" :data-config-field="key">
-                    <span class="mono">{{ key }}</span>
-                    <span class="os-text-muted"> · {{ field.type }}</span>
-                    <span v-if="defaultLabel(field)" class="os-text-muted"> · {{ defaultLabel(field) }}</span>
-                    <span v-if="field.required" class="os-text-muted"> · Required</span>
-                    <span v-if="setByPerson(field)" class="os-text-muted"> · Set by a person only</span>
-                  </div>
-                </dd>
+              <!-- WHAT IT DECLARES, COUNTED: the whole of it is in Details, where a plugin with
+                   seventeen settings has the room they need. -->
+              <div class="plugin-tile-line os-text-muted q-mt-xs" data-plugin-summary>{{ declaresSummary(row.plugin) }}</div>
 
-                <dt>Secrets</dt>
-                <dd data-secrets>
-                  <template v-if="Object.keys(row.plugin.secrets).length === 0">None</template>
-                  <span v-for="(secret, key) in row.plugin.secrets" :key="key" class="mono q-mr-sm">{{ key }}</span>
-                </dd>
-
-                <dt>Connections</dt>
-                <dd data-connections>
-                  <template v-if="Object.keys(row.plugin.connections ?? {}).length === 0">None</template>
-                  <div v-for="(wanted, key) in row.plugin.connections ?? {}" :key="key" :data-connection-slot="key">
-                    <span class="mono">{{ key }}</span>
-                    <span class="os-text-muted"> · {{ slotSummary(wanted) }}</span>
-                    <span v-if="wanted.required" class="os-text-muted"> · Required</span>
-                    <span v-if="wanted.description" class="os-text-muted"> · {{ wanted.description }}</span>
-                  </div>
-                </dd>
-
-                <dt>Events</dt>
-                <dd data-events>
-                  <template v-if="pluginEvents(row.plugin).length === 0">None</template>
-                  <div v-for="event in pluginEvents(row.plugin)" :key="event.type">
-                    <span class="mono">{{ event.type }}</span>
-                    <span v-if="event.summary" class="os-text-muted"> · {{ event.summary }}</span>
-                  </div>
-                </dd>
-
-                <dt>Skill</dt>
-                <dd data-skill>
-                  <span v-if="pluginSkill(row.plugin)" class="mono">{{ pluginSkill(row.plugin) }}</span>
-                  <template v-else>None</template>
-                </dd>
-
-                <dt>Members</dt>
-                <dd data-members>
-                  <template v-if="row.plugin.members.length === 0">None hired</template>
-                  <div v-for="member in row.plugin.members" :key="`${member.team}/${member.member}`">
-                    <a
-                      href="#"
-                      class="plugin-member-link"
-                      :data-member-link="`${member.team}/${member.member}`"
-                      @click.prevent="openMember(member)"
-                    >{{ teamLabel(member) }} / {{ memberLabel(member) }}</a>
-                  </div>
-                </dd>
-              </dl>
+              <!-- WHO IS HIRED ON IT, on the tile: each a link to that member's settings. -->
+              <div class="plugin-tile-line" data-members-summary>
+                <span class="os-text-muted">Members: </span>
+                <template v-if="row.plugin.members.length === 0">None hired</template>
+                <template v-for="(member, index) in row.plugin.members" :key="`${member.team}/${member.member}`">
+                  <span v-if="index > 0">, </span>
+                  <a
+                    href="#"
+                    class="plugin-member-link"
+                    :data-member-link="`${member.team}/${member.member}`"
+                    @click.prevent="openMember(member)"
+                  >{{ teamLabel(member) }} / {{ memberLabel(member) }}</a>
+                </template>
+              </div>
             </template>
 
             <!-- ACTIONS, icons with their words in a tooltip and an aria-label, as on an Agent's
                  tile. Remove version only where the plugin has another; Remove plugin on its first
                  tile. -->
             <div class="plugin-tile-actions">
+              <span v-if="row.verdict === 'installed'" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="visibility"
+                  :aria-label="`Details ${row.id} ${row.version}`"
+                  data-plugin-details
+                  @click="detailsRow = row"
+                />
+                <q-tooltip>Details: its settings, secrets, connections, events, skill and members</q-tooltip>
+              </span>
               <span v-if="row.version" class="row-btn-wrap">
                 <q-btn
                   dense
@@ -520,6 +508,81 @@ const verdictText = computed(() => {
           @click="confirmRemove"
         />
       </q-card-actions>
+    </q-card>
+  </q-dialog>
+
+  <!-- DETAILS: everything an installed version declares, read-only. -->
+  <q-dialog :model-value="detailsRow !== null" @update:model-value="(showing: boolean) => { if (!showing) detailsRow = null; }">
+    <q-card v-if="detailsRow && detailsRow.verdict === 'installed'" class="os-dialog-md" data-plugin-details-dialog>
+      <q-card-section class="row items-center q-pb-none">
+        <div>
+          <div class="os-dialog-title">{{ detailsRow.name }}</div>
+          <div class="text-caption os-text-muted mono">{{ detailsRow.id }} {{ detailsRow.version }}</div>
+        </div>
+        <q-space />
+        <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
+      </q-card-section>
+      <q-card-section class="plugin-details-body">
+        <div v-if="detailsRow.plugin.description" class="q-mb-sm">{{ detailsRow.plugin.description }}</div>
+        <dl class="plugin-facts">
+          <dt>Settings</dt>
+          <dd data-config>
+            <template v-if="Object.keys(detailsRow.plugin.config).length === 0">None</template>
+            <div v-for="(field, key) in detailsRow.plugin.config" :key="key" :data-config-field="key">
+              <span class="mono">{{ key }}</span>
+              <span class="os-text-muted"> · {{ field.type }}</span>
+              <span v-if="defaultLabel(field)" class="os-text-muted"> · {{ defaultLabel(field) }}</span>
+              <span v-if="field.required" class="os-text-muted"> · Required</span>
+              <span v-if="setByPerson(field)" class="os-text-muted"> · Set by a person only</span>
+            </div>
+          </dd>
+
+          <dt>Secrets</dt>
+          <dd data-secrets>
+            <template v-if="Object.keys(detailsRow.plugin.secrets).length === 0">None</template>
+            <span v-for="(secret, key) in detailsRow.plugin.secrets" :key="key" class="mono q-mr-sm">{{ key }}</span>
+          </dd>
+
+          <dt>Connections</dt>
+          <dd data-connections>
+            <template v-if="Object.keys(detailsRow.plugin.connections ?? {}).length === 0">None</template>
+            <div v-for="(wanted, key) in detailsRow.plugin.connections ?? {}" :key="key" :data-connection-slot="key">
+              <span class="mono">{{ key }}</span>
+              <span class="os-text-muted"> · {{ slotSummary(wanted) }}</span>
+              <span v-if="wanted.required" class="os-text-muted"> · Required</span>
+              <span v-if="wanted.description" class="os-text-muted"> · {{ wanted.description }}</span>
+            </div>
+          </dd>
+
+          <dt>Events</dt>
+          <dd data-events>
+            <template v-if="pluginEvents(detailsRow.plugin).length === 0">None</template>
+            <div v-for="event in pluginEvents(detailsRow.plugin)" :key="event.type">
+              <span class="mono">{{ event.type }}</span>
+              <span v-if="event.summary" class="os-text-muted"> · {{ event.summary }}</span>
+            </div>
+          </dd>
+
+          <dt>Skill</dt>
+          <dd data-skill>
+            <span v-if="pluginSkill(detailsRow.plugin)" class="mono">{{ pluginSkill(detailsRow.plugin) }}</span>
+            <template v-else>None</template>
+          </dd>
+
+          <dt>Members</dt>
+          <dd data-members>
+            <template v-if="detailsRow.plugin.members.length === 0">None hired</template>
+            <div v-for="member in detailsRow.plugin.members" :key="`${member.team}/${member.member}`">
+              <a
+                href="#"
+                class="plugin-member-link"
+                :data-member-link="`${member.team}/${member.member}`"
+                @click.prevent="openMember(member)"
+              >{{ teamLabel(member) }} / {{ memberLabel(member) }}</a>
+            </div>
+          </dd>
+        </dl>
+      </q-card-section>
     </q-card>
   </q-dialog>
 
@@ -655,6 +718,19 @@ const verdictText = computed(() => {
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+/* Three lines of the description on the tile; the whole of it is in Details. */
+.plugin-description {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.plugin-details-body {
+  max-height: 70vh;
+  overflow-y: auto;
 }
 
 .plugin-tile-actions {
