@@ -97,5 +97,63 @@ public static class OutcomeSchema
             CREATE TRIGGER workflow_ledger_no_delete BEFORE DELETE ON workflow_ledger
             BEGIN SELECT RAISE(ABORT, 'workflow_ledger is append-only'); END;
             """),
+
+        // THE OUTCOMES AND THEIR LINKS. `outcomes.id` is a GUID written with its hyphens, so it
+        // stays text wherever it is copied (`workflow_ledger.outcome_id_at_close` is INTEGER). A
+        // name is unique among `proposed` and `active` only, compared by `name_key` (trimmed,
+        // whitespace runs one space, lower-cased): a retired or merged name may be used again.
+        // `merged_into` is set on a merged outcome and reads follow it; nothing rewrites a link.
+        //
+        // `workflow_outcome_links` is APPEND-ONLY, like the ledger: a workflow's outcome is its
+        // newest row, a move is a new row, and a rename or merge never touches one - the name and
+        // team snapshots say what they were when the link was made. `how` is dispatch, trigger,
+        // tell, manager or person; `set_by_kind` is person, member or platform.
+        new MigrationStep(
+            "outcome-002",
+            """
+            CREATE TABLE outcomes (
+                id              TEXT PRIMARY KEY,
+                name            TEXT NOT NULL,
+                name_key        TEXT NOT NULL,
+                description     TEXT NOT NULL DEFAULT '',
+                status          TEXT NOT NULL,
+                merged_into     TEXT NULL,
+                source          TEXT NOT NULL DEFAULT 'local',
+                target_metric   TEXT NULL,
+                target_unit     TEXT NULL,
+                target_value    TEXT NULL,
+                created_by      TEXT NOT NULL,
+                created_by_kind TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL,
+                confirmed_by    TEXT NULL,
+                confirmed_at    TEXT NULL
+            );
+
+            CREATE UNIQUE INDEX ux_outcomes_live_name ON outcomes(name_key)
+                WHERE status IN ('proposed', 'active');
+
+            CREATE TABLE workflow_outcome_links (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                correlation          INTEGER NOT NULL,
+                outcome_id           TEXT    NOT NULL,
+                team_id              TEXT    NULL COLLATE NOCASE,
+                team_name_at_link    TEXT    NULL,
+                outcome_name_at_link TEXT    NOT NULL,
+                set_by               TEXT    NOT NULL,
+                set_by_kind          TEXT    NOT NULL,
+                set_at               TEXT    NOT NULL,
+                how                  TEXT    NOT NULL
+            );
+
+            CREATE INDEX ix_workflow_outcome_links_correlation ON workflow_outcome_links(correlation, id);
+            CREATE INDEX ix_workflow_outcome_links_outcome ON workflow_outcome_links(outcome_id);
+
+            CREATE TRIGGER workflow_outcome_links_no_update BEFORE UPDATE ON workflow_outcome_links
+            BEGIN SELECT RAISE(ABORT, 'workflow_outcome_links is append-only'); END;
+
+            CREATE TRIGGER workflow_outcome_links_no_delete BEFORE DELETE ON workflow_outcome_links
+            BEGIN SELECT RAISE(ABORT, 'workflow_outcome_links is append-only'); END;
+            """),
     ];
 }

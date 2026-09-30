@@ -520,5 +520,14 @@ public static class AuthSchema
                 plugins      TEXT NOT NULL DEFAULT '{}'
             );
             """),
+
+        // THE OUTCOME A TRIGGER'S FIRES SERVE. NULL for none, and for every trigger from before the
+        // step. A fire of a trigger that names one links the workflow it roots to it, attributed to
+        // the person who configured the trigger. No foreign key: `outcomes` is the outcome module's.
+        new MigrationStep(
+            "auth-017",
+            """
+            ALTER TABLE triggers ADD COLUMN outcome_id TEXT NULL;
+            """),
     ];
 }

@@ -149,6 +149,10 @@ public static class LedgerRows
 
         var teamId = MessageTeam.Of(close);
 
+        // THE OUTCOME THE WORKFLOW SERVED WHEN IT CLOSED: its newest link's outcome, as linked. A
+        // later merge is followed on read; nothing here is rewritten.
+        var outcome = (await OutcomeLinks.CurrentAsync(connection, transaction, close.CorrelationId, ct))?.OutcomeId;
+
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText =
@@ -156,7 +160,7 @@ public static class LedgerRows
              INSERT {(backfilled ? "OR IGNORE " : "")}INTO workflow_ledger (
                  close_seq, correlation, team_id, team_name, root_at, closed_at, how_closed,
                  outcome_id_at_close, backfilled)
-             VALUES ($seq, $correlation, $team, {TeamNameSql}, $rootAt, $closedAt, $how, NULL, $backfilled)
+             VALUES ($seq, $correlation, $team, {TeamNameSql}, $rootAt, $closedAt, $how, $outcome, $backfilled)
              """;
 
         insert.Parameters.AddWithValue("$seq", close.Seq);
@@ -166,6 +170,7 @@ public static class LedgerRows
         insert.Parameters.AddWithValue("$closedAt", Stamp(close.OccurredAt));
         insert.Parameters.AddWithValue(
             "$how", close.Type == MessageTypes.WorkflowCompleted ? WorkflowLedgerRow.Completed : WorkflowLedgerRow.Closed);
+        insert.Parameters.AddWithValue("$outcome", (object?)outcome ?? DBNull.Value);
         insert.Parameters.AddWithValue("$backfilled", backfilled ? 1 : 0);
 
         return await insert.ExecuteNonQueryAsync(ct) > 0;

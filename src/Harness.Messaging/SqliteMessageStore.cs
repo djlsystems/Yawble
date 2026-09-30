@@ -229,6 +229,10 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // can skip it; when it cannot be written this throws and the row is not stored either.
         await LedgerRows.WriteAsync(connection, transaction, stored, backfilled: false, ct);
 
+        // THE OUTCOME, AT THE ROOT, IN THIS SAME TRANSACTION: a dispatch links to its item's outcome
+        // and a trigger's fire to its trigger's. See OutcomeLinks.
+        await OutcomeLinks.OnAppendAsync(connection, transaction, stored, ct);
+
         return stored;
     }
 

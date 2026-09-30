@@ -20,6 +20,7 @@ public sealed partial class PlatformMcpTools
         [Description("Card id, for show, move, edit, and comment.")] string? card = null,
         [Description("Board filter: one member's identifier.")] string? member = null,
         [Description("Board filter, or the new status on edit.")] string? status = null,
+        [Description("Board filter: an outcome's id, or none for cards whose workflows have no outcome.")] string? outcome = null,
         [Description("Lane id, for move: todo, in-progress, blocked, or done.")] string? lane = null,
         [Description("New title, for edit or plan.")] string? title = null,
         [Description("Card body, for plan.")] string? body = null,
@@ -33,7 +34,8 @@ public sealed partial class PlatformMcpTools
         var verb = (action ?? "").Trim().ToLowerInvariant();
         if (verb is "filter")
         {
-            return "The board takes three filters: team, member, and status. "
+            return "The board takes four filters: team, member, status, and outcome (an outcome's id "
+                + "from the outcome tool's list, or none for cards whose workflows have no outcome). "
                 + "A date range is not a filter. A workflow is workflow_show. "
                 + "Searching a card's text is not a flag; read the board.";
         }
@@ -43,7 +45,7 @@ public sealed partial class PlatformMcpTools
             return await SendAsync(
                 HttpMethod.Get,
                 "/api/kanban/board" + Query(
-                    ("team", team), ("member", member), ("status", status)),
+                    ("team", team), ("member", member), ("status", status), ("outcome", outcome)),
                 null,
                 cancellationToken);
         }
@@ -57,7 +59,7 @@ public sealed partial class PlatformMcpTools
             case "board":
                 return await SendAsync(
                     HttpMethod.Get,
-                    teamPath + "/kanban/board" + Query(("member", member), ("status", status)),
+                    teamPath + "/kanban/board" + Query(("member", member), ("status", status), ("outcome", outcome)),
                     null,
                     cancellationToken);
 

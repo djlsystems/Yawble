@@ -294,6 +294,16 @@ builder.Services.AddSingleton<ICursors>(store);
 builder.Services.AddSingleton<ISubscriptions>(store);
 builder.Services.AddSingleton(workflowWaits);
 builder.Services.AddSingleton<IUsageLedger>(new SqliteUsageLedger(database));
+
+// THE OUTCOMES AND THEIR LINKS, in the same file: every person's write lands with its tenant_events
+// row in one transaction, written with the tenant log's own columns.
+var outcomeStore = new SqliteOutcomeStore(database, TenantAuditRow.AppendAsync);
+builder.Services.AddSingleton(outcomeStore);
+builder.Services.AddSingleton<IOutcomeStore>(outcomeStore);
+
+// THE GATE, read through a delegate so a person's change applies to the next declaration.
+builder.Services.AddSingleton(sp => new OutcomeGate(
+    () => sp.GetRequiredService<TenantSettings>().OutcomesRequireForCompletion, outcomeStore));
 builder.Services.AddSingleton(new LedgerIdentity(ledgerStart?.InstanceId, ledgerStart?.LedgerStartedAt));
 builder.Services.AddSingleton(new KanbanStore(store));
 
@@ -473,7 +483,9 @@ builder.Services.AddSingleton(fileBrowser);
 builder.Services.AddSingleton<ILedger>(new SqliteLedger(database));
 builder.Services.AddSingleton<ITranscriptStore>(new FileTranscriptStore(teamPaths));
 builder.Services.AddSingleton<IContextBuilder>(sp =>
-    new LedgerContextBuilder(sp.GetRequiredService<ILedger>()));
+    new OutcomeNudge(
+        new LedgerContextBuilder(sp.GetRequiredService<ILedger>()),
+        sp.GetRequiredService<IOutcomeStore>()));
 
 // BUILT-IN PRESETS FROM THE BUILD, custom ones from agents.json. Nothing built-in is
 // written to the volume, so a fix to a built-in preset reaches this instance on its next start.
@@ -619,7 +631,8 @@ builder.Services.AddSingleton(sp =>
             }),
         runAs.Switches ? runAs.Gid : -1,
         sp.GetRequiredService<ISecretStore>(),
-        sp.GetRequiredService<TriggerSweep>());
+        sp.GetRequiredService<TriggerSweep>(),
+        sp.GetRequiredService<SqliteOutcomeStore>());
 });
 
 // THE SOLUTIONS LAUNCHER AND A SOLUTION'S CONTROL PANEL: reads only; every control is an existing route.
@@ -1963,6 +1976,7 @@ SiteEndpoints.Map(app);
 SiteApiEndpoints.Map(app);
 TenantSettingsEndpoints.Map(app);
 LedgerEndpoints.Map(app);
+OutcomeEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
 RemovalEndpoints.Map(app);
@@ -3144,7 +3158,7 @@ app.MapPost("/api/teams/{team}/triggers", async (
             request.Timezone, request.IntervalSeconds, request.FireAt, request.IdleOnly, request.Enabled,
             request.NextDueAt, request.EventType, request.Filter, request.WatchRoot, request.WatchPath,
             request.WatchGlob, request.PollSeconds, request.QuietSeconds, request.MinIntervalSeconds,
-            request.WakeManager, request.DailyTokenCap),
+            request.WakeManager, request.DailyTokenCap, request.OutcomeId),
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown",
         row => TenantLogging.Row(
             context, TenantActions.ScheduleCreated, row.Id, row.Name, new { team = row.Team, member = row.Container }),
@@ -3182,6 +3196,7 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
     AgentCatalog catalog,
     EffectiveSubscriptions effective,
     TriggerWakeSignal wake,
+    IOutcomeStore outcomes,
     HttpContext context,
     CancellationToken ct) =>
 {
@@ -3309,6 +3324,17 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
     if (TriggerFilter.RefusalFor(candidate.Filter, candidate.EventType ?? "") is { } filterRefusal)
     {
         return Results.BadRequest(new { error = filterRefusal });
+    }
+
+    // THE OUTCOME ITS FIRES SERVE: a live one, named by id or exact name, stored by id.
+    if (patch.HasOutcomeId && candidate.OutcomeId is { } outcomeAsked)
+    {
+        if (await outcomes.ResolveLiveAsync(outcomeAsked, ct) is not { } outcome)
+        {
+            return Results.BadRequest(new { error = TriggerCreation.OutcomeRefusal(outcomeAsked) });
+        }
+
+        candidate = candidate with { OutcomeId = outcome.Id };
     }
 
     // A PERSON'S CHANGE WAKES A SCHEDULE ASLEEP ON ITS CAP. Raised above today's spend, or cleared,
@@ -5529,7 +5555,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
         + "called `Manager` unless it has been relabelled.")]
     string name,
     Tell request, TeamRegistry teams, ContainerHost host,
-    IMessageLog log, IPendingDeliveries pending, HttpContext context, CancellationToken ct) =>
+    IMessageLog log, IPendingDeliveries pending, IOutcomeStore outcomes, HttpContext context, CancellationToken ct) =>
 {
     // The STORED spelling, so the id built here is the one the container was registered under
     // however the caller capitalised the team.
@@ -5703,6 +5729,27 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
         ? await QueuedInstructions.DuplicateOfAsync(pending, log, container.Id, correlation, request.Instruction, ct)
         : null;
 
+    // THE OUTCOME OF A NEW WORKFLOW, named at its root: an id, or the exact name of a live outcome.
+    // An instruction that joins a workflow has none to name - that workflow's outcome is its own.
+    Outcome? rootOutcome = null;
+    if (!string.IsNullOrWhiteSpace(request.Outcome))
+    {
+        if (causation is not null)
+        {
+            return Results.BadRequest(new
+            {
+                error = $"`outcome` names the outcome of a NEW workflow, and this instruction joins workflow {joins}. "
+                    + "Set that workflow's outcome with the `outcome` tool instead.",
+            });
+        }
+
+        rootOutcome = await outcomes.ResolveLiveAsync(request.Outcome, ct);
+        if (rootOutcome is null)
+        {
+            return Results.BadRequest(new { error = TriggerCreation.OutcomeRefusal(request.Outcome.Trim()) });
+        }
+    }
+
     // Three fields, and `instruction` is the one that must never leave.
     //
     // It is what every reader reads, and the log is APPEND-ONLY and REPLAYED: older rows may carry
@@ -5714,8 +5761,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
     // agent told less than the person wrote fails in the way nothing can see.
     var parts = InstructionText.Split(request.Instruction, request.Subject);
 
-    var message = await log.AppendAsync(
-        new NewMessage(
+    var instructionRow = new NewMessage(
             MessageTypes.InstructionFor(container.Id),
             JsonSerializer.Serialize(new
             {
@@ -5730,8 +5776,38 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
                 card = string.IsNullOrWhiteSpace(request.Card) ? null : request.Card.Trim(),
             }),
             from,
-            causation),
-        ct);
+            causation);
+
+    // THE ROOT, ITS LINK AND ITS TENANT ROW IN ONE TRANSACTION (`how: tell`): a person's own tell
+    // is theirs, and the Concierge's is an agent's, which a Manager may later move. The
+    // `workflow.outcome-changed` row names the person, or the member for an agent's tell; when it
+    // cannot be written, neither the instruction nor the link lands.
+    var tellerIsPerson = callerPrincipal?.Kind == PrincipalKind.User;
+    var message = rootOutcome is null
+        ? await log.AppendAsync(instructionRow, ct)
+        : (await log.AppendWithinAsync(
+            (_, _, _) => Task.FromResult<NewMessage?>(instructionRow),
+            async (connection, transaction, stored, token) =>
+            {
+                var sqlite = (Microsoft.Data.Sqlite.SqliteConnection)connection;
+                var within = (Microsoft.Data.Sqlite.SqliteTransaction)transaction;
+
+                await OutcomeLinks.WriteAsync(
+                    sqlite, within, stored.CorrelationId, rootOutcome.Id, container.Id.Team,
+                    tellerIsPerson ? context.User.FindFirstValue(ClaimTypes.Email) ?? from : from,
+                    tellerIsPerson ? OutcomeActorKind.Person : OutcomeActorKind.Member,
+                    OutcomeLinkHow.Tell,
+                    token);
+
+                var detail = new { team = container.Id.Team, workflow = stored.CorrelationId, how = OutcomeLinkHow.Tell };
+                await TenantAuditRow.AppendAsync(sqlite, within,
+                    tellerIsPerson
+                        ? TenantLogging.Row(context, TenantActions.WorkflowOutcomeChanged, rootOutcome.Id, rootOutcome.Name, detail)
+                        : new TriggerAudit(from, null, TenantActions.WorkflowOutcomeChanged, rootOutcome.Id, rootOutcome.Name,
+                            JsonSerializer.Serialize(detail)),
+                    token);
+            },
+            ct))!;
     var paused = teams.IsPaused(stored);
     return Results.Ok(new
     {
@@ -6130,7 +6206,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
     HttpContext context, TeamRegistry teams, ContainerHost host, IMessageLog log,
     IPendingDeliveries pending, IBacklogStore backlog, ITeamPublisher publisher,
     KanbanStore kanban, WorktreeRemoval worktrees, TeamPaths paths, ILoggerFactory loggers,
-    SolutionNotice solutionNotice,
+    SolutionNotice solutionNotice, OutcomeGate outcomeGate,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -6225,6 +6301,14 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
             error = "This workflow is already declared complete or closed, so there is nothing "
                 + "to declare. End your turn; do not retry.",
         });
+    }
+
+    // THE OUTCOME GATE, off by default: when a person turns it on, an agent does not declare a
+    // workflow that serves no outcome. Read through its delegate on every declaration. A person's
+    // close and the platform's own declarations never come through here, so it never gates them.
+    if (await outcomeGate.RefusalAsync(correlation, ct) is { } noOutcome)
+    {
+        return Results.Conflict(new { error = noOutcome });
     }
 
     // THE OWNER OF A MEMBER-OWNED WORKFLOW IS NOT REFUSED FOR A MANAGER THAT IS ONLY WATCHING -
@@ -7429,7 +7513,8 @@ static bool TryReadSchedulePatch(JsonElement body, out SchedulePatch patch, out 
         body.TryGetProperty("quietSeconds", out _), typed.QuietSeconds,
         body.TryGetProperty("minIntervalSeconds", out _), typed.MinIntervalSeconds,
         body.TryGetProperty("wakeManager", out _), typed.WakeManager,
-        body.TryGetProperty("dailyTokenCap", out _), typed.DailyTokenCap);
+        body.TryGetProperty("dailyTokenCap", out _), typed.DailyTokenCap,
+        body.TryGetProperty("outcomeId", out _), string.IsNullOrWhiteSpace(typed.OutcomeId) ? null : typed.OutcomeId.Trim());
 
     return true;
 }
@@ -7610,6 +7695,7 @@ static bool ApplySchedulePatch(
         MinIntervalSeconds = patch.HasMinIntervalSeconds ? patch.MinIntervalSeconds : existing.MinIntervalSeconds,
         WakeManager = wakeManager,
         DailyTokenCap = dailyTokenCap,
+        OutcomeId = patch.HasOutcomeId ? patch.OutcomeId : existing.OutcomeId,
     };
 
     return true;
@@ -7636,7 +7722,8 @@ internal readonly record struct SchedulePatch(
     bool HasQuietSeconds = false, int? QuietSeconds = null,
     bool HasMinIntervalSeconds = false, int? MinIntervalSeconds = null,
     bool HasWakeManager = false, string? WakeManager = null,
-    bool HasDailyTokenCap = false, long? DailyTokenCap = null);
+    bool HasDailyTokenCap = false, long? DailyTokenCap = null,
+    bool HasOutcomeId = false, string? OutcomeId = null);
 
 /// <summary>
 /// Public so WebApplicationFactory&lt;Program&gt; can find it. Note the asymmetry with
@@ -7951,11 +8038,18 @@ internal sealed record CreateSchedule(
     [property: Description(WatchDescriptions.WakeManager + " Defaults to `onHandbackOrFailure`.")]
     string? WakeManager = null,
     [property: Description(WatchDescriptions.DailyTokenCap + " Omit or null for no cap.")]
-    long? DailyTokenCap = null);
+    long? DailyTokenCap = null,
+    [property: Description(WatchDescriptions.Outcome + " Omit or null for none.")]
+    string? OutcomeId = null);
 
 /// <summary>The folder-trigger field descriptions, shared by the create, update and test-folder bodies.</summary>
 internal static class WatchDescriptions
 {
+    public const string Outcome =
+        "The outcome this trigger's fires serve: an active or proposed outcome's id or exact name, "
+        + "stored as its id. A fire that roots a workflow links it to this outcome, attributed to the "
+        + "person who configured the trigger.";
+
     public const string Root =
         "`kind: folderChange` only. `documents` for the team's documents, or `root:<name>` for a "
         + "file-browser root configured with allowWatch.";
@@ -8049,7 +8143,9 @@ internal sealed record UpdateSchedule(
     [property: Description(WatchDescriptions.WakeManager + " May not be null.")]
     string? WakeManager = null,
     [property: Description(WatchDescriptions.DailyTokenCap + " Null clears the cap.")]
-    long? DailyTokenCap = null);
+    long? DailyTokenCap = null,
+    [property: Description(WatchDescriptions.Outcome + " Null clears it.")]
+    string? OutcomeId = null);
 
 internal sealed record CreateContainer(
     [property: Description(
@@ -8399,7 +8495,13 @@ internal sealed record Tell(
         + "Todo; no second card is minted. Absent - which is every ordinary instruction - behaves "
         + "exactly as it always has, which is what keeps a team that never touches the backlog "
         + "unchanged and stops conversational instructions each becoming a card of their own.")]
-    string? Card = null);
+    string? Card = null,
+
+    [property: Description(
+        "The outcome the NEW workflow this instruction roots serves: an active or proposed "
+        + "outcome's id, or its exact name. Only on an instruction with no causation; one that "
+        + "joins a workflow is refused, and that workflow's outcome is set with the `outcome` tool.")]
+    string? Outcome = null);
 
 internal sealed record NewFolder(
     [property: Description(

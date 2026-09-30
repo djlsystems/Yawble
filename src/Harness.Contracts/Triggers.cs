@@ -76,7 +76,12 @@ public sealed record TriggerRow(
 
     /// <summary>How many fires the daily cap skipped on <see cref="CappedSkipsDay"/>. Only the first
     /// of them wrote a `schedule.skipped` row and a tenant row.</summary>
-    int CappedSkips = 0);
+    int CappedSkips = 0)
+{
+    /// <summary>The outcome this trigger's fires serve (<c>auth-017</c>), or null. A fire rooting a
+    /// workflow links it to this outcome, attributed to <see cref="CreatedBy"/>.</summary>
+    public string? OutcomeId { get; init; }
+}
 
 /// <summary>
 /// The `tenant_events` row a settings write appends in the SAME transaction as the write, so a

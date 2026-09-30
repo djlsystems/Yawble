@@ -62,6 +62,8 @@ public sealed partial class PlatformMcpTools(
         [Description("Optional card title, at most 80 characters.")] string? subject = null,
         [Description("Message seq this instruction answers. A team member that omits it dispatches inside the run it is in; a Concierge that omits it starts a new workflow.")] string? causation = null,
         [Description("Optional planned card id this instruction claims.")] string? card = null,
+        [Description("Optional, only when this starts a new workflow (no causation): the outcome it serves - an active or proposed outcome's id or exact name, from the outcome tool's list.")]
+        string? outcome = null,
         CancellationToken cancellationToken = default)
     {
         var resolved = await TeamAsync(team, cancellationToken);
@@ -70,7 +72,7 @@ public sealed partial class PlatformMcpTools(
         return await SendAsync(
             HttpMethod.Post,
             $"/api/teams/{Uri.EscapeDataString(resolved)}/containers/{Uri.EscapeDataString(member)}/tell",
-            new { instruction, subject, causation, card },
+            new { instruction, subject, causation, card, outcome = string.IsNullOrWhiteSpace(outcome) ? null : outcome.Trim() },
             cancellationToken);
     }
 

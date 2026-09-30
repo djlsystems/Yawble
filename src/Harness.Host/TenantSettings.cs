@@ -75,6 +75,7 @@ public sealed class TenantSettings
     public const string ThemeDefaultName = "theme.default";
     public const string SystemPackagesName = "system.packages";
     public const string AgentTagsName = "agents.tags";
+    public const string OutcomesRequireForCompletionName = "outcomes.requireForCompletion";
 
     private readonly SqliteTenantSettingsStore _store;
     private readonly IConfiguration _configuration;
@@ -151,6 +152,13 @@ public sealed class TenantSettings
                 + "entry naming no built-in preset is ignored, and GET /api/agents lists it under "
                 + "ignoredTagOverrides. Applies to the next hire.",
                 Max: 64),
+            new(OutcomesRequireForCompletionName, TenantSettingKind.Choice, "off", "Outcomes:RequireForCompletion",
+                "Whether an agent's declaration that a workflow is complete is refused while the workflow "
+                + "has no outcome. `off` (the default) refuses nothing: unlinked work is counted as "
+                + "\"No outcome\". `on` refuses the declaration with a sentence naming the `outcome` tool. "
+                + "A person's close and the platform's own declarations are never refused. Applies to the "
+                + "next declaration.",
+                Choices: ["off", "on"]),
         ];
 
         _definitions = Definitions.ToDictionary(d => d.Name, StringComparer.Ordinal);
@@ -206,6 +214,9 @@ public sealed class TenantSettings
         ParseLaneLimits(Current(KanbanWipLimitsName));
 
     public string ThemeDefault => Current(ThemeDefaultName);
+
+    /// <summary><c>outcomes.requireForCompletion</c>: whether an agent's declaration needs an outcome.</summary>
+    public bool OutcomesRequireForCompletion => Current(OutcomesRequireForCompletionName) == "on";
 
     /// <summary><c>system.packages</c>: what the entrypoint installs at the next start.</summary>
     public IReadOnlyList<string> SystemPackages =>
