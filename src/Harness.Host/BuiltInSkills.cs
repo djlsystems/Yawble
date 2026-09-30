@@ -1347,7 +1347,7 @@ public static class BuiltInSkills
               person's action; you never merge, push or ask an agent to. When the item reads
               landed, mark it implemented (`backlog  action: edit  id: <id>  state: implemented`).
             - **A defect in scope:** tell the same team to fix it, continuing the dispatch workflow:
-              `tell  member: Manager  team: <team>  causation: <the dispatch workflow's latest row>`.
+              `tell  member: Manager  team: <team>  instruction: <what to fix>  causation: <the dispatch workflow's latest row>`.
               Assess again when it completes.
             - **Something outside the item's scope,** or a gap the item did not ask for: write a new
               backlog item for it with `backlog  action: add`, in the house format (Summary, The
