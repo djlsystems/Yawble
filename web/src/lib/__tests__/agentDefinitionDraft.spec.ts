@@ -141,4 +141,31 @@ describe('rebuildAgentDefinition', () => {
 
     expect(rebuilt.install).toBeNull()
   })
+  it('carries a preset\'s isolation declaration through an edit unchanged', () => {
+    const isolation = {
+      arguments: ['--strict-mcp-config'],
+      env: { ENABLE_CLAUDEAI_MCP_SERVERS: 'false' },
+      allowedTools: ['Bash'],
+      gaps: ['a known gap'],
+    }
+
+    const rebuilt = rebuildAgentDefinition({
+      name: 'mine',
+      mode: 'Headless',
+      fileName: 'claude',
+      args: '{isolation}\n-p',
+      systemPromptArguments: '',
+      instructionsFile: '',
+      usageFormat: '',
+      env: '',
+      timeout: '',
+      tags: '',
+      installUrl: '',
+      installHint: '',
+      languageModel: true,
+      isolation,
+    })
+
+    expect(rebuilt.isolation).toEqual(isolation)
+  })
 })

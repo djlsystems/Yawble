@@ -1,4 +1,4 @@
-import type { Agent, AgentInstall, AgentMode } from '../api/types'
+import type { Agent, AgentInstall, AgentIsolation, AgentMode } from '../api/types'
 import { launchFromDialogState } from './agentLaunch'
 
 export interface AgentDraft {
@@ -28,6 +28,13 @@ export interface AgentDraft {
    */
   installUrl: string
   installHint: string
+
+  /**
+   * The preset's isolation declaration, carried unchanged: the dialog has no field for it yet, and a
+   * rebuild that dropped it would turn an isolated custom preset into a not-verified one on its
+   * next save.
+   */
+  isolation?: AgentIsolation | null
 }
 
 const parseLines = (text: string): string[] =>
@@ -101,6 +108,7 @@ export function rebuildAgentDefinition(draft: AgentDraft): Agent {
     timeoutSeconds: parseNumberOrNull(draft.timeout),
     tags: parseTags(draft.tags),
     install: parseInstall(draft.installUrl, draft.installHint),
+    ...(draft.isolation ? { isolation: draft.isolation } : {}),
   }
 }
 

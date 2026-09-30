@@ -201,7 +201,7 @@ public sealed class CodexMcpWiringTests
             ["--dangerously-bypass-approvals-and-sandbox", .. Wiring],
             presets["codex"].Launch.Arguments);
         Assert.Equal(
-            ["exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", .. Wiring],
+            ["exec", AgentIsolation.Token, "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", .. Wiring],
             presets["codex-headless"].Launch.Arguments);
     }
 
