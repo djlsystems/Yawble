@@ -170,6 +170,11 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
         var detail = JsonDocument.Parse(tenant.Detail!).RootElement;
         Assert.Equal("fired", detail.GetProperty("outcome").GetString());
         Assert.Equal(instruction.Seq, detail.GetProperty("seq").GetInt64());
+
+        // The schedule's own `schedule.fired` row, as the sweep's fire writes it.
+        var fired = Assert.Single(await TenantRowsAsync(TenantActions.ScheduleFired, id));
+        Assert.Equal($"schedule:{id}", fired.ActorId);
+        Assert.True(JsonDocument.Parse(fired.Detail!).RootElement.GetProperty("runNow").GetBoolean());
     }
 
     [Fact]
@@ -200,6 +205,33 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
         var runs = await TenantRowsAsync(TenantActions.ScheduleRunNow, id);
         Assert.Equal(2, runs.Count);
         Assert.Contains(runs, e => JsonDocument.Parse(e.Detail!).RootElement.GetProperty("outcome").GetString() == "capped");
+    }
+
+    /// <summary>A solution's run-at-install is this same call with its own action and the clock
+    /// counted on from now: at the cap it is skipped with the cap's row, like a person's Run now.</summary>
+    [Fact]
+    public async Task A_capped_run_at_install_goes_through_the_same_call_and_is_skipped_with_its_row()
+    {
+        var id = await DailyAsync(cap: 1000);
+        var after = await Log.HighestSeqAsync(Ct);
+
+        Assert.Equal("fired", (await RunNowAsync(id)).GetProperty("outcome").GetString());
+        await SettleAsync(after);
+
+        var run = await Services.GetRequiredService<TriggerSweep>().RunNowAsync(
+            id, DateTimeOffset.UtcNow, "installer-id", "installer@example.test", TenantActions.ScheduleRunAtInstall,
+            countOnFromNow: true, Ct);
+
+        Assert.NotNull(run);
+        Assert.Equal(("capped", MessageTypes.ScheduleSkippedCapReason), (run.Outcome, run.Reason));
+        Assert.Single(
+            await Log.ReadAfterAsync(0, [MessageTypes.ScheduleSkipped], int.MaxValue, Ct), m => m.Source == $"schedule:{id}");
+        Assert.Single(await TenantRowsAsync(TenantActions.ScheduleSkipped, id));
+        Assert.Single(await InstructionsAsync(id));
+
+        var installed = Assert.Single(await TenantRowsAsync(TenantActions.ScheduleRunAtInstall, id));
+        Assert.Equal("installer@example.test", installed.ActorEmail);
+        Assert.Equal("capped", JsonDocument.Parse(installed.Detail!).RootElement.GetProperty("outcome").GetString());
     }
 
     [Fact]

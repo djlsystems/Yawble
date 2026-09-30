@@ -774,7 +774,7 @@ public sealed class SolutionInstaller(
 
         // THE FIRST RUNS, only now that the last step has succeeded and the documents are in: a
         // failed step returned above, having made no fire.
-        var firstRuns = await FirstRunsAsync(manifest, triggerIds, firstDue, ct);
+        var firstRuns = await FirstRunsAsync(manifest, triggerIds, firstDue, actor, ct);
 
         var saved = (await store.FindAsync(stored!, ct))!;
 
@@ -1289,13 +1289,14 @@ public sealed class SolutionInstaller(
 
     /// <summary>
     /// EACH SCHEDULE'S FIRST RUN after an install. A <c>runAtInstall</c> one is fired once now through
-    /// <see cref="TriggerSweep.FireNowAsync"/> - the fire its schedule makes, with its wakeManager and
-    /// its daily cap - and then comes due on its interval from now. Any other waits for the due time
+    /// <see cref="TriggerSweep.RunNowAsync"/> - Run now's own call, the fire its schedule makes, with its
+    /// wakeManager and its daily cap, recorded as the installing person's `schedule.run-at-install` -
+    /// and then comes due on its interval from now. Any other waits for the due time
     /// it was created with. A fire that does not happen is that run's outcome, not the install's.
     /// </summary>
     private async Task<IReadOnlyList<SolutionFirstRun>> FirstRunsAsync(
         SolutionManifest manifest, IReadOnlyDictionary<string, string> triggerIds,
-        IReadOnlyDictionary<string, DateTimeOffset?> firstDue, CancellationToken ct)
+        IReadOnlyDictionary<string, DateTimeOffset?> firstDue, SolutionActor actor, CancellationToken ct)
     {
         var runs = new List<SolutionFirstRun>();
 
@@ -1310,24 +1311,25 @@ public sealed class SolutionInstaller(
             }
 
             var now = DateTimeOffset.UtcNow;
-            TriggerRow? fired;
+            TriggerRunNow? fired;
 
             try
             {
-                fired = await sweep.FireNowAsync(id, now, ct);
+                fired = await sweep.RunNowAsync(
+                    id, now, actor.UserId, actor.Email, TenantActions.ScheduleRunAtInstall, countOnFromNow: true, ct);
             }
             catch (Exception) when (!ct.IsCancellationRequested)
             {
                 fired = null;
             }
 
-            if (fired is { LastOutcome: SolutionFirstRun.Fired })
+            if (fired is { Outcome: SolutionFirstRun.Fired })
             {
-                runs.Add(new(trigger.Name, trigger.Member, true, true, SolutionFirstRun.Fired, now, fired.NextDueAt));
+                runs.Add(new(trigger.Name, trigger.Member, true, true, SolutionFirstRun.Fired, now, fired.Trigger.NextDueAt));
             }
             else
             {
-                runs.Add(new(trigger.Name, trigger.Member, true, false, fired?.LastOutcome ?? SolutionFirstRun.Failed, fired?.NextDueAt ?? due, null));
+                runs.Add(new(trigger.Name, trigger.Member, true, false, fired?.Outcome ?? SolutionFirstRun.Failed, fired?.Trigger.NextDueAt ?? due, null));
             }
         }
 

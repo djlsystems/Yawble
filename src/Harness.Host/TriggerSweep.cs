@@ -40,26 +40,6 @@ public sealed class TriggerSweep(
         }
     }
 
-    /// <summary>
-    /// FIRES ONE CLOCK TRIGGER NOW, as if <paramref name="now"/> were its due time: the fire the
-    /// sweep makes (source `schedule:&lt;id&gt;`, its instruction with its wakeManager, skipped for a
-    /// paused team or a busy idle-only member, skipped with its row at the daily cap), and then its
-    /// next due time counts on from now, as after any fire. A solution's first run at install is
-    /// this one call. Answers the row as the fire left it (its <c>LastOutcome</c> says what
-    /// happened), or null for an unknown row or one that is not a schedule.
-    /// </summary>
-    public async Task<TriggerRow?> FireNowAsync(string id, DateTimeOffset now, CancellationToken ct = default)
-    {
-        if (await schedules.FindAsync(id, ct) is not { } row
-            || !TryKind(row.Kind, out var kind) || kind is not (TriggerKind.Cron or TriggerKind.Every))
-        {
-            return null;
-        }
-
-        await FireOneAsync(row with { NextDueAt = now }, now, ct);
-        return await schedules.FindAsync(id, ct);
-    }
-
     private async Task FireOneAsync(TriggerRow row, DateTimeOffset now, CancellationToken ct)
     {
         if (row.NextDueAt is null) return;
@@ -181,32 +161,40 @@ public sealed class TriggerSweep(
     }
 
     /// <summary>
-    /// FIRES ONE CLOCK TRIGGER NOW, outside its schedule: a person's Run now, and a solution's
-    /// run-at-install. It is the fire the sweep makes - source `schedule:&lt;id&gt;`, the trigger's
-    /// instruction with its wakeManager, skipped for a paused team or a busy idle-only member, and
-    /// skipped with its `schedule.skipped` row when the daily cap is reached - but it is nobody's
-    /// due time: the stored `next_due_at` is left alone (a capped one sleeps, as the cap always
-    /// does), and nothing is counted as missed.
+    /// FIRES ONE CLOCK TRIGGER NOW, outside its schedule: the one single-fire entry point, for a
+    /// person's Run now and a solution's run-at-install. It is the fire the sweep makes - source
+    /// `schedule:&lt;id&gt;`, the trigger's instruction with its wakeManager and the sweep's
+    /// `schedule.fired` row, skipped with its `schedule.skipped` row for a paused team or a busy
+    /// idle-only member, and skipped as the sweep's capped fire is when the daily cap is reached - but
+    /// it is nobody's due time, so nothing is counted as missed.
+    ///
+    /// THE CLOCK: by default the stored `next_due_at` is left alone (a capped one sleeps, as the cap
+    /// always does). With <paramref name="countOnFromNow"/> the next due time counts on from now, as
+    /// after any fire - a run-at-install "runs once now, then every …". Either way the schedule's next
+    /// run is never skipped: the next occurrence after now is never later than one interval from now.
     ///
     /// WHO ASKED is written: one tenant row, <paramref name="action"/> by
     /// <paramref name="actorId"/>, whatever the outcome, beside the rows the fire itself writes.
-    /// Null for an event or folder trigger, which has no instruction of its own to fire.
+    /// Null for an unknown row, or an event or folder trigger, which has no instruction of its own
+    /// to fire.
     /// </summary>
     public async Task<TriggerRunNow?> RunNowAsync(
-        TriggerRow row,
+        string id,
         DateTimeOffset now,
         string? actorId,
         string? actorEmail,
         string action,
+        bool countOnFromNow = false,
         CancellationToken ct = default)
     {
-        if (!TryKind(row.Kind, out var kind) || kind is not (TriggerKind.Cron or TriggerKind.Every or TriggerKind.Once))
+        if (await schedules.FindAsync(id, ct) is not { } row
+            || !TryKind(row.Kind, out var kind) || kind is not (TriggerKind.Cron or TriggerKind.Every or TriggerKind.Once))
         {
             return null;
         }
 
-        var source = SourceOf(row.Id);
-        var result = await RunNowOutcomeAsync(row, now, source, ct);
+        var next = countOnFromNow ? Next(row, kind, now) : row.NextDueAt;
+        var (outcome, seq, reason) = await RunNowOutcomeAsync(row, now, next, ct);
 
         await tenant.WriteAsAsync(
             actorId,
@@ -218,41 +206,72 @@ public sealed class TriggerSweep(
             {
                 team = row.Team,
                 container = row.Container,
-                outcome = result.Outcome,
-                reason = result.Reason,
-                seq = result.Seq,
+                outcome,
+                reason,
+                seq,
                 at = now.ToString("O", CultureInfo.InvariantCulture),
             },
             ct);
 
-        return result;
+        return new TriggerRunNow(outcome, seq, reason, await schedules.FindAsync(row.Id, ct) ?? row);
     }
 
-    private async Task<TriggerRunNow> RunNowOutcomeAsync(TriggerRow row, DateTimeOffset now, string source, CancellationToken ct)
+    private async Task<(string Outcome, long? Seq, string? Reason)> RunNowOutcomeAsync(
+        TriggerRow row, DateTimeOffset now, DateTimeOffset? next, CancellationToken ct)
     {
         if (host.Find(new ContainerId(row.Team, row.Container)) is not { } container)
         {
-            return new TriggerRunNow("member-missing", Seq: null, Reason: null);
+            return ("member-missing", null, null);
         }
 
+        var source = SourceOf(row.Id);
         var found = container.Id;
+        var moves = next != row.NextDueAt;
+
         if (await SkipReasonAsync(row, container, ct) is { } reason)
         {
             var skipped = await AppendSkippedAsync(found, reason, source, ct);
-            await schedules.RecordSkipAsync(row.Id, "skipped", skipped.Seq, ct);
-            return new TriggerRunNow("skipped", skipped.Seq, reason);
+            if (moves) await schedules.RecordOutcomeAsync(row.Id, firedAt: null, next, "skipped", skipped.Seq, row.MissedCount, ct);
+            else await schedules.RecordSkipAsync(row.Id, "skipped", skipped.Seq, ct);
+            await WriteFireRowAsync(TenantActions.ScheduleSkipped, row, found, now, next, instructionSeq: null, reason, ct);
+            return ("skipped", skipped.Seq, reason);
         }
 
-        if (cost is not null && await cost.SkipIfCappedAsync(row, found, now, row.NextDueAt, cause: null, ct))
+        if (cost is not null && await cost.SkipIfCappedAsync(row, found, now, next, cause: null, ct))
         {
             // Its `schedule.skipped` row is the cap's, written once a day; a later one is counted.
-            return new TriggerRunNow("capped", Seq: null, MessageTypes.ScheduleSkippedCapReason);
+            return ("capped", null, MessageTypes.ScheduleSkippedCapReason);
         }
 
         var instruction = await AppendInstructionAsync(row, found, source, ct);
-        await schedules.RecordFireAsync(row.Id, now, "fired", instruction.Seq, ct);
-        return new TriggerRunNow("fired", instruction.Seq, Reason: null);
+        if (moves) await schedules.RecordOutcomeAsync(row.Id, now, next, "fired", instruction.Seq, row.MissedCount, ct);
+        else await schedules.RecordFireAsync(row.Id, now, "fired", instruction.Seq, ct);
+        await WriteFireRowAsync(TenantActions.ScheduleFired, row, found, now, next, instruction.Seq, reason: null, ct);
+        return ("fired", instruction.Seq, null);
     }
+
+    /// <summary>The `schedule.fired` or `schedule.skipped` tenant row of a Run now, written by the
+    /// schedule as the sweep's are, marked <c>runNow</c> since it had no due time.</summary>
+    private Task WriteFireRowAsync(
+        string action, TriggerRow row, ContainerId found, DateTimeOffset now, DateTimeOffset? next,
+        long? instructionSeq, string? reason, CancellationToken ct) =>
+        tenant.WriteAsAsync(
+            SourceOf(row.Id),
+            actorEmail: null,
+            action,
+            row.Id,
+            row.Name,
+            new
+            {
+                team = found.Team,
+                container = found.Name,
+                runNow = true,
+                instructionSeq,
+                reason,
+                firedAt = now.ToString("O", CultureInfo.InvariantCulture),
+                nextDueAt = next?.ToString("O", CultureInfo.InvariantCulture),
+            },
+            ct);
 
     /// <summary>Why a fire of <paramref name="row"/> is skipped before its cap is asked: the team
     /// is paused, or an idle-only trigger's member is busy. Null when neither.</summary>
@@ -347,5 +366,6 @@ public sealed class TriggerSweep(
 
 /// <summary>What one <see cref="TriggerSweep.RunNowAsync"/> did: `fired`, `skipped` (paused team or
 /// busy idle-only member, <c>Reason</c> says which), `capped` or `member-missing`, and the seq of the
-/// instruction or `schedule.skipped` row it appended (null when capped: that row is the cap's).</summary>
-public sealed record TriggerRunNow(string Outcome, long? Seq, string? Reason);
+/// instruction or `schedule.skipped` row it appended (null when capped: that row is the cap's), and
+/// the trigger as the fire left it.</summary>
+public sealed record TriggerRunNow(string Outcome, long? Seq, string? Reason, TriggerRow Trigger);

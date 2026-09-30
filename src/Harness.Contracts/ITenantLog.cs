@@ -182,6 +182,10 @@ public static class TenantActions
     /// (`fired`, `skipped`, `capped`, `member-missing`), its `reason` and the `seq` it appended.</summary>
     public const string ScheduleRunNow = "schedule.run-now";
 
+    /// <summary>A solution install ran a `runAtInstall` schedule once, by the person who installed it.
+    /// Detail carries the same `outcome`, `reason` and `seq` as <see cref="ScheduleRunNow"/>.</summary>
+    public const string ScheduleRunAtInstall = "schedule.run-at-install";
+
     /// <summary>A person minted a credential for themselves. The row carries the key's id, its
     /// label and its prefix - never the credential, which is the one thing this log must never
     /// hold.</summary>

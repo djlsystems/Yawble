@@ -58,6 +58,10 @@ public sealed class SolutionFirstRunTests(HostFixture host) : IClassFixture<Host
         Assert.Contains($"\"{PayloadFields.WakeManager}\":\"never\"", fire.Payload);
         Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.ScheduleFired, id, Ct));
 
+        // Run now's own call, recorded as the installing person's.
+        var installed = await Get<ITenantLog>().FindLatestAsync(TenantActions.ScheduleRunAtInstall, id, Ct);
+        Assert.Equal(Person.Email, installed?.ActorEmail);
+
         var scan = Assert.Single(done.FirstRuns, r => r.Trigger == "Scan for postings");
         Assert.True(scan.RunAtInstall);
         Assert.True(scan.RanNow);

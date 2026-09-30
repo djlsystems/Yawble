@@ -3374,20 +3374,19 @@ app.MapPost("/api/teams/{team}/triggers/{id}/run", async (
 
     var now = DateTimeOffset.UtcNow;
     var run = await sweep.RunNowAsync(
-        row,
+        row.Id,
         now,
         context.User.FindFirstValue(ClaimTypes.NameIdentifier),
         context.User.FindFirstValue(ClaimTypes.Email),
         TenantActions.ScheduleRunNow,
-        ct);
+        ct: ct);
 
     if (run is null)
     {
         return Results.BadRequest(new { error = "Run now fires a schedule (cron, every or once); this trigger fires on an event." });
     }
 
-    var trigger = await schedules.FindAsync(row.Id, ct) ?? row;
-    return Results.Ok(new { outcome = run.Outcome, reason = run.Reason, seq = run.Seq, trigger = await cost.ViewAsync(trigger, now, ct) });
+    return Results.Ok(new { outcome = run.Outcome, reason = run.Reason, seq = run.Seq, trigger = await cost.ViewAsync(run.Trigger, now, ct) });
 })
     .WithTags("Teams")
     .HumansOnly()
