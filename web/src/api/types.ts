@@ -1557,11 +1557,35 @@ export interface AgentUpdateResult {
   agent: string
   command: string
   updated: boolean
+  /** Null when no update command ran: the preset declares none. */
   exitCode: number | null
   versionBefore: string | null
   versionAfter: string | null
   at: string
   detail: string
+  /** The CLI's entry as `cliVersions` gives it, read back after this update's line was written.
+   *  Null when the Host keeps no version record. */
+  cliVersion?: CliVersion | null
+}
+
+/**
+ * One CLI's installed version and when it last changed, from the Host's CLI version record
+ * (`cli-versions.jsonl`) - the record the operator CLI's `doctor` and `agents` read. `version` is null
+ * when the record has none, which is shown as not known and never guessed.
+ */
+export interface CliVersion {
+  cli: string
+  version: string | null
+  /** When this version first appeared after a different one; null when the kept record never saw
+   *  it change, and `since` is then how far back the record reaches. Null, with `updatedBy`, when
+   *  the version is not known: a version nobody could read has no update time. */
+  updatedAt: string | null
+  since: string | null
+  /** `start` for a container start, `person` for a person's update through the platform. A plain
+   *  string rather than a union: every quoted literal in the app is cut into the icon font subset. */
+  updatedBy: string | null
+  /** That person's email, when the record has it. */
+  person: string | null
 }
 
 /** A preset's isolation declaration. See `AgentIsolation` in the Host. */
@@ -1667,6 +1691,10 @@ export interface Catalog {
    * making a claim nothing checked; the library reads an absent entry as `unknown` instead.
    */
   installations?: AgentInstallation[]
+
+  /** Each preset's CLI version, one entry per preset that launches a command. A person's arm only;
+   *  absent reads as not known. */
+  cliVersions?: (CliVersion & { agent: string })[]
 }
 
 /**

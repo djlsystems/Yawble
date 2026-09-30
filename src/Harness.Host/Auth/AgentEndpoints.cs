@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Harness.Contracts;
 
 namespace Harness.Host.Auth;
@@ -30,7 +31,7 @@ public static class AgentEndpoints
     {
         app.MapGet("/api/agents", async (
             HttpContext context, AgentCatalog catalog, ITeamStore teams,
-            AgentInstallProbe probe, CancellationToken ct) =>
+            AgentInstallProbe probe, CliVersionHistory history, CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { } caller) return Results.Unauthorized();
 
@@ -59,11 +60,34 @@ public static class AgentEndpoints
                     .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
                     .Value.SerializerOptions;
 
+                // EACH PRESET'S CLI VERSION, from the one record the doctor and the operator CLI's `agents` read
+                // (`cli-versions.jsonl`): what the newest line says and when it last changed. Beside
+                // the catalog for the reason `installations` is. People only, as the Diagnostics
+                // route's history is: it names the tooling every member runs on.
+                var starts = await history.ReadAsync(CliVersionHistory.MaxTake, ct);
+
                 return Results.Ok(new
                 {
                     agents = catalog.Definitions.Select(a => WithTagSource(a, catalog, json)),
                     installations,
                     ignoredTagOverrides = catalog.IgnoredTagOverrides,
+                    cliVersions = catalog.Definitions
+                        .Where(a => a.Launch is not null)
+                        .Select(a => new
+                        {
+                            agent = a.Name,
+                            now = CliVersionHistory.Now(a.Launch!.FileName, starts),
+                        })
+                        .Select(v => new
+                        {
+                            v.agent,
+                            cli = v.now.Cli,
+                            version = v.now.Version,
+                            updatedAt = v.now.UpdatedAt,
+                            updatedBy = v.now.UpdatedBy,
+                            person = v.now.Person,
+                            since = v.now.Since,
+                        }),
                 });
             }
 
@@ -115,7 +139,14 @@ public static class AgentEndpoints
                 + "`state` is null when the command resolves and `AgentNotInstalled` when it does "
                 + "not. It is a distinct fact from a member's `missingAgent`, which means the "
                 + "CATALOG has no such entry: that one is fixed here, this one is fixed in a "
-                + "terminal.");
+                + "terminal.\n\n"
+                + "**`cliVersions`** (a person only) is one entry per preset that launches a command: "
+                + "`cli` (the command), `version` (null when the record has none - never guessed), `updatedAt` "
+                + "(when that version first appeared after a different one; null when the kept record "
+                + "never saw it change, and `since` is then how far back the record reaches; null, with "
+                + "`updatedBy`, when the version is not known), `updatedBy` (`start` or `person`) and `person` (that person's email when recorded). "
+                + "Read from the Host's CLI version record, `cli-versions.jsonl`, which the operator CLI's `doctor` "
+                + "and `agents` read too.");
 
         app.MapPut("/api/agents", async (
             CatalogSubmission submitted, AgentCatalog catalog, ITeamStore teams,
@@ -199,7 +230,9 @@ public static class AgentEndpoints
             string name,
             AgentCliUpdater updater, ITenantLog tenantLog, HttpContext context, CancellationToken ct) =>
         {
-            if (await updater.UpdateAsync(name, ct) is not { } result)
+            var person = context.User.FindFirstValue(ClaimTypes.Email);
+
+            if (await updater.UpdateAsync(name, ct, person) is not { } result)
             {
                 return Results.NotFound(new { error = $"No Agent '{name}'." });
             }
@@ -235,7 +268,9 @@ public static class AgentEndpoints
                 + "WAITS until no run of that command is in flight, and from the moment it is asked "
                 + "new launches of that command wait for it - they are held, never failed - so no "
                 + "run finds its program half-replaced. Answers with the versions before and after, "
-                + "which are also recorded in the CLI version history.\n\n"
+                + "which are also recorded in the CLI version history with the person who asked, and "
+                + "`cliVersion`: the CLI's entry as `GET /api/agents` gives it in `cliVersions` once "
+                + "that line is written (null when the Host keeps no record).\n\n"
                 + "`updated` is false, with a sentence, when the preset declares no update command "
                 + "or the command failed. 404 for an unknown preset."
                 + PeopleOnly);
