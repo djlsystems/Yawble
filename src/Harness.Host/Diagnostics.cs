@@ -258,6 +258,14 @@ public static class DiagnosticsMiddleware
         {
             await next();
         }
+        catch (Exception exception) when (IsAbandoned(context, exception))
+        {
+            // THE CLIENT LEFT, NOTHING FAILED. A browser that reloads, switches team or closes a
+            // dialog cancels its fetches, the handler's awaits throw on RequestAborted, and this
+            // used to record "Unhandled exception, 500" - an answer nobody received, filed as the
+            // store's loudest kind. Re-thrown unchanged, as below; only the row is not written.
+            throw;
+        }
         catch (Exception exception)
         {
             var recorder = context.RequestServices.GetService<DiagnosticsRecorder>();
@@ -314,6 +322,15 @@ public static class DiagnosticsMiddleware
             detail: new { method = context.Request.Method },
             ct: context.RequestAborted);
     });
+
+    /// <summary>
+    /// Whether an exception is the request being abandoned by its client rather than a failure: a
+    /// cancellation thrown once <see cref="HttpContext.RequestAborted"/> has fired. A cancellation
+    /// with the client still there (a timeout of the Host's own) is still a failure and still
+    /// recorded.
+    /// </summary>
+    public static bool IsAbandoned(HttpContext context, Exception exception) =>
+        exception is OperationCanceledException && context.RequestAborted.IsCancellationRequested;
 
     /// <summary>
     /// Whether a completed request is worth a row. THE WHOLE OF THE VOLUME POLICY, in one

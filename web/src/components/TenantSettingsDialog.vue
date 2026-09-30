@@ -43,7 +43,17 @@ import TenantSettingField from './TenantSettingField.vue';
 const open = defineModel<boolean>({ required: true });
 
 /** The tab to show on opening. The Concierge panel's gear opens straight on `concierge`. */
-const props = defineProps<{ initialTab?: 'admission' | 'spend' | 'concierge' | 'sweeps' | 'kanban' | 'system' | 'health' | 'roots' }>();
+const props = defineProps<{
+  initialTab?: 'admission' | 'spend' | 'concierge' | 'sweeps' | 'kanban' | 'system' | 'health' | 'roots';
+  /**
+   * True while a dialog this one opened (Open Agents, Open Skills) is showing. This dialog is
+   * lifted above the Concierge shell (`.concierge-settings`, 7100), and the Agents and Skills
+   * dialogs are ordinary Quasar dialogs (6000), so they opened BEHIND it. While covered it drops
+   * the lift and, being earlier in <body>, sits under the dialog it opened; its drafts are kept,
+   * because it stays open rather than closing and reloading.
+   */
+  covered?: boolean;
+}>();
 
 const emit = defineEmits<{ 'open-agents': []; 'open-skills': [] }>();
 
@@ -245,7 +255,7 @@ function holdText(hold: { team: string; member: string }) {
 </script>
 
 <template>
-  <q-dialog v-model="open" class="concierge-settings">
+  <q-dialog v-model="open" :class="{ 'concierge-settings': !props.covered }" data-tenant-settings>
     <q-card class="os-dialog-lg tenant-settings-card">
       <q-card-section class="row items-center q-pb-none">
         <div class="os-dialog-title">Settings</div>

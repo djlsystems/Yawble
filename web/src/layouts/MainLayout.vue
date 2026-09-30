@@ -525,6 +525,7 @@ async function signOut() {
     <AgentsDialog v-model="agentsOpen" />
     <TenantSettingsDialog
       v-model="tenantSettingsOpen"
+      :covered="agentsOpen || skillsOpen"
       @open-agents="agentsOpen = true"
       @open-skills="skillsOpen = true"
     />

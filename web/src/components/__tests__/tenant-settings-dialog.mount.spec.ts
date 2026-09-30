@@ -396,6 +396,24 @@ describe('Concierge', () => {
     expect(document.body.querySelector('.q-dialog.concierge-settings, .concierge-settings .q-dialog__inner, .concierge-settings')).not.toBeNull();
     expect(select(wrapper, 'Font family')!.props('popupContentClass')).toBe('concierge-settings');
   });
+
+  /** Open Agents and Open Skills showed their dialogs BEHIND this one: 6000 under its 7100. */
+  it('drops the lift while a dialog it opened covers it, keeping what was typed', async () => {
+    const wrapper = await openDialog();
+    const lifted = () => document.body.querySelector('.concierge-settings') !== null;
+    expect(lifted()).toBe(true);
+
+    await type(wrapper, 'Agents running at once', '7');
+    await wrapper.setProps({ covered: true });
+    await flushPromises();
+    expect(lifted()).toBe(false);
+    expect(document.body.querySelector('[data-tenant-settings]')).not.toBeNull();
+
+    await wrapper.setProps({ covered: false });
+    await flushPromises();
+    expect(lifted()).toBe(true);
+    expect(input(wrapper, 'Agents running at once')!.props('modelValue')).toBe('7');
+  });
 });
 
 describe('System packages', () => {
