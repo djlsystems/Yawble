@@ -261,6 +261,31 @@ public sealed class TeamPublisher(
         }
     }
 
+    /// <summary>
+    /// Whether origin's copy of the team branch is behind the clone's, so the push is owed.
+    /// <para>
+    /// A TEAM BRANCH ORIGIN HAS NO COPY OF IS OWED ONLY WHILE IT HOLDS WORK THE DEFAULT BRANCH DOES
+    /// NOT. A person merges the team branch to main and then deletes it on origin; the clone keeps
+    /// its own copy, which is then "ahead" of a copy that no longer exists, and every later run end
+    /// would push it back. One already contained in origin's default branch stays deleted. A team
+    /// branch never pushed at all, holding a member's work, is still pushed. The default branch is
+    /// the stored one, else the one the clone's <c>origin/HEAD</c> already names (a clone made
+    /// moments ago may not have had its stored value written yet); with neither, the push is owed,
+    /// which is the recoverable direction.
+    /// </para>
+    /// </summary>
+    private async Task<bool> TeamBranchBehindOnOriginAsync(
+        string clonePath, string branch, string? defaultBranch, CancellationToken ct)
+    {
+        if (!await git.BranchAheadOfOriginAsync(clonePath, branch, ct)) return false;
+        if (await git.HasOriginCopyAsync(clonePath, branch, ct)) return true;
+
+        var target = defaultBranch ?? await git.ReadRecordedOriginHeadBranchAsync(clonePath, ct);
+        if (target is null) return true;
+
+        return !await git.ContainedInOriginAsync(clonePath, branch, target, ct);
+    }
+
     private async Task<RepoPublishOutcome> PushBranchesAsync(
         string team, string repo, string clonePath, string? defaultBranch, CancellationToken ct)
     {
@@ -288,7 +313,7 @@ public sealed class TeamPublisher(
             // new and the count above is 0 - while origin's team branch has not moved. That is the
             // integrated work a person merges from, left behind on every completion.
             if (ahead is 0
-                && !(branch == $"team/{team}" && await git.BranchAheadOfOriginAsync(clonePath, branch, ct)))
+                && !(branch == $"team/{team}" && await TeamBranchBehindOnOriginAsync(clonePath, branch, defaultBranch, ct)))
             {
                 continue;
             }

@@ -748,6 +748,17 @@ public sealed class GitRunner
         return (await RunGitAsync(clonePath, ["merge-base", "--is-ancestor", remote, local], ct)).ExitCode == 0;
     }
 
+    /// <summary>Whether this clone holds a remote-tracking copy of <paramref name="branch"/> from origin.</summary>
+    public async Task<bool> HasOriginCopyAsync(string clonePath, string branch, CancellationToken ct = default) =>
+        (await RunGitAsync(clonePath, ["rev-parse", "--verify", "--quiet", $"refs/remotes/origin/{branch}"], ct)).ExitCode == 0;
+
+    /// <summary>
+    /// Whether every commit of the local <paramref name="branch"/> is already in origin's
+    /// <paramref name="target"/> - a branch merged there. False when origin has no such branch.
+    /// </summary>
+    public async Task<bool> ContainedInOriginAsync(string clonePath, string branch, string target, CancellationToken ct = default) =>
+        (await RunGitAsync(clonePath, ["merge-base", "--is-ancestor", $"refs/heads/{branch}", $"refs/remotes/origin/{target}"], ct)).ExitCode == 0;
+
     // Private helpers
 
     private async Task<string?> RevParseAsync(string clonePath, string @ref, CancellationToken ct)

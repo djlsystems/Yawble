@@ -385,6 +385,58 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
         Assert.Empty(await RowsAsync(MessageTypes.RepoPushFailed));
     }
 
+    /// <summary>
+    /// A team branch merged into main and then deleted on origin - what a person does after Merge
+    /// to main - is not pushed back by a later publish, although the clone still holds its copy.
+    /// The publisher is asked directly: a run end's publish may outlive its bound on a busy machine,
+    /// so an assertion that nothing was pushed cannot wait for one.
+    /// </summary>
+    [Fact]
+    public async Task A_team_branch_merged_into_main_and_deleted_on_origin_is_not_pushed_back()
+    {
+        await StartAsync();
+        var teamBranch = $"team/{_team}";
+
+        // The clone knows origin's main and its HEAD, as any real clone does after the platform's
+        // own merge to main (this harness clones an empty origin, which records no HEAD).
+        Assert.Equal(0, Git(_clone, "fetch", "origin").ExitCode);
+        Assert.Equal(0, Git(_clone, "remote", "set-head", "origin", "main").ExitCode);
+        Assert.Equal(0, Git(_clone, "branch", teamBranch, "main").ExitCode);
+        Assert.Null(OriginSha(teamBranch));
+
+        var report = await Publish();
+
+        Assert.DoesNotContain(report.Repos, r => r.Branches.Contains(teamBranch));
+        Assert.Null(OriginSha(teamBranch));
+    }
+
+    /// <summary>
+    /// A team branch origin has never had, holding a member's work that is not in main, is pushed
+    /// even though every one of its commits is already on origin under the member's own branch.
+    /// </summary>
+    [Fact]
+    public async Task A_team_branch_origin_never_had_holding_unmerged_work_is_pushed()
+    {
+        await StartAsync();
+        var teamBranch = $"team/{_team}";
+
+        var memberTree = CutTree(new ContainerId(_team, "Dev"), "2197", push: true);
+        var memberTip = Git(memberTree, "rev-parse", "HEAD").Output.Trim();
+        Assert.Equal(0, Git(_clone, "fetch", "origin").ExitCode);
+        Assert.Equal(0, Git(_clone, "remote", "set-head", "origin", "main").ExitCode);
+        Assert.Equal(0, Git(_clone, "branch", "-f", teamBranch, memberTip).ExitCode);
+        Assert.Null(OriginSha(teamBranch));
+
+        var report = await Publish();
+
+        Assert.Contains(report.Repos, r => r.Branches.Contains(teamBranch));
+        Assert.Equal(memberTip, OriginSha(teamBranch));
+    }
+
+    private Task<TeamPublishReport> Publish() =>
+        _factory.Services.GetRequiredService<ITeamPublisher>().PublishAsync(
+            _team, [$"https://github.com/example/{Repo}.git"], new ContainerId(_team, "Manager"), null, Ct);
+
     /// <summary>No source names a single per-member tree: every tree is a card's.</summary>
     [Fact]
     public void No_source_still_names_the_single_per_member_tree()
