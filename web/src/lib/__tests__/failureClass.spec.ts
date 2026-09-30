@@ -47,7 +47,7 @@ describe('resumesAutomatically', () => {
     expect(resumesAutomatically('quota')).toBe(true)
     expect(resumesAutomatically('rate')).toBe(true)
 
-    for (const never of ['transport', 'timeout', 'agent-fault', 'interrupted', 'unknown']) {
+    for (const never of ['transport', 'timeout', 'agent-fault', 'launch-missing', 'interrupted', 'unknown']) {
       expect(resumesAutomatically(never)).toBe(false)
     }
   })
@@ -68,6 +68,7 @@ describe('failureClassWords', () => {
       'rate',
       'transport',
       'agent-fault',
+      'launch-missing',
       'timeout',
       'interrupted',
       'unknown',
@@ -86,6 +87,16 @@ describe('failureClassWords', () => {
     expect(failureClassWords(undefined)).toBeNull()
     expect(failureClassWords('a-class-from-2027')).toBeNull()
     expect(failureClassLabel('a-class-from-2027')).toBeNull()
+  })
+
+  /** A program missing at launch asks for a re-send, and asks nobody to repair anything. */
+  it('says a launch-missing run is re-sent, not repaired', () => {
+    const words = failureClassWords('launch-missing')!
+    expect(words).toContain('not found when the run started')
+    expect(words).toContain('re-sending the instruction will try again')
+    expect(words).not.toMatch(/repair/i)
+    expect(words).not.toContain('agent itself failed')
+    expect(failureClassLabel('launch-missing')).toBe('launch-missing')
   })
 
   /** `unknown` is a real class with something to say, not an absence dressed up as one. */
