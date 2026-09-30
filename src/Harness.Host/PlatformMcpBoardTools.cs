@@ -127,7 +127,8 @@ public sealed partial class PlatformMcpTools
         "The backlog. action is list, search, add, show, edit, archive, restore, move, delete, "
         + "or dispatch. list defaults to pending. show with a team reads the item that team was "
         + "given; show without one reads the tenant item and is refused to a member. "
-        + "This is harness backlog. Do not request /api yourself. Mark an item ready only when the person tells you to.")]
+        + "This is harness backlog. Do not request /api yourself. Mark an item ready only when the person tells you to, "
+        + "or asks you to run the backlog: then the items in the plan you stated to them.")]
     public async Task<string> Backlog(
         [Description("list, search, add, show, edit, archive, restore, move, delete, or dispatch.")]
         string action,
