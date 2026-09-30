@@ -253,6 +253,23 @@ public sealed class SolutionCheckTests : IDisposable
         Assert.Contains("names no `panel.primarySite`", refusal.Reason);
     }
 
+    [Theory]
+    [InlineData("\"nope\"")]
+    [InlineData("5")]
+    public void A_refused_primary_site_is_the_only_refusal_a_data_status_line_brings(string primarySite)
+    {
+        // The sample's status line counts site data. With the site named but refused, the one
+        // thing to fix is the site: a second refusal saying none is named would send the author
+        // looking for a key that is right there.
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["panel"]!["primarySite"] = JsonNode.Parse(primarySite));
+
+        var check = Check(folder);
+
+        Refused(check, "solution.json", "panel.primarySite");
+        Assert.DoesNotContain(check.Refusals, r => r.Field == "panel.status");
+    }
+
     [Fact]
     public void A_panel_that_is_not_an_object_is_refused()
     {

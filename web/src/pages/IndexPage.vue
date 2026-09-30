@@ -13,6 +13,7 @@ import TeamKpiStrip from '../components/TeamKpiStrip.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
 import TeamsView from '../components/TeamsView.vue';
 import SolutionBlockedBanner from '../components/SolutionBlockedBanner.vue';
+import { panelPath } from '../lib/solutionPanel';
 import { useDisplayStore } from '../stores/display';
 import { useKanbanStore } from '../stores/kanban';
 import type { Team, TeamId } from '../api/types';
@@ -508,6 +509,23 @@ onUnmounted(() => {
 
 
         <q-space />
+
+        <!-- A TEAM INSTALLED FROM A SOLUTION PACKAGE is managed from its control panel: an address,
+             so it is the same screen the launcher's Manage opens. A plain hash link, as the install
+             notice's is (`installHref`). -->
+        <q-btn
+          v-if="activeTeam.solution"
+          flat
+          dense
+          no-caps
+          size="sm"
+          icon="tune"
+          label="Manage solution"
+          :href="`#${panelPath(activeTeam.id)}`"
+          data-manage-solution
+        >
+          <q-tooltip>{{ activeTeam.solution.name }} {{ activeTeam.solution.version }}: status, controls, results and maintenance</q-tooltip>
+        </q-btn>
 
         <!-- THE BRAKE, WHERE THE WORK IS. It lived only on the Teams rollup and in team settings,
              and the first thing anybody did when they wanted to stop a running team was look at the
