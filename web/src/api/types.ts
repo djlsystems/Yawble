@@ -2329,8 +2329,9 @@ export interface MemberRun {
   /** A run that finished quietly (`quiet: true` on its `completed` row), which woke nobody. */
   quiet: boolean
   /**
-   * The platform declared the run's workflow complete as it ended (`workflowDeclared: true` on its
-   * `completed` row), because its owner cannot declare: the Manager was not woken by it.
+   * The run's workflow was declared complete by the time it ended (`workflowDeclared: true` on its
+   * `completed` row) - by the platform for an owner that cannot declare, or by the member itself:
+   * the Manager was not woken by it.
    */
   workflowDeclared: boolean
   /**

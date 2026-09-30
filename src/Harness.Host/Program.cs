@@ -822,8 +822,16 @@ builder.Services.AddSingleton(sp => new ContainerHost(
         //
         // ITS ANSWER IS THE HOOK'S: the run's terminal row says the workflow was declared, and the
         // pump passes over the Manager on it (PayloadFields.WorkflowDeclared).
+        //
+        // AND A WORKFLOW ALREADY DECLARED WHEN THE RUN ENDS SAYS SO THE SAME WAY - the owner of a
+        // member-owned workflow declaring it in this run, typically on the idle offer. The offer went
+        // to the owner only; waking the Manager on the run that answered it would hand it the same
+        // decision, already made. Never on the Manager's own run, which wakes no Manager anyway; the
+        // runtime keeps the key off a row closing a member's own `tell`.
         return await sp.GetRequiredService<UndeclarableWorkflows>()
-            .OnRunEndingAsync(member, causation, succeeded, ct);
+                .OnRunEndingAsync(member, causation, succeeded, ct)
+            || (!member.Equals(new ContainerId(member.Team, TeamRegistry.DefaultManagerName))
+                && await WorkflowDeclaration.DeclaredAsync(sp.GetRequiredService<IMessageLog>(), causation, ct));
     }));
 // A container's credential and its environment, in one place - see AgentEnvironment for why those
 // two belong together rather than either side of the registry.
@@ -6038,7 +6046,8 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
     [Description(Describe.Team)] string team,
     [Description(
         "The member declaring completion. Must be the container the workflow's root instruction "
-        + "addressed, or this team's Manager when nothing addressed it.")]
+        + "addressed, or this team's Manager when nothing addressed it or when one of its members "
+        + "was addressed.")]
     string name,
     ReportWorkflowCompleted request,
     HttpContext context, TeamRegistry teams, ContainerHost host, IMessageLog log,
@@ -6101,16 +6110,26 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
     // Null means the root was not an addressed instruction - a schedule, a card event - and the
     // Manager owns it. Falling back rather than refusing is deliberate: a workflow nobody may
     // declare complete is a team that reads UNDECLARED forever.
-    var owner = await WorkflowOwner.OfAsync(log, correlation, ct)
-        ?? new ContainerId(stored, TeamRegistry.DefaultManagerName);
+    var manager = new ContainerId(stored, TeamRegistry.DefaultManagerName);
+    var owner = await WorkflowOwner.OfAsync(log, correlation, ct) ?? manager;
 
-    if (!container.Id.Equals(owner))
+    // THE MANAGER MAY DECLARE A WORKFLOW ONE OF ITS OWN MEMBERS OWNS, on the owner's behalf, and on
+    // the same rule the owner declares by: the owner and every other member idle in it, nothing
+    // queued in it but the Manager's own delivery (the busy check below, with the Manager as the
+    // caller). Without it a Manager woken by a member-owned workflow could only tell the owner to
+    // declare, and each refusal woke the other again. Any other member is refused, as before.
+    var onBehalf = !container.Id.Equals(owner)
+        && container.Id.Equals(manager)
+        && string.Equals(owner.Team, stored, StringComparison.OrdinalIgnoreCase)
+        && host.Find(owner) is not null;
+
+    if (!container.Id.Equals(owner) && !onBehalf)
     {
         return Results.Json(
             new
             {
                 error = $"This workflow was addressed to '{owner.Name}', "
-                    + "so only that member may declare it completed.",
+                    + "so only that member, or this team's Manager on its behalf, may declare it completed.",
             },
             statusCode: StatusCodes.Status403Forbidden);
     }
@@ -6120,8 +6139,23 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
         return Results.BadRequest(new { error = "Say what was delivered." });
     }
 
+    // A WORKFLOW ALREADY DECLARED OR CLOSED IS NOT DECLARED AGAIN. With two members able to declare
+    // one workflow, the second would otherwise append a second `workflow.completed` to it.
+    if (!(await log.OpenWorkflowsAmongAsync([correlation], ct)).Contains(correlation))
+    {
+        return Results.Conflict(new
+        {
+            error = "This workflow is already declared complete or closed, so there is nothing "
+                + "to declare. End your turn; do not retry.",
+        });
+    }
+
+    // THE OWNER OF A MEMBER-OWNED WORKFLOW IS NOT REFUSED FOR A MANAGER THAT IS ONLY WATCHING -
+    // woken by a row the owner or another member wrote here. See `WorkflowBusyState`'s `watcher`.
+    // A Manager told to do work here still counts, and every member's run still counts.
     var busy = await WorkflowBusyState.DescribeAsync(
-        stored, correlation, host, pending, log, container.Id, ct);
+        stored, correlation, host, pending, log, container.Id, ct,
+        watcher: container.Id.Equals(manager) ? null : manager);
 
     if (busy.Count != 0)
     {
@@ -6170,13 +6204,25 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
     await publisher.PublishAsync(
         stored, teams.ReposFor(stored), container.Id, container.CurrentCausation, ct);
 
+    var declared = new Dictionary<string, object?>(StringComparer.Ordinal)
+    {
+        ["delivered"] = request.Delivered.Trim(),
+        ["dropped"] = looseEnds.Count == 0 ? null : dropped,
+        ["looseEnds"] = looseEnds.Count == 0 ? null : looseEnds,
+    };
+
+    // WHO DECLARED IT, when that is not the owner: the Manager, on the owner's behalf.
+    if (onBehalf)
+    {
+        declared[WorkflowDeclaration.DeclaredByField] = container.Id.ToString();
+        declared[WorkflowDeclaration.OnBehalfOfField] = owner.ToString();
+    }
+
     // THE ROW, ITS BACKLOG ITEM AND ITS SETTLED TREES: one sequence, shared with the platform's
     // declaration for a member that cannot declare (`UndeclarableWorkflows`).
     await WorkflowDeclaration.AppendAsync(
         stored, correlation, container.Id, container.CurrentCausation,
-        JsonSerializer.Serialize(looseEnds.Count == 0
-            ? new { delivered = request.Delivered.Trim(), dropped = (string?)null, looseEnds = (IReadOnlyList<string>?)null }
-            : new { delivered = request.Delivered.Trim(), dropped, looseEnds = (IReadOnlyList<string>?)looseEnds }),
+        JsonSerializer.Serialize(declared),
         log, backlog, host, kanban, worktrees, paths, teams.ReposFor(stored),
         loggers.CreateLogger("WorktreeRemoval"), ct, solutionNotice);
 
@@ -6191,7 +6237,12 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
         + "was not an addressed instruction (a schedule firing, a kanban card event). Correlation is "
         + "stamped from the waking message by the container; the caller never supplies one. The "
         + "declaration is refused while a member is Running or has pending deliveries UNDER THIS "
-        + "WORKFLOW - other open workflows on the same team do not block it.");
+        + "WORKFLOW - other open workflows on the same team do not block it. When a member owns the "
+        + "workflow, a Manager woken only by that member's or another member's row in it is not "
+        + "counted against the owner; a Manager told to do work in it is. The Manager may declare "
+        + "a workflow one of its members owns on that member's behalf, on the same rule, and the "
+        + "row records `declaredBy` and `onBehalfOf`. A workflow already declared or closed is "
+        + "refused (409).");
 
 // A PERSON ENDING A WORKFLOW, WHICH IS NOT A MANAGER DECLARING A DELIVERY.
 //
