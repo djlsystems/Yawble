@@ -12,7 +12,7 @@ namespace Harness.Tests.Host;
 /// <summary>
 /// EVERY PERSON'S WRITE TO AN OUTCOME OR A LINK LANDS WITH ITS TENANT ROW, OR NOT AT ALL. With
 /// `tenant_events` taken away, each one - create, rename, confirm, retire, reactivate, merge, reject,
-/// and linking a workflow - is refused and changes nothing. A Host of its own, because the only honest
+/// linking a workflow, and a tell that names an outcome - is refused and changes nothing. A Host of its own, because the only honest
 /// way to make the row unwritable is to take the table away.
 /// </summary>
 public sealed class OutcomeAuditTests : IAsyncLifetime
@@ -73,6 +73,7 @@ public sealed class OutcomeAuditTests : IAsyncLifetime
         var workflow = (await told.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("correlationId").GetInt64();
 
         var before = await Outcomes.ListAsync(Ct);
+        var messagesBefore = await MessageCountAsync();
 
         await using (var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false"))
         {
@@ -93,6 +94,7 @@ public sealed class OutcomeAuditTests : IAsyncLifetime
             (HttpMethod.Post, $"/api/outcomes/{active.Id}/merge", new { into = into.Id }),
             (HttpMethod.Delete, $"/api/outcomes/{proposed.Id}", null),
             (HttpMethod.Put, $"/api/teams/{_team}/workflows/{workflow}/outcome", new { outcome = active.Id }),
+            (HttpMethod.Post, $"/api/teams/{_team}/containers/Manager/tell", new { instruction = "never told", outcome = active.Id }),
         };
 
         foreach (var (method, path, body) in writes)
@@ -104,5 +106,17 @@ public sealed class OutcomeAuditTests : IAsyncLifetime
 
         Assert.Equal(before, await Outcomes.ListAsync(Ct));
         Assert.Null(await Outcomes.CurrentLinkAsync(workflow, Ct));
+
+        // The tell's instruction did not land either: it, its link and its row are one transaction.
+        Assert.Equal(messagesBefore, await MessageCountAsync());
+    }
+
+    private async Task<long> MessageCountAsync()
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false");
+        await connection.OpenAsync(Ct);
+        await using var count = connection.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM messages";
+        return (long)(await count.ExecuteScalarAsync(Ct))!;
     }
 }

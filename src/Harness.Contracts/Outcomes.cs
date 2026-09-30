@@ -86,11 +86,14 @@ public static class OutcomeLinkHow
 
     /// <summary>
     /// A MANAGER NEVER OVERRIDES A LINK A PERSON CAUSED. An agent may link a workflow with no link,
-    /// or move one an agent made (<c>manager</c> or <c>tell</c>); a link from a dispatch, a trigger
-    /// or a person's own choice is the person's, and only a person moves it.
+    /// or move one an agent made: a <c>manager</c> link, or a <c>tell</c> the Concierge sent. A link
+    /// from a dispatch, a trigger, a person's own <c>tell</c> or a person's own choice is the
+    /// person's, and only a person moves it.
     /// </summary>
     public static bool AgentMayReplace(OutcomeLink? current) =>
-        current is null || current.How is Manager or Tell;
+        current is null
+        || current.How == Manager
+        || (current.How == Tell && current.SetByKind != OutcomeActorKind.Person);
 }
 
 /// <summary>Who made a link or an outcome.</summary>

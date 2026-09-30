@@ -254,10 +254,6 @@ public sealed class FreshVolumeTests : IDisposable
     }
 
     /// <summary>
-    /// A trigger made before `auth-010` keeps `always` - today's behaviour - and no cap, so nothing
-    /// changes under anyone until a person chooses otherwise. A new row round-trips both.
-    /// </summary>
-    /// <summary>
     /// `outcome-002`, `auth-017` and `backlog-002` apply to a volume from before them: a trigger and a
     /// backlog item from before serve no outcome until a person names one, and the new tables work.
     /// </summary>
@@ -297,6 +293,10 @@ public sealed class FreshVolumeTests : IDisposable
         Assert.Equal(outcome.Id, (await backlog.GetAsync(item.Id, Ct))!.OutcomeId);
     }
 
+    /// <summary>
+    /// A trigger made before `auth-010` keeps `always` - today's behaviour - and no cap, so nothing
+    /// changes under anyone until a person chooses otherwise. A new row round-trips both.
+    /// </summary>
     [Fact]
     public async Task A_trigger_from_before_the_wake_choice_step_keeps_always_and_no_cap()
     {

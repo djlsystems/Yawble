@@ -55,7 +55,14 @@ public static class OutcomeLinks
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT outcome_id, created_by, team FROM triggers WHERE id = $id";
+        // SET_BY IS THE PERSON'S EMAIL, as on every other link and tenant row a person causes;
+        // `created_by` is the user id, so it is resolved here, and kept as it is only when no
+        // user of that id is left.
+        command.CommandText = """
+            SELECT t.outcome_id, COALESCE(u.email, t.created_by), t.team
+            FROM triggers t LEFT JOIN users u ON u.id = t.created_by
+            WHERE t.id = $id
+            """;
         command.Parameters.AddWithValue("$id", triggerId);
 
         string? outcome, configuredBy, team;

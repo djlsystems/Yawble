@@ -5778,21 +5778,35 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
             from,
             causation);
 
-    // THE ROOT AND ITS LINK IN ONE TRANSACTION (`how: tell`): a person's own tell is theirs, and
-    // the Concierge's is an agent's, which a Manager may later move.
+    // THE ROOT, ITS LINK AND ITS TENANT ROW IN ONE TRANSACTION (`how: tell`): a person's own tell
+    // is theirs, and the Concierge's is an agent's, which a Manager may later move. The
+    // `workflow.outcome-changed` row names the person, or the member for an agent's tell; when it
+    // cannot be written, neither the instruction nor the link lands.
+    var tellerIsPerson = callerPrincipal?.Kind == PrincipalKind.User;
     var message = rootOutcome is null
         ? await log.AppendAsync(instructionRow, ct)
         : (await log.AppendWithinAsync(
             (_, _, _) => Task.FromResult<NewMessage?>(instructionRow),
-            (connection, transaction, stored, token) => OutcomeLinks.WriteAsync(
-                (Microsoft.Data.Sqlite.SqliteConnection)connection, (Microsoft.Data.Sqlite.SqliteTransaction)transaction,
-                stored.CorrelationId, rootOutcome.Id, container.Id.Team,
-                callerPrincipal?.Kind == PrincipalKind.User
-                    ? context.User.FindFirstValue(ClaimTypes.Email) ?? from
-                    : from,
-                callerPrincipal?.Kind == PrincipalKind.User ? OutcomeActorKind.Person : OutcomeActorKind.Member,
-                OutcomeLinkHow.Tell,
-                token),
+            async (connection, transaction, stored, token) =>
+            {
+                var sqlite = (Microsoft.Data.Sqlite.SqliteConnection)connection;
+                var within = (Microsoft.Data.Sqlite.SqliteTransaction)transaction;
+
+                await OutcomeLinks.WriteAsync(
+                    sqlite, within, stored.CorrelationId, rootOutcome.Id, container.Id.Team,
+                    tellerIsPerson ? context.User.FindFirstValue(ClaimTypes.Email) ?? from : from,
+                    tellerIsPerson ? OutcomeActorKind.Person : OutcomeActorKind.Member,
+                    OutcomeLinkHow.Tell,
+                    token);
+
+                var detail = new { team = container.Id.Team, workflow = stored.CorrelationId, how = OutcomeLinkHow.Tell };
+                await TenantAuditRow.AppendAsync(sqlite, within,
+                    tellerIsPerson
+                        ? TenantLogging.Row(context, TenantActions.WorkflowOutcomeChanged, rootOutcome.Id, rootOutcome.Name, detail)
+                        : new TriggerAudit(from, null, TenantActions.WorkflowOutcomeChanged, rootOutcome.Id, rootOutcome.Name,
+                            JsonSerializer.Serialize(detail)),
+                    token);
+            },
             ct))!;
     var paused = teams.IsPaused(stored);
     return Results.Ok(new

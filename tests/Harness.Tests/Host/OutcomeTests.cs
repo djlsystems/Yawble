@@ -152,7 +152,9 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
 
         var link = (await Outcomes.CurrentLinkAsync(fired.CorrelationId, Ct))!;
         Assert.Equal((outcome.Id, OutcomeLinkHow.Trigger, OutcomeActorKind.Person), (link.OutcomeId, link.How, link.SetByKind));
-        Assert.Equal(trigger.GetProperty("createdBy").GetString(), link.SetBy);
+        // SET_BY IS THE CONFIGURING PERSON'S EMAIL, as on dispatch and tell links, not the user id.
+        Assert.Equal(Email, link.SetBy);
+        Assert.NotEqual(trigger.GetProperty("createdBy").GetString(), link.SetBy);
 
         // A trigger naming no live outcome is refused.
         var refused = await person.PostAsJsonAsync($"/api/teams/{host.Alpha}/triggers", new
@@ -178,11 +180,9 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         var link = (await Outcomes.CurrentLinkAsync(workflow, Ct))!;
         Assert.Equal((OutcomeLinkHow.Manager, $"{host.Alpha}/Manager", OutcomeActorKind.Member), (link.How, link.SetBy, link.SetByKind));
 
-        // A MANAGER MAY MOVE ITS OWN LINK, AND A TELL'S.
+        // A MANAGER MAY MOVE ITS OWN LINK.
         var other = await CreateAsync(person, Unique("Other"));
         Assert.StartsWith("HTTP 200", await tools.Outcome("set", outcome: other.Id, causation: workflow.ToString(), cancellationToken: Ct), StringComparison.Ordinal);
-        var told = await WorkflowAsync(person, host.Alpha, outcome.Id);
-        Assert.StartsWith("HTTP 200", await tools.Outcome("set", outcome: other.Id, causation: told.ToString(), cancellationToken: Ct), StringComparison.Ordinal);
 
         // DISPATCH-LINKED: refused with a sentence, and the link stands.
         var item = (await JsonAsync(await person.PostAsJsonAsync("/api/backlog", new { title = "t", body = "b" }, Ct))).GetProperty("id").GetInt64();
@@ -218,6 +218,52 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         var gated = await manager.PutAsJsonAsync($"/api/teams/{host.Beta}/workflows/{beta}/outcome", new { outcome = outcome.Id }, Ct);
         Assert.Equal(HttpStatusCode.Forbidden, gated.StatusCode);
         Assert.Null(await Outcomes.CurrentLinkAsync(beta, Ct));
+    }
+
+    [Fact]
+    public async Task A_managers_set_is_refused_on_a_persons_own_tell_link_and_allowed_on_the_concierges()
+    {
+        var person = await host.PersonAsync();
+        var chosen = await CreateAsync(person, Unique("Chosen"));
+        var other = await CreateAsync(person, Unique("Manager's pick"));
+        var tools = ManagerTools(host.Alpha);
+
+        // A PERSON'S OWN TELL: the person caused it, so the Manager is refused and the link stands.
+        var told = await WorkflowAsync(person, host.Alpha, chosen.Id);
+        Assert.Equal((OutcomeLinkHow.Tell, OutcomeActorKind.Person),
+            ((await Outcomes.CurrentLinkAsync(told, Ct))!.How, (await Outcomes.CurrentLinkAsync(told, Ct))!.SetByKind));
+
+        var refused = await tools.Outcome("set", outcome: other.Id, causation: told.ToString(), cancellationToken: Ct);
+        Assert.StartsWith("Refused: the outcome tool's set: ", refused, StringComparison.Ordinal);
+        Assert.Contains("only a person moves it", refused, StringComparison.Ordinal);
+        Assert.DoesNotContain("/api/", refused, StringComparison.Ordinal);
+        Assert.DoesNotContain("http", refused, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(chosen.Id, (await Outcomes.CurrentLinkAsync(told, Ct))!.OutcomeId);
+
+        // ...and a propose on it is refused too, creating nothing.
+        var name = Unique("Never created");
+        Assert.StartsWith("Refused: the outcome tool's propose: ",
+            await tools.Outcome("propose", name: name, causation: told.ToString(), cancellationToken: Ct), StringComparison.Ordinal);
+        Assert.Null(await Outcomes.FindLiveByNameAsync(name, Ct));
+
+        // THE CONCIERGE'S TELL: an agent made it, so the Manager may move it.
+        var owner = await host.Services.GetRequiredService<IUserStore>().FindAsync(Email, Ct);
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            ConciergeLaunchFactory.PrincipalId(owner!.Id), PrincipalKind.TenantConcierge, host.Alpha,
+            ConciergeLaunchFactory.ConciergePermits, ownerUserId: owner.Id, ct: Ct);
+        using var concierge = host.Container(key);
+        var byConcierge = await WorkflowAsync(concierge, host.Alpha, chosen.Id);
+        var agentTell = (await Outcomes.CurrentLinkAsync(byConcierge, Ct))!;
+        Assert.Equal((OutcomeLinkHow.Tell, OutcomeActorKind.Member), (agentTell.How, agentTell.SetByKind));
+
+        // Its `workflow.outcome-changed` row names the member, not the person it acts for.
+        var row = (await host.Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.WorkflowOutcomeChanged, chosen.Id, Ct))!;
+        Assert.Equal(ConciergeLaunchFactory.PrincipalId(owner.Id), row.ActorId);
+        Assert.Null(row.ActorEmail);
+
+        Assert.StartsWith("HTTP 200", await tools.Outcome("set", outcome: other.Id, causation: byConcierge.ToString(), cancellationToken: Ct), StringComparison.Ordinal);
+        var moved = (await Outcomes.CurrentLinkAsync(byConcierge, Ct))!;
+        Assert.Equal((other.Id, OutcomeLinkHow.Manager), (moved.OutcomeId, moved.How));
     }
 
     [Fact]
