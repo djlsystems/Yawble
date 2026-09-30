@@ -412,6 +412,18 @@ public sealed partial class PlatformMcpTools
                     state = itemState,
                     team = itemTeam,
                     teamName = TextOf(item, "teamName"),
+
+                    // THE OPEN WORKFLOW OF THE ITEM'S DISPATCH, so a reader continues it by number
+                    // rather than working it out from the log. Null when nothing is in flight.
+                    workflow = NumberOf(item, "inFlight", "correlation"),
+
+                    // AND, WHEN THAT WORKFLOW WAS LEFT BEHIND, WHERE ITS WORK CONTINUED - with the
+                    // sentence the row says. Closing it is a person's; nothing here offers a verb.
+                    continuedIn = NumberOf(item, "stranded", "continuedIn"),
+                    notice = item.TryGetProperty("stranded", out var stranded)
+                        && stranded.ValueKind == JsonValueKind.Object
+                            ? TextOf(stranded, "notice")
+                            : null,
                     context,
                 });
             }
@@ -419,6 +431,14 @@ public sealed partial class PlatformMcpTools
             return "HTTP 200" + Environment.NewLine + JsonSerializer.Serialize(rows);
         }
     }
+
+    private static long? NumberOf(JsonElement item, string outer, string name) =>
+        item.TryGetProperty(outer, out var value)
+        && value.ValueKind == JsonValueKind.Object
+        && value.TryGetProperty(name, out var number)
+        && number.TryGetInt64(out var parsed)
+            ? parsed
+            : null;
 
     private static string? TextOf(JsonElement item, string name) =>
         item.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String

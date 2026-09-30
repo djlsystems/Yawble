@@ -220,6 +220,21 @@ public interface IMessageLog
         string team, long sinceSeq, CancellationToken ct = default);
 
     /// <summary>
+    /// ONE NAMED WORKFLOW OF THIS TEAM, described exactly as each row of
+    /// <see cref="WorkflowsForTeamAsync"/> is - the same projection and the same state ranking,
+    /// asked of a correlation the caller already holds rather than of the newest fifty.
+    ///
+    /// <para>
+    /// Exists for the backlog, which knows its dispatch's correlation exactly and has to say whether
+    /// that workflow is Blocked or Failed. That workflow can be older than the fifty the plural
+    /// keeps, and a second ranking written for the backlog would be a second answer to the
+    /// question the board's tile already answers.
+    /// </para>
+    /// </summary>
+    Task<TeamWorkflowTiming> WorkflowForTeamAsync(
+        string team, long correlation, long sinceSeq, CancellationToken ct = default);
+
+    /// <summary>
     /// WHICH OF THESE WORKFLOWS ARE STILL OPEN, in one query - the same predicate
     /// <see cref="WorkflowsForTeamAsync"/> counts <see cref="TeamWorkflows.OpenCount"/> with, asked
     /// about a caller's own list of correlations instead of a team's.

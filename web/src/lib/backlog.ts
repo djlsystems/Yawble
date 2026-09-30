@@ -1,5 +1,5 @@
 import type { BacklogItemView } from '../api/client'
-import type { BacklogInFlight, BacklogLanded } from '../api/types'
+import type { BacklogInFlight, BacklogLanded, BacklogStranded } from '../api/types'
 import { MAXIMUM_BACKLOG_TITLE_LENGTH } from './rules'
 
 /**
@@ -489,6 +489,18 @@ export function inFlightTitle(flight: BacklogInFlight): string {
   return flight.running
     ? `${where} A member is running now.`
     : `${where} Open, nobody running at the moment.`
+}
+
+/**
+ * The long form of a stranded notice. SAYS WHOSE MOVE IT IS: only a person closes a workflow, and
+ * the platform has changed nothing - the notice is the whole of what it did.
+ */
+export function strandedTitle(stranded: BacklogStranded): string {
+  return (
+    `Workflow #${stranded.workflow} is ${stranded.state} and still open. ` +
+    `The work continued in workflow #${stranded.continuedIn}. ` +
+    'Nothing has been closed: closing it is a person\'s decision.'
+  )
 }
 
 /**
