@@ -342,6 +342,54 @@ type connectionRow struct {
 	Status   string `json:"status"`
 }
 
+// firstRunRow is one schedule's first run in the install's answer: ran now, or when it first runs.
+type firstRunRow struct {
+	Trigger      string  `json:"trigger"`
+	Member       string  `json:"member"`
+	RunAtInstall bool    `json:"runAtInstall"`
+	RanNow       bool    `json:"ranNow"`
+	Outcome      string  `json:"outcome"`
+	At           *string `json:"at"`
+}
+
+// renderFirstRuns names each schedule's first run: "Fetch jobs ran now", "Fetch jobs first runs at
+// 8:51 PM", or for a first run at install that did not happen, why and when it first runs instead.
+func renderFirstRuns(out io.Writer, runs []firstRunRow, now time.Time) {
+	if len(runs) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "\nSchedules:")
+	for _, r := range runs {
+		if r.RanNow {
+			fmt.Fprintf(out, "  %s ran now.\n", r.Trigger)
+			continue
+		}
+		at := " runs on its schedule"
+		if r.At != nil {
+			if when, err := time.Parse(time.RFC3339Nano, *r.At); err == nil {
+				at = " first runs at " + firstRunTime(when, now)
+			}
+		}
+		switch {
+		case !r.RunAtInstall || r.Outcome == "scheduled":
+			fmt.Fprintf(out, "  %s%s.\n", r.Trigger, at)
+		case r.Outcome == "failed":
+			fmt.Fprintf(out, "  %s could not run now; it%s.\n", r.Trigger, at)
+		default:
+			fmt.Fprintf(out, "  %s did not run now (%s); it%s.\n", r.Trigger, r.Outcome, at)
+		}
+	}
+}
+
+// firstRunTime is a first run's local time: "8:51 PM" today, "Thu 8:00 AM" on another day.
+func firstRunTime(when, now time.Time) string {
+	when, now = when.Local(), now.Local()
+	if when.Year() == now.Year() && when.YearDay() == now.YearDay() {
+		return when.Format("3:04 PM")
+	}
+	return when.Format("Mon 3:04 PM")
+}
+
 // installBody is POST /api/solutions/install's (and update's) answer.
 type installBody struct {
 	OK         bool         `json:"ok"`
@@ -361,9 +409,10 @@ type installBody struct {
 		Member      *string `json:"member"`
 		Description string  `json:"description"`
 	} `json:"missing"`
-	Secrets []secretRow `json:"secrets"`
-	Unset   []string    `json:"unset"`
-	Steps   []struct {
+	Secrets   []secretRow   `json:"secrets"`
+	Unset     []string      `json:"unset"`
+	FirstRuns []firstRunRow `json:"firstRuns"`
+	Steps     []struct {
 		Step   string `json:"step"`
 		Number int    `json:"number"`
 		Title  string `json:"title"`
@@ -914,6 +963,7 @@ func (in *solutionInstall) result(p previewBody, status int, raw json.RawMessage
 			fmt.Fprintf(in.out, "  Blocked: waiting for %s - %s\n", name, m.Description)
 		}
 	}
+	renderFirstRuns(in.out, b.FirstRuns, time.Now())
 	renderSecrets(in.out, b.Secrets, nil)
 	if len(b.Unset) > 0 {
 		fmt.Fprintln(in.out, "\nThese keys are still not set on the Host. Each one's source fails until it is set:")

@@ -2,6 +2,7 @@ import type {
   InstalledSolution,
   SolutionDiff,
   SolutionDiffSection,
+  SolutionFirstRun,
   SolutionMissing,
   SolutionPersonSetting,
   SolutionPlanTrigger,
@@ -86,10 +87,13 @@ function everyWords(seconds: number): string {
 export function triggerSource(trigger: SolutionPlanTrigger): string {
   switch (trigger.kind) {
     case 'schedule': {
+      // A first run at install reads "runs once now, then every ..."; the Host's own words for the
+      // schedule already say so.
+      const once = trigger.runAtInstall ? 'runs once now, then ' : '';
+      if (trigger.everySeconds) return once + everyWords(trigger.everySeconds);
       if (trigger.schedule) return trigger.schedule;
-      if (trigger.everySeconds) return everyWords(trigger.everySeconds);
-      if (trigger.cron) return `cron ${trigger.cron} (${trigger.timezone || 'UTC'})`;
-      return 'on a schedule';
+      if (trigger.cron) return `${once}cron ${trigger.cron} (${trigger.timezone || 'UTC'})`;
+      return once + 'on a schedule';
     }
     case 'event':
       return `on ${trigger.eventType ?? 'an event'}${trigger.filter ? ` where ${trigger.filter}` : ''}`;
@@ -270,4 +274,26 @@ export function secretSentence(secret: SolutionSecret, state: SecretState): stri
  * the Host reads it when it restarts. */
 export function secretSetWith(key: string): string {
   return `${productCli} secret set ${key} (it prompts for the value), then ${productCli} up to restart the Host`;
+}
+
+/** A first run's time as a person reads it: "8:51 PM" today, "Thu 8:00 AM" on another day. */
+export function firstRunTime(at: string, now: Date = new Date()): string {
+  const when = new Date(at);
+  // One plain space before AM/PM, whichever space the runtime's locale data puts there.
+  const time = when.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s+/g, ' ');
+  return when.toDateString() === now.toDateString()
+    ? time
+    : `${when.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+}
+
+/**
+ * One schedule's first run, as the result names it: "Fetch jobs ran now", "Fetch jobs first runs at
+ * 8:51 PM", or, for a first run at install that did not happen, why and when it first runs instead.
+ */
+export function firstRunLine(run: SolutionFirstRun, now: Date = new Date()): string {
+  if (run.ranNow) return `${run.trigger} ran now`;
+  const at = run.at ? ` first runs at ${firstRunTime(run.at, now)}` : ' runs on its schedule';
+  if (!run.runAtInstall || run.outcome === 'scheduled') return `${run.trigger}${at}`;
+  const why = run.outcome === 'failed' ? 'could not run now' : `did not run now (${run.outcome})`;
+  return `${run.trigger} ${why}; it${at}`;
 }

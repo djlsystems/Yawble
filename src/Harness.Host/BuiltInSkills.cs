@@ -1405,6 +1405,12 @@ public static class BuiltInSkills
             triggers' full instruction text and its daily caps are all in the package; nothing is
             left for a person to type in except what `inputs` asks them for.
 
+            When the package's point is a schedule (a page it fills, a feed it fetches), give that
+            schedule trigger `"runAtInstall": true`: the install runs it once as soon as its last
+            step succeeds, then on its schedule, so the person does not look at an empty page until
+            the first due time. It is for a `schedule` trigger only; the check refuses it on an
+            `event` or `folder` one. Say in the README that the page fills right after install.
+
             ## 2. Done when
 
             A spec for a package names, in its Done-when:

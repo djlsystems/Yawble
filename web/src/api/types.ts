@@ -2647,6 +2647,8 @@ export interface SolutionPlanTrigger {
   filter: string | null
   folderPath: string | null
   folderGlob: string | null
+  /** Fired once right after the install's last step, then on its clock; `schedule` then says so. */
+  runAtInstall?: boolean
 }
 
 export interface SolutionPlanSkill {
@@ -2854,6 +2856,22 @@ export interface SolutionUpdateRequest extends SolutionInstallInputs {
   team: string
 }
 
+/**
+ * One schedule's first run after an install. `outcome` is `fired` when the install ran it
+ * (`ranNow`), `scheduled` when it waits for its first due time, and for a first run at install that
+ * did not happen the fire's own word (`skipped`, `capped`, `member-missing`) or `failed` - the run's
+ * outcome, never the install's. `at` is when it ran, or when it first runs.
+ */
+export interface SolutionFirstRun {
+  trigger: string
+  member: string
+  runAtInstall: boolean
+  ranNow: boolean
+  outcome: string
+  at: string | null
+  next: string | null
+}
+
 /** `POST /api/solutions/install` and `/update`. A 409 or 400 is thrown with the Host's sentence. */
 export type SolutionInstallResult =
   | {
@@ -2870,6 +2888,8 @@ export type SolutionInstallResult =
       secrets?: SolutionSecret[]
       /** The keys still to set: bound, needed and not set on the Host. */
       unset?: string[]
+      /** Each schedule's first run: ran now at install, or when it first comes due. */
+      firstRuns?: SolutionFirstRun[]
     }
   | { ok: false; step: string; stepNumber: number; reason: string; steps: SolutionStep[] }
   | { ok: false; refusals: SolutionRefusal[] }

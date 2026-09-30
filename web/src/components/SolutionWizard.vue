@@ -37,6 +37,7 @@ import {
   missingLine,
   refusalLine,
   removedItems,
+  firstRunLine,
   secretNeeded,
   secretSetWith,
   secretSentence,
@@ -415,6 +416,10 @@ const unsetSecrets = computed(() => {
   const unset = done.unset ?? [];
   return unset.map((key) => ({ key, setWith: secretSetWith(key) }));
 });
+/** Each schedule's first run, as the result names it: ran now, or when it first runs. */
+const firstRuns = computed(() =>
+  (succeeded.value?.firstRuns ?? []).map((run) => ({ trigger: run.trigger, ranNow: run.ranNow, line: firstRunLine(run) })),
+);
 const failedStep = computed(() => (result.value && !result.value.ok && 'step' in result.value ? result.value : null));
 const failedCheck = computed(() => (result.value && !result.value.ok && 'refusals' in result.value ? result.value : null));
 
@@ -951,6 +956,12 @@ function next() {
                 <div v-for="(item, index) in missing" :key="index" data-missing-item>{{ missingLine(item) }}</div>
               </div>
               <div v-else-if="missing && !uploading" class="q-mt-sm" data-nothing-missing>Nothing is missing: the team is ready.</div>
+
+              <div v-if="firstRuns.length > 0" class="q-mt-sm" data-first-runs>
+                <div v-for="run in firstRuns" :key="run.trigger" :data-first-run="run.trigger" :data-ran-now="run.ranNow">
+                  {{ run.line }}.
+                </div>
+              </div>
 
               <div v-if="unsetSecrets.length > 0" class="q-mt-sm" data-unset-secrets>
                 <div>These keys are still not set on the Host. Each one's source fails until it is set:</div>

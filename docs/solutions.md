@@ -147,9 +147,20 @@ restarts the Host with `yawble up`, and the plugin receives it on stdin at each 
 | `wakeManager` | `always`, `onHandbackOrFailure` (the default) or `never`: see [triggers.md](triggers.md#wake-the-manager-when-a-run-ends). |
 | `dailyTokenCap` | The most billable tokens its runs may spend in a day, at least 1; absent or `null` for none. See [triggers.md](triggers.md#daily-token-cap). |
 | `idleOnly` | Skip a fire while the member is busy; `true` by default. |
+| `runAtInstall` | For `schedule` only: `true` fires it once right after the install's last step succeeds, then it runs on its schedule as usual. The check refuses it on an `event` or `folder` trigger, naming the file and field. |
 
 These are the trigger settings a person sets in the Triggers dialog. An agent member is never
 subscribed to a high-volume event, as the dialog refuses it too.
+
+**A first run at install.** A package whose point is a schedule can say `"runAtInstall": true`, so
+the person does not look at an empty page until its first due time. The install fires it once, after
+the last step has succeeded and the documents are copied in. It is the same fire the schedule makes:
+source `schedule:<id>`, its instruction with its `wakeManager`, skipped with its row for a paused team,
+a busy idle-only member or a reached daily cap. Its next due time then counts on from that fire. A
+failed step makes no fire, since nothing is left behind. If the first run itself fails, or is
+skipped, that is the run's outcome and not the install's: the install is still done, and the result
+says the schedule did not run now and when it first runs. The plan's schedule reads "runs once now,
+then every …". An update does not fire it.
 
 ### Inputs
 
@@ -235,7 +246,10 @@ refuses:
    then `yawble up`), or "not needed" when it belongs to a setting the person left off. Unset is not
    a refusal. The preview's `secrets` carries these (in an update, as the update will leave them).
 4. **Install**: the steps below; on failure the wizard names the step and the reason. The result
-   lists the keys still unset, each with the way to set it.
+   names each schedule's first run ("Scan for postings ran now", "Morning summary first runs at
+   8:00 AM"), and lists the keys still unset, each with the way to set it. The answer's `firstRuns`
+   carries these (`trigger`, `member`, `runAtInstall`, `ranNow`, `outcome`, `at`, `next`), and
+   `yawble solution install` prints the same lines under "Schedules:".
 
 The install runs, in order, through the stores a person's own clicks use, each step appending its
 usual tenant row:
@@ -388,6 +402,7 @@ the package the solution tests check and install.
       "name": "Scan for postings",
       "kind": "schedule",
       "schedule": { "everySeconds": 3600 },
+      "runAtInstall": true,
       "member": "Scout",
       "instruction": "scan",
       "wakeManager": "never",
@@ -529,7 +544,7 @@ Plugins installed (1):
   job-board 0.1.0 (Job Board (sample)), publishes plugin.job-board.posting-found
 
 Triggers (5):
-  Scan for postings: every 3600 seconds, wakes Scout; wakes the Manager: never; no daily cap
+  Scan for postings: runs once now, then every 3600 seconds, wakes Scout; wakes the Manager: never; no daily cap
     Instruction: scan
   New posting: on plugin.job-board.posting-found, wakes Writer; wakes the Manager: never; daily cap 200,000 tokens
     Instruction: A new posting matched: {event.title} at {event.company} ({event.url}). …
@@ -640,3 +655,12 @@ skill `interview-prep` and ships `job-board` 0.2.0. The tests make it the same w
   and `Merged_secrets_keep_what_the_person_changed_or_unbound`; the wizard -
   `solution-wizard-secrets.mount.spec.ts`; the CLI -
   `TestSolutionInstallPrintsEachSecretByKeyAndTheKeysStillUnset`.
+- A first run at install: the check - `SolutionCheckTests.RunAtInstall_on_a_schedule_passes_and_the_plan_says_it_runs_once_now_then_on_its_clock`,
+  `Without_runAtInstall_the_plan_says_only_the_clock` and the `runAtInstall` rows of
+  `A_malformed_or_missing_field_is_refused_naming_its_file_and_field` (on an event trigger, on a
+  folder trigger, not a flag); the install -
+  `SolutionFirstRunTests.RunAtInstall_fires_once_at_install_through_the_schedules_own_fire_and_next_on_its_interval`
+  and `Without_runAtInstall_nothing_fires_at_install_and_the_result_names_the_first_due_time`; no
+  fire from a failed step - `SolutionInstallTests.A_failure_at_any_step_leaves_nothing_behind`; the
+  wizard - `solution-wizard-first-runs.mount.spec.ts`; the CLI -
+  `TestSolutionInstallNamesEachSchedulesFirstRun`.

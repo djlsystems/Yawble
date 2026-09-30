@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/cli"
 	"github.com/djlsystems/yawble/cli/internal/engine"
@@ -640,6 +641,42 @@ func TestSolutionInstallPrintsEachSecretByKeyAndTheKeysStillUnset(t *testing.T) 
 			if strings.Contains(out, "  THEMUSE_API_KEY - ") || strings.Contains(out, "  ADZUNA_APP_ID - ") {
 				t.Errorf("a set or unneeded key is listed as still to set:\n%s", out)
 			}
+		})
+	}
+}
+
+func TestSolutionInstallNamesEachSchedulesFirstRun(t *testing.T) {
+	now := time.Now()
+	evening := time.Date(now.Year(), now.Month(), now.Day(), 20, 51, 0, 0, time.Local).UTC().Format(time.RFC3339)
+	tomorrow := time.Date(now.Year(), now.Month(), now.Day()+1, 8, 0, 0, 0, time.Local)
+	for _, program := range programs {
+		t.Run(program, func(t *testing.T) {
+			preview := routeBody(t, "solution-preview-install.json", func(b map[string]any) {
+				trigger := b["plan"].(map[string]any)["triggers"].([]any)[0].(map[string]any)
+				trigger["runAtInstall"] = true
+				trigger["schedule"] = "runs once now, then every 3600 seconds"
+			})
+			done := routeBody(t, "solution-install-done.json", func(b map[string]any) {
+				named("Job Tracker")(b)
+				b["firstRuns"] = []map[string]any{
+					{"trigger": "Scan for postings", "member": "Scout", "runAtInstall": true, "ranNow": true, "outcome": "fired", "at": evening},
+					{"trigger": "Morning summary", "member": "Coordinator", "runAtInstall": false, "ranNow": false, "outcome": "scheduled", "at": evening},
+					{"trigger": "Evening summary", "member": "Coordinator", "runAtInstall": true, "ranNow": false, "outcome": "capped", "at": tomorrow.UTC().Format(time.RFC3339)},
+				}
+			})
+			s := installScript(t, program, hostReport(t, "n2", 200, preview), hostReport(t, "n3", 200, done))
+
+			code, out, errOut := run(t, installDeps(s, program, ""), "solution", "install", solutionPackage(t), "--yes")
+			if code != 0 {
+				t.Fatalf("exit %d: %s %s", code, out, errOut)
+			}
+			containsAll(t, "the output", out,
+				"  Scan for postings: runs once now, then every 3600 seconds, wakes Scout;",
+				"Schedules:",
+				"  Scan for postings ran now.",
+				"  Morning summary first runs at 8:51 PM.",
+				"  Evening summary did not run now (capped); it first runs at "+tomorrow.Format("Mon")+" 8:00 AM.",
+			)
 		})
 	}
 }
