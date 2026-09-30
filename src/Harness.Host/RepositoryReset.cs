@@ -79,8 +79,9 @@ public sealed class ResetNotRecordedException(string team, Exception inner)
 /// <b>THE TEAM BRANCH</b>, only with every member ticked, is moved to the STORED default branch in
 /// the clone - never assumed: not known refuses the whole reset in <see cref="PlanAsync"/> - and
 /// only when it holds no commit that is on no remote and not on the default branch. On origin it
-/// is deleted only when it holds nothing <c>origin/&lt;default&gt;</c> lacks; otherwise it stays,
-/// named. A contributor-mode origin is the fork, and is never touched.
+/// is deleted only when it holds nothing <c>origin/&lt;default&gt;</c> lacks, compared after fetching
+/// both and deleted with a lease on the sha compared; otherwise it stays, named. A contributor-mode
+/// origin is the fork, and is never touched.
 /// </para>
 ///
 /// <para>
@@ -315,9 +316,17 @@ public sealed class RepositoryReset(GitRunner git, WorktreeRemoval worktrees, Te
 
     /// <summary>
     /// <c>origin/team/&lt;id&gt;</c>, deleted only when it holds nothing <c>origin/&lt;default&gt;</c>
-    /// lacks - by ancestry, or by patch (<c>git cherry</c>, which errs toward "not there") - as the Git
-    /// dialog's delete does. Null when origin has none. A contributor-mode origin is the fork: kept,
-    /// never touched.
+    /// lacks - by ancestry, or by patch (<c>git cherry</c>, which errs toward "not there").
+    ///
+    /// <para>
+    /// <b>NEVER ON A VIEW THAT COULD NOT BE REFRESHED.</b> Origin is asked for both branches first
+    /// (<c>git ls-remote</c>), and both are fetched before the compare: the clone's
+    /// <c>refs/remotes/origin/…</c> may be older than a push from another clone. A failed read or
+    /// fetch keeps the branch, named. Then the delete is leased on the sha that was compared
+    /// (<see cref="GitRunner.DeleteOriginBranchIfAtAsync"/>), so a push that lands between the
+    /// compare and the delete refuses it and the branch is kept, named. Null when origin has none.
+    /// A contributor-mode origin is the fork: kept, never touched, not even fetched.
+    /// </para>
     /// </summary>
     private async Task<(RepoResetItem Item, bool Kept)?> DeleteOriginTeamBranchAsync(
         RepoResetTarget repo, string teamBranch, string defaultBranch, CancellationToken ct)
@@ -325,27 +334,59 @@ public sealed class RepositoryReset(GitRunner git, WorktreeRemoval worktrees, Te
         var clone = repo.ClonePath;
         var name = $"origin/{teamBranch}";
         var remote = $"refs/remotes/origin/{teamBranch}";
-
-        if (await ShaAsync(clone, remote, ct) is null) return null;
+        var basis = $"refs/remotes/origin/{defaultBranch}";
 
         (RepoResetItem, bool) Keep(string reason) => (new(repo.Repo, name, null, reason), true);
 
         if (repo.ContributorMode)
         {
-            return Keep("In contributor mode origin is the fork, and a reset never touches it.");
+            return await ShaAsync(clone, remote, ct) is null
+                ? null
+                : Keep("In contributor mode origin is the fork, and a reset never touches it.");
         }
 
-        var basis = $"refs/remotes/origin/{defaultBranch}";
-        if (await ShaAsync(clone, basis, ct) is null)
+        var listed = await git.RunGitAsync(
+            clone, ["ls-remote", "origin", $"refs/heads/{teamBranch}", $"refs/heads/{defaultBranch}"], ct);
+        if (listed.ExitCode != 0)
         {
-            return Keep($"origin/{defaultBranch} is not in the clone, so there is nothing to compare it with.");
+            return await ShaAsync(clone, remote, ct) is null
+                ? null
+                : Keep($"Could not ask origin for it ({Said(listed)}), so it was not deleted.");
         }
 
-        var merged = await git.RunGitAsync(clone, ["merge-base", "--is-ancestor", remote, basis], ct);
+        var heads = listed.Stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split('\t'))
+            .Where(parts => parts.Length == 2)
+            .Select(parts => parts[1])
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (!heads.Contains($"refs/heads/{teamBranch}")) return null;
+
+        if (!heads.Contains($"refs/heads/{defaultBranch}"))
+        {
+            return Keep($"origin has no {defaultBranch} to compare it with, so it was not deleted.");
+        }
+
+        var fetched = await git.RunGitAsync(
+            clone,
+            ["fetch", "--no-tags", "origin", $"+refs/heads/{teamBranch}:{remote}", $"+refs/heads/{defaultBranch}:{basis}"],
+            ct);
+        if (fetched.ExitCode != 0)
+        {
+            return Keep($"Could not fetch it from origin ({Said(fetched)}), so it was not deleted.");
+        }
+
+        // The sha compared is the sha the delete is leased on.
+        if (await ShaAsync(clone, remote, ct) is not { } compared || await ShaAsync(clone, basis, ct) is null)
+        {
+            return Keep("Could not read it after fetching it, so it was not deleted.");
+        }
+
+        var merged = await git.RunGitAsync(clone, ["merge-base", "--is-ancestor", compared, basis], ct);
 
         if (merged.ExitCode != 0)
         {
-            var cherry = await git.RunGitAsync(clone, ["cherry", basis, remote], ct);
+            var cherry = await git.RunGitAsync(clone, ["cherry", basis, compared], ct);
             var equivalent = cherry.ExitCode == 0
                 && !cherry.Stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).Any(line => line.StartsWith('+'));
 
@@ -355,12 +396,11 @@ public sealed class RepositoryReset(GitRunner git, WorktreeRemoval worktrees, Te
             }
         }
 
-        // A delete is a push with an empty source: nothing for a forcing flag to apply to.
-        var deleted = await git.PushRefspecAsync(clone, string.Empty, $"refs/heads/{teamBranch}", ct);
+        var deleted = await git.DeleteOriginBranchIfAtAsync(clone, teamBranch, compared, ct);
 
         return deleted.ExitCode == 0
             ? (new RepoResetItem(repo.Repo, name, null, $"Deleted: it held nothing origin/{defaultBranch} lacks."), false)
-            : Keep($"git could not delete it: {Said(deleted)}");
+            : Keep($"It changed on origin after it was compared, or git could not delete it, so it was kept: {Said(deleted)}");
     }
 
     /// <summary>Names a kept branch on the team feed. Source is the member it belongs to.</summary>

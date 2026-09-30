@@ -195,6 +195,71 @@ public sealed class TeamResetRepositoriesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_team_branch_that_gained_work_on_origin_after_the_clone_last_fetched_is_kept_on_origin_and_named()
+    {
+        var team = await TeamAsync("Zeta");
+        var clone = ClonePath(team);
+        var before = DefaultBranchShas(clone);
+
+        Git(clone, "branch", $"team/{team}", "trunk");
+        Git(clone, "push", "origin", $"team/{team}");
+
+        // Another clone pushes new work to origin's team branch. The team's clone has not fetched
+        // since, so its refs/remotes/origin/team/<id> still says "nothing trunk lacks".
+        Git(_seed, "fetch", "origin");
+        Git(_seed, "checkout", "-b", $"team/{team}", $"origin/team/{team}");
+        Commit(_seed, "pushed from elsewhere", "elsewhere.txt");
+        Git(_seed, "push", "origin", $"team/{team}");
+        var pushed = RevParse(_seed, "HEAD");
+        Assert.NotEqual(pushed, RevParse(clone, $"refs/remotes/origin/team/{team}"));
+
+        var person = await PersonAsync();
+        var response = await ResetAsync(person, team, ["Manager", "Dev", "Writer"]);
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, body);
+        var repos = JsonDocument.Parse(body).RootElement.GetProperty("repositories");
+
+        // The commit is still on origin, and the branch is named as kept, with the reason.
+        Assert.Equal(pushed, TryRevParse(_origin, $"refs/heads/team/{team}"));
+        Assert.DoesNotContain($"origin/team/{team}", Names(repos, "teamBranchReset"));
+        Assert.Contains("does not have", Reason(repos, "teamBranchKept", $"origin/team/{team}"), StringComparison.Ordinal);
+
+        var done = await _factory.Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.TeamReset, team, Ct);
+        Assert.NotNull(done);
+        var detail = JsonDocument.Parse(done.Detail!).RootElement.GetProperty("repositories");
+        Assert.Contains("does not have", Reason(detail, "teamBranchKept", $"origin/team/{team}"), StringComparison.Ordinal);
+
+        Assert.Equal(before, DefaultBranchShas(clone));
+    }
+
+    [Fact]
+    public async Task The_origin_delete_is_leased_on_the_sha_compared_so_a_push_since_refuses_it()
+    {
+        // A push that lands between the compare and the delete: the delete names the sha compared,
+        // and origin has moved on.
+        var clone = Path.Combine(_root, "racer");
+        Git(_root, "clone", _origin, clone);
+        Git(clone, "checkout", "-b", "team/Eta", "origin/trunk");
+        Git(clone, "push", "origin", "team/Eta");
+        var compared = RevParse(clone, "refs/remotes/origin/team/Eta");
+
+        Commit(_seed, "landed since", "since.txt");
+        Git(_seed, "push", "origin", "HEAD:refs/heads/team/Eta");
+        var landed = RevParse(_seed, "HEAD");
+
+        var git = new GitRunner();
+        var refused = await git.DeleteOriginBranchIfAtAsync(clone, "team/Eta", compared, Ct);
+
+        Assert.NotEqual(0, refused.ExitCode);
+        Assert.Equal(landed, TryRevParse(_origin, "refs/heads/team/Eta"));
+
+        // At the sha origin really holds, it deletes.
+        var deleted = await git.DeleteOriginBranchIfAtAsync(clone, "team/Eta", landed, Ct);
+        Assert.True(deleted.ExitCode == 0, deleted.Stderr);
+        Assert.Null(TryRevParse(_origin, "refs/heads/team/Eta"));
+    }
+
+    [Fact]
     public async Task While_the_default_branch_is_not_known_resetting_every_members_repositories_is_refused_and_nothing_changes()
     {
         var team = await TeamAsync("Delta");

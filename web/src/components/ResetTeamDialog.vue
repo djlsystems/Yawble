@@ -285,6 +285,7 @@ function finish() {
               Removes the ticked members' worktrees and branches, and with every member ticked
               resets the team branch to the default branch. Nothing is forced: a worktree or branch
               holding work that is on no remote is kept and named.
+              A branch is deleted when every commit on it is on a remote, merged or not.
             </div>
 
             <div v-if="previewFailed" class="text-negative q-mt-xs">{{ previewFailed }}</div>

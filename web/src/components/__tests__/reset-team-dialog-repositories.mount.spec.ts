@@ -118,6 +118,7 @@ describe('ResetTeamDialog, Reset repositories', () => {
     expect(previewResetRepositories).toHaveBeenCalledWith('alpha');
     const text = bodyText();
     expect(text).toContain('Removes the ticked members\' worktrees and branches');
+    expect(text).toContain('A branch is deleted when every commit on it is on a remote, merged or not.');
     expect(text).toContain('What is lost');
     expect(text).toContain('wt_Digger_c1');
     expect(text).toContain('wt_Manager_c2');
