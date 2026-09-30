@@ -324,6 +324,36 @@ public sealed class SolutionCheckTests : IDisposable
     // ---- Secrets: key names, never values ------------------------------------------------------
 
     [Fact]
+    public void RunAtInstall_on_a_schedule_passes_and_the_plan_says_it_runs_once_now_then_on_its_clock()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["triggers"]![4]!["runAtInstall"] = true);
+
+        var check = Check(folder);
+
+        Assert.True(check.Ok, string.Join("\n", check.Refusals));
+        var scan = check.Plan!.Triggers[0];
+        Assert.True(scan.RunAtInstall);
+        Assert.Equal("runs once now, then every 3600 seconds", scan.Schedule);
+        var morning = check.Plan.Triggers[4];
+        Assert.True(morning.RunAtInstall);
+        Assert.Equal("runs once now, then cron 0 0 8 * * 1-5 (Europe/London)", morning.Schedule);
+        Assert.All(check.Plan.Triggers.Where(t => t.Kind != "schedule"), t => Assert.False(t.RunAtInstall));
+    }
+
+    [Fact]
+    public void Without_runAtInstall_the_plan_says_only_the_clock()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["triggers"]![0]!.AsObject().Remove("runAtInstall"));
+
+        var scan = Check(folder).Plan!.Triggers[0];
+
+        Assert.False(scan.RunAtInstall);
+        Assert.Equal("every 3600 seconds", scan.Schedule);
+    }
+
+    [Fact]
     public void A_valid_secrets_block_passes_and_the_plan_names_each_key_and_what_it_is_for()
     {
         var check = Check(Sample());
@@ -500,6 +530,9 @@ public sealed class SolutionCheckTests : IDisposable
         new("wakeManager unknown", Json(m => m["triggers"]![2]!["wakeManager"] = "sometimes"), "solution.json", "triggers[2].wakeManager", "must be one of: always, onHandbackOrFailure, never"),
         new("daily cap of zero", Json(m => m["triggers"]![2]!["dailyTokenCap"] = 0), "solution.json", "triggers[2].dailyTokenCap", "at least 1"),
         new("idleOnly not a flag", Json(m => m["triggers"]![0]!["idleOnly"] = "yes"), "solution.json", "triggers[0].idleOnly", "true or false"),
+        new("runAtInstall not a flag", Json(m => m["triggers"]![0]!["runAtInstall"] = "yes"), "solution.json", "triggers[0].runAtInstall", "true or false"),
+        new("runAtInstall on an event trigger", Json(m => m["triggers"]![1]!["runAtInstall"] = true), "solution.json", "triggers[1].runAtInstall", "belongs to a schedule trigger; an event trigger fires when its event arrives"),
+        new("runAtInstall on a folder trigger", Json(m => m["triggers"]![3]!["runAtInstall"] = true), "solution.json", "triggers[3].runAtInstall", "belongs to a schedule trigger; a folder trigger fires when its folder changes"),
         new("{solution} without tools", f => Directory.Delete(Path.Combine(f, "tools"), recursive: true), "solution.json", "triggers[2].instruction", "no tools/ folder"),
         new("{solution} in instructions without tools", f => { Directory.Delete(Path.Combine(f, "tools"), recursive: true); SolutionSamples.Edit(f, m => m["triggers"]![2]!["instruction"] = "draft"); }, "solution.json", "members[2].instructions", "no tools/ folder"),
         new("skills not an array", Json(m => m["skills"] = "job-search-playbook"), "solution.json", "skills", "must be an array"),

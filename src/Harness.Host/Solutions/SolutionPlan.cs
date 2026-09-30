@@ -30,6 +30,9 @@ public sealed record SolutionPlan(
     /// team's folder, <c>&lt;teams root&gt;/&lt;team&gt;/solution</c>.</summary>
     public const string InstalledToolsFolder = "solution";
 
+    /// <summary>How the plan starts a schedule the install runs once: "runs once now, then every …".</summary>
+    public const string RunsOnceNow = "runs once now, then ";
+
     public static SolutionPlan Of(SolutionPackage package)
     {
         var manifest = package.Manifest;
@@ -47,8 +50,12 @@ public sealed record SolutionPlan(
                 [.. p.Manifest.Publishes.Select(e => EventCatalog.PluginType(p.Id, e.Type))]))],
             [.. manifest.Triggers.Select(t => new SolutionPlanTrigger(
                 t.Name, t.Kind, t.PlatformKind.ToString(), t.Member, t.Instruction, t.WakeManager, t.DailyTokenCap, t.IdleOnly,
-                t.Schedule?.ToString(), t.Schedule?.Cron, t.Schedule?.Timezone, t.Schedule?.EverySeconds,
-                t.Event?.Type, t.Event?.Filter, t.Folder?.Path, t.Folder?.Glob))],
+                t.Schedule is null ? null : t.RunAtInstall ? $"{RunsOnceNow}{t.Schedule}" : t.Schedule.ToString(),
+                t.Schedule?.Cron, t.Schedule?.Timezone, t.Schedule?.EverySeconds,
+                t.Event?.Type, t.Event?.Filter, t.Folder?.Path, t.Folder?.Glob)
+            {
+                RunAtInstall = t.RunAtInstall,
+            })],
             [.. package.Skills.Select(s => new SolutionPlanSkill(s.Name, s.Description, s.Roles, s.File, s.Body))],
             [.. package.Sites.Select(s => new SolutionPlanSite(s.Name, $"{SolutionChecker.SitesFolder}/{s.Name}", s.Files))],
             package.ToolsFolder is null ? null : new SolutionPlanTools(SolutionChecker.ToolsFolderName, InstalledToolsFolder, package.Tools),
@@ -86,7 +93,12 @@ public sealed record SolutionPlanPlugin(string Id, string Name, string Version, 
 public sealed record SolutionPlanTrigger(
     string Name, string Kind, string PlatformKind, string Member, string Instruction, string WakeManager, long? DailyTokenCap,
     bool IdleOnly, string? Schedule, string? Cron, string? Timezone, int? EverySeconds, string? EventType, string? Filter,
-    string? FolderPath, string? FolderGlob);
+    string? FolderPath, string? FolderGlob)
+{
+    /// <summary>The schedule fires once right after the install's last step, then on its interval;
+    /// <c>Schedule</c> then reads "runs once now, then every …".</summary>
+    public bool RunAtInstall { get; init; }
+}
 
 public sealed record SolutionPlanSkill(string Name, string Description, IReadOnlyList<string> Roles, string File, string Body);
 

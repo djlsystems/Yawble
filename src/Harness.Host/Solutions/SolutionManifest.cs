@@ -403,6 +403,19 @@ public sealed record SolutionManifest(
                 }
             }
 
+            var runAtInstall = false;
+            if (item.TryGetProperty("runAtInstall", out var runElement) && runElement.ValueKind != JsonValueKind.Null)
+            {
+                if (runElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                {
+                    read.Refuse($"{at}.runAtInstall", $"`{at}.runAtInstall` must be true or false.");
+                }
+                else
+                {
+                    runAtInstall = runElement.ValueKind == JsonValueKind.True;
+                }
+            }
+
             var kind = read.Required(item, "kind", $"{at}.kind")?.ToLowerInvariant();
             SolutionSchedule? schedule = null;
             SolutionEvent? onEvent = null;
@@ -433,7 +446,10 @@ public sealed record SolutionManifest(
             if (read.Refusals.Count == refusalsBefore)
             {
                 triggers.Add(new SolutionTrigger(
-                    name!, kind!, member!, instruction!, wakeManager, cap, idleOnly, schedule, onEvent, folder));
+                    name!, kind!, member!, instruction!, wakeManager, cap, idleOnly, schedule, onEvent, folder)
+                {
+                    RunAtInstall = runAtInstall,
+                });
                 read.Placed("triggers", index - 1);
             }
         }
@@ -925,6 +941,10 @@ public sealed record SolutionTrigger(
         SolutionManifest.KindFolder => TriggerKind.FolderChange,
         _ => TriggerKind.Event,
     };
+
+    /// <summary>A schedule's first run at install: fired once, right after the install's last step,
+    /// then on its interval. The check refuses it on an event or folder trigger.</summary>
+    public bool RunAtInstall { get; init; }
 }
 
 /// <summary>A clock: a seconds-format cron in a timezone, or every N seconds.</summary>

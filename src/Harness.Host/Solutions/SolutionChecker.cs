@@ -477,6 +477,16 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
                 refusals.Add(new(SolutionManifest.FileName, $"{at}.instruction", $"`{at}.instruction` uses {SolutionManifest.SolutionToken}, but the package has no {ToolsFolderName}/ folder for it to name."));
             }
 
+            // A FIRST RUN AT INSTALL is a schedule's: an event or folder trigger has no fire of its own
+            // to make until its event or file arrives.
+            if (trigger.RunAtInstall && trigger.Kind != SolutionManifest.KindSchedule)
+            {
+                refusals.Add(new(SolutionManifest.FileName, $"{at}.runAtInstall",
+                    trigger.Kind == SolutionManifest.KindFolder
+                        ? $"`{at}.runAtInstall` belongs to a schedule trigger; a folder trigger fires when its folder changes, not at install."
+                        : $"`{at}.runAtInstall` belongs to a schedule trigger; an event trigger fires when its event arrives, not at install."));
+            }
+
             if (trigger.Event is not { } onEvent) continue;
 
             var definition = packageEvents.GetValueOrDefault(onEvent.Type) ?? platform.Event(onEvent.Type);

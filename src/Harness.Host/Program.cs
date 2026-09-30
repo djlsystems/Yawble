@@ -594,7 +594,8 @@ builder.Services.AddSingleton(sp =>
                 return () => listPush.AnnounceDeletedAsync(team, viewers);
             }),
         runAs.Switches ? runAs.Gid : -1,
-        sp.GetRequiredService<ISecretStore>());
+        sp.GetRequiredService<ISecretStore>(),
+        sp.GetRequiredService<TriggerSweep>());
 });
 
 // The board's notice for a package a workflow wrote, checked through that one door when the

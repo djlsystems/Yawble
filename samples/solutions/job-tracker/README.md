@@ -17,6 +17,12 @@ and the package the solution tests install.
 - **Resume** (required): your reference resume, `.docx` or PDF, uploaded to the team's `Resume` folder.
 - **The Scout's sources** (optional): which boards it may read. Until you tick `sample`, it reads none.
 
+## The page fills right after install
+
+"Scan for postings" sets `runAtInstall`, so the install runs it once as soon as its last step
+succeeds, and then every hour as usual. With a source ticked, the tracker page fills right after
+install instead of an hour later; the install's result says "Scan for postings ran now".
+
 ## Secrets
 
 The install binds the Scout's five secrets by key name; you do not bind them by hand. Each is

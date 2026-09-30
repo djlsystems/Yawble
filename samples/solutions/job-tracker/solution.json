@@ -40,6 +40,7 @@
       "name": "Scan for postings",
       "kind": "schedule",
       "schedule": { "everySeconds": 3600 },
+      "runAtInstall": true,
       "member": "Scout",
       "instruction": "scan",
       "wakeManager": "never",

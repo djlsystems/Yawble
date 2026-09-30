@@ -40,6 +40,26 @@ public sealed class TriggerSweep(
         }
     }
 
+    /// <summary>
+    /// FIRES ONE CLOCK TRIGGER NOW, as if <paramref name="now"/> were its due time: the fire the
+    /// sweep makes (source `schedule:&lt;id&gt;`, its instruction with its wakeManager, skipped for a
+    /// paused team or a busy idle-only member, skipped with its row at the daily cap), and then its
+    /// next due time counts on from now, as after any fire. A solution's first run at install is
+    /// this one call. Answers the row as the fire left it (its <c>LastOutcome</c> says what
+    /// happened), or null for an unknown row or one that is not a schedule.
+    /// </summary>
+    public async Task<TriggerRow?> FireNowAsync(string id, DateTimeOffset now, CancellationToken ct = default)
+    {
+        if (await schedules.FindAsync(id, ct) is not { } row
+            || !TryKind(row.Kind, out var kind) || kind is not (TriggerKind.Cron or TriggerKind.Every))
+        {
+            return null;
+        }
+
+        await FireOneAsync(row with { NextDueAt = now }, now, ct);
+        return await schedules.FindAsync(id, ct);
+    }
+
     private async Task FireOneAsync(TriggerRow row, DateTimeOffset now, CancellationToken ct)
     {
         if (row.NextDueAt is null) return;

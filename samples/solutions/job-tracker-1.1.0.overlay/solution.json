@@ -49,6 +49,7 @@
       "schedule": {
         "everySeconds": 3600
       },
+      "runAtInstall": true,
       "member": "Scout",
       "instruction": "scan",
       "wakeManager": "never",

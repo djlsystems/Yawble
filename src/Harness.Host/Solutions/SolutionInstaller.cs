@@ -86,6 +86,26 @@ public sealed record SolutionDone(
     /// <summary>The keys still to set: bound, needed and not set on this Host. Not a failure - each
     /// one's source fails until it is set.</summary>
     public IReadOnlyList<string> Unset => [.. Secrets.Where(s => s.Needed != false && !s.Set).Select(s => s.Key).Distinct(StringComparer.Ordinal)];
+
+    /// <summary>Each schedule's first run: ran now at install, or when it first comes due.</summary>
+    public IReadOnlyList<SolutionFirstRun> FirstRuns { get; init; } = [];
+}
+
+/// <summary>
+/// ONE SCHEDULE'S FIRST RUN, as the result screen and the CLI name it: "Fetch jobs ran now", or
+/// "Fetch jobs first runs at 8:51 PM". <paramref name="Outcome"/> is <c>fired</c> for a schedule the
+/// install ran (<paramref name="RanNow"/>), <c>scheduled</c> for one that waits for its first due
+/// time, and for a first run at install that did not happen the fire's own word - <c>skipped</c>,
+/// <c>capped</c>, <c>member-missing</c> - or <c>failed</c>. That is a run's outcome, never the
+/// install's. <paramref name="At"/> is when it ran, or when it first runs; <paramref name="Next"/>
+/// is its next due time after that.
+/// </summary>
+public sealed record SolutionFirstRun(
+    string Trigger, string Member, bool RunAtInstall, bool RanNow, string Outcome, DateTimeOffset? At, DateTimeOffset? Next)
+{
+    public const string Fired = "fired";
+    public const string Scheduled = "scheduled";
+    public const string Failed = "failed";
 }
 
 /// <summary>
@@ -151,7 +171,8 @@ public sealed class SolutionInstaller(
     IPluginMemberSettingsStore? pluginSettings = null,
     TeamAnnouncements? announce = null,
     int group = -1,
-    ISecretStore? secretStore = null)
+    ISecretStore? secretStore = null,
+    TriggerSweep? sweep = null)
 {
     public const string StepPlugins = "plugins";
     public const string StepTeam = "team";
@@ -613,6 +634,7 @@ public sealed class SolutionInstaller(
         string? stored = null;
         var memberIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var triggerIds = new Dictionary<string, string>(StringComparer.Ordinal);
+        var firstDue = new Dictionary<string, DateTimeOffset?>(StringComparer.Ordinal);
 
         try
         {
@@ -712,7 +734,9 @@ public sealed class SolutionInstaller(
 
                 foreach (var trigger in manifest.Triggers)
                 {
-                    triggerIds[trigger.Name] = await CreateTriggerAsync(stored!, trigger, memberIds, tools, actor, run, ct);
+                    var made = await CreateTriggerAsync(stored!, trigger, memberIds, tools, actor, run, ct);
+                    triggerIds[trigger.Name] = made.Id;
+                    firstDue[trigger.Name] = made.NextDueAt;
                 }
             });
 
@@ -748,6 +772,10 @@ public sealed class SolutionInstaller(
 
         await CopyDocumentsAsync(stored!, answers, actor, ct);
 
+        // THE FIRST RUNS, only now that the last step has succeeded and the documents are in: a
+        // failed step returned above, having made no fire.
+        var firstRuns = await FirstRunsAsync(manifest, triggerIds, firstDue, ct);
+
         var saved = (await store.FindAsync(stored!, ct))!;
 
         return new(200, new SolutionDone(
@@ -755,6 +783,7 @@ public sealed class SolutionInstaller(
             await MissingAsync(stored!, saved, ct), run.Done)
         {
             Secrets = await InstalledSecretsAsync(stored!, memberIds, package, ct),
+            FirstRuns = firstRuns,
         });
     }
 
@@ -951,7 +980,7 @@ public sealed class SolutionInstaller(
                             actor.Row(TenantActions.ScheduleDeleted, oldId, trigger.Name, new { team = stored, solution = manifest.Id, replaced = true }), CancellationToken.None));
                     }
 
-                    triggerIds[trigger.Name] = await CreateTriggerAsync(stored, trigger, memberIds, tools, actor, run, ct);
+                    triggerIds[trigger.Name] = (await CreateTriggerAsync(stored, trigger, memberIds, tools, actor, run, ct)).Id;
                 }
 
                 foreach (var name in diff.Triggers.Removed)
@@ -1258,7 +1287,54 @@ public sealed class SolutionInstaller(
         }
     }
 
-    private async Task<string> CreateTriggerAsync(
+    /// <summary>
+    /// EACH SCHEDULE'S FIRST RUN after an install. A <c>runAtInstall</c> one is fired once now through
+    /// <see cref="TriggerSweep.FireNowAsync"/> - the fire its schedule makes, with its wakeManager and
+    /// its daily cap - and then comes due on its interval from now. Any other waits for the due time
+    /// it was created with. A fire that does not happen is that run's outcome, not the install's.
+    /// </summary>
+    private async Task<IReadOnlyList<SolutionFirstRun>> FirstRunsAsync(
+        SolutionManifest manifest, IReadOnlyDictionary<string, string> triggerIds,
+        IReadOnlyDictionary<string, DateTimeOffset?> firstDue, CancellationToken ct)
+    {
+        var runs = new List<SolutionFirstRun>();
+
+        foreach (var trigger in manifest.Triggers.Where(t => t.Schedule is not null))
+        {
+            var due = firstDue.GetValueOrDefault(trigger.Name);
+
+            if (!trigger.RunAtInstall || sweep is null || !triggerIds.TryGetValue(trigger.Name, out var id))
+            {
+                runs.Add(new(trigger.Name, trigger.Member, trigger.RunAtInstall, false, SolutionFirstRun.Scheduled, due, null));
+                continue;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            TriggerRow? fired;
+
+            try
+            {
+                fired = await sweep.FireNowAsync(id, now, ct);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                fired = null;
+            }
+
+            if (fired is { LastOutcome: SolutionFirstRun.Fired })
+            {
+                runs.Add(new(trigger.Name, trigger.Member, true, true, SolutionFirstRun.Fired, now, fired.NextDueAt));
+            }
+            else
+            {
+                runs.Add(new(trigger.Name, trigger.Member, true, false, fired?.LastOutcome ?? SolutionFirstRun.Failed, fired?.NextDueAt ?? due, null));
+            }
+        }
+
+        return runs;
+    }
+
+    private async Task<TriggerRow> CreateTriggerAsync(
         string team, SolutionTrigger trigger, IReadOnlyDictionary<string, string> memberIds, string? tools,
         SolutionActor actor, Run run, CancellationToken ct)
     {
@@ -1293,7 +1369,7 @@ public sealed class SolutionInstaller(
         run.Made($"trigger {trigger.Name}", () => triggers.DeleteAsync(made.Id,
             actor.Row(TenantActions.ScheduleDeleted, made.Id, made.Name, new { team, reason = "install undone" }), CancellationToken.None));
 
-        return made.Id;
+        return made;
     }
 
     /// <summary>Each document input's folder, made now so a folder trigger can watch it and a
