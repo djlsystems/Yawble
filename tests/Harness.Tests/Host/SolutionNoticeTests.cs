@@ -72,7 +72,7 @@ public sealed class SolutionNoticeTests(HostFixture host) : IClassFixture<HostFi
         Assert.StartsWith("solution.json triggers[0].member:", problem);
         Assert.Contains("Nobody", problem);
         var text = payload.GetProperty(PayloadFields.Text).GetString()!;
-        Assert.StartsWith("Job Tracker 1.0.0 did not pass the check: solution.json triggers[0].member:", text);
+        Assert.StartsWith("Job Tracker 1.0.0 did not pass the check:\nsolution.json triggers[0].member:", text);
         Assert.DoesNotContain("Review and install", text);
         Assert.EndsWith("Coordinator, Scout, Writer.", text);
 
@@ -81,6 +81,38 @@ public sealed class SolutionNoticeTests(HostFixture host) : IClassFixture<HostFi
         var shown = Assert.Single(detail.GetProperty("stats")[0].GetProperty("notices").EnumerateArray());
         Assert.False(shown.GetProperty("ok").GetBoolean());
         Assert.Equal(problem, Assert.Single(shown.GetProperty("problems").EnumerateArray()).GetString());
+    }
+
+    [Fact]
+    public async Task A_package_whose_solution_json_links_outside_is_named_by_its_folder_and_nothing_of_the_target_is_shown()
+    {
+        const string outside = "OUTSIDE-3f9c1e-not-the-packages";
+        var (team, root, _) = await WorkflowAsync("Notice Link");
+        var folder = SolutionSamples.JobTracker("1.0.0", Documents(team));
+        var manifest = Path.Combine(folder, "solution.json");
+        var target = Path.Combine(Path.GetDirectoryName(Documents(team))!, $"outside-{Guid.NewGuid():N}.json");
+        File.WriteAllText(target, $$"""{"id":"{{outside}}","name":"{{outside}}","version":"{{outside}}"}""");
+        File.Delete(manifest);
+        File.CreateSymbolicLink(manifest, Path.GetRelativePath(folder, target));
+        // Written during the workflow: a link is not walked, so another file says so.
+        File.SetLastWriteTimeUtc(Path.Combine(folder, "skills", "job-search-playbook.md"), DateTime.UtcNow);
+
+        try
+        {
+            await DeclareAsync(team, root);
+
+            var payload = Assert.Single(await NoticesAsync(root)).Payload;
+            var notice = JsonDocument.Parse(payload).RootElement;
+            Assert.False(notice.GetProperty(PayloadFields.Ok).GetBoolean());
+            Assert.Equal(
+                $"{Path.GetFileName(folder)} did not pass the check:\nsolution.json (link): solution.json is a link leading outside the package ({Path.GetRelativePath(folder, target)}).",
+                notice.GetProperty(PayloadFields.Text).GetString());
+            Assert.DoesNotContain(outside, payload, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(target);
+        }
     }
 
     [Fact]
@@ -127,11 +159,33 @@ public sealed class SolutionNoticeTests(HostFixture host) : IClassFixture<HostFi
     }
 
     [Theory]
-    [InlineData("solution.json version: is required.", "Job Tracker 1.0.0 did not pass the check: solution.json version: is required.")]
-    [InlineData("solution.json version: is required", "Job Tracker 1.0.0 did not pass the check: solution.json version: is required.")]
+    [InlineData("solution.json version: is required.", "Job Tracker 1.0.0 did not pass the check:\nsolution.json version: is required.")]
+    [InlineData("solution.json version: is required", "Job Tracker 1.0.0 did not pass the check:\nsolution.json version: is required.")]
     public void The_failing_sentence_ends_in_one_full_stop(string problem, string expected)
     {
         Assert.Equal(expected, SolutionNotice.FailingText("Job Tracker", "1.0.0", [problem]));
+    }
+
+    [Fact]
+    public void Each_problem_keeps_its_own_full_stop_on_its_own_line_and_nothing_reads_dot_semicolon()
+    {
+        var text = SolutionNotice.FailingText("Job Tracker", "1.0.0",
+        [
+            "solution.json triggers[0].member: 'Nobody' names no member of this package; its members are Coordinator, Scout, Writer.",
+            "solution.json members[1].pluginId: 'linkedin-scraper' is not a plugin in this package",
+            "skills/job-search-playbook.md roles: must say who it is for.",
+        ]);
+
+        Assert.DoesNotContain(".;", text);
+        Assert.Equal(
+            [
+                "Job Tracker 1.0.0 did not pass the check:",
+                "solution.json triggers[0].member: 'Nobody' names no member of this package; its members are Coordinator, Scout, Writer.",
+                "solution.json members[1].pluginId: 'linkedin-scraper' is not a plugin in this package.",
+                "skills/job-search-playbook.md roles: must say who it is for.",
+            ],
+            text.Split('\n'));
+        Assert.All(text.Split('\n').Skip(1), line => Assert.True(line.EndsWith('.') && !line.EndsWith(".."), line));
     }
 
     /// <summary>The Manager's declaration, through the one sequence the route runs.</summary>

@@ -86,14 +86,19 @@ public sealed class SolutionNotice(SolutionService solutions, TeamDocuments docu
     }
 
     /// <summary>
-    /// The failing notice's sentence: the package, then its problems, ending in one full stop - a
-    /// reason that already ends a sentence is not given a second.
+    /// The failing notice: the package, then each problem on its own line ending in one full stop - a
+    /// reason that already ends a sentence is not given a second, and none is joined to the next.
     /// </summary>
     public static string FailingText(string name, string? version, IReadOnlyList<string> problems)
     {
-        var text = $"{Label(name, version)} did not pass the check: {string.Join("; ", problems)}".TrimEnd();
-        return text.EndsWith('.') || text.EndsWith('?') || text.EndsWith('!') ? text : text + ".";
+        var lines = problems.Select(p => p.TrimEnd()).Where(p => p.Length > 0).Select(Sentence).ToList();
+        return lines.Count == 0
+            ? $"{Label(name, version)} did not pass the check."
+            : $"{Label(name, version)} did not pass the check:\n{string.Join("\n", lines)}";
     }
+
+    private static string Sentence(string text) =>
+        text.EndsWith('.') || text.EndsWith('?') || text.EndsWith('!') ? text : text + ".";
 
     /// <summary>
     /// The package's id, name and version: the checked manifest's when it passed, otherwise what
@@ -103,6 +108,9 @@ public sealed class SolutionNotice(SolutionService solutions, TeamDocuments docu
     private static (string? Id, string Name, string? Version) Named(string folder, SolutionCheck? check)
     {
         if (check?.Package?.Manifest is { } manifest) return (manifest.Id, manifest.Name, manifest.Version);
+
+        // A link leaving the package stopped the check before any read; the notice reads nothing either.
+        if (check is not null && check.Refusals.Any(r => r.Field == SolutionChecker.LinkField)) return (null, Path.GetFileName(folder), null);
 
         string? id = null, name = null, version = null;
 

@@ -1302,12 +1302,14 @@ function down(index: number) {
             <div v-if="(selected.stats[i]?.members.length ?? 0) > 0" class="text-caption os-text-muted">
               {{ selected.stats[i]!.members.join(', ') }}
             </div>
-            <!-- The platform's check of each package this workflow wrote. Words interpolated; the
-                 one link is composed from the folder, and opens the review rather than installing. -->
+            <!-- The platform's check of each package this workflow wrote. Words interpolated, a failing
+                 package's problems a line each; the one link is composed from the folder, and opens
+                 the review rather than installing. -->
             <div
               v-for="notice in noticesOf(selected.stats[i])"
               :key="notice.folder"
               class="backlog-notice text-caption"
+              style="white-space: pre-line"
               :class="notice.ok ? 'text-positive' : 'text-negative'"
             >
               {{ notice.words }}
