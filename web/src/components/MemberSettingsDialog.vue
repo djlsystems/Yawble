@@ -26,6 +26,7 @@ import {
   initialConfig,
   initialSecrets,
   missingRequired,
+  outOfRange,
   settingsBody,
   type PluginFieldValues,
   type PluginSettingsShape,
@@ -151,6 +152,10 @@ const pluginProblem = ref<string | null>(null);
 const pluginMissing = computed(() =>
   pluginShape.value ? missingRequired(pluginShape.value, pluginConfig.value, pluginSecrets.value) : [],
 );
+/** Number fields outside their manifest bounds: held like a missing required field; the Host refuses them too. */
+const pluginOutOfRange = computed(() =>
+  pluginShape.value ? Object.keys(outOfRange(pluginShape.value, pluginConfig.value)) : [],
+);
 
 const pluginBody = computed(() =>
   pluginShape.value ? settingsBody(pluginShape.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value) : null,
@@ -192,7 +197,7 @@ const valid = computed(
     // A plugin member kept on its plugin is not held to the team's Agent allowlist - a person may
     // hire any installed plugin, and editing its settings is not a repoint.
     ((isPlugin.value && agent.value === props.snapshot.agent) || allowlistIncludes(teamAllowlist.value, agent.value)) &&
-    pluginMissing.value.length === 0,
+    pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0,
 );
 
 /** Why the Agent picker cannot be used, as its own error state. Null while it has choices. */

@@ -13,6 +13,7 @@ import {
   initialConfig,
   initialSecrets,
   missingRequired,
+  outOfRange,
   settingsBody,
   type PluginFieldValues,
 } from '../lib/pluginSettings';
@@ -77,7 +78,7 @@ const valid = computed(
     passes(agent.value, agentRules) &&
     (plugin.value
       // The server refuses every hire on a team with an empty allowlist, a plugin's included.
-      ? normalizeAllowlist(props.memberAgents).length > 0 && pluginMissing.value.length === 0
+      ? normalizeAllowlist(props.memberAgents).length > 0 && pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0
       : allowlistIncludes(props.memberAgents, agent.value ?? '')),
 );
 
@@ -130,6 +131,10 @@ watch(plugin, (chosen) => {
 
 const pluginMissing = computed(() =>
   plugin.value ? missingRequired(plugin.value, pluginConfig.value, pluginSecrets.value) : [],
+);
+/** Number fields outside their manifest bounds: held like a missing required field; the Host refuses them too. */
+const pluginOutOfRange = computed(() =>
+  plugin.value ? Object.keys(outOfRange(plugin.value, pluginConfig.value)) : [],
 );
 
 async function loadPlugins() {

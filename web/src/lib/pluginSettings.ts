@@ -1,5 +1,6 @@
 import type { ConnectionSlot, PluginConfigField, PluginHire, PluginSecretField, PluginSettingValue } from '../api/types';
 import { bindingsBody } from './connections';
+import { boundsHint, boundsProblem } from './numberBounds';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, AS A FORM: what each manifest field starts as, whether it is still at
@@ -150,6 +151,28 @@ export function missingRequired(
 
   return missing;
 }
+
+/**
+ * Each number field whose value is outside its manifest bounds (or not whole when it must be), with
+ * the sentence saying so - held before sending the way a missing required field is. A value STORED
+ * out of range (bounds added after it was saved) shows here too, as it is: the form never changes it
+ * for the person.
+ */
+export function outOfRange(shape: PluginSettingsShape, config: PluginFieldValues): Record<string, string> {
+  const problems: Record<string, string> = {};
+
+  for (const [name, field] of Object.entries(shape.config)) {
+    if (field.type !== 'number') continue;
+
+    const problem = boundsProblem(name, field, config[name]);
+    if (problem !== null) problems[name] = problem;
+  }
+
+  return problems;
+}
+
+/** A number field's bounds in words for its hint, or null for any other field or one without bounds. */
+export const fieldBoundsHint = (field: PluginConfigField) => (field.type === 'number' ? boundsHint(field) : null);
 
 /**
  * The `config` and `secrets` to store, holding ONLY what differs from the manifest's defaults - so

@@ -30,6 +30,7 @@ import {
 import {
   initialConfig,
   initialSecrets,
+  outOfRange,
   settingsBody,
   type PluginFieldValues,
   type PluginSettingsShape,
@@ -295,6 +296,12 @@ async function saveSettings(member: string) {
   if (!state) return;
   state.saved = false;
   state.problem = '';
+  // Held before sending, as the dialogs hold it: the field shows the sentence, and so does the Save.
+  const bounds = Object.values(outOfRange(state.shape, state.config));
+  if (bounds.length > 0) {
+    state.problem = bounds.join(' ');
+    return;
+  }
   busy.value = `settings:${member}`;
   try {
     await savePluginSettings(props.team, member, settingsBody(state.shape, state.config, state.secrets, state.connections));
