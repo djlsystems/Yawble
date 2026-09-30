@@ -58,7 +58,7 @@ watch(() => wizard.value.open, (showing, was) => {
 </script>
 
 <template>
-  <q-dialog v-model="open">
+  <q-dialog v-model="open" no-route-dismiss>
     <q-card class="os-dialog-xl" data-solutions-launcher>
       <q-card-section class="row items-center q-pb-none">
         <div class="os-dialog-title">Solutions</div>
@@ -103,11 +103,11 @@ watch(() => wizard.value.open, (showing, was) => {
             :data-solution-tile="row.team"
           >
             <q-card-section class="q-pb-xs">
-              <div class="row items-baseline no-wrap q-gutter-x-sm">
-                <div class="text-subtitle1 text-weight-medium ellipsis" data-tile-name>{{ row.name }}</div>
-                <div class="text-caption os-text-muted" data-tile-version>{{ row.version }}</div>
+              <div class="row items-baseline no-wrap q-gutter-x-sm solution-tile-title">
+                <div class="text-subtitle1 text-weight-medium ellipsis solution-tile-name" :title="row.name" data-tile-name>{{ row.name }}</div>
+                <div class="text-caption os-text-muted solution-tile-version" data-tile-version>{{ row.version }}</div>
               </div>
-              <div class="text-caption os-text-muted" data-tile-team>Team {{ row.teamName }}</div>
+              <div class="text-caption os-text-muted ellipsis" :title="row.teamName" data-tile-team>Team {{ row.teamName }}</div>
             </q-card-section>
 
             <q-card-section class="q-py-xs col">
@@ -121,7 +121,7 @@ watch(() => wizard.value.open, (showing, was) => {
                 <q-icon :name="stateBadge(row.state)?.icon" size="14px" class="q-mr-xs" />
                 <span class="solution-badge-text">{{ stateBadge(row.state)?.text }}</span>
               </q-badge>
-              <div v-if="row.status" class="os-body q-mt-xs" data-tile-status>{{ row.status }}</div>
+              <div v-if="row.status" class="os-body q-mt-xs solution-tile-status" data-tile-status>{{ row.status }}</div>
             </q-card-section>
 
             <q-card-actions align="right">
@@ -172,12 +172,30 @@ watch(() => wizard.value.open, (showing, was) => {
 <style scoped>
 .solutions-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  /* min(): a phone narrower than one column still gets a tile that fits it. */
+  grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr));
   gap: 12px;
 }
 
+/* A LONG NAME IS CUT INSIDE THE TILE, never pushing Open and Manage out of it: a grid item and a
+   flex item both refuse to shrink below their content unless told `min-width: 0`. */
 .solution-tile {
   min-height: 11rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.solution-tile-name {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.solution-tile-version {
+  flex: 0 0 auto;
+}
+
+.solution-tile-status {
+  overflow-wrap: anywhere;
 }
 
 /* A blocked reason can be a sentence: the badge wraps rather than running off the tile. */

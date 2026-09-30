@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   getPluginSettings,
   listConnectionProviders,
@@ -35,7 +35,18 @@ import {
   type PluginSettingsShape,
 } from '../lib/pluginSettings';
 import { missingLine } from '../lib/solutions';
-import { memberStateLine, nextFireLine, parseCap, sizeWords, stateBadge, whenWords } from '../lib/solutionPanel';
+import {
+  hasNewRun,
+  memberStateLine,
+  nextFireLine,
+  parseCap,
+  RunWatchEveryMs,
+  RunWatchTries,
+  runKeys,
+  sizeWords,
+  stateBadge,
+  whenWords,
+} from '../lib/solutionPanel';
 import { cappedLine, spentTodayLine } from '../lib/triggers';
 import ConnectionPicker from './ConnectionPicker.vue';
 import HostPathPicker from './HostPathPicker.vue';
@@ -98,6 +109,7 @@ async function load() {
 }
 
 function reset() {
+  stopWatchingRun();
   section.value = 'status';
   panel.value = null;
   problem.value = '';
@@ -182,16 +194,52 @@ function setEnabled(trigger: SolutionPanelTrigger, enabled: boolean) {
 
 async function runNow(trigger: SolutionPanelTrigger) {
   let said = '';
+  let fired = false;
+  const seen = runKeys(panel.value?.recentRuns ?? []);
   await act(`run:${trigger.id}`, async () => {
     const run = await runScheduleNow(asTeamId(props.team), trigger.id);
-    if (run.outcome === 'fired') said = `${trigger.packageName} is running now.`;
+    fired = run.outcome === 'fired';
+    if (fired) said = `${trigger.packageName} is running now.`;
     else {
       const why = run.outcome === 'member-missing' ? 'its member is gone' : (run.reason ?? run.outcome);
       said = `${trigger.packageName} was skipped: ${why}.`;
     }
   });
   if (said) notice.value = said;
+  if (fired && !problem.value) watchForRun(seen);
 }
+
+// The run route answers once the run is queued, not when it ends: read the panel again on a short
+// bounded timer until a run it had not seen shows, so Recent runs, each member's last run and the
+// status line catch up without Refresh. Only the panel is re-read - settings being edited are kept.
+let runWatch: ReturnType<typeof setTimeout> | undefined;
+
+function stopWatchingRun() {
+  if (runWatch !== undefined) clearTimeout(runWatch);
+  runWatch = undefined;
+}
+
+function watchForRun(seen: ReadonlySet<string>, triesLeft = RunWatchTries) {
+  stopWatchingRun();
+  const team = props.team;
+  runWatch = setTimeout(async () => {
+    runWatch = undefined;
+    let read: SolutionPanel | null = null;
+    try {
+      read = await solutionPanel(team);
+    } catch {
+      // A failed read is one try used; the next may answer.
+    }
+    if (team !== props.team || !open.value) return;
+    if (read) {
+      panel.value = read;
+      if (hasNewRun(seen, read.recentRuns)) return;
+    }
+    if (triesLeft > 1) watchForRun(seen, triesLeft - 1);
+  }, RunWatchEveryMs);
+}
+
+onBeforeUnmount(stopWatchingRun);
 
 function togglePaused() {
   const team = asTeamId(props.team);
@@ -378,7 +426,10 @@ async function confirmUninstall() {
 watch(
   () => [open.value, props.team] as const,
   ([showing]) => {
-    if (!showing) return;
+    if (!showing) {
+      stopWatchingRun();
+      return;
+    }
     reset();
     void load();
   },
@@ -393,7 +444,7 @@ function closeUninstall() {
 </script>
 
 <template>
-  <q-dialog v-model="open">
+  <q-dialog v-model="open" no-route-dismiss>
     <q-card class="os-dialog-xl solution-panel" data-solution-panel>
       <q-card-section class="row items-center q-pb-none no-wrap">
         <q-btn flat dense round icon="arrow_back" aria-label="All solutions" data-panel-back @click="emit('launcher')">

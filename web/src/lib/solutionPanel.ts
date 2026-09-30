@@ -1,4 +1,4 @@
-import type { SolutionPanelMember, SolutionPanelTrigger, SolutionState } from '../api/types';
+import type { SolutionPanelMember, SolutionPanelRun, SolutionPanelTrigger, SolutionState } from '../api/types';
 
 /**
  * THE WORDS OF THE SOLUTIONS LAUNCHER AND CONTROL PANEL, kept out of the components so each can be
@@ -101,3 +101,18 @@ export function parseCap(typed: string | number | null | undefined): number | nu
 /** The address of one solution's control panel, and of the launcher. */
 export const panelPath = (team: string) => `/solutions/${encodeURIComponent(team)}`;
 export const LauncherPath = '/solutions';
+
+/**
+ * AFTER RUN NOW, THE PANEL WATCHES FOR THE RUN TO FINISH: the run route answers as soon as the run
+ * is queued, so the panel reads itself again every `RunWatchEveryMs` until a run it had not seen
+ * shows in Recent runs - bounded to `RunWatchTries` reads, after which Refresh is still there.
+ */
+export const RunWatchEveryMs = 2000;
+export const RunWatchTries = 90;
+
+export const runKeys = (runs: readonly Pick<SolutionPanelRun, 'member' | 'seq'>[]) =>
+  new Set(runs.map((run) => `${run.member}/${run.seq}`));
+
+/** True once `runs` holds a run that is not in `seen`. */
+export const hasNewRun = (seen: ReadonlySet<string>, runs: readonly Pick<SolutionPanelRun, 'member' | 'seq'>[]) =>
+  runs.some((run) => !seen.has(`${run.member}/${run.seq}`));

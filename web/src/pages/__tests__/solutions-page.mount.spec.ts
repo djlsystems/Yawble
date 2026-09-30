@@ -13,7 +13,7 @@ import SolutionsPage from '../SolutionsPage.vue';
 import { bodyFind, resetBody } from '../../test/mountQuasar';
 import { settle } from '../../test/formProbe';
 import { fakeHost, reply, type Call } from '../../test/solutionFixtures';
-import { launcherRow, panelRoutes } from '../../test/solutionPanelFixtures';
+import { launcherRow, panelRead, panelRoutes } from '../../test/solutionPanelFixtures';
 
 let calls: Call[] = [];
 
@@ -23,7 +23,14 @@ beforeEach(() => {
     'fetch',
     vi.fn(
       fakeHost(
-        [(call) => (call.url === '/api/solutions/installed' ? reply(200, [launcherRow()]) : undefined), ...panelRoutes()],
+        [
+          (call) => (call.url === '/api/solutions/installed' ? reply(200, [launcherRow()]) : undefined),
+          (call) =>
+            call.url === '/api/teams/news/solution/panel'
+              ? reply(200, panelRead({ team: 'news', teamName: 'News desk', name: 'News Desk', members: [], settings: [] }))
+              : undefined,
+          ...panelRoutes(),
+        ],
         calls,
       ),
     ),
@@ -81,6 +88,21 @@ describe('the solutions addresses', () => {
     await settle();
 
     expect(router.currentRoute.value.fullPath).toBe('/solutions');
+  });
+
+  it("changing the address from one panel to another opens the other solution's panel", async () => {
+    const router = await app('/solutions/job-tracker');
+    expect(bodyFind('[data-panel-title]')?.textContent).toContain('Job Tracker');
+
+    // A pasted link, or "Manage solution" followed in the same tab.
+    await router.push('/solutions/news');
+    await settle();
+    await settle();
+
+    expect(router.currentRoute.value.fullPath).toBe('/solutions/news');
+    expect(bodyFind('[data-solution-panel]')).not.toBeNull();
+    expect(bodyFind('[data-panel-title]')?.textContent).toContain('News Desk');
+    expect(calls.some((call) => call.url === '/api/teams/news/solution/panel')).toBe(true);
   });
 
   it('leaves for the Console when the launcher is closed', async () => {

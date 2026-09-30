@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LauncherPath, memberStateLine, nextFireLine, panelPath, parseCap, sizeWords, stateBadge } from '../solutionPanel';
+import { hasNewRun, LauncherPath, memberStateLine, nextFireLine, panelPath, parseCap, runKeys, sizeWords, stateBadge } from '../solutionPanel';
 import { needsActiveWorkTeam, Ribbon, SolutionsAction } from '../ribbon';
 
 describe('a solution state badge', () => {
@@ -83,5 +83,19 @@ describe('the solution screens', () => {
   it.each(['SolutionsLauncher.vue', 'SolutionPanel.vue'])('%s binds nothing as HTML', (file) => {
     const source = readFileSync(join(import.meta.dirname, '../../components', file), 'utf8');
     expect(source).not.toMatch(/v-html|innerHTML/);
+  });
+});
+
+describe('watching for the run Run now started', () => {
+  const seen = runKeys([{ member: 'scout', seq: 41 }, { member: 'Manager', seq: 40 }]);
+
+  it('is not done while only the runs already seen are listed', () => {
+    expect(hasNewRun(seen, [{ member: 'scout', seq: 41 }, { member: 'Manager', seq: 40 }])).toBe(false);
+    expect(hasNewRun(seen, [])).toBe(false);
+  });
+
+  it('is done once a run it had not seen is listed, whichever member ran it', () => {
+    expect(hasNewRun(seen, [{ member: 'scout', seq: 42 }, { member: 'scout', seq: 41 }])).toBe(true);
+    expect(hasNewRun(seen, [{ member: 'writer', seq: 41 }])).toBe(true);
   });
 });
