@@ -251,6 +251,20 @@ public static class BuiltInSkills
             `tell` returns a workflow number immediately and nothing blocks. You are woken again when
             that member finishes, with what it reported. Decide the next step then.
 
+            ## An instruction already queued is delivered in turn
+
+            `status` lists each member's queued and deferred instructions: seq, first line, source.
+            A queued instruction runs when the member is free, in turn, without anything more from
+            you. When you accept a member's hand-back, do not re-send the instruction that was
+            queued behind it: it is already on its way. `tell` names a queued match in its reply
+            (`duplicateOf`, with the queued seq) and sends your copy anyway, so a match means you
+            have just paid for the same work twice.
+
+            Several instructions that reach a busy member arrive as one run with numbered items.
+            The member does each, blocks one (`blocked` with its `item`) or defers one (`blocked`
+            with its `item` and `defer: true`). A deferred item shows in `status` as deferred and
+            comes back to the member as its own next run in the same workflow; do not re-send it.
+
             DO NOT WAIT FOR A MEMBER BY ANY MEANS. FINISH YOUR TURN. No sleep loop, no polling
             `workflow_show`. The member's completion is a delivery addressed to you, and
             `workflow_complete` is refused while it is in flight, so a Manager that holds its turn
@@ -382,6 +396,19 @@ public static class BuiltInSkills
             `blocked` with reason "<why you stopped>". Say whether you FAILED at a step or CANNOT
             REACH it, and if you cannot reach it, what you would need: one is re-dispatched, the
             other escalated.
+
+            ## A run with several numbered items
+
+            Instructions sent while you were busy arrive as ONE run with numbered items. Each item is
+            yours now and there is no later run for it. For each one, pick:
+
+            - Do it, and say so in your hand-back.
+            - Block it: `blocked` with reason "<why>" and `item` <n>. The rest of the run carries on.
+            - Defer it: `blocked` with reason "<why it waits>", `item` <n> and `defer: true`. It
+              comes back to you as its own next run, in the same workflow, saying which run it was
+              deferred from. Deferring the only item of a run is refused.
+
+            Never leave an item unanswered in the hope that it arrives again: it does not.
 
             ## When your card is done, hand it back
 

@@ -5387,7 +5387,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
         + "called `Manager` unless it has been relabelled.")]
     string name,
     Tell request, TeamRegistry teams, ContainerHost host,
-    IMessageLog log, HttpContext context, CancellationToken ct) =>
+    IMessageLog log, IPendingDeliveries pending, HttpContext context, CancellationToken ct) =>
 {
     // The STORED spelling, so the id built here is the one the container was registered under
     // however the caller capitalised the team.
@@ -5470,6 +5470,10 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
     // one as "", and the two mean the same thing here.
     long? causation = null;
 
+    // The workflow this instruction will join, known only when it answers something: an
+    // instruction with no causation heads a new workflow, where nothing can already be queued.
+    long? joins = null;
+
     // A team container that names no causation dispatches inside the run it is in. See
     // `TellCausation`; the depth and budget checks below then apply to it like any other.
     var callerPrincipal = PrincipalClaims.From(context.User);
@@ -5545,7 +5549,17 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
         }
 
         causation = seq;
+        joins = found.CorrelationId;
     }
+
+    // A DUPLICATE IS NAMED, NOT HELD. The b001h Manager re-sent an instruction already queued to a
+    // busy member when its predecessor was accepted, and paid a member run and a Manager wake to
+    // hear it repeated. The reply names the queued seq so the sender learns that - but the row is
+    // still appended below, because `tell` is never held: text that matches is not proof the sender
+    // meant the same thing, and a refusal the sender misreads loses work silently.
+    var duplicate = joins is { } correlation
+        ? await QueuedInstructions.DuplicateOfAsync(pending, log, container.Id, correlation, request.Instruction, ct)
+        : null;
 
     // Three fields, and `instruction` is the one that must never leave.
     //
@@ -5583,6 +5597,8 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
         message.CorrelationId,
         paused,
         pauseNotice = paused ? PauseNoticeFor(teams.LabelFor(stored)) : null,
+        duplicateOf = duplicate?.Seq,
+        duplicateNotice = duplicate is null ? null : QueuedInstructions.DuplicateNotice(container.Id.Name, duplicate.Seq),
     });
 })
     .WithTags("Members")
@@ -5599,7 +5615,35 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
         + "caller that will. Follow the returned `correlationId` through `GET "
         + "/api/workflows/{correlationId}` to see what happened; every message the instruction goes "
         + "on to cause carries it.\n\n"
+        + "When the text matches an instruction already queued to this member in the same workflow, "
+        + "`duplicateOf` names that queued seq and `duplicateNotice` says so in a sentence. The "
+        + "instruction is appended all the same: a match is reported, never held.\n\n"
         + "400 for an empty instruction; 404 for an unknown team or member.");
+
+// WHAT IS WAITING FOR EACH MEMBER: accepted, not started. `status` shows it so a Manager does not
+// re-send what a member already has - see QueuedInstructions.
+app.MapGet("/api/teams/{team}/queued", async (
+    [Description(Describe.Team)] string team,
+    [Description("Omit for every member. The member's identifier, matched case-insensitively.")] string? member,
+    TeamRegistry teams, IMessageLog log, IPendingDeliveries pending, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+
+    var queued = await QueuedInstructions.ForTeamAsync(
+        pending, log, stored, string.IsNullOrWhiteSpace(member) ? null : member.Trim(), ct);
+
+    return Results.Ok(new { queued });
+})
+    .WithTags("Members")
+    .RequirePermit(Permits.Read)
+    .WithSummary("Each member's queued and deferred instructions")
+    .WithDescription(
+        "Every delivery a member of this team has accepted and not yet started, oldest first within "
+        + "each member: its `seq`, the first `line` of the instruction, its `source` and the workflow "
+        + "(`correlation`) it belongs to. `state` is `queued`, or `deferred` for an item a batched run "
+        + "put back on the queue, with `deferredFromRun` naming that run. What a member is running "
+        + "now is not listed: every item of a running batch has started.\n\n"
+        + "404 for an unknown team.");
 
 // What a member says about ITSELF while it works. The one route a permit-less-by-default member
 // can reach, and the reason every member gets a credential at all.

@@ -128,6 +128,13 @@ public static class BuiltInPrompts
         no HTTP fallback. HARNESS_CAUSATION is the message you are answering: pass it as causation
         on every tell, or you start a new workflow.
 
+        ## A run with several numbered items
+
+        When your run carries more than one numbered item, each is yours now and there is no later
+        run for it. Answer it, block it with `blocked` naming its `item` number, or defer it with
+        `blocked` naming its `item` and `defer: true`: a deferred item comes back to you as its own
+        next run. The only item of a run cannot be deferred.
+
         Durable notes you have written for yourself are in `STANDING-NOTES.md` in your working
         folder. Read it when a job touches something you may have met before, and append to it when
         you learn something that will still be true next week. Nothing loads it for you.
@@ -239,6 +246,13 @@ public static class BuiltInPrompts
         team_current, wip, status, hiring, member, kanban, backlog, repo, and site. There is no shell
         command and no HTTP fallback. Call progress while you work. Pass HARNESS_CAUSATION as
         causation on every tell.
+
+        ## A run with several numbered items
+
+        When your run carries more than one numbered item, each is yours now and there is no later
+        run for it. Do it, block it with `blocked` naming its `item` number, or defer it with
+        `blocked` naming its `item` and `defer: true`: a deferred item comes back to you as its own
+        next run. The only item of a run cannot be deferred.
 
         Durable notes you have written for yourself are in `STANDING-NOTES.md` in your working
         folder. Read it when a job touches something you may have met before, and append to it when

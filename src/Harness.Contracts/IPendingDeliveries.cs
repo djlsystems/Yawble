@@ -4,8 +4,13 @@ namespace Harness.Contracts;
 /// <param name="Started">Whether the container had picked it up when the host stopped. An
 /// un-started delivery is resumed; a started one is reported, because nothing can know how far
 /// into it the agent got.</param>
-public sealed record PendingDelivery(long Seq, bool Started);
-public sealed record TeamPendingDelivery(string Subscriber, long Seq, bool Started);
+/// <param name="DeferredFromRun">Set on an item a batched run DEFERRED: the seq of the run it was
+/// deferred from. It is back on the queue as its own pending instruction, and `status` shows it as
+/// deferred rather than merely queued. Null for every ordinary delivery.</param>
+public sealed record PendingDelivery(long Seq, bool Started, long? DeferredFromRun = null);
+
+/// <param name="DeferredFromRun">As on <see cref="PendingDelivery"/>.</param>
+public sealed record TeamPendingDelivery(string Subscriber, long Seq, bool Started, long? DeferredFromRun = null);
 
 /// <summary>
 /// What a container has accepted and not yet finished, durably.
