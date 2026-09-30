@@ -127,6 +127,17 @@ describe('the solutions launcher', () => {
     expect(name.getAttribute('title')).toBe(long);
     expect([...name.classList]).toEqual(expect.arrayContaining(['ellipsis', 'solution-tile-name']));
     expect(first.classList).toContain('solution-tile');
+    // Quasar's `row` and `column` WRAP: in a wrapping flex box each line is as wide as its content,
+    // so the name would never shrink and Open and Manage would sit outside the tile. Every flex box
+    // from the tile down to the name must carry `no-wrap`.
+    const wrapping: string[] = [];
+    for (let el: Element | null = name; el; el = el.parentElement) {
+      const flex = el.classList.contains('row') || el.classList.contains('column');
+      if (flex && !el.classList.contains('no-wrap')) wrapping.push(el.className);
+      if (el === first) break;
+    }
+    expect(wrapping).toEqual([]);
+    expect(first.classList).toContain('no-wrap');
     // The actions are the tile's own children, not pushed into a neighbour.
     expect(first.querySelector('[data-tile-open]')).not.toBeNull();
     expect(first.querySelector('[data-tile-manage]')).not.toBeNull();
