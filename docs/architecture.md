@@ -104,6 +104,11 @@ MCP servers, plugins, skills, memory and instruction files).
   `~/.grok/config.toml` (where the Host writes its own `harness` entry) and skills from
   `~/.grok/skills` and `~/.claude/skills`; Copilot reads `~/.copilot`'s MCP config, plugins,
   skills and instructions. Do not put anything there that a member must not have.
+- **A preset's local tools can depend on the model.** Copilot with `--model auto` offers
+  `apply_patch` and `rg` on one model and `create`, `edit` and `grep` on another, so its allowed
+  list holds every set measured here; a model not yet measured may be offered a file tool the
+  list lacks, and the per-run check names it. Grok's subagent sessions add
+  `wait_commands_or_subagents`. Claude's are pinned by `--tools` whatever the model.
 - **Checked before a run, too.** At start and after every catalog save, the Host asks each
   installed CLI what it would load, with the CLI's own listing and no model call (`claude mcp list`
   and `plugin list`; `codex mcp list`, `features list` and `debug prompt-input`; `grok inspect`;
