@@ -593,7 +593,9 @@ builder.Services.AddSingleton(sp =>
                 var viewers = (await listPush.EntitledViewerIdsAsync(team)).ToArray();
                 return () => listPush.AnnounceDeletedAsync(team, viewers);
             }),
-        runAs.Switches ? runAs.Gid : -1);
+        runAs.Switches ? runAs.Gid : -1,
+        sp.GetRequiredService<ISecretStore>(),
+        sp.GetRequiredService<TriggerSweep>());
 });
 
 // The board's notice for a package a workflow wrote, checked through that one door when the
@@ -3345,6 +3347,58 @@ app.MapDelete("/api/teams/{team}/triggers/{id}", async (
     .WithDescription(
         "Deletes one trigger row.\n\n"
         + "404 for an unknown team or trigger.");
+
+// RUN NOW: the fire the schedule makes, at a person's hand. TriggerSweep.RunNowAsync is the one
+// single-fire entry point (a solution's run-at-install calls it too); this route only resolves the
+// row and says who asked. Always 200 for a clock trigger: a skip is the answer, not a failure.
+app.MapPost("/api/teams/{team}/triggers/{id}/run", async (
+    [Description(Describe.Team)] string team,
+    [Description("The schedule row's identifier.")] string id,
+    TeamRegistry teams,
+    ITriggerStore schedules,
+    TriggerSweep sweep,
+    TriggerCost cost,
+    HttpContext context,
+    CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored)
+    {
+        return Results.NotFound(new { error = $"No team '{team}'." });
+    }
+
+    if (await schedules.FindAsync(id, ct) is not { } row
+        || !string.Equals(row.Team, stored, StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.NotFound(new { error = $"No schedule '{id}' on team '{stored}'." });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var run = await sweep.RunNowAsync(
+        row.Id,
+        now,
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+        context.User.FindFirstValue(ClaimTypes.Email),
+        TenantActions.ScheduleRunNow,
+        ct: ct);
+
+    if (run is null)
+    {
+        return Results.BadRequest(new { error = "Run now fires a schedule (cron, every or once); this trigger fires on an event." });
+    }
+
+    return Results.Ok(new { outcome = run.Outcome, reason = run.Reason, seq = run.Seq, trigger = await cost.ViewAsync(run.Trigger, now, ct) });
+})
+    .WithTags("Teams")
+    .HumansOnly()
+    .WithSummary("Run one schedule now")
+    .WithDescription(
+        "Fires a `cron`, `every` or `once` trigger now, the same fire its schedule makes: source "
+        + "`schedule:<id>`, its instruction with its `wakeManager`, skipped for a paused team or a busy "
+        + "idle-only member, and skipped with its `schedule.skipped` row when its daily token cap is "
+        + "reached. Its stored next due time is not moved (a capped one sleeps, as the cap does). "
+        + "Answers `outcome` (`fired`, `skipped`, `capped`, `member-missing`), `reason`, `seq` and "
+        + "`trigger`, the row as the list routes return it. Audited as `schedule.run-now`.\n\n"
+        + "400 for an event or folder trigger; 404 for an unknown team or trigger.");
 
 // "TEST THIS FOLDER". What a folder trigger there would see and how long the listing took,
 // so a person can tell a slow share from a wrong path before saving anything. Always 200 for a team

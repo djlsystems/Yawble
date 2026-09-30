@@ -193,48 +193,13 @@ public static class PluginEndpoints
 
             var before = await settings.ForAsync(id, ct);
 
-            var fields = before.Config.Keys.Union(changed.Config.Keys, StringComparer.Ordinal)
-                .Where(name => !(before.Config.TryGetValue(name, out var old) && changed.Config.TryGetValue(name, out var now)
-                    && JsonElement.DeepEquals(old, now)))
-                .Order(StringComparer.Ordinal)
-                .ToArray();
-            var secretNames = before.Secrets.Keys.Union(changed.Secrets.Keys, StringComparer.Ordinal)
-                .Where(name => before.Secrets.GetValueOrDefault(name) != changed.Secrets.GetValueOrDefault(name))
-                .Order(StringComparer.Ordinal)
-                .ToArray();
-
-            var slots = before.Connections.Keys.Union(changed.Connections.Keys, StringComparer.Ordinal)
-                .Where(slot => before.Connections.GetValueOrDefault(slot) != changed.Connections.GetValueOrDefault(slot))
-                .Order(StringComparer.Ordinal)
-                .ToArray();
-
-            List<TriggerAudit> rows = [];
-
-            if (slots.Length > 0)
-            {
-                rows.Add(TenantLogging.Row(
-                    context, TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", found.Label ?? found.Name,
-                    ConnectionsChangedDetail(id, plugin.Manifest.Id, slots, before, changed)));
-            }
-
             try
             {
                 await settings.SaveAsync(
                     id, changed,
-                    [.. rows, new TriggerAudit(
-                        context.User.FindFirstValue(ClaimTypes.NameIdentifier),
-                        context.User.FindFirstValue(ClaimTypes.Email),
-                        TenantActions.MemberPluginSettingsChanged,
-                        $"{id.Team}/{id.Name}",
-                        found.Label ?? found.Name,
-                        JsonSerializer.Serialize(new
-                        {
-                            team = id.Team,
-                            plugin = plugin.Manifest.Id,
-                            config = fields,
-                            secrets = secretNames,
-                            connections = slots,
-                        }))],
+                    PersonChangeRows(
+                        context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.User.FindFirstValue(ClaimTypes.Email),
+                        id, found.Label ?? found.Name, plugin.Manifest.Id, before, changed),
                     ct);
             }
             catch (SqliteException exception)
@@ -311,6 +276,46 @@ public static class PluginEndpoints
 
     /// <summary>The <c>member.connections-changed</c> row's detail: each slot's connection before and
     /// after, by id - never a token - and who may set a binding: always a person.</summary>
+    /// <summary>
+    /// THE ROWS A PERSON'S SETTINGS CHANGE IS SAVED WITH, in the same transaction: a
+    /// <c>member.connections-changed</c> row when a slot's binding changed, and always the
+    /// <c>member.plugin-settings-changed</c> row naming the changed config fields, secret fields and
+    /// slots - names only, never a value. The settings route and a solution update share it, so a
+    /// package's binding is recorded exactly as a person's is.
+    /// </summary>
+    public static IReadOnlyList<TriggerAudit> PersonChangeRows(
+        string? userId, string? email, ContainerId id, string label, string plugin, PluginMemberSettings before, PluginMemberSettings changed)
+    {
+        var fields = before.Config.Keys.Union(changed.Config.Keys, StringComparer.Ordinal)
+            .Where(name => !(before.Config.TryGetValue(name, out var old) && changed.Config.TryGetValue(name, out var now)
+                && JsonElement.DeepEquals(old, now)))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var secretNames = before.Secrets.Keys.Union(changed.Secrets.Keys, StringComparer.Ordinal)
+            .Where(name => before.Secrets.GetValueOrDefault(name) != changed.Secrets.GetValueOrDefault(name))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var slots = before.Connections.Keys.Union(changed.Connections.Keys, StringComparer.Ordinal)
+            .Where(slot => before.Connections.GetValueOrDefault(slot) != changed.Connections.GetValueOrDefault(slot))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        List<TriggerAudit> rows = [];
+
+        if (slots.Length > 0)
+        {
+            rows.Add(new TriggerAudit(
+                userId, email, TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", label,
+                JsonSerializer.Serialize(ConnectionsChangedDetail(id, plugin, slots, before, changed))));
+        }
+
+        rows.Add(new TriggerAudit(
+            userId, email, TenantActions.MemberPluginSettingsChanged, $"{id.Team}/{id.Name}", label,
+            JsonSerializer.Serialize(new { team = id.Team, plugin, config = fields, secrets = secretNames, connections = slots })));
+
+        return rows;
+    }
+
     public static object ConnectionsChangedDetail(
         ContainerId id, string plugin, IEnumerable<string> slots, PluginMemberSettings before, PluginMemberSettings after) => new
     {

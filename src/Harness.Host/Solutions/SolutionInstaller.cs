@@ -77,7 +77,55 @@ public sealed record SolutionOutcome(int Status, object Body)
 
 public sealed record SolutionDone(
     bool Ok, string Team, string TeamName, string Id, string Version, string? From,
-    SolutionDiff? Diff, IReadOnlyList<SolutionMissing> Missing, IReadOnlyList<SolutionStep> Steps);
+    SolutionDiff? Diff, IReadOnlyList<SolutionMissing> Missing, IReadOnlyList<SolutionStep> Steps)
+{
+    /// <summary>Every secret the team's plugin members bind, by key name, with whether the Host has
+    /// it set and whether it is needed.</summary>
+    public IReadOnlyList<SolutionSecret> Secrets { get; init; } = [];
+
+    /// <summary>The keys still to set: bound, needed and not set on this Host. Not a failure - each
+    /// one's source fails until it is set.</summary>
+    public IReadOnlyList<string> Unset => [.. Secrets.Where(s => s.Needed != false && !s.Set).Select(s => s.Key).Distinct(StringComparer.Ordinal)];
+
+    /// <summary>Each schedule's first run: ran now at install, or when it first comes due.</summary>
+    public IReadOnlyList<SolutionFirstRun> FirstRuns { get; init; } = [];
+}
+
+/// <summary>
+/// ONE SCHEDULE'S FIRST RUN, as the result screen and the CLI name it: "Fetch jobs ran now", or
+/// "Fetch jobs first runs at 8:51 PM". <paramref name="Outcome"/> is <c>fired</c> for a schedule the
+/// install ran (<paramref name="RanNow"/>), <c>scheduled</c> for one that waits for its first due
+/// time, and for a first run at install that did not happen the fire's own word - <c>skipped</c>,
+/// <c>capped</c>, <c>member-missing</c> - or <c>failed</c>. That is a run's outcome, never the
+/// install's. <paramref name="At"/> is when it ran, or when it first runs; <paramref name="Next"/>
+/// is its next due time after that.
+/// </summary>
+public sealed record SolutionFirstRun(
+    string Trigger, string Member, bool RunAtInstall, bool RanNow, string Outcome, DateTimeOffset? At, DateTimeOffset? Next)
+{
+    public const string Fired = "fired";
+    public const string Scheduled = "scheduled";
+    public const string Failed = "failed";
+}
+
+/// <summary>
+/// ONE SECRET A PACKAGE BINDS, as the wizard's "Your part", its result and the CLI show it: the
+/// member, the plugin's secret field, the KEY NAME it is bound to (never a value), whether the Host
+/// has that key set (by name only), the manifest's description, what it is needed for, and the exact
+/// way to set it. <paramref name="Needed"/> is false for a secret whose setting the person left off
+/// (a source not ticked), true when needed, and null in a preview where it waits on the person's
+/// answer to <paramref name="When"/>'s setting.
+/// </summary>
+public sealed record SolutionSecret(
+    string Member, string Field, string Key, string Description, bool Required, SolutionPlanSecretWhen? When,
+    bool Set, bool? Needed, string SetWith)
+{
+    /// <summary>How an operator sets <paramref name="key"/>: the operator CLI prompts for the value,
+    /// and the Host reads its environment when it starts. The web and the CLI print the command
+    /// itself under the product's name.</summary>
+    public static string SetWithFor(string key) =>
+        $"the operator CLI's `secret set {key}` (it prompts for the value), then its `up` to restart the Host";
+}
 
 public sealed record SolutionStepFailed(
     bool Ok, string Step, int StepNumber, string Title, string Reason, IReadOnlyList<string> Undone,
@@ -120,9 +168,11 @@ public sealed class SolutionInstaller(
     Func<string?> defaultAgent,
     Connections? connections = null,
     ConnectionStore? connectionStore = null,
-    IPluginMemberSettings? pluginSettings = null,
+    IPluginMemberSettingsStore? pluginSettings = null,
     TeamAnnouncements? announce = null,
-    int group = -1)
+    int group = -1,
+    ISecretStore? secretStore = null,
+    TriggerSweep? sweep = null)
 {
     public const string StepPlugins = "plugins";
     public const string StepTeam = "team";
@@ -298,6 +348,7 @@ public sealed class SolutionInstaller(
                 diff = Diff(row, package),
                 connections = available,
                 kept = await KeptAsync(stored, row, package, ct),
+                secrets = await SecretsAfterUpdateAsync(stored, row, package, ct),
             });
         }
 
@@ -311,6 +362,7 @@ public sealed class SolutionInstaller(
             nameRefusal = NameRefusal(name),
             plan,
             connections = available,
+            secrets = SecretStates(package, (member, field) => package.Manifest.Member(member)?.Secrets.GetValueOrDefault(field), config: null),
         });
     }
 
@@ -359,6 +411,125 @@ public sealed class SolutionInstaller(
         }).ToList();
 
         return new { settings, connections, documents = present };
+    }
+
+    /// <summary>
+    /// THE SECRETS LIST: each field the package's plugin members bind, with the key it will be (or
+    /// is) bound to, whether the Host has that key set - asked of the secret store by NAME, the value
+    /// never read into anything answered - and whether it is needed. <paramref name="config"/> answers a
+    /// member's settings as installed; null in a preview, where a secret whose setting the person is
+    /// asked for waits on the answer.
+    /// </summary>
+    private IReadOnlyList<SolutionSecret> SecretStates(
+        SolutionPackage package, Func<string, string, string?> keyOf, Func<string, IReadOnlyDictionary<string, JsonElement>?>? config)
+    {
+        var states = new List<SolutionSecret>();
+
+        foreach (var planned in SolutionPlan.Of(package).Secrets)
+        {
+            if (keyOf(planned.Member, planned.Field) is not { } key) continue;
+
+            bool? needed = true;
+
+            if (planned.When is { } when)
+            {
+                var member = package.Manifest.Member(planned.Member);
+                var field = package.Plugin(member?.PluginId)?.Manifest.Config.GetValueOrDefault(when.Setting);
+                var condition = new PluginSecretWhen(when.Setting, when.Value);
+
+                if (config?.Invoke(planned.Member) is { } installed)
+                {
+                    needed = condition.HoldsIn(installed.TryGetValue(when.Setting, out var value) ? value : field?.Default);
+                }
+                else if (package.Manifest.Inputs.Settings.Any(i => SameName(i.Member, planned.Member) && i.Setting == when.Setting))
+                {
+                    needed = null;
+                }
+                else
+                {
+                    needed = condition.HoldsIn(member is not null && member.Settings.TryGetValue(when.Setting, out var value) ? value : field?.Default);
+                }
+            }
+
+            states.Add(new SolutionSecret(
+                planned.Member, planned.Field, key, planned.Description, planned.Required, planned.When,
+                secretStore?.TryGet(key) is not null, needed, SolutionSecret.SetWithFor(key)));
+        }
+
+        return states;
+    }
+
+    private static bool SameName(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The secrets list as an update would leave the team: a kept member's bindings merged
+    /// as <see cref="MergedSecrets"/> does, a new member's as the package says.</summary>
+    private async Task<IReadOnlyList<SolutionSecret>> SecretsAfterUpdateAsync(
+        string team, TeamSolutionRow row, SolutionPackage package, CancellationToken ct)
+    {
+        var (old, _) = SolutionManifest.Parse(row.Manifest);
+        var bound = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        var configs = new Dictionary<string, IReadOnlyDictionary<string, JsonElement>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var member in package.Manifest.Members.Where(m => m.Kind == MemberRef.PluginKind))
+        {
+            if (pluginSettings is not null && row.Members.TryGetValue(member.Name, out var id) && MemberExists(team, id))
+            {
+                var current = await pluginSettings.ForAsync(new ContainerId(team, id), ct);
+                bound[member.Name] = MergedSecrets(current.Secrets, old?.Member(member.Name), member);
+                configs[member.Name] = current.Config;
+            }
+            else
+            {
+                bound[member.Name] = member.Secrets;
+            }
+        }
+
+        return SecretStates(
+            package,
+            (member, field) => bound.GetValueOrDefault(member)?.GetValueOrDefault(field),
+            member => configs.GetValueOrDefault(member));
+    }
+
+    /// <summary>
+    /// AN UPDATE KEEPS A BINDING A PERSON CHANGED: a field still bound as the installed version of
+    /// the package bound it takes the new version's key (or goes, when the new version names none);
+    /// a field the person bound otherwise - to another key, or unbound - stays as the person left it.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> MergedSecrets(
+        IReadOnlyDictionary<string, string> current, SolutionMember? installed, SolutionMember now)
+    {
+        var merged = new Dictionary<string, string>(current, StringComparer.Ordinal);
+        var before = installed?.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var field in before.Keys.Union(now.Secrets.Keys, StringComparer.Ordinal))
+        {
+            if (current.GetValueOrDefault(field) != before.GetValueOrDefault(field)) continue;
+
+            if (now.Secrets.TryGetValue(field, out var key)) merged[field] = key;
+            else merged.Remove(field);
+        }
+
+        return merged;
+    }
+
+    /// <summary>The team's secrets list once installed or updated, read from what is stored.</summary>
+    private async Task<IReadOnlyList<SolutionSecret>> InstalledSecretsAsync(
+        string team, IReadOnlyDictionary<string, string> memberIds, SolutionPackage package, CancellationToken ct)
+    {
+        var stored = new Dictionary<string, PluginMemberSettings>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var member in package.Manifest.Members.Where(m => m.Kind == MemberRef.PluginKind))
+        {
+            if (pluginSettings is not null && memberIds.TryGetValue(member.Name, out var id))
+            {
+                stored[member.Name] = await pluginSettings.ForAsync(new ContainerId(team, id), ct);
+            }
+        }
+
+        return SecretStates(
+            package,
+            (member, field) => stored.GetValueOrDefault(member)?.Secrets.GetValueOrDefault(field),
+            member => stored.GetValueOrDefault(member)?.Config);
     }
 
     private async Task<IReadOnlyList<object>> ConnectionsAsync(CancellationToken ct) =>
@@ -463,6 +634,7 @@ public sealed class SolutionInstaller(
         string? stored = null;
         var memberIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var triggerIds = new Dictionary<string, string>(StringComparer.Ordinal);
+        var firstDue = new Dictionary<string, DateTimeOffset?>(StringComparer.Ordinal);
 
         try
         {
@@ -562,7 +734,9 @@ public sealed class SolutionInstaller(
 
                 foreach (var trigger in manifest.Triggers)
                 {
-                    triggerIds[trigger.Name] = await CreateTriggerAsync(stored!, trigger, memberIds, tools, actor, run, ct);
+                    var made = await CreateTriggerAsync(stored!, trigger, memberIds, tools, actor, run, ct);
+                    triggerIds[trigger.Name] = made.Id;
+                    firstDue[trigger.Name] = made.NextDueAt;
                 }
             });
 
@@ -598,11 +772,19 @@ public sealed class SolutionInstaller(
 
         await CopyDocumentsAsync(stored!, answers, actor, ct);
 
+        // THE FIRST RUNS, only now that the last step has succeeded and the documents are in: a
+        // failed step returned above, having made no fire.
+        var firstRuns = await FirstRunsAsync(manifest, triggerIds, firstDue, actor, ct);
+
         var saved = (await store.FindAsync(stored!, ct))!;
 
         return new(200, new SolutionDone(
             true, stored!, teams.LabelFor(stored!), manifest.Id, manifest.Version, null, null,
-            await MissingAsync(stored!, saved, ct), run.Done));
+            await MissingAsync(stored!, saved, ct), run.Done)
+        {
+            Secrets = await InstalledSecretsAsync(stored!, memberIds, package, ct),
+            FirstRuns = firstRuns,
+        });
     }
 
     // ------------------------------------------------------------------ update
@@ -676,6 +858,12 @@ public sealed class SolutionInstaller(
                     if (!memberIds.TryGetValue(member.Name, out var id) || !MemberExists(stored, id))
                     {
                         memberIds[member.Name] = await HireAsync(stored, member, package, answers, agent!, tools, actor, run, ct);
+                        continue;
+                    }
+
+                    if (member.Kind == MemberRef.PluginKind)
+                    {
+                        await RebindSecretsAsync(stored, id, old.Member(member.Name), member, package, actor, run, ct);
                         continue;
                     }
 
@@ -792,7 +980,7 @@ public sealed class SolutionInstaller(
                             actor.Row(TenantActions.ScheduleDeleted, oldId, trigger.Name, new { team = stored, solution = manifest.Id, replaced = true }), CancellationToken.None));
                     }
 
-                    triggerIds[trigger.Name] = await CreateTriggerAsync(stored, trigger, memberIds, tools, actor, run, ct);
+                    triggerIds[trigger.Name] = (await CreateTriggerAsync(stored, trigger, memberIds, tools, actor, run, ct)).Id;
                 }
 
                 foreach (var name in diff.Triggers.Removed)
@@ -844,7 +1032,10 @@ public sealed class SolutionInstaller(
 
         return new(200, new SolutionDone(
             true, stored, teams.LabelFor(stored), manifest.Id, manifest.Version, row.Version, diff,
-            await MissingAsync(stored, saved, ct), run.Done));
+            await MissingAsync(stored, saved, ct), run.Done)
+        {
+            Secrets = await InstalledSecretsAsync(stored, memberIds, package, ct),
+        });
     }
 
     /// <summary>What changed from the team's installed version to <paramref name="package"/>.</summary>
@@ -982,12 +1173,17 @@ public sealed class SolutionInstaller(
 
             snapshot = await teams.HireMemberAsync(
                 team, member.Name, MemberRef.PluginPrefix + member.PluginId, "", [], ct: ct,
-                settings: new PluginMemberSettings(config, new Dictionary<string, string>(StringComparer.Ordinal)) { Connections = bindings },
+                // THE PACKAGE'S SECRET BINDINGS land in the same hire as the member, checked by the
+                // same SettingsRefusal a person's binding in the member's settings is - except that
+                // a key the Host has not set yet is not a refusal: its source fails until it is set.
+                // The install is a person's action, so it may bind keys no one bound on the team yet.
+                settings: new PluginMemberSettings(config, new Dictionary<string, string>(member.Secrets, StringComparer.Ordinal)) { Connections = bindings },
                 promptSetBy: actor.PromptSetter,
                 connectionsAudit: bindings.Count == 0
                     ? null
                     : id => actor.Row(TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", member.Name,
-                        new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) }));
+                        new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) }),
+                secretsSetLater: true);
         }
         else
         {
@@ -998,9 +1194,47 @@ public sealed class SolutionInstaller(
         run.Made($"member {member.Name}", () => memberDeletion.DeleteAsync(team, snapshot.Id, CancellationToken.None));
 
         await audit.WriteAsAsync(actor.UserId, actor.Email, TenantActions.MemberAdded, $"{snapshot.Team}/{snapshot.Id}", snapshot.Name,
-            new { resolvedAgent = snapshot.Agent, team = snapshot.Team, solution = package.Manifest.Id }, ct);
+            new
+            {
+                resolvedAgent = snapshot.Agent,
+                team = snapshot.Team,
+                solution = package.Manifest.Id,
+                secrets = member.Secrets.Keys.Order(StringComparer.Ordinal),
+            }, ct);
 
         return snapshot.Id;
+    }
+
+    /// <summary>
+    /// A KEPT PLUGIN MEMBER'S SECRET BINDINGS after an update, merged as <see cref="MergedSecrets"/>
+    /// says, and saved - when anything changed - exactly as a person's change in the member's
+    /// settings is: the same check and the same rows, in one transaction. Undone to what was there.
+    /// </summary>
+    private async Task RebindSecretsAsync(
+        string team, string id, SolutionMember? installed, SolutionMember member, SolutionPackage package,
+        SolutionActor actor, Run run, CancellationToken ct)
+    {
+        if (pluginSettings is null || package.Plugin(member.PluginId) is not { } plugin) return;
+
+        var memberId = new ContainerId(team, id);
+        var before = await pluginSettings.ForAsync(memberId, ct);
+        var merged = MergedSecrets(before.Secrets, installed, member);
+
+        if (merged.Count == before.Secrets.Count && merged.All(b => before.Secrets.GetValueOrDefault(b.Key) == b.Value)) return;
+
+        var changed = before with { Secrets = merged };
+
+        if (PluginMemberRunner.SettingsRefusal(plugin.Manifest, changed, secretStore, requireSet: false) is { } refusal)
+        {
+            throw new SolutionStepException($"{member.Name}: {refusal}");
+        }
+
+        await pluginSettings.SaveAsync(
+            memberId, changed,
+            PluginEndpoints.PersonChangeRows(actor.UserId, actor.Email, memberId, member.Name, plugin.Id, before, changed),
+            ct);
+
+        run.Made($"member {member.Name} (secrets)", () => pluginSettings.SaveAsync(memberId, before, CancellationToken.None));
     }
 
     private async Task RegisterSkillAsync(string team, SolutionSkill skill, SolutionActor actor, Run run, CancellationToken ct)
@@ -1053,7 +1287,56 @@ public sealed class SolutionInstaller(
         }
     }
 
-    private async Task<string> CreateTriggerAsync(
+    /// <summary>
+    /// EACH SCHEDULE'S FIRST RUN after an install. A <c>runAtInstall</c> one is fired once now through
+    /// <see cref="TriggerSweep.RunNowAsync"/> - Run now's own call, the fire its schedule makes, with its
+    /// wakeManager and its daily cap, recorded as the installing person's `schedule.run-at-install` -
+    /// and then comes due on its interval from now. Any other waits for the due time
+    /// it was created with. A fire that does not happen is that run's outcome, not the install's.
+    /// </summary>
+    private async Task<IReadOnlyList<SolutionFirstRun>> FirstRunsAsync(
+        SolutionManifest manifest, IReadOnlyDictionary<string, string> triggerIds,
+        IReadOnlyDictionary<string, DateTimeOffset?> firstDue, SolutionActor actor, CancellationToken ct)
+    {
+        var runs = new List<SolutionFirstRun>();
+
+        foreach (var trigger in manifest.Triggers.Where(t => t.Schedule is not null))
+        {
+            var due = firstDue.GetValueOrDefault(trigger.Name);
+
+            if (!trigger.RunAtInstall || sweep is null || !triggerIds.TryGetValue(trigger.Name, out var id))
+            {
+                runs.Add(new(trigger.Name, trigger.Member, trigger.RunAtInstall, false, SolutionFirstRun.Scheduled, due, null));
+                continue;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            TriggerRunNow? fired;
+
+            try
+            {
+                fired = await sweep.RunNowAsync(
+                    id, now, actor.UserId, actor.Email, TenantActions.ScheduleRunAtInstall, countOnFromNow: true, ct);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                fired = null;
+            }
+
+            if (fired is { Outcome: SolutionFirstRun.Fired })
+            {
+                runs.Add(new(trigger.Name, trigger.Member, true, true, SolutionFirstRun.Fired, now, fired.Trigger.NextDueAt));
+            }
+            else
+            {
+                runs.Add(new(trigger.Name, trigger.Member, true, false, fired?.Outcome ?? SolutionFirstRun.Failed, fired?.Trigger.NextDueAt ?? due, null));
+            }
+        }
+
+        return runs;
+    }
+
+    private async Task<TriggerRow> CreateTriggerAsync(
         string team, SolutionTrigger trigger, IReadOnlyDictionary<string, string> memberIds, string? tools,
         SolutionActor actor, Run run, CancellationToken ct)
     {
@@ -1088,7 +1371,7 @@ public sealed class SolutionInstaller(
         run.Made($"trigger {trigger.Name}", () => triggers.DeleteAsync(made.Id,
             actor.Row(TenantActions.ScheduleDeleted, made.Id, made.Name, new { team, reason = "install undone" }), CancellationToken.None));
 
-        return made.Id;
+        return made;
     }
 
     /// <summary>Each document input's folder, made now so a folder trigger can watch it and a

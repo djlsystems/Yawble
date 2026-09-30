@@ -8,6 +8,7 @@ import {
   listContainerTriggers,
   listEvents,
   listWatchRoots,
+  runScheduleNow,
   testTriggerFolder,
   updateSchedule,
 } from '../api/client'
@@ -160,6 +161,40 @@ async function loadRows() {
   }
 
   loading.value = false
+}
+
+/** A schedule - cron, every or once - can be run now; an event or folder trigger has no fire of its own. */
+function isSchedule(row: TeamTrigger): boolean {
+  return ['cron', 'every', 'once'].includes(row.kind.toLowerCase())
+}
+
+/**
+ * RUN NOW: the fire the schedule makes, at a person's hand - its daily cap asked, a paused team or
+ * busy idle-only member skipped - so the answer is said, not assumed to be a run.
+ */
+async function runNow(row: TeamTrigger) {
+  busyId.value = row.id
+
+  try {
+    const run = await runScheduleNow(props.team, row.id)
+    rows.value = rows.value.map((item) => (item.id === run.trigger.id ? run.trigger : item))
+
+    if (run.outcome === 'fired') {
+      $q.notify({ type: 'positive', message: `${row.name} is running now.`, timeout: 3500 })
+    } else {
+      const why = run.outcome === 'member-missing' ? 'its member is gone' : run.reason ?? run.outcome
+      $q.notify({ type: 'warning', message: `${row.name} was skipped: ${why}.`, timeout: 5000 })
+    }
+
+    await board.refresh()
+  } catch (cause) {
+    $q.notify({
+      type: 'negative',
+      message: cause instanceof Error ? cause.message : String(cause),
+    })
+  } finally {
+    busyId.value = null
+  }
 }
 
 function isFolder(row: TeamTrigger): boolean {
@@ -349,6 +384,19 @@ watch(open, (showing) => {
                 />
 
                 <div class="row items-center q-gutter-xs">
+                  <q-btn
+                    v-if="isSchedule(row)"
+                    flat
+                    dense
+                    round
+                    icon="play_arrow"
+                    class="trigger-run-now"
+                    aria-label="Run this schedule now"
+                    :disable="busyId === row.id || saving"
+                    @click="runNow(row)"
+                  >
+                    <q-tooltip>Run now</q-tooltip>
+                  </q-btn>
                   <q-btn
                     flat
                     dense

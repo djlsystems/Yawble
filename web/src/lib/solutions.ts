@@ -2,13 +2,16 @@ import type {
   InstalledSolution,
   SolutionDiff,
   SolutionDiffSection,
+  SolutionFirstRun,
   SolutionMissing,
   SolutionPersonSetting,
   SolutionPlanTrigger,
   SolutionRefusal,
+  SolutionSecret,
   SolutionStep,
   SolutionWakeManager,
 } from '../api/types';
+import { productCli } from '../presentation/product';
 
 /**
  * THE WORDS OF THE SOLUTION INSTALL WIZARD, kept out of the component so each can be read and
@@ -84,10 +87,13 @@ function everyWords(seconds: number): string {
 export function triggerSource(trigger: SolutionPlanTrigger): string {
   switch (trigger.kind) {
     case 'schedule': {
+      // A first run at install reads "runs once now, then every ..."; the Host's own words for the
+      // schedule already say so.
+      const once = trigger.runAtInstall ? 'runs once now, then ' : '';
+      if (trigger.everySeconds) return once + everyWords(trigger.everySeconds);
       if (trigger.schedule) return trigger.schedule;
-      if (trigger.everySeconds) return everyWords(trigger.everySeconds);
-      if (trigger.cron) return `cron ${trigger.cron} (${trigger.timezone || 'UTC'})`;
-      return 'on a schedule';
+      if (trigger.cron) return `${once}cron ${trigger.cron} (${trigger.timezone || 'UTC'})`;
+      return once + 'on a schedule';
     }
     case 'event':
       return `on ${trigger.eventType ?? 'an event'}${trigger.filter ? ` where ${trigger.filter}` : ''}`;
@@ -232,3 +238,62 @@ export function keptValueWords(value: unknown): string {
 
 export const settingKey = (setting: { member: string; setting: string }) => `${setting.member}/${setting.setting}`;
 export const slotKey = (input: { member: string; slot: string }) => `${input.member}/${input.slot}`;
+
+// --- Secrets -------------------------------------------------------------------------------------
+
+export type SecretState = 'set' | 'unset' | 'not-needed';
+
+/**
+ * Whether a secret is needed: the Host's word when it gave one, else from the value the person has
+ * chosen (or the update keeps) for the setting it depends on - a list holding the value, or a choice
+ * equal to it.
+ */
+export function secretNeeded(secret: SolutionSecret, value: unknown): boolean {
+  if (secret.needed !== null) return secret.needed;
+  if (!secret.when) return true;
+  if (Array.isArray(value)) return value.includes(secret.when.value);
+  return value === secret.when.value;
+}
+
+export function secretState(secret: SolutionSecret, needed: boolean): SecretState {
+  if (!needed) return 'not-needed';
+  return secret.set ? 'set' : 'unset';
+}
+
+/** One plain sentence per secret: set, not set (and what that means), or not needed. */
+export function secretSentence(secret: SolutionSecret, state: SecretState): string {
+  if (state === 'not-needed') {
+    const why = secret.when ? `${secret.member}'s ${secret.when.setting} leaves ${secret.when.value} off` : 'nothing uses it';
+    return `Not needed: ${why}.`;
+  }
+  if (state === 'set') return 'Set on this Host.';
+  return `Not set on this Host. That is not a problem for the install, but its source fails until it is set. Set it with: ${secretSetWith(secret.key)}.`;
+}
+
+/** The exact commands that set a key, under the operator CLI's own name: it prompts for the value, and
+ * the Host reads it when it restarts. */
+export function secretSetWith(key: string): string {
+  return `${productCli} secret set ${key} (it prompts for the value), then ${productCli} up to restart the Host`;
+}
+
+/** A first run's time as a person reads it: "8:51 PM" today, "Thu 8:00 AM" on another day. */
+export function firstRunTime(at: string, now: Date = new Date()): string {
+  const when = new Date(at);
+  // One plain space before AM/PM, whichever space the runtime's locale data puts there.
+  const time = when.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s+/g, ' ');
+  return when.toDateString() === now.toDateString()
+    ? time
+    : `${when.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+}
+
+/**
+ * One schedule's first run, as the result names it: "Fetch jobs ran now", "Fetch jobs first runs at
+ * 8:51 PM", or, for a first run at install that did not happen, why and when it first runs instead.
+ */
+export function firstRunLine(run: SolutionFirstRun, now: Date = new Date()): string {
+  if (run.ranNow) return `${run.trigger} ran now`;
+  const at = run.at ? ` first runs at ${firstRunTime(run.at, now)}` : ' runs on its schedule';
+  if (!run.runAtInstall || run.outcome === 'scheduled') return `${run.trigger}${at}`;
+  const why = run.outcome === 'failed' ? 'could not run now' : `did not run now (${run.outcome})`;
+  return `${run.trigger} ${why}; it${at}`;
+}

@@ -435,6 +435,16 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
                 }
             }
 
+            foreach (var name in member.Secrets.Keys)
+            {
+                if (!plugin.Manifest.Secrets.ContainsKey(name))
+                {
+                    var field = $"{at}.secrets.{name}";
+                    var known = plugin.Manifest.Secrets.Count == 0 ? "it declares none" : "it declares " + string.Join(", ", plugin.Manifest.Secrets.Keys);
+                    refusals.Add(new(SolutionManifest.FileName, field, $"`{field}`: plugin {plugin.Id} declares no secret '{name}' in its manifest; {known}."));
+                }
+            }
+
             foreach (var (name, config) in plugin.Manifest.Config)
             {
                 // AN ABSENCE IS JUDGED ON A WHOLE FILE ONLY: an input refused above may be the one
@@ -465,6 +475,16 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
             if (!hasTools && trigger.Instruction.Contains(SolutionManifest.SolutionToken, StringComparison.Ordinal))
             {
                 refusals.Add(new(SolutionManifest.FileName, $"{at}.instruction", $"`{at}.instruction` uses {SolutionManifest.SolutionToken}, but the package has no {ToolsFolderName}/ folder for it to name."));
+            }
+
+            // A FIRST RUN AT INSTALL is a schedule's: an event or folder trigger has no fire of its own
+            // to make until its event or file arrives.
+            if (trigger.RunAtInstall && trigger.Kind != SolutionManifest.KindSchedule)
+            {
+                refusals.Add(new(SolutionManifest.FileName, $"{at}.runAtInstall",
+                    trigger.Kind == SolutionManifest.KindFolder
+                        ? $"`{at}.runAtInstall` belongs to a schedule trigger; a folder trigger fires when its folder changes, not at install."
+                        : $"`{at}.runAtInstall` belongs to a schedule trigger; an event trigger fires when its event arrives, not at install."));
             }
 
             if (trigger.Event is not { } onEvent) continue;
