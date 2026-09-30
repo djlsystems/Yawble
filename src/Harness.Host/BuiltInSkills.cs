@@ -61,8 +61,10 @@ public static class BuiltInSkills
 
         ## Declare the workflow complete
 
-        `workflow_complete` is the Manager's declaration and is refused to anyone else. If you are a
-        worker, hand finished work back instead:
+        `workflow_complete` is the declaration of the workflow's owner - the member its first
+        instruction was addressed to - and of the Manager for a workflow one of its own members
+        owns. It is refused to anyone else. If you are working a card in somebody else's workflow,
+        hand finished work back instead:
 
             handback  delivered: "<what you delivered>"
 
@@ -322,6 +324,23 @@ public static class BuiltInSkills
             """
 
 
+            ## A workflow a member owns
+
+            A person can start a workflow by telling one of your members directly. That member owns
+            it, and its completion still wakes you - to read what happened, not to work in it. Your
+            wake only watching does not hold the owner's declaration back.
+
+            1. Let the owner declare. If it has not yet, finish your turn without another `tell`.
+            2. Or declare it yourself, with `workflow_complete`, once the owner and every other
+               member are idle in it and nothing is queued in it but your own delivery. The row
+               says `declaredBy` you, on behalf of the owner.
+            3. If your declaration is refused, the refusal names what is still busy or unfinished.
+               That is the answer for this wake: do not declare again in the same run.
+
+            Never tell the owner to retry a refused declaration. Each refused attempt ends a run
+            whose row wakes the other, so the two of you go round a loop paying for runs. If neither
+            of you can declare, say so with `blocked`, naming the refusal, and stop.
+
             ## Hand the work over
 
             The team's work is delivered on the team branch, `team/<id>` (`repo` names it), and
@@ -423,7 +442,7 @@ public static class BuiltInSkills
             `handback` with delivered "<what you delivered>" - the branch, the commit, what you ran.
             That wakes your Manager on the same workflow. `blocked` is for giving up, never for
             finishing: it tells your Manager you abandoned work you delivered. Handing back does not
-            declare the workflow complete; only a Manager declares.
+            declare the workflow complete; only its owner, or the Manager, declares.
             """
             + WorkflowDeclarationSection),
         new(

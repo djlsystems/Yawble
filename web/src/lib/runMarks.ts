@@ -13,13 +13,14 @@ export const QuietMark: RunMark = {
 }
 
 /**
- * A run whose workflow the platform declared complete as it ended, because its owner cannot declare
- * (a person told a plugin member directly): its `completed` row carries `workflowDeclared: true`,
- * and the Manager was not woken into the closed workflow.
+ * A run whose workflow was declared complete by the time it ended - by the platform, because its
+ * owner cannot declare (a person told a plugin member directly), or by the member itself, as the
+ * owner of a workflow a person told it directly: its `completed` row carries
+ * `workflowDeclared: true`, and the Manager was not woken into the closed workflow.
  */
 export const WorkflowDeclaredMark: RunMark = {
   label: 'workflow declared',
-  tooltip: 'The platform declared this workflow complete when this run finished, so the Manager was not woken.',
+  tooltip: 'This workflow was declared complete by the time this run finished, so the Manager was not woken.',
 }
 
 /**

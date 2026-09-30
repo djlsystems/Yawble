@@ -14,6 +14,30 @@ namespace Harness.Host;
 /// </summary>
 public static class WorkflowDeclaration
 {
+    /// <summary>On a <c>workflow.completed</c> row the Manager declared for a workflow one of its
+    /// members owns: the Manager's id. Absent when the owner (or the platform) declared.</summary>
+    public const string DeclaredByField = "declaredBy";
+
+    /// <summary>Beside <see cref="DeclaredByField"/>: the owner the Manager declared for.</summary>
+    public const string OnBehalfOfField = "onBehalfOf";
+
+    /// <summary>
+    /// Whether the workflow of the row <paramref name="causation"/> names has been declared - a
+    /// <c>workflow.completed</c> row on its thread. Asked as a run ends: its `completed` row then
+    /// carries <see cref="PayloadFields.WorkflowDeclared"/> and wakes no Manager into it. A person's
+    /// close is not a declaration, and is not counted.
+    /// </summary>
+    public static async Task<bool> DeclaredAsync(IMessageLog log, long? causation, CancellationToken ct)
+    {
+        if (causation is not { } seq || await log.FindAsync(seq, ct) is not { } woken || woken.CorrelationId <= 0)
+        {
+            return false;
+        }
+
+        return (await log.ReadCorrelationAsync(woken.CorrelationId, ct))
+            .Any(row => row.Type == MessageTypes.WorkflowCompleted);
+    }
+
     /// <returns>The appended <c>workflow.completed</c> row.</returns>
     public static async Task<Message> AppendAsync(
         string team, long correlation, ContainerId declarer, long? causation, string payload,

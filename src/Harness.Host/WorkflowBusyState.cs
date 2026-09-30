@@ -27,6 +27,14 @@ namespace Harness.Host;
 /// </summary>
 internal static class WorkflowBusyState
 {
+    /// <param name="watcher">
+    /// The Manager, when the OWNER of a member-owned workflow is declaring it. A Manager woken by a
+    /// row the owner or another member wrote in this workflow is reading what happened, not working
+    /// in it - and counting that run refused the owner for the very wake its own completion caused,
+    /// while the Manager was refused as not the owner: the two went round until a person closed it.
+    /// Such a run, and the watcher's queued rows of the same kind, are left out; a watcher TOLD to
+    /// do work here still counts. Null - every other caller - counts everything, as before.
+    /// </param>
     public static async Task<IReadOnlyList<string>> DescribeAsync(
         string team,
         long correlation,
@@ -34,7 +42,8 @@ internal static class WorkflowBusyState
         IPendingDeliveries pending,
         IMessageLog log,
         ContainerId? excluded,
-        CancellationToken ct)
+        CancellationToken ct,
+        ContainerId? watcher = null)
     {
         var busy = new List<string>();
 
@@ -53,6 +62,17 @@ internal static class WorkflowBusyState
                 && snapshot.State == ContainerState.Running
                 && snapshot.CurrentCorrelation == correlation)
             {
+                // THE WATCHER READING WHAT HAPPENED IS NOT WORK IN THE WORKFLOW. See `watcher`.
+                // Its cause is read NOW, and a run that ended in between reads as busy: only a
+                // cause that is positively a watching row is left out.
+                if (watcher is not null && member.Equals(watcher)
+                    && host.Find(member)?.CurrentCausation is { } cause
+                    && await log.FindAsync(cause, ct) is { } woke
+                    && Watching(woke, team, correlation, watcher))
+                {
+                    continue;
+                }
+
                 busy.Add($"{snapshot.Name} is Running");
             }
         }
@@ -77,6 +97,16 @@ internal static class WorkflowBusyState
             if (await log.FindAsync(row.Seq, ct) is not { } message) continue;
             if (message.CorrelationId != correlation) continue;
 
+            // The watcher's deliveries OF THE SAME KIND - another member's row it is only to read -
+            // are left out with its run. Anything else queued for it, an instruction above all,
+            // still counts.
+            if (watcher is not null
+                && string.Equals(row.Subscriber, watcher.ToString(), StringComparison.OrdinalIgnoreCase)
+                && Watching(message, team, correlation, watcher))
+            {
+                continue;
+            }
+
             matchedSubscribers.Add(row.Subscriber);
         }
 
@@ -99,4 +129,16 @@ internal static class WorkflowBusyState
 
         return busy;
     }
+
+    /// <summary>
+    /// A row the <paramref name="watcher"/> is handed only to READ: not an instruction, under this
+    /// workflow, written by a member of this team other than the watcher - a completion, a hand-back,
+    /// a failure. A person's row, the platform's (`host`), and any instruction - told work - are not.
+    /// </summary>
+    internal static bool Watching(Message row, string team, long correlation, ContainerId watcher) =>
+        row.CorrelationId == correlation
+        && !row.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)
+        && ContainerId.TryParse(row.Source, out var source)
+        && string.Equals(source.Team, team, StringComparison.OrdinalIgnoreCase)
+        && !source.Equals(watcher);
 }
