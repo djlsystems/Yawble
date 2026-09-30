@@ -1765,6 +1765,8 @@ import type {
   SolutionInstallRequest,
   SolutionInstallResult,
   SolutionPreview,
+  SolutionPanel,
+  SolutionUninstallResult,
   SolutionUpdateRequest,
   TeamSolution,
 } from './types'
@@ -1810,3 +1812,18 @@ export async function teamSolution(team: string): Promise<TeamSolution | null> {
     throw cause
   }
 }
+
+/** One solution's control panel: its status, controls, results and maintenance, read live. A person's. */
+export const solutionPanel = (team: string) =>
+  json<SolutionPanel>(`/api/teams/${encodeURIComponent(team)}/solution/panel`)
+
+/**
+ * Uninstalls a solution: its triggers, members, team skills, sites and tools go; the team and its
+ * documents stay. Acts when called - asking first is the caller's. `removePlugins` removes each of
+ * the package's plugins no other team uses.
+ */
+export const uninstallSolution = (team: string, removePlugins: boolean) =>
+  json<SolutionUninstallResult>(
+    `/api/teams/${encodeURIComponent(team)}/solution/uninstall`,
+    postJson({ removePlugins }),
+  )

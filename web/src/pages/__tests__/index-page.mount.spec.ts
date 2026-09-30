@@ -220,6 +220,23 @@ describe('a team\'s marks', () => {
     expect(page.find('.team-heading-pause').text()).toBe('PAUSED');
   });
 
+  it('links a team installed from a solution package to its control panel', async () => {
+    const page = await mountPage([
+      team('job-tracker', { solution: { id: 'job-tracker', name: 'Job Tracker', version: '1.1.0', plugins: [] } }),
+    ]);
+
+    const link = page.find('[data-manage-solution]');
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toContain('Manage solution');
+    expect(link.attributes('href')).toBe('#/solutions/job-tracker');
+  });
+
+  it('has no Manage solution link for a team made by hand', async () => {
+    const page = await mountPage([team('alpha')]);
+
+    expect(page.find('[data-manage-solution]').exists()).toBe(false);
+  });
+
   it('does not mark a running team paused', async () => {
     const page = await mountPage([team('alpha')]);
 

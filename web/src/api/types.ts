@@ -2804,6 +2804,35 @@ export interface InstalledSolution {
   installedAt: string
   installedBy: string
   plugins: string[]
+  /**
+   * THE LAUNCHER'S FIELDS (B001J). Optional on the client only, so a row from a Host that predates
+   * them still reads: the tile then shows no Open, no status line and no badge.
+   */
+  updatedAt?: string | null
+  /** The source folder of the installed version. */
+  folder?: string | null
+  /** The package's `panel.primarySite`; null when it declares none, and then there is no Open. */
+  primarySite?: SolutionPrimarySite | null
+  /** The filled status line. Package text: rendered as text, never HTML. */
+  status?: string
+  state?: SolutionState
+  paused?: boolean
+}
+
+/** A package's primary site. `url` is relative to the Host; unpublished means Open would 404. */
+export interface SolutionPrimarySite {
+  name: string
+  url: string
+  published: boolean
+}
+
+/** Which one holds, first that does: paused, blocked, running, capped, idle. */
+export type SolutionStateKind = 'running' | 'idle' | 'blocked' | 'paused' | 'capped'
+
+/** A solution's state and, for blocked and capped, why ("Upload a file to Resume/"). */
+export interface SolutionState {
+  kind: SolutionStateKind
+  reason: string | null
 }
 
 /** A connection a picker offers, as the preview lists it. */
@@ -2972,4 +3001,128 @@ export interface TeamSolution {
   installedBy: string
   plugins: string[]
   missing: SolutionMissing[]
+}
+
+// --- B001J: one solution's control panel, `GET /api/teams/{team}/solution/panel` -----------------
+//
+// Every string that comes from a package or from site data - names, descriptions, the status line,
+// file names, run output - is PLAIN TEXT, rendered with `{{ }}` and never `v-html`.
+
+export interface SolutionPanelMember {
+  /** The package's own name for the member. */
+  packageName: string
+  /** The stored member name, for every `/members/{member}` and `/containers/{name}` route. */
+  member: string
+  kind: 'agent' | 'plugin'
+  role: 'manager' | 'member'
+  /** The container's status string, as the containers route says it. */
+  state: string
+  lastRun: { seq: number; at: string; outcome: string } | null
+}
+
+/** Today's spend: measured tokens only, and the runs that reported none counted, never estimated. */
+export interface SolutionPanelSpend {
+  tokens: number
+  measuredRuns: number
+  unmeasuredRuns: number
+}
+
+export interface SolutionPanelTrigger {
+  id: string
+  name: string
+  kind: 'schedule' | 'event' | 'folder'
+  member: string
+  enabled: boolean
+  nextFireAt: string | null
+  /** A schedule: Run now is offered. */
+  runNow: boolean
+  dailyTokenCap: number | null
+  spentToday: SolutionPanelSpend
+  capped: boolean
+}
+
+/** What the team waits for, with how to fix it where it is shown. */
+export interface SolutionPanelBlocked {
+  kind: 'document' | 'connection' | 'setting'
+  name: string
+  member: string | null
+  packageMember?: string | null
+  description: string
+  fix?: {
+    upload?: { folder: string }
+    connection?: { member: string; slot: string }
+  } | null
+}
+
+/** One of `panel.settings`, in the package's order: shown before "All settings". */
+export interface SolutionPanelSetting {
+  member: string
+  packageMember: string
+  setting: string
+  personOnly: boolean
+}
+
+export interface SolutionPanelFile {
+  path: string
+  name: string
+  size: number
+  modifiedAt: string
+  /** The download route, relative to the Host. */
+  download: string
+}
+
+/** One of `panel.outputs`: its files newest first, at most 50, `more` when there were more. */
+export interface SolutionPanelOutput {
+  folder: string
+  exists: boolean
+  files: SolutionPanelFile[]
+  more: boolean
+}
+
+export interface SolutionPanelRun {
+  member: string
+  packageMember: string
+  seq: number
+  startedAt: string | null
+  endedAt: string
+  outcome: string
+  output: string | null
+  reason: string | null
+  quiet: boolean
+}
+
+export interface SolutionPanel {
+  team: string
+  teamName: string
+  id: string
+  name: string
+  version: string
+  description: string
+  installedAt: string
+  updatedAt: string | null
+  installedBy: string
+  folder: string
+  paused: boolean
+  state: SolutionState
+  status: string
+  primarySite: SolutionPrimarySite | null
+  members: SolutionPanelMember[]
+  triggers: SolutionPanelTrigger[]
+  blocked: SolutionPanelBlocked[]
+  settings: SolutionPanelSetting[]
+  outputs: SolutionPanelOutput[]
+  recentRuns: SolutionPanelRun[]
+}
+
+/** `POST /api/teams/{team}/solution/uninstall`. The team and its documents stay. */
+export interface SolutionUninstallResult {
+  ok: boolean
+  team: string
+  id: string
+  version: string
+  removed: { triggers: string[]; members: string[]; skills: string[]; sites: string[]; tools: boolean }
+  plugins: { removed: string[]; kept: { id: string; usedBy: string[] }[] }
+  documentsKept: string
+  /** Anything that could not be removed, one sentence each. */
+  failures: string[]
 }

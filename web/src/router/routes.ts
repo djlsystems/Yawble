@@ -37,6 +37,19 @@ const routes: RouteRecordRaw[] = [
     children: [{ path: '', component: () => import('@/pages/SolutionInstallPage.vue') }],
   },
 
+  // THE SOLUTIONS LAUNCHER, `#/solutions`, and ONE SOLUTION'S CONTROL PANEL, `#/solutions/<team>`: the
+  // Console with that screen open over it. Addresses rather than dialog state, so the board header,
+  // a tile and the Concierge can all link to the same place. `/solutions/install` is declared above
+  // and wins over `:team` (a team id is never `install`'s route).
+  {
+    path: '/solutions',
+    component: () => import('@/layouts/MainLayout.vue'),
+    children: [
+      { path: '', component: () => import('@/pages/SolutionsPage.vue') },
+      { path: ':team', component: () => import('@/pages/SolutionsPage.vue') },
+    ],
+  },
+
   {
     path: '/board',
     redirect: '/console',
