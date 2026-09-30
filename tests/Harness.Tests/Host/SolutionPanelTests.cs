@@ -289,7 +289,7 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
     {
         var endpoints = Get<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().ToList();
 
-        foreach (var (control, method, route) in SolutionPanels.Controls)
+        foreach (var (control, method, route, _) in SolutionPanels.Controls)
         {
             var endpoint = endpoints.SingleOrDefault(e =>
                 string.Equals(e.RoutePattern.RawText, route, StringComparison.Ordinal)
@@ -310,6 +310,78 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         Assert.Equal(
             ["GET /api/teams/{team}/solution", "GET /api/teams/{team}/solution/panel", "POST /api/teams/{team}/solution/uninstall"],
             solutionRoutes);
+    }
+
+    [Fact]
+    public async Task Every_control_on_the_panel_appends_its_tenant_row()
+    {
+        var team = await InstallAsync(PackageWithPlugin("jb-controls"), "Controls");
+        using var person = await host.PersonAsync();
+        var panel = await JsonAsync(await person.GetAsync($"/api/teams/{team}/solution/panel", Ct));
+        var triggers = panel.GetProperty("triggers").EnumerateArray().Select(t => t.GetProperty("id").GetString()!).ToList();
+        var since = DateTimeOffset.UtcNow;
+
+        // EACH CONTROL DRIVEN THROUGH ITS ROUTE, answering the subject its row is written under. A
+        // control added to the list and not driven here fails below.
+        var subjects = new Dictionary<string, string>();
+
+        Assert.Equal(HttpStatusCode.NoContent, (await person.PostAsync($"/api/teams/{team}/pause", null, Ct)).StatusCode);
+        subjects["Pause"] = team;
+        Assert.Equal(HttpStatusCode.NoContent, (await person.PostAsync($"/api/teams/{team}/resume", null, Ct)).StatusCode);
+        subjects["Resume"] = team;
+
+        // Run now fires a schedule; an event trigger is refused, so the first one it takes.
+        foreach (var id in triggers)
+        {
+            if ((await person.PostAsync($"/api/teams/{team}/triggers/{id}/run", null, Ct)).StatusCode != HttpStatusCode.OK) continue;
+            subjects["Run now"] = id;
+            break;
+        }
+
+        var capped = triggers[0];
+        Assert.Equal(HttpStatusCode.OK, (await person.PatchAsJsonAsync($"/api/teams/{team}/triggers/{capped}", new { dailyTokenCap = 4321 }, Ct)).StatusCode);
+        subjects["A trigger's on/off and daily cap"] = capped;
+
+        var route = $"/api/teams/{team}/members/Scout/plugin-settings";
+        var current = await JsonAsync(await person.GetAsync(route, Ct));
+        var secrets = current.GetProperty("secrets").Deserialize<Dictionary<string, string>>()!;
+        secrets[secrets.Keys.First()] = "A_REBOUND_KEY";
+        Assert.True((await person.PutAsJsonAsync(route, new { config = current.GetProperty("config"), secrets }, Ct)).IsSuccessStatusCode);
+        subjects["Plugin settings and connection bindings"] = $"{team}/Scout";
+
+        await UploadAsync(person, team, "Resume", "resume.md", "THE FILE'S OWN WORDS");
+        subjects["Upload a missing document"] = team;
+
+        var newer = SolutionSamples.JobTracker(
+            "1.1.0",
+            Path.Combine(Get<TeamDocuments>().EnsureFor(host.Alpha), "packages", Guid.NewGuid().ToString("N")));
+        Directory.Move(Path.Combine(newer, "plugins", "job-board"), Path.Combine(newer, "plugins", "jb-controls"));
+        SolutionSamples.EditJson(Path.Combine(newer, "plugins", "jb-controls", "plugin.json"), m => m["id"] = "jb-controls");
+        SolutionSamples.Edit(newer, m =>
+        {
+            m["members"]![1]!["pluginId"] = "jb-controls";
+            m["triggers"]![1]!["event"]!["type"] = "plugin.jb-controls.posting-found";
+        });
+        var updated = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/update", new { folder = newer, team }, Ct));
+        Assert.True(updated.GetProperty("ok").GetBoolean(), updated.ToString());
+        subjects["Update from a folder"] = team;
+
+        var removed = await JsonAsync(await person.PostAsJsonAsync($"/api/teams/{team}/solution/uninstall", new { removePlugins = false }, Ct));
+        Assert.True(removed.GetProperty("ok").GetBoolean(), removed.ToString());
+        subjects["Uninstall"] = team;
+
+        foreach (var (control, method, path, action) in SolutionPanels.Controls)
+        {
+            Assert.True(subjects.TryGetValue(control, out var subject), $"{control}: not driven by this test");
+            var row = await Get<ITenantLog>().FindLatestAsync(action, subject, Ct);
+            Assert.True(row is not null && row.OccurredAt >= since.AddSeconds(-1), $"{control}: {method} {path} appended no {action} row");
+        }
+
+        // The upload's row names the file and its size, never what is in it.
+        var upload = (await Get<ITenantLog>().FindLatestAsync(TenantActions.DocumentUploaded, team, Ct))!;
+        Assert.Equal("Resume/resume.md", upload.SubjectName);
+        Assert.Contains("\"size\":20", upload.Detail);
+        Assert.DoesNotContain("OWN WORDS", upload.Detail);
     }
 
     [Fact]

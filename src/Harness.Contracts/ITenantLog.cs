@@ -162,6 +162,10 @@ public static class TenantActions
     /// Written BEFORE the delete, which does not happen when this row cannot be.</summary>
     public const string DocumentsDeleted = "documents.deleted";
 
+    /// <summary>A person uploaded a document into a team's documents. Detail carries the team, the
+    /// path and the size - never the file's contents.</summary>
+    public const string DocumentUploaded = "document.uploaded";
+
     /// <summary>A team's additional instructions changed.</summary>
     public const string TeamInstructionsChanged = "team.instructions-changed";
 

@@ -696,6 +696,9 @@ public sealed record SolutionManifest(
             return SolutionPanel.None;
         }
 
+        // NAMED BUT REFUSED is not the same as not named: the status line's "no primarySite"
+        // refusal is for a package that names none, and would only mislead beside this one.
+        var primarySiteNamed = panel.TryGetProperty("primarySite", out var named) && named.ValueKind != JsonValueKind.Null;
         var primarySite = read.Optional(panel, "primarySite", "panel.primarySite");
         if (primarySite is not null && !sites.Contains(primarySite, StringComparer.OrdinalIgnoreCase))
         {
@@ -775,7 +778,7 @@ public sealed record SolutionManifest(
                 read.Refuse("panel.status", $"`panel.status` {refusal}");
                 status = null;
             }
-            else if (template!.ReadsData && primarySite is null)
+            else if (template!.ReadsData && primarySite is null && !primarySiteNamed)
             {
                 read.Refuse("panel.status", "`panel.status` counts site data ({data.…}) but the package names no `panel.primarySite` to read it from.");
                 status = null;
