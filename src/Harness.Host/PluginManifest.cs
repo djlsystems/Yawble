@@ -509,6 +509,10 @@ public sealed record PluginConfigField(
             {
                 return (null, $"`config.{name}.{key}` must be a number.");
             }
+            else if (!double.IsFinite(bound.GetDouble()))
+            {
+                return (null, $"`config.{name}.{key}` must be a finite number; {bound.GetRawText()} is too large to hold.");
+            }
             else if (key == "min")
             {
                 min = bound.GetDouble();
@@ -594,7 +598,8 @@ public sealed record PluginConfigField(
     /// <summary>
     /// Why a number <paramref name="value"/> is outside this field's <see cref="Min"/>,
     /// <see cref="Max"/> or <see cref="Integer"/>, naming the field and the bound; null when it is
-    /// inside them, has no bounds, or is not a number. A run does not ask: a value stored before its
+    /// inside them, has no bounds, or is not a number. A number too large to hold (1e400 reads as
+    /// infinity) is refused whatever the bounds. A run does not ask: a value stored before its
     /// bounds existed keeps running, and the settings read reports it as out of range.
     /// </summary>
     public string? BoundsRefusal(string name, JsonElement value)
@@ -603,6 +608,7 @@ public sealed record PluginConfigField(
 
         var number = value.GetDouble();
 
+        if (!double.IsFinite(number)) return $"`{name}` must be a finite number; {value.GetRawText()} is too large to hold.";
         if (Min is { } min && number < min) return $"`{name}` must be at least {Show(min)}; {value.GetRawText()} is below it.";
         if (Max is { } max && number > max) return $"`{name}` must be at most {Show(max)}; {value.GetRawText()} is above it.";
         if (Integer && Math.Floor(number) != number) return $"`{name}` must be a whole number; {value.GetRawText()} is not.";
