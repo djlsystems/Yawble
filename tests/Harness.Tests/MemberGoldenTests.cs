@@ -325,19 +325,26 @@ public sealed class MemberGoldenTests
             await log.AppendAsync(new NewMessage(
                 MessageTypes.InstructionFor(member), """{"instruction":"go"}""", "console"), ct);
 
-            var deadline = DateTime.UtcNow.AddSeconds(20);
+            var deadline = DateTime.UtcNow.AddSeconds(60);
             while (fake.RunsFor(member) == 0 && DateTime.UtcNow < deadline) await Task.Delay(50, ct);
 
             var run = Assert.Single(fake.Invocations, i => i.Container == member);
             var host = services.GetRequiredService<ContainerHost>();
 
-            // The snapshot AFTER the run: its row written and the member idle again.
+            // The snapshot AFTER the run: its row written and the member idle again. A deadline of
+            // its own, and a failure that says so when it passes: under a full suite's load the
+            // start alone can use most of the first, and a snapshot taken mid-run then fails as a
+            // golden mismatch that reads like a change to what the member is.
+            var idleBy = DateTime.UtcNow.AddSeconds(60);
             while ((host.Find(member)!.Snapshot().State != ContainerState.Idle
                     || (await log.ReadAfterAsync(0, [MessageTypes.Completed], 10, ct)).Count == 0)
-                   && DateTime.UtcNow < deadline)
+                   && DateTime.UtcNow < idleBy)
             {
                 await Task.Delay(50, ct);
             }
+
+            Assert.True(host.Find(member)!.Snapshot().State == ContainerState.Idle,
+                "The member did not return to Idle after its run within 60 seconds.");
 
             var row = (await services.GetRequiredService<ITeamStore>().MembersAsync(ct))
                 .Single(m => m.Team == team && m.Name == "Worker");
