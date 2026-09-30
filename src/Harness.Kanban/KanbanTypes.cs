@@ -93,7 +93,15 @@ public record KanbanCard(
     /// Ask <see cref="BelongsTo"/> rather than comparing <see cref="WorkflowSeq"/>.
     /// </para>
     /// </summary>
-    IReadOnlyList<long>? Workflows = null)
+    IReadOnlyList<long>? Workflows = null,
+
+    /// <summary>
+    /// What the per-run tools check found on this card's runs, the strongest mark so far:
+    /// <c>called</c> (a run called a tool the platform did not give it), <c>offered</c> (a run was
+    /// offered one and called none), <c>notMeasured</c> (a run could not be checked), or null when
+    /// every run checked clean or none has been checked. A FLAG, like <see cref="Paused"/>, not a status.
+    /// </summary>
+    string? ForeignTools = null)
 {
     /// <summary>Whether this card is work of the workflow <paramref name="correlation"/>: born in it,
     /// or claimed or told in it since. See <see cref="Workflows"/>.</summary>

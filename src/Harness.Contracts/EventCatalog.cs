@@ -552,6 +552,29 @@ public static class EventCatalog
             "A workflow was declared complete and a solution package written during it sits in the "
             + "team's documents folder, so the platform checked it: ready to review and install, or "
             + "the problems by file and field. Source is the member that declared."),
+
+        // OUT OF THE LEDGER: a finding for the person, about what the platform let reach a member;
+        // the member did not choose its tools and cannot fix this on its next wake.
+        new(MessageTypes.AgentForeignTools, EventPublisher.Platform, HighVolume: false, InLedger: false,
+            [
+                Source,
+                new(PayloadFields.ForeignToolsStatus, EventFieldKind.String,
+                    "`foreign`: the run was offered or called a tool outside `harness` and its preset's allowed list. "
+                    + "`notMeasured`: nothing foreign was seen, but the transcript cannot list what was offered or the "
+                    + "preset declares no allowed list, so the run is not reported clean."),
+                new(PayloadFields.ForeignCalled, EventFieldKind.List,
+                    "Each foreign tool the run called, as `server/tool`, or the tool alone for the CLI's own."),
+                new(PayloadFields.ForeignOffered, EventFieldKind.List,
+                    "Each foreign tool or MCP server the run was offered and did not call."),
+                new(PayloadFields.Agent, EventFieldKind.String, "The preset the run launched as."),
+                new(PayloadFields.AgentTranscriptFormat, EventFieldKind.String, "The transcript format that was read."),
+                new(PayloadFields.Measured, EventFieldKind.String, "What that format records about tools, in words."),
+                new(PayloadFields.Run, EventFieldKind.Integer, "The seq of the run's terminal row."),
+                new(PayloadFields.Text, EventFieldKind.String, "The finding, as a person reads it."),
+            ],
+            "A member's run was checked against the tools the platform gives it. Written only when the run "
+            + "met a foreign tool (a call is marked above an offer) or could not be measured; a clean run "
+            + "writes nothing. Source is the member; the Concierge is never checked."),
     ];
 
     public static IReadOnlySet<string> Types { get; } =

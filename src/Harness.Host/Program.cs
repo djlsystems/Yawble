@@ -1319,6 +1319,13 @@ builder.Services.AddSingleton<PumpHeartbeat>();
 builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddHostedService<PumpService>();
 builder.Services.AddHostedService<KanbanChangePush>();
+
+// THE PER-RUN FOREIGN TOOLS CHECK: every member run's transcript, read for tools the platform did
+// not give it. What a preset allows is the seam below; until a preset declares its list it is not
+// verified, and its runs are never reported clean. See ForeignToolsCheck.
+builder.Services.AddSingleton(new PresetAllowedTools(_ => null));
+builder.Services.AddSingleton<ForeignToolsCheck>();
+builder.Services.AddHostedService<ForeignToolsWatch>();
 builder.Services.AddHostedService<DefaultBranchAtStart>();
 // The operator CLI's `plugin install` asks for a rescan by writing a file the Host polls: no restart, no API key.
 builder.Services.AddHostedService<PluginRescanRequests>();

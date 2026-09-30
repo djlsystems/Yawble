@@ -370,6 +370,18 @@ public static class MessageTypes
     public const string SolutionChecked = "solution.checked";
 
     /// <summary>
+    /// A MEMBER'S RUN MET A TOOL THE PLATFORM DID NOT GIVE IT, OR COULD NOT BE CHECKED. After every
+    /// member run that ended, the platform reads the agent's own transcript and names each tool it
+    /// was offered or called that is outside <c>harness</c> and its preset's allowed list: an account
+    /// connector, a home MCP server, a plugin. <c>foreign</c>: tools named, called apart from offered.
+    /// <c>notMeasured</c>: the format cannot list what was offered, or the preset declares no allowed
+    /// list, and nothing foreign was seen - never reported clean. A clean run writes nothing. Source
+    /// is the member and causation the run's terminal row, so it lands on the member's card. The
+    /// Concierge is not a member and is never checked.
+    /// </summary>
+    public const string AgentForeignTools = "agent.foreignTools";
+
+    /// <summary>
     /// The exact skip reason published in <see cref="ScheduleSkipped"/> rows for idle-only schedules.
     /// Kept as one constant so every producer and assertion says the same sentence.
     /// </summary>

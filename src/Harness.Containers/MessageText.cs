@@ -300,6 +300,9 @@ public static class MessageText
             // The platform's check of a package: the notice as a person reads it.
             MessageTypes.SolutionChecked => Field(payload, PayloadFields.Text) ?? "A solution package was checked.",
 
+            // The platform's check of a run's tools: the finding as a person reads it.
+            MessageTypes.AgentForeignTools => Field(payload, PayloadFields.Text) ?? $"{who}'s run was checked for foreign tools.",
+
             // An unrecognised type is passed through rather than dropped: a container may subscribe
             // to something this file has never heard of, and inventing a summary for it would be
             // worse than handing over what actually arrived.

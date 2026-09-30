@@ -314,4 +314,22 @@ public static class PayloadFields
 
     /// <summary>`solution.checked`: each problem, <c>&lt;file&gt; &lt;field&gt;: &lt;reason&gt;</c>, on a fail only.</summary>
     public const string Problems = "problems";
+
+    /// <summary>`agent.foreignTools`: <c>foreign</c> or <c>notMeasured</c>. A clean run writes no row.</summary>
+    public const string ForeignToolsStatus = "foreignStatus";
+
+    /// <summary>`agent.foreignTools`: each foreign tool the run CALLED, as <c>server/tool</c> or the tool alone.</summary>
+    public const string ForeignCalled = "foreignCalled";
+
+    /// <summary>`agent.foreignTools`: each foreign tool or server the run was OFFERED and did not call.</summary>
+    public const string ForeignOffered = "foreignOffered";
+
+    /// <summary>`agent.foreignTools`: what the run's transcript format records about tools, in words.</summary>
+    public const string Measured = "measured";
+
+    /// <summary>`agent.foreignTools`: the preset the run launched as.</summary>
+    public const string Agent = "agent";
+
+    /// <summary>`agent.foreignTools`: the seq of the terminal row whose transcript was read.</summary>
+    public const string Run = "run";
 }
