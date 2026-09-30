@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "canary": {
+      "tools": [
+        "*"
+      ],
+      "type": "local",
+      "command": "/bin/true",
+      "args": [],
+      "source": "user",
+      "enabled": true
+    },
+    "github-mcp-server": {
+      "type": "http",
+      "url": "https://api.individual.githubcopilot.com/mcp/readonly",
+      "headers": {
+        "X-MCP-Host": "copilot-cli",
+        "Copilot-Harness-Id": "copilot-sdk",
+        "Copilot-Integration-Id": "copilot-developer-cli",
+        "X-MCP-Tools": "get_file_contents,search_code,get_copilot_space,list_copilot_spaces,web_search,search_users"
+      },
+      "tools": [
+        "*"
+      ],
+      "isDefaultServer": true,
+      "source": "builtin",
+      "filterMapping": {
+        "issue_read": "markdown",
+        "get_pull_request": "markdown",
+        "get_pull_request_comments": "markdown",
+        "get_pull_request_reviews": "markdown"
+      },
+      "enabled": false
+    }
+  }
+}

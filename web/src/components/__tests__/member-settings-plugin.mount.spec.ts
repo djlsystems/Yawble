@@ -39,7 +39,7 @@ import {
 } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostField, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
-import { button, field, fieldWrapper, hasError, isDisabled, settle, type } from '../../test/formProbe';
+import { blur, button, field, fieldWrapper, hasError, isDisabled, settle, type } from '../../test/formProbe';
 
 const fields: Record<string, PluginConfigField> = {
   greeting: hostField({ type: 'string', description: 'What it says first.', default: 'hello' }),
@@ -260,6 +260,39 @@ describe('MemberSettingsDialog, a plugin member', () => {
       'Echo',
       { config: { greeting: 'hi', mode: 'reverse', loud: true, recipients: ['ops'] }, secrets: { token: 'ECHO_TOKEN' } },
     ]);
+
+    wrapper.unmount();
+  });
+
+  // A value typed into a list's box and never Entered used to be dropped: Save saw no change, sent
+  // nothing, and still said "saved". Leaving the box - which pressing Save does first - keeps it.
+  it('keeps a list value typed without Enter when the box loses focus, and Save sends it', async () => {
+    const wrapper = await mountSettings();
+
+    await type('Add to labels', 'Systems Analyst');
+    await blur('Add to labels');
+
+    expect(chips('labels')).toEqual(['Systems Analyst']);
+
+    button('Save').click();
+    await settle();
+
+    expect(savePluginSettings).toHaveBeenCalledTimes(1);
+    expect(savePluginSettings.mock.calls[0]![2]).toMatchObject({ config: { labels: ['Systems Analyst'] } });
+
+    wrapper.unmount();
+  });
+
+  // Quasar reports the focus loss on a timer; a click on Save that beats it still saves the value.
+  it('sends a list value still typed in its box when Save is pressed, with no focus change first', async () => {
+    const wrapper = await mountSettings();
+
+    await type('Add to labels', 'Remote');
+    button('Save').click();
+    await settle();
+
+    expect(savePluginSettings).toHaveBeenCalledTimes(1);
+    expect(savePluginSettings.mock.calls[0]![2]).toMatchObject({ config: { labels: ['Remote'] } });
 
     wrapper.unmount();
   });

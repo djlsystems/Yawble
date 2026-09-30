@@ -164,6 +164,10 @@ public static class EventCatalog
                 new(PayloadFields.TokensReasoning, EventFieldKind.Integer, "Absent, not zero, when usage is unknown."),
                 new(PayloadFields.TokensSource, EventFieldKind.String, "Which brand's usage format was parsed, if any."),
                 new(PayloadFields.UsageCountedOn, EventFieldKind.Integer, "Set when this run answered several deliveries: the causation of the row that carries its token figures. This row carries none."),
+                new(PayloadFields.Item, EventFieldKind.Integer, "Set when this run carried several items: the number, in the prompt, of the item this row closes."),
+                new(PayloadFields.ItemOutcome, EventFieldKind.String, "Set when this run carried several items: `answered` or `failed` for the item this row closes."),
+                new(PayloadFields.Items, EventFieldKind.List, "Set when this run carried several items: every item's `{ item, seq, outcome }`, outcome `answered`, `failed`, `blocked` or `deferred`. A deferred item is delivered again as its own run."),
+                new(PayloadFields.DeferredFromRun, EventFieldKind.Integer, "Set when this run was a deferred item delivered again: the `started` seq of the run it was deferred from."),
 
                 // DECLARED ON BOTH ARMS BECAUSE THERE IS ONE JSON OBJECT. These two entries share a
                 // call site, so a field added to one is written - as null - by the other, and
@@ -190,6 +194,10 @@ public static class EventCatalog
                 new(PayloadFields.TokensReasoning, EventFieldKind.Integer, "Absent, not zero, when usage is unknown."),
                 new(PayloadFields.TokensSource, EventFieldKind.String, "Which brand's usage format was parsed, if any."),
                 new(PayloadFields.UsageCountedOn, EventFieldKind.Integer, "Set when this run answered several deliveries: the causation of the row that carries its token figures. This row carries none."),
+                new(PayloadFields.Item, EventFieldKind.Integer, "Set when this run carried several items: the number, in the prompt, of the item this row closes."),
+                new(PayloadFields.ItemOutcome, EventFieldKind.String, "Set when this run carried several items: `answered` or `failed` for the item this row closes."),
+                new(PayloadFields.Items, EventFieldKind.List, "Set when this run carried several items: every item's `{ item, seq, outcome }`, outcome `answered`, `failed`, `blocked` or `deferred`. A deferred item is delivered again as its own run."),
+                new(PayloadFields.DeferredFromRun, EventFieldKind.Integer, "Set when this run was a deferred item delivered again: the `started` seq of the run it was deferred from."),
                 new(PayloadFields.FailureClass, EventFieldKind.String,
                     "What KIND of failure this was - quota, rate, transport, agent-fault, launch-missing, "
                     + "timeout, interrupted, or unknown. Absent on every row written before classes existed; "
@@ -552,6 +560,32 @@ public static class EventCatalog
             "A workflow was declared complete and a solution package written during it sits in the "
             + "team's documents folder, so the platform checked it: ready to review and install, or "
             + "the problems by file and field. Source is the member that declared."),
+
+        // OUT OF THE LEDGER: a finding for the person, about what the platform let reach a member;
+        // the member did not choose its tools and cannot fix this on its next wake.
+        new(MessageTypes.AgentForeignTools, EventPublisher.Platform, HighVolume: false, InLedger: false,
+            [
+                Source,
+                new(PayloadFields.ForeignToolsStatus, EventFieldKind.String,
+                    "`foreign`: the run was offered or called a tool outside `harness` and its preset's allowed list. "
+                    + "`notMeasured`: nothing foreign was seen, but the transcript cannot list what was offered, so the "
+                    + "run is not reported clean. `notVerified`: the whole offer was read and no foreign MCP server was "
+                    + "in it, but the preset declares no allowed tools, so the CLI's own tools were not judged."),
+                new(PayloadFields.ForeignCalled, EventFieldKind.List,
+                    "Each foreign tool the run called, as `server/tool`, or the tool alone for the CLI's own."),
+                new(PayloadFields.ForeignOffered, EventFieldKind.List,
+                    "Each foreign tool or MCP server the run was offered and did not call."),
+                new(PayloadFields.Agent, EventFieldKind.String, "The preset the run launched as."),
+                new(PayloadFields.PresetVerified, EventFieldKind.Boolean,
+                    "Whether the preset declares its allowed tools. False: it is not verified, and only MCP servers were judged."),
+                new(PayloadFields.AgentTranscriptFormat, EventFieldKind.String, "The transcript format that was read."),
+                new(PayloadFields.Measured, EventFieldKind.String, "What that format records about tools, in words."),
+                new(PayloadFields.Run, EventFieldKind.Integer, "The seq of the run's terminal row."),
+                new(PayloadFields.Text, EventFieldKind.String, "The finding, as a person reads it."),
+            ],
+            "A member's run was checked against the tools the platform gives it. Written only when the run "
+            + "met a foreign tool (a call is marked above an offer) or could not be measured; a clean run "
+            + "writes nothing. Source is the member; the Concierge is never checked."),
     ];
 
     public static IReadOnlySet<string> Types { get; } =

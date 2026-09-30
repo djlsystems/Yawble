@@ -98,6 +98,39 @@ public sealed class MemberRuntimeTests
     }
 
     /// <summary>
+    /// THE MARK IS SET BEFORE THE TERMINAL HOOK RUNS. Whoever sees a Failed row may read the
+    /// member's failure straight away, so the reason and class cannot wait on a reader of the run
+    /// that takes its time: here one that blocks until released.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_rows_reason_is_set_while_a_slow_terminal_hook_still_runs()
+    {
+        var entered = new TaskCompletionSource<Message>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var bed = new ContainerTestBed(onTerminal: async (row, ct) =>
+        {
+            entered.TrySetResult(row);
+            await release.Task.WaitAsync(ct);
+        });
+
+        try
+        {
+            var (row, member, _) = await RunOnceAsync(bed, _ =>
+                new MemberResult(false, 1, "", FailureReason: "The plugin said no.", FailureClass: FailureClasses.Transport));
+
+            Assert.Equal(MessageTypes.Failed, row.Type);
+            Assert.Equal(row.Seq, (await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct)).Seq);
+            Assert.False(release.Task.IsCompleted);
+            Assert.Equal("The plugin said no.", member.Snapshot().Failed);
+            Assert.Equal(FailureClasses.Transport, member.Snapshot().FailureClass);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+    }
+
+    /// <summary>
     /// THE RUNTIME IS AGENT-FREE, mechanically: none of the agent seam's types, and no prompt
     /// rendering or history building, appear in the member runtime or the pump.
     /// </summary>

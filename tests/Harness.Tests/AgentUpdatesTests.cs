@@ -101,6 +101,49 @@ public sealed class AgentUpdatesTests : IDisposable
         Assert.DoesNotContain("DISABLE_AUTOUPDATER=0", result.Output.Split('\n'));
     }
 
+    /// <summary>
+    /// A member's launch carries BOTH declarations: the preset's isolation (the platform's tools only)
+    /// and its update-off. Neither replaces the other's arguments or variables.
+    /// </summary>
+    [Theory]
+    [InlineData("claude-headless", "ENABLE_CLAUDEAI_MCP_SERVERS", "DISABLE_AUTOUPDATER", null)]
+    [InlineData("grok-headless", "GROK_MEMORY", "GROK_DISABLE_AUTOUPDATER", null)]
+    [InlineData("copilot-headless", null, "COPILOT_AUTO_UPDATE", "--disable-builtin-mcps")]
+    [InlineData("codex-headless", null, null, "--ignore-user-config")]
+    public void A_members_launch_carries_its_isolation_and_its_update_off(
+        string preset, string? isolationVariable, string? updateVariable, string? isolationArgument)
+    {
+        var launch = BuiltIns().For(preset)!;
+
+        if (isolationVariable is not null) Assert.True(launch.IsolationEnvironment!.ContainsKey(isolationVariable));
+        if (isolationArgument is not null) Assert.Contains(isolationArgument, launch.Arguments);
+        if (updateVariable is not null) Assert.True(launch.UpdateEnvironment!.ContainsKey(updateVariable));
+        else Assert.Equal(["-c", "check_for_update_on_startup=false"], launch.Arguments.TakeLast(2));
+    }
+
+    [Fact]
+    public async Task A_members_process_gets_the_isolation_and_the_update_off_variables_together()
+    {
+        var program = Path.Combine(_root, "stub-env");
+        await TestExecutable.WriteAsync(program, "#!/bin/sh\ncat >/dev/null\nenv\n");
+        var claude = BuiltIns().Definition("claude-headless")!;
+
+        var catalog = new AgentCatalog(
+        [
+            new AgentDefinition("probe", AgentMode.Headless, new AgentLaunch(program, [], LanguageModel: false),
+                Isolation: claude.Isolation, Updates: claude.Updates),
+        ]);
+
+        var result = await new ProcessAgentRunner(catalog, new RunHeartbeat()).RunAsync(
+            Invocation("probe", new Dictionary<string, string>()), TestContext.Current.CancellationToken);
+
+        var lines = result.Output.Split('\n');
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("DISABLE_AUTOUPDATER=1", lines);
+        Assert.Contains("ENABLE_CLAUDEAI_MCP_SERVERS=false", lines);
+        Assert.Contains("CLAUDE_CODE_DISABLE_AUTO_MEMORY=1", lines);
+    }
+
     [Theory]
     [InlineData("claude", "DISABLE_AUTOUPDATER", "1")]
     [InlineData("copilot", "COPILOT_AUTO_UPDATE", "false")]
@@ -139,6 +182,7 @@ public sealed class AgentUpdatesTests : IDisposable
         private static Task<MemberReportOutcome> Unexpected() => throw new InvalidOperationException("only progress");
 
         public Task<MemberReportOutcome> BlockedAsync(ContainerId member, string reason, int? item = null, CancellationToken ct = default) => Unexpected();
+        public Task<MemberReportOutcome> DeferAsync(ContainerId member, int item, string reason, CancellationToken ct = default) => Unexpected();
         public Task<MemberReportOutcome> NeedsDecisionAsync(ContainerId member, string question, CancellationToken ct = default) => Unexpected();
         public Task<MemberReportOutcome> HandbackAsync(ContainerId member, string delivered, CancellationToken ct = default) => Unexpected();
         public Task<MemberReportOutcome> PublishAsync(ContainerId member, string type, string payload, CancellationToken ct = default) => Unexpected();

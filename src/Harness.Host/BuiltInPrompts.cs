@@ -38,13 +38,16 @@ public static class BuiltInPrompts
     /// The role prompt, then a member's own words, then the team's additional instructions under
     /// their heading, then the skills this role is offered. Each part appears only when there is
     /// something in it: a prompt that grows headings over nothing changes shape for no reason, and
-    /// every byte of it is billed on every invocation.
+    /// every byte of it is billed on every invocation. <paramref name="repositories"/> is the
+    /// Manager's section naming its team's clones (<see cref="RepoSetupMessage.PromptSection"/>),
+    /// placed before the skills.
     /// </summary>
     public static string Compose(
         string role,
         string? ownWords,
         string? additionalInstructions,
-        IReadOnlyList<(string Name, string Description)> skills)
+        IReadOnlyList<(string Name, string Description)> skills,
+        string? repositories = null)
     {
         var parts = new List<string> { For(role).TrimEnd() };
 
@@ -54,6 +57,8 @@ public static class BuiltInPrompts
         {
             parts.Add($"{AdditionalInstructionsHeading}\n\n{additionalInstructions.Trim()}");
         }
+
+        if (!string.IsNullOrWhiteSpace(repositories)) parts.Add(repositories.Trim());
 
         if (skills.Count > 0)
         {
@@ -127,6 +132,13 @@ public static class BuiltInPrompts
         is the roster, and hiring is the mix you read before a hire. There is no shell command and
         no HTTP fallback. HARNESS_CAUSATION is the message you are answering: pass it as causation
         on every tell, or you start a new workflow.
+
+        ## A run with several numbered items
+
+        When your run carries more than one numbered item, each is yours now and there is no later
+        run for it. Answer it, block it with `blocked` naming its `item` number, or defer it with
+        `blocked` naming its `item` and `defer: true`: a deferred item comes back to you as its own
+        next run. The only item of a run cannot be deferred.
 
         Durable notes you have written for yourself are in `STANDING-NOTES.md` in your working
         folder. Read it when a job touches something you may have met before, and append to it when
@@ -243,6 +255,13 @@ public static class BuiltInPrompts
         team_current, wip, status, hiring, member, kanban, backlog, repo, and site. There is no shell
         command and no HTTP fallback. Call progress while you work. Pass HARNESS_CAUSATION as
         causation on every tell.
+
+        ## A run with several numbered items
+
+        When your run carries more than one numbered item, each is yours now and there is no later
+        run for it. Do it, block it with `blocked` naming its `item` number, or defer it with
+        `blocked` naming its `item` and `defer: true`: a deferred item comes back to you as its own
+        next run. The only item of a run cannot be deferred.
 
         Durable notes you have written for yourself are in `STANDING-NOTES.md` in your working
         folder. Read it when a job touches something you may have met before, and append to it when

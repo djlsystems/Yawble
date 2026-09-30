@@ -49,12 +49,46 @@ public static class PayloadFields
     public const string WakeManager = "wakeManager";
 
     /// <summary>
+    /// On a `completed` row: true when the platform declared the run's workflow complete as the run
+    /// ended, because its owner cannot declare (`UndeclarableWorkflows`, `declaredByPlatform`) -
+    /// a person told a plugin member directly. The workflow is closed, so the pump passes over the
+    /// Manager (a subscriber holding the type in its BASE set) on it, as on `wakeManager: never`;
+    /// an event trigger naming the type still fires. Written only when true, never on a `failed`
+    /// row, never on a trigger's run (its <see cref="WakeManager"/> choice governs) and never on a
+    /// row closing a member's own `tell`, which that member is waiting on.
+    /// </summary>
+    public const string WorkflowDeclared = "workflowDeclared";
+
+    /// <summary>
     /// On a `completed` or `failed` row that closes a delivery its run shared with others: the
     /// causation seq of the row in the same batch that carries the run's token figures. This row
     /// carries none, and the spend queries skip it, so a run is billed once however many deliveries
     /// it answered. Absent on a row that carries its run's usage, or unknown usage, itself.
     /// </summary>
     public const string UsageCountedOn = "usageCountedOn";
+
+    /// <summary>
+    /// On each `completed` or `failed` row of a run that carried MORE THAN ONE item: what became of
+    /// EVERY item of that run, as a list of <c>{ item, seq, outcome }</c> in prompt order, where
+    /// outcome is one of <see cref="ItemOutcomes"/>. A deferred item has no terminal row of its own
+    /// in that run - it is delivered again - so this list is where the run says so. Absent on a
+    /// run of one item.
+    /// </summary>
+    public const string Items = "items";
+
+    /// <summary>
+    /// On each `completed` or `failed` row of a run that carried more than one item: what became of
+    /// THE item this row closes - `answered` or `failed`, see <see cref="ItemOutcomes"/>. Beside
+    /// <see cref="Item"/>, its number in the prompt. Absent on a run of one item.
+    /// </summary>
+    public const string ItemOutcome = "itemOutcome";
+
+    /// <summary>
+    /// On a delivery the member DEFERRED out of a batched run and on the terminal row of the run it
+    /// was delivered again in: the seq of the `agentContainer.started` row of the run it was
+    /// deferred from. The same value sits on its pending delivery (<c>PendingDelivery.DeferredFromRun</c>).
+    /// </summary>
+    public const string DeferredFromRun = "deferredFromRun";
 
     /// <summary>
     /// On the Host's repository-setup instruction to a Manager: the clone paths that could not be
@@ -314,4 +348,45 @@ public static class PayloadFields
 
     /// <summary>`solution.checked`: each problem, <c>&lt;file&gt; &lt;field&gt;: &lt;reason&gt;</c>, on a fail only.</summary>
     public const string Problems = "problems";
+
+    /// <summary>`agent.foreignTools`: <c>foreign</c>, <c>notMeasured</c> or <c>notVerified</c>. A clean run writes no row.</summary>
+    public const string ForeignToolsStatus = "foreignStatus";
+
+    /// <summary>`agent.foreignTools`: each foreign tool the run CALLED, as <c>server/tool</c> or the tool alone.</summary>
+    public const string ForeignCalled = "foreignCalled";
+
+    /// <summary>`agent.foreignTools`: each foreign tool or server the run was OFFERED and did not call.</summary>
+    public const string ForeignOffered = "foreignOffered";
+
+    /// <summary>`agent.foreignTools`: what the run's transcript format records about tools, in words.</summary>
+    public const string Measured = "measured";
+
+    /// <summary>`agent.foreignTools`: whether the preset declares its allowed tools. False: only MCP servers were judged.</summary>
+    public const string PresetVerified = "presetVerified";
+
+    /// <summary>`agent.foreignTools`: the preset the run launched as.</summary>
+    public const string Agent = "agent";
+
+    /// <summary>`agent.foreignTools`: the seq of the terminal row whose transcript was read.</summary>
+    public const string Run = "run";
+}
+
+/// <summary>
+/// What became of one item of a batched run, as <see cref="PayloadFields.Items"/> and
+/// <see cref="PayloadFields.ItemOutcome"/> spell it. Never a bare `completed` copied from another
+/// item: a run that carried several instructions says which it answered, blocked and deferred.
+/// </summary>
+public static class ItemOutcomes
+{
+    /// <summary>The run finished and the item was neither blocked nor deferred.</summary>
+    public const string Answered = "answered";
+
+    /// <summary>The run itself failed; the item's row is `failed`.</summary>
+    public const string Failed = "failed";
+
+    /// <summary>The agent blocked the item by its number; its `blocked` row closed it.</summary>
+    public const string Blocked = "blocked";
+
+    /// <summary>The agent deferred the item by its number; it is delivered again as its own run.</summary>
+    public const string Deferred = "deferred";
 }

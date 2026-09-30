@@ -212,6 +212,30 @@ public static class RepoSetupMessage
             + "current, and nothing else.";
     }
 
+    /// <summary>The heading the Manager's repository section sits under.</summary>
+    public const string PromptHeading = "## Your team's repositories";
+
+    /// <summary>
+    /// WHAT THE READY NOTICE CARRIED, IN THE MANAGER'S PROMPT INSTEAD. A team whose repositories all
+    /// cloned is not told so by an instruction: that notice woke the Manager into a paid run with
+    /// nothing to do. The clone paths and the rule that a member cuts its own worktree reach it here,
+    /// on its first real run and every one after. A clone that FAILED still sends <see cref="For"/>'s
+    /// failure notice, because that one needs a person. Null for a team with no repositories.
+    /// </summary>
+    public static string? PromptSection(IReadOnlyList<(string Url, string Path)> clones)
+    {
+        if (clones.Count == 0) return null;
+
+        return
+            PromptHeading + "\n\n"
+            + "The platform makes the main clone of each repository, and you do not clone anything "
+            + "yourself. If a clone could not be made, you are told so in an instruction.\n\n"
+            + string.Join("\n", clones.Select(c => $"  {GitOutputRedaction.Redact(c.Url)} -> {c.Path}"))
+            + "\n\nHire a member when there is work. A member cuts its own worktree from that clone; "
+            + "see the `worktrees` skill. What a manager does to the clone itself is bring it "
+            + "current, and nothing else.";
+    }
+
     /// <summary>
     /// THE ONE PLACE A REPOSITORY URL IS COMPOSED INTO A ROW, AND THEREFORE THE ONE PLACE THE
     /// CREDENTIAL IN IT IS TAKEN OUT.

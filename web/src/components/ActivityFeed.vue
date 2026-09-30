@@ -4,6 +4,7 @@ import { getMessagesBefore } from '../api/client';
 import type { Message } from '../api/types';
 import { detail, label, ownerOf, summarise, timeOf } from '../lib/summarise';
 import { solutionNoticeOf } from '../lib/solutionNotice';
+import { runMarkOf } from '../lib/runMarks';
 import { useCursorList } from '../lib/useCursorList';
 import { useConsoleStore } from '../stores/console';
 import CursorSentinel from './CursorSentinel.vue';
@@ -162,6 +163,12 @@ function tone(type: string): string {
         <!-- Interpolated, never innerHTML: agent output reaches this line and Vue
              escapes it. -->
         <q-item-label caption lines="2" class="feed-line">{{ summarise(message) || '—' }}</q-item-label>
+        <!-- WHY A FINISHED RUN WOKE NOBODY: a quiet run, or one whose workflow the platform declared
+             as it ended. Said on the row, so a Manager that did not run is not mistaken for a miss. -->
+        <q-item-label v-if="runMarkOf(message)" caption class="feed-run-mark os-text-muted">
+          {{ runMarkOf(message)!.label }}
+          <q-tooltip>{{ runMarkOf(message)!.tooltip }}</q-tooltip>
+        </q-item-label>
         <!-- A package ready to install: the wizard's link, composed from the folder and never read
              from the row's text. It opens the review; nothing installs from here. -->
         <q-item-label v-if="solutionNoticeOf(message)?.href" caption>

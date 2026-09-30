@@ -80,11 +80,16 @@ public sealed partial class PlatformMcpTools(
         CancellationToken cancellationToken = default) =>
         OwnAsync("progress", new { status }, cancellationToken);
 
-    [McpServerTool(Name = "blocked"), Description("Stop without finishing, and say why. Use this instead of exiting quietly.")]
+    [McpServerTool(Name = "blocked"), Description(
+        "Stop without finishing, and say why. Use this instead of exiting quietly. When your prompt "
+        + "lists several numbered items, pass item to block only that one, or item with defer true "
+        + "to have it delivered again as its own next run.")]
     public Task<string> Blocked(
-        [Description("Why you stopped, in one or two sentences.")] string reason,
+        [Description("Why you stopped, in one or two sentences. For a deferral, why the item waits.")] string reason,
+        [Description("Optional: the number of one item of this run's prompt, to block or defer only that item.")] int? item = null,
+        [Description("Optional, with item: defer that item to its own next run instead of blocking it. Refused for the only item of a run.")] bool? defer = null,
         CancellationToken cancellationToken = default) =>
-        OwnAsync("blocked", new { reason }, cancellationToken);
+        OwnAsync("blocked", new { reason, item, defer }, cancellationToken);
 
     [McpServerTool(Name = "handback"), Description("Hand finished work back to your manager.")]
     public Task<string> Handback(
@@ -177,7 +182,9 @@ public sealed partial class PlatformMcpTools(
 
     [McpServerTool(Name = "status"), Description(
         "The roster and what each member is doing, including who they were hired for and why a run "
-        + "failed. This is harness status. Do not request /api/overview or /api/teams yourself.")]
+        + "failed, then each member's queued and deferred instructions (seq, first line, source): "
+        + "a queued instruction is delivered in turn, so do not send it again. "
+        + "This is harness status. Do not request /api/overview or /api/teams yourself.")]
     public async Task<string> Status(
         [Description(
             "Omit for the whole roster. The member's identifier, not the spaced label: "
@@ -191,7 +198,19 @@ public sealed partial class PlatformMcpTools(
             return "Refused: name a team. A Concierge has no default team.";
 
         var roster = await SendAsync(HttpMethod.Get, "/api/overview", null, cancellationToken);
-        if (string.IsNullOrWhiteSpace(member) || resolved is null) return roster;
+        if (resolved is null) return roster;
+
+        // WHAT IS WAITING, beside who is doing what: the roster says a member is busy, and this says
+        // what it will do next, so the Manager does not send it again.
+        var queued = await SendAsync(
+            HttpMethod.Get,
+            "/api/teams/" + Uri.EscapeDataString(resolved) + "/queued"
+                + (string.IsNullOrWhiteSpace(member) ? "" : "?member=" + Uri.EscapeDataString(member.Trim())),
+            null,
+            cancellationToken);
+
+        roster += Environment.NewLine + Environment.NewLine + queued;
+        if (string.IsNullOrWhiteSpace(member)) return roster;
 
         var tail = await SendAsync(
             HttpMethod.Get,

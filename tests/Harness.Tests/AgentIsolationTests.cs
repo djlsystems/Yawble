@@ -137,6 +137,35 @@ public sealed class AgentIsolationTests
         Assert.Empty(BuiltIns().Allowance("copilot-headless")!.AllowedServers.Except(["harness"]));
     }
 
+    /// <summary>
+    /// Copilot's native tools depend on the model `--model auto` routes to: the offered lists in real
+    /// `session.usage_checkpoint` events were these two sets, and a run on either must not be flagged.
+    /// </summary>
+    [Theory]
+    [InlineData("gpt-6-luna",
+        "apply_patch bash fetch_copilot_cli_documentation glob list_agents list_bash read_agent read_bash rg "
+            + "search_code_subagent session_store_sql skill sql stop_bash task view web_fetch write_agent")]
+    [InlineData("mai-code-1.1-flash",
+        "bash create edit fetch_copilot_cli_documentation glob grep list_agents list_bash read_agent read_bash "
+            + "search_code_subagent session_store_sql skill sql stop_bash task view web_fetch write_agent")]
+    public void Copilots_allowed_tools_cover_every_model_it_was_measured_on(string model, string offered)
+    {
+        var allowance = BuiltIns().Allowance("copilot-headless")!;
+
+        Assert.All(offered.Split(' '), tool => Assert.True(allowance.Allows(null, tool), $"{model}: {tool}"));
+        Assert.False(allowance.Allows("github-mcp-server", "search_code"));
+        Assert.Contains(allowance.Gaps, gap => gap.Contains("model", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Grok_allows_the_tools_its_subagent_sessions_are_offered()
+    {
+        var allowance = BuiltIns().Allowance("grok-headless")!;
+
+        Assert.True(allowance.Allows(null, "wait_commands_or_subagents"));
+        Assert.True(allowance.Allows(null, "spawn_subagent"));
+    }
+
     [Fact]
     public void Grok_members_also_lose_the_codex_surfaces_and_memory()
     {

@@ -1386,7 +1386,14 @@ public sealed class AgentCatalog(
     public IReadOnlyList<AgentDefinition> Custom =>
         [.. _definitions.Where(d => !AgentCatalogFile.IsBuiltIn(d.Name))];
 
-    public void Replace(IReadOnlyList<AgentDefinition> definitions) => _definitions = definitions;
+    public void Replace(IReadOnlyList<AgentDefinition> definitions)
+    {
+        _definitions = definitions;
+        Changed?.Invoke();
+    }
+
+    /// <summary>Raised after <see cref="Replace"/>: the pre-flight lists the CLIs again.</summary>
+    public event Action? Changed;
 
     /// <summary>
     /// The headless command for a preset, or null.

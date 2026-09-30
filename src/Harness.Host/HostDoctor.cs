@@ -38,7 +38,8 @@ public sealed record DoctorReport(
     DoctorBackups Backups,
     DateTimeOffset? VersionsRecordedAt,
     IReadOnlyList<DoctorAgent> Agents,
-    AgentLaunchRecord? AgentLaunch = null);
+    AgentLaunchRecord? AgentLaunch = null,
+    AgentToolsRecord? AgentTools = null);
 
 /// <summary>
 /// What `--doctor` reports: the state of one data root, read and never changed. The operator CLI
@@ -79,8 +80,18 @@ public static class HostDoctor
             await AgentsAsync(versions, history, ct),
             // Who the Host said, at its last start, agent children run as - and, when it
             // refuses them, why. Recorded by the Host, because the doctor is a different process.
-            AgentLaunchRecord.Read(dataRoot));
+            AgentLaunchRecord.Read(dataRoot),
+            AgentToolsSection(dataRoot));
     }
+
+    /// <summary>
+    /// THE AGENT TOOLS SECTION: per preset, isolated, foreign tools found (named) or not verified,
+    /// with its recorded gaps, and the Concierge's tools as information. The Host's last pre-flight
+    /// (<see cref="AgentToolPreflight"/>), read and never re-run: listing the CLIs here would run
+    /// them as whoever started the doctor, and needs the catalog, which a diagnostic must not load.
+    /// Null when the Host has not recorded one - not measured, never clean.
+    /// </summary>
+    public static AgentToolsRecord? AgentToolsSection(string dataRoot) => AgentToolsRecord.Read(dataRoot);
 
     /// <summary>
     /// The newest start's versions, as `scripts/ensure-agent-clis.sh` recorded them. Reading the

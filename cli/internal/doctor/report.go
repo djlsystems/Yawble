@@ -34,6 +34,8 @@ type HostReport struct {
 	} `json:"backups"`
 	VersionsRecordedAt *string `json:"versionsRecordedAt"`
 	Agents             []Agent `json:"agents"`
+	// The Host's last pre-flight of its agent CLIs (agenttools.go). Nil: not recorded, not measured.
+	AgentTools *AgentTools `json:"agentTools"`
 }
 
 type Schema struct {

@@ -2076,7 +2076,7 @@ public sealed class TeamRegistry(
             team, DefaultManagerName, agent, "", ManagerSubscriptions(), ManagerPermits, ct: ct);
 
         if (validatedRepos.Count > 0)
-            await WakeManagerForReposAsync(team, validatedRepos, ct, handleRepoSetup);
+            await WakeManagerForReposAsync(team, validatedRepos, ct, handleRepoSetup, atCreation: true);
 
         return All().Single(t => string.Equals(t.Id, team, StringComparison.OrdinalIgnoreCase));
     }
@@ -2370,6 +2370,9 @@ public sealed class TeamRegistry(
             container.Reenv(next);
         }
 
+        // The Manager's prompt names the clones, so it follows the list.
+        await RepromptManagerAsync(stored, ct);
+
         await WakeManagerForReposAsync(stored, validated, ct);
     }
 
@@ -2440,15 +2443,18 @@ public sealed class TeamRegistry(
     /// then tell the Manager what is true. A wake that arrives before the clone finishes is a
     /// Manager looking at a directory that is halfway through being made.
     /// </summary>
+    /// <remarks>
+    /// <b>AT CREATION, ONLY A FAILURE IS AN INSTRUCTION.</b> A notice that every clone is ready woke
+    /// the new team's Manager into a paid run with nothing to do. What it said - the clone paths and
+    /// that a member cuts its own worktree - is in the Manager's prompt instead
+    /// (<see cref="RepoSetupMessage.PromptSection"/>), so its first real run carries it. A failed
+    /// clone still roots its notice workflow, because that one needs a person.
+    /// </remarks>
     private async Task WakeManagerForReposAsync(
         string team, IReadOnlyList<string> repos, CancellationToken ct,
-        Func<IReadOnlyList<RepoCloneOutcome>, bool>? handleRepoSetup = null)
+        Func<IReadOnlyList<RepoCloneOutcome>, bool>? handleRepoSetup = null, bool atCreation = false)
     {
-        var targets = repos
-            .Select(url => (
-                Url: url,
-                Path: Path.Combine(paths.ReposFor(team), RepoUrls.DeriveName(url), "main")))
-            .ToList();
+        var targets = CloneTargets(team, repos);
 
         var outcomes = await cloner.EnsureAllAsync(targets, ct);
 
@@ -2469,6 +2475,8 @@ public sealed class TeamRegistry(
         // Returning false leaves the ordinary repo wake intact. The outcomes, rather than
         // rendered text, let that caller distinguish failure without parsing a prompt.
         if (handleRepoSetup?.Invoke(outcomes) == true) return;
+
+        if (atCreation && !outcomes.Any(o => o.Result is RepoCloneResult.Failed)) return;
 
         var instruction = RepoSetupMessage.For(outcomes);
 
@@ -2492,6 +2500,20 @@ public sealed class TeamRegistry(
                     : JsonSerializer.Serialize(new { instruction }),
                 "host"),
             ct);
+    }
+
+    /// <summary>Each repository's URL and the path of its main clone.</summary>
+    private List<(string Url, string Path)> CloneTargets(string team, IReadOnlyList<string> repos) =>
+        [.. repos.Select(url => (url, Path.Combine(paths.ReposFor(team), RepoUrls.DeriveName(url), "main")))];
+
+    /// <summary>The team's clone targets, or none when it has no repositories or no registered
+    /// root (mid-deletion) - a prompt goes on without the section rather than failing.</summary>
+    private List<(string Url, string Path)> CloneTargetsFor(string team)
+    {
+        if (_repos.GetValueOrDefault(team) is not { Count: > 0 } repos) return [];
+
+        try { return CloneTargets(team, repos); }
+        catch (KeyNotFoundException) { return []; }
     }
 
     /// <summary>
@@ -3167,7 +3189,8 @@ public sealed class TeamRegistry(
         var tools = SolutionToolsFor(id.Team);
 
         var template = BuiltInPrompts.Compose(
-            role, systemPrompt, WithSolutionTools(AdditionalInstructionsFor(id.Team), tools), _skills.For(role, id.Team));
+            role, systemPrompt, WithSolutionTools(AdditionalInstructionsFor(id.Team), tools), _skills.For(role, id.Team),
+            IsManager(id) ? RepoSetupMessage.PromptSection(CloneTargetsFor(id.Team)) : null);
 
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {

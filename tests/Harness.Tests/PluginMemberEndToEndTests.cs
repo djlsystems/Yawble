@@ -340,9 +340,8 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
     /// plugin's to declare, and a plugin holds no credential to declare with - so it stayed open
     /// forever, and the Manager was refused. The platform now declares it on the owner's behalf
     /// when a run in it ends successfully and nothing is left working it. No agent is involved:
-    /// the one declaration is the platform's. The plugin's result still wakes the Manager, as it
-    /// always did, and that wake races the declaration (its `started` row may come first on a busy
-    /// machine), so the test pins who declared, not the order of the rows.
+    /// the one declaration is the platform's, and the run's `completed` row says so, so the Manager
+    /// is not woken into the closed workflow (WorkflowDeclaredWakeTests).
     /// </summary>
     [Fact]
     public async Task E1_A_workflow_a_person_starts_by_telling_a_plugin_ends_completed()

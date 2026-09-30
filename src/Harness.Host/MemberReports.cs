@@ -100,6 +100,24 @@ public sealed class MemberReports(
         return MemberReportOutcome.Ok;
     }
 
+    public Task<MemberReportOutcome> DeferAsync(ContainerId member, int item, string reason, CancellationToken ct = default)
+    {
+        if (host.Find(member) is not { } container) return Task.FromResult(NoSuchMember(member));
+
+        // NO ROW NOW, and no mark: the deferral and its reason are written on the run's own terminal
+        // rows (`items`), and the item's next run is its record. A row here would wake nobody and
+        // say less.
+        if (!container.TryDeferItem(item, reason.Trim(), out _, out var error))
+        {
+            return Task.FromResult(MemberReportOutcome.Refused(error!, 400));
+        }
+
+        // A DELIBERATE ACT resets the idle clock - see RunHeartbeat.
+        heartbeat.Touch(container.Id);
+
+        return Task.FromResult(MemberReportOutcome.Ok);
+    }
+
     public async Task<MemberReportOutcome> HandbackAsync(ContainerId member, string delivered, CancellationToken ct = default)
     {
         if (host.Find(member) is not { } container) return NoSuchMember(member);

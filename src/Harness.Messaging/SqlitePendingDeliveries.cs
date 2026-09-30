@@ -60,6 +60,26 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
             subscriber, seq, ct);
     }
 
+    public async Task DeferAsync(ContainerId subscriber, long seq, long fromRun, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        // An UPSERT, not an update: the row is normally there, but a deferral must never be lost to
+        // a row a failed write left missing.
+        command.CommandText =
+            """
+            INSERT INTO pending_deliveries (subscriber, seq, started, deferred_from_run)
+            VALUES ($subscriber, $seq, 0, $from)
+            ON CONFLICT(subscriber, seq) DO UPDATE SET started = 0, deferred_from_run = $from
+            """;
+        command.Parameters.AddWithValue("$subscriber", subscriber.ToString());
+        command.Parameters.AddWithValue("$seq", seq);
+        command.Parameters.AddWithValue("$from", fromRun);
+
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<int> RemoveAllAsync(ContainerId subscriber, CancellationToken ct = default)
     {
         await using var connection = Open();
@@ -98,7 +118,7 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
 
         command.CommandText =
             """
-            SELECT seq, started FROM pending_deliveries
+            SELECT seq, started, deferred_from_run FROM pending_deliveries
             WHERE subscriber = $subscriber
             ORDER BY seq
             """;
@@ -110,7 +130,8 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
 
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new PendingDelivery(reader.GetInt64(0), reader.GetInt64(1) != 0));
+            rows.Add(new PendingDelivery(
+                reader.GetInt64(0), reader.GetInt64(1) != 0, reader.IsDBNull(2) ? null : reader.GetInt64(2)));
         }
 
         return rows;
@@ -124,7 +145,7 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
 
         command.CommandText =
             """
-            SELECT subscriber, seq, started FROM pending_deliveries
+            SELECT subscriber, seq, started, deferred_from_run FROM pending_deliveries
             WHERE substr(subscriber, 1, length($teamPrefix)) = $teamPrefix COLLATE NOCASE
             ORDER BY subscriber, seq
             """;
@@ -136,7 +157,9 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
 
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new TeamPendingDelivery(reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2) != 0));
+            rows.Add(new TeamPendingDelivery(
+                reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2) != 0,
+                reader.IsDBNull(3) ? null : reader.GetInt64(3)));
         }
 
         return rows;

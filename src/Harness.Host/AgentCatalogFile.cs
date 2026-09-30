@@ -204,7 +204,8 @@ public static class AgentCatalogFile
         // cross-session memory. The `harness` server comes from `~/.grok/config.toml`, which the
         // Host writes, so grok's MCP servers cannot be narrowed at launch: the GROK_CONFIG overlay
         // accepts `[features]` and refuses `[skills]` and `[mcp_servers]` (measured). The tool list
-        // is `tool_definitions.json` in a real session plus the server-side search tools.
+        // is `tool_definitions.json` in a real session plus the server-side search tools; a
+        // subagent's session (`session_kind: subagent`) is also offered `wait_commands_or_subagents`.
         var grokIsolation = new AgentIsolation(
             [],
             Env: new Dictionary<string, string>
@@ -220,6 +221,7 @@ public static class AgentCatalogFile
             [
                 "run_terminal_command", "read_file", "search_replace", "list_dir", "grep", "write",
                 "kill_command_or_subagent", "get_command_or_subagent_output", "spawn_subagent",
+                "wait_commands_or_subagents",
                 "todo_write", "scheduler_create", "scheduler_delete", "scheduler_list", "monitor",
                 "search_tool", "use_tool", "workflow", "enter_plan_mode", "exit_plan_mode",
                 "ask_user_question", "send_feedback", "web_fetch", "web_search", "open_page",
@@ -240,17 +242,23 @@ public static class AgentCatalogFile
         // itself STAYS: it is how copilot signs in here (unset, the launch fails asking for a login),
         // so the choice written down is "no GitHub server", and allowing it means naming
         // `github-mcp-server` in AllowedServers and dropping the flag. The tool list is the
-        // `tools` of `session.usage_checkpoint` in a real session's events.
+        // `tools` of `session.usage_checkpoint` in a real session's events. The file tools depend on
+        // the model `--model auto` routes to: gpt-6-luna is offered `apply_patch` and `rg`,
+        // mai-code-1.1-flash `create`, `edit` and `grep` instead, so both sets are listed.
         var copilotIsolation = new AgentIsolation(
             ["--disable-builtin-mcps"],
             AllowedTools:
             [
                 "bash", "read_bash", "stop_bash", "list_bash", "view", "apply_patch", "rg", "glob",
+                "create", "edit", "grep",
                 "web_fetch", "fetch_copilot_cli_documentation", "search_code_subagent", "skill", "sql",
                 "session_store_sql", "task", "read_agent", "list_agents", "write_agent",
             ],
             Gaps:
             [
+                "The local tool set varies by model: only the models `--model auto` has routed to here "
+                    + "(gpt-6-luna, mai-code-1.1-flash) were measured, and a run on another model may be "
+                    + "offered a file tool not listed, which the check then names.",
                 "~/.copilot/mcp-config.json, its installed plugins, skills and instructions still load: "
                     + "moving COPILOT_HOME would move the session transcript the live view reads.",
             ]);
