@@ -59,6 +59,15 @@ function mountStrip(usage: TeamTokenTotals | null) {
 const n = (value: number) => value.toLocaleString();
 const squash = (text: string) => text.replace(/\s+/g, ' ');
 
+/** Each row of a tokens-dialog table, as its figures by column. */
+function tableRows(kind: 'brand' | 'member'): Record<string, string>[] {
+  return [...document.body.querySelectorAll(`[data-token-table="${kind}"] tbody tr`)].map((tr) =>
+    Object.fromEntries(
+      [...tr.querySelectorAll('[data-cell]')].map((td) => [td.getAttribute('data-cell')!, squash(td.textContent ?? '').trim()]),
+    ),
+  );
+}
+
 describe('TeamKpiStrip token tile, mounted', () => {
   afterEach(resetBody);
 
@@ -83,12 +92,16 @@ describe('TeamKpiStrip token tile, mounted', () => {
     await wrapper.find('.team-kpi--tokens').trigger('click');
     await flushPromises();
 
-    const row =
-      `${n(2_142)} in · ${n(76_466_631)} cache read · ${n(2_393_199)} cache write · ${n(577_066)} out`
-      + ` · ${n(11_217_369)} billable`;
-    const text = squash(bodyText());
-    // Once for the brand row, once for the member row.
-    expect(text.split(row).length - 1).toBe(2);
+    const row = {
+      billable: n(11_217_369),
+      in: n(2_142),
+      'cache-read': n(76_466_631),
+      'cache-write': n(2_393_199),
+      out: n(577_066),
+    };
+    // Once in the brand table, once in the member table: one column per figure.
+    expect(tableRows('brand')).toEqual([row]);
+    expect(tableRows('member')).toEqual([row]);
 
     wrapper.unmount();
   });
@@ -163,10 +176,16 @@ describe('TeamKpiStrip token card copy, mounted', () => {
     await openDialog(wrapper);
 
     const text = squash(bodyText());
-    const row =
-      `(unknown) in · (unknown) cache read · (unknown) cache write · ${n(577_066)} out · (unknown) billable`;
-    // Once for the brand row, once for the member row.
-    expect(text.split(row).length - 1).toBe(2);
+    const row = {
+      billable: '(unknown)',
+      in: '(unknown)',
+      'cache-read': '(unknown)',
+      'cache-write': '(unknown)',
+      out: n(577_066),
+    };
+    // Once in the brand table, once in the member table.
+    expect(tableRows('brand')).toEqual([row]);
+    expect(tableRows('member')).toEqual([row]);
     expect(text).not.toContain('undefined');
 
     wrapper.unmount();

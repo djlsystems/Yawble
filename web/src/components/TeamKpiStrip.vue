@@ -28,6 +28,7 @@ import { unpushedTeamBranchesLine } from '../lib/repoStatus';
 import { asTeamId } from '../api/types';
 import { closeWorkflow, nudgeWorkflow, resumeWorkflow, stopWorkflow } from '../api/client';
 import { useConsoleStore } from '../stores/console';
+import { vResizableColumns } from '../lib/resizableColumns';
 
 const props = defineProps<{
   containers: ContainerSnapshot[];
@@ -1009,64 +1010,103 @@ function showThread(row: WorkflowRow) {
       </q-card-section>
 
       <q-card-section v-if="tokens.available">
-        <div class="text-body2 q-mb-md">
-          <span class="mono text-weight-medium">{{ tokens.billable.toLocaleString() }}</span>
-          billable
-          <div class="text-caption mono">
-            {{ tokens.input.toLocaleString() }} in · {{ tokens.cachedIn.toLocaleString() }} cache read ·
-            {{ tokens.cacheCreation.toLocaleString() }} cache write · {{ tokens.output.toLocaleString() }} out
+        <!-- THE TEAM TOTAL: billable as the headline, the four figures it is weighted from as
+             labelled values beside it, never one run-on line of numbers. -->
+        <div class="token-summary" data-token-summary>
+          <div class="token-summary-total">
+            <div class="token-summary-value mono">{{ tokens.billable.toLocaleString() }}</div>
+            <div class="text-caption os-text-muted">billable tokens</div>
           </div>
-          <div class="text-caption os-text-muted">
-            Billable weights a cache read at 1/10 and a cache write at 5/4, and counts a combined
-            total as reported.
-          </div>
-        </div>
-
-        <div class="text-caption os-text-muted text-weight-medium q-mb-xs">By agent brand</div>
-        <div v-if="tokens.byBrand.length === 0" class="text-caption os-text-muted q-mb-md">
-          No brand totals.
-        </div>
-        <div v-else class="q-mb-md">
-          <div v-for="row in tokens.byBrand" :key="row.brand" class="row items-center q-mb-xs">
-            <div class="col ellipsis">{{ row.brand }}</div>
-
-            <!-- The same substitution as the member rows below, and it must stay in step with
-                 them: seen live reading `(unknown)` here and `this Agent reports no usage` one
-                 line down, over the same Agent. -->
-            <div v-if="row.note" class="col-auto text-caption os-text-muted">{{ row.note }}</div>
-            <div v-else class="col-auto mono text-caption">
-              {{ formatToken(row.input) }} in · {{ formatToken(row.cachedIn) }} cache read ·
-              {{ formatToken(row.cacheCreation) }} cache write · {{ formatToken(row.output) }} out ·
-              {{ formatToken(row.billable) }} billable
+          <div class="token-summary-parts">
+            <div class="token-summary-part" data-token-part="in">
+              <div class="mono">{{ tokens.input.toLocaleString() }}</div>
+              <div class="text-caption os-text-muted">in</div>
+            </div>
+            <div class="token-summary-part" data-token-part="cache-read">
+              <div class="mono">{{ tokens.cachedIn.toLocaleString() }}</div>
+              <div class="text-caption os-text-muted">cache read</div>
+            </div>
+            <div class="token-summary-part" data-token-part="cache-write">
+              <div class="mono">{{ tokens.cacheCreation.toLocaleString() }}</div>
+              <div class="text-caption os-text-muted">cache write</div>
+            </div>
+            <div class="token-summary-part" data-token-part="out">
+              <div class="mono">{{ tokens.output.toLocaleString() }}</div>
+              <div class="text-caption os-text-muted">out</div>
             </div>
           </div>
         </div>
+        <div class="text-caption os-text-muted q-mt-sm">
+          Billable weights a cache read at 1/10 and a cache write at 5/4, and counts a combined
+          total as reported.
+        </div>
 
-        <div class="text-caption os-text-muted text-weight-medium q-mb-xs">By member</div>
+        <!-- ONE COLUMN PER FIGURE, right-aligned so the digits line up, and the name in a column
+             of its own that WRAPS rather than truncates: "De...416" named nobody. A row's note
+             ("this Agent reports no usage") REPLACES its figures, spanning their columns - the
+             decision is lib/teamKpis.ts's, as before. -->
+        <div class="token-section-title">By agent brand</div>
+        <div v-if="tokens.byBrand.length === 0" class="text-caption os-text-muted">
+          No brand totals.
+        </div>
+        <table v-else v-resizable-columns="'tokens-by-brand'" class="token-table" data-token-table="brand">
+          <thead>
+            <tr>
+              <th class="token-name-col">Brand</th>
+              <th class="token-num">Billable</th>
+              <th class="token-num">In</th>
+              <th class="token-num">Cache read</th>
+              <th class="token-num">Cache write</th>
+              <th class="token-num">Out</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in tokens.byBrand" :key="row.brand" :data-token-row="`brand:${row.brand}`">
+              <td class="token-name">{{ row.brand }}</td>
+              <td v-if="row.note" colspan="5" class="token-note">{{ row.note }}</td>
+              <template v-else>
+                <td class="token-num mono token-billable" data-cell="billable">{{ formatToken(row.billable) }}</td>
+                <td class="token-num mono" data-cell="in">{{ formatToken(row.input) }}</td>
+                <td class="token-num mono" data-cell="cache-read">{{ formatToken(row.cachedIn) }}</td>
+                <td class="token-num mono" data-cell="cache-write">{{ formatToken(row.cacheCreation) }}</td>
+                <td class="token-num mono" data-cell="out">{{ formatToken(row.output) }}</td>
+              </template>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="token-section-title">By member</div>
         <div v-if="tokens.byMember.length === 0" class="text-caption os-text-muted">
           No member totals.
         </div>
-        <div v-else>
-          <div v-for="row in tokens.byMember" :key="row.member" class="row items-center q-mb-xs">
-            <div class="col ellipsis">
-              {{ row.member }}
-              <span class="os-text-muted"> · {{ row.brand }}</span>
-            </div>
-
-            <!-- THE NOTE REPLACES THE FIGURES, never sits beside them. `(unknown) in ·
-                 (unknown) out` is the right rendering for a figure that has gone missing and may
-                 come back; it is the wrong one for an Agent that reports nothing and never will,
-                 and for a member that has not finished a run yet. `lib/teamKpis.ts` decides which
-                 of those a row is - this file can be mounted under test now, and a `v-if` here
-                 would still make the decision harder to test than the pure function does. -->
-            <div v-if="row.note" class="col-auto text-caption os-text-muted">{{ row.note }}</div>
-            <div v-else class="col-auto mono text-caption">
-              {{ formatToken(row.input) }} in · {{ formatToken(row.cachedIn) }} cache read ·
-              {{ formatToken(row.cacheCreation) }} cache write · {{ formatToken(row.output) }} out ·
-              {{ formatToken(row.billable) }} billable
-            </div>
-          </div>
-        </div>
+        <table v-else v-resizable-columns="'tokens-by-member'" class="token-table" data-token-table="member">
+          <thead>
+            <tr>
+              <th class="token-name-col">Member</th>
+              <th class="token-num">Billable</th>
+              <th class="token-num">In</th>
+              <th class="token-num">Cache read</th>
+              <th class="token-num">Cache write</th>
+              <th class="token-num">Out</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in tokens.byMember" :key="row.member" :data-token-row="`member:${row.member}`">
+              <td class="token-name">
+                <div>{{ row.member }}</div>
+                <div class="text-caption os-text-muted">{{ row.brand }}</div>
+              </td>
+              <td v-if="row.note" colspan="5" class="token-note">{{ row.note }}</td>
+              <template v-else>
+                <td class="token-num mono token-billable" data-cell="billable">{{ formatToken(row.billable) }}</td>
+                <td class="token-num mono" data-cell="in">{{ formatToken(row.input) }}</td>
+                <td class="token-num mono" data-cell="cache-read">{{ formatToken(row.cachedIn) }}</td>
+                <td class="token-num mono" data-cell="cache-write">{{ formatToken(row.cacheCreation) }}</td>
+                <td class="token-num mono" data-cell="out">{{ formatToken(row.output) }}</td>
+              </template>
+            </tr>
+          </tbody>
+        </table>
       </q-card-section>
 
       <q-card-section v-else-if="pluginOnly" class="os-body os-text-muted team-kpi-plugin-only">
@@ -1407,5 +1447,85 @@ function showThread(row: WorkflowRow) {
     opacity: 0.35;
     transform: scale(0.7);
   }
+}
+
+/* THE TOKENS DIALOG. The headline total with its four parts, then two tables whose figures line
+   up in right-aligned columns and whose names wrap instead of being cut. */
+.token-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px 32px;
+}
+
+.token-summary-value {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.token-summary-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.token-section-title {
+  margin: 20px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.token-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.token-table th {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  opacity: 0.7;
+  border-bottom: 1px solid var(--os-rule-strong);
+  white-space: nowrap;
+}
+
+.token-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--os-rule);
+  vertical-align: top;
+}
+
+.token-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.token-table .token-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.token-name-col {
+  width: 100%;
+}
+
+.token-name {
+  overflow-wrap: anywhere;
+  min-width: 10ch;
+}
+
+.token-billable {
+  font-weight: 600;
+}
+
+.token-note {
+  font-size: 12px;
+  opacity: 0.7;
 }
 </style>

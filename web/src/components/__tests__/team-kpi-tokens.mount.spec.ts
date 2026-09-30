@@ -133,11 +133,28 @@ describe('TeamKpiStrip token card', () => {
     const strip = await mountStrip(totals());
     const dialog = await openTokensDialog(strip);
 
-    expect(dialog).toMatch(/1,200 in · 5,000 cache read ·\s+80 cache write · 340 out ·\s+2,140 billable/);
-    expect(dialog).toMatch(
-      /\(unknown\) in · \(unknown\) cache read ·\s+\(unknown\) cache write · \(unknown\) out ·\s+\(unknown\) billable/,
+    const rows = [...document.body.querySelectorAll('[data-token-table="member"] tbody tr')].map((tr) =>
+      [...tr.querySelectorAll('[data-cell]')].map((td) => (td.textContent ?? '').trim()),
     );
+    // billable, in, cache read, cache write, out - one column each.
+    expect(rows).toContainEqual(['2,140', '1,200', '5,000', '80', '340']);
+    expect(rows).toContainEqual(['(unknown)', '(unknown)', '(unknown)', '(unknown)', '(unknown)']);
     expect(dialog).not.toContain('undefined');
+  });
+
+  // A member's name is shown whole, in a column of its own that wraps: the old row cut the name to
+  // make room for the figures, and "De...416" named nobody.
+  it('shows each member name in full, with its brand under it, and nothing cut', async () => {
+    const long = 'DeveloperMireilleWithAVeryLongName';
+    const base = totals();
+    const strip = await mountStrip(totals({ members: [{ ...base.members[0]!, member: long }] }));
+    await openTokensDialog(strip);
+
+    const name = document.body.querySelector('[data-token-table="member"] tbody tr .token-name')!;
+    expect(name.textContent).toContain(long);
+    expect(name.textContent).toContain('claude-headless');
+    expect(name.classList.contains('ellipsis')).toBe(false);
+    expect(name.querySelector('.ellipsis')).toBeNull();
   });
 
   /** The retained feed is twenty messages a card still holds; summing it would count DOWN as the

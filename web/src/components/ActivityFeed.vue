@@ -16,7 +16,7 @@ import CursorSentinel from './CursorSentinel.vue';
 const props = defineProps<{ feed: Message[]; team?: string; name?: string; sinceSeq?: number }>();
 
 /**
- * THE MESSAGE THE DIALOG SHOWS, by seq - a click (or a tap) on a row opens it, and Previous / Next
+ * THE MESSAGE THE DIALOG SHOWS, by seq - a click (or a tap) on a row opens it, and Newer / Older
  * step through this card's rows in the order the card lists them, newest first.
  *
  * Held by seq rather than by index because the live feed grows at the top while the dialog is
@@ -249,9 +249,9 @@ function tone(type: string): string {
           dense
           no-caps
           icon="chevron_left"
-          label="Previous"
+          label="Newer"
           :disable="newer === null"
-          aria-label="Previous: the newer message above"
+          aria-label="Newer: the message above"
           data-feed-previous
           @click="show(newer)"
         />
@@ -263,9 +263,9 @@ function tone(type: string): string {
           dense
           no-caps
           icon-right="chevron_right"
-          label="Next"
+          label="Older"
           :disable="older === null"
-          aria-label="Next: the older message below"
+          aria-label="Older: the message below"
           data-feed-next
           @click="show(older)"
         />
@@ -327,7 +327,7 @@ function tone(type: string): string {
 .feed-card {
   border-left: 3px solid var(--os-rule-strong);
 
-  /* ONE HEIGHT FOR EVERY MESSAGE, so Previous and Next stay under the pointer. The dialog is
+  /* ONE HEIGHT FOR EVERY MESSAGE, so Newer and Older stay under the pointer. The dialog is
      centred, and a card that took each message's own height moved its header - and the buttons in
      it - up and down the screen at every step. The body takes what is left and scrolls. */
   height: min(78vh, 680px);
@@ -335,7 +335,7 @@ function tone(type: string): string {
   flex-direction: column;
 }
 
-/* Previous and Next sit together at the top, where a thumb or a pointer finds them without moving
+/* Newer and Older sit together at the top, where a thumb or a pointer finds them without moving
    as the body below changes length from one message to the next. */
 .feed-card-nav {
   display: flex;

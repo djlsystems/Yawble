@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
 // A MEMBER CARD'S ROW, READ IN FULL. A click (or a tap) on a row opens a dialog with the whole
-// message; Previous and Next step through the card's rows in the order the card lists them (newest
+// message; Newer and Older step through the card's rows in the order the card lists them (newest
 // first) without closing it; hovering opens nothing. The workflow button and the install link keep
 // their own clicks.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -75,10 +75,14 @@ describe('a member card row opens its message in a dialog', () => {
     expect(position()).toBe('2 of 3');
   });
 
-  it('steps to the newer row with Previous and the older row with Next, and stops at each end', async () => {
+  it('steps to the newer row with Newer and the older row with Older, and stops at each end', async () => {
     mountFeed(feed);
     await rows()[1]!.trigger('click');
     await settle();
+
+    // Named for where they go, not for a direction the reader has to translate.
+    expect(previous().textContent).toContain('Newer');
+    expect(next().textContent).toContain('Older');
 
     previous().click();
     await settle();
