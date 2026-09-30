@@ -38,6 +38,12 @@ public static class TenantActions
     public const string TeamRelabelled = "team.renamed";
     public const string TeamDeleted = "team.deleted";
 
+    /// <summary>A person asked for a team to be deleted. Written BEFORE anything is removed, naming
+    /// its containers and root, and not swallowed: when it cannot be written the delete answers 500
+    /// and nothing is removed. What was removed and what remains is on the <see cref="TeamDeleted"/>
+    /// row after it.</summary>
+    public const string TeamDeleting = "team.deleting";
+
     /// <summary>Unfinished removals were retried - at the Host's start (no actor) or by a person.
     /// Detail names every folder retried, whether it finished, and each path still remaining.</summary>
     public const string RemovalRetried = "removal.retried";
