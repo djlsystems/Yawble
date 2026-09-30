@@ -20,6 +20,17 @@ export interface PluginSettingsShape {
   secrets: Record<string, PluginSecretField>;
   /** Its connection slots. Absent or `{}` for a plugin that declares none. */
   connections?: Record<string, ConnectionSlot>;
+  /**
+   * What the settings read found stored, for the member being edited (absent on a hire): the values
+   * as loaded, and the Host's `outOfRange` sentences for the stored numbers outside their bounds.
+   */
+  stored?: StoredSettings;
+}
+
+/** A member's settings as read: the form values as loaded, and the Host's out-of-range sentences. */
+export interface StoredSettings {
+  config: PluginFieldValues;
+  outOfRange: Record<string, string>;
 }
 
 /** Whether the plugin declares any connection slot, so the body carries `connections` at all. */
@@ -154,8 +165,8 @@ export function missingRequired(
 
 /**
  * Each number field whose value is outside its manifest bounds (or not whole when it must be), with
- * the sentence saying so - held before sending the way a missing required field is. A value STORED
- * out of range (bounds added after it was saved) shows here too, as it is: the form never changes it
+ * the sentence saying so. A value STORED out of range (bounds added after it was saved) shows here
+ * too, as it is, with the Host's own sentence when the read carried one: the form never changes it
  * for the person.
  */
 export function outOfRange(shape: PluginSettingsShape, config: PluginFieldValues): Record<string, string> {
@@ -164,11 +175,32 @@ export function outOfRange(shape: PluginSettingsShape, config: PluginFieldValues
   for (const [name, field] of Object.entries(shape.config)) {
     if (field.type !== 'number') continue;
 
-    const problem = boundsProblem(name, field, config[name]);
-    if (problem !== null) problems[name] = problem;
+    const kept = keptStored(shape, config, name);
+    const problem = (kept ? shape.stored?.outOfRange[name] : undefined) ?? boundsProblem(name, field, config[name]);
+    if (problem) problems[name] = problem;
   }
 
   return problems;
+}
+
+/**
+ * The out-of-range fields that HOLD a save - as a missing required field does. A stored value sent
+ * back unchanged is not one: the Host keeps it and accepts the rest of the form, so it is shown as
+ * out of range but never blocks. Any other out-of-range value is refused, as the Host refuses it.
+ */
+export function refusedOutOfRange(shape: PluginSettingsShape, config: PluginFieldValues): string[] {
+  return Object.keys(outOfRange(shape, config)).filter((name) => !keptStored(shape, config, name));
+}
+
+/** Whether `name` still holds the value it was read with (the same number, however it is typed). */
+function keptStored(shape: PluginSettingsShape, config: PluginFieldValues, name: string): boolean {
+  const stored = shape.stored?.config[name];
+  const current = config[name];
+  if (stored === undefined || current === undefined) return false;
+  if (stored === current) return true;
+
+  const [a, b] = [stored, current].map((value) => (typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN));
+  return Number.isFinite(a) && a === b;
 }
 
 /** A number field's bounds in words for its hint, or null for any other field or one without bounds. */

@@ -2489,6 +2489,11 @@ export interface PluginMemberSettings {
   connections?: Record<string, string>
   /** The manifest's connection slots, as `GET /api/plugins` lists them. */
   connectionFields?: Record<string, ConnectionSlot>
+  /**
+   * Each STORED number outside its manifest bounds (bounds added after it was saved), with the
+   * Host's sentence. Always present on the read and the PUT answer; `{}` when none is.
+   */
+  outOfRange?: Record<string, string>
 }
 
 /** A plugin member's settings on hire: config values, and each secret bound to a LOGICAL KEY. */

@@ -140,16 +140,62 @@ describe('Member settings - a bounded number field', () => {
     wrapper.unmount();
   });
 
-  it('shows a value already stored out of range as out of range, unchanged', async () => {
+  it('shows a value already stored out of range as out of range, unchanged, with no Host sentence to hand', async () => {
     getPluginSettings.mockResolvedValue(stored({ salaryMax: -2 }));
     const wrapper = await mountSettings();
 
-    // As stored - never rewritten for the person - and said to be out of range.
+    // As stored - never rewritten for the person - and said to be out of range, in the form's own words.
     expect(field('salaryMax').value).toBe('-2');
     expect(hasError('salaryMax')).toBe(true);
     expect(setting('salaryMax').textContent).toContain('-2 is out of range for salaryMax: it must be at least 0.');
-    expect(isDisabled('Save')).toBe(true);
     expect(savePluginSettings).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+
+  it("shows the Host's outOfRange sentence for a stored value, and still saves a change to another field", async () => {
+    const hostSentence = '`salaryMax` must be at least 0; -2 is below it.';
+    getPluginSettings.mockResolvedValue({ ...stored({ salaryMax: -2 }), outOfRange: { salaryMax: hostSentence } });
+    savePluginSettings.mockResolvedValue({ ...stored({ salaryMax: -2, note: 'remote only' }), outOfRange: { salaryMax: hostSentence } });
+    const wrapper = await mountSettings();
+
+    // The Host's sentence, not the form's own; the value as stored.
+    expect(field('salaryMax').value).toBe('-2');
+    expect(hasError('salaryMax')).toBe(true);
+    expect(setting('salaryMax').textContent).toContain(hostSentence);
+    expect(setting('salaryMax').textContent).not.toContain('is out of range for salaryMax');
+
+    // The stored value, sent back unchanged, is kept by the Host: it does not hold the rest of the form.
+    expect(isDisabled('Save')).toBe(false);
+    await type('note', 'remote only');
+    expect(isDisabled('Save')).toBe(false);
+
+    button('Save').click();
+    await settle();
+    expect(savePluginSettings).toHaveBeenCalledTimes(1);
+    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { salaryMax: -2, note: 'remote only' }, secrets: {} });
+
+    wrapper.unmount();
+  });
+
+  it('refuses inline once a stored out-of-range value is changed to another out-of-range value', async () => {
+    const hostSentence = '`salaryMax` must be at least 0; -2 is below it.';
+    getPluginSettings.mockResolvedValue({ ...stored({ salaryMax: -2 }), outOfRange: { salaryMax: hostSentence } });
+    const wrapper = await mountSettings();
+
+    await type('salaryMax', '-5');
+    expect(hasError('salaryMax')).toBe(true);
+    expect(setting('salaryMax').textContent).toContain('-5 is out of range for salaryMax: it must be at least 0.');
+    expect(isDisabled('Save')).toBe(true);
+
+    button('Save').click();
+    await settle();
+    expect(savePluginSettings).not.toHaveBeenCalled();
+
+    // Put back as stored: shown as out of range again, and no longer holding Save.
+    await type('salaryMax', '-2');
+    expect(setting('salaryMax').textContent).toContain(hostSentence);
+    expect(isDisabled('Save')).toBe(false);
 
     wrapper.unmount();
   });

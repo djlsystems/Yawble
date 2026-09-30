@@ -1322,14 +1322,18 @@ export const getPluginSettings = (team: string, member: string) =>
 
 /**
  * Replaces a plugin member's settings. Validated by the Host exactly as a hire is, refused naming
- * the field; takes effect on the member's next run. A person's: a Manager is refused.
+ * the field; takes effect on the member's next run. A person's: a Manager is refused. Answers the
+ * settings as now stored (with `outOfRange`), or undefined when the answer carries no body.
  */
 export const savePluginSettings = (team: string, member: string, settings: PluginHire) =>
   send(pluginSettingsPath(team, member), {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(settings),
-  }).then(() => undefined)
+  }).then(async (response) => {
+    const text = await response.text()
+    return text.trim() === '' ? undefined : (JSON.parse(text) as PluginMemberSettings)
+  })
 
 // --- Connections: OAuth accounts the Host holds for plugins. Every route is a person's. ----------
 

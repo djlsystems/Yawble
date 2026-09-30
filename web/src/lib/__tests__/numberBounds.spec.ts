@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { boundsHint, boundsProblem } from '../numberBounds';
+import { outOfRange, refusedOutOfRange, type PluginSettingsShape } from '../pluginSettings';
+import type { PluginConfigField } from '../../api/types';
 
 describe('boundsHint', () => {
   it('says each shape of bound, and nothing for none', () => {
@@ -34,5 +36,30 @@ describe('the wheel guard', () => {
   it('is installed once, at boot, for every number box - no form opts in', () => {
     const config = readFileSync(resolve(__dirname, '../../../quasar.config.ts'), 'utf8');
     expect(config).toMatch(/boot:\s*\[[^\]]*'numberWheel'/);
+  });
+});
+
+describe('a stored out-of-range value (outOfRange / refusedOutOfRange)', () => {
+  const field = { type: 'number', description: null, default: null, required: false, min: 0 } as unknown as PluginConfigField;
+  const hostSentence = '`salaryMax` must be at least 0; -2 is below it.';
+  const shape: PluginSettingsShape = {
+    config: { salaryMax: field },
+    secrets: {},
+    stored: { config: { salaryMax: '-2' }, outOfRange: { salaryMax: hostSentence } },
+  };
+
+  it("shows the Host's sentence while the value is as stored, and does not hold the save", () => {
+    expect(outOfRange(shape, { salaryMax: '-2' })).toEqual({ salaryMax: hostSentence });
+    // The same number however it is typed.
+    expect(refusedOutOfRange(shape, { salaryMax: '-2.0' })).toEqual([]);
+  });
+
+  it("refuses any other out-of-range value in the form's own words", () => {
+    expect(outOfRange(shape, { salaryMax: '-5' })).toEqual({ salaryMax: '-5 is out of range for salaryMax: it must be at least 0.' });
+    expect(refusedOutOfRange(shape, { salaryMax: '-5' })).toEqual(['salaryMax']);
+  });
+
+  it('holds every out-of-range value when nothing was stored (a hire)', () => {
+    expect(refusedOutOfRange({ config: shape.config, secrets: {} }, { salaryMax: '-2' })).toEqual(['salaryMax']);
   });
 });

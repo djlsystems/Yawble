@@ -31,6 +31,7 @@ import {
   initialConfig,
   initialSecrets,
   outOfRange,
+  refusedOutOfRange,
   settingsBody,
   type PluginFieldValues,
   type PluginSettingsShape,
@@ -228,9 +229,10 @@ async function loadSettings(read: SolutionPanel) {
           secrets: stored.secretFields,
           connections: stored.connectionFields ?? {},
         };
+        const config = initialConfig(shape, stored.config);
         next[member] = {
-          shape,
-          config: initialConfig(shape, stored.config),
+          shape: { ...shape, stored: { config, outOfRange: stored.outOfRange ?? {} } },
+          config,
           secrets: initialSecrets(shape, stored.secrets),
           connections: { ...(stored.connections ?? {}) },
           problem: '',
@@ -297,15 +299,18 @@ async function saveSettings(member: string) {
   state.saved = false;
   state.problem = '';
   // Held before sending, as the dialogs hold it: the field shows the sentence, and so does the Save.
-  const bounds = Object.values(outOfRange(state.shape, state.config));
+  // A stored out-of-range value left as it was is not held: the Host keeps it and saves the rest.
+  const shown = outOfRange(state.shape, state.config);
+  const bounds = refusedOutOfRange(state.shape, state.config).map((name) => shown[name]);
   if (bounds.length > 0) {
     state.problem = bounds.join(' ');
     return;
   }
   busy.value = `settings:${member}`;
   try {
-    await savePluginSettings(props.team, member, settingsBody(state.shape, state.config, state.secrets, state.connections));
+    const answer = await savePluginSettings(props.team, member, settingsBody(state.shape, state.config, state.secrets, state.connections));
     state.saved = true;
+    if (answer) state.shape = { ...state.shape, stored: { config: { ...state.config }, outOfRange: answer.outOfRange ?? {} } };
     const read = await solutionPanel(props.team);
     panel.value = { ...read };
   } catch (cause) {
