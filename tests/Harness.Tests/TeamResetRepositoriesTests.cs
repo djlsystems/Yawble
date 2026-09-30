@@ -335,10 +335,14 @@ public sealed class TeamResetRepositoriesTests : IAsyncDisposable
         var services = _factory.Services;
         var registry = services.GetRequiredService<TeamRegistry>();
         var agent = services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;
-        var team = (await registry.CreateAsync(name, agent, memberAgent: agent, ct: Ct)).Id;
+        // THE REPOSITORY IS NAMED AT CREATION, not attached afterwards. Attaching one to an existing
+        // team tells its Manager the clone is ready - an instruction this test never meant to send.
+        // Queued in the instant before the pause below, the pause held it, and the wait for quiet
+        // timed out behind it. At creation a clone that succeeds sends nothing.
+        var team = (await registry.CreateAsync(
+            name, agent, memberAgent: agent, repos: [$"https://github.com/example/{Repo}.git"], ct: Ct)).Id;
         await registry.AddContainerAsync(team, "Dev", agent, "", [], ct: Ct);
         await registry.AddContainerAsync(team, "Writer", agent, "", [], ct: Ct);
-        await registry.SetReposAsync(team, [$"https://github.com/example/{Repo}.git"], Ct);
 
         var clone = ClonePath(team);
         Assert.True(Directory.Exists(Path.Combine(clone, ".git")), "the platform did not clone");
@@ -347,33 +351,60 @@ public sealed class TeamResetRepositoriesTests : IAsyncDisposable
         Assert.Equal("trunk", registry.DefaultBranchFor(team, Repo).Branch);
 
         // QUIET BEFORE ANY LOCAL-ONLY STATE IS MADE. A run ending publishes every branch that is on no
-        // remote, so a Manager run woken by the repository being attached would push the very commit a
-        // test needs to be on no remote. Paused, nothing new starts; idle twice in a row, nothing is
-        // in flight.
+        // remote, so any Manager run would push the very commit a test needs to be on no remote.
+        // Nobody was told anything; paused, nothing new starts; idle twice in a row, nothing is in
+        // flight.
         var person = await PersonAsync();
         (await person.PostAsync($"/api/teams/{team}/pause", null, Ct)).EnsureSuccessStatusCode();
 
-        var host = services.GetRequiredService<ContainerHost>();
-        var pending = services.GetRequiredService<IPendingDeliveries>();
+        var told = await services.GetRequiredService<IMessageLog>().ReadAfterAsync(
+            0, [.. registry.ContainerIdsOf(team).Select(MessageTypes.InstructionFor)], 50, Ct);
+        Assert.True(told.Count == 0,
+            $"the test's team was sent an instruction it did not ask for: {string.Join("; ", told.Select(m => $"#{m.Seq} {m.Type} from {m.Source}"))}");
+
         var quiet = 0;
         var deadline = DateTime.UtcNow.AddSeconds(30);
+        IReadOnlyList<string> busy = [];
 
         while (quiet < 2 && DateTime.UtcNow < deadline)
         {
-            var busy = false;
-            foreach (var id in registry.ContainerIdsOf(team))
-            {
-                var member = host.Find(id);
-                busy |= member is { State: ContainerState.Running } or { QueueDepth: > 0 }
-                    || (await pending.ForAsync(id, Ct)).Count > 0;
-            }
-
-            quiet = busy ? 0 : quiet + 1;
+            busy = await BusyMembersAsync(team);
+            quiet = busy.Count > 0 ? 0 : quiet + 1;
             await Task.Delay(200, Ct);
         }
 
-        Assert.True(quiet >= 2, "the team never went quiet");
+        Assert.True(quiet >= 2, $"the team never went quiet:\n{string.Join("\n", busy)}");
         return team;
+    }
+
+    /// <summary>Every member of the team still doing something, each with why: its state, queue
+    /// depth, and every pending delivery's seq, type and source.</summary>
+    private async Task<IReadOnlyList<string>> BusyMembersAsync(string team)
+    {
+        var services = _factory.Services;
+        var host = services.GetRequiredService<ContainerHost>();
+        var pending = services.GetRequiredService<IPendingDeliveries>();
+        var log = services.GetRequiredService<IMessageLog>();
+        var busy = new List<string>();
+
+        foreach (var id in services.GetRequiredService<TeamRegistry>().ContainerIdsOf(team))
+        {
+            var member = host.Find(id);
+            var deliveries = await pending.ForAsync(id, Ct);
+            if (member is not ({ State: ContainerState.Running } or { QueueDepth: > 0 }) && deliveries.Count == 0) continue;
+
+            var described = new List<string>();
+            foreach (var delivery in deliveries)
+            {
+                var row = await log.FindAsync(delivery.Seq, Ct);
+                described.Add($"#{delivery.Seq} {row?.Type ?? "(no row)"} from {row?.Source ?? "?"}{(delivery.Started ? " started" : "")}");
+            }
+
+            busy.Add($"{id}: state {member?.State.ToString() ?? "(not hosted)"}, queue depth {member?.QueueDepth ?? 0}, "
+                + $"team paused {host.IsPaused(team)}, pending [{string.Join("; ", described)}]");
+        }
+
+        return busy;
     }
 
     private string ClonePath(string team) =>
@@ -401,7 +432,7 @@ public sealed class TeamResetRepositoriesTests : IAsyncDisposable
                 $"/api/teams/{team}/reset",
                 new { members, forgetHistory = false, resetRepositories = true }, Ct);
 
-            // A Manager woken by the repository being attached may still be finishing.
+            // A member still finishing refuses the reset; wait it out.
             if (response.StatusCode != HttpStatusCode.Conflict || DateTime.UtcNow > deadline) return response;
             var text = await response.Content.ReadAsStringAsync(Ct);
             if (!text.Contains("still working", StringComparison.Ordinal)) return response;
