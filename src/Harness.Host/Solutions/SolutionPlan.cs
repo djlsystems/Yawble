@@ -26,6 +26,9 @@ public sealed record SolutionPlan(
     /// has each set is the Host's, not the package's: the preview and the result add it.</summary>
     public IReadOnlyList<SolutionPlanSecret> Secrets { get; init; } = [];
 
+    /// <summary>What the solution's control panel and launcher tile take from the package.</summary>
+    public SolutionPanel Panel { get; init; } = SolutionPanel.None;
+
     /// <summary>Where an install copies <c>tools/</c>, as <c>{solution}</c> names it: under the
     /// team's folder, <c>&lt;teams root&gt;/&lt;team&gt;/solution</c>.</summary>
     public const string InstalledToolsFolder = "solution";
@@ -74,6 +77,7 @@ public sealed record SolutionPlan(
                     m.Name, binding.Key, binding.Value, declared?.Description ?? "", declared?.Required ?? false,
                     declared?.When is { } when ? new SolutionPlanSecretWhen(when.Setting, when.Value) : null);
             }))],
+            Panel = manifest.Panel,
         };
     }
 }

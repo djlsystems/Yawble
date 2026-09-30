@@ -811,6 +811,195 @@ public sealed class SolutionInstaller(
         }
     }
 
+    /// <summary>
+    /// UNINSTALLS the solution <paramref name="team"/> was installed from: removes the triggers, the
+    /// members (the team's Manager stays - every team has one - with the package's instructions
+    /// cleared), the team skills, the sites with their data and the tools folder the package made,
+    /// and forgets the <c>team_solutions</c> row with its <c>solution.uninstalled</c> row. The team
+    /// and its DOCUMENTS stay: they are the person's. With <paramref name="removePlugins"/>, each of
+    /// the package's plugins is removed too, but only when no other team has a member on it.
+    ///
+    /// Asking first is the caller's: this acts when called. Each removal goes through the store a
+    /// person's own click uses, with its own tenant row; one that fails is named in <c>failures</c>
+    /// and the rest go on, so a half-removed solution is never left looking installed.
+    /// </summary>
+    public async Task<SolutionOutcome> UninstallAsync(
+        string team, bool removePlugins, SolutionActor actor, PluginRemover? remover, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+
+        try
+        {
+            return await UninstallLockedAsync(team, removePlugins, actor, remover, ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<SolutionOutcome> UninstallLockedAsync(
+        string team, bool removePlugins, SolutionActor actor, PluginRemover? remover, CancellationToken ct)
+    {
+        if (teams.ExistingName(team) is not { } stored || await store.FindAsync(stored, ct) is not { } row)
+        {
+            return new(404, new { error = $"'{team}' was not installed from a solution package." });
+        }
+
+        var manifest = SolutionManifest.Parse(row.Manifest).Manifest;
+        var failures = new List<string>();
+        var removedTriggers = new List<string>();
+        var removedMembers = new List<string>();
+        var removedSkills = new List<string>();
+        var removedSites = new List<string>();
+
+        async Task Try(string what, Func<Task> removal)
+        {
+            try
+            {
+                await removal();
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                failures.Add($"{what}: {exception.Message}");
+            }
+        }
+
+        // 1. TRIGGERS FIRST, so nothing fires onto a member about to go.
+        foreach (var (name, id) in row.Triggers.OrderBy(t => t.Key, StringComparer.Ordinal))
+        {
+            await Try($"trigger {name}", async () =>
+            {
+                if (await triggers.DeleteAsync(id, actor.Row(TenantActions.ScheduleDeleted, id, name, new { team = stored, solution = row.PackageId, uninstalled = true }), ct))
+                {
+                    removedTriggers.Add(name);
+                }
+            });
+        }
+
+        // 2. MEMBERS. The Manager stays, as every team has one; the package's instructions for it go.
+        foreach (var (name, id) in row.Members.OrderBy(m => m.Key, StringComparer.Ordinal))
+        {
+            if (string.Equals(id, TeamRegistry.DefaultManagerName, StringComparison.OrdinalIgnoreCase))
+            {
+                await Try($"member {name}", async () =>
+                {
+                    if (!MemberExists(stored, id)) return;
+                    var manager = await teams.MemberAsync(stored, id, ct);
+                    await teams.UpdateMemberAsync(
+                        stored, id, manager.Label, "", manager.Agent, actor.PromptSetter, ct,
+                        change => [actor.Row(TenantActions.MemberInstructionsChanged, $"{stored}/{id}", name, new { solution = row.PackageId, uninstalled = true })]);
+                });
+                continue;
+            }
+
+            await Try($"member {name}", async () =>
+            {
+                if (!MemberExists(stored, id)) return;
+                if (await memberDeletion.DeleteAsync(stored, id, ct) is null) return;
+                await audit.WriteAsAsync(actor.UserId, actor.Email, TenantActions.MemberDeleted, $"{stored}/{id}", name, new { solution = row.PackageId, uninstalled = true }, ct);
+                removedMembers.Add(id);
+            });
+        }
+
+        // 3. TEAM SKILLS the package registered.
+        foreach (var name in manifest?.Skills ?? [])
+        {
+            await Try($"skill {name}", async () =>
+            {
+                if (await teamSkills.DeleteAsync(stored, name,
+                        actor.Row(TenantActions.SkillDeleted, stored, name, new { team = stored, name, solution = row.PackageId, uninstalled = true }), ct))
+                {
+                    removedSkills.Add(name);
+                }
+            });
+        }
+
+        // 4. SITES, with their data: the solution's app goes with it. Documents are not site data.
+        foreach (var name in manifest?.Sites ?? [])
+        {
+            await Try($"site {name}", async () =>
+            {
+                if ((await sites.DeleteAsync(stored, name, confirmed: true, actor.Site, ct)).Ok) removedSites.Add(name);
+            });
+        }
+
+        // 5. THE TOOLS FOLDER, the Host's own copy under the team's folder.
+        var tools = ToolsFolderOf(paths, stored);
+        var hadTools = Directory.Exists(tools);
+        await Try("tools", () =>
+        {
+            RemoveFolder(tools);
+            return Task.CompletedTask;
+        });
+
+        // 6. THE PLUGINS, only when asked and only when no other team hires them. After the members,
+        // so this team's own members no longer count as a use.
+        var pluginsRemoved = new List<string>();
+        var pluginsKept = new List<object>();
+
+        foreach (var id in row.Plugins.Keys.Order(StringComparer.Ordinal))
+        {
+            var usedBy = remover?.HiredOn(id).Select(m => m.Team).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+
+            if (!removePlugins || remover is null || usedBy.Count > 0)
+            {
+                pluginsKept.Add(new { id, usedBy });
+                continue;
+            }
+
+            await Try($"plugin {id}", async () =>
+            {
+                var removed = await remover.RemoveAsync(id, null,
+                    actor.Row(TenantActions.PluginRemoved, id, id, new { solution = row.PackageId, team = stored, uninstalled = true }), ct);
+
+                if (removed.Status is >= 200 and < 300) pluginsRemoved.Add(id);
+                else
+                {
+                    failures.Add($"plugin {id}: {removed.Reason}");
+                    pluginsKept.Add(new { id, usedBy });
+                }
+            });
+        }
+
+        // 7. THE RECORD, with the row that says what went. Last, so the team shows as a solution
+        // until everything that can be removed has been.
+        var documentsFolder = documents.RootFor(stored);
+        var documentsKept = Directory.Exists(documentsFolder) ? documentsFolder : null;
+
+        var removedSummary = new
+        {
+            triggers = removedTriggers,
+            members = removedMembers,
+            skills = removedSkills,
+            sites = removedSites,
+            tools = hadTools && !Directory.Exists(tools),
+        };
+
+        await store.DeleteAsync(stored, actor.Row(TenantActions.SolutionUninstalled, stored, teams.LabelFor(stored), new
+        {
+            id = row.PackageId,
+            version = row.Version,
+            removed = removedSummary,
+            plugins = new { removed = pluginsRemoved, kept = pluginsKept },
+            documentsKept,
+            failures,
+        }), ct);
+
+        return new(200, new
+        {
+            ok = failures.Count == 0,
+            team = stored,
+            teamName = teams.LabelFor(stored),
+            id = row.PackageId,
+            version = row.Version,
+            removed = removedSummary,
+            plugins = new { removed = pluginsRemoved, kept = pluginsKept },
+            documentsKept,
+            failures,
+        });
+    }
+
     private async Task<SolutionOutcome> UpdateLockedAsync(
         SolutionUpdateRequest request, SolutionActor actor, Func<string, Task>? afterStep, CancellationToken ct)
     {

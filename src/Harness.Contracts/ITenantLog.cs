@@ -299,6 +299,13 @@ public static class TenantActions
     /// the step, the reason and what was undone.</summary>
     public const string SolutionFailed = "solution.failed";
 
+    /// <summary>A person uninstalled the solution a team was installed from. Subject is the team;
+    /// detail names the package id and version, the triggers, members, skills and sites removed,
+    /// whether the tools folder went, the plugins removed and kept (with the teams still using
+    /// them), the documents folder kept, and anything that could not be removed. Written with the
+    /// deletion of the team's <c>team_solutions</c> row.</summary>
+    public const string SolutionUninstalled = "solution.uninstalled";
+
     // ONLY ACTIONS SOMETHING WRITES ARE LISTED HERE. A tenant-log action nobody writes is a row type
     // that can never appear. Rows carrying a verb not listed here still read: this table is
     // append-only and the verbs in it can outlive the code that wrote them, which is exactly why
