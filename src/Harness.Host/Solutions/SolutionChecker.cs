@@ -119,6 +119,9 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
     public const string ToolsFolderName = "tools";
     public const string ReadmeFile = "README.md";
 
+    /// <summary>The field a link leaving the package is refused on.</summary>
+    public const string LinkField = "(link)";
+
     public SolutionCheck Check(string folder)
     {
         var refusals = new List<SolutionRefusal>();
@@ -138,9 +141,11 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
             return new SolutionCheck(root, null, null, refusals);
         }
 
-        // EVERY LINK FIRST: a link leaving the package would let every later read see a file the
-        // package does not hold.
+        // EVERY LINK FIRST, AND ALONE: a link leaving the package would let every later read see a
+        // file the package does not hold, and a refusal could echo what it holds. Nothing is read.
         refusals.AddRange(LinksLeaving(root));
+
+        if (refusals.Count > 0) return new SolutionCheck(root, null, null, refusals);
 
         string json;
 
@@ -430,6 +435,16 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
                 }
             }
 
+            foreach (var name in member.Secrets.Keys)
+            {
+                if (!plugin.Manifest.Secrets.ContainsKey(name))
+                {
+                    var field = $"{at}.secrets.{name}";
+                    var known = plugin.Manifest.Secrets.Count == 0 ? "it declares none" : "it declares " + string.Join(", ", plugin.Manifest.Secrets.Keys);
+                    refusals.Add(new(SolutionManifest.FileName, field, $"`{field}`: plugin {plugin.Id} declares no secret '{name}' in its manifest; {known}."));
+                }
+            }
+
             foreach (var (name, config) in plugin.Manifest.Config)
             {
                 // AN ABSENCE IS JUDGED ON A WHOLE FILE ONLY: an input refused above may be the one
@@ -460,6 +475,16 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
             if (!hasTools && trigger.Instruction.Contains(SolutionManifest.SolutionToken, StringComparison.Ordinal))
             {
                 refusals.Add(new(SolutionManifest.FileName, $"{at}.instruction", $"`{at}.instruction` uses {SolutionManifest.SolutionToken}, but the package has no {ToolsFolderName}/ folder for it to name."));
+            }
+
+            // A FIRST RUN AT INSTALL is a schedule's: an event or folder trigger has no fire of its own
+            // to make until its event or file arrives.
+            if (trigger.RunAtInstall && trigger.Kind != SolutionManifest.KindSchedule)
+            {
+                refusals.Add(new(SolutionManifest.FileName, $"{at}.runAtInstall",
+                    trigger.Kind == SolutionManifest.KindFolder
+                        ? $"`{at}.runAtInstall` belongs to a schedule trigger; a folder trigger fires when its folder changes, not at install."
+                        : $"`{at}.runAtInstall` belongs to a schedule trigger; an event trigger fires when its event arrives, not at install."));
             }
 
             if (trigger.Event is not { } onEvent) continue;
@@ -567,14 +592,14 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
                 {
                     if (Path.IsPathRooted(link))
                     {
-                        yield return new(relative, "(link)", $"{relative} is a link to an absolute path ({link}); a package's links must be relative and stay inside it.");
+                        yield return new(relative, LinkField, $"{relative} is a link to an absolute path ({link}); a package's links must be relative and stay inside it.");
                         continue;
                     }
 
                     var resolved = PluginCatalog.Resolved(entry);
                     if (resolved != resolvedRoot && !resolved.StartsWith(resolvedRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                     {
-                        yield return new(relative, "(link)", $"{relative} is a link leading outside the package ({link}).");
+                        yield return new(relative, LinkField, $"{relative} is a link leading outside the package ({link}).");
                     }
 
                     continue;

@@ -316,7 +316,7 @@ Content-Type: application/json
 | `executable.path`, `executable.args` | required / optional | A relative path inside the version directory. `args` is a fixed argv with no substitution. |
 | `timeoutSeconds` | optional | An **idle** clock: this long with no `progress` record ends the run. Default 300. |
 | `config` | optional | Name → `{type: string, number, bool or list; enum; default; required; setBy; description}`. Flat in v1. A `list` is a list of strings, default `[]`. See [List settings](#list-settings). |
-| `secrets` | optional | Name → `{description, required}`. A `value` key is refused. |
+| `secrets` | optional | Name → `{description, required, when?}`. A `value` key is refused. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. |
 | `connections` | optional | Slot name → `{description, providers, scopes, required}`: an OAuth account the plugin acts on, which the Host holds and refreshes. See [Connections](#connections-oauth-accounts). |
 | `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `inLedger` is not read in v1: a plugin event always reaches the ledger. See [Events](#events). |
 | `skills` | optional | Files inside the plugin, in the same front-matter format as a skill. Indexed at load and on every rescan. See [Skills](#skills). |

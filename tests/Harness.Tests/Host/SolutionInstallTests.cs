@@ -187,6 +187,7 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         var name = Unique("Rollback");
         var derived = ContainerId.DeriveName(name)!;
         var pluginsRoot = Get<PluginCatalog>().Root;
+        var before = await Get<IMessageLog>().HighestSeqAsync(Ct);
 
         var outcome = await Get<SolutionInstaller>().InstallAsync(
             new SolutionInstallRequest(folder, name), Person, Ct,
@@ -212,6 +213,12 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         Assert.False(Directory.Exists(Path.Combine(host.DataRoot, "teams", derived)));
         Assert.False(Directory.Exists(Path.Combine(host.DataRoot, "documents", derived)));
         Assert.False(Get<LocalRepos>().Exists(derived));
+
+        // NO FIRST RUN: the sample's runAtInstall schedule fires only after the last step succeeds.
+        Assert.DoesNotContain(
+            await Get<IMessageLog>().ReadAfterAsync(
+                before, [MessageTypes.InstructionFor(new ContainerId(derived, "Scout")), MessageTypes.ScheduleSkipped], int.MaxValue, Ct),
+            m => m.Source.StartsWith("schedule:", StringComparison.Ordinal));
 
         // And the failure is on the tenant log, naming the step.
         var logged = (await Get<ITenantLog>().FindLatestAsync(TenantActions.SolutionFailed, name, Ct))!;

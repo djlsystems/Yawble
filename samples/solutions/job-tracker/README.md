@@ -17,6 +17,27 @@ and the package the solution tests install.
 - **Resume** (required): your reference resume, `.docx` or PDF, uploaded to the team's `Resume` folder.
 - **The Scout's sources** (optional): which boards it may read. Until you tick `sample`, it reads none.
 
+## The page fills right after install
+
+"Scan for postings" sets `runAtInstall`, so the install runs it once as soon as its last step
+succeeds, and then every hour as usual. With a source ticked, the tracker page fills right after
+install instead of an hour later; the install's result says "Scan for postings ran now".
+
+## Secrets
+
+The install binds the Scout's five secrets by key name; you do not bind them by hand. Each is
+needed only when you tick its source, and the install shows which the Host already has set.
+
+| Key | For |
+|---|---|
+| `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` | `adzuna` |
+| `USAJOBS_API_KEY`, `USAJOBS_USER_AGENT` | `usajobs` |
+| `THEMUSE_API_KEY` | `themuse` |
+
+To set one, the operator runs `yawble secret set ADZUNA_APP_ID` (it prompts for the value) and then
+`yawble up` to restart the Host. A key left unset is not an error: that source fails until it is
+set. This sample's board is a stand-in and calls none of them; it says which ticked board has no keys.
+
 ## Check it
 
 ```

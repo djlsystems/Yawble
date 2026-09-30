@@ -593,7 +593,9 @@ builder.Services.AddSingleton(sp =>
                 var viewers = (await listPush.EntitledViewerIdsAsync(team)).ToArray();
                 return () => listPush.AnnounceDeletedAsync(team, viewers);
             }),
-        runAs.Switches ? runAs.Gid : -1);
+        runAs.Switches ? runAs.Gid : -1,
+        sp.GetRequiredService<ISecretStore>(),
+        sp.GetRequiredService<TriggerSweep>());
 });
 
 // The board's notice for a package a workflow wrote, checked through that one door when the

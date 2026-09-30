@@ -92,7 +92,7 @@ func TestSolutionCheckCopiesThePackageInAsksTheHostPrintsThePlanAndCleansUp(t *t
 				"  Scout: plugin job-board 0.1.0",
 				`    setting keywords = ["engineer","developer"]`,
 				"  job-board 0.1.0 (Job Board (sample)), publishes plugin.job-board.posting-found",
-				"  Scan for postings: every 3600 seconds, wakes Scout; wakes the Manager: never; no daily cap",
+				"  Scan for postings: runs once now, then every 3600 seconds, wakes Scout; wakes the Manager: never; no daily cap",
 				"  Apply pressed: on site.action where siteAction eq tracker/apply, wakes Writer; wakes the Manager: onHandbackOrFailure; daily cap 400,000 tokens",
 				"  Resume changed: when files change in documents/Resume matching *, wakes Writer; wakes the Manager: onHandbackOrFailure; daily cap 300,000 tokens",
 				"  Morning summary: cron 0 0 8 * * 1-5 (Europe/London), wakes Coordinator; wakes the Manager: never; daily cap 100,000 tokens",

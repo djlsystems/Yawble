@@ -2615,16 +2615,19 @@ public sealed class TeamRegistry(
     /// </summary>
     /// <param name="promptSetBy">Who is hiring, recorded as having set the member's own
     /// instructions. Null records nobody.</param>
+    /// <param name="secretsSetLater">A solution install: a bound key the Host has not set yet is not
+    /// a refusal (see <see cref="PluginMemberRunner.SettingsRefusal"/>).</param>
     public Task<ContainerSnapshot> HireMemberAsync(
         string team, string label, string agent, string systemPrompt, IReadOnlyCollection<string> subscribes,
         string? hiredFor = null,
         CancellationToken ct = default,
         PluginMemberSettings? settings = null,
         SystemPromptSetter? promptSetBy = null,
-        Func<ContainerId, TriggerAudit>? connectionsAudit = null) =>
+        Func<ContainerId, TriggerAudit>? connectionsAudit = null,
+        bool secretsSetLater = false) =>
         AddContainerAsync(
             team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct, settings: settings,
-            promptSetBy: promptSetBy, connectionsAudit: connectionsAudit);
+            promptSetBy: promptSetBy, connectionsAudit: connectionsAudit, secretsSetLater: secretsSetLater);
 
     /// <summary>
     /// Adds a container called <paramref name="label"/>, deriving its identifier the same way a
@@ -2642,7 +2645,8 @@ public sealed class TeamRegistry(
         CancellationToken ct = default,
         PluginMemberSettings? settings = null,
         SystemPromptSetter? promptSetBy = null,
-        Func<ContainerId, TriggerAudit>? connectionsAudit = null)
+        Func<ContainerId, TriggerAudit>? connectionsAudit = null,
+        bool secretsSetLater = false)
     {
         if (!_teams.TryGetValue(team, out var members)) throw new InvalidOperationException($"No team '{team}'.");
 
@@ -2666,7 +2670,7 @@ public sealed class TeamRegistry(
         }
 
         if (isPlugin && plugins?.For(pluginId!) is { } installed
-            && PluginMemberRunner.SettingsRefusal(installed.Manifest, settings ?? PluginMemberSettings.None, secrets) is { } settingsRefusal)
+            && PluginMemberRunner.SettingsRefusal(installed.Manifest, settings ?? PluginMemberSettings.None, secrets, requireSet: !secretsSetLater) is { } settingsRefusal)
         {
             throw new PluginSettingsException(settingsRefusal);
         }
