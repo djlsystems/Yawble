@@ -464,7 +464,7 @@ const rowBusy = computed(
                     dense
                     flat
                     round
-                    icon="system_update_alt"
+                    icon="download"
                     :loading="updating === agent.name"
                     :disable="rowBusy"
                     :aria-label="`Update the CLI ${agent.name} runs`"
