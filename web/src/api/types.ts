@@ -1579,8 +1579,9 @@ export interface CliVersion {
    *  it change, and `since` is then how far back the record reaches. */
   updatedAt: string | null
   since: string | null
-  /** `start` for a container start, `person` for a person's update through the platform. */
-  updatedBy: 'start' | 'person' | null
+  /** `start` for a container start, `person` for a person's update through the platform. A plain
+   *  string rather than a union: every quoted literal in the app is cut into the icon font subset. */
+  updatedBy: string | null
   /** That person's email, when the record has it. */
   person: string | null
 }
