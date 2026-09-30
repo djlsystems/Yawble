@@ -1,9 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text.Json;
 using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Host.Auth;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Harness.Tests.Host;
@@ -290,6 +294,159 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         var manager = Container(host.Alpha, TeamRegistry.DefaultManagerName).SystemPrompt;
         Assert.Contains($"- `{Name}` - {skill.Description}", manager, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// The running-the-backlog skill is how the Concierge runs a whole backlog: plan, dispatch,
+    /// watch, assess before the next step, act, reorder, tidy up and keep a run log. It is the
+    /// Concierge's alone, and the `concierge` skill points to it.
+    /// </summary>
+    [Fact]
+    public async Task The_backlog_running_skill_is_offered_to_the_concierge_only_carries_every_step_and_is_pointed_to()
+    {
+        const string Name = "running-the-backlog";
+        var skill = BuiltInSkills.Find(Name)!;
+        Assert.Equal([SkillRoles.Concierge], skill.Roles);
+
+        foreach (var line in new[]
+        {
+            // Plan, and its ordering rules.
+            "List every pending and ready item (`backlog  action: list",
+            "read each one (`backlog  action: show",
+            "An item that says it needs another merged first waits for it.",
+            "Items that touch the same area (the same files, schema module, skill or dialog) go to the same team one after another, or wait.",
+            "Independent items run in parallel, each on its own new team.",
+            "Tell the person the plan in one message",
+            "The person's request to run the backlog is the instruction to mark the planned items ready",
+            // Dispatch.
+            "create a team for it with `team_create`, named after the item: its citation and a short slug",
+            "`backlog  action: dispatch  id: <id>  team: <team>`",
+            "Record which team holds which item",
+            // Watch.
+            "Follow each team with `status` and `kanban`",
+            "blocked on a person is raised to the person at once",
+            "A launch-missing failure is re-sent once, then raised to the person.",
+            // Assess before the next step, against the verification document.
+            "Assess before the next step, every time",
+            "Read its verification document in the team's documents folder.",
+            "Check every Done-when line of the item against the verification document.",
+            "Check the repository state with `repo`",
+            "Check the item's landed and stranded state",
+            "as met, not met or unverified",
+            "in the team's own figures, marked as the team's",
+            // Act on it.
+            "tell the person the item is ready to merge",
+            "name the Git dialog as the place to merge",
+            "When the item reads landed, mark it implemented",
+            "tell the same team to fix it, continuing the dispatch workflow",
+            "causation: <the dispatch workflow's latest row>",
+            "write a new backlog item for it with `backlog  action: add`, in the house format (Summary, The change, Constraints, Done when, Delivery)",
+            // Reorder and continue.
+            "After each assessment, re-plan",
+            "Keep going until every item in the plan is implemented or the person stops it.",
+            // Tidy up.
+            "Archive the item: `backlog  action: archive",
+            "Ask the person to delete the finished team; team deletion is the person's action.",
+            "its documents, and a local repository unless the person ticks it",
+            "Say which documents the team left, and ask whether to keep them.",
+            // The run log, and resuming from it.
+            "`backlog-run-<date>.md`",
+            "your own working folder",
+            "It lists the plan, each dispatch (item, team, workflow), each assessment and its outcome, each follow-up item, and what is waiting on the person.",
+            "If you find an unfinished run log, read it before doing anything else, and ask the person whether to continue it.",
+            // Every never.
+            "Never merge or push a default branch.",
+            "Never delete a team.",
+            "Never close a workflow.",
+            "Never mark an item implemented before it has landed.",
+            "Never estimate a figure you were not given.",
+            "Ask the person for each of these, and keep going with everything else meanwhile.",
+        })
+        {
+            Assert.Contains(Flat(line), Flat(skill.Body), StringComparison.Ordinal);
+        }
+
+        // The concierge skill points to it, and its ready rule names the run request.
+        var concierge = BuiltInSkills.Find("concierge")!.Body;
+        Assert.Contains($"`{Name}`", concierge, StringComparison.Ordinal);
+        Assert.Contains(Flat("or asks you to run the backlog: then the items in the plan you stated to them"), Flat(concierge), StringComparison.Ordinal);
+
+        var principals = host.Services.GetRequiredService<IPrincipalStore>();
+        var person = await host.Services.GetRequiredService<IUserStore>().FindAsync("person@example.test", Ct);
+        var conciergeKey = await principals.MintAsync(
+            ConciergeLaunchFactory.PrincipalId(person!.Id), PrincipalKind.TenantConcierge, null,
+            ConciergeLaunchFactory.ConciergePermits, ownerUserId: person.Id, ct: Ct);
+        var managerKey = await principals.MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+
+        using (var caller = host.Container(conciergeKey))
+        {
+            Assert.Equal(HttpStatusCode.OK, (await caller.GetAsync($"/api/me/skills/{Name}", Ct)).StatusCode);
+            var found = await caller.GetFromJsonAsync<JsonElement[]>("/api/me/skills?q=backlog", Ct);
+            Assert.Contains(Name, found!.Select(r => r.GetProperty("name").GetString()));
+        }
+
+        foreach (var (key, role) in new[] { (managerKey, "manager"), (host.AlphaContainerKey, "member") })
+        {
+            using var caller = host.Container(key);
+            var refused = await caller.GetAsync($"/api/me/skills/{Name}", Ct);
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+            Assert.Contains($"not offered to the {role} role", await refused.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+
+            var searched = await caller.GetFromJsonAsync<JsonElement[]>("/api/me/skills?q=backlog", Ct);
+            Assert.DoesNotContain(Name, searched!.Select(r => r.GetProperty("name").GetString()));
+        }
+
+        Assert.DoesNotContain($"- `{Name}` - ", Container(host.Alpha, TeamRegistry.DefaultManagerName).SystemPrompt, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The `backlog` tool says a request to run the backlog marks the items of the stated plan
+    /// ready, and still only on the person's word.
+    /// </summary>
+    [Fact]
+    public void The_backlog_tool_says_a_run_request_marks_the_planned_items_ready()
+    {
+        var description = typeof(PlatformMcpTools).GetMethod(nameof(PlatformMcpTools.Backlog))!
+            .GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()!.Description;
+
+        Assert.Contains("Mark an item ready only when the person tells you to", description, StringComparison.Ordinal);
+        Assert.Contains("or asks you to run the backlog: then the items in the plan you stated to them.", description, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The Concierge runs a backlog, and what it never does in a run stays a person's: merge, team
+    /// deletion and workflow close are `HumansOnly`, so the Concierge's key is refused them however
+    /// the skill is read.
+    /// </summary>
+    [Fact]
+    public void The_concierge_runs_a_backlog_and_leaves_merge_team_deletion_and_workflow_close_to_the_person()
+    {
+        var endpoints = host.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().ToList();
+
+        foreach (var (method, route) in new[]
+        {
+            ("POST", "/api/teams/{team}/repos/{repo}/merge-to-main"),
+            ("POST", "/api/teams/{team}/repos/{repo}/bring-current-and-merge"),
+            ("DELETE", "/api/teams/{team}"),
+            ("POST", "/api/teams/{team}/workflows/{correlation:long}/close"),
+        })
+        {
+            var endpoint = endpoints.Single(e =>
+                string.Equals(e.RoutePattern.RawText, route, StringComparison.Ordinal)
+                && e.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods.Contains(method) == true);
+            Assert.True(endpoint.Metadata.GetMetadata<HumansOnlyMarker>() is not null, $"{method} {route} is not HumansOnly");
+        }
+
+        var body = BuiltInSkills.Find("running-the-backlog")!.Body;
+        Assert.Contains("Merging to the default branch is the person's action; you never merge, push or ask an agent to.", Flat(body), StringComparison.Ordinal);
+        Assert.Contains("Never delete a team.", body, StringComparison.Ordinal);
+        Assert.Contains("Never close a workflow.", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>Whitespace-insensitive text, so a pinned sentence survives re-wrapping.</summary>
+    private static string Flat(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
 
     [Fact]
     public async Task A_custom_member_skill_is_found_by_search_and_listed_in_a_new_members_prompt()

@@ -717,8 +717,10 @@ public static class BuiltInSkills
             Manager said it was delivered - a claim, not a landing; nothing automatic moves it on)
             and `implemented` (a person says the work is in the product). Only a `ready` item can be
             dispatched. Mark an item `ready` only when the person tells you to, for example by
-            naming the items that make up a wave. When you have written or improved an item on your
-            own, say the id back and ask the person whether it is ready; do not decide that yourself.
+            naming the items that make up a wave, or asks you to run the backlog: then the items in
+            the plan you stated to them, and no others. When you have written or improved an item on
+            your own, say the id back and ask the person whether it is ready; do not decide that
+            yourself.
 
             Item ids read `B000H`; pass them as given, or as a bare number. The actions:
 
@@ -762,6 +764,9 @@ public static class BuiltInSkills
             - Asked to finalise, finish, wrap up or clean up: follow "Wrapping up a round" below.
             - Asked to see, try or open something the team built: load the `running-a-tree` skill
               first.
+            - Asked to run the backlog, or a wave of it, to completion: load the
+              `running-the-backlog` skill first. It plans, dispatches, assesses and tidies up, and
+              leaves merging, team deletion and closing a workflow to the person.
             - Planning work that includes a plugin, a site or triggers: load the
               `packaging-solutions` skill. The delivery is a package the person installs in one
               pass, and when it is ready you hand them its link.
@@ -1272,6 +1277,112 @@ public static class BuiltInSkills
             Give the URL, the port, the PID, where the output goes, and how to stop it. A process
             that spawned children can outlive this session, so the PID and stop command matter. Do
             not promise cleanup you cannot guarantee.
+            """),
+        new(
+            "running-the-backlog",
+            "Use when a person asks the Concierge to run the backlog, or a wave of it, to completion.",
+            [SkillRoles.Concierge],
+            """
+            # Running the backlog
+
+            A person asked you to run the backlog to completion. You plan it, dispatch it in waves,
+            assess each finished team before the next step, write follow-up items for what the
+            assessment found, and tidy away finished work. Merging, deleting a team and closing a
+            workflow stay the person's.
+
+            ## Resume first
+
+            Before anything else, look in your own working folder for a run log,
+            `backlog-run-<date>.md` (see "Keep a run log" below). If you find an unfinished run log,
+            read it before doing anything else, and ask the person whether to continue it. Do not
+            start a second run over the first.
+
+            ## Plan
+
+            - List every pending and ready item (`backlog  action: list  state: pending`, then
+              `state: ready`) and read each one (`backlog  action: show  id: <id>`).
+            - Order them:
+              - An item that says it needs another merged first waits for it.
+              - Items that touch the same area (the same files, schema module, skill or dialog) go
+                to the same team one after another, or wait.
+              - Independent items run in parallel, each on its own new team.
+            - Tell the person the plan in one message: the waves, which items are in each, and why
+              that order. Then proceed; do not wait for a second yes.
+            - The person's request to run the backlog is the instruction to mark the planned items
+              ready: `backlog  action: edit  id: <id>  state: ready` for each item in the plan you
+              stated, and no other.
+
+            ## Dispatch
+
+            - For each item in the current wave, create a team for it with `team_create`, named
+              after the item: its citation and a short slug (`B000H-login-banner`), on the
+              repository the item names, or the team's default when it names none.
+            - Then dispatch the item to that team: `backlog  action: dispatch  id: <id>  team: <team>`.
+            - Record which team holds which item, and the dispatch workflow, in the run log.
+
+            ## Watch
+
+            - Follow each team with `status` and `kanban`, naming the team on every call.
+            - A dispatch workflow that is blocked on a person is raised to the person at once, with
+              the team's question in its own words.
+            - A launch-missing failure is re-sent once, then raised to the person.
+
+            ## Assess, when a team's dispatch workflow completes
+
+            Assess before the next step, every time:
+
+            - Read its verification document in the team's documents folder.
+            - Check every Done-when line of the item against the verification document.
+            - Check the repository state with `repo`: the team branch is pushed, and how far it is
+              from the default branch.
+            - Check the item's landed and stranded state with `backlog  action: show`.
+            - The assessment names each Done-when line as met, not met or unverified, and says what
+              the team reported about its test runs, in the team's own figures, marked as the
+              team's. A line you could not check is unverified, never met.
+
+            ## Act on the assessment
+
+            - **Every line met:** tell the person the item is ready to merge, with the assessment,
+              and name the Git dialog as the place to merge. Merging to the default branch is the
+              person's action; you never merge, push or ask an agent to. When the item reads
+              landed, mark it implemented (`backlog  action: edit  id: <id>  state: implemented`).
+            - **A defect in scope:** tell the same team to fix it, continuing the dispatch workflow:
+              `tell  member: Manager  team: <team>  causation: <the dispatch workflow's latest row>`.
+              Assess again when it completes.
+            - **Something outside the item's scope,** or a gap the item did not ask for: write a new
+              backlog item for it with `backlog  action: add`, in the house format (Summary, The
+              change, Constraints, Done when, Delivery), and place it in the plan.
+
+            ## Reorder and continue
+
+            - After each assessment, re-plan: new items, items now unblocked, conflicts.
+            - Tell the person what changed in one short message, and dispatch the next wave as soon
+              as what it depends on has landed.
+            - Keep going until every item in the plan is implemented or the person stops it.
+
+            ## Tidy up, once an item is implemented and its branch has landed
+
+            - Archive the item: `backlog  action: archive  id: <id>`.
+            - Ask the person to delete the finished team; team deletion is the person's action. Say
+              what deletion keeps: its documents, and a local repository unless the person ticks it.
+            - Say which documents the team left, and ask whether to keep them.
+
+            ## Keep a run log
+
+            A restarted Concierge resumes from it. Keep one document, `backlog-run-<date>.md`, in
+            your own working folder. It lists the plan, each dispatch (item, team, workflow), each
+            assessment and its outcome, each follow-up item, and what is waiting on the person.
+            Rewrite it whenever one of those changes.
+
+            ## What you never do in a run
+
+            - Never merge or push a default branch.
+            - Never delete a team.
+            - Never close a workflow.
+            - Never mark an item implemented before it has landed.
+            - Never estimate a figure you were not given.
+
+            Ask the person for each of these, and keep going with everything else meanwhile.
             """),
         new(
             "testing-a-web-app",
