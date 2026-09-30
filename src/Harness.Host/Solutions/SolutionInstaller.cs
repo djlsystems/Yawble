@@ -1413,7 +1413,7 @@ public sealed class SolutionInstaller(
 
         var changed = before with { Secrets = merged };
 
-        if (PluginMemberRunner.SettingsRefusal(plugin.Manifest, changed, secretStore, requireSet: false) is { } refusal)
+        if (PluginMemberRunner.SettingsRefusal(plugin.Manifest, changed, secretStore, requireSet: false, stored: before) is { } refusal)
         {
             throw new SolutionStepException($"{member.Name}: {refusal}");
         }

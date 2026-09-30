@@ -248,8 +248,8 @@ Content-Type: application/json
 ```
 
 - **`config`** is checked against the manifest. Refused at hire, with the field named: an unknown
-  field, a value of the wrong type or outside its `enum`, or a missing `required` field with no
-  default.
+  field, a value of the wrong type, outside its `enum` or outside a number's bounds (see
+  [Number bounds](#number-bounds)), or a missing `required` field with no default.
 - **`secrets`** binds each secret the manifest names to a **logical key**, never to a value (see
   [Configuration and secrets](#configuration-and-secrets)). A `required` secret whose key is not set
   is refused at hire.
@@ -315,7 +315,7 @@ Content-Type: application/json
 | `protocol` | required | `harness.member/1`, the only protocol this Host speaks. |
 | `executable.path`, `executable.args` | required / optional | A relative path inside the version directory. `args` is a fixed argv with no substitution. |
 | `timeoutSeconds` | optional | An **idle** clock: this long with no `progress` record ends the run. Default 300. |
-| `config` | optional | Name → `{type: string, number, bool or list; enum; default; required; setBy; description}`. Flat in v1. A `list` is a list of strings, default `[]`. See [List settings](#list-settings). |
+| `config` | optional | Name → `{type: string, number, bool or list; enum; default; required; setBy; description}`; a `number` may add `min`, `max` and `integer` (see [Number bounds](#number-bounds)). Flat in v1. A `list` is a list of strings, default `[]`. See [List settings](#list-settings). |
 | `secrets` | optional | Name → `{description, required, when?}`. A `value` key is refused. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. |
 | `connections` | optional | Slot name → `{description, providers, scopes, required}`: an OAuth account the plugin acts on, which the Host holds and refreshes. See [Connections](#connections-oauth-accounts). |
 | `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `inLedger` is not read in v1: a plugin event always reaches the ledger. See [Events](#events). |
@@ -342,6 +342,37 @@ manifest gives none, so the plugin always receives an array in the request's `co
 
 Every other type keeps its rules. A Host from before list settings refuses a manifest that uses one,
 naming the field, as it refuses any unknown type. The web's settings editor shows a list as chips.
+
+### Number bounds
+
+A `"type": "number"` field may declare `min` and `max` (both inclusive) and `"integer": true` (whole
+numbers only). Declare the bounds the plugin can mean: an unbounded number takes a stray keystroke,
+and a salary maximum of -2 makes a job board drop every posting that states a salary.
+
+```json
+"config": {
+  "salaryMax":        { "type": "number", "min": 0, "description": "Highest annual salary to look at." },
+  "archiveAfterDays": { "type": "number", "min": 1, "integer": true, "default": 7 }
+}
+```
+
+- **The manifest is refused**, naming the field, when `min` or `max` is not a number, `integer` is
+  not `true` or `false`, a bound is on a field that is not a number, `min` is greater than `max`, or
+  the `default` is outside the bounds (or not whole when `integer`).
+- **Every writer refuses a value outside them** - Member settings (`PUT .../plugin-settings`), a hire
+  (`POST /api/teams/{team}/containers`, Add member and a Manager's `member` tool), and a solution
+  install or update (a package's `members[].settings` in the check, a person's `inputs.settings`
+  answer at install) - with 400 and one sentence naming the field and the bound, such as
+  "`salaryMax` must be at least 0; -2 is below it.", and writes nothing: no setting, no member, no
+  `tenant_events` row. One Host check does it (`PluginMemberRunner.SettingsRefusal`, over
+  `PluginConfigField.BoundsRefusal`); the web says the bounds earlier, in the field's hint, but
+  never instead.
+- **A value stored before its bounds existed is kept.** It is never rewritten, the member keeps
+  running with it, and the settings read names it in `outOfRange` (`{ "<field>": "<sentence>" }`,
+  `{}` when none). Saving the settings form with that value unchanged is accepted; changing it to
+  another value outside the bounds is refused.
+- The settings read's `fields.<field>`, `GET /api/plugins`' `config.<field>` and a solution plan's
+  `personSettings[]` carry `min`, `max` (null when not declared) and `integer`.
 
 ### Connections: OAuth accounts
 

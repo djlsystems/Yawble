@@ -1011,6 +1011,14 @@ public static class BuiltInSkills
             each item. A person edits it as chips. Use it wherever a setting holds several values;
             never pack them into one string.
 
+            A `number` setting may declare `min` and `max` (inclusive) and `integer: true` for whole
+            numbers only. Give every number the bounds it can mean - `min: 0` on a salary or a rate,
+            `min: 1, integer: true` on a count of days - because an unbounded number accepts a stray
+            keystroke: a salary maximum of -2 silently drops every posting. The platform refuses a
+            manifest whose `min` is above its `max` or whose default is outside them, and refuses a
+            value outside them from every writer, naming the field and the bound. The spec states the
+            bounds for each number setting.
+
             `requires` names the runtimes the plugin needs from the image, from exactly `dotnet`,
             `node` and `python3`; a self-contained binary needs none. The platform refuses a plugin
             whose runtime is not installed, naming it, when it is installed or rescanned, so its first
@@ -1036,7 +1044,7 @@ public static class BuiltInSkills
             ## 3. Settings and secrets
 
             Settings are per member, chosen when the member is hired, and checked against the manifest
-            then: a wrong type or a missing required field is refused. Secrets are logical key names.
+            then: a wrong type, a number outside its bounds or a missing required field is refused. Secrets are logical key names.
             The person sets the value with the operator CLI's secret command, on the machine that runs
             the platform. A spec, a manifest, a message or a backlog item names the key, never the
             value. The value reaches the plugin only on its input when a run starts. The platform

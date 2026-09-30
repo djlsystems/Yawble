@@ -441,6 +441,15 @@ public sealed record PluginConfigField(
 {
     private static readonly JsonElement EmptyList = JsonDocument.Parse("[]").RootElement.Clone();
 
+    /// <summary>A number field's smallest allowed value, inclusive; null for none.</summary>
+    public double? Min { get; init; }
+
+    /// <summary>A number field's largest allowed value, inclusive; null for none.</summary>
+    public double? Max { get; init; }
+
+    /// <summary>A number field that takes whole numbers only.</summary>
+    public bool Integer { get; init; }
+
     public static (PluginConfigField? Field, string? Refusal) Parse(string name, JsonElement element)
     {
         if (!PluginManifest.IsConfigName(name)) return (null, $"`config.{name}` is not a usable name.");
@@ -482,15 +491,53 @@ public sealed record PluginConfigField(
             personOnly = setBy.GetString() == "person";
         }
 
+        // BOUNDS ARE A NUMBER'S: min and max inclusive, integer for whole numbers only.
+        double? min = null, max = null;
+        var integer = false;
+
+        foreach (var key in (string[])["min", "max", "integer"])
+        {
+            if (!element.TryGetProperty(key, out var bound)) continue;
+            if (type != "number") return (null, $"`config.{name}.{key}` applies only to a number field.");
+
+            if (key == "integer")
+            {
+                if (bound.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return (null, $"`config.{name}.integer` must be true or false.");
+                integer = bound.ValueKind == JsonValueKind.True;
+            }
+            else if (bound.ValueKind != JsonValueKind.Number)
+            {
+                return (null, $"`config.{name}.{key}` must be a number.");
+            }
+            else if (key == "min")
+            {
+                min = bound.GetDouble();
+            }
+            else
+            {
+                max = bound.GetDouble();
+            }
+        }
+
+        if (min > max) return (null, $"`config.{name}.min` ({Show(min!.Value)}) is greater than its `max` ({Show(max!.Value)}).");
+
         var field = new PluginConfigField(
             type,
             element.TryGetProperty("description", out var desc) && desc.ValueKind == JsonValueKind.String ? desc.GetString()! : "",
             element.TryGetProperty("required", out var r) && r.ValueKind == JsonValueKind.True,
             fallback,
             choices,
-            personOnly);
+            personOnly)
+        {
+            Min = min,
+            Max = max,
+            Integer = integer,
+        };
 
-        if (fallback is { } value && field.Refusal(name, value) is { } badDefault) return (null, badDefault);
+        if (fallback is { } value && field.Refusal(name, value) is { } badDefault)
+        {
+            return (null, field.BoundsRefusal(name, value) is null ? badDefault : $"`config.{name}.default`: {badDefault}");
+        }
 
         return (field, null);
     }
@@ -509,8 +556,9 @@ public sealed record PluginConfigField(
             + "in the Add member dialog.";
     }
 
-    /// <summary>Why <paramref name="value"/> is not a valid value for this field, or null.</summary>
-    public string? Refusal(string name, JsonElement value)
+    /// <summary>Why <paramref name="value"/> is not a valid value for this field, or null. Its
+    /// bounds are checked too unless <paramref name="bounds"/> is false.</summary>
+    public string? Refusal(string name, JsonElement value, bool bounds = true)
     {
         var fits = Type switch
         {
@@ -540,8 +588,29 @@ public sealed record PluginConfigField(
             return $"`{name}` must be one of: {string.Join(", ", choices)}.";
         }
 
+        return bounds ? BoundsRefusal(name, value) : null;
+    }
+
+    /// <summary>
+    /// Why a number <paramref name="value"/> is outside this field's <see cref="Min"/>,
+    /// <see cref="Max"/> or <see cref="Integer"/>, naming the field and the bound; null when it is
+    /// inside them, has no bounds, or is not a number. A run does not ask: a value stored before its
+    /// bounds existed keeps running, and the settings read reports it as out of range.
+    /// </summary>
+    public string? BoundsRefusal(string name, JsonElement value)
+    {
+        if (Type != "number" || value.ValueKind != JsonValueKind.Number) return null;
+
+        var number = value.GetDouble();
+
+        if (Min is { } min && number < min) return $"`{name}` must be at least {Show(min)}; {value.GetRawText()} is below it.";
+        if (Max is { } max && number > max) return $"`{name}` must be at most {Show(max)}; {value.GetRawText()} is above it.";
+        if (Integer && Math.Floor(number) != number) return $"`{name}` must be a whole number; {value.GetRawText()} is not.";
+
         return null;
     }
+
+    private static string Show(double number) => number.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }
 
 /// <summary>A secret the plugin needs, by name. The manifest never holds its value.</summary>

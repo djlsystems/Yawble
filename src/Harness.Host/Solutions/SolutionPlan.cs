@@ -66,7 +66,12 @@ public sealed record SolutionPlan(
             [.. manifest.Inputs.Settings.Select(input =>
             {
                 var field = package.Plugin(manifest.Member(input.Member)?.PluginId)?.Manifest.Config.GetValueOrDefault(input.Setting);
-                return new SolutionPlanSetting(input.Member, input.Setting, input.Description, input.Required, field?.Type, field?.Default, field?.Enum);
+                return new SolutionPlanSetting(input.Member, input.Setting, input.Description, input.Required, field?.Type, field?.Default, field?.Enum)
+                {
+                    Min = field?.Min,
+                    Max = field?.Max,
+                    Integer = field?.Integer ?? false,
+                };
             })],
             manifest.Ignored)
         {
@@ -114,7 +119,15 @@ public sealed record SolutionPlanTools(string Folder, string InstalledAs, IReadO
 
 /// <summary>A person-only setting the install asks for, with what its manifest says of it.</summary>
 public sealed record SolutionPlanSetting(
-    string Member, string Setting, string Description, bool Required, string? Type, JsonElement? Default, IReadOnlyList<string>? Choices);
+    string Member, string Setting, string Description, bool Required, string? Type, JsonElement? Default, IReadOnlyList<string>? Choices)
+{
+    /// <summary>The plugin field's bounds, when it is a number that declares them.</summary>
+    public double? Min { get; init; }
+
+    public double? Max { get; init; }
+
+    public bool Integer { get; init; }
+}
 
 /// <summary>
 /// A secret a plugin member binds: the member (the package's name), the plugin's secret
