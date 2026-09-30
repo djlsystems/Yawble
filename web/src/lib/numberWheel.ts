@@ -1,7 +1,7 @@
 /**
  * A NUMBER BOX DOES NOT CHANGE ON THE MOUSE WHEEL. A browser steps a focused `<input type="number">`
  * when the wheel turns over it, so a person scrolling a form past the box they just typed in changes
- * the value without seeing it - JobTracker's `salaryMax` was saved as -2 that way (B001W). One
+ * the value without seeing it - JobTracker's `salaryMax` was saved as -2 that way. One
  * listener on the document, installed once at boot (`boot/numberWheel.ts`), covers every number box
  * in every form, present and future; no form opts in.
  *

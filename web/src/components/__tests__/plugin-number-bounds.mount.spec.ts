@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// A PLUGIN NUMBER SETTING'S BOUNDS, SAID FIRST (B001W). A manifest `number` field may declare
+// A PLUGIN NUMBER SETTING'S BOUNDS, SAID FIRST. A manifest `number` field may declare
 // `min`, `max` and `integer`; the Host refuses a value outside them on every writer. Member settings
 // and Add member say the bounds in the field's hint and hold Save / Add member on an out-of-range or
 // non-whole value, with the sentence under the field - as they hold a missing required field. A value

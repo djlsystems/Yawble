@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE SOLUTION WIZARD AND A BOUNDED NUMBER SETTING (B001W). A person-only number setting whose
+// THE SOLUTION WIZARD AND A BOUNDED NUMBER SETTING. A person-only number setting whose
 // plugin declares `min`, `max` or `integer` says its bounds in its hint; a value outside them (or not
 // whole) is refused inline and Next stays off until it is fixed - unlike a skipped required setting,
 // which installs and leaves the team blocked, an out-of-range value is one the Host refuses. When the
