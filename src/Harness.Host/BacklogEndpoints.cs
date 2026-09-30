@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Harness.Containers;
 using Harness.Contracts;
+using Harness.Kanban;
 using Harness.Host.Auth;
 
 namespace Harness.Host;
@@ -76,7 +77,7 @@ public static class BacklogEndpoints
         app.MapGet("/api/backlog", async (
             HttpContext context, IBacklogStore backlog, TeamRegistry teams, TeamAccess access,
             IMessageLog log, ContainerHost host, TeamPaths paths, GitRunner git,
-            BacklogLandedCache landedCache, PullRequestStateReader pullRequests,
+            BacklogLandedCache landedCache, PullRequestStateReader pullRequests, KanbanStore kanban,
             [Description("Archived items instead of the backlog. The two tabs on the screen.")]
             bool archived = false,
             [Description(
@@ -121,6 +122,10 @@ public static class BacklogEndpoints
 
             var inFlight = await BacklogInFlightState.ForAsync(latest.Values, teams, host, log, ct);
 
+            // AND WHICH OF THOSE WERE LEFT BEHIND: open, Blocked or Failed, with their work done in
+            // a later workflow. Asked only of in-flight items. See BacklogStrandedState.
+            var stranded = await BacklogStrandedState.ForAsync(inFlight, teams, log, kanban, ct);
+
             // AND WHETHER THE WORK ACTUALLY LANDED. Off the SAME one store read, so this
             // adds no query; what it adds is git, which is why it is bounded per TEAM and cached
             // rather than asked per row. See BacklogLandedState for what it costs and what caps it.
@@ -130,7 +135,7 @@ public static class BacklogEndpoints
             return Results.Ok(items
                 .Select(item => Render(
                     item, teams, inFlight.GetValueOrDefault(item.Id), latest.GetValueOrDefault(item.Id),
-                    landed.GetValueOrDefault(item.Id)))
+                    landed.GetValueOrDefault(item.Id), stranded.GetValueOrDefault(item.Id)))
                 .ToList());
         })
             .RequirePermit(Permits.Read)
@@ -166,6 +171,12 @@ public static class BacklogEndpoints
                 + "SINCE BEEN DELETED is still reported, under the name the record kept, with "
                 + "`dispatchedTeamGone` - while `inFlight` is null, because a team that is gone is "
                 + "working nothing.\n\n"
+                + "`stranded` is set when the current dispatch's workflow is still open and Blocked "
+                + "or Failed while a LATER workflow on the same team took one of its cards to Done: "
+                + "`notice` says \"The work continued in workflow N.\", and `close` names the "
+                + "existing person-only close route for the original workflow with a suggested "
+                + "reason. It is an offer. Nothing is closed, declared or marked until a person "
+                + "calls that route. Null otherwise.\n\n"
                 + "`landed` says whether the CURRENT dispatch's work reached origin's default "
                 + "branch, derived from that team's clone and stored nowhere. `landed.state` is one "
                 + "of `landed` (on origin's default branch), `pushed` (on a remote branch, not yet "
@@ -183,7 +194,8 @@ public static class BacklogEndpoints
         app.MapGet("/api/backlog/{id:long}", async (
             long id, HttpContext context, IBacklogStore backlog, TeamRegistry teams,
             TeamAccess access, IMessageLog log, ContainerHost host, TeamPaths paths, GitRunner git,
-            BacklogLandedCache landedCache, PullRequestStateReader pullRequests, CancellationToken ct) =>
+            BacklogLandedCache landedCache, PullRequestStateReader pullRequests, KanbanStore kanban,
+            CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
             if (!MayReach(principal)) return RefuseKind();
@@ -210,6 +222,12 @@ public static class BacklogEndpoints
                 : (await BacklogInFlightState.ForAsync([current], teams, host, log, ct))
                     .GetValueOrDefault(id);
 
+            var stranded = inFlight is null
+                ? null
+                : (await BacklogStrandedState.ForAsync(
+                    new Dictionary<long, BacklogInFlight> { [id] = inFlight }, teams, log, kanban, ct))
+                    .GetValueOrDefault(id);
+
             // THE SAME ANSWER THE LIST GAVE, for the same reason `inFlight` is recomputed here: a
             // person who opened the row must not read a different verdict than the row showed. The
             // team's measurement is cached, so opening a row the list has just rendered is free.
@@ -220,7 +238,7 @@ public static class BacklogEndpoints
 
             return Results.Ok(new
             {
-                item = Render(item, teams, inFlight, current, landed),
+                item = Render(item, teams, inFlight, current, landed, stranded),
                 dispatches = dispatches.Select(d => new
                 {
                     d.Id,
@@ -822,6 +840,9 @@ public static class BacklogEndpoints
             long id,
             IBacklogStore backlog,
             TeamRegistry teams,
+            ContainerHost host,
+            IMessageLog log,
+            KanbanStore kanban,
             CancellationToken ct) =>
         {
             if (teams.ExistingName(team) is not { } stored)
@@ -844,7 +865,21 @@ public static class BacklogEndpoints
                 return Results.NotFound(new { error = $"{PlatformBacklogId.Format(id)} was not dispatched to this team." });
             }
 
-            return Results.Ok(new { item.Id, item.Title, item.Body, item.State });
+            // THE OPEN WORKFLOW OF THIS TEAM'S LATEST DISPATCH, so a reader continues the workflow the
+            // work belongs to rather than working it out from the log. Null once it has ended.
+            var ours = dispatches.Last(d => string.Equals(d.TeamId, stored, StringComparison.OrdinalIgnoreCase));
+            var inFlight = await BacklogInFlightState.ForAsync([ours], teams, host, log, ct);
+            var stranded = await BacklogStrandedState.ForAsync(inFlight, teams, log, kanban, ct);
+
+            return Results.Ok(new
+            {
+                item.Id,
+                item.Title,
+                item.Body,
+                item.State,
+                workflow = inFlight.GetValueOrDefault(id)?.Correlation,
+                stranded = stranded.GetValueOrDefault(id),
+            });
         })
             .RequirePermit(Permits.Read)
             .WithTags("Backlog")
@@ -854,7 +889,10 @@ public static class BacklogEndpoints
                 + "into its instruction: one store of record means one copy, and a copy cannot go "
                 + "stale.\n\n"
                 + "`{team}` in the route, so TeamGate covers this structurally - that declaration is "
-                + "the whole access-control argument. An item not dispatched to this team is a 404.");
+                + "the whole access-control argument. An item not dispatched to this team is a 404.\n\n"
+                + "`workflow` is the open workflow of this team's latest dispatch of the item, null "
+                + "once it has ended. `stranded` is as on `GET /api/backlog`: the workflow is Blocked "
+                + "or Failed and its work continued in a later one, and only a person may close it.");
 
         app.MapPost("/api/teams/{team}/kanban/plan", async (
             [Description(Describe.Team)] string team,
@@ -1228,7 +1266,8 @@ public static class BacklogEndpoints
         TeamRegistry teams,
         BacklogInFlight? inFlight = null,
         BacklogDispatch? dispatched = null,
-        BacklogLanded? landed = null) => new
+        BacklogLanded? landed = null,
+        BacklogStranded? stranded = null) => new
     {
         item.Id,
         item.Team,
@@ -1244,6 +1283,10 @@ public static class BacklogEndpoints
         item.UpdatedAt,
         item.CreatedBy,
         inFlight,
+
+        // THE OPEN WORKFLOW LEFT BEHIND, when its work finished in a later one. Only ever set beside
+        // an `inFlight`, and only ever an offer - see BacklogStranded.
+        stranded,
 
         // BESIDE `inFlight`, NOT INSTEAD OF IT, and the pair is the point. `inFlight` says the work
         // is happening; this says where the work ENDED UP. An item can be neither, either or both:

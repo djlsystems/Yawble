@@ -682,6 +682,21 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         return await TimingForAsync(connection, team, correlation, sinceSeq, serverNow, ct);
     }
 
+    /// <summary>One named workflow. See <see cref="IMessageLog.WorkflowForTeamAsync"/>.</summary>
+    public async Task<TeamWorkflowTiming> WorkflowForTeamAsync(
+        string team, long correlation, long sinceSeq, CancellationToken ct = default)
+    {
+        var serverNow = DateTimeOffset.UtcNow;
+
+        if (string.IsNullOrWhiteSpace(team))
+        {
+            return Unavailable(serverNow, "No team was named.");
+        }
+
+        await using var connection = Open();
+        return await TimingForAsync(connection, team, correlation, sinceSeq, serverNow, ct);
+    }
+
     /// <summary>
     /// ONE WORKFLOW, FULLY DESCRIBED, once the correlation is chosen. Every query inside it is
     /// scoped to that correlation; the CHOICE is the caller's.

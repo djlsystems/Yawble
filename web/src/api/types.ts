@@ -2074,6 +2074,37 @@ export interface BacklogItemView {
    * not a wrong answer.
    */
   landed?: BacklogLanded | null
+
+  /**
+   * THE DISPATCH'S WORKFLOW WAS LEFT BEHIND: still open, Blocked or Failed, while a later workflow
+   * on the same team took one of its cards to Done. The row says where the work continued and
+   * offers a person the existing close route. An offer, never an act - nothing is closed until a
+   * person presses it. Null or absent otherwise.
+   */
+  stranded?: BacklogStranded | null
+}
+
+/** See `BacklogItemView.stranded`. Derived by `BacklogStrandedState` on the server. */
+export interface BacklogStranded {
+  teamId: string
+
+  /** The dispatch's own workflow - the one a person may close. */
+  workflow: number
+
+  /** `Blocked` or `Failed`, the log's word for it. */
+  state: string
+
+  /** The latest later workflow one of its cards was done in. */
+  continuedIn: number
+
+  /** The original workflow's cards that were done later. */
+  cards: string[]
+
+  /** "The work continued in workflow N." - what the row says. */
+  notice: string
+
+  /** The person-only close route for `workflow`, and a suggested reason. */
+  close: { route: string; by: 'person'; reason: string }
 }
 
 /**
