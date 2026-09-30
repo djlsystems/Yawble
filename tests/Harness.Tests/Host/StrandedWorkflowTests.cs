@@ -180,9 +180,18 @@ public sealed class StrandedWorkflowTests(HostFixture host) : IClassFixture<Host
         var agent = host.Services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;
         var team = (await registry.CreateAsync(name, agent, memberAgent: agent)).Id;
 
+        // THE TEAM IS PAUSED, SO NOTHING HERE RUNS. The rows below are written straight to the log
+        // while the real pump is delivering, and a row it would deliver - the developer's
+        // `completed` wakes the Manager - starts a real run. This Host's agent CLI is the test
+        // assembly's stub, so that run fails, and its `failed` row reads the workflow as Failed
+        // rather than Blocked, sooner or later depending on load. A paused team takes no slot and
+        // runs nothing; its workflows keep the state their rows give them.
+        await registry.SetPausedAsync(team, true, Ct);
+
+        // ROOTED AS A REAL DISPATCH IS, by its `backlog.item.dispatched` row, which no member acts on.
         var root = await Log.AppendAsync(new NewMessage(
-            MessageTypes.InstructionFor(new ContainerId(team, TeamRegistry.DefaultManagerName)),
-            """{"instruction":"Build the job tracker."}""", "console"), Ct);
+            MessageTypes.BacklogItemDispatched,
+            $$"""{"item":1,"team":"{{team}}","title":"Job tracker"}""", "person@example.test"), Ct);
 
         var backlog = host.Services.GetRequiredService<IBacklogStore>();
         var item = await backlog.CreateAsync(null, "Job tracker", "Build it.", "person@example.test", Ct);
