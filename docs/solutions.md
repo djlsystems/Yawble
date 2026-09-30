@@ -90,8 +90,48 @@ A **plugin** member (a `pluginId` makes one; `"kind": "plugin"` may say so too):
 | `name` | Required. |
 | `pluginId` | Required: a plugin the package ships under `plugins/<id>/`. |
 | `settings` | Its configuration, checked against the plugin's manifest. A **person-only** setting (`"setBy": "person"`) may only be left at its default here: ask a person for it under `inputs.settings`. |
+| `secrets` | Its secret bindings: `{ "<manifest secret field>": "<LOGICAL_KEY_NAME>" }`, each a field the plugin's manifest declares under `secrets`, bound to a **key name, never a value**. See [Secrets](#secrets). |
 
-A plugin member takes no `role`, `preset` or `instructions`; an agent member takes no `settings`.
+A plugin member takes no `role`, `preset` or `instructions`; an agent member takes no `settings`
+or `secrets`.
+
+#### Secrets
+
+A package binds its plugin members' secrets by **logical key name**, exactly as a person binds them
+in the member's settings ([plugins.md](plugins.md#configuration-and-secrets)). The value never travels with a package:
+the operator sets it on the Host with `yawble secret set <KEY>` (it prompts for the value) and
+restarts the Host with `yawble up`, and the plugin receives it on stdin at each run.
+
+```json
+{
+  "name": "Scout",
+  "pluginId": "job-board",
+  "secrets": {
+    "adzunaAppId": "ADZUNA_APP_ID",
+    "adzunaAppKey": "ADZUNA_APP_KEY"
+  }
+}
+```
+
+- **The check refuses**, each naming `solution.json` and the field (`members[1].secrets.adzunaAppId`),
+  all at once: a field the plugin's manifest does not declare; a key that is not a legal environment
+  variable name (upper-case letters, digits and underscores, not starting with a digit) or one the
+  platform keeps for itself (`HARNESS_*`, model providers' credentials); and an entry that **looks
+  like a value** - a known credential prefix (`sk-`, `ghp_`, `AKIA`, `eyJ`, a PEM block ...), a long
+  run of letters and digits with no underscore, or anything that is not a string. A refusal never
+  repeats the entry: what was written there may be the credential itself.
+- **The install binds** each named field to its key in the same step as the member is hired, through
+  the same check a person's binding runs. The install is a person's action, so it may bind keys no
+  one has bound on the team yet (a Manager's or the Concierge's hire still may not).
+- **A key the Host has not set is not a refusal**: the install goes ahead and the secret's source
+  fails until the key is set. The wizard and the CLI say so per key, with the exact way to set it.
+- **Needed for one setting only.** A plugin's manifest may say a secret is needed only while a
+  setting holds a value - `"when": { "sources": "adzuna" }` ([plugins.md](plugins.md#configuration-and-secrets)). Where
+  the person leaves that setting off (a source not ticked), the secret is shown as not needed.
+- **An update keeps a binding a person changed**: a field still bound as the installed version bound
+  it takes the new version's key; a field the person rebound or unbound stays as they left it. A
+  change is saved as a person's settings change is, with its `member.plugin-settings-changed` row
+  naming the fields (never a value).
 
 ### Triggers
 
@@ -157,6 +197,8 @@ refuses:
 - a plugin manifest the Host would refuse, or one whose `id` is not its folder's name;
 - a setting the plugin does not have, a value its manifest refuses, or a person-only setting set by
   the package; an input naming a setting that is not person-only, or a slot the plugin lacks;
+- a secret field the plugin's manifest does not declare, a key that is not a legal environment
+  variable name, and a value-looking entry ([Secrets](#secrets));
 - a skill whose name is a built-in's or begins `plugin-`, whose file is missing, or whose front
   matter lacks a matching name, a description, roles or a body;
 - an event type the catalog does not know, a filter on a field it does not carry, and a high-volume
@@ -187,7 +229,13 @@ refuses:
    (the update never changes them), and a document folder names the files already in it; only an
    empty required folder or an unbound required slot warns that the team will be blocked. The
    preview's `kept` carries these, and `yawble solution install` shows them the same way.
-4. **Install**: the steps below; on failure the wizard names the step and the reason.
+   **Secrets** are listed here too, each by key name with whether the Host has it set (by name
+   only, never the value), what the manifest says it is for, and either "set on this Host", "not
+   set: its source fails until it is set" with the exact way to set it (`yawble secret set <KEY>`,
+   then `yawble up`), or "not needed" when it belongs to a setting the person left off. Unset is not
+   a refusal. The preview's `secrets` carries these (in an update, as the update will leave them).
+4. **Install**: the steps below; on failure the wizard names the step and the reason. The result
+   lists the keys still unset, each with the way to set it.
 
 The install runs, in order, through the stores a person's own clicks use, each step appending its
 usual tenant row:
@@ -223,7 +271,8 @@ members, triggers, skills, sites, tools and plugins, each added, changed or remo
 - removes what the package no longer has, last, once everything that can fail has: a member, a
   trigger, a skill; a site is **unpublished, never deleted**, so its data stays the person's;
 - keeps the person's settings and connection bindings on the members it keeps, the uploaded
-  documents and every site's data;
+  documents and every site's data; a kept member's secret bindings take the new version's keys
+  except where the person changed them ([Secrets](#secrets));
 - rewrites the `team_solutions` row with `solution.updated`.
 
 Only a newer version updates: the same or an older one, or another package's id, is refused with a
@@ -234,8 +283,8 @@ installs, and person-only settings stay person-only):
 
 | Route | |
 |---|---|
-| `POST /api/solutions/preview` `{ folder, team? }` | What installing would do, writing nothing: `mode: install` with the team name and why it cannot be used, or `mode: update` with `from`, `to` and the diff. |
-| `POST /api/solutions/install` `{ folder, teamName?, agent?, localRepository?, settings?, connections? }` | The install. `{ ok: true, team, missing, steps }`, or `{ ok: false, step, stepNumber, title, reason, undone }`. 409 for a taken name. |
+| `POST /api/solutions/preview` `{ folder, team? }` | What installing would do, writing nothing: `mode: install` with the team name and why it cannot be used, or `mode: update` with `from`, `to` and the diff. Both carry `secrets`: `{ member, field, key, description, required, when, set, needed, setWith }` per binding - `needed` is null while it waits on the person's answer to `when`'s setting. |
+| `POST /api/solutions/install` `{ folder, teamName?, agent?, localRepository?, settings?, connections? }` | The install. `{ ok: true, team, missing, steps, secrets, unset }` (`unset`: the keys bound, needed and not set on the Host), or `{ ok: false, step, stepNumber, title, reason, undone }`. 409 for a taken name. |
 | `POST /api/solutions/update` `{ folder, team, settings?, connections? }` | The update, with `from` and `diff`. |
 | `GET /api/solutions/installed` | Every team installed from a package, with its id and version. |
 | `GET /api/teams/{team}/solution` | The package a team came from, and what it still waits for. `Read`: the team's own members may read it too. |
@@ -250,7 +299,8 @@ wizard is open reopens it on the new folder.
 **The CLI**: `yawble solution install <folder> [--team <name>] [--from-instance] [--yes]` asks the
 same questions in the terminal - the team name (or, with `--team` naming a team installed from an
 earlier version, the update and its diff), each person-only setting, each connection slot, a file
-for each document folder - and then installs, printing each step or the step that failed. It stages
+for each document folder - prints the secrets list as "Your part" shows it, and then installs,
+printing each step or the step that failed, the secrets list again and the keys still unset. It stages
 the folder under `<dataRoot>/plugins/.solutions/`, which only the Host and root can write, and
 hands the Host a request file (`<dataRoot>/plugins/.solution`) that `SolutionRequests` answers with
 exactly what the matching route answers. An agent cannot write there, so it cannot install.
@@ -291,6 +341,9 @@ the package the solution tests check and install.
   `{solution}/make-cover-letter.py`; a new resume in `Resume/` wakes it to refresh its notes.
 - The person provides their **resume** (required) and ticks which **sources** the Scout may read
   (a person-only setting: until they do, it reads none).
+- The Scout binds five secrets by key name - `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `USAJOBS_API_KEY`,
+  `USAJOBS_USER_AGENT` and `THEMUSE_API_KEY` - each needed only when its source is ticked. The
+  stand-in board calls none of them; it says which ticked board has no keys set.
 
 ```json
 {
@@ -314,7 +367,14 @@ the package the solution tests check and install.
     {
       "name": "Scout",
       "pluginId": "job-board",
-      "settings": { "keywords": ["engineer", "developer"] }
+      "settings": { "keywords": ["engineer", "developer"] },
+      "secrets": {
+        "adzunaAppId": "ADZUNA_APP_ID",
+        "adzunaAppKey": "ADZUNA_APP_KEY",
+        "usajobsApiKey": "USAJOBS_API_KEY",
+        "usajobsUserAgent": "USAJOBS_USER_AGENT",
+        "themuseApiKey": "THEMUSE_API_KEY"
+      }
     },
     {
       "name": "Writer",
@@ -396,7 +456,8 @@ the package the solution tests check and install.
 ```
 
 The plugin's manifest, `plugins/job-board/plugin.json`, declares the event the "New posting" trigger
-names, and the person-only `sources` setting `inputs.settings` asks for:
+names, the person-only `sources` setting `inputs.settings` asks for, and the secrets the Scout
+binds, each needed only for its source:
 
 ```json
 {
@@ -417,11 +478,18 @@ names, and the person-only `sources` setting `inputs.settings` asks for:
     },
     "sources": {
       "type": "list",
-      "enum": ["sample"],
+      "enum": ["sample", "adzuna", "usajobs", "themuse"],
       "default": [],
       "setBy": "person",
-      "description": "The boards this member may read. Empty reads none."
+      "description": "The boards this member may read. Empty reads none. adzuna, usajobs and themuse each need their keys set on the Host."
     }
+  },
+  "secrets": {
+    "adzunaAppId": { "description": "Your Adzuna application id, from developer.adzuna.com. Needed to read Adzuna.", "when": { "sources": "adzuna" } },
+    "adzunaAppKey": { "description": "Your Adzuna application key, from developer.adzuna.com. Needed to read Adzuna.", "when": { "sources": "adzuna" } },
+    "usajobsApiKey": { "description": "Your USAJOBS API key, from developer.usajobs.gov. Needed to read USAJOBS.", "when": { "sources": "usajobs" } },
+    "usajobsUserAgent": { "description": "The email address you registered the USAJOBS key with; USAJOBS asks for it on every request.", "when": { "sources": "usajobs" } },
+    "themuseApiKey": { "description": "Your The Muse API key, from themuse.com/developers. Needed to read The Muse.", "when": { "sources": "themuse" } }
   },
   "events": {
     "publishes": [
@@ -560,3 +628,15 @@ skill `interview-prep` and ships `job-board` 0.2.0. The tests make it the same w
   (`solution-blocked-banner`), all `*.mount.spec.ts`.
 - `yawble solution install` against Podman and Docker scripted engines:
   `cli/internal/cli/solution_install_test.go`.
+- Secrets: the check - `SolutionCheckTests.A_valid_secrets_block_passes_and_the_plan_names_each_key_and_what_it_is_for`,
+  `A_secret_field_the_plugin_manifest_does_not_declare_is_refused_naming_file_and_field`,
+  `A_secret_key_that_is_not_a_legal_environment_variable_name_is_refused_naming_file_and_field`,
+  `A_value_looking_secret_entry_is_refused_naming_file_and_field_and_never_repeated`,
+  `Every_secrets_refusal_is_named_at_once`, `An_agent_member_naming_secrets_is_refused` and
+  `A_manifest_secret_needed_when_an_unknown_setting_or_value_is_refused`; the install -
+  `SolutionSecretsTests.Install_binds_the_job_tracker_plugin_member_to_its_five_keys_and_names_each_keys_set_state_never_its_value`
+  (with the no-value scan of every response and every file the Host wrote); the update -
+  `SolutionSecretsTests.An_update_keeps_a_binding_the_person_changed_and_takes_the_packages_new_key_where_they_did_not`
+  and `Merged_secrets_keep_what_the_person_changed_or_unbound`; the wizard -
+  `solution-wizard-secrets.mount.spec.ts`; the CLI -
+  `TestSolutionInstallPrintsEachSecretByKeyAndTheKeysStillUnset`.

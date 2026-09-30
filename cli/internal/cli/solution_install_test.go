@@ -588,3 +588,58 @@ func TestSolutionInstallScriptsUnderSh(t *testing.T) {
 		t.Errorf("not withdrawn: %v", err)
 	}
 }
+
+// secretRows are the Host's secrets list: by key name, never a value. needed is nil in a preview
+// where it waits on the Scout's sources.
+func secretRows(needed map[string]any) []any {
+	row := func(key, field, description string, set bool, when any) map[string]any {
+		return map[string]any{
+			"member": "Scout", "field": field, "key": key, "description": description, "required": false,
+			"when": when, "set": set, "needed": needed[key],
+			"setWith": "yawble secret set " + key + " (it prompts for the value), then yawble up to restart the Host",
+		}
+	}
+	return []any{
+		row("ADZUNA_APP_ID", "adzunaAppId", "Your Adzuna application id.", true, nil),
+		row("USAJOBS_API_KEY", "usajobsApiKey", "Your USAJOBS API key.", false, nil),
+		row("THEMUSE_API_KEY", "themuseApiKey", "Your The Muse API key.", false, map[string]any{"setting": "sources", "value": "themuse"}),
+	}
+}
+
+func TestSolutionInstallPrintsEachSecretByKeyAndTheKeysStillUnset(t *testing.T) {
+	for _, program := range programs {
+		t.Run(program, func(t *testing.T) {
+			preview := routeBody(t, "solution-preview-install.json", func(b map[string]any) {
+				b["secrets"] = secretRows(map[string]any{"ADZUNA_APP_ID": true, "USAJOBS_API_KEY": true, "THEMUSE_API_KEY": nil})
+			})
+			done := routeBody(t, "solution-install-done.json", func(b map[string]any) {
+				named("Job Tracker")(b)
+				b["secrets"] = secretRows(map[string]any{"ADZUNA_APP_ID": true, "USAJOBS_API_KEY": true, "THEMUSE_API_KEY": false})
+				b["unset"] = []string{"USAJOBS_API_KEY"}
+			})
+			s := installScript(t, program, hostReport(t, "n2", 200, preview), hostReport(t, "n3", 200, done))
+
+			// No answers: the sources stay empty, so The Muse's key is not needed.
+			code, out, errOut := run(t, installDeps(s, program, ""), "solution", "install", solutionPackage(t), "--yes")
+			if code != 0 {
+				t.Fatalf("exit %d: %s %s", code, out, errOut)
+			}
+			containsAll(t, "the output", out,
+				"Secrets (bound by key name; values are set on the Host, never here):",
+				"  ADZUNA_APP_ID (Scout): set on this Host.",
+				"      Your Adzuna application id.",
+				"  USAJOBS_API_KEY (Scout): not set - its source fails until it is set. Set it with: yawble secret set USAJOBS_API_KEY (it prompts for the value), then yawble up to restart the Host.",
+				"  THEMUSE_API_KEY (Scout): not needed - Scout's sources leaves themuse off.",
+				"These keys are still not set on the Host. Each one's source fails until it is set:",
+				"  USAJOBS_API_KEY - yawble secret set USAJOBS_API_KEY (it prompts for the value), then yawble up to restart the Host",
+			)
+			// Printed twice: before the install (Your part) and in the result.
+			if n := strings.Count(out, "Secrets (bound by key name"); n != 2 {
+				t.Errorf("the secrets list was printed %d times, want 2:\n%s", n, out)
+			}
+			if strings.Contains(out, "  THEMUSE_API_KEY - ") || strings.Contains(out, "  ADZUNA_APP_ID - ") {
+				t.Errorf("a set or unneeded key is listed as still to set:\n%s", out)
+			}
+		})
+	}
+}

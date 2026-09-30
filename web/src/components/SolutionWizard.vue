@@ -23,6 +23,7 @@ import {
   type SolutionPlan,
   type SolutionPreview,
   type SolutionRefusal,
+  type SolutionSecret,
   type SolutionStep,
 } from '../api/types';
 import { firstProblem, teamLabel } from '../lib/rules';
@@ -36,6 +37,9 @@ import {
   missingLine,
   refusalLine,
   removedItems,
+  secretNeeded,
+  secretSentence,
+  secretState,
   settingInputKind,
   settingKey,
   settingStartValue,
@@ -56,7 +60,9 @@ import { useConsoleStore } from '../stores/console';
  *    trigger's instruction become prompts, so none is shortened; each trigger says what fires it,
  *    whom it wakes, how the Manager is woken and its daily cap. An update marks what is new or
  *    changed and lists what goes.
- * 3. **Your part**: what only a person provides - person-only settings, connections, documents.
+ * 3. **Your part**: what only a person provides - person-only settings, connections, documents -
+ *    and the secrets the package binds, by key name: set on the Host, not set (its source fails
+ *    until it is, and how to set it), or not needed for a source left off. Never a value.
  *    Skipping a required one is allowed; the team then shows as blocked, naming it, until provided.
  * 4. **Install**: nothing is written before the person presses Install. A failed step is named by
  *    its number and title, and the Host undid everything. After a success the chosen documents are
@@ -325,6 +331,24 @@ const connectionOptions = computed(() =>
   })),
 );
 
+// SECRETS, BY KEY NAME: whether each is needed follows the setting it depends on as the person
+// chooses it here (or as the update keeps it).
+const secrets = computed<SolutionSecret[]>(() => okPreview.value?.secrets ?? []);
+
+function secretSettingValue(secret: SolutionSecret): unknown {
+  if (!secret.when) return undefined;
+  const key = settingKey({ member: secret.member, setting: secret.when.setting });
+  const keptEntry = kept.value?.settings.find((entry) => settingKey(entry) === key);
+  return keptEntry ? keptEntry.value : values.value[key];
+}
+
+const secretRows = computed(() =>
+  secrets.value.map((secret) => {
+    const state = secretState(secret, secretNeeded(secret, secretSettingValue(secret)));
+    return { secret, state, sentence: secretSentence(secret, state) };
+  }),
+);
+
 /** What only the person provides and was left out, by name, for the blocked sentence. */
 const skippedRequired = computed<string[]>(() => {
   const current = plan.value;
@@ -348,7 +372,8 @@ const nothingToProvide = computed(() => {
     !!current &&
     current.personSettings.length === 0 &&
     current.inputs.connections.length === 0 &&
-    current.inputs.documents.length === 0
+    current.inputs.documents.length === 0 &&
+    secrets.value.length === 0
   );
 });
 
@@ -381,6 +406,14 @@ const missing = ref<SolutionMissing[] | null>(null);
 const missingProblem = ref('');
 
 const succeeded = computed(() => (result.value && result.value.ok ? result.value : null));
+
+/** The keys the result says are still to set, each with the way to set it. */
+const unsetSecrets = computed(() => {
+  const done = succeeded.value;
+  if (!done) return [];
+  const unset = done.unset ?? [];
+  return unset.map((key) => done.secrets?.find((secret) => secret.key === key) ?? { key, setWith: `yawble secret set ${key}` });
+});
 const failedStep = computed(() => (result.value && !result.value.ok && 'step' in result.value ? result.value : null));
 const failedCheck = computed(() => (result.value && !result.value.ok && 'refusals' in result.value ? result.value : null));
 
@@ -837,6 +870,28 @@ function next() {
               </div>
             </section>
 
+            <section v-if="secretRows.length > 0" data-secrets>
+              <div class="solution-heading">Secrets</div>
+              <div class="text-caption os-text-muted q-mb-xs">
+                The install binds each by its key name. Values are set on the Host by its operator, never here.
+              </div>
+              <div
+                v-for="row in secretRows"
+                :key="`${row.secret.member}/${row.secret.field}`"
+                class="q-mb-sm"
+                :data-secret="row.secret.key"
+                :data-secret-state="row.state"
+              >
+                <span class="text-weight-medium mono">{{ row.secret.key }}</span>
+                <span class="os-text-muted"> · {{ row.secret.member }}</span>
+                <span v-if="row.state === 'set'" class="text-positive"> · set</span>
+                <span v-else-if="row.state === 'unset'" class="text-warning"> · not set</span>
+                <span v-else class="os-text-muted"> · not needed</span>
+                <div class="text-caption os-text-muted">{{ row.secret.description }}</div>
+                <div class="text-caption" data-secret-sentence>{{ row.sentence }}</div>
+              </div>
+            </section>
+
             <q-banner v-if="skippedRequired.length > 0" dense class="os-bg-tint-warn" data-skipped-required>
               <template #avatar><q-icon name="warning" /></template>
               You can install without {{ skippedRequired.join(', ') }}. Until it is provided, the team
@@ -895,6 +950,13 @@ function next() {
                 <div v-for="(item, index) in missing" :key="index" data-missing-item>{{ missingLine(item) }}</div>
               </div>
               <div v-else-if="missing && !uploading" class="q-mt-sm" data-nothing-missing>Nothing is missing: the team is ready.</div>
+
+              <div v-if="unsetSecrets.length > 0" class="q-mt-sm" data-unset-secrets>
+                <div>These keys are still not set on the Host. Each one's source fails until it is set:</div>
+                <div v-for="secret in unsetSecrets" :key="secret.key" :data-unset-secret="secret.key">
+                  <span class="mono">{{ secret.key }}</span> - {{ secret.setWith }}.
+                </div>
+              </div>
             </template>
           </div>
         </template>

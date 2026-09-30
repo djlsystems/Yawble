@@ -6,6 +6,7 @@ import type {
   SolutionPlan,
   SolutionPlanTrigger,
   SolutionPreview,
+  SolutionSecret,
   SolutionStep,
 } from '../api/types';
 
@@ -190,6 +191,20 @@ export function hostPlan(version = '1.1.0'): SolutionPlan {
   };
 }
 
+/**
+ * The preview's secrets, as the Host names them: by key, never a value. ADZUNA_APP_ID is set on the
+ * Host, USAJOBS_API_KEY is not, and THEMUSE_API_KEY is needed only when the Scout's sources hold
+ * `other` - which waits on the person's answer, so the Host says `needed: null`.
+ */
+export function hostSecrets(): SolutionSecret[] {
+  const setWith = (key: string) => `yawble secret set ${key} (it prompts for the value), then yawble up to restart the Host`;
+  return [
+    { member: 'Scout', field: 'adzunaAppId', key: 'ADZUNA_APP_ID', description: 'Your Adzuna application id.', required: false, when: null, set: true, needed: true, setWith: setWith('ADZUNA_APP_ID') },
+    { member: 'Scout', field: 'usajobsApiKey', key: 'USAJOBS_API_KEY', description: 'Your USAJOBS API key.', required: false, when: null, set: false, needed: true, setWith: setWith('USAJOBS_API_KEY') },
+    { member: 'Scout', field: 'themuseApiKey', key: 'THEMUSE_API_KEY', description: 'Your The Muse API key.', required: false, when: { setting: 'sources', value: 'other' }, set: false, needed: null, setWith: setWith('THEMUSE_API_KEY') },
+  ];
+}
+
 export function okCheck(plan = hostPlan()): SolutionCheck {
   return { ok: true, folder: plan.package.folder, plan, refusals: [] };
 }
@@ -198,8 +213,13 @@ export const Connections = [
   { id: 'conn-1', name: 'Work mail', provider: 'google', account: 'dana@example.com', status: 'ok' },
 ];
 
-export function installPreview(teamName = 'Job Tracker', nameRefusal: string | null = null, plan = hostPlan()): SolutionPreview {
-  return { ok: true, mode: 'install', teamName, nameRefusal, plan, connections: Connections };
+export function installPreview(
+  teamName = 'Job Tracker',
+  nameRefusal: string | null = null,
+  plan = hostPlan(),
+  secrets: SolutionSecret[] = [],
+): SolutionPreview {
+  return { ok: true, mode: 'install', teamName, nameRefusal, plan, connections: Connections, secrets };
 }
 
 export const UpdateDiff: SolutionDiff = {
@@ -293,7 +313,7 @@ export function fakeHost(routes: Route[], calls: Call[]) {
 }
 
 /** The routes an ordinary wizard run needs, each overridable by a route listed before it. */
-export function wizardRoutes(options: { installed?: InstalledSolution[]; plan?: SolutionPlan } = {}): Route[] {
+export function wizardRoutes(options: { installed?: InstalledSolution[]; plan?: SolutionPlan; secrets?: SolutionSecret[] } = {}): Route[] {
   const plan = options.plan ?? hostPlan();
   return [
     (call) => (call.method === 'POST' && call.url === '/api/solutions/check' ? reply(200, okCheck(plan)) : undefined),
@@ -301,7 +321,7 @@ export function wizardRoutes(options: { installed?: InstalledSolution[]; plan?: 
     (call) => {
       if (call.method !== 'POST' || call.url !== '/api/solutions/preview') return undefined;
       const team = (call.body as { team?: string }).team;
-      return reply(200, installPreview(team ?? plan.team.name, null, plan));
+      return reply(200, installPreview(team ?? plan.team.name, null, plan, options.secrets ?? []));
     },
   ];
 }

@@ -6,6 +6,7 @@ import type {
   SolutionPersonSetting,
   SolutionPlanTrigger,
   SolutionRefusal,
+  SolutionSecret,
   SolutionStep,
   SolutionWakeManager,
 } from '../api/types';
@@ -232,3 +233,34 @@ export function keptValueWords(value: unknown): string {
 
 export const settingKey = (setting: { member: string; setting: string }) => `${setting.member}/${setting.setting}`;
 export const slotKey = (input: { member: string; slot: string }) => `${input.member}/${input.slot}`;
+
+// --- Secrets -------------------------------------------------------------------------------------
+
+export type SecretState = 'set' | 'unset' | 'not-needed';
+
+/**
+ * Whether a secret is needed: the Host's word when it gave one, else from the value the person has
+ * chosen (or the update keeps) for the setting it depends on - a list holding the value, or a choice
+ * equal to it.
+ */
+export function secretNeeded(secret: SolutionSecret, value: unknown): boolean {
+  if (secret.needed !== null) return secret.needed;
+  if (!secret.when) return true;
+  if (Array.isArray(value)) return value.includes(secret.when.value);
+  return value === secret.when.value;
+}
+
+export function secretState(secret: SolutionSecret, needed: boolean): SecretState {
+  if (!needed) return 'not-needed';
+  return secret.set ? 'set' : 'unset';
+}
+
+/** One plain sentence per secret: set, not set (and what that means), or not needed. */
+export function secretSentence(secret: SolutionSecret, state: SecretState): string {
+  if (state === 'not-needed') {
+    const why = secret.when ? `${secret.member}'s ${secret.when.setting} leaves ${secret.when.value} off` : 'nothing uses it';
+    return `Not needed: ${why}.`;
+  }
+  if (state === 'set') return 'Set on this Host.';
+  return `Not set on this Host. That is not a problem for the install, but its source fails until it is set. Set it with: ${secret.setWith}.`;
+}
