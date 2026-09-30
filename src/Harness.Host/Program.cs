@@ -971,7 +971,9 @@ builder.Services.AddSingleton<ITeamPublisher>(sp => new TeamPublisher(
 builder.Services.AddSingleton(sp => new BacklogTipRecorder(
     sp.GetRequiredService<IBacklogStore>(),
     sp.GetRequiredService<IMessageLog>(),
-    sp.GetRequiredService<TeamRegistry>()));
+    sp.GetRequiredService<TeamRegistry>(),
+    sp.GetRequiredService<TeamPaths>(),
+    sp.GetRequiredService<GitRunner>()));
 
 builder.Services.AddSingleton(sp => new TeamAccess(
     sp.GetRequiredService<IUserStore>(),

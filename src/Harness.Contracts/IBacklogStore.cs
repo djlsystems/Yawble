@@ -203,6 +203,16 @@ public sealed record BacklogDispatch(
 public sealed record BacklogDispatchTip(long Dispatch, string Repo, string Sha, string RecordedAt);
 
 /// <summary>
+/// WHERE A DISPATCH STARTED IN ONE REPOSITORY: origin's default branch, and the team branch when it
+/// had one, as they stood when the dispatch was made. Recorded once. The dispatch's OWN work is what
+/// is beyond both, and only that is ever stored as landed - a fresh team branch sitting on the
+/// default branch, or a branch whose earlier work landed for an earlier item, proves nothing about
+/// this one.
+/// </summary>
+/// <param name="Repo">The folder name derived from the URL, as on <see cref="BacklogDispatchTip"/>.</param>
+public sealed record BacklogDispatchBase(long Dispatch, string Repo, string DefaultSha, string? TeamSha, string RecordedAt);
+
+/// <summary>
 /// The backlog's store. Its own module for the reason <see cref="BacklogItem"/>'s schema records.
 /// </summary>
 public interface IBacklogStore
@@ -336,6 +346,16 @@ public interface IBacklogStore
 
     /// <summary>The dispatch's recorded tips, one per repository, by repository name.</summary>
     Task<IReadOnlyList<BacklogDispatchTip>> TipsAsync(long dispatchId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records where the dispatch started in <paramref name="repo"/>, ONLY when nothing is recorded
+    /// for it yet: the start does not move. See <see cref="BacklogDispatchBase"/>.
+    /// </summary>
+    Task RecordBaseAsync(
+        long dispatchId, string repo, string defaultSha, string? teamSha, CancellationToken ct = default);
+
+    /// <summary>The dispatch's recorded starting points, one per repository, by repository name.</summary>
+    Task<IReadOnlyList<BacklogDispatchBase>> BasesAsync(long dispatchId, CancellationToken ct = default);
 
     /// <summary>
     /// Stores landed on the dispatch, ONLY when it has none yet: a stored landed is never

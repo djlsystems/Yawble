@@ -1227,6 +1227,14 @@ public static class BacklogEndpoints
         var record = await backlog.AddDispatchAsync(
             item.Id, stored, teams.LabelFor(stored), dispatched.Seq, actor, ct);
 
+        // WHERE THE DISPATCH STARTS IS READ BEFORE THE MANAGER IS TOLD, so nothing the team does
+        // for this item can be mistaken for where it started. Only work beyond it is ever stored as
+        // landed. See BacklogTipRecorder.RecordBaseAsync.
+        if (context.RequestServices.GetService<BacklogTipRecorder>() is { } recorder)
+        {
+            await recorder.RecordBaseAsync(record, ct);
+        }
+
         var manager = new ContainerId(stored, TeamRegistry.DefaultManagerName);
 
         await log.AppendAsync(

@@ -35,7 +35,7 @@ public sealed class FreshVolumeTests : IDisposable
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
     /// settings; `auth-008` is a plugin member's configuration and secret bindings; `auth-009` is who
     /// last set a member's own instructions, and when; `auth-010` is a trigger's wake choice and daily
-    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `backlog-002` is a dispatch's recorded tips and its stored landed.
+    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `backlog-002` is a dispatch's recorded tips, where it started and its stored landed.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()

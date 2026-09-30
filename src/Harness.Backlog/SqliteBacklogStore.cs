@@ -307,6 +307,15 @@ public sealed class SqliteBacklogStore : IBacklogStore
             await tips.ExecuteNonQueryAsync(ct);
         }
 
+        await using (var bases = connection.CreateCommand())
+        {
+            bases.Transaction = transaction;
+            bases.CommandText =
+                "DELETE FROM backlog_dispatch_bases WHERE dispatch IN (SELECT id FROM backlog_dispatches WHERE item = $id)";
+            bases.Parameters.AddWithValue("$id", Key(id));
+            await bases.ExecuteNonQueryAsync(ct);
+        }
+
         await using (var dispatches = connection.CreateCommand())
         {
             dispatches.Transaction = transaction;
@@ -475,6 +484,52 @@ public sealed class SqliteBacklogStore : IBacklogStore
         while (await reader.ReadAsync(ct))
         {
             rows.Add(new BacklogDispatchTip(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+        }
+
+        return rows;
+    }
+
+    public async Task RecordBaseAsync(
+        long dispatchId, string repo, string defaultSha, string? teamSha, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        // KEPT, NOT REPLACED: where the dispatch started is one moment, and a later write would
+        // move it past work that is the dispatch's own.
+        command.CommandText =
+            """
+            INSERT INTO backlog_dispatch_bases (dispatch, repo, default_sha, team_sha, recorded_at)
+            VALUES ($dispatch, $repo, $default, $team, $now)
+            ON CONFLICT (dispatch, repo) DO NOTHING;
+            """;
+        command.Parameters.AddWithValue("$dispatch", dispatchId);
+        command.Parameters.AddWithValue("$repo", repo);
+        command.Parameters.AddWithValue("$default", defaultSha);
+        command.Parameters.AddWithValue("$team", (object?)teamSha ?? DBNull.Value);
+        command.Parameters.AddWithValue("$now", Now());
+
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<BacklogDispatchBase>> BasesAsync(long dispatchId, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            "SELECT dispatch, repo, default_sha, team_sha, recorded_at FROM backlog_dispatch_bases"
+            + " WHERE dispatch = $dispatch ORDER BY repo";
+        command.Parameters.AddWithValue("$dispatch", dispatchId);
+
+        var rows = new List<BacklogDispatchBase>();
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new BacklogDispatchBase(
+                reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4)));
         }
 
         return rows;

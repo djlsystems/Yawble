@@ -99,6 +99,17 @@ public static class BacklogSchema
                 recorded_at  TEXT    NOT NULL,
                 PRIMARY KEY (dispatch, repo)
             );
+
+            -- Where the dispatch started, per repository: origin's default branch and the team
+            -- branch as they stood then. Landed is stored only for work beyond both.
+            CREATE TABLE backlog_dispatch_bases (
+                dispatch     INTEGER NOT NULL,
+                repo         TEXT    NOT NULL COLLATE NOCASE,
+                default_sha  TEXT    NOT NULL,
+                team_sha     TEXT    NULL,
+                recorded_at  TEXT    NOT NULL,
+                PRIMARY KEY (dispatch, repo)
+            );
             """),
     ];
 }

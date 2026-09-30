@@ -181,6 +181,204 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         Assert.Equal(sha, Assert.Single(await Backlog.TipsAsync(stored.Id, Ct)).Sha);
     }
 
+    [Fact]
+    public async Task Dispatching_records_where_the_dispatch_started_before_the_manager_is_told()
+    {
+        var person = await PersonAsync();
+        var team = await TeamAsync("Nu");
+        PushWork(team, "earlier work");
+
+        var item = await Backlog.CreateAsync(null, "Item for Nu", "body", "person@example.test", Ct);
+        (await person.PatchAsJsonAsync($"/api/backlog/{item.Id}", new { state = "ready" }, Ct)).EnsureSuccessStatusCode();
+        var dispatched = await person.PostAsync($"/api/teams/{team}/backlog/{item.Id}/dispatch", null, Ct);
+        Assert.Equal(HttpStatusCode.OK, dispatched.StatusCode);
+
+        var start = Assert.Single(await Backlog.BasesAsync((await CurrentDispatchAsync(item.Id)).Id, Ct));
+        Assert.Equal(Repo, start.Repo);
+        Assert.Equal(Run(_origin, "rev-parse", "trunk").Stdout.Trim(), start.DefaultSha);
+        Assert.Equal(Run(_origin, "rev-parse", $"team/{team}").Stdout.Trim(), start.TeamSha);
+    }
+
+    [Fact]
+    public async Task A_fresh_team_branch_with_no_work_of_its_own_is_not_landed_and_nothing_is_stored()
+    {
+        var person = await PersonAsync();
+        var team = await TeamAsync("Zeta");
+        var item = await DispatchAsync(team);
+
+        // The Manager cuts the team branch from trunk; no work yet. It is reachable from
+        // origin/trunk, and that proves nothing about the item.
+        var clone = Clone(team);
+        Git(clone, "branch", $"team/{team}");
+
+        var first = await ReadAsync(person, item);
+        Assert.Equal(BacklogLandedStates.Unknown, first.GetProperty("state").GetString());
+        Assert.Contains("own work", first.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        Assert.Null((await CurrentDispatchAsync(item)).LandedAt);
+
+        // The real work arrives, pushed and not merged: it reads pushed, not a kept landed.
+        Git(clone, "checkout", $"team/{team}");
+        File.WriteAllText(Path.Combine(clone, "zeta.txt"), "zeta\n");
+        Commit(clone, "zeta work");
+        Git(clone, "push", "origin", $"team/{team}");
+
+        Assert.Equal(BacklogLandedStates.Pushed, (await ReadAsync(person, item)).GetProperty("state").GetString());
+        Assert.Null((await CurrentDispatchAsync(item)).LandedAt);
+    }
+
+    [Fact]
+    public async Task A_second_item_on_a_team_whose_branch_already_landed_is_not_landed_before_its_own_work()
+    {
+        var person = await PersonAsync();
+        var team = await TeamAsync("Eta");
+        var first = await DispatchAsync(team);
+        PushWork(team, "eta one", alsoTo: "trunk");
+        var clone = Clone(team);
+        Git(clone, "fetch", "origin");
+        Git(clone, "branch", $"team/{team}", $"origin/team/{team}");
+        Assert.Equal(BacklogLandedStates.Landed, (await ReadAsync(person, first)).GetProperty("state").GetString());
+
+        // The same team is handed a second item; its branch is the first item's, already landed.
+        var second = await DispatchAsync(team);
+        var read = await ReadAsync(person, second);
+        Assert.Equal(BacklogLandedStates.Unknown, read.GetProperty("state").GetString());
+        Assert.Null((await CurrentDispatchAsync(second)).LandedAt);
+
+        // Its own work, pushed and not merged, reads pushed.
+        Git(clone, "checkout", $"team/{team}");
+        File.WriteAllText(Path.Combine(clone, "eta2.txt"), "eta2\n");
+        Commit(clone, "eta two");
+        var own = Run(clone, "rev-parse", "HEAD").Stdout.Trim();
+        Git(clone, "push", "origin", $"team/{team}");
+        Assert.Equal(BacklogLandedStates.Pushed, (await ReadAsync(person, second)).GetProperty("state").GetString());
+        Assert.Null((await CurrentDispatchAsync(second)).LandedAt);
+
+        // Merged: now it is landed, on its own sha.
+        Git(clone, "push", "origin", $"team/{team}:trunk");
+        Git(clone, "fetch", "origin");
+        Assert.Equal(BacklogLandedStates.Landed, (await ReadAsync(person, second)).GetProperty("state").GetString());
+        Assert.Equal(own, (await CurrentDispatchAsync(second)).LandedSha);
+    }
+
+    [Fact]
+    public async Task Merge_to_main_stores_landed_only_on_dispatches_whose_work_is_in_the_merge()
+    {
+        var person = await PersonAsync();
+        var team = await TeamAsync("Lambda");
+        var earlier = await DispatchAsync(team);
+        var sha = PushWork(team, "lambda work");
+
+        // Dispatched after the work it is about to be merged with was already on the team branch.
+        var later = await DispatchAsync(team);
+
+        var merged = await ActAsync(person, team, "merge-to-main");
+        Assert.Equal(HttpStatusCode.OK, merged.StatusCode);
+
+        var landed = await CurrentDispatchAsync(earlier);
+        Assert.NotNull(landed.LandedAt);
+        Assert.Equal(sha, landed.LandedSha);
+
+        var notItsWork = await CurrentDispatchAsync(later);
+        Assert.Null(notItsWork.LandedAt);
+        Assert.Empty(await Backlog.TipsAsync(notItsWork.Id, Ct));
+        Assert.NotEqual(BacklogLandedStates.Landed, (await ReadAsync(person, later)).GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task The_landed_at_answered_is_the_stored_one_even_when_another_reader_stored_it_first()
+    {
+        var person = await PersonAsync();
+        var team = await TeamAsync("Mu");
+        var item = await DispatchAsync(team);
+        var sha = PushWork(team, "mu work", alsoTo: "trunk");
+        Git(Clone(team), "fetch", "origin");
+
+        // A reader that loaded the dispatch before another reader stored landed on it.
+        var before = await CurrentDispatchAsync(item);
+        Assert.True(await Backlog.RecordLandedAsync(before.Id, sha, "trunk", Ct));
+        var stored = await CurrentDispatchAsync(item);
+        await Task.Delay(50, Ct);   // so a fresh UtcNow could not pass for the stored value
+
+        var services = _factory.Services;
+        var late = (await BacklogLandedState.ForAsync(
+            [before], services.GetRequiredService<TeamRegistry>(), services.GetRequiredService<TeamPaths>(),
+            services.GetRequiredService<GitRunner>(), new BacklogLandedCache(TimeSpan.Zero), Ct, store: Backlog))[item];
+
+        Assert.Equal(BacklogLandedStates.Landed, late.State);
+        Assert.Equal(Parse(stored.LandedAt!), late.LandedAt);
+
+        // And the first read over HTTP answers exactly what it stored.
+        var other = await DispatchAsync(team);
+        var clone = Clone(team);
+        Git(clone, "checkout", "-b", $"team/{team}", "origin/trunk");
+        File.WriteAllText(Path.Combine(clone, "mu2.txt"), "mu2\n");
+        Commit(clone, "mu two");
+        Git(clone, "push", "origin", $"team/{team}", $"team/{team}:trunk");
+        Git(clone, "fetch", "origin");
+
+        var first = await ReadAsync(person, other);
+        Assert.Equal(BacklogLandedStates.Landed, first.GetProperty("state").GetString());
+        Assert.Equal(Parse((await CurrentDispatchAsync(other)).LandedAt!), first.GetProperty("landedAt").GetDateTimeOffset());
+    }
+
+    [Fact]
+    public async Task A_newer_unmerged_publish_replaces_the_tip_and_a_gone_team_is_not_claimed_landed()
+    {
+        var person = await PersonAsync();
+        var team = await TeamAsync("Theta");
+        var item = await DispatchAsync(team);
+        var registry = _factory.Services.GetRequiredService<TeamRegistry>();
+        var publisher = _factory.Services.GetRequiredService<ITeamPublisher>();
+        var clone = Clone(team);
+        Git(clone, "checkout", "-b", $"team/{team}");
+        File.WriteAllText(Path.Combine(clone, "a.txt"), "a\n");
+        Commit(clone, "A");
+        var a = Run(clone, "rev-parse", "HEAD").Stdout.Trim();
+        await publisher.PublishAsync(team, registry.ReposFor(team), new ContainerId(team, "Manager"), null, Ct);
+
+        // A is merged outside the platform and never read; B follows and is not merged.
+        Git(_origin, "update-ref", "refs/heads/trunk", a);
+        File.WriteAllText(Path.Combine(clone, "b.txt"), "b\n");
+        Commit(clone, "B");
+        var b = Run(clone, "rev-parse", "HEAD").Stdout.Trim();
+        await publisher.PublishAsync(team, registry.ReposFor(team), new ContainerId(team, "Manager"), null, Ct);
+        Assert.Equal(b, Assert.Single(await Backlog.TipsAsync((await CurrentDispatchAsync(item)).Id, Ct)).Sha);
+
+        await TeamAsync("Iota");
+        Assert.Equal(HttpStatusCode.OK, (await person.DeleteAsync($"/api/teams/{team}", Ct)).StatusCode);
+
+        Assert.Equal(BacklogLandedStates.Unknown, (await ReadAsync(person, item)).GetProperty("state").GetString());
+        Assert.Null((await CurrentDispatchAsync(item)).LandedAt);
+    }
+
+    [Fact]
+    public async Task A_stored_landed_is_not_moved_by_a_later_proof_of_newer_work()
+    {
+        var person = await PersonAsync();
+        var team = await TeamAsync("Kappa");
+        var item = await DispatchAsync(team);
+        var sha = PushWork(team, "kappa", alsoTo: "trunk");
+        var clone = Clone(team);
+        Git(clone, "fetch", "origin");
+        Assert.Equal(BacklogLandedStates.Landed, (await ReadAsync(person, item)).GetProperty("state").GetString());
+        var stored = await CurrentDispatchAsync(item);
+
+        // More work merged later: a derive would now prove a newer sha.
+        Git(clone, "checkout", "-b", $"team/{team}", $"origin/team/{team}");
+        File.WriteAllText(Path.Combine(clone, "k2.txt"), "k2\n");
+        Commit(clone, "k2");
+        Git(clone, "push", "origin", $"team/{team}", $"team/{team}:trunk");
+        Git(clone, "fetch", "origin");
+        await ReadAsync(person, item);
+
+        var kept = await CurrentDispatchAsync(item);
+        Assert.Equal(stored.LandedAt, kept.LandedAt);
+        Assert.Equal(sha, kept.LandedSha);
+    }
+
+    private static DateTimeOffset Parse(string at) =>
+        DateTimeOffset.Parse(at, System.Globalization.CultureInfo.InvariantCulture);
+
     /// <summary>An action as a person presses it: again while the answer is 409 "still working".</summary>
     private static async Task<HttpResponseMessage> ActAsync(HttpClient person, string team, string action)
     {
@@ -212,8 +410,17 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         // ABOVE THE TEAM'S FLOOR, as a real dispatch's correlation is: the row it wrote.
         var row = await _factory.Services.GetRequiredService<IMessageLog>().AppendAsync(
             new NewMessage("test.dispatched", "{}", "test", null), Ct);
-        await Backlog.AddDispatchAsync(item.Id, team, team, row.Seq, "person@example.test", Ct);
+        var dispatch = await Backlog.AddDispatchAsync(item.Id, team, team, row.Seq, "person@example.test", Ct);
+
+        // WHERE IT STARTS, read as the dispatch routes read it before the Manager is told.
+        await _factory.Services.GetRequiredService<BacklogTipRecorder>().RecordBaseAsync(dispatch, Ct);
         return item.Id;
+    }
+
+    private async Task<JsonElement> ReadAsync(HttpClient person, long item)
+    {
+        _factory.Services.GetRequiredService<BacklogLandedCache>().Clear();
+        return await LandedOverHttpAsync(person, item);
     }
 
     /// <summary>Commits on top of trunk from a scratch clone and pushes them as team/{id} (and to
