@@ -1017,7 +1017,16 @@ builder.Services.AddSingleton(sp => new TeamReset(
     sp.GetRequiredService<IPendingDeliveries>(),
     sp.GetRequiredService<IMessageLog>(),
     sp.GetRequiredService<TeamPaths>(),
-    sp.GetRequiredService<FolderRemoval>()));
+    sp.GetRequiredService<FolderRemoval>(),
+    sp.GetRequiredService<RepositoryReset>()));
+
+// Reset repositories: trees through the one WorktreeRemoval, git through the one GitRunner (as the
+// agent, and into a local origin as the Host), kept branches named on the log.
+builder.Services.AddSingleton(sp => new RepositoryReset(
+    sp.GetRequiredService<GitRunner>(),
+    sp.GetRequiredService<WorktreeRemoval>(),
+    sp.GetRequiredService<TeamPaths>(),
+    sp.GetRequiredService<IMessageLog>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a deletion would silently
 // skip if it were optional, and a MemberDeletion missing its pending-delivery store leaves rows the
@@ -2866,19 +2875,15 @@ app.MapDelete("/api/teams/{team}", async (
 // Handing a team a clean slate WITHOUT deleting it: keep the Agent Containers, reset the substrate
 // underneath them.
 //
-// GATED STRUCTURALLY, and that is the whole permission model. It declares {team}, which is the same
-// declaration that lets its handler read a team at all, so TeamGate covers it - and "anyone who
-// works in this team may reset it" needs no tier and no filter.
-//
-// Deliberately NOT HumansOnly, which is what DELETING a team is. That destroys every member's
-// configuration; this destroys none of it.
+// It declares {team}, so TeamGate covers it, and it is HumansOnly (see below): a member able to
+// reset its own team could erase its own evidence, and Reset repositories removes code.
 //
 // The ORDER the work happens in is TeamReset's, and its doc comment is where the reasoning lives.
 // This route's job is authority, the two refusals, and reporting what actually happened.
 app.MapPost("/api/teams/{team}/reset", async (
     [Description(Describe.Team)] string team,
     TeamResetOptions options,
-    TeamReset reset, TenantLogging audit, TeamRegistry teams, HttpContext context,
+    TeamReset reset, TenantLogging audit, ITenantLog tenantLog, TeamRegistry teams, HttpContext context,
     CancellationToken ct) =>
 {
     // The LABEL, read before the reset - an audit row naming an identifier a person has never seen
@@ -2889,7 +2894,22 @@ app.MapPost("/api/teams/{team}/reset", async (
 
     try
     {
-        done = await reset.ResetAsync(team, options, ct);
+        // RESET REPOSITORIES' ROW COMES FIRST, and is not swallowed: a tree or branch removed with
+        // no record of who asked is the one outcome refused, so a row that cannot be written stops
+        // the whole reset before anything moves. It names what may go; the team.reset row after
+        // names what went and what was kept.
+        done = await reset.ResetAsync(team, options, ct, (plan, token) => tenantLog.WriteAsync(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+            context.User.FindFirstValue(ClaimTypes.Email),
+            TenantActions.TeamResetRepositories, teams.ExistingName(team) ?? team, label,
+            JsonSerializer.Serialize(new
+            {
+                members = options.Members,
+                worktrees = plan.Worktrees,
+                branches = plan.Branches,
+                teamBranch = plan.TeamBranch,
+            }, JsonSerializerOptions.Web),
+            token));
     }
     catch (TeamBusyException busy)
     {
@@ -2898,6 +2918,19 @@ app.MapPost("/api/teams/{team}/reset", async (
         // idle half - a team where some members remember the last task and others do not is a worse
         // state than either.
         return Results.Conflict(new { error = busy.Message, busy = busy.Busy });
+    }
+    catch (ResetDefaultBranchNotKnownException unknown)
+    {
+        // The team branch is reset to the STORED default branch or not at all, and the existing
+        // sentence says which. Nothing else changes: the refusal comes before anything moves.
+        await audit.WriteAsync(
+            context, TenantActions.TeamResetRepositories, teams.ExistingName(team) ?? team, label,
+            new { refused = true, reason = unknown.Message }, ct);
+        return Results.Conflict(new { error = unknown.Message, repo = unknown.Repo });
+    }
+    catch (ResetNotRecordedException unrecorded)
+    {
+        return Results.Json(new { error = unrecorded.Message }, statusCode: StatusCodes.Status500InternalServerError);
     }
 
     if (done is null) return Results.NotFound(new { error = $"No team '{team}'." });
@@ -2919,6 +2952,11 @@ app.MapPost("/api/teams/{team}/reset", async (
             cleared = done.Cleared,
             failures = done.Failures,
             remaining = done.Remaining,
+
+            // Each tree and branch removed, and each kept with its reason. Absent when not asked.
+            repositories = done.Repositories is null
+                ? (JsonElement?)null
+                : JsonSerializer.SerializeToElement(done.Repositories, JsonSerializerOptions.Web),
         },
         ct);
 
@@ -2953,10 +2991,33 @@ app.MapPost("/api/teams/{team}/reset", async (
         + "which is not a member and is never targeted.\n\n"
         + "409 when any named member is running or holds accepted work: the whole reset is refused, "
         + "never the idle half.\n\n"
+        + "`resetRepositories` removes each named member's worktrees (never forced) and its merged or "
+        + "empty branches, and with EVERY member named resets `team/<id>` to the stored default "
+        + "branch; `repositories` in the answer names each tree and branch removed and each kept, "
+        + "with the reason. Its `team.reset-repositories` tenant row is written before anything "
+        + "moves: 500 and nothing reset when it cannot be. 409 with the existing sentence, and "
+        + "nothing reset, when every member is named and a repository's default branch is not known.\n\n"
         + "404 for an unknown team. A member the team does not hold is skipped rather than "
         + "refused.\n\n"
-        + "**Anyone with access to the team.** Deleting a team is a person's action; this is not, "
-        + "because it destroys none of what a deletion does.");
+        + "**A person's action.**");
+
+// WHAT RESET REPOSITORIES WOULD REMOVE, read before the person confirms: the dialog lists the
+// ticked members' trees and branches, and the team branch when every member is ticked. HumansOnly
+// for the reason the reset itself is.
+app.MapGet("/api/teams/{team}/reset/repositories", async (
+    [Description(Describe.Team)] string team,
+    TeamReset reset, CancellationToken ct) =>
+    await reset.PreviewRepositoriesAsync(team, ct) is { } preview
+        ? Results.Ok(preview)
+        : Results.NotFound(new { error = $"No team '{team}'." }))
+    .WithTags("Teams")
+    .HumansOnly()
+    .WithSummary("List what Reset repositories would remove")
+    .WithDescription(
+        "Every member's worktrees and local branches in every team repository, each with its "
+        + "member, and the team branch `team/<id>` that is reset when every member is ticked. "
+        + "`defaultBranchNotKnown` names each repository whose default branch is not known, for "
+        + "which that reset is refused. Reads only; changes nothing. 404 for an unknown team.");
 
 app.MapPost("/api/teams/{team}/pause", async (
     [Description(Describe.Team)] string team,

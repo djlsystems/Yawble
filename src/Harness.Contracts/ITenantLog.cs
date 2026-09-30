@@ -53,6 +53,12 @@ public static class TenantActions
     /// </summary>
     public const string TeamReset = "team.reset";
 
+    /// <summary>A person asked a reset to reset the team's repositories. Written BEFORE anything
+    /// moves, naming every tree and branch it may remove and whether the team branch is reset; when
+    /// it cannot be written nothing is reset. What was removed and kept is on the
+    /// <see cref="TeamReset"/> row after it.</summary>
+    public const string TeamResetRepositories = "team.reset-repositories";
+
     /// <summary>
     /// A team was created carrying another team's configuration. Its own verb rather than a
     /// <c>team.created</c> with a detail field, because the question an audit asks is "where did

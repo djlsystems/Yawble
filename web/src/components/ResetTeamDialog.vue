@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
-import { resetTeam } from '../api/client';
-import type { Team, TeamWasReset } from '../api/types';
-import { choicesFor, requestFrom, wouldDoSomething } from '../lib/reset';
+import { previewResetRepositories, resetTeam } from '../api/client';
+import type { RepositoryResetPreview, Team, TeamWasReset } from '../api/types';
+import { choicesFor, repositoryLosses, requestFrom, wouldDoSomething } from '../lib/reset';
 import { useConsoleStore } from '../stores/console';
 
 /**
@@ -41,6 +41,11 @@ const busy = ref(false);
 const done = ref<TeamWasReset | null>(null);
 const failed = ref('');
 
+/** What Reset repositories would remove, read when its box is first ticked in this opening - never
+ *  on open, so a reset that leaves code alone asks git nothing. */
+const preview = ref<RepositoryResetPreview | null>(null);
+const previewFailed = ref('');
+
 /** Re-seeded on every OPEN rather than once, because the team may have gained or lost members since
  *  the last time — and a stale map would silently drop a new member from every reset. */
 watch(open, (showing) => {
@@ -49,7 +54,27 @@ watch(open, (showing) => {
   choices.value = choicesFor(members.value.map((m) => m.id));
   done.value = null;
   failed.value = '';
+  preview.value = null;
+  previewFailed.value = '';
 });
+
+watch(
+  () => choices.value.resetRepositories,
+  async (ticked) => {
+    if (!ticked || preview.value) return;
+
+    previewFailed.value = '';
+
+    try {
+      preview.value = await previewResetRepositories(props.team.id);
+    } catch (cause) {
+      previewFailed.value = cause instanceof Error ? cause.message : String(cause);
+    }
+  },
+);
+
+/** The ticked members' trees and branches, and the team branch when every member is ticked. */
+const losses = computed(() => (preview.value ? repositoryLosses(preview.value, choices.value) : null));
 
 const ready = computed(() => wouldDoSomething(choices.value));
 
@@ -146,6 +171,39 @@ function finish() {
           Cleared {{ done.cleared.length }} folder(s).
         </div>
 
+        <!-- WHAT RESET REPOSITORIES DID, and above all what it KEPT: a tree or branch that would
+             have lost work stays, and the person decides what happens to it. -->
+        <div v-if="done.repositories" class="reset-repositories-result text-body2 q-mb-sm">
+          <div>
+            Removed {{ done.repositories.worktreesRemoved.length }} worktree(s) and deleted
+            {{ done.repositories.branchesDeleted.length }} branch(es).
+          </div>
+          <div v-for="item in done.repositories.teamBranchReset" :key="`reset-${item.repo}-${item.name}`">
+            {{ item.name }} ({{ item.repo }}): {{ item.reason }}
+          </div>
+          <template
+            v-if="
+              done.repositories.worktreesKept.length > 0 ||
+              done.repositories.branchesKept.length > 0 ||
+              done.repositories.teamBranchKept.length > 0
+            "
+          >
+            <div class="q-mt-xs">Kept, because removing them would lose work:</div>
+            <ul class="q-my-xs">
+              <li
+                v-for="item in [
+                  ...done.repositories.worktreesKept,
+                  ...done.repositories.branchesKept,
+                  ...done.repositories.teamBranchKept,
+                ]"
+                :key="`kept-${item.repo}-${item.name}`"
+              >
+                {{ item.name }} ({{ item.repo }}): {{ item.reason }}
+              </li>
+            </ul>
+          </template>
+        </div>
+
         <!-- Named, not swallowed. The reset happened either way, so this is a WARNING rather than an
              error: the usual cause is a file still held by a child that has not finished exiting. -->
         <q-banner v-if="done.failures.length > 0" dense class="bg-warning text-black">
@@ -209,6 +267,50 @@ function finish() {
               :disable="busy"
               dense
             />
+
+            <q-checkbox
+              v-model="choices.resetRepositories"
+              label="Reset repositories"
+              color="negative"
+              :disable="busy"
+              dense
+            />
+          </div>
+
+          <!-- WHAT IS LOST, READ BEFORE THE PERSON CONFIRMS. One line on what it does, then the
+               list: the ticked members' trees and branches, and the team branch only when every
+               member is ticked - the server's rule, shown rather than decided here. -->
+          <div v-if="choices.resetRepositories" class="reset-repositories q-mt-xs q-ml-lg">
+            <div class="os-body os-text-muted">
+              Removes the ticked members' worktrees and branches, and with every member ticked
+              resets the team branch to the default branch. Nothing is forced: a worktree or branch
+              holding work that is on no remote is kept and named.
+            </div>
+
+            <div v-if="previewFailed" class="text-negative q-mt-xs">{{ previewFailed }}</div>
+            <div v-else-if="!losses" class="os-text-muted q-mt-xs">Reading what would be removed…</div>
+            <template v-else>
+              <div class="text-body2 q-mt-xs">What is lost:</div>
+              <ul class="reset-repositories-losses q-my-xs">
+                <li v-for="tree in losses.worktrees" :key="`wt-${tree.repo}-${tree.name}`">
+                  {{ labelFor(tree.member ?? '') }}'s worktree {{ tree.name }} ({{ tree.repo }})
+                </li>
+                <li v-for="branch in losses.branches" :key="`br-${branch.repo}-${branch.name}`">
+                  {{ labelFor(branch.member ?? '') }}'s branch {{ branch.name }} ({{ branch.repo }})
+                </li>
+                <li v-if="losses.teamBranch">The team branch {{ losses.teamBranch }}</li>
+                <li
+                  v-if="losses.worktrees.length === 0 && losses.branches.length === 0 && !losses.teamBranch"
+                >
+                  Nothing: the ticked members have no worktrees or branches.
+                </li>
+              </ul>
+              <q-banner v-if="losses.refusedFor.length > 0" dense class="bg-warning text-black">
+                The default branch of {{ losses.refusedFor.join(', ') }} is not known, so resetting
+                the team branch will be refused and nothing will change. Fetch the repository, or
+                set it in Team settings.
+              </q-banner>
+            </template>
           </div>
 
           <!-- NO "RESET CONCIERGE" BOX, AND THERE MUST NOT BE ONE. A Concierge is keyed on the

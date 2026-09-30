@@ -446,6 +446,20 @@ public static class EventCatalog
             + "uncommitted edits, commits not on origin, or git refused it. Source is the member the "
             + "tree belongs to."),
 
+        // OUT OF THE LEDGER for `repo.worktreeLeft`'s reason: a person decides what happens to it.
+        new(MessageTypes.RepoBranchKept, EventPublisher.Platform, HighVolume: false, InLedger: false,
+            [
+                Source,
+                new(PayloadFields.Repo, EventFieldKind.String,
+                    "Which repository, by the folder name derived from its URL - never the URL."),
+                new(PayloadFields.Branch, EventFieldKind.String, "The local branch that was kept."),
+                new(PayloadFields.Reason, EventFieldKind.String,
+                    "Why it was kept: its commits are on no remote, or it is checked out in a tree that was kept."),
+            ],
+            "A reset of a team's repositories kept one of a member's branches, because a branch is "
+            + "never force-deleted: it holds commits on no remote, or a kept tree has it checked out. "
+            + "Source is the member the branch belongs to."),
+
         // OUT OF THE LEDGER for `repo.pushed`'s reason: a receipt for a person, nothing a
         // member acts on. `team` IS IN THE PAYLOAD because the publisher is the person who pressed
         // Bring current, whose Source carries no team.

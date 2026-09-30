@@ -51,7 +51,17 @@ public sealed record TeamResetOptions(
     [property: Description(
         "Empty the team's shared documents, `teams/{team}/docs`. Team-wide rather than per member, "
         + "because the folder is.")]
-    bool ClearSharedDocuments = false);
+    bool ClearSharedDocuments = false,
+
+    [property: Description(
+        "Reset the team's repositories. For each named member, every worktree in every team "
+        + "repository is removed without `--force` and pruned, then its merged or empty local branches "
+        + "are deleted; a tree with uncommitted edits or commits on no remote, and a branch with "
+        + "commits on no remote, are KEPT and named. With EVERY member named, `team/<id>` is also "
+        + "reset to the stored default branch and deleted on origin when it holds nothing the default "
+        + "branch lacks. The default branch itself is never moved, pushed or deleted, and a "
+        + "contributor-mode fork is never touched.")]
+    bool ResetRepositories = false);
 
 // THERE IS NO `ResetConcierge` FLAG, and it was DELETED rather than left deprecated. A Concierge is
 // keyed on the PERSON - one per signed-in user, serving every team they reach - so no team-scoped
@@ -81,7 +91,10 @@ public sealed record TeamWasReset(
 
     /// <summary>Every path a clear could not remove. Recorded by path and retried; a retry
     /// removes only these paths, never what the member has written since.</summary>
-    IReadOnlyList<string> Remaining);
+    IReadOnlyList<string> Remaining,
+
+    /// <summary>What resetting the repositories removed and kept; null when it was not asked.</summary>
+    RepositoriesReset? Repositories = null);
 
 /// <summary>
 /// A targeted member is running, holds queued work, or has accepted a delivery it has not finished.
@@ -128,10 +141,15 @@ public sealed class TeamBusyException(string team, IReadOnlyList<string> busy)
 /// 4. <b>The purge, if asked</b> - AFTER flooring, never before. Flooring is what makes the team
 ///    correct; the purge is disk and confidentiality. A purge that fails leaves a reset that
 ///    succeeded.
-/// 5. <b>Directories last</b>, for TeamDeletion's stated reason: the only step that is not a
+/// 5. <b>Directories</b>, for TeamDeletion's stated reason: the only step that is not a
 ///    database write and the only one that can fail halfway. Emptied through
 ///    <see cref="FolderRemoval"/>, as a team root is removed; what remains is NAMED path by path,
 ///    not swallowed, and recorded to be retried.
+/// 6. <b>Repositories last</b>, when asked, through <see cref="RepositoryReset"/>: trees never
+///    forced, branches deleted only when nothing on them is lost, the team branch only with every
+///    member ticked. Its PLAN is read in step 0, where a default branch that is not known refuses
+///    the whole reset, and the plan's <c>team.reset-repositories</c> row is written there too,
+///    before anything moves: no row, no reset.
 /// </summary>
 public sealed class TeamReset(
     TeamRegistry teams,
@@ -141,7 +159,8 @@ public sealed class TeamReset(
     IPendingDeliveries pending,
     IMessageLog log,
     TeamPaths paths,
-    FolderRemoval? removal = null)
+    FolderRemoval? removal = null,
+    RepositoryReset? repositories = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -156,8 +175,13 @@ public sealed class TeamReset(
     /// is not a fault.
     /// </summary>
     /// <exception cref="TeamBusyException">A targeted member is running or holds accepted work.</exception>
+    /// <exception cref="ResetDefaultBranchNotKnownException">Repositories and every member asked
+    /// for while a repository's default branch is not known.</exception>
+    /// <exception cref="ResetNotRecordedException"><paramref name="recordRepositories"/> threw: the
+    /// row naming what the repository reset may remove was not written, so nothing was reset.</exception>
     public async Task<TeamWasReset?> ResetAsync(
-        string team, TeamResetOptions options, CancellationToken ct = default)
+        string team, TeamResetOptions options, CancellationToken ct = default,
+        Func<RepositoryResetPlan, CancellationToken, Task>? recordRepositories = null)
     {
         // The STORED spelling, resolved once. Every path and row key below is built from it, so
         // taking the caller's capitalisation clears a directory that is not there and leaves the one
@@ -189,6 +213,33 @@ public sealed class TeamReset(
         }
 
         if (busy.Count > 0) throw new TeamBusyException(stored, busy);
+
+        // Still step 0: the repository plan, and its row, before anything moves.
+        IReadOnlyList<RepoResetTarget> repos = [];
+        RepositoryResetPlan? plan = null;
+
+        if (options.ResetRepositories)
+        {
+            var reset = repositories
+                ?? throw new InvalidOperationException("This reset cannot reset repositories: it was built without them.");
+
+            repos = RepoTargetsOf(stored);
+
+            var everyMember = teams.ContainerIdsOf(stored).All(id => targeted.Contains(id));
+            plan = await reset.PlanAsync(stored, repos, targeted.Select(id => id.Name).ToList(), everyMember, ct);
+
+            if (recordRepositories is not null)
+            {
+                try
+                {
+                    await recordRepositories(plan, ct);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    throw new ResetNotRecordedException(stored, exception);
+                }
+            }
+        }
 
         var failures = new List<string>();
 
@@ -264,9 +315,41 @@ public sealed class TeamReset(
             }
         }
 
+        // 6. The repositories.
+        var reposReset = plan is null ? null : await repositories!.ResetAsync(stored, repos, plan, ct);
+
         return new TeamWasReset(
-            stored, head, floored, report.Purged, report.Retained, cleared, failures, remaining);
+            stored, head, floored, report.Purged, report.Retained, cleared, failures, remaining, reposReset);
     }
+
+    /// <summary>
+    /// What Reset repositories would remove for each member, as the dialog lists it before the
+    /// person confirms. Read-only. Null for no such team.
+    /// </summary>
+    public async Task<RepositoryResetPreview?> PreviewRepositoriesAsync(string team, CancellationToken ct = default)
+    {
+        if (teams.ExistingName(team) is not { } stored || repositories is null) return null;
+
+        var repos = RepoTargetsOf(stored);
+        var members = teams.ContainerIdsOf(stored).Select(id => id.Name).ToList();
+
+        // Never refused: a preview that could not be shown because a default branch is not known
+        // would hide the very thing that says the team-branch step will be refused.
+        var plan = await repositories.PlanAsync(stored, repos, members, everyMember: false, ct);
+
+        return new RepositoryResetPreview(
+            plan.Worktrees,
+            plan.Branches,
+            RepositoryReset.TeamBranchOf(stored),
+            [.. repos.Where(repo => Directory.Exists(repo.ClonePath) && repo.DefaultBranch is null).Select(repo => repo.Repo)]);
+    }
+
+    private IReadOnlyList<RepoResetTarget> RepoTargetsOf(string stored) =>
+        [.. teams.ReposFor(stored).Select(RepoUrls.DeriveName).Select(repo => new RepoResetTarget(
+            repo,
+            Path.Combine(paths.ReposFor(stored), repo, "main"),
+            teams.DefaultBranchFor(stored, repo).Branch,
+            teams.ContributorFor(stored, repo).ContributorMode))];
 
     /// <summary>
     /// The targeted members' messages, gone.

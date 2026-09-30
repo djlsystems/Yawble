@@ -320,6 +320,14 @@ public static class MessageTypes
     public const string RepoWorktreeLeft = "repo.worktreeLeft";
 
     /// <summary>
+    /// A MEMBER'S BRANCH A RESET WOULD HAVE DELETED AND DID NOT. Written when a person resets a
+    /// team's repositories and one of a ticked member's local branches holds commits on no remote,
+    /// or is still checked out in a tree that was kept. Branches are never force-deleted, so it
+    /// stays and this row names it and why. Its Source is the member the branch belongs to.
+    /// </summary>
+    public const string RepoBranchKept = "repo.branchKept";
+
+    /// <summary>
     /// A CONTRIBUTOR-MODE FORK'S DEFAULT BRANCH WAS FAST-FORWARDED TO UPSTREAM'S, by Bring
     /// current in the Git dialog: <c>git push origin upstream/&lt;default&gt;:refs/heads/&lt;default&gt;</c>,
     /// never forced. The one push of a default branch the platform makes. Appended AFTER the push

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { choicesFor, requestFrom, wouldDoSomething, type ResetChoices } from '../reset'
+import { choicesFor, repositoryLosses, requestFrom, wouldDoSomething, type ResetChoices } from '../reset'
+import type { RepositoryResetPreview } from '../../api/types'
 
 const choices = (over: Partial<ResetChoices> = {}): ResetChoices => ({
   ...choicesFor(['Manager', 'Digger']),
@@ -86,5 +87,41 @@ describe('whether a reset would do anything', () => {
 
   it('is true for the ordinary case', () => {
     expect(wouldDoSomething(choices())).toBe(true)
+  })
+})
+
+describe('Reset repositories', () => {
+  const preview: RepositoryResetPreview = {
+    worktrees: [
+      { repo: 'Widget', name: '/r/Widget/wt_Manager_1', member: 'Manager' },
+      { repo: 'Widget', name: '/r/Widget/wt_Digger_2', member: 'Digger' },
+    ],
+    branches: [{ repo: 'Widget', name: 'digger/2', member: 'Digger' }],
+    teamBranch: 'team/alpha',
+    defaultBranchNotKnown: ['Widget'],
+  }
+
+  it('is off when the dialog opens', () => {
+    expect(choicesFor(['Manager']).resetRepositories).toBe(false)
+  })
+
+  it('is sent only when ticked, and alone is enough to reset', () => {
+    expect(requestFrom(choices({ resetRepositories: true })).resetRepositories).toBe(true)
+    expect('resetRepositories' in requestFrom(choices())).toBe(false)
+    expect(wouldDoSomething(choices({ deleteMemory: false, resetRepositories: true }))).toBe(true)
+  })
+
+  it('lists only the ticked members, and the team branch only when every member is ticked', () => {
+    const one = repositoryLosses(preview, choices({ resetRepositories: true }))
+    expect(one.worktrees.map((t) => t.member)).toEqual(['Manager'])
+    expect(one.branches).toEqual([])
+    expect(one.teamBranch).toBeNull()
+    expect(one.refusedFor).toEqual([])
+
+    const all = repositoryLosses(preview, choices({ members: { Manager: true, Digger: true } }))
+    expect(all.worktrees).toHaveLength(2)
+    expect(all.branches.map((b) => b.name)).toEqual(['digger/2'])
+    expect(all.teamBranch).toBe('team/alpha')
+    expect(all.refusedFor).toEqual(['Widget'])
   })
 })
