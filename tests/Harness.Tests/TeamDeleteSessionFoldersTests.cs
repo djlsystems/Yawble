@@ -153,6 +153,33 @@ public sealed class TeamDeleteSessionFoldersTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_folder_a_live_teams_workspace_dashes_to_as_well_is_kept_and_not_counted()
+    {
+        await _teams.CreateAsync("Alpha", "fake", memberAgents: ["fake"], ct: Ct);
+        await _teams.CreateAsync("Alpha-workspaces-X", "fake", memberAgents: ["fake"], ct: Ct);
+        var own = _paths.WorkspaceFor(Assert.Single(_teams.ContainerIdsOf("Alpha")));
+        var liveWorkspace = _paths.WorkspaceFor(Assert.Single(_teams.ContainerIdsOf("Alpha-workspaces-X")));
+
+        // A folder left in the deleted team's workspaces whose path dashes exactly as the live
+        // team's workspace does: `/` and `-` both become `-`.
+        var colliding = Path.Combine(_paths.RootFor("Alpha"), "workspaces", "X-workspaces-" + Path.GetFileName(liveWorkspace));
+        Directory.CreateDirectory(colliding);
+        Assert.NotEqual(liveWorkspace, colliding);
+        Assert.Equal(LiveView.Dashed(liveWorkspace), LiveView.Dashed(colliding));
+
+        var doomed = Write(Projects(own), "session.jsonl");
+        var live = Write(Projects(liveWorkspace), "session.jsonl");
+
+        var deleted = await _deletion.DeleteAsync("Alpha", ct: Ct);
+
+        Assert.NotNull(deleted);
+        Assert.False(File.Exists(doomed));
+        Assert.True(File.Exists(live), "the live team's session folder was removed");
+        Assert.Equal(1, deleted.SessionFolders);
+        Assert.Empty(deleted.SessionFoldersRemaining);
+    }
+
+    [Fact]
     public async Task A_session_folder_that_is_a_link_is_removed_as_a_link_and_what_it_points_at_is_kept()
     {
         await _teams.CreateAsync("Alpha", "fake", memberAgents: ["fake"], ct: Ct);
