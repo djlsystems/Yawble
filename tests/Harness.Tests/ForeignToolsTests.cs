@@ -176,14 +176,21 @@ public sealed class ForeignToolsTests
     [Fact]
     public void Copilot_offers_different_own_tools_on_another_model_and_the_preset_list_judges_them()
     {
-        // mai-code-1.1-flash is offered create, edit and grep where gpt-6-luna gets apply_patch; the
-        // copilot preset lists the latter, so a run on that model is offered tools it does not list.
+        // mai-code-1.1-flash is offered create, edit and grep where gpt-6-luna gets apply_patch. The
+        // copilot preset lists both sets, so a run on either model is clean.
         var use = Extract(LiveView.CopilotEvents, "ForeignTools", "copilot-no-builtin-servers.jsonl");
         Assert.True(use.OfferedComplete);
         Assert.DoesNotContain(use.Offered, t => t.Server is not null);
+        Assert.Contains(use.Offered, t => t.ToString() == "grep");
 
-        var finding = ForeignToolsJudge.Judge(use, Allowance("copilot-headless"));
-        Assert.Equal(["create", "edit", "grep"], Names(finding.Offered));
+        var copilot = Allowance("copilot-headless");
+        Assert.Equal(ForeignToolsStatus.Clean, ForeignToolsJudge.Judge(use, copilot).Status);
+
+        // The list still judges each of the CLI's own tools: one it does not name is foreign.
+        var withoutGrep = copilot with { AllowedTools = [.. copilot.AllowedTools!.Where(t => t != "grep")] };
+        var finding = ForeignToolsJudge.Judge(use, withoutGrep);
+        Assert.Equal(ForeignToolsStatus.Foreign, finding.Status);
+        Assert.Equal(["grep"], Names(finding.Offered));
         Assert.Equal(ForeignToolsStatus.NotVerified, ForeignToolsJudge.Judge(use, NotVerified("copilot-headless")).Status);
     }
 
