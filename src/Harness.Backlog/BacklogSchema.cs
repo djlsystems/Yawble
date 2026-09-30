@@ -22,7 +22,7 @@ namespace Harness.Backlog;
 /// </para>
 ///
 /// <para>
-/// ONE STEP. A change is a NEW step after this one; this id is permanent.
+/// A change is a NEW step after the last one; a shipped id is permanent.
 /// </para>
 ///
 /// <para>
@@ -78,6 +78,38 @@ public static class BacklogSchema
             );
 
             CREATE INDEX backlog_dispatches_item ON backlog_dispatches(item, id);
+            """),
+
+        // LANDED SURVIVES CLEANUP. The work's tip per dispatch and repository, recorded
+        // when the team's publish pushes its branch, and landed stored on the dispatch once proven
+        // so it outlives the branch, the clone and the team. Nullable columns: every dispatch
+        // before this step simply has not been proven yet.
+        new MigrationStep(
+            "backlog-002",
+            """
+            ALTER TABLE backlog_dispatches ADD COLUMN landed_at TEXT NULL;
+            ALTER TABLE backlog_dispatches ADD COLUMN landed_sha TEXT NULL;
+            ALTER TABLE backlog_dispatches ADD COLUMN landed_branch TEXT NULL;
+
+            -- No foreign key, for the reason backlog_dispatches has none. DeleteAsync removes these.
+            CREATE TABLE backlog_dispatch_tips (
+                dispatch     INTEGER NOT NULL,
+                repo         TEXT    NOT NULL COLLATE NOCASE,
+                sha          TEXT    NOT NULL,
+                recorded_at  TEXT    NOT NULL,
+                PRIMARY KEY (dispatch, repo)
+            );
+
+            -- Where the dispatch started, per repository: origin's default branch and the team
+            -- branch as they stood then. Landed is stored only for work beyond both.
+            CREATE TABLE backlog_dispatch_bases (
+                dispatch     INTEGER NOT NULL,
+                repo         TEXT    NOT NULL COLLATE NOCASE,
+                default_sha  TEXT    NOT NULL,
+                team_sha     TEXT    NULL,
+                recorded_at  TEXT    NOT NULL,
+                PRIMARY KEY (dispatch, repo)
+            );
             """),
     ];
 }

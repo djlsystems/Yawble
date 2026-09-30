@@ -68,15 +68,36 @@ public static class BacklogLandedStates
 /// In contributor mode the answer is GitHub's, about the recorded pull request, and this is
 /// when GitHub last gave it. Null for every answer derived from the clone alone.
 /// </param>
-public sealed record BacklogLanded(string State, string TeamId, string Detail, DateTimeOffset? ReadAt = null);
+/// <param name="LandedAt">
+/// WHEN LANDED WAS FIRST PROVEN AND STORED. Set on every <c>landed</c> answered from the
+/// dispatch's stored proof, which is what outlives the branch, the clone and the team. Null for
+/// every other answer.
+/// </param>
+public sealed record BacklogLanded(
+    string State, string TeamId, string Detail, DateTimeOffset? ReadAt = null, DateTimeOffset? LandedAt = null)
+{
+    /// <summary>
+    /// What a derived <c>landed</c> stands on: per repository, the sha proven reachable and the
+    /// default branch it was read on. Carried to the store, never to the wire - the sentence in
+    /// <see cref="Detail"/> is what a person reads.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<LandedProof>? Proof { get; init; }
+}
+
+/// <summary>One repository's evidence behind a derived <c>landed</c>, and the clone that proved it.</summary>
+public sealed record LandedProof(string Repo, string Sha, string Branch, string ClonePath);
 
 /// <summary>
 /// Derives <see cref="BacklogLanded"/> for a set of items from their CURRENT dispatches.
 ///
 /// <para>
 /// THE SHAPE IS <see cref="BacklogInFlightState"/>'S, DELIBERATELY, because that class is the
-/// discipline wanted here: one store query for every item's latest dispatch, a dispatch at or
-/// below its team's floor derives nothing, and NOTHING IS STORED - so nothing can get stuck.
+/// discipline wanted here: one store query for every item's latest dispatch, and a dispatch at or
+/// below its team's floor derives nothing. ONE THING IS STORED, AND ONLY ONE: <c>landed</c>,
+/// once proven by ancestry, is kept on the dispatch and answered from there ever after, because the
+/// branch, clone and team it was proven from are tidied away. Nothing short of that is stored, so
+/// nothing short of that can get stuck.
 /// </para>
 ///
 /// <para>
@@ -98,7 +119,10 @@ public sealed record BacklogLanded(string State, string TeamId, string Detail, D
 /// </para>
 ///
 /// <para>
-/// NO NETWORK, ON ANY PATH. Every git command here is local: <c>rev-parse</c>, <c>merge-base</c>,
+/// NO NETWORK ON THE TEAM'S OWN PATH, AND ONE FETCH ON THE RECORDED-TIP PATH. The one
+/// exception is <c>FromRecordedTipsAsync</c>: a dispatch that nothing else can answer, whose tip was
+/// recorded, fetches the clone it asks - paid only until landed is proven and stored, cached per
+/// dispatch, and inside the same budget. Everything else below is local: <c>rev-parse</c>, <c>merge-base</c>,
 /// <c>rev-list</c> and <c>cherry</c> against refs this clone already has. There is no <c>fetch</c>
 /// and no <c>ls-remote</c>, which the repo status route asks only behind an explicit
 /// <c>?refresh=true</c> - a backlog list is read on every visit to the screen, and a network round
@@ -148,25 +172,41 @@ public static class BacklogLandedState
         GitRunner git,
         BacklogLandedCache cache,
         CancellationToken ct = default,
-        PullRequestStateReader? pullRequests = null)
+        PullRequestStateReader? pullRequests = null,
+        IBacklogStore? store = null)
     {
         var result = new Dictionary<long, BacklogLanded>();
         var candidates = new List<(BacklogDispatch Dispatch, string Team)>();
         var floors = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(Budget);
+
         foreach (var dispatch in latest)
         {
+            // LANDED, ONCE PROVEN, IS KEPT. The stored proof is answered before anything
+            // else is asked, because the branch, the clone and the team it was proven from may all
+            // be gone - and a proven fact is not re-derived into `unknown`. Never downgraded; a
+            // later rewrite of the default branch that drops the commit is out of scope.
+            if (Stored(dispatch) is { } kept)
+            {
+                result[dispatch.Item] = kept;
+                continue;
+            }
+
             // THE TEAM IS GONE, AND THAT IS `unknown` RATHER THAN NOTHING. Deleting a team removes
             // its directory - its clone and every worktree - so the evidence this derivation reads
             // is not merely absent, it has been destroyed. `inFlight` answers no here and is right
-            // to; this one must not, because "no" would assert the work is not on main.
+            // to; this one must not, because "no" would assert the work is not on main. What can
+            // still be asked is whether the tip its publish RECORDED is on the default branch in
+            // another clone of the same repository.
             if (teams.ExistingName(dispatch.TeamId) is not { } stored)
             {
-                result[dispatch.Item] = new BacklogLanded(
-                    BacklogLandedStates.Unknown,
-                    dispatch.TeamId,
-                    $"{dispatch.TeamName} no longer exists, so its clone is gone too and nothing "
-                    + "on this machine can say whether the work reached the default branch.");
+                var gone = $"{dispatch.TeamName} no longer exists, so its clone is gone too and nothing "
+                    + "on this machine can say whether the work reached the default branch.";
+
+                result[dispatch.Item] = await FromRecordedTipsAsync(
+                    dispatch, null, teams, paths, git, cache, store, budget, ct) ?? Unknown(dispatch.TeamId, gone);
                 continue;
             }
 
@@ -189,9 +229,6 @@ public static class BacklogLandedState
         // ONE VERDICT PER TEAM, SHARED BY EVERY ITEM IT HOLDS - the bound that keeps this affordable.
         var byTeam = new Dictionary<string, BacklogLanded>(StringComparer.OrdinalIgnoreCase);
 
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        budget.CancelAfter(Budget);
-
         foreach (var (dispatch, stored) in candidates)
         {
             if (!byTeam.TryGetValue(stored, out var verdict))
@@ -202,11 +239,305 @@ public static class BacklogLandedState
                 byTeam[stored] = verdict;
             }
 
-            result[dispatch.Item] = verdict;
+            // THE TEAM IS HERE AND ITS CLONE CANNOT SAY - its branch was deleted after the merge,
+            // or the clone itself is gone: the recorded tip is asked, of its own clone first and
+            // then of any other clone of the repository, exactly as for a team that is gone.
+            if (verdict.State == BacklogLandedStates.Unknown
+                && await FromRecordedTipsAsync(dispatch, stored, teams, paths, git, cache, store, budget, ct) is { } fromTip)
+            {
+                result[dispatch.Item] = fromTip;
+                continue;
+            }
+
+            result[dispatch.Item] = await KeepAsync(dispatch, verdict, store, git, budget.Token, ct);
         }
 
         return result;
     }
+
+    /// <summary>
+    /// A dispatch's STORED landed, answered as <c>landed</c> with when it was proven, or null when
+    /// nothing has been proven for it yet.
+    /// </summary>
+    private static BacklogLanded? Stored(BacklogDispatch dispatch)
+    {
+        if (dispatch.LandedAt is not { } at) return null;
+
+        DateTimeOffset? when = DateTimeOffset.TryParse(
+            at, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : null;
+
+        var stamp = when?.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture) ?? at;
+        var what = dispatch.LandedSha is { } sha && dispatch.LandedBranch is { } branch && !sha.Contains(' ')
+            ? $"{Short(sha)} was on origin/{branch}"
+            : $"the work was on the default branch ({dispatch.LandedSha} on {dispatch.LandedBranch})";
+
+        return new BacklogLanded(
+            BacklogLandedStates.Landed,
+            dispatch.TeamId,
+            $"{what} when it was proven at {stamp}. Proven landed is kept after the branch or the team is gone.",
+            LandedAt: when);
+    }
+
+    /// <summary>
+    /// STORES A DERIVED <c>landed</c> ON THE DISPATCH the first time it is proven, and answers the
+    /// verdict with the landed_at the store holds. Anything else is answered as it is and stores
+    /// nothing: only positive evidence is kept, and only ancestry leaves a
+    /// <see cref="BacklogLanded.Proof"/> - a merged pull request in contributor mode carries none,
+    /// so that mode is untouched.
+    ///
+    /// <para>
+    /// ONLY THE DISPATCH'S OWN WORK IS STORED. The team's branch is shared by every item it is
+    /// given, and a branch sitting on the default branch is reachable from it without any work at
+    /// all - a fresh team branch, or one whose earlier work landed for an earlier item. So the
+    /// proven sha must be beyond where the dispatch started (<see cref="BacklogDispatchBase"/>) in
+    /// at least one repository. When it is not, the answer is <c>unknown</c>, saying so: nothing
+    /// here can be traced to this item, which is the rule for a clone with no branch of its own. A
+    /// dispatch with no recorded start is answered by the existing rules and never stored.
+    /// </para>
+    /// </summary>
+    private static async Task<BacklogLanded> KeepAsync(
+        BacklogDispatch dispatch, BacklogLanded verdict, IBacklogStore? store, GitRunner git, CancellationToken gitCt,
+        CancellationToken ct)
+    {
+        if (store is null
+            || verdict.State != BacklogLandedStates.Landed
+            || verdict.Proof is not { Count: > 0 } proof)
+        {
+            return verdict;
+        }
+
+        var starts = await store.BasesAsync(dispatch.Id, ct);
+        if (starts.Count == 0) return verdict;
+
+        var own = false;
+        var undecided = new List<string>();
+
+        foreach (var p in proof)
+        {
+            if (starts.FirstOrDefault(b => string.Equals(b.Repo, p.Repo, StringComparison.OrdinalIgnoreCase)) is not { } start)
+            {
+                return verdict;
+            }
+
+            bool? mine;
+            try
+            {
+                mine = await OwnWorkAsync(git, p.ClonePath, p.Sha, start, gitCt);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                mine = null;
+            }
+
+            if (mine == true) own = true;
+            else if (mine is null) undecided.Add(p.Repo);
+        }
+
+        if (!own)
+        {
+            return Unknown(
+                dispatch.TeamId,
+                undecided.Count > 0
+                    ? $"git could not say whether the work on the default branch in {string.Join(", ", undecided)} "
+                        + "is this item's own or was already there when it was dispatched, so it is not claimed landed."
+                    : "nothing on the default branch is this item's own work yet: what is there was already on "
+                        + $"origin's default branch or on team/{dispatch.TeamId} when the item was dispatched.");
+        }
+
+        var (sha, branch) = proof.Count == 1
+            ? (proof[0].Sha, proof[0].Branch)
+            : (string.Join(", ", proof.Select(p => $"{p.Repo} {p.Sha}")),
+                string.Join(", ", proof.Select(p => $"{p.Repo} {p.Branch}")));
+
+        await store.RecordLandedAsync(dispatch.Id, sha, branch, ct);
+
+        // THE STORED landed_at, NOT THIS MOMENT: when another reader stored it first, its value is
+        // the one every later read answers, so this one answers it too.
+        var kept = (await store.DispatchesAsync(dispatch.Item, ct)).FirstOrDefault(d => d.Id == dispatch.Id);
+
+        return verdict with { LandedAt = kept is null ? null : Stored(kept)?.LandedAt };
+    }
+
+    /// <summary>
+    /// WHETHER <paramref name="sha"/> CARRIES WORK BEYOND WHERE THE DISPATCH STARTED: true when
+    /// it is on neither the default branch nor the team branch as they stood then, false when it
+    /// is on either, null when git cannot say (the clone does not hold one of the commits).
+    /// </summary>
+    internal static async Task<bool?> OwnWorkAsync(
+        GitRunner git, string clonePath, string sha, BacklogDispatchBase start, CancellationToken ct)
+    {
+        foreach (var from in new[] { start.DefaultSha, start.TeamSha })
+        {
+            if (from is null) continue;
+            if (string.Equals(sha, from, StringComparison.OrdinalIgnoreCase)) return false;
+
+            var contained = await git.RunGitAsync(clonePath, ["merge-base", "--is-ancestor", sha, from], ct);
+            if (contained.ExitCode == 0) return false;
+            if (contained.ExitCode != 1) return null;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// THE RECORDED TIP, ASKED OF A CLONE OF THE SAME REPOSITORY. For a dispatch whose
+    /// team is gone (<paramref name="own"/> null), or whose team's own clone answered
+    /// <c>unknown</c> - its branch deleted after the merge, or the clone gone. The team's own clone
+    /// is asked first when it has one, then every other team's. Null when nothing was recorded,
+    /// which leaves the caller's answer standing.
+    ///
+    /// <para>
+    /// A FETCH, AND THE ONE NETWORK CALL THIS CLASS MAKES. The other clone's origin/&lt;default&gt;
+    /// may be older than the merge, and a stale ref can only under-report; the fetch goes through
+    /// <see cref="GitRunner.FetchAsync"/>, so it gets <c>GH_TOKEN</c> by that clone's team's
+    /// remotes, the rule every fetch follows. It is paid only until landed is proven, is cached per
+    /// dispatch like a team's verdict, and runs inside the same <see cref="Budget"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// NEVER GUESSED. The sha must be an ancestor of origin/&lt;default&gt; in that clone, by the
+    /// default branch stored for that clone's team. No clone anywhere is <c>unknown</c> and says so;
+    /// a sha no clone holds, or one that is not reachable, is <c>unknown</c> too. A contributor-mode
+    /// clone is never asked: its origin is a fork, and a merged pull request is the only proof there.
+    /// </para>
+    /// </summary>
+    private static async Task<BacklogLanded?> FromRecordedTipsAsync(
+        BacklogDispatch dispatch,
+        string? own,
+        TeamRegistry teams,
+        TeamPaths paths,
+        GitRunner git,
+        BacklogLandedCache cache,
+        IBacklogStore? store,
+        CancellationTokenSource budget,
+        CancellationToken ct)
+    {
+        if (store is null) return null;
+
+        var tips = await store.TipsAsync(dispatch.Id, ct);
+        if (tips.Count == 0) return null;
+
+        var key = $"dispatch#{dispatch.Id}";
+        if (cache.Get(key) is { } cached) return await KeepAsync(dispatch, cached, store, git, budget.Token, ct);
+
+        BacklogLanded? worst = null;
+        var proofs = new List<LandedProof>();
+
+        foreach (var tip in tips)
+        {
+            BacklogLanded verdict;
+            try
+            {
+                verdict = await TipAsync(dispatch.TeamId, own, tip, teams, paths, git, budget.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                verdict = Unknown(dispatch.TeamId, $"the check of {tip.Repo}'s recorded tip took too long and was stopped.");
+            }
+
+            if (verdict.Proof is { } proof) proofs.AddRange(proof);
+            if (tips.Count > 1) verdict = verdict with { Detail = $"{tip.Repo}: {verdict.Detail}" };
+            if (worst is null || Rank(verdict.State) > Rank(worst.State)) worst = verdict;
+        }
+
+        var answer = worst!.State == BacklogLandedStates.Landed ? worst with { Proof = proofs } : worst;
+
+        return await KeepAsync(dispatch, cache.Put(key, answer), store, git, budget.Token, ct);
+    }
+
+    /// <summary>One recorded tip, against the first other clone of its repository that can answer.</summary>
+    private static async Task<BacklogLanded> TipAsync(
+        string teamId,
+        string? own,
+        BacklogDispatchTip tip,
+        TeamRegistry teams,
+        TeamPaths paths,
+        GitRunner git,
+        CancellationToken ct)
+    {
+        var sha = tip.Sha;
+        var notReachable = new List<string>();
+
+        foreach (var (other, clonePath, branch) in ClonesOf(tip.Repo, own, teams, paths))
+        {
+            // A FAILED FETCH IS NOT FATAL: the refs already here can still prove a yes, and a
+            // stale ref can only fail to - which lands in `unknown` below, never in a no.
+            await git.FetchAsync(clonePath, ct);
+
+            var ancestor = await git.RunGitAsync(
+                clonePath, ["merge-base", "--is-ancestor", sha, $"refs/remotes/origin/{branch}"], ct);
+
+            if (ancestor.ExitCode == 0)
+            {
+                return new BacklogLanded(
+                    BacklogLandedStates.Landed,
+                    teamId,
+                    $"the recorded tip {Short(sha)} is on origin/{branch} in {teams.LabelFor(other)}'s clone of {tip.Repo}.")
+                {
+                    Proof = [new LandedProof(tip.Repo, sha, branch, clonePath)],
+                };
+            }
+
+            // 1 is "not an ancestor"; anything else is this clone not holding the commit at all,
+            // which says nothing about whether it landed.
+            if (ancestor.ExitCode == 1) notReachable.Add($"{teams.LabelFor(other)}'s clone");
+        }
+
+        return notReachable.Count > 0
+            ? Unknown(teamId,
+                $"the recorded tip {Short(sha)} is not reachable from the default branch in "
+                + $"{string.Join(", ", notReachable)} of {tip.Repo}, so whether it landed cannot be proven here.")
+            : ClonesOf(tip.Repo, own, teams, paths).Any()
+                ? Unknown(teamId,
+                    $"no clone of {tip.Repo} on this instance holds the recorded tip {Short(sha)}, so whether it landed cannot be proven here.")
+                : Unknown(teamId, $"no clone of {tip.Repo} on this instance to check the recorded tip against.");
+    }
+
+    /// <summary>
+    /// Every clone of <paramref name="repo"/> on this instance that can be asked, the team's own
+    /// (<paramref name="own"/>) first: cloned, with its default branch stored, and not in
+    /// contributor mode.
+    /// </summary>
+    private static IEnumerable<(string Team, string ClonePath, string Branch)> ClonesOf(
+        string repo, string? own, TeamRegistry teams, TeamPaths paths)
+    {
+        var ids = teams.All().Select(team => team.Id)
+            .OrderBy(id => string.Equals(id, own, StringComparison.OrdinalIgnoreCase) ? 0 : 1);
+
+        foreach (var team in ids)
+        {
+            if (!teams.ReposFor(team).Any(url => SameRepo(url, repo))) continue;
+            if (teams.ContributorFor(team, repo).ContributorMode) continue;
+            if (teams.DefaultBranchFor(team, repo).Branch is not { } branch) continue;
+
+            string clonePath;
+            try
+            {
+                clonePath = Path.Combine(paths.ReposFor(team), repo, "main");
+            }
+            catch (KeyNotFoundException)
+            {
+                continue;
+            }
+
+            if (Directory.Exists(clonePath)) yield return (team, clonePath, branch);
+        }
+    }
+
+    private static bool SameRepo(string url, string repo)
+    {
+        try
+        {
+            return string.Equals(RepoUrls.DeriveName(url), repo, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (UriFormatException)
+        {
+            return false;
+        }
+    }
+
+    private static string Short(string sha) => sha.Length > 7 ? sha[..7] : sha;
 
     /// <summary>
     /// One team's verdict, over every repository it holds.
@@ -254,6 +585,7 @@ public static class BacklogLandedState
 
         BacklogLanded? worst = null;
         var many = urls.Count > 1;
+        var proofs = new List<LandedProof>();
 
         foreach (var url in urls)
         {
@@ -282,10 +614,14 @@ public static class BacklogLandedState
                 verdict = verdict with { Detail = $"{repo}: {verdict.Detail}" };
             }
 
+            if (verdict.Proof is { } proof) proofs.AddRange(proof);
             if (worst is null || Rank(verdict.State) > Rank(worst.State)) worst = verdict;
         }
 
-        return worst!;
+        // LANDED OVERALL STANDS ON EVERY REPOSITORY'S PROOF; one without a sha keeps nothing.
+        return worst!.State == BacklogLandedStates.Landed
+            ? worst with { Proof = proofs.Count == urls.Count ? proofs : null }
+            : worst;
     }
 
     /// <summary>One repository's verdict. Every command is local and every claim is proven.</summary>
@@ -394,10 +730,17 @@ public static class BacklogLandedState
 
         if (ancestor.ExitCode == 0)
         {
+            // THE SHA IS THE PROOF THAT IS KEPT: the ref names a branch that will be
+            // deleted, the commit it points at now is the fact.
+            var tip = await git.RunGitAsync(clonePath, ["rev-parse", "--verify", work], ct);
+
             return new BacklogLanded(
                 BacklogLandedStates.Landed,
                 stored,
-                $"the work on {work} is on origin/{branch} in {repo}.");
+                $"the work on {work} is on origin/{branch} in {repo}.")
+            {
+                Proof = tip.ExitCode == 0 ? [new LandedProof(repo, tip.Stdout.Trim(), branch, clonePath)] : null,
+            };
         }
 
         // THE ANCESTRY HAZARD, AND IT IS WHY `unknown` IS NOT OPTIONAL.

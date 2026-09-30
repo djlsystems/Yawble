@@ -992,7 +992,17 @@ builder.Services.AddSingleton<ITeamPublisher>(sp => new TeamPublisher(
     sp.GetRequiredService<IMessageLog>(),
     // Resolved per call, not at construction, so the publisher does not need the registry
     // to exist before it does.
-    (team, repo) => sp.GetRequiredService<TeamRegistry>().DefaultBranchFor(team, repo).Branch));
+    (team, repo) => sp.GetRequiredService<TeamRegistry>().DefaultBranchFor(team, repo).Branch,
+    // THE TIP A DISPATCH RECORDS, so `landed` outlives the branch and the team.
+    (team, repo, sha, causation, ct) =>
+        sp.GetRequiredService<BacklogTipRecorder>().RecordTipAsync(team, repo, sha, causation, ct)));
+
+builder.Services.AddSingleton(sp => new BacklogTipRecorder(
+    sp.GetRequiredService<IBacklogStore>(),
+    sp.GetRequiredService<IMessageLog>(),
+    sp.GetRequiredService<TeamRegistry>(),
+    sp.GetRequiredService<TeamPaths>(),
+    sp.GetRequiredService<GitRunner>()));
 
 builder.Services.AddSingleton(sp => new TeamAccess(
     sp.GetRequiredService<IUserStore>(),

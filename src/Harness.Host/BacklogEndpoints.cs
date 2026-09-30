@@ -130,7 +130,7 @@ public static class BacklogEndpoints
             // adds no query; what it adds is git, which is why it is bounded per TEAM and cached
             // rather than asked per row. See BacklogLandedState for what it costs and what caps it.
             var landed = await BacklogLandedState.ForAsync(
-                latest.Values, teams, paths, git, landedCache, ct, pullRequests);
+                latest.Values, teams, paths, git, landedCache, ct, pullRequests, backlog);
 
             return Results.Ok(items
                 .Select(item => Render(
@@ -178,7 +178,11 @@ public static class BacklogEndpoints
                 + "reason. It is an offer. Nothing is closed, declared or marked until a person "
                 + "calls that route. Null otherwise.\n\n"
                 + "`landed` says whether the CURRENT dispatch's work reached origin's default "
-                + "branch, derived from that team's clone and stored nowhere. `landed.state` is one "
+                + "branch, derived from that team's clone. Once `landed` is proven it is STORED on "
+                + "the dispatch and answered from there, with `landedAt`, even after the branch, the "
+                + "clone and the team are gone; it is never downgraded. With the team's clone unable "
+                + "to say, the tip its publish recorded is checked in a clone of the same repository "
+                + "on this instance, after a fetch. `landed.state` is one "
                 + "of `landed` (on origin's default branch), `pushed` (on a remote branch, not yet "
                 + "on origin's default branch), `local` (commits on no remote at all - the state "
                 + "work is in when it exists on one disk only) and `unknown`. `unknown` IS AN ANSWER: the team is gone, the clone is "
@@ -195,7 +199,7 @@ public static class BacklogEndpoints
             long id, HttpContext context, IBacklogStore backlog, TeamRegistry teams,
             TeamAccess access, IMessageLog log, ContainerHost host, TeamPaths paths, GitRunner git,
             BacklogLandedCache landedCache, PullRequestStateReader pullRequests, KanbanStore kanban,
-            CancellationToken ct) =>
+            ITenantLog tenantLog, CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
             if (!MayReach(principal)) return RefuseKind();
@@ -234,12 +238,26 @@ public static class BacklogEndpoints
             // team's measurement is cached, so opening a row the list has just rendered is free.
             var landed = current is null
                 ? null
-                : (await BacklogLandedState.ForAsync([current], teams, paths, git, landedCache, ct, pullRequests))
+                : (await BacklogLandedState.ForAsync([current], teams, paths, git, landedCache, ct, pullRequests, backlog))
                     .GetValueOrDefault(id);
+
+            // WHO SAID THE WORK IS IN THE PRODUCT, while it is marked so. The row outlives the person
+            // and the team; a person's word when landed could not be proven reads the same way.
+            var implemented = item.State == BacklogStates.Implemented
+                ? await tenantLog.FindLatestAsync(TenantActions.BacklogItemImplemented, PlatformBacklogId.Format(id), ct)
+                : null;
 
             return Results.Ok(new
             {
                 item = Render(item, teams, inFlight, current, landed, stranded),
+                implementedBy = implemented is null
+                    ? null
+                    : new
+                    {
+                        by = implemented.ActorEmail ?? implemented.ActorId,
+                        at = implemented.OccurredAt,
+                        viaConcierge = ViaConcierge(implemented.Detail),
+                    },
                 dispatches = dispatches.Select(d => new
                 {
                     d.Id,
@@ -264,7 +282,10 @@ public static class BacklogEndpoints
                 + "`teamGone` says the team a dispatch ran on no longer exists. The record keeps its "
                 + "NAME regardless, which is the one field the message log cannot answer for.\n\n"
                 + "The item's own `dispatchedTeam` is the CURRENT dispatch - the last of this list "
-                + "- so a person who opened a row reads the same team the row showed.");
+                + "- so a person who opened a row reads the same team the row showed.\n\n"
+                + "`implementedBy` says who marked the item implemented - `by` (their email), `at`, "
+                + "and `viaConcierge` when a Concierge wrote it on the person's word - while it is "
+                + "implemented; null otherwise, or for an item marked before it was recorded.");
 
         app.MapPost("/api/backlog", async (
             CreateBacklogItem request, HttpContext context, IBacklogStore backlog,
@@ -370,6 +391,14 @@ public static class BacklogEndpoints
             await WriteAuditAsync(
                 context, principal, users, audit, TenantActions.BacklogItemEdited, PlatformBacklogId.Format(id),
                 request.Title ?? item.Title, new { id, state = request.State }, ct);
+
+            if (request.State == BacklogStates.Implemented && item.State != BacklogStates.Implemented)
+            {
+                await WriteAuditAsync(
+                    context, principal, users, audit, TenantActions.BacklogItemImplemented, PlatformBacklogId.Format(id),
+                    request.Title ?? item.Title,
+                    new { id, from = item.State, viaConcierge = principal.Kind == PrincipalKind.TenantConcierge }, ct);
+            }
 
             return Results.Ok(Render((await backlog.GetAsync(id, ct))!, teams));
         })
@@ -1109,6 +1138,22 @@ public static class BacklogEndpoints
     /// Who did it, for a denormalised `created_by`. The ticket's claim is first when it exists; a
     /// Concierge falls back to its owner's email so the stored actor keeps naming the person.
     /// </summary>
+    /// <summary>Whether a <c>backlog.item-implemented</c> row was written by a Concierge acting on
+    /// the person's word. A row whose detail cannot be read says no.</summary>
+    private static bool ViaConcierge(string? detail)
+    {
+        if (detail is null) return false;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(detail);
+            return doc.RootElement.TryGetProperty("viaConcierge", out var via) && via.ValueKind == System.Text.Json.JsonValueKind.True;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
     private static async Task<string> ActorOfAsync(
         HttpContext context, Principal principal, IUserStore users, CancellationToken ct) =>
         await ActorEmailOfAsync(context, principal, users, ct)
@@ -1183,6 +1228,14 @@ public static class BacklogEndpoints
 
         var record = await backlog.AddDispatchAsync(
             item.Id, stored, teams.LabelFor(stored), dispatched.Seq, actor, ct);
+
+        // WHERE THE DISPATCH STARTS IS READ BEFORE THE MANAGER IS TOLD, so nothing the team does
+        // for this item can be mistaken for where it started. Only work beyond it is ever stored as
+        // landed. See BacklogTipRecorder.RecordBaseAsync.
+        if (context.RequestServices.GetService<BacklogTipRecorder>() is { } recorder)
+        {
+            await recorder.RecordBaseAsync(record, ct);
+        }
 
         var manager = new ContainerId(stored, TeamRegistry.DefaultManagerName);
 

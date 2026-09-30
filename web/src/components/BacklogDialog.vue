@@ -1320,6 +1320,11 @@ function down(index: number) {
           <q-btn dense no-caps color="primary" label="Save" :disable="busy" @click="saveBody" />
         </div>
 
+        <div v-if="selected.implementedBy" class="q-mt-md text-caption os-text-muted backlog-implemented-by">
+          Marked implemented by {{ selected.implementedBy.by }}<span v-if="selected.implementedBy.viaConcierge">
+          (through the Concierge)</span>, {{ selected.implementedBy.at.slice(0, 10) }}
+        </div>
+
         <div v-if="selected.dispatches.length > 0" class="q-mt-md">
           <div class="text-caption os-text-muted">Dispatched</div>
           <div v-for="(d, i) in selected.dispatches" :key="d.id" class="backlog-dispatch">

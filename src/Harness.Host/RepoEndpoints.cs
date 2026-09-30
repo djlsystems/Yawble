@@ -1347,6 +1347,8 @@ public static partial class RepoEndpoints
         TeamPaths paths,
         ContainerHost host,
         ITenantLog log,
+        BacklogTipRecorder landedRecorder,
+        BacklogLandedCache landedCache,
         CancellationToken ct)
     {
         if (teams.ExistingName(team) is not { } stored)
@@ -1789,6 +1791,13 @@ public static partial class RepoEndpoints
         // was written and here it is", and the row is kept forever.
         await log.WriteAsync(userId, email, TenantActions.RepoMergeToMain, $"{stored}/{repo}", null,
             JsonSerializer.Serialize(new { success = true, mergedFrom = resolvedRef, mergeCommit }), ct);
+
+        // LANDED IS STORED AT THE MOMENT IT LANDS. This route has just put the team's sha
+        // on origin/<default> and knows it without asking anybody, so the backlog item reads
+        // `landed` from here on - after the branch, the clone and the team are gone too. On the
+        // merge arm the team's sha is the merge commit's second parent, reachable all the same.
+        await landedRecorder.RecordMergedAsync(stored, name, teamSha!, branch, ct);
+        landedCache.Clear();
 
         // WHICH REF WAS INTEGRATED IS THE SENTENCE, not a footnote. A person reading "Team branch
         // merged to main" after the local-main fallback ran would believe the branch on origin is

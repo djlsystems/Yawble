@@ -2328,6 +2328,13 @@ export interface BacklogLanded {
    * when GitHub last gave it (ISO-8601). Null or absent for an answer read from the clone.
    */
   readAt?: string | null
+
+  /**
+   * WHEN `landed` WAS FIRST PROVEN AND STORED on the dispatch (ISO-8601). A stored landed is kept
+   * after the branch, the clone and the team are gone, and never downgraded. Null or absent for
+   * every other answer.
+   */
+  landedAt?: string | null
 }
 
 /** Where a backlog item is being worked right now. See `BacklogItemView.inFlight`. */

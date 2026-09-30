@@ -357,7 +357,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
             "Never merge or push a default branch.",
             "Never delete a team.",
             "Never close a workflow.",
-            "Never mark an item implemented before it has landed.",
+            "Never mark an item implemented before it has landed, unless the person says they merged it outside the platform and `landed` reads `unknown`.",
             "Never estimate a figure you were not given.",
             "Ask the person for each of these, and keep going with everything else meanwhile.",
         })
@@ -442,6 +442,34 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.Contains("Merging to the default branch is the person's action; you never merge, push or ask an agent to.", Flat(body), StringComparison.Ordinal);
         Assert.Contains("Never delete a team.", body, StringComparison.Ordinal);
         Assert.Contains("Never close a workflow.", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A finished team's branch is what `landed` is read from until it is proven, so the skill reads
+    /// `landed` before asking the person to delete the team. And when the person merged the work
+    /// outside the platform and `landed` reads `unknown`, their word marks the item implemented, and
+    /// the item's history records who confirmed it - the platform's `implementedBy`.
+    /// </summary>
+    [Fact]
+    public void The_backlog_running_skill_reads_landed_before_team_deletion_and_takes_the_persons_word_when_landed_is_unknown()
+    {
+        var body = Flat(BuiltInSkills.Find("running-the-backlog")!.Body);
+
+        var read = body.IndexOf(Flat("Read `landed` (`backlog  action: show`) before asking the person to delete the finished team"), StringComparison.Ordinal);
+        var ask = body.IndexOf("Ask the person to delete the finished team;", StringComparison.Ordinal);
+        Assert.True(read >= 0, "the skill does not say to read landed before asking to delete the team");
+        Assert.True(read < ask, "the skill asks to delete the team before it reads landed");
+        Assert.Contains("When it does not read landed, say so and what it reads, and let the person decide.", body, StringComparison.Ordinal);
+
+        foreach (var line in new[]
+        {
+            "when the person tells you they merged the work outside the platform (on GitHub, or by hand) and `landed` still reads `unknown`, the person's word marks the item implemented",
+            "The item's history records who confirmed it.",
+            "Only `unknown` gives way to their word",
+        })
+        {
+            Assert.Contains(Flat(line), body, StringComparison.Ordinal);
+        }
     }
 
     /// <summary>Whitespace-insensitive text, so a pinned sentence survives re-wrapping.</summary>
