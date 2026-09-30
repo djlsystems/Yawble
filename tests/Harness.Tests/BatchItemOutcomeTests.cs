@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Http;
 namespace Harness.Tests;
 
 /// <summary>
-/// A BATCHED RUN NEVER COMPLETES AN INSTRUCTION IT DID NOT DO (B001M). A run that carried several
+/// A BATCHED RUN NEVER COMPLETES AN INSTRUCTION IT DID NOT DO. A run that carried several
 /// items says, on its terminal rows, what became of each - answered, blocked or deferred - and a
 /// deferred item is not closed: it is delivered again as its own next run, in the same workflow,
 /// under its own causation, saying which run it was deferred from.
@@ -24,7 +24,7 @@ public sealed class BatchItemOutcomeTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
-    /// The b001h case (workflow 2067): a busy member is sent "do X", then a duplicate of X, then
+    /// A busy member is sent "do X", then a duplicate of X, then
     /// "do Y after X". The batch that carries the duplicate and Y ends with Y deferred and delivered
     /// as its own next run, not completed; the Manager is woken once per finished run.
     /// </summary>
@@ -123,7 +123,7 @@ public sealed class BatchItemOutcomeTests
     }
 
     /// <summary>
-    /// The 2156 case: a mid-card update batched into a run answering another instruction ends with
+    /// A mid-card update batched into a run answering another instruction ends with
     /// its OWN outcome on its own terminal row, and the Manager is woken once for the run.
     /// </summary>
     [Fact]
@@ -143,10 +143,10 @@ public sealed class BatchItemOutcomeTests
             return new AgentResult(0, "Merged and green.");
         };
 
-        var root = await bed.Store.AppendAsync(Instruction("build card 2073"), Ct);
+        var root = await bed.Store.AppendAsync(Instruction("build the deep link"), Ct);
         Assert.True(await bed.PumpUntilAsync(() => Volatile.Read(ref runs) == 1));
 
-        var answer = await bed.Store.AppendAsync(Instruction("answer the review on 2073", root.Seq), Ct);
+        var answer = await bed.Store.AppendAsync(Instruction("answer the review of the deep link", root.Seq), Ct);
         var update = await bed.Store.AppendAsync(Instruction("merge the team branch at 88d207d and report the green SHA", root.Seq), Ct);
         await bed.SettleAsync();
         firstRun.SetResult();
