@@ -62,7 +62,10 @@ public sealed class SolutionNotice(SolutionService solutions, TeamDocuments docu
 
     private static Dictionary<string, object?> Payload(string folder, SolutionFolderCheck answer)
     {
-        var (id, name, version) = Named(folder, answer.Check);
+        // A folder refused (a link leaving the data root) is never read: the notice names it by its folder.
+        var (id, name, version) = answer.FolderRefused
+            ? (null, Path.GetFileName(folder), null)
+            : Named(folder, answer.Check);
 
         var problems = answer.FolderRefused
             ? [answer.Error!]

@@ -116,6 +116,42 @@ public sealed class SolutionNoticeTests(HostFixture host) : IClassFixture<HostFi
     }
 
     [Fact]
+    public async Task A_package_folder_linked_outside_is_named_by_its_folder_and_nothing_of_the_target_is_shown()
+    {
+        const string outside = "OUTSIDE-7a2d4b-not-the-packages";
+        var (team, root, _) = await WorkflowAsync("Notice Folder Link");
+        // Outside the data root: the service refuses the folder before any check.
+        var target = Path.Combine(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(
+            Path.Combine(target, "solution.json"),
+            $$"""{"id":"{{outside}}","name":"{{outside}}","version":"{{outside}}"}""");
+        var folder = Path.Combine(Documents(team), "linked-package");
+        Directory.CreateSymbolicLink(folder, target);
+
+        try
+        {
+            await DeclareAsync(team, root);
+
+            var payload = Assert.Single(await NoticesAsync(root)).Payload;
+            var notice = JsonDocument.Parse(payload).RootElement;
+            Assert.False(notice.GetProperty(PayloadFields.Ok).GetBoolean());
+            Assert.Equal("linked-package", notice.GetProperty(PayloadFields.Name).GetString());
+            Assert.Equal(JsonValueKind.Null, notice.GetProperty(PayloadFields.Solution).ValueKind);
+            Assert.Equal(JsonValueKind.Null, notice.GetProperty(PayloadFields.Version).ValueKind);
+            var text = notice.GetProperty(PayloadFields.Text).GetString()!;
+            Assert.StartsWith("linked-package did not pass the check:\n", text);
+            Assert.Contains("goes through a link that leaves the data root", text);
+            Assert.DoesNotContain(outside, payload, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(folder);
+            Directory.Delete(target, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task A_package_not_written_during_the_workflow_is_not_checked()
     {
         var (team, root, _) = await WorkflowAsync("Notice Old");
