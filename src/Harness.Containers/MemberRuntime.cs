@@ -176,6 +176,24 @@ public sealed class MemberRuntime : IAsyncDisposable
     private IReadOnlyList<Message>? _runningBatch;
     private HashSet<long>? _blockedItems;
 
+    /// <summary>The items of the running batch the agent DEFERRED, by seq, with the reason it gave.
+    /// Under <see cref="_batchGate"/> with <see cref="_blockedItems"/>.</summary>
+    private Dictionary<long, string>? _deferredItems;
+
+    /// <summary>
+    /// DEFERRED ITEMS WAITING TO BE DELIVERED AGAIN, each as its own next run, before anything else
+    /// is taken. Touched only by the consumer loop: a run's end puts them here and the next take
+    /// reads them, on the same task.
+    /// </summary>
+    private readonly Queue<Message> _redeliveries = new();
+
+    /// <summary>
+    /// Which queued seqs are deferred items and the run each was deferred from. A message named here
+    /// runs ALONE - it is never grown into a batch nor added to one - and carries the note. Written by
+    /// a run's end and by <see cref="Redeliver"/> on a restart, read by the consumer loop.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, long> _redeliverFrom = new();
+
     /// <summary>
     /// MESSAGES READ FROM THE CHANNEL THAT BELONG TO ANOTHER WORKFLOW than the batch being built.
     ///
@@ -559,6 +577,12 @@ public sealed class MemberRuntime : IAsyncDisposable
             var seq = _runningBatch[item - 1].Seq;
             _blockedItems ??= [];
 
+            if (_deferredItems?.ContainsKey(seq) == true)
+            {
+                error = $"Item {item} was already deferred for this run; it is delivered again as its own run.";
+                return false;
+            }
+
             if (!_blockedItems.Add(seq))
             {
                 error = $"Item {item} was already marked blocked for this run.";
@@ -568,6 +592,86 @@ public sealed class MemberRuntime : IAsyncDisposable
             cause = seq;
             return true;
         }
+    }
+
+    /// <summary>
+    /// DEFERS one item of the running batch, addressed by its 1-based number in the prompt: it is
+    /// not closed when this run ends, it is delivered again as its own next run, in the same
+    /// workflow, under its own causation. Refused for the only item of a run - there is no later
+    /// run to put it in - and for the last item not yet deferred, so a run always answers or blocks
+    /// something.
+    /// </summary>
+    public bool TryDeferItem(int item, string reason, out long seq, out string? error)
+    {
+        seq = 0;
+        error = null;
+
+        lock (_batchGate)
+        {
+            if (_runningBatch is null || _runningBatch.Count == 0)
+            {
+                error = "No batch is running.";
+                return false;
+            }
+
+            if (_runningBatch.Count == 1)
+            {
+                error = "This run carries only one item, so there is no later run to defer it to: do it, or block it with a reason.";
+                return false;
+            }
+
+            if (item < 1 || item > _runningBatch.Count)
+            {
+                error = $"Item {item} is out of range for this run (1..{_runningBatch.Count}).";
+                return false;
+            }
+
+            var candidate = _runningBatch[item - 1].Seq;
+            _deferredItems ??= [];
+
+            if (_blockedItems?.Contains(candidate) == true)
+            {
+                error = $"Item {item} was already marked blocked for this run.";
+                return false;
+            }
+
+            if (_deferredItems.ContainsKey(candidate))
+            {
+                error = $"Item {item} was already deferred for this run.";
+                return false;
+            }
+
+            if (_deferredItems.Count + 1 >= _runningBatch.Count)
+            {
+                error = $"Every other item of this run is already deferred. Do item {item} or block it with a reason.";
+                return false;
+            }
+
+            _deferredItems[candidate] = reason;
+            seq = candidate;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Queues a deferred item found on its pending row when the Host starts, as its own run with
+    /// its note, exactly as the run that deferred it would have. Answers false at the ceiling, as
+    /// <see cref="OfferAsync"/> does, without a rejection row: the item was accepted long ago.
+    /// </summary>
+    public bool Redeliver(Message message, long fromRun)
+    {
+        _redeliverFrom[message.Seq] = fromRun;
+        Interlocked.Increment(ref _queueDepth);
+
+        if (!_queue.Writer.TryWrite(message))
+        {
+            Interlocked.Decrement(ref _queueDepth);
+            _redeliverFrom.TryRemove(message.Seq, out _);
+            return false;
+        }
+
+        Publish();
+        return true;
     }
 
     /// <summary>
@@ -845,6 +949,13 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// </summary>
     private bool TryTake(out Message message)
     {
+        // A DEFERRED ITEM FIRST: it was promised the next run.
+        if (_redeliveries.Count > 0)
+        {
+            message = _redeliveries.Dequeue();
+            return true;
+        }
+
         if (_deferred.Count > 0)
         {
             message = _deferred.Dequeue();
@@ -862,7 +973,7 @@ public sealed class MemberRuntime : IAsyncDisposable
             // waits on the CHANNEL, so a container holding a set-aside message with nothing new
             // arriving would wait forever on work it is already holding - the workflow would never
             // run and nothing would say why.
-            while (_deferred.Count > 0
+            while (_deferred.Count > 0 || _redeliveries.Count > 0
                    || await _queue.Reader.WaitToReadAsync(_shutdown.Token).ConfigureAwait(false))
             {
                 while (true)
@@ -934,7 +1045,10 @@ public sealed class MemberRuntime : IAsyncDisposable
                         var batch = new List<Message>(DefaultCeiling) { first };
                         var lastGrowthAt = DateTime.UtcNow;
 
-                        while (batch.Count < DefaultCeiling)
+                        // A DEFERRED ITEM RUNS ALONE: it was deferred out of a batch to be its own run.
+                        var alone = _redeliverFrom.ContainsKey(first.Seq);
+
+                        while (!alone && batch.Count < DefaultCeiling)
                         {
                             var before = batch.Count;
                             DrainBatch(batch, first.CorrelationId);
@@ -1021,7 +1135,9 @@ public sealed class MemberRuntime : IAsyncDisposable
     {
         while (batch.Count < DefaultCeiling && _queue.Reader.TryRead(out var next))
         {
-            if (next.CorrelationId == correlation) batch.Add(next);
+            // A deferred item delivered again on a restart is held like another workflow's message,
+            // and taken as a batch of its own.
+            if (next.CorrelationId == correlation && !_redeliverFrom.ContainsKey(next.Seq)) batch.Add(next);
             else _deferred.Enqueue(next);
         }
     }
@@ -1115,18 +1231,43 @@ public sealed class MemberRuntime : IAsyncDisposable
         {
             _runningBatch = messages;
             _blockedItems = [];
+            _deferredItems = [];
         }
     }
 
-    private HashSet<long> EndBatch()
+    private (HashSet<long> Blocked, Dictionary<long, string> Deferred) EndBatch()
     {
         lock (_batchGate)
         {
             var blocked = _blockedItems ?? [];
+            var deferred = _deferredItems ?? [];
             _blockedItems = null;
+            _deferredItems = null;
             _runningBatch = null;
-            return blocked;
+            return (blocked, deferred);
         }
+    }
+
+    /// <summary>
+    /// The message a deferred item is run as: its own, with <see cref="PayloadFields.DeferredFromRun"/>
+    /// added so the prompt can say where it came from. The seq, causation and correlation are the
+    /// original's, untouched.
+    /// </summary>
+    private static Message WithDeferredFrom(Message message, long fromRun)
+    {
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(message.Payload) is System.Text.Json.Nodes.JsonObject payload)
+            {
+                payload[PayloadFields.DeferredFromRun] = fromRun;
+                return message with { Payload = payload.ToJsonString() };
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return message;
     }
 
     /// <summary>
@@ -1219,11 +1360,17 @@ public sealed class MemberRuntime : IAsyncDisposable
         _running = run;
         _stoppedByHand = false;
 
-        await SafeAppendAsync(new NewMessage(
+        // A DEFERRED ITEM DELIVERED AGAIN: alone, and told where it came from.
+        long? deferredFrom = batch.Count == 1 && _redeliverFrom.TryRemove(first.Seq, out var from) ? from : null;
+        IReadOnlyList<Message> work = deferredFrom is { } fromRun ? [WithDeferredFrom(first, fromRun)] : batch;
+
+        // The run's own seq, which an item deferred out of it names. The waking seq stands in when
+        // the row could not be written: a deferral must still name something.
+        var runSeq = (await SafeAppendAsync(new NewMessage(
             MessageTypes.Started,
             JsonSerializer.Serialize(new { trigger = first.Type }),
             Id.ToString(),
-            cause));
+            cause)))?.Seq ?? cause;
 
         MemberResult result;
 
@@ -1239,7 +1386,7 @@ public sealed class MemberRuntime : IAsyncDisposable
                 new MemberInvocation(
                     Id,
                     _definition.Agent,
-                    batch,
+                    work,
                     _definition.WorkingDirectory,
                     EnvironmentFor(cause, worktree),
                     new MemberRunContext(
@@ -1330,7 +1477,26 @@ public sealed class MemberRuntime : IAsyncDisposable
         // Zeros here would be indistinguishable from a run that genuinely spent nothing.
         var usage = result.Usage;
 
-        var blockedItems = EndBatch();
+        var (blockedItems, deferredItems) = EndBatch();
+
+        // A DEFERRAL HOLDS ONLY OVER A FINISHED RUN. A run that failed or was stopped closes every
+        // item it did not block as failed, the way it always has: the Manager woken by that failure
+        // decides what to send again, and a Stop from the board is never undone by a redelivery.
+        if (!result.Succeeded) deferredItems = [];
+
+        // WHAT BECAME OF EVERY ITEM, for a run that carried more than one: never a bare `completed`
+        // copied from another item. Written on each terminal row of the run.
+        var items = batch.Count > 1
+            ? batch.Select((message, index) => new RunItem(
+                    index + 1,
+                    message.Seq,
+                    blockedItems.Contains(message.Seq) ? ItemOutcomes.Blocked
+                    : deferredItems.ContainsKey(message.Seq) ? ItemOutcomes.Deferred
+                    : result.Succeeded ? ItemOutcomes.Answered
+                    : ItemOutcomes.Failed,
+                    deferredItems.TryGetValue(message.Seq, out var why) ? why : null))
+                .ToList()
+            : null;
         var output = Excerpt.Of(result.Output, _limits.ExcerptChars, reference, failed: !result.Succeeded);
 
         // THE CARD'S HALF OF `container.failed`, set on the same arm that chooses to publish it.
@@ -1396,8 +1562,32 @@ public sealed class MemberRuntime : IAsyncDisposable
         // answered two hand-backs in one run would be charged twice.
         long? usageRowCause = null;
 
-        foreach (var message in batch)
+        for (var index = 0; index < batch.Count; index++)
         {
+            var message = batch[index];
+
+            // NOT CLOSED: delivered again as its own next run, and its pending row says so, so a
+            // restart in between re-offers it rather than losing or failing it.
+            if (deferredItems.ContainsKey(message.Seq))
+            {
+                if (_pending is not null)
+                {
+                    try
+                    {
+                        await _pending.DeferAsync(Id, message.Seq, runSeq, _shutdown.Token);
+                    }
+                    catch (Exception) when (!_shutdown.IsCancellationRequested)
+                    {
+                    }
+                }
+
+                _redeliverFrom[message.Seq] = runSeq;
+                _redeliveries.Enqueue(message);
+                Interlocked.Increment(ref _queueDepth);
+                Publish();
+                continue;
+            }
+
             if (!blockedItems.Contains(message.Seq))
             {
                 var usageCountedOn = usageRowCause;
@@ -1452,6 +1642,22 @@ public sealed class MemberRuntime : IAsyncDisposable
                     payload = payload[..^1]
                         + $",\"{PayloadFields.AgentTranscript}\":{JsonSerializer.Serialize(agentTranscript.Path)}"
                         + $",\"{PayloadFields.AgentTranscriptFormat}\":{JsonSerializer.Serialize(agentTranscript.Format)}}}";
+                }
+
+                // WHAT BECAME OF EACH ITEM, the same way: keys only on a run that carried more than
+                // one, so a run of one item writes the row it always wrote.
+                if (items is not null)
+                {
+                    payload = payload[..^1]
+                        + $",\"{PayloadFields.Item}\":{index + 1}"
+                        + $",\"{PayloadFields.ItemOutcome}\":{JsonSerializer.Serialize(items[index].Outcome)}"
+                        + $",\"{PayloadFields.Items}\":{JsonSerializer.Serialize(items, RunItem.Json)}}}";
+                }
+
+                // A deferred item's own run says which run it was deferred from.
+                if (deferredFrom is { } deferredFromRun)
+                {
+                    payload = payload[..^1] + $",\"{PayloadFields.DeferredFromRun}\":{deferredFromRun}}}";
                 }
 
                 // A QUIET RUN, the same way: one key, only when true, so every other row is byte for
@@ -1509,15 +1715,27 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// container wedged mid-message with its queue stalled - a far worse outcome than a missing
     /// signal, which is recoverable by looking.
     /// </summary>
-    private async Task SafeAppendAsync(NewMessage message)
+    private async Task<Message?> SafeAppendAsync(NewMessage message)
     {
         try
         {
-            await _log.AppendAsync(message, _shutdown.Token);
+            return await _log.AppendAsync(message, _shutdown.Token);
         }
         catch (Exception) when (!_shutdown.IsCancellationRequested)
         {
+            return null;
         }
+    }
+
+    /// <summary>One entry of <see cref="PayloadFields.Items"/>. <c>reason</c> is written only for a
+    /// deferral, which has no row of its own to carry it.</summary>
+    private sealed record RunItem(int Item, long Seq, string Outcome, string? Reason)
+    {
+        public static readonly JsonSerializerOptions Json = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        };
     }
 
     private void Publish()

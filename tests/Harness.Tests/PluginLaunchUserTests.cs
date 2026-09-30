@@ -33,6 +33,7 @@ public sealed class PluginLaunchUserTests : IDisposable
 
         public Task<MemberReportOutcome> ProgressAsync(ContainerId member, string status, CancellationToken ct = default) => Refused();
         public Task<MemberReportOutcome> BlockedAsync(ContainerId member, string reason, int? item = null, CancellationToken ct = default) => Refused();
+        public Task<MemberReportOutcome> DeferAsync(ContainerId member, int item, string reason, CancellationToken ct = default) => Refused();
         public Task<MemberReportOutcome> NeedsDecisionAsync(ContainerId member, string question, CancellationToken ct = default) => Refused();
         public Task<MemberReportOutcome> HandbackAsync(ContainerId member, string delivered, CancellationToken ct = default) => Refused();
         public Task<MemberReportOutcome> PublishAsync(ContainerId member, string type, string payload, CancellationToken ct = default) => Refused();

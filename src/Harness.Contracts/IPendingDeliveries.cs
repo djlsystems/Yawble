@@ -4,12 +4,12 @@ namespace Harness.Contracts;
 /// <param name="Started">Whether the container had picked it up when the host stopped. An
 /// un-started delivery is resumed; a started one is reported, because nothing can know how far
 /// into it the agent got.</param>
-/// <param name="DeferredFromRun">Set on an item a batched run DEFERRED: the seq of the run it was
-/// deferred from. It is back on the queue as its own pending instruction, and `status` shows it as
-/// deferred rather than merely queued. Null for every ordinary delivery.</param>
+/// <param name="DeferredFromRun">Set when the member DEFERRED this delivery out of a batched run:
+/// the seq of that run's <c>agentContainer.started</c> row. Such a delivery is queued again as its
+/// own next run, not closed. Null on every other delivery.</param>
 public sealed record PendingDelivery(long Seq, bool Started, long? DeferredFromRun = null);
 
-/// <param name="DeferredFromRun">As on <see cref="PendingDelivery"/>.</param>
+/// <summary>One delivery a team member accepted and has not finished. See <see cref="PendingDelivery"/>.</summary>
 public sealed record TeamPendingDelivery(string Subscriber, long Seq, bool Started, long? DeferredFromRun = null);
 
 /// <summary>
@@ -28,6 +28,13 @@ public interface IPendingDeliveries
     Task StartAsync(ContainerId subscriber, long seq, CancellationToken ct = default);
 
     Task RemoveAsync(ContainerId subscriber, long seq, CancellationToken ct = default);
+
+    /// <summary>
+    /// Puts a delivery the member DEFERRED back in the queue: un-started again, naming the run it
+    /// was deferred from. Not a removal - a deferred item is not closed, it is delivered again as
+    /// its own run, and a restart in between re-offers it rather than losing or failing it.
+    /// </summary>
+    Task DeferAsync(ContainerId subscriber, long seq, long fromRun, CancellationToken ct = default);
 
     /// <summary>
     /// Removes EVERY outstanding delivery for a subscriber, for a container that has been deleted.

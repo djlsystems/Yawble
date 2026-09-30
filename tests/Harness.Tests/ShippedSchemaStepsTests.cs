@@ -17,6 +17,7 @@ public sealed class ShippedSchemaStepsTests
     private static readonly Dictionary<string, string> Shipped = new(StringComparer.Ordinal)
     {
         ["messages-001"] = "405bfd0b5d7180af4cd6844c31d5d6a2e58c2cc385aaae83a5798b782e3feb9a",
+        ["messages-002"] = "968d861608751e96c040aa158f04f16baf6053ce464f8e44ee2c2ecc177b2ccb",
         ["auth-001"] = "c2e86a37e99a689f95c32134db882b3add91e4775c1516c759ee1758482d374d",
         ["auth-002"] = "e1b6b1e9b3dab445585d7658667e95067126053948aaf4a0e3ebfd6f500605b4",
         ["auth-003"] = "a632d0adfee1aae846161316f552e5d72a91a586935a7c51dc45c39d624869d5",

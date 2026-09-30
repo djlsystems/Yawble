@@ -257,6 +257,8 @@ const run = (seq: number, over: Record<string, unknown> = {}) => ({
   output: null,
   reason: null,
   quiet: false,
+  items: null,
+  deferredFromRun: null,
   ...over,
 });
 
@@ -329,6 +331,40 @@ describe('the watch dialog: live run and earlier runs', () => {
     expect(quiet!.querySelector('.earlier-run-quiet')?.textContent?.trim()).toBe('quiet');
     expect(loud!.querySelector('.earlier-run-quiet')).toBeNull();
     expect(quiet!.querySelector('.earlier-run-outcome')!.textContent).toBe('completed');
+  });
+
+  it("shows each item's outcome for a run of several, a deferral included, and the deferred item's own run", async () => {
+    stubApi({
+      pages: {
+        '': {
+          runs: [
+            run(9, { deferredFromRun: 7 }),
+            run(8, {
+              items: [
+                { item: 1, seq: 5, outcome: 'answered', reason: null },
+                { item: 2, seq: 6, outcome: 'deferred', reason: 'after X is accepted' },
+              ],
+            }),
+          ],
+          nextBefore: null,
+        },
+      },
+      transcripts: { 8: text('') },
+    });
+    await mountDialog(LiveViewDialog, { ...props, running: false });
+
+    const [again, batch] = runRows();
+    expect(again!.querySelector('.earlier-run-deferred-from')!.textContent!.trim()).toBe('deferred from run 7');
+    expect(again!.querySelector('.earlier-run-items')).toBeNull();
+    expect(batch!.querySelector('.earlier-run-items')!.textContent!.trim()).toBe('items 1 answered · 2 deferred');
+
+    batch!.click();
+    await flushPromises();
+
+    const items = [...document.body.querySelectorAll<HTMLElement>('.run-item')];
+    expect(items.map((item) => item.dataset.outcome)).toEqual(['answered', 'deferred']);
+    expect(items[0]!.textContent).toBe('Item 1 (seq 5): answered');
+    expect(items[1]!.textContent).toBe('Item 2 (seq 6): deferred, delivered again as its own run - after X is accepted');
   });
 
   it('loads the next older page with the cursor the last one gave, and stops when there is none', async () => {

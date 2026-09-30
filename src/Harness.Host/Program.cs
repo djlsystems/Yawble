@@ -5808,9 +5808,18 @@ app.MapPost("/api/teams/{team}/containers/{name}/blocked", async (
         return Results.BadRequest(new { error = "Say why you stopped." });
     }
 
-    // THE EFFECTS LIVE IN MemberReports: one batch item closed by its own row, or the whole run
-    // marked. An `item` that is not in this run is refused there, for every caller.
-    var outcome = await reports.BlockedAsync(container.Id, request.Reason, request.Item, ct);
+    // A DEFERRAL NAMES ITS ITEM: deferring "the run" means nothing.
+    if (request.Defer == true && request.Item is null)
+    {
+        return Results.BadRequest(new { error = "Name the item to defer: its number in this run's prompt." });
+    }
+
+    // THE EFFECTS LIVE IN MemberReports: one batch item closed by its own row, one deferred to its
+    // own next run, or the whole run marked. An `item` that is not in this run is refused there, for
+    // every caller, and so is deferring the only item of a run.
+    var outcome = request.Defer == true
+        ? await reports.DeferAsync(container.Id, request.Item!.Value, request.Reason, ct)
+        : await reports.BlockedAsync(container.Id, request.Reason, request.Item, ct);
 
     if (!outcome.Accepted) return Results.BadRequest(new { error = outcome.Refusal });
 
@@ -5824,12 +5833,16 @@ app.MapPost("/api/teams/{team}/containers/{name}/blocked", async (
         + "`agentContainer.failed`, which is the PLATFORM reporting a run that did not complete: this is "
         + "a run that finished normally and produced no result. Without it, a member that abandons "
         + "a job and one that delivers are both idle with exit code 0. `item` is optional and, when "
-        + "present, names one batched prompt item (1-based) to abandon instead of the whole run.\n\n"
+        + "present, names one batched prompt item (1-based) to abandon instead of the whole run. "
+        + "`defer` true with an `item` DEFERS that item instead: it is not closed when this run ends "
+        + "but delivered again as its own next run, in the same workflow, and the run's terminal rows "
+        + "list it as `deferred` with the reason. Deferring the only item of a run is refused.\n\n"
         + "The reason stays on the card until something wakes this member again. "
         + "**Only about yourself.** The caller must BE the member it names; anything else is 403. "
         + "Every member holds this permit, so the identity check rather than the permit is what "
         + "stops one member marking another. "
-        + "400 for an empty reason or an invalid `item`; 404 for an unknown team or member.");
+        + "400 for an empty reason, an invalid `item`, or a deferral that is refused; 404 for an "
+        + "unknown team or member.");
 
 // THE HAND-BACK. A worker saying its own part is done and nothing is owed.
 //
@@ -8021,7 +8034,11 @@ internal sealed record ReportBlocked(
     [property: Description(
         "Optional 1-based item number from this run's batched prompt. When present, marks only "
         + "that item as abandoned; omit it to mark the whole run.")]
-    int? Item = null);
+    int? Item = null,
+    [property: Description(
+        "With `item`: defer that item instead of abandoning it. It is delivered again as its own "
+        + "next run; `reason` says why it waits. Refused for the only item of a run.")]
+    bool? Defer = null);
 
 /// <summary>What question this member needs answered before it can continue.</summary>
 internal sealed record ReportNeedsDecision(
