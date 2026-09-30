@@ -152,11 +152,18 @@ public interface ITeamPublisher
 /// The stored default branch of (team, repository), which is never published either: it is
 /// the branch `main` stands for below. Null, or a null answer, leaves only the fixed names.
 /// </param>
+/// <param name="teamBranchPublished">
+/// Told (team, repository, sha, causation) each time `team/{team}` reaches origin, after its
+/// receipt row - the tip a dispatch records so `landed` outlives the branch and the team
+/// (<see cref="BacklogTipRecorder"/>). Null records nothing. It cannot fail a publish: anything it
+/// throws, other than the caller's own cancellation, is swallowed.
+/// </param>
 public sealed class TeamPublisher(
     TeamPaths paths,
     GitRunner git,
     IMessageLog log,
-    Func<string, string, string?>? defaultBranchOf = null) : ITeamPublisher
+    Func<string, string, string?>? defaultBranchOf = null,
+    Func<string, string, string, long?, CancellationToken, Task>? teamBranchPublished = null) : ITeamPublisher
 {
     /// <summary>
     /// THE BRANCHES THAT ARE NEVER A DESTINATION HERE, AND THIS IS THE ENFORCEMENT RATHER THAN THE
@@ -196,9 +203,42 @@ public sealed class TeamPublisher(
             var outcome = await PublishOneAsync(team, url, ct);
             outcomes.Add(outcome);
             await ReportAsync(outcome, source, causation, ct);
+            await RecordTipAsync(team, url, outcome, causation, ct);
         }
 
         return new TeamPublishReport(outcomes);
+    }
+
+    /// <summary>
+    /// THE TEAM BRANCH'S TIP, WHEN THIS PUBLISH PUT IT ON ORIGIN. Read from the clone after the
+    /// push, so the sha is exactly what origin now holds.
+    /// </summary>
+    private async Task RecordTipAsync(
+        string team, string url, RepoPublishOutcome outcome, long? causation, CancellationToken ct)
+    {
+        if (teamBranchPublished is null) return;
+
+        var published = outcome.Result == TeamPublishResult.Published ? outcome.Branches : outcome.Published;
+        var branch = $"team/{team}";
+        if (published is null || !published.Contains(branch, StringComparer.Ordinal)) return;
+
+        try
+        {
+            var clonePath = Path.Combine(paths.ReposFor(team), outcome.Repo, "main");
+            var tip = await git.RunGitAsync(clonePath, ["rev-parse", "--verify", $"refs/heads/{branch}"], ct);
+            if (tip.ExitCode != 0) return;
+
+            await teamBranchPublished(team, RepoUrls.DeriveName(url), tip.Stdout.Trim(), causation, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // NEVER THROWS, for the reason PublishAsync does not: a tip that could not be recorded
+            // leaves `landed` to be derived as it always was, and must not cost the acceptance.
+        }
     }
 
     private async Task<RepoPublishOutcome> PublishOneAsync(string team, string url, CancellationToken ct)

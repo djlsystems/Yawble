@@ -130,7 +130,7 @@ public static class BacklogEndpoints
             // adds no query; what it adds is git, which is why it is bounded per TEAM and cached
             // rather than asked per row. See BacklogLandedState for what it costs and what caps it.
             var landed = await BacklogLandedState.ForAsync(
-                latest.Values, teams, paths, git, landedCache, ct, pullRequests);
+                latest.Values, teams, paths, git, landedCache, ct, pullRequests, backlog);
 
             return Results.Ok(items
                 .Select(item => Render(
@@ -178,7 +178,11 @@ public static class BacklogEndpoints
                 + "reason. It is an offer. Nothing is closed, declared or marked until a person "
                 + "calls that route. Null otherwise.\n\n"
                 + "`landed` says whether the CURRENT dispatch's work reached origin's default "
-                + "branch, derived from that team's clone and stored nowhere. `landed.state` is one "
+                + "branch, derived from that team's clone. Once `landed` is proven it is STORED on "
+                + "the dispatch and answered from there, with `landedAt`, even after the branch, the "
+                + "clone and the team are gone; it is never downgraded. With the team's clone unable "
+                + "to say, the tip its publish recorded is checked in a clone of the same repository "
+                + "on this instance, after a fetch. `landed.state` is one "
                 + "of `landed` (on origin's default branch), `pushed` (on a remote branch, not yet "
                 + "on origin's default branch), `local` (commits on no remote at all - the state "
                 + "work is in when it exists on one disk only) and `unknown`. `unknown` IS AN ANSWER: the team is gone, the clone is "
@@ -233,7 +237,7 @@ public static class BacklogEndpoints
             // team's measurement is cached, so opening a row the list has just rendered is free.
             var landed = current is null
                 ? null
-                : (await BacklogLandedState.ForAsync([current], teams, paths, git, landedCache, ct, pullRequests))
+                : (await BacklogLandedState.ForAsync([current], teams, paths, git, landedCache, ct, pullRequests, backlog))
                     .GetValueOrDefault(id);
 
             return Results.Ok(new

@@ -167,6 +167,17 @@ public static class BacklogStates
 /// already the moment a person says "keep this for the record". Restoring clears it and the item
 /// goes back to deriving.
 /// </param>
+/// <param name="LandedAt">
+/// LANDED, ONCE PROVEN, IS KEPT. Set the first time the work was proven reachable from
+/// origin's default branch - by ancestry, or by the Git dialog's Merge to main - and never cleared
+/// or moved afterwards, so a dispatch whose branch, clone and team are all gone still reads
+/// <c>landed</c>. Null until then. A later rewrite of the default branch that drops the commit is
+/// out of scope.
+/// </param>
+/// <param name="LandedSha">The commit proven on the default branch. With several repositories,
+/// <c>Repo sha</c> pairs joined by <c>, </c>.</param>
+/// <param name="LandedBranch">The default branch it was read on, as stored for the repository at
+/// the time - never assumed. With several repositories, <c>Repo branch</c> pairs.</param>
 public sealed record BacklogDispatch(
     long Id,
     long Item,
@@ -176,7 +187,20 @@ public sealed record BacklogDispatch(
     string DispatchedAt,
     string DispatchedBy,
     string? FrozenAt,
-    string? FrozenStats);
+    string? FrozenStats,
+    string? LandedAt = null,
+    string? LandedSha = null,
+    string? LandedBranch = null);
+
+/// <summary>
+/// THE WORK'S TIP IN ONE REPOSITORY, as the team's publish last pushed it. One row per
+/// dispatch and repository, replaced by the newer tip on every publish. It is what lets
+/// <c>landed</c> be read after the team's clone is gone: the sha is checked against another clone
+/// of the same repository.
+/// </summary>
+/// <param name="Repo">The folder name derived from the URL - never the URL, which is where a
+/// credential lives.</param>
+public sealed record BacklogDispatchTip(long Dispatch, string Repo, string Sha, string RecordedAt);
 
 /// <summary>
 /// The backlog's store. Its own module for the reason <see cref="BacklogItem"/>'s schema records.
@@ -303,4 +327,20 @@ public interface IBacklogStore
     /// the item to move to <c>declared</c>.
     /// </summary>
     Task<BacklogDispatch?> DispatchForCorrelationAsync(long correlation, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records <paramref name="sha"/> as the dispatch's tip in <paramref name="repo"/>, replacing
+    /// any earlier one. See <see cref="BacklogDispatchTip"/>.
+    /// </summary>
+    Task RecordTipAsync(long dispatchId, string repo, string sha, CancellationToken ct = default);
+
+    /// <summary>The dispatch's recorded tips, one per repository, by repository name.</summary>
+    Task<IReadOnlyList<BacklogDispatchTip>> TipsAsync(long dispatchId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stores landed on the dispatch, ONLY when it has none yet: a stored landed is never
+    /// downgraded, cleared or moved. Answers whether this call stored it.
+    /// </summary>
+    Task<bool> RecordLandedAsync(
+        long dispatchId, string sha, string branch, CancellationToken ct = default);
 }
