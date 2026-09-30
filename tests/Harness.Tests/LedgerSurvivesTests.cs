@@ -30,6 +30,9 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
     private HttpClient _person = null!;
     private string _team = "";
 
+    /// <summary>When set, a Manager run waits on it, so a delivery can be held in the Manager's queue.</summary>
+    private TaskCompletionSource? _holdManager;
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private IServiceProvider Services => _factory.Services;
@@ -55,6 +58,11 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
             {
                 await Services.GetRequiredService<MemberReports>().HandbackAsync(invocation.Container, "found one", Ct);
                 return new AgentResult(0, "handed back", Usage: new InvocationUsage(1000, 500, "test", cachedIn: 2000));
+            }
+
+            if (invocation.Container.Name == TeamRegistry.DefaultManagerName && _holdManager is { } hold)
+            {
+                await hold.Task.WaitAsync(Ct);
             }
 
             return new AgentResult(0, $"noted by {invocation.Container.Name}", Usage: new InvocationUsage(600, 100, "test"));
@@ -182,6 +190,88 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_reset_while_a_manager_run_is_queued_behind_the_handback_leaves_its_row_queued_at_trigger_and_the_trigger_spend_today()
+    {
+        // The Manager is busy on work of its own, so the hand-back Dev's scheduled run writes waits
+        // in the Manager's queue.
+        _holdManager = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var busy = await Log.AppendAsync(new NewMessage(
+            MessageTypes.InstructionFor(Manager), JsonSerializer.Serialize(new { instruction = "hold" }), "console"), Ct);
+        var host = Services.GetRequiredService<Harness.Containers.ContainerHost>();
+        await UntilAsync(() => host.Find(Manager)?.State == ContainerState.Running, "the Manager running its own work");
+
+        var trigger = await CreateScheduleAsync();
+        var after = await Log.HighestSeqAsync(Ct);
+        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(DateTimeOffset.UtcNow.AddSeconds(301), Ct);
+
+        var dev = await AwaitRowAsync(m => m.Seq > after && m.Source == Dev.ToString(), "Dev's terminal row");
+        var handback = (await Log.ReadAfterAsync(after, [MessageTypes.Handback], int.MaxValue, Ct))
+            .Single(m => m.Source == Dev.ToString());
+        await UntilAsync(() => host.Find(Dev)?.State is ContainerState.Idle && host.Find(Manager)?.QueueDepth > 0,
+            "Dev idle and the hand-back queued for the Manager");
+
+        // Dev's memory is deleted while the Manager's run of the hand-back is still queued. Nothing
+        // on the log cites the hand-back yet, but the queued delivery does: it is retained, or the
+        // Manager's run would spend and write no row at all. The rest of Dev's run goes.
+        var reset = await _person.PostAsJsonAsync($"/api/teams/{_team}/reset", new
+        {
+            members = new[] { "Dev" },
+            forgetHistory = true,
+            purge = true,
+        }, Ct);
+        Assert.True(reset.IsSuccessStatusCode, await reset.Content.ReadAsStringAsync(Ct));
+        Assert.Null(await Log.FindAsync(dev.Seq, Ct));
+        Assert.NotNull(await Log.FindAsync(handback.Seq, Ct));
+
+        _holdManager.SetResult();
+        await AwaitRowAsync(m => m.Source == Manager.ToString() && m.CausationSeq == busy.Seq, "the Manager's own run");
+        await SettleAsync();
+
+        var managerRun = (await Ledger.ReadRecentRunsAsync(Manager, 10, Ct))
+            .Single(r => r.Correlation == dev.CorrelationId);
+        Assert.Equal(handback.OccurredAt, managerRun.QueuedAt);
+        Assert.Equal($"schedule:{trigger}", managerRun.TriggerSource);
+        Assert.NotNull(managerRun.TriggerFiredAt);
+
+        // Dev's run and the Manager run it woke are both still the trigger's.
+        var today = await SpentTodayAsync(trigger);
+        Assert.Equal(1000 + 500 + 200 + 600 + 100, today.GetProperty("billableTokens").GetInt64());
+        Assert.Equal(2, today.GetProperty("measuredRuns").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_reset_that_deletes_the_nudge_leaves_the_spend_since_the_nudge_on_the_same_window()
+    {
+        var (_, devRow, _) = await FireScheduleAsync();
+        var correlation = devRow.CorrelationId;
+
+        var after = await Log.HighestSeqAsync(Ct);
+        var nudged = await _person.PostAsync($"/api/teams/{_team}/workflows/{correlation}/nudge", null, Ct);
+        Assert.True(nudged.IsSuccessStatusCode, await nudged.Content.ReadAsStringAsync(Ct));
+        var nudge = (await Log.ReadRangeAsync(after, int.MaxValue, Ct))
+            .Single(m => m.Type == MessageTypes.InstructionFor(Manager) && m.CausationSeq == correlation);
+        await AwaitRowAsync(m => m.Source == Manager.ToString() && m.CausationSeq == nudge.Seq, "the nudged Manager's run");
+        await SettleAsync();
+
+        // Only the Manager's run after the nudge is in the window, not the whole workflow.
+        var sinceNudge = await Log.GetSpendSinceNudgeAsync(correlation, Ct);
+        Assert.Equal(600 + 100, sinceNudge.TokensSpent);
+        Assert.True(sinceNudge.TokensSpent < (await Log.GetWorkflowSpendAsync(correlation, Ct)).TokensSpent);
+
+        // Resetting the Manager deletes the nudge - an instruction addressed to it - with its run.
+        var reset = await _person.PostAsJsonAsync($"/api/teams/{_team}/reset", new
+        {
+            members = new[] { "Dev", TeamRegistry.DefaultManagerName },
+            forgetHistory = true,
+            purge = true,
+        }, Ct);
+        Assert.True(reset.IsSuccessStatusCode, await reset.Content.ReadAsStringAsync(Ct));
+        Assert.Null(await Log.FindAsync(nudge.Seq, Ct));
+
+        Assert.Equal(sinceNudge, await Log.GetSpendSinceNudgeAsync(correlation, Ct));
+    }
+
+    [Fact]
     public async Task A_deleted_teams_ledger_rows_remain_and_keep_its_name()
     {
         var (_, devRow, _) = await FireScheduleAsync();
@@ -259,17 +349,7 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
     /// the Manager. Answers the trigger id, Dev's terminal row and the Manager's.</summary>
     private async Task<(string Trigger, Message Dev, Message Manager)> FireScheduleAsync()
     {
-        var created = await _person.PostAsJsonAsync($"/api/teams/{_team}/triggers", new Dictionary<string, object?>
-        {
-            ["name"] = "Poll Dev",
-            ["kind"] = "every",
-            ["container"] = "Dev",
-            ["intervalSeconds"] = 300,
-            ["idleOnly"] = false,
-            ["instruction"] = "look",
-        }, Ct);
-        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-        var trigger = (await created.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetString()!;
+        var trigger = await CreateScheduleAsync();
 
         var after = await Log.HighestSeqAsync(Ct);
         await Services.GetRequiredService<TriggerSweep>().FireDueAsync(DateTimeOffset.UtcNow.AddSeconds(301), Ct);
@@ -281,6 +361,33 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
 
         await SettleAsync();
         return (trigger, dev, manager);
+    }
+
+    /// <summary>A schedule on Dev, due in 300 seconds. Answers its id.</summary>
+    private async Task<string> CreateScheduleAsync()
+    {
+        var created = await _person.PostAsJsonAsync($"/api/teams/{_team}/triggers", new Dictionary<string, object?>
+        {
+            ["name"] = "Poll Dev",
+            ["kind"] = "every",
+            ["container"] = "Dev",
+            ["intervalSeconds"] = 300,
+            ["idleOnly"] = false,
+            ["instruction"] = "look",
+        }, Ct);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        return (await created.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetString()!;
+    }
+
+    private static async Task UntilAsync(Func<bool> condition, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException($"Never: {what}.");
+            await Task.Delay(20, Ct);
+        }
     }
 
     /// <summary>Waits until every member of the team has been idle for several passes, so nothing is
