@@ -9,7 +9,14 @@ public sealed record LocalRepoInfo(
     long SizeBytes,
     string? DefaultBranch,
     LocalRepoCommit? LastCommit,
-    IReadOnlyList<string> Teams);
+    IReadOnlyList<string> Teams)
+{
+    /// <summary>Its branches, by short name (B0020: what deleting it would lose).</summary>
+    public IReadOnlyList<string> Branches { get; init; } = [];
+
+    /// <summary>How many commits its branches hold together; null when git could not count them.</summary>
+    public int? CommitCount { get; init; }
+}
 
 /// <summary>The newest commit on a local repository's default branch.</summary>
 public sealed record LocalRepoCommit(string Sha, string Subject, DateTimeOffset? CommittedAt);
@@ -128,7 +135,13 @@ public sealed partial class LocalRepos(string dataRoot, GitRunner git)
         var branch = await git.ReadLocalRepositoryHeadAsync(path, ct);
         var last = branch is null ? null : await git.ReadLocalRepositoryTipAsync(path, branch, ct);
 
-        return new LocalRepoInfo(name, ReferenceFor(name), size, branch, last, teamsUsing);
+        var (branches, commits) = await git.ReadLocalRepositoryContentsAsync(path, ct);
+
+        return new LocalRepoInfo(name, ReferenceFor(name), size, branch, last, teamsUsing)
+        {
+            Branches = branches,
+            CommitCount = commits,
+        };
     }
 
     /// <summary>

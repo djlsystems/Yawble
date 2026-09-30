@@ -45,7 +45,35 @@ public sealed record TeamDeleted(
     /// listed as unused afterwards, where a person may delete them. Filled in by the route.
     /// </summary>
     public IReadOnlyList<string> LocalRepositoriesKept { get; init; } = [];
+
+    /// <summary>
+    /// THE LOCAL REPOSITORIES DELETED WITH THE TEAM (B0020): the <c>local:&lt;name&gt;</c> references a
+    /// person ticked, each deleted after the team through <see cref="LocalRepoDeletion"/>, the code
+    /// Admin -> Repositories' delete uses. Filled in by the route.
+    /// </summary>
+    public IReadOnlyList<string> LocalRepositoriesDeleted { get; init; } = [];
+
+    /// <summary>
+    /// A ticked local repository that could not be deleted, and why. The team is deleted either
+    /// way; the repository is also in <see cref="LocalRepositoriesKept"/>, and a person finishes it
+    /// from Admin -> Repositories. Filled in by the route.
+    /// </summary>
+    public IReadOnlyList<LocalRepositoryNotDeleted> LocalRepositoryFailures { get; init; } = [];
+
+    /// <summary>
+    /// How many agent CLI session folders keyed to the team's own workspaces went from the shared
+    /// agent home (B0020): Claude's <c>projects</c> and <c>.cache</c> folders, and each other
+    /// built-in preset's <see cref="AgentDefinition.SessionFolders"/>.
+    /// </summary>
+    public int SessionFolders { get; init; }
+
+    /// <summary>Every path of those session folders still on disk, one by one; each is also named in
+    /// <see cref="Failures"/>. Not retried: a team of the same name may own that workspace path next.</summary>
+    public IReadOnlyList<string> SessionFoldersRemaining { get; init; } = [];
 }
+
+/// <summary>A local repository a person asked to delete with its team, which was not deleted.</summary>
+public sealed record LocalRepositoryNotDeleted(string Reference, string Reason);
 
 /// <summary>
 /// Deleting this team would discard commits no remote-tracking ref in the clone can reach, and the
@@ -126,9 +154,20 @@ public sealed class TeamDeletion(
     FolderRemoval? removal = null,
     SiteService? sites = null,
     TeamSkills? skills = null,
-    ITeamSolutionStore? solutions = null)
+    ITeamSolutionStore? solutions = null,
+    string? agentHome = null,
+    IReadOnlyList<string>? sessionFolders = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
+
+    /// <summary>The shared agent home the CLIs keep their session folders in: the Host's own HOME,
+    /// which every agent child is launched with.</summary>
+    private readonly string _agentHome = agentHome
+        ?? (Environment.GetEnvironmentVariable("HOME") is { Length: > 0 } home
+            ? home
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+    private readonly IReadOnlyList<string> _sessionFolders = sessionFolders ?? AgentSessionFolders.BuiltIn();
 
     /// <summary>
     /// Deletes <paramref name="team"/>. Returns null when there is no such team, which is a 404
@@ -166,6 +205,10 @@ public sealed class TeamDeletion(
 
         var containers = teams.ContainerIdsOf(stored);
         var failures = new List<string>();
+
+        // Read while the registry and the root still name them: the step after the root removes the
+        // CLIs' session folders keyed to these, and nothing can name them afterwards.
+        var workspaces = WorkspacesOf(root, containers);
 
         // 1. Containers, and then the rows that only they own.
         var swept = 0;
@@ -314,6 +357,17 @@ public sealed class TeamDeletion(
         // the claim guard still recognises it.
         RemoveIfOnlyMarker(kept, stored, failures);
 
+        // 6. The agent CLIs' own session folders for this team's workspaces, from the shared agent
+        // home. After the containers stopped (step 1), so no run is writing one, and after the
+        // registry forgot the team (step 4), so the live teams read below are exactly the others.
+        var (sessionFoldersRemoved, sessionFoldersLeft) = await RemoveSessionFoldersAsync(workspaces, ct);
+        if (sessionFoldersLeft.Count > 0)
+        {
+            failures.Add(
+                $"agent session folders: {sessionFoldersLeft.Count} path(s) could not be removed from {_agentHome}: "
+                + string.Join(", ", sessionFoldersLeft));
+        }
+
         // This process's memory of the ROOT, distinct from step 4's memory of the team itself - a
         // stale entry here outlives the team it named and would answer a later RootFor(stored) with
         // a path nothing owns any more.
@@ -328,7 +382,93 @@ public sealed class TeamDeletion(
             failures,
             remaining,
             remaining.Count > 0 ? root : null,
-            Directory.Exists(kept) ? kept : null);
+            Directory.Exists(kept) ? kept : null)
+        {
+            SessionFolders = sessionFoldersRemoved,
+            SessionFoldersRemaining = sessionFoldersLeft,
+        };
+    }
+
+    /// <summary>
+    /// A team's workspaces: every container's the registry names, and every folder under the root's
+    /// <c>workspaces</c> - which also holds a member deleted earlier whose folder is still there.
+    /// </summary>
+    private IReadOnlyList<string> WorkspacesOf(string root, IEnumerable<ContainerId> containers)
+    {
+        var found = new HashSet<string>(containers.Select(id => Path.Combine(root, "workspaces", id.Name)), StringComparer.Ordinal);
+
+        try
+        {
+            var folder = Path.Combine(root, "workspaces");
+            if (Directory.Exists(folder) && new DirectoryInfo(folder).LinkTarget is null)
+            {
+                foreach (var workspace in Directory.EnumerateDirectories(folder)) found.Add(workspace);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The registry's list alone.
+        }
+
+        return [.. found.Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path))).Distinct(StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Removes each session folder keyed to <paramref name="workspaces"/> through
+    /// <see cref="FolderRemoval.RemoveSessionFolderAsync"/>. A folder that is ALSO a live team's -
+    /// two workspace paths can dash to one name (<c>/a/b-c</c> and <c>/a/b/c</c>) - is left alone:
+    /// nothing is touched for a live team. Answers how many went and every path still there.
+    /// </summary>
+    private async Task<(int Removed, IReadOnlyList<string> Remaining)> RemoveSessionFoldersAsync(
+        IReadOnlyList<string> workspaces, CancellationToken ct)
+    {
+        if (_sessionFolders.Count == 0 || string.IsNullOrEmpty(_agentHome)) return (0, []);
+
+        var live = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var team in teams.All())
+        {
+            string liveRoot;
+            try
+            {
+                liveRoot = paths.RootFor(team.Id);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
+            {
+                continue;
+            }
+
+            foreach (var workspace in WorkspacesOf(liveRoot, teams.ContainerIdsOf(team.Id)))
+            {
+                foreach (var template in _sessionFolders)
+                {
+                    if (AgentSessionFolders.Resolve(template, _agentHome, workspace) is { } folder) live.Add(folder);
+                }
+            }
+        }
+
+        var removed = 0;
+        var remaining = new List<string>();
+
+        foreach (var workspace in workspaces)
+        {
+            foreach (var template in _sessionFolders)
+            {
+                if (AgentSessionFolders.Resolve(template, _agentHome, workspace) is not { } folder
+                    || live.Contains(folder)
+                    || !(Directory.Exists(folder) || new FileInfo(folder).LinkTarget is not null))
+                {
+                    continue;
+                }
+
+                var report = await _removal.RemoveSessionFolderAsync(_agentHome, folder, ct);
+
+                if (report.Refused is { } refused) remaining.Add(refused);
+                else if (report.Remaining.Count > 0) remaining.AddRange(report.Remaining);
+                else removed++;
+            }
+        }
+
+        return (removed, remaining);
     }
 
     private static void RemoveIfOnlyMarker(string folder, string team, List<string> failures)

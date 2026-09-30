@@ -166,7 +166,16 @@ public sealed record AgentDefinition(
         + "that replaced it while others launched from it would leave them no program. Updates "
         + "happen only where the platform chooses: at the container's start, and when a person "
         + "asks, with `update` the command it runs then.")]
-    AgentUpdates? Updates = null)
+    AgentUpdates? Updates = null,
+
+    [property: Description(
+        "The folders this CLI keeps in the agent's home for each working directory it was run in - "
+        + "its session transcripts and caches - which a team deletion removes for the deleted team's "
+        + "own workspaces. Each starts with `~/`, may not contain `..`, and ends in one segment that "
+        + "is exactly `{workspaceDashed}` or `{workspaceEncoded}` (see `liveView`). Read from the "
+        + "built-in presets only: a custom preset's are never acted on. Null when the CLI keys "
+        + "nothing by workspace.")]
+    IReadOnlyList<string>? SessionFolders = null)
 {
     /// <summary>Whether this preset is compiled into the build. Computed from the name, never
     /// stored: a file cannot make a custom preset built-in, or a built-in custom.</summary>

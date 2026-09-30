@@ -294,6 +294,16 @@ public static class AgentCatalogFile
             new Dictionary<string, string> { ["GROK_DISABLE_AUTOUPDATER"] = "1" },
             Update: ["grok", "update"]);
 
+        // THE FOLDERS EACH CLI KEEPS PER WORKING DIRECTORY in the shared agent home, which a team
+        // deletion removes for the deleted team's own workspaces (B0020). Claude keeps its session
+        // transcripts under `projects` and a cache under `~/.cache/claude-cli-nodejs`, both named
+        // like its live view's folder; grok keeps its sessions under the encoded working directory.
+        // codex (dated folders) and copilot (one folder per session id) key nothing by workspace,
+        // so they name none: finding their files would mean reading every session in the home.
+        IReadOnlyList<string> claudeSessionFolders =
+            ["~/.claude/projects/{workspaceDashed}", "~/.cache/claude-cli-nodejs/{workspaceDashed}"];
+        IReadOnlyList<string> grokSessionFolders = ["~/.grok/sessions/{workspaceEncoded}"];
+
         return
         [
             new AgentDefinition(
@@ -304,7 +314,8 @@ public static class AgentCatalogFile
                     ["--dangerously-skip-permissions", "--mcp-config", "{mcpConfig}", .. claudeModel],
                     claudeArguments),
                 Install: claudeInstall,
-                Updates: claudeUpdates),
+                Updates: claudeUpdates,
+                SessionFolders: claudeSessionFolders),
 
             new AgentDefinition(
                 "claude-headless",
@@ -353,7 +364,8 @@ public static class AgentCatalogFile
                 LiveView: new AgentLiveView(
                     "~/.claude/projects/{workspaceDashed}/{sessionId}.jsonl", LiveView.ClaudeJsonl),
                 Isolation: claudeIsolation,
-                Updates: claudeUpdates),
+                Updates: claudeUpdates,
+                SessionFolders: claudeSessionFolders),
 
             // The three other coding CLIs, verified against their own --help rather than from
             // documentation, which disagreed with the binaries in several places.
@@ -572,7 +584,8 @@ public static class AgentCatalogFile
                     [],
                     InstructionsFile: AgentsFile),
                 Install: grokInstall,
-                Updates: grokUpdates),
+                Updates: grokUpdates,
+                SessionFolders: grokSessionFolders),
 
             new AgentDefinition(
                 "grok-headless",
@@ -623,7 +636,8 @@ public static class AgentCatalogFile
                 LiveView: new AgentLiveView(
                     "~/.grok/sessions/{workspaceEncoded}/{sessionId}/updates.jsonl", LiveView.GrokUpdates),
                 Isolation: grokIsolation,
-                Updates: grokUpdates),
+                Updates: grokUpdates,
+                SessionFolders: grokSessionFolders),
 
             new AgentDefinition(
                 "echo",

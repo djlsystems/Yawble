@@ -928,6 +928,10 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
 // agent. A team names one as `local:<name>`; see LocalRepos.
 builder.Services.AddSingleton(sp => new LocalRepos(dataRoot, sp.GetRequiredService<GitRunner>()));
 
+// The one delete of a local repository: Admin -> Repositories' and a team deletion's (B0020).
+builder.Services.AddSingleton(sp => new LocalRepoDeletion(
+    sp.GetRequiredService<LocalRepos>(), sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<ITenantLog>()));
+
 // FORGIVING TEAM REPOSITORIES (B001F): a team's default local repository, and the `ls-remote` check
 // with its choices before a URL is used. The registry is resolved per call: it is built after this.
 builder.Services.AddSingleton<IRemoteRepoCheck>(sp => new RemoteRepoCheck(sp.GetRequiredService<GitRunner>()));
@@ -2762,7 +2766,12 @@ app.MapDelete("/api/teams/{team}", async (
         "Exact confirmation string required only when deletion would discard commits that are on "
         + "no remote.")]
     string? confirm,
-    TeamDeletion deletion, TenantLogging audit, TeamRegistry teams, TeamListPush listPush,
+    [Description(
+        "A `local:<name>` repository of this team's to delete after the team, repeated for each one "
+        + "the person ticked. Only a local repository the team uses; a URL is refused with 400.")]
+    string[]? deleteLocalRepository,
+    TeamDeletion deletion, LocalRepoDeletion localRepoDeletion, TenantLogging audit, TeamRegistry teams,
+    TeamListPush listPush,
     HttpContext context,
     CancellationToken ct) =>
 {
@@ -2779,9 +2788,26 @@ app.MapDelete("/api/teams/{team}", async (
     // KEPT, NEVER DELETED WITH THE TEAM (B001F): its local repositories live under
     // `<dataRoot>/repos`, outside the team's root, and show as unused in Admin -> Repositories,
     // where a person may delete them. Read before the deletion, which forgets the list.
-    var localRepositoriesKept = teams.ExistingName(team) is { } named
-        ? teams.ReposFor(named).Where(LocalRepos.IsLocal).ToArray()
+    var localRepositories = teams.ExistingName(team) is { } named
+        ? teams.ReposFor(named).Where(LocalRepos.IsLocal).Select(r => r.Trim()).ToArray()
         : [];
+
+    // DELETED WITH THE TEAM ONLY WHEN TICKED (B0020): each a `local:<name>` this team uses. Anything
+    // else - a URL, another team's repository - is refused before a single thing is deleted.
+    var ticked = new List<string>();
+    foreach (var asked in deleteLocalRepository ?? [])
+    {
+        if (localRepositories.FirstOrDefault(r => string.Equals(r, asked?.Trim(), StringComparison.Ordinal)) is not { } own)
+        {
+            return Results.BadRequest(new
+            {
+                error = $"'{asked}' is not a local repository this team uses, so nothing was deleted. Only a "
+                    + "team's own local:<name> repositories can be deleted with it.",
+            });
+        }
+
+        if (!ticked.Contains(own, StringComparer.Ordinal)) ticked.Add(own);
+    }
 
     TeamDeleted? removed;
     try
@@ -2800,6 +2826,32 @@ app.MapDelete("/api/teams/{team}", async (
 
     if (removed is null) return Results.NotFound(new { error = $"No team '{team}'." });
 
+    // AFTER THE TEAM, and through the one delete Admin -> Repositories uses: its own
+    // `local-repo.deleted` row first, the same refusal while another team uses it. One that fails
+    // leaves the team deleted - never the reverse - and is named with its reason and kept.
+    var localRepositoriesDeleted = new List<string>();
+    var localRepositoriesKept = new List<string>();
+    var localRepositoryFailures = new List<LocalRepositoryNotDeleted>();
+    foreach (var reference in localRepositories)
+    {
+        if (!ticked.Contains(reference, StringComparer.Ordinal))
+        {
+            localRepositoriesKept.Add(reference);
+            continue;
+        }
+
+        var result = await localRepoDeletion.DeleteAsync(LocalRepos.NameOf(reference), context.User, ct);
+        if (result.Deleted)
+        {
+            localRepositoriesDeleted.Add(reference);
+            continue;
+        }
+
+        if (result.Outcome != LocalRepoDeleteOutcome.NotFound) localRepositoriesKept.Add(reference);
+        localRepositoryFailures.Add(new LocalRepositoryNotDeleted(
+            reference, $"{result.Error} Delete it from Admin → Repositories."));
+    }
+
     // Exactly what went, because this is the one act in the system with nothing to inspect
     // afterwards. Written AFTER the delete: recording an intention that then failed would be worse
     // than recording nothing.
@@ -2817,7 +2869,14 @@ app.MapDelete("/api/teams/{team}", async (
 
             // Every path still on disk, one by one: the root keeps its marker and is retried.
             remaining = removed.Remaining,
+            localRepositoriesDeleted,
             localRepositoriesKept,
+            localRepositoryFailures = localRepositoryFailures
+                .Select(f => new { reference = f.Reference, reason = f.Reason }).ToArray(),
+
+            // The agent CLIs' session folders for its workspaces (B0020), and any still there.
+            sessionFolders = removed.SessionFolders,
+            sessionFoldersRemaining = removed.SessionFoldersRemaining,
         },
         ct);
 
@@ -2826,7 +2885,12 @@ app.MapDelete("/api/teams/{team}", async (
     // 200 with a body rather than 204. A deletion that could not remove a directory is still a
     // deletion - the team is gone from every list - and a caller that is told only "no content"
     // cannot say which files are still on disk.
-    return Results.Ok(removed with { LocalRepositoriesKept = localRepositoriesKept });
+    return Results.Ok(removed with
+    {
+        LocalRepositoriesKept = localRepositoriesKept,
+        LocalRepositoriesDeleted = localRepositoriesDeleted,
+        LocalRepositoryFailures = localRepositoryFailures,
+    });
 })
     .WithTags("Teams")
     .HumansOnly()
@@ -2844,8 +2908,17 @@ app.MapDelete("/api/teams/{team}", async (
         + "record of how that work was checked. They stay readable - by any person, once the "
         + "team that shared them is gone - through `GET /api/documents` and the documents routes "
         + "under this team's name.\n\n"
-        + "**ITS LOCAL REPOSITORIES ARE KEPT** (`localRepositoriesKept`, the `local:<name>` references it "
-        + "had): they are listed as unused in `GET /api/local-repos`, where a person may delete them.\n\n"
+        + "**ITS LOCAL REPOSITORIES ARE KEPT** unless named in `deleteLocalRepository` (`localRepositoriesKept`, "
+        + "the `local:<name>` references it had and still has on disk): they are listed as unused in "
+        + "`GET /api/local-repos`, where a person may delete them. One named in `deleteLocalRepository` is "
+        + "deleted AFTER the team through the same delete `DELETE /api/local-repos/{name}` does - its "
+        + "`local-repo.deleted` row first, refused while another team uses it - and listed in "
+        + "`localRepositoriesDeleted`; one that could not be deleted is kept and named with its reason in "
+        + "`localRepositoryFailures`, and the team is deleted either way.\n\n"
+        + "**The agent CLIs' session folders** keyed to the team's own workspaces are removed from the shared "
+        + "agent home (Claude's `~/.claude/projects/<workspace, dashed>` and `~/.cache/claude-cli-nodejs/...`, "
+        + "each built-in preset's `sessionFolders`), counted in `sessionFolders`; any path left is in "
+        + "`sessionFoldersRemaining` and `failures`. Nothing else in the home, and nothing of a live team's.\n\n"
         + "**The message log is not touched.** It is append-only, and a team's messages are the "
         + "history of what happened rather than a property of the team; deleting them would take "
         + "other teams' causally-linked messages with them.\n\n"
