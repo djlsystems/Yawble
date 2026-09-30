@@ -46,19 +46,19 @@ public sealed class SolutionPanels(
 
     /// <summary>
     /// EVERY CONTROL THE PANEL OFFERS, and the existing route each one is. The panel adds no write
-    /// route but Uninstall: each of these carries its own permit marker and appends its own tenant
-    /// row, and a test holds this list against the Host's endpoints.
+    /// route but Uninstall: each of these carries its own permit marker and appends the tenant row
+    /// named here, and tests hold this list against the Host's endpoints and drive every control.
     /// </summary>
-    public static readonly IReadOnlyList<(string Control, string Method, string Route)> Controls =
+    public static readonly IReadOnlyList<(string Control, string Method, string Route, string Row)> Controls =
     [
-        ("Pause", "POST", "/api/teams/{team}/pause"),
-        ("Resume", "POST", "/api/teams/{team}/resume"),
-        ("Run now", "POST", "/api/teams/{team}/triggers/{id}/run"),
-        ("A trigger's on/off and daily cap", "PATCH", "/api/teams/{team}/triggers/{id}"),
-        ("Plugin settings and connection bindings", "PUT", "/api/teams/{team}/members/{member}/plugin-settings"),
-        ("Upload a missing document", "POST", "/api/teams/{team}/documents/upload"),
-        ("Update from a folder", "POST", "/api/solutions/update"),
-        ("Uninstall", "POST", "/api/teams/{team}/solution/uninstall"),
+        ("Pause", "POST", "/api/teams/{team}/pause", TenantActions.TeamPaused),
+        ("Resume", "POST", "/api/teams/{team}/resume", TenantActions.TeamResumed),
+        ("Run now", "POST", "/api/teams/{team}/triggers/{id}/run", TenantActions.ScheduleRunNow),
+        ("A trigger's on/off and daily cap", "PATCH", "/api/teams/{team}/triggers/{id}", TenantActions.ScheduleChanged),
+        ("Plugin settings and connection bindings", "PUT", "/api/teams/{team}/members/{member}/plugin-settings", TenantActions.MemberPluginSettingsChanged),
+        ("Upload a missing document", "POST", "/api/teams/{team}/documents/upload", TenantActions.DocumentUploaded),
+        ("Update from a folder", "POST", "/api/solutions/update", TenantActions.SolutionUpdated),
+        ("Uninstall", "POST", "/api/teams/{team}/solution/uninstall", TenantActions.SolutionUninstalled),
     ];
 
     /// <summary>How many files one output folder lists, newest first.</summary>
