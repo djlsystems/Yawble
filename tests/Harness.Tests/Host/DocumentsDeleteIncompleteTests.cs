@@ -133,6 +133,43 @@ public sealed class DocumentsDeleteIncompleteTests : IAsyncLifetime
             (await RowsAsync()).Select(r => r.Action));
     }
 
+    [Fact]
+    public async Task A_folder_holding_a_subfolder_the_host_cannot_list_answers_409_naming_it_not_an_unhandled_500()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix permissions.");
+        var locked = Path.GetDirectoryName(Write("reports/locked/keep.md"))!;
+        var gone = Write("reports/free.md");
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        _unlock.Add(locked);
+        if (CanList(locked)) Assert.Skip("This process lists a mode-000 folder anyway (it runs as root).");
+
+        var response = await _client.DeleteAsync("/api/teams/Alpha/documents?path=reports&recursive=true", Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        Assert.Contains("reports/locked (permission denied)", body.GetProperty("error").GetString()!);
+        Assert.Contains(body.GetProperty("remaining").EnumerateArray(), left => left.GetProperty("path").GetString() == "reports/locked");
+        Assert.False(File.Exists(gone));
+
+        var rows = await RowsAsync();
+        Assert.Equal([TenantActions.DocumentsDeleted, TenantActions.DocumentsDeleteIncomplete], rows.Select(r => r.Action));
+        Assert.Contains("reports/locked", rows[1].Detail!);
+
+        // Listable again: deleting again finishes it.
+        File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await _client.DeleteAsync("/api/teams/Alpha/documents?path=reports&recursive=true", Ct)).StatusCode);
+        Assert.False(Directory.Exists(Path.Combine(Docs.RootFor("Alpha"), "reports")));
+    }
+
+    private readonly List<string> _unlock = [];
+
+    private static bool CanList(string folder)
+    {
+        try { _ = Directory.EnumerateFileSystemEntries(folder).Any(); return true; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
     /// <summary>This test's documents rows, oldest first.</summary>
     private async Task<List<TenantEvent>> RowsAsync() =>
         [.. (await _factory.Services.GetRequiredService<ITenantLog>().ReadAsync(null, 200, Ct)).Events
@@ -141,6 +178,11 @@ public sealed class DocumentsDeleteIncompleteTests : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
+        foreach (var folder in _unlock.Where(Directory.Exists))
+        {
+            File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
         _client.Dispose();
         await _factory.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
