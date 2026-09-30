@@ -231,6 +231,9 @@ public sealed class AgentUpdateGate
 }
 
 /// <summary>What one platform update of a CLI came to.</summary>
+/// <param name="CliVersion">The CLI's version and when it last changed, read back from the version
+/// history after this update's line was written - what the Agents screen's row shows next. Null when
+/// the Host keeps no history or the preset declares no update.</param>
 public sealed record AgentUpdateResult(
     string Agent,
     string Command,
@@ -239,7 +242,8 @@ public sealed record AgentUpdateResult(
     string? VersionBefore,
     string? VersionAfter,
     DateTimeOffset At,
-    string Detail);
+    string Detail,
+    CliVersionNow? CliVersion = null);
 
 /// <summary>
 /// THE PLATFORM'S UPDATE OF A PRESET'S CLI, when a person asks: the preset's declared
@@ -253,7 +257,8 @@ public sealed class AgentCliUpdater(
     /// <summary>How long one update command may take before it is stopped.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);
 
-    public async Task<AgentUpdateResult?> UpdateAsync(string agent, CancellationToken ct)
+    /// <param name="person">The email of the person who asked, recorded on the history's line.</param>
+    public async Task<AgentUpdateResult?> UpdateAsync(string agent, CancellationToken ct, string? person = null)
     {
         if (catalog.Definition(agent) is not { Launch: { } launch } definition) return null;
 
@@ -275,10 +280,14 @@ public sealed class AgentCliUpdater(
             var after = await VersionAsync(command, updates, token);
             var at = DateTimeOffset.UtcNow;
 
+            CliVersionNow? now = null;
+
             if (dataRoot is not null)
             {
-                await CliVersionHistory.In(dataRoot).AppendAsync(
-                    new Dictionary<string, string?> { [command] = after }, "update", token);
+                var history = CliVersionHistory.In(dataRoot);
+                await history.AppendAsync(
+                    new Dictionary<string, string?> { [command] = after }, "update", token, person);
+                now = CliVersionHistory.Now(command, await history.ReadAsync(CliVersionHistory.MaxTake, token));
             }
 
             return new AgentUpdateResult(
@@ -286,7 +295,8 @@ public sealed class AgentCliUpdater(
                 exit == 0
                     ? before == after ? $"`{string.Join(' ', update)}` ran; {command} is already the newest ({after})."
                         : $"`{string.Join(' ', update)}` updated {command} from {before} to {after}."
-                    : $"`{string.Join(' ', update)}` exited {exit}: {Tail(output)}");
+                    : $"`{string.Join(' ', update)}` exited {exit}: {Tail(output)}",
+                now);
         }, ct);
     }
 

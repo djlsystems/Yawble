@@ -15,7 +15,8 @@ import {
 import { useAgentInstallations } from '../lib/useAgentInstallations';
 import { authReportFor, authStatus, refreshAgentAuth, useAgentAuth } from '../lib/useAgentAuth';
 import { toolsReportFor, toolsStatus } from '../lib/agentTools';
-import type { PresetToolReport } from '../api/types';
+import { cliVersionFor, updateOutcome, versionLine, withCliVersion } from '../lib/agentVersions';
+import type { CliVersion, PresetToolReport } from '../api/types';
 import AgentEditDialog from './AgentEditDialog.vue';
 
 /**
@@ -142,6 +143,18 @@ const formError = ref('');
 const editingAgent = ref<Agent | null>(null);
 const agentEditOpen = ref(false);
 
+/**
+ * Each preset's CLI version, from `cliVersions` on `GET /api/agents` - the Host's CLI version record,
+ * the one `yawble doctor` and `yawble agents` read. Beside the catalog for `installations`' reason.
+ */
+const cliVersions = ref<(CliVersion & { agent: string })[]>([]);
+const versionOf = (agent: Agent) => versionLine(cliVersionFor(cliVersions.value, agent.name));
+
+/** What each CLI's last update from this screen came to, keyed by command: every preset that
+ *  launches it shows the outcome, since they share one install. Cleared on every opening. */
+const updateOutcomes = ref<Record<string, string>>({});
+const outcomeOf = (agent: Agent) => (agent.launch ? updateOutcomes.value[agent.launch.fileName] : undefined);
+
 /** The row mid-DELETE, not a plain boolean, so the spinner lands on the row that is going. */
 const removing = ref<string | null>(null);
 
@@ -163,6 +176,10 @@ async function updateCli(agent: Agent) {
     const result = await api.updateAgentCli(agent.name);
     $q.notify({ type: result.updated ? 'positive' : 'warning', message: result.detail });
     await load();
+    // IN PLACE, from the update's own answer: the entry as the record reads after its line, laid
+    // over what the reload brought in case that read raced the write.
+    if (result.cliVersion) cliVersions.value = withCliVersion(cliVersions.value, result.cliVersion);
+    updateOutcomes.value = { ...updateOutcomes.value, [result.command]: updateOutcome(result) };
   } catch (failure) {
     $q.notify({ type: 'negative', message: (failure as Error).message });
   } finally {
@@ -184,10 +201,12 @@ async function load() {
 
     agents.value = catalog.agents;
     installations.value = catalog.installations ?? [];
+    cliVersions.value = catalog.cliVersions ?? [];
   } catch (failure) {
     error.value = (failure as Error).message;
     agents.value = [];
     installations.value = [];
+    cliVersions.value = [];
   } finally {
     busy.value = false;
   }
@@ -203,6 +222,7 @@ watch(open, (showing) => {
   taggingAgent.value = null;
   error.value = '';
   formError.value = '';
+  updateOutcomes.value = {};
   void load();
   // Its own call, beside the catalog load rather than inside it: the probe runs each CLI's own
   // status command and is the slower of the two, and a list that waited for it would open blank.
@@ -420,6 +440,22 @@ const rowBusy = computed(
                     'os-text-muted': statusOf(agent).tone !== 'warn',
                   }"
                 >{{ statusOf(agent).text }}</span>
+              </q-item-label>
+
+              <!-- THE CLI'S VERSION, on a built-in's row: what the Host's CLI version record says,
+                   when it last changed and who brought it - the record the doctor reads. A version
+                   the record does not have is "version not known", never a guess. After this row's
+                   update button, what that update came to. -->
+              <q-item-label v-if="isBuiltIn(agent)" caption class="agent-version-line">
+                <q-icon name="sync" size="14px" class="q-mr-xs" aria-hidden="true" />
+                <span v-if="versionOf(agent).version" class="mono agent-version">{{ versionOf(agent).version }}</span>
+                <span v-else class="os-text-muted agent-version">version not known</span>
+                <span v-if="versionOf(agent).updated" class="os-text-muted q-ml-xs agent-version-updated">
+                  · {{ versionOf(agent).updated }}
+                </span>
+              </q-item-label>
+              <q-item-label v-if="outcomeOf(agent)" caption class="agent-version-outcome">
+                {{ outcomeOf(agent) }}
               </q-item-label>
 
               <!-- The remedy, and ONLY where there is something to remedy. The sentence claims

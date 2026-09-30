@@ -4,15 +4,22 @@ namespace Harness.Host;
 
 /// <summary>One container start and the version each agent CLI reported at it. A null version is
 /// a CLI that was not installed at that start. <paramref name="By"/> is null for a start's line and
-/// `update` for the line the Host writes after a person's update of one CLI.</summary>
+/// `update` for the line the Host writes after a person's update of one CLI; <paramref name="Person"/>
+/// is that person's email when the Host knew it, and null on a start's line.</summary>
 public sealed record CliVersionsAtStart(
-    DateTimeOffset At, IReadOnlyDictionary<string, string?> Versions, string? By = null);
+    DateTimeOffset At, IReadOnlyDictionary<string, string?> Versions, string? By = null, string? Person = null);
 
 /// <summary>A CLI's installed version and when it last changed, as the history says.</summary>
 /// <param name="UpdatedAt">The first line that recorded this version after a different one; null
 /// when every kept line has this version (no update recorded since <paramref name="Since"/>).</param>
 /// <param name="Since">The oldest line kept.</param>
-public sealed record CliVersionNow(string Cli, string? Version, DateTimeOffset? UpdatedAt, DateTimeOffset? Since);
+/// <param name="UpdatedBy">Who brought this version, from the line at <paramref name="UpdatedAt"/>:
+/// `start` for a container start's line, `person` for a person's update through the platform; null
+/// when <paramref name="UpdatedAt"/> is.</param>
+/// <param name="Person">That person's email when the line records it.</param>
+public sealed record CliVersionNow(
+    string Cli, string? Version, DateTimeOffset? UpdatedAt, DateTimeOffset? Since,
+    string? UpdatedBy = null, string? Person = null);
 
 /// <summary>
 /// Which CLI versions this VOLUME has started with, newest first.
@@ -70,7 +77,10 @@ public sealed class CliVersionHistory(string path)
         {
             if (!string.Equals(newestFirst[i].Versions.GetValueOrDefault(cli), version, StringComparison.Ordinal))
             {
-                return new CliVersionNow(cli, version, newestFirst[i - 1].At, since);
+                var arrived = newestFirst[i - 1];
+                return new CliVersionNow(
+                    cli, version, arrived.At, since,
+                    arrived.By == "update" ? "person" : "start", arrived.Person);
             }
         }
 
@@ -82,9 +92,10 @@ public sealed class CliVersionHistory(string path)
     /// marked <paramref name="by"/>, keeping the newest <see cref="MaxTake"/>. Rewritten IN PLACE,
     /// never moved over, for the start script's reason: the Host may write the file and may not
     /// replace an entry in the data root. False when it could not be written; never throws.
+    /// <paramref name="person"/> is the email of the person who asked, written as `person` when known.
     /// </summary>
     public async Task<bool> AppendAsync(
-        IReadOnlyDictionary<string, string?> changed, string by, CancellationToken ct = default)
+        IReadOnlyDictionary<string, string?> changed, string by, CancellationToken ct = default, string? person = null)
     {
         try
         {
@@ -93,12 +104,14 @@ public sealed class CliVersionHistory(string path)
             foreach (var (cli, version) in newest?.Versions ?? new Dictionary<string, string?>()) versions[cli] = version;
             foreach (var (cli, version) in changed) versions[cli] = version;
 
-            var line = JsonSerializer.Serialize(new Dictionary<string, object?>
+            var fields = new Dictionary<string, object?>
             {
                 ["at"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture),
                 ["versions"] = versions,
                 ["by"] = by,
-            });
+            };
+            if (person is not null) fields["person"] = person;
+            var line = JsonSerializer.Serialize(fields);
 
             var lines = File.Exists(Path) ? [.. await File.ReadAllLinesAsync(Path, ct)] : new List<string>();
             lines.Add(line);
@@ -143,7 +156,11 @@ public sealed class CliVersionHistory(string path)
                 ? byValue.GetString()
                 : null;
 
-            return new CliVersionsAtStart(when, map, by);
+            var person = root.TryGetProperty("person", out var personValue) && personValue.ValueKind == JsonValueKind.String
+                ? personValue.GetString()
+                : null;
+
+            return new CliVersionsAtStart(when, map, by, person);
         }
         catch (JsonException)
         {
