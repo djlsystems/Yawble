@@ -87,14 +87,8 @@ describe('the control panel: Controls', () => {
   });
 
   it('shows the run Run now started once it finishes, without Refresh', async () => {
-    await controls();
-    const before = read;
-    const reads = () => sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length;
-    const readsBefore = reads();
-    await click('[data-control-trigger="trg_scan"] [data-run-now]');
-
-    // The run ends a moment after the route answered: the next read has it.
-    read = {
+    const before = panelRead();
+    const finished: PanelShape = {
       ...before,
       status: '5 new jobs · last checked 2026-09-30T10:00:00Z',
       members: before.members.map((member) =>
@@ -105,12 +99,27 @@ describe('the control panel: Controls', () => {
         ...before.recentRuns,
       ],
     };
+    // The run ends a moment after the route answered: the read as it answers still shows the old
+    // runs, every read after that has the finished one.
+    let readsSinceRun = -1;
+    serve([
+      (call) => {
+        if (call.method === 'POST' && call.url === '/api/teams/job-tracker/triggers/trg_scan/run') readsSinceRun = 0;
+        if (call.method === 'GET' && call.url === '/api/teams/job-tracker/solution/panel' && readsSinceRun >= 0)
+          return reply(200, readsSinceRun++ === 0 ? before : finished);
+        return undefined;
+      },
+    ]);
+    await controls();
+    expect(bodyFind('[data-panel-status]')?.textContent).not.toContain('5 new jobs');
+
+    await click('[data-control-trigger="trg_scan"] [data-run-now]');
     await vi.waitFor(() => expect(bodyFind('[data-panel-status]')?.textContent).toBe('5 new jobs · last checked 2026-09-30T10:00:00Z'));
 
     await new Promise((resolve) => setTimeout(resolve, 60));
     await settle();
-    // It stopped once the new run showed, well before its tries ran out.
-    expect(reads()).toBeLessThan(readsBefore + 1 + 3);
+    // It stopped at the read that showed the new run: the one as the route answered, and one more.
+    expect(readsSinceRun).toBe(2);
     await openSection('results');
     expect(bodyFind('[data-run="42"] [data-run-output]')?.textContent).toBe('5 new postings');
   });
