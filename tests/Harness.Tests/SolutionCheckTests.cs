@@ -250,6 +250,46 @@ public sealed class SolutionCheckTests : IDisposable
         Assert.Contains("absolute path", Refused(check, "tools/passwd", "(link)").Reason);
     }
 
+    /// <summary>What a file outside the package holds, which no refusal may repeat.</summary>
+    private const string Outside = "OUTSIDE-3f9c1e-not-the-packages";
+
+    [Fact]
+    public void A_solution_json_linked_outside_the_package_is_refused_alone_and_never_read()
+    {
+        var folder = Sample();
+        var manifest = Path.Combine(folder, "solution.json");
+        var target = Path.Combine(_scratch, "outside-solution.json");
+        // A manifest that, were it read, would be refused naming the marker.
+        File.WriteAllText(target, File.ReadAllText(manifest).Replace("\"member\": \"Scout\"", $"\"member\": \"{Outside}\"", StringComparison.Ordinal));
+        File.Delete(manifest);
+        File.CreateSymbolicLink(manifest, "../outside-solution.json");
+
+        var check = Check(folder);
+
+        var refusal = Assert.Single(check.Refusals);
+        Assert.Equal(("solution.json", "(link)"), (refusal.File, refusal.Field));
+        Assert.DoesNotContain(check.Refusals, r => r.ToString().Contains(Outside, StringComparison.Ordinal));
+        Assert.False(check.Ok);
+    }
+
+    [Fact]
+    public void A_skill_file_linked_outside_the_package_is_refused_alone_and_never_read()
+    {
+        var folder = Sample();
+        var skill = Path.Combine(folder, "skills", "job-search-playbook.md");
+        // A skill that, were it read, would be refused naming the marker.
+        File.WriteAllText(Path.Combine(_scratch, "outside-skill.md"), $"---\nname: {Outside}\ndescription: {Outside}\nroles: {Outside}\n---\n\n{Outside}\n");
+        File.Delete(skill);
+        File.CreateSymbolicLink(skill, "../../outside-skill.md");
+
+        var check = Check(folder);
+
+        var refusal = Assert.Single(check.Refusals);
+        Assert.Equal(("skills/job-search-playbook.md", "(link)"), (refusal.File, refusal.Field));
+        Assert.DoesNotContain(check.Refusals, r => r.ToString().Contains(Outside, StringComparison.Ordinal));
+        Assert.False(check.Ok);
+    }
+
     [Fact]
     public void A_link_that_stays_inside_the_package_is_allowed()
     {
