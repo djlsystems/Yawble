@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Harness.Contracts;
+using Harness.Host;
 using Harness.Messaging;
 
 namespace Harness.Tests;
@@ -64,7 +65,7 @@ public sealed class LedgerExclusionTests : IDisposable
     {
         Directory.CreateDirectory(_directory);
         _database = Path.Combine(_directory, "messages.db");
-        new SchemaMigrator(_database).ApplyAsync(MessageSchema.Steps).GetAwaiter().GetResult();
+        new SchemaMigrator(_database).ApplyAsync(SchemaModules.All).GetAwaiter().GetResult();
     }
 
     [Fact]

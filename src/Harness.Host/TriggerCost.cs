@@ -12,7 +12,7 @@ namespace Harness.Host;
 /// What a trigger's runs cost today, whether its daily cap stops the next fire, and what a member's
 /// recent runs actually cost.
 ///
-/// MEASURED ONLY. Spend is <see cref="InvocationUsage.BillableTokens"/>, summed by the log with the
+/// MEASURED ONLY. Spend is <see cref="InvocationUsage.BillableTokens"/>, summed from the usage ledger with the
 /// weights the workflow budget uses. A run that reported no usage is counted as UNMEASURED, beside
 /// the figure: it is never a zero and never an estimate, and it never convicts a cap. A run that ran
 /// NO MODEL (a plugin's, <see cref="UsageSource.NoModel"/>) is not that: its cost is known, and it is
@@ -20,6 +20,7 @@ namespace Harness.Host;
 /// </summary>
 public sealed class TriggerCost(
     IMessageLog log,
+    IUsageLedger ledger,
     ITriggerStore triggers,
     IOptions<JsonOptions> json)
 {
@@ -246,8 +247,11 @@ public sealed class TriggerCost(
     /// <summary>What a member's last <see cref="RecentRuns"/> runs measured. See the route.</summary>
     public async Task<MemberRecentCost> RecentAsync(ContainerId member, string kind, CancellationToken ct = default)
     {
-        var runs = await log.ReadRecentRunsAsync(member.ToString(), RecentRuns, ct);
-        var measured = runs.Select(run => BillableOf(run.Payload)).OfType<long>().Order().ToArray();
+        // FROM THE LEDGER, one row per run, so a Reset's "Delete memory" leaves a member's recent
+        // cost as it was. `billable` is NULL for an unmeasured run and 0 for one that ran no model -
+        // the rule BillableOf reads a log row by.
+        var runs = await ledger.ReadRecentRunsAsync(member, RecentRuns, ct);
+        var measured = runs.Where(run => run.Measured).Select(run => run.Billable ?? 0).Order().ToArray();
 
         long? median = measured.Length == 0
             ? null

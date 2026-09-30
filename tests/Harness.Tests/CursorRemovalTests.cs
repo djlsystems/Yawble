@@ -1,4 +1,5 @@
 using Harness.Contracts;
+using Harness.Host;
 using Harness.Messaging;
 
 namespace Harness.Tests;
@@ -21,7 +22,7 @@ public sealed class CursorRemovalTests : IDisposable
     {
         Directory.CreateDirectory(_directory);
         var database = Path.Combine(_directory, "messages.db");
-        new SchemaMigrator(database).ApplyAsync(MessageSchema.Steps).GetAwaiter().GetResult();
+        new SchemaMigrator(database).ApplyAsync(SchemaModules.All).GetAwaiter().GetResult();
         _store = new SqliteMessageStore(database);
     }
 

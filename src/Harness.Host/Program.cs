@@ -264,6 +264,26 @@ catch (Exception exception)
     return;
 }
 
+// THE LEDGER'S START AND THE INSTANCE'S ID, before anything appends: the one-time backfill of
+// `usage_ledger` and `workflow_ledger` from the log, and `instance.id`. See LedgerStart. A failure
+// is printed and the host starts anyway - the backfill's own row is what marks it done, so the next
+// start tries again, and rows recovered then are keyed so none is counted twice.
+LedgerStartResult? ledgerStart = null;
+try
+{
+    var ledger = ledgerStart = await LedgerStart.RunAsync(database);
+
+    if (ledger.BackfilledRuns is { } recovered)
+    {
+        Console.WriteLine(
+            $"Usage ledger started: {recovered} run(s) and {ledger.BackfilledWorkflows} workflow close(s) recovered from the log.");
+    }
+}
+catch (Microsoft.Data.Sqlite.SqliteException exception)
+{
+    Console.Error.WriteLine($"The usage ledger's start did not finish and is tried again at the next start: {exception.Message}");
+}
+
 var workflowWaits = new MessageWaitRegistry();
 var store = new SqliteMessageStore(database, workflowWaits);
 
@@ -271,6 +291,8 @@ builder.Services.AddSingleton<IMessageLog>(store);
 builder.Services.AddSingleton<ICursors>(store);
 builder.Services.AddSingleton<ISubscriptions>(store);
 builder.Services.AddSingleton(workflowWaits);
+builder.Services.AddSingleton<IUsageLedger>(new SqliteUsageLedger(database));
+builder.Services.AddSingleton(new LedgerIdentity(ledgerStart?.InstanceId, ledgerStart?.LedgerStartedAt));
 builder.Services.AddSingleton(new KanbanStore(store));
 
 // What each container has accepted and not finished. Without it nothing is durable: a container's
@@ -1938,6 +1960,7 @@ SurfaceEndpoints.Map(app, dataRoot);
 SiteEndpoints.Map(app);
 SiteApiEndpoints.Map(app);
 TenantSettingsEndpoints.Map(app);
+LedgerEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
 RemovalEndpoints.Map(app);

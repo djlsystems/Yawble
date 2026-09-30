@@ -103,7 +103,7 @@ public static class BacklogExecutionRecord
     /// </para>
     /// </summary>
     public static async Task<BacklogExecutionStats> ForAsync(
-        BacklogDispatch dispatch, IMessageLog log, CancellationToken ct = default)
+        BacklogDispatch dispatch, IMessageLog log, CancellationToken ct = default, IUsageLedger? ledger = null)
     {
         if (dispatch.FrozenStats is { Length: > 0 } frozen)
         {
@@ -122,7 +122,7 @@ public static class BacklogExecutionRecord
             }
         }
 
-        return await DeriveAsync(dispatch.Correlation, log, ct);
+        return await DeriveAsync(dispatch.Correlation, log, ledger, ct);
     }
 
     /// <summary>
@@ -135,7 +135,7 @@ public static class BacklogExecutionRecord
     /// </para>
     /// </summary>
     private static async Task<BacklogExecutionStats> DeriveAsync(
-        long correlation, IMessageLog log, CancellationToken ct)
+        long correlation, IMessageLog log, IUsageLedger? ledger, CancellationToken ct)
     {
         var rows = await log.ReadCorrelationAsync(correlation, ct);
         var spend = await log.GetWorkflowSpendAsync(correlation, ct);
@@ -196,6 +196,19 @@ public static class BacklogExecutionRecord
         if (outcome != Unknown && rows.Count > 0)
         {
             elapsed = (rows[^1].OccurredAt - rows[0].OccurredAt).TotalSeconds;
+        }
+
+        // A DECLARATION THE LOG NO LONGER HOLDS - a Reset's "Delete memory" takes the Manager's
+        // `workflow.completed` with the rest of its rows - IS STILL IN THE WORKFLOW LEDGER, which
+        // nothing deletes: the newest completion there says the workflow completed and how long it
+        // took. Only when the log cannot say so itself, so a workflow the log still describes reads
+        // exactly as it always did.
+        if (outcome == Unknown
+            && ledger is not null
+            && await ledger.ReadWorkflowAsync(correlation, ct) is { HowClosed: WorkflowLedgerRow.Completed } declared)
+        {
+            outcome = Completed;
+            elapsed = declared.ElapsedSeconds;
         }
 
         return new BacklogExecutionStats(
@@ -404,7 +417,8 @@ public static class BacklogExecutionRecord
         bool freeze,
         IBacklogStore backlog,
         IMessageLog log,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IUsageLedger? ledger = null)
     {
         var now = DateTimeOffset.UtcNow.ToString("O");
 
@@ -418,7 +432,7 @@ public static class BacklogExecutionRecord
 
             // DERIVED, never read back from a frozen copy - re-freezing an already-frozen dispatch
             // must take what the LOG says now rather than copying a copy forward.
-            var stats = await DeriveAsync(dispatch.Correlation, log, ct);
+            var stats = await DeriveAsync(dispatch.Correlation, log, ledger, ct);
 
             await backlog.FreezeDispatchAsync(
                 dispatch.Id, now, JsonSerializer.Serialize(stats), ct);
