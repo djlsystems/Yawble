@@ -111,5 +111,13 @@ public static class BacklogSchema
                 PRIMARY KEY (dispatch, repo)
             );
             """),
+
+        // THE OUTCOME AN ITEM SERVES. NULL for none. A dispatch links its new workflow to it, in
+        // the dispatch's own transaction. No foreign key: `outcomes` is the outcome module's.
+        new MigrationStep(
+            "backlog-003",
+            """
+            ALTER TABLE backlog_items ADD COLUMN outcome_id TEXT NULL;
+            """),
     ];
 }

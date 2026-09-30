@@ -355,7 +355,7 @@ public static class BacklogEndpoints
         app.MapPatch("/api/backlog/{id:long}", async (
             long id, UpdateBacklogItem request, HttpContext context, IBacklogStore backlog,
             TeamRegistry teams, TeamAccess access, IUserStore users, TenantLogging audit,
-            CancellationToken ct) =>
+            IOutcomeStore outcomes, CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
             if (!MayReach(principal)) return RefuseKind();
@@ -386,11 +386,24 @@ public static class BacklogEndpoints
             // names it. A team's own credential never reaches this route (`MayReach`), so a Manager
             // still cannot clear its own drafts for dispatch.
 
+            // THE OUTCOME THE ITEM SERVES: a live one, stored by id; empty clears it.
+            string? outcomeId = null;
+            if (request.OutcomeId is { Length: > 0 } asked && !string.IsNullOrWhiteSpace(asked))
+            {
+                if (await outcomes.ResolveLiveAsync(asked, ct) is not { } outcome)
+                {
+                    return Results.BadRequest(new { error = TriggerCreation.OutcomeRefusal(asked.Trim()) });
+                }
+
+                outcomeId = outcome.Id;
+            }
+
             await backlog.UpdateAsync(id, request.Title, request.Body, request.State, ct);
+            if (request.OutcomeId is not null) await backlog.SetOutcomeAsync(id, outcomeId, ct);
 
             await WriteAuditAsync(
                 context, principal, users, audit, TenantActions.BacklogItemEdited, PlatformBacklogId.Format(id),
-                request.Title ?? item.Title, new { id, state = request.State }, ct);
+                request.Title ?? item.Title, new { id, state = request.State, outcomeId = request.OutcomeId is null ? null : outcomeId ?? "" }, ct);
 
             if (request.State == BacklogStates.Implemented && item.State != BacklogStates.Implemented)
             {
@@ -1337,6 +1350,9 @@ public static class BacklogEndpoints
         item.CreatedAt,
         item.UpdatedAt,
         item.CreatedBy,
+
+        // THE OUTCOME THE ITEM SERVES, by id; a dispatch links its workflow to it.
+        item.OutcomeId,
         inFlight,
 
         // THE OPEN WORKFLOW LEFT BEHIND, when its work finished in a later one. Only ever set beside
@@ -1418,7 +1434,11 @@ internal sealed record UpdateBacklogItem(
     [property: Description("Absent leaves it alone.")] string? Title = null,
     [property: Description("Absent leaves it alone.")] string? Body = null,
     [property: Description("`pending`, `ready`, `declared` or `implemented`. Absent leaves it alone.")]
-    string? State = null);
+    string? State = null,
+    [property: Description(
+        "The outcome the item serves: an active or proposed outcome's id or exact name. A dispatch "
+        + "links its workflow to it. Empty clears it; absent leaves it alone.")]
+    string? OutcomeId = null);
 
 /// <param name="After">The id of the item this one now sits BELOW, or absent for the top.</param>
 /// <param name="Before">The id of the item this one now sits ABOVE, or absent for the bottom.</param>

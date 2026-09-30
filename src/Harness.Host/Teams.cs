@@ -826,6 +826,9 @@ public sealed class TeamRegistry(
             // The team's own sites: publish a page for a person, feed its data. Bounded to its own
             // team by TeamGate like every other {team} route.
             Permits.Sites,
+            // WHAT THE WORK IS FOR: propose an outcome and link its workflows to one, never over a
+            // link a person caused. A Manager's alone on a team; restored on it, never a member's.
+            Permits.Outcomes,
         };
 
     /// <summary>
@@ -1149,6 +1152,12 @@ public sealed class TeamRegistry(
                 // Sites is a member's default (see AddContainerAsync), so one hired before the
                 // permit existed is given it here rather than refused by the skill it is offered.
                 if (!isPlugin) permits.Add(Permits.Sites);
+
+                // OUTCOMES IS THE MANAGER'S, restored on it so a Manager hired before the permit
+                // existed is not told by its skill to set an outcome and then refused; and taken from
+                // any other member, whatever its stored permits say.
+                if (string.Equals(member.Name, DefaultManagerName, StringComparison.OrdinalIgnoreCase)) permits.Add(Permits.Outcomes);
+                else permits.Remove(Permits.Outcomes);
 
                 // Built BEFORE ComposePrompt, not after: C# evaluates constructor arguments
                 // left to right, and ComposePrompt is one of them, so composing the prompt
@@ -2814,6 +2823,9 @@ public sealed class TeamRegistry(
             // and be refused. Delete stays a person's action; no permit reaches it.
             Permits.Sites,
         };
+
+        // OUTCOMES IS NEVER A MEMBER'S: only the Manager proposes an outcome or links a workflow.
+        if (!string.Equals(id.Name, DefaultManagerName, StringComparison.OrdinalIgnoreCase)) memberPermits.Remove(Permits.Outcomes);
 
         // Built before ComposePrompt for the same reason RestoreAsync's local is: C# evaluates
         // constructor arguments left to right, and composing the prompt first would hand it an

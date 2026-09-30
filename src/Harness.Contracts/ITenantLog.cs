@@ -305,6 +305,32 @@ public static class TenantActions
     public const string TenantAgentConverted = "tenant-agent.converted";
 
     /// <summary>A team's site was created. Subject is <c>&lt;team&gt;/&lt;site&gt;</c>, as on every site row.</summary>
+    /// <summary>An outcome was created: a person's (active at once), a Manager's proposal, or a
+    /// solution install's. Subject is the outcome's id.</summary>
+    public const string OutcomeCreated = "outcome.created";
+
+    /// <summary>A person renamed an outcome. Links keep the name they were made with.</summary>
+    public const string OutcomeRenamed = "outcome.renamed";
+
+    /// <summary>A person changed an outcome's description or targets.</summary>
+    public const string OutcomeChanged = "outcome.changed";
+
+    public const string OutcomeConfirmed = "outcome.confirmed";
+
+    /// <summary>A person merged an outcome into another; detail names <c>into</c>. No link is rewritten.</summary>
+    public const string OutcomeMerged = "outcome.merged";
+
+    public const string OutcomeRetired = "outcome.retired";
+    public const string OutcomeReactivated = "outcome.reactivated";
+
+    /// <summary>A person rejected a proposed outcome no workflow was linked to; its row is gone.</summary>
+    public const string OutcomeRejected = "outcome.rejected";
+
+    /// <summary>A workflow was linked to an outcome, or moved to another: by a person, or by a
+    /// Manager's or the Concierge's <c>outcome</c> set or propose (actor the member). Subject is the
+    /// outcome's id; detail names the workflow.</summary>
+    public const string WorkflowOutcomeChanged = "workflow.outcome-changed";
+
     public const string SiteCreated = "site.created";
 
     /// <summary>A new version of a site was copied and made live. Detail carries the version, the

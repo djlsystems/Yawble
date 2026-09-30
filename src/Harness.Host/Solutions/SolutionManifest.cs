@@ -423,6 +423,13 @@ public sealed record SolutionManifest(
                 }
             }
 
+            // THE OUTCOME ITS FIRES SERVE, by name; the install makes it active when none is live.
+            var outcome = read.Optional(item, "outcome", $"{at}.outcome");
+            if (outcome is not null && OutcomeNames.Clean(outcome).Length > OutcomeNames.MaxLength)
+            {
+                read.Refuse($"{at}.outcome", $"`{at}.outcome` is at most {OutcomeNames.MaxLength} characters.");
+            }
+
             var kind = read.Required(item, "kind", $"{at}.kind")?.ToLowerInvariant();
             SolutionSchedule? schedule = null;
             SolutionEvent? onEvent = null;
@@ -456,6 +463,7 @@ public sealed record SolutionManifest(
                     name!, kind!, member!, instruction!, wakeManager, cap, idleOnly, schedule, onEvent, folder)
                 {
                     RunAtInstall = runAtInstall,
+                    Outcome = outcome,
                 });
                 read.Placed("triggers", index - 1);
             }
@@ -1083,6 +1091,10 @@ public sealed record SolutionTrigger(
     /// <summary>A schedule's first run at install: fired once, right after the install's last step,
     /// then on its interval. The check refuses it on an event or folder trigger.</summary>
     public bool RunAtInstall { get; init; }
+
+    /// <summary>The outcome this trigger's fires serve, by NAME: the install links it to the live
+    /// outcome of that name, or creates it <c>active</c>. Null for none.</summary>
+    public string? Outcome { get; init; }
 }
 
 /// <summary>A clock: a seconds-format cron in a timezone, or every N seconds.</summary>

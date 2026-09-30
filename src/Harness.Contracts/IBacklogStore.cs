@@ -41,7 +41,12 @@ public sealed record BacklogItem(
     string? ArchivedAt,
     string CreatedAt,
     string UpdatedAt,
-    string CreatedBy);
+    string CreatedBy)
+{
+    /// <summary>The outcome this item serves (<c>backlog-003</c>), or null. A dispatch links its
+    /// workflow to it.</summary>
+    public string? OutcomeId { get; init; }
+}
 
 /// <summary>
 /// The four states an item can be in, as DATA rather than an enum - the same call
@@ -283,6 +288,9 @@ public interface IBacklogStore
 
     /// <summary>Repoints the visibility link. Null clears it, which only a person may do.</summary>
     Task SetTeamAsync(long id, string? team, CancellationToken ct = default);
+
+    /// <summary>Sets or clears (null) the outcome the item serves.</summary>
+    Task SetOutcomeAsync(long id, string? outcomeId, CancellationToken ct = default);
 
     /// <summary>Writes ONE row's position. See <see cref="BacklogItem.Position"/>.</summary>
     Task SetPositionAsync(long id, double position, CancellationToken ct = default);

@@ -35,13 +35,13 @@ public sealed class FreshVolumeTests : IDisposable
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
     /// settings; `auth-008` is a plugin member's configuration and secret bindings; `auth-009` is who
     /// last set a member's own instructions, and when; `auth-010` is a trigger's wake choice and daily
-    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `backlog-002` is a dispatch's recorded tips, where it started and its stored landed; `outcome-001` is the usage ledger (`usage_ledger`, `workflow_ledger`).
+    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `outcome-001` is the usage ledger (`usage_ledger`, `workflow_ledger`); `outcome-002` is the outcomes and their append-only workflow links; `auth-017` is the outcome a trigger's fires serve; `backlog-002` is a dispatch's recorded tips, where it started and its stored landed; `backlog-003` is the outcome a backlog item serves.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "messages-002", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "outcome-001"],
+            ["messages-001", "messages-002", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "outcome-001", "outcome-002"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -53,7 +53,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "backlog-001", "backlog-002", "messages-001", "messages-002", "outcome-001", "skill-001", "skill-002", "skill-003", "skill-004"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "backlog-001", "backlog-002", "backlog-003", "messages-001", "messages-002", "outcome-001", "outcome-002", "skill-001", "skill-002", "skill-003", "skill-004"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -251,6 +251,46 @@ public sealed class FreshVolumeTests : IDisposable
         Assert.Equal(
             new SystemPromptSetter("person@example.test", "person", at),
             Assert.Single(await store.MembersAsync(Ct)).SystemPromptSetBy);
+    }
+
+    /// <summary>
+    /// `outcome-002`, `auth-017` and `backlog-003` apply to a volume from before them: a trigger and a
+    /// backlog item from before serve no outcome until a person names one, and the new tables work.
+    /// </summary>
+    [Fact]
+    public async Task A_trigger_and_an_item_from_before_the_outcome_steps_serve_no_outcome_until_one_is_named()
+    {
+        var migrator = new SchemaMigrator(Database);
+        var outcomeSteps = new[] { "outcome-002", "auth-017", "backlog-003" };
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => !outcomeSteps.Contains(s.Id))], ct: Ct);
+
+        await ExecuteAsync(
+            """
+            INSERT INTO teams (id, created_utc) VALUES ('old-team', '2026-09-01T00:00:00Z');
+            INSERT INTO triggers
+                (id, team, container, name, instruction, kind, interval_seconds, idle_only, enabled,
+                 missed_count, created_at, created_by)
+            VALUES
+                ('t1', 'old-team', 'Manager', 'Poll', 'look', 'every', 300, 1, 1, 0,
+                 '2026-09-01T00:00:00Z', 'person');
+            """);
+        var item = await new Harness.Backlog.SqliteBacklogStore(Database).CreateAsync(null, "Old item", "spec", "person", Ct);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        var triggers = new SqliteTriggerStore(Database);
+        var backlog = new Harness.Backlog.SqliteBacklogStore(Database);
+        Assert.Null((await triggers.FindAsync("t1", Ct))!.OutcomeId);
+        Assert.Null((await backlog.GetAsync(item.Id, Ct))!.OutcomeId);
+
+        var outcomes = new SqliteOutcomeStore(Database, TenantAuditRow.AppendAsync);
+        var outcome = (await outcomes.CreateAsync("Old work's result", new OutcomeEdit(), new OutcomeActor("person", OutcomeActorKind.Person),
+            new TriggerAudit(null, "person", TenantActions.OutcomeCreated, null, null, null), Ct)).Outcome!;
+
+        await triggers.SaveAsync((await triggers.FindAsync("t1", Ct))! with { OutcomeId = outcome.Id }, Ct);
+        await backlog.SetOutcomeAsync(item.Id, outcome.Id, Ct);
+        Assert.Equal(outcome.Id, (await triggers.FindAsync("t1", Ct))!.OutcomeId);
+        Assert.Equal(outcome.Id, (await backlog.GetAsync(item.Id, Ct))!.OutcomeId);
     }
 
     /// <summary>

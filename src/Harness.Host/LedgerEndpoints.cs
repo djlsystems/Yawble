@@ -23,10 +23,14 @@ public static class LedgerEndpoints
                     + "for the newest page.")] long? before,
                 [Description("How many rows (runs and workflows together) to return. Default 50, clamped to "
                     + "1..200.")] int? take,
-                IUsageLedger ledger, LedgerIdentity identity, CancellationToken ct) =>
+                IUsageLedger ledger, IOutcomeStore outcomes, LedgerIdentity identity, CancellationToken ct) =>
             {
                 var page = await ledger.ReadPageAsync(
                     since ?? DateTimeOffset.MinValue, before, Math.Clamp(take ?? 50, 1, ITenantLog.MaxTake), ct);
+
+                // THE OUTCOMES AND EVERY LINK, whole, on the first page only: they are definitions and
+                // an append-only history, not rows of the seq cursor the pages walk.
+                var first = before is null;
 
                 return Results.Ok(new
                 {
@@ -34,6 +38,8 @@ public static class LedgerEndpoints
                     ledgerStartedAt = identity.LedgerStartedAt,
                     runs = page.Runs,
                     workflows = page.Workflows,
+                    outcomes = first ? await outcomes.ListAsync(ct) : null,
+                    links = first ? await outcomes.ReadLinksAsync(ct) : null,
                     nextBefore = page.NextBefore,
                 });
             })
@@ -53,6 +59,10 @@ public static class LedgerEndpoints
                 + "next, older page; `nextBefore` is null on the last page.\n\n"
                 + "Nothing ever updates or deletes a ledger row: Reset, team deletion and log retention "
                 + "leave it, and a deleted team's rows keep its `teamName`.\n\n"
+                + "The first page (no `before`) also answers `outcomes`, every outcome with its status and "
+                + "`mergedInto`, and `links`, every workflow-to-outcome link oldest first: a workflow's "
+                + "outcome is its newest link, and a workflow's `outcomeIdAtClose` is the outcome it served "
+                + "when it closed. Later pages carry null for both.\n\n"
                 + "**A person's action.**");
     }
 }

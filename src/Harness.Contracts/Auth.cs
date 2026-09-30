@@ -84,10 +84,20 @@ public static class Permits
     /// </summary>
     public const string Sites = "Sites";
 
+    /// <summary>
+    /// Proposing an outcome and linking a workflow to one: <c>POST /api/outcomes/propose</c> and
+    /// <c>PUT /api/teams/{team}/workflows/{correlation}/outcome</c>. Its own verb, folded into
+    /// nothing else, as <see cref="Sites"/> is. Granted to a team's Manager (restored on it) and to
+    /// the Concierge; NEVER to a member, which works a card and does not decide what a workflow is
+    /// for. Confirming, renaming, merging, retiring, reactivating and rejecting are a person's, and
+    /// no permit reaches them.
+    /// </summary>
+    public const string Outcomes = "Outcomes";
+
     public static IReadOnlySet<string> All { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         Read, Tell, CreateContainer, CreateTeam, Progress,
-        Skills, SkillsGated, Sites,
+        Skills, SkillsGated, Sites, Outcomes,
     };
 }
 

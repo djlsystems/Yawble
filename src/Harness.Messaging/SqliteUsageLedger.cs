@@ -177,7 +177,7 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
                 At(reader, 4),
                 MessageRows.ReadStamp(reader.GetString(5)),
                 reader.GetString(6),
-                Long(reader, 7),
+                Text(reader, 7),
                 reader.GetInt64(8) != 0));
         }
 

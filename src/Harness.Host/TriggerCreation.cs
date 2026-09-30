@@ -25,7 +25,8 @@ public sealed record NewTrigger(
     int? QuietSeconds = null,
     int? MinIntervalSeconds = null,
     string? WakeManager = null,
-    long? DailyTokenCap = null);
+    long? DailyTokenCap = null,
+    string? OutcomeId = null);
 
 /// <summary>The trigger made, or the sentence that refused it (and nothing was written).</summary>
 public sealed record TriggerCreated(TriggerRow? Row, string? Refusal);
@@ -42,8 +43,13 @@ public sealed class TriggerCreation(
     FolderWatch folders,
     AgentCatalog catalog,
     EffectiveSubscriptions effective,
-    TriggerWakeSignal wake)
+    TriggerWakeSignal wake,
+    IOutcomeStore? outcomes = null)
 {
+    /// <summary>The refusal for an outcome that is not a live one.</summary>
+    public static string OutcomeRefusal(string asked) =>
+        $"No active or proposed outcome '{asked}'. Name one by its id or its exact name.";
+
     public async Task<TriggerCreated> CreateAsync(
         string stored, NewTrigger request, string createdBy, Func<TriggerRow, TriggerAudit> audit, CancellationToken ct = default)
     {
@@ -147,6 +153,18 @@ public sealed class TriggerCreation(
             return Refused(filterRefusal);
         }
 
+        // THE OUTCOME ITS FIRES SERVE: a live one, named by id or exact name, stored by id.
+        string? outcomeId = null;
+        if (!string.IsNullOrWhiteSpace(request.OutcomeId))
+        {
+            if (outcomes is null || await outcomes.ResolveLiveAsync(request.OutcomeId, ct) is not { } outcome)
+            {
+                return Refused(OutcomeRefusal(request.OutcomeId.Trim()));
+            }
+
+            outcomeId = outcome.Id;
+        }
+
         var expression = string.IsNullOrWhiteSpace(request.Expression) ? null : request.Expression.Trim();
         var timezone = string.IsNullOrWhiteSpace(request.Timezone) ? null : request.Timezone.Trim();
 
@@ -188,6 +206,7 @@ public sealed class TriggerCreation(
             MinIntervalSeconds = folderKind ? request.MinIntervalSeconds : null,
             WakeManager = wakeManager,
             DailyTokenCap = request.DailyTokenCap,
+            OutcomeId = outcomeId,
         };
 
         // The row and its tenant_events row are one transaction: a trigger with no record of who made
