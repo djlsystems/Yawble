@@ -953,7 +953,8 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
 
 // THE INSTANCE'S LOCAL REPOSITORIES: bare, under <dataRoot>/repos, the Host's and read-only to the
 // agent. A team names one as `local:<name>`; see LocalRepos.
-builder.Services.AddSingleton(sp => new LocalRepos(dataRoot, sp.GetRequiredService<GitRunner>()));
+builder.Services.AddSingleton(sp => new LocalRepos(
+    dataRoot, sp.GetRequiredService<GitRunner>(), sp.GetRequiredService<FolderRemoval>()));
 
 // The one delete of a local repository: Admin -> Repositories' and a team deletion's.
 builder.Services.AddSingleton(sp => new LocalRepoDeletion(
@@ -1015,7 +1016,8 @@ builder.Services.AddSingleton(sp => new UnfinishedRemovalRetry(
     sp.GetRequiredService<IUnfinishedRemovals>(),
     sp.GetRequiredService<TeamRegistry>(),
     sp.GetRequiredService<ContainerHost>(),
-    sp.GetRequiredService<TeamPaths>()));
+    sp.GetRequiredService<TeamPaths>(),
+    sp.GetRequiredService<LocalRepos>()));
 
 // Constructed BY HAND, like ContainerHost, and for the same reason: every dependency here is one a
 // deletion would silently skip if it were optional. A TeamDeletion missing its pending-delivery
@@ -2884,6 +2886,14 @@ app.MapDelete("/api/teams/{team}", async (
         if (result.Deleted)
         {
             localRepositoriesDeleted.Add(reference);
+            continue;
+        }
+
+        // Incomplete: its name is gone, so it is not kept, and what is left is retried, not
+        // deleted again from Admin -> Repositories.
+        if (result.Outcome == LocalRepoDeleteOutcome.Incomplete)
+        {
+            localRepositoryFailures.Add(new LocalRepositoryNotDeleted(reference, result.Error!));
             continue;
         }
 

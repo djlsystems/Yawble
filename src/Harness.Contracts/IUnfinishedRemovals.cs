@@ -11,6 +11,10 @@ public static class RemovalKinds
 
     /// <summary>A folder a reset emptied and kept. A retry removes only the paths it named.</summary>
     public const string Emptied = "emptied";
+
+    /// <summary>A deleted local repository's <c>.deleting-&lt;guid&gt;</c> folder under
+    /// <c>&lt;dataRoot&gt;/repos</c>. Removed again, whole; no team owns it, so its team is empty.</summary>
+    public const string LocalRepo = "local-repo";
 }
 
 /// <summary>

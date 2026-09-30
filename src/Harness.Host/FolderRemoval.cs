@@ -301,6 +301,50 @@ public sealed class FolderRemoval(
     }
 
     /// <summary>
+    /// Removes a deleted local repository's <c>.deleting-&lt;guid&gt;</c> folder directly in
+    /// <paramref name="repos"/> (<see cref="LocalRepos.Root"/>): everything in it, then the folder,
+    /// links removed and never followed. REFUSED for anything that is not a <c>.deleting-</c> folder
+    /// directly in <paramref name="repos"/> with no link on the way. What remains is recorded as
+    /// <see cref="RemovalKinds.LocalRepo"/> and retried, and a removal that finishes forgets its row.
+    ///
+    /// THE HOST'S PASS ONLY. Agents cannot write under the repositories root - the Host writes it as
+    /// itself with <c>core.sharedRepository=0640</c> and agents never push into it (see
+    /// <see cref="LocalRepos"/>) - so there is nothing of an agent's for the agent's pass to remove.
+    /// This goes through here not for that rule but to name, record and retry what is left, which a
+    /// recursive delete cannot: it throws on the first path and says nothing of the rest.
+    /// </summary>
+    public async Task<FolderRemovalReport> RemoveLocalRepositoryAsync(string repos, string aside, CancellationToken ct = default)
+    {
+        repos = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repos));
+        aside = Path.TrimEndingDirectorySeparator(Path.GetFullPath(aside));
+
+        if (!string.Equals(Path.GetDirectoryName(aside), repos, StringComparison.Ordinal)
+            || !Path.GetFileName(aside).StartsWith(LocalRepos.DeletingPrefix, StringComparison.Ordinal)
+            || !Confined(repos, aside))
+        {
+            return new FolderRemovalReport([],
+                $"{aside} was left alone: it is not a {LocalRepos.DeletingPrefix} folder directly in {repos} with no symbolic link on the way.");
+        }
+
+        if (!Exists(aside))
+        {
+            await ForgetAsync(aside, ct);
+            return FolderRemovalReport.Done;
+        }
+
+        var remaining = new Leftovers();
+        RemoveAsHost(aside, remaining);
+
+        var report = await SettleAsync(aside, RemovalKinds.LocalRepo, "", null, remaining, ct);
+
+        return report with
+        {
+            Reasons = report.Remaining.ToDictionary(
+                p => p, p => remaining.Reasons.GetValueOrDefault(p, "still there after the delete"), StringComparer.Ordinal),
+        };
+    }
+
+    /// <summary>
     /// Finishes <paramref name="row"/> the way its kind says: a team root and a workspace are
     /// removed again, whole; an emptied folder has only the paths it named removed.
     /// </summary>
@@ -318,6 +362,14 @@ public sealed class FolderRemoval(
 
             case RemovalKinds.Workspace:
                 return await RemoveWorkspaceAsync(row.Path, row.Team, row.Member ?? "", ct);
+
+            case RemovalKinds.LocalRepo:
+                var local = await RemoveLocalRepositoryAsync(Path.GetDirectoryName(row.Path)!, row.Path, ct);
+
+                // A path that is no longer a .deleting- folder of the repositories root is not
+                // retried again: nothing says it is still a repository this platform set aside.
+                if (local.Refused is not null) await ForgetAsync(row.Path, ct);
+                return local;
 
             default:
                 return await RetryEmptiedAsync(row, ct);
