@@ -461,10 +461,10 @@ const rowBusy = computed(() => busy.value || formBusy.value || removing.value !=
                     'os-text-muted': toolsOf(agent)!.tone === 'info',
                   }"
                 >{{ toolsOf(agent)!.text }}</span>
-                <span v-if="toolsOf(agent)!.names.length" class="mono agent-tools-names">
+                <span v-if="toolsOf(agent)!.names.length" class="mono agent-tools-names q-ml-xs">
                   {{ toolsOf(agent)!.names.join(', ') }}
                 </span>
-                <span v-if="toolsReportOf(agent)?.detail" class="os-text-muted">
+                <span v-if="toolsReportOf(agent)?.detail" class="os-text-muted q-ml-xs">
                   {{ toolsReportOf(agent)?.detail }}
                 </span>
               </q-item-label>

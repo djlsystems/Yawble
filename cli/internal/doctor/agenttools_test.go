@@ -76,7 +76,7 @@ func TestTheBlockListsEachPresetItsGapsAndTheConciergesToolsAsInformation(t *tes
 		"claude-headless (headless, claude)\n  state       isolated",
 		"  gap         A repository's own .claude/settings.json still loads.",
 		"grok-headless (headless, grok)\n  state       isolated: harness and its own tools only\n  loads       harness\n  skills      1 (instructions, not tools)",
-		"  switched off github-mcp-server (disabled)",
+		"  off         github-mcp-server (disabled)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, text)

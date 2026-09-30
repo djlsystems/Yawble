@@ -118,7 +118,8 @@ describe('AgentsDialog, the tools caption', () => {
     expect(leaky.querySelector('.text-warning')).not.toBeNull();
 
     const unverified = toolsLine('my-claude');
-    expect(unverified.textContent).toContain('Not verified');
+    expect(unverified.textContent).toContain('Not verified: this preset declares no isolation, and would get:');
+    expect(unverified.textContent).toContain('claude.ai Gmail');
     expect(unverified.querySelector('.text-warning')).not.toBeNull();
 
     const unmeasured = toolsLine('copilot-headless');

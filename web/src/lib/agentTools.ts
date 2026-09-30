@@ -45,7 +45,10 @@ export function toolsStatus(report: PresetToolReport | undefined): ToolsStatus |
       return { text: 'Foreign tools found:', icon: 'warning', tone: 'warn', names: names(report.foreign) }
     case 'notVerified':
       return {
-        text: 'Not verified: this preset declares no isolation',
+        text:
+          report.foreign.length > 0
+            ? 'Not verified: this preset declares no isolation, and would get:'
+            : 'Not verified: this preset declares no isolation',
         icon: 'warning',
         tone: 'warn',
         names: names(report.foreign),

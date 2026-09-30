@@ -79,7 +79,7 @@ func AgentToolsCheck(r *HostReport, err error) Check {
 	}
 	fix := ""
 	if verdict == Warn {
-		fix = "Admin → Agents names each one; switch it off in the preset or move it into a Connection"
+		fix = "Admin → Agents names each one: declare the preset's isolation, switch the tool off in its launch, or move it into a Connection"
 	}
 	return Check{name, verdict, strings.Join(parts, " · "), fix}
 }
@@ -133,7 +133,7 @@ func RenderAgentTools(w io.Writer, tools *AgentTools) {
 			for _, i := range off {
 				parts = append(parts, i.Name+" ("+deref(i.Off)+")")
 			}
-			fmt.Fprintf(w, "  switched off %s\n", strings.Join(parts, ", "))
+			fmt.Fprintf(w, "  off         %s\n", strings.Join(parts, ", "))
 		}
 		if n := count(p.Loaded, "skill"); n > 0 {
 			fmt.Fprintf(w, "  skills      %d (instructions, not tools)\n", n)
