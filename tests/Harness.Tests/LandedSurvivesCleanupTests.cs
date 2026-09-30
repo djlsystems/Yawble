@@ -170,7 +170,7 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         var sha = PushWork(team, "epsilon work");
         Assert.Null((await CurrentDispatchAsync(item)).LandedAt);
 
-        var merged = await person.PostAsync($"/api/teams/{team}/repos/{Repo}/merge-to-main", null, Ct);
+        var merged = await ActAsync(person, team, "merge-to-main");
         Assert.Equal(HttpStatusCode.OK, merged.StatusCode);
 
         // Straight from the store - no backlog read has derived anything.
@@ -179,6 +179,21 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         Assert.Equal(sha, stored.LandedSha);
         Assert.Equal("trunk", stored.LandedBranch);
         Assert.Equal(sha, Assert.Single(await Backlog.TipsAsync(stored.Id, Ct)).Sha);
+    }
+
+    /// <summary>An action as a person presses it: again while the answer is 409 "still working".</summary>
+    private static async Task<HttpResponseMessage> ActAsync(HttpClient person, string team, string action)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (true)
+        {
+            var response = await person.PostAsync($"/api/teams/{team}/repos/{Repo}/{action}", null, Ct);
+            if (response.StatusCode != HttpStatusCode.Conflict || DateTime.UtcNow > deadline) return response;
+
+            var text = await response.Content.ReadAsStringAsync(Ct);
+            if (!text.Contains("still working", StringComparison.Ordinal)) return response;
+            await Task.Delay(100, Ct);
+        }
     }
 
     private async Task<JsonElement> LandedOverHttpAsync(HttpClient person, long item)
