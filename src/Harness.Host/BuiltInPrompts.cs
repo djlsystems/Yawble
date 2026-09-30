@@ -38,13 +38,16 @@ public static class BuiltInPrompts
     /// The role prompt, then a member's own words, then the team's additional instructions under
     /// their heading, then the skills this role is offered. Each part appears only when there is
     /// something in it: a prompt that grows headings over nothing changes shape for no reason, and
-    /// every byte of it is billed on every invocation.
+    /// every byte of it is billed on every invocation. <paramref name="repositories"/> is the
+    /// Manager's section naming its team's clones (<see cref="RepoSetupMessage.PromptSection"/>),
+    /// placed before the skills.
     /// </summary>
     public static string Compose(
         string role,
         string? ownWords,
         string? additionalInstructions,
-        IReadOnlyList<(string Name, string Description)> skills)
+        IReadOnlyList<(string Name, string Description)> skills,
+        string? repositories = null)
     {
         var parts = new List<string> { For(role).TrimEnd() };
 
@@ -54,6 +57,8 @@ public static class BuiltInPrompts
         {
             parts.Add($"{AdditionalInstructionsHeading}\n\n{additionalInstructions.Trim()}");
         }
+
+        if (!string.IsNullOrWhiteSpace(repositories)) parts.Add(repositories.Trim());
 
         if (skills.Count > 0)
         {
