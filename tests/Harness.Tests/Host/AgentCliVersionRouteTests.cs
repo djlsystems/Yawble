@@ -146,8 +146,10 @@ public sealed class AgentCliVersionRouteTests(HostFixture host) : IClassFixture<
         // alpha/worker holds a share of printf's install: a run in flight.
         var inFlight = await gate.EnterRunAsync("printf", null, Ct, new AgentRunHolder("alpha", "worker"));
 
-        // ANSWERED AT ONCE, 202, with the gate's own state: waiting for that run, naming it.
-        var answer = await person.PostAsync("/api/agents/stub-waiting/update", null, Ct);
+        // ANSWERED AT ONCE, 202, with the gate's own state: waiting for that run, naming it. Bounded,
+        // so a route that held the request open until the update left the gate fails here in
+        // seconds rather than hanging the run.
+        var answer = await person.PostAsync("/api/agents/stub-waiting/update", null, Ct).WaitAsync(TimeSpan.FromSeconds(10), Ct);
         Assert.Equal(HttpStatusCode.Accepted, answer.StatusCode);
         var asked = await answer.Content.ReadFromJsonAsync<JsonElement>(Ct);
         AssertWaitingOnAlphaWorker(asked);
@@ -164,10 +166,11 @@ public sealed class AgentCliVersionRouteTests(HostFixture host) : IClassFixture<
                 && s.GetProperty("held").GetArrayLength() == 1));
         Assert.False(held.IsCompleted);
 
-        // A machine principal may neither read nor cancel it.
+        // A machine principal may neither read nor cancel it, nor read the list the board polls.
         using var container = host.Container(host.AlphaContainerKey);
         Assert.Equal(HttpStatusCode.Forbidden, (await container.GetAsync("/api/agents/stub-waiting/update", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await container.DeleteAsync("/api/agents/stub-waiting/update", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await container.GetAsync("/api/agents/updates", Ct)).StatusCode);
 
         // Cancel removes the waiting update and releases the launch it held.
         var cancel = await person.DeleteAsync("/api/agents/stub-waiting/update", Ct);

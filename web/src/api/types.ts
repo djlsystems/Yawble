@@ -1552,7 +1552,6 @@ export interface AgentUpdates {
   update?: string[] | null
 }
 
-/** What `POST /api/agents/{name}/update` came to. */
 /** A run holding, or waiting for, a share of a CLI's install, named as `/api/wip` names a slot's holder. */
 export interface AgentRunHolder {
   team: string
@@ -1588,6 +1587,7 @@ export interface AgentUpdateState {
   cancelledBy: string | null
 }
 
+/** What a finished update measured: an `AgentUpdateState`'s `result` once it is `done`. */
 export interface AgentUpdateResult {
   agent: string
   command: string
