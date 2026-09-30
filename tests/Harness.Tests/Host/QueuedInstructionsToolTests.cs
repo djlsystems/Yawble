@@ -137,25 +137,28 @@ public sealed class QueuedInstructionsToolTests(HostFixture host) : IClassFixtur
         Assert.Equal(JsonValueKind.Null, reply.GetProperty("duplicateOf").ValueKind);
     }
 
-    /// <summary>The shared contract with the defer: a pending row carrying
-    /// <see cref="PendingDelivery.DeferredFromRun"/> is listed as deferred, naming the run.</summary>
+    /// <summary>A delivery the defer put back - through the real store's
+    /// <see cref="IPendingDeliveries.DeferAsync"/> - is listed by `status` as deferred, naming the
+    /// run. The runtime's own deferral is followed into this listing by
+    /// <c>DeferredItemQueueListingTests</c>.</summary>
     [Fact]
-    public async Task A_delivery_deferred_from_a_run_is_listed_as_deferred()
+    public async Task Status_lists_a_deferred_delivery_as_deferred_from_its_run()
     {
         var (team, manager) = await PausedTeamAsync();
         var member = await HireAsync(team, "Developer Ada");
         var id = new ContainerId(team, member);
         var sent = await TellAsync(manager, team, member, "Do Y after X");
-        var log = host.Services.GetRequiredService<IMessageLog>();
+        var pending = host.Services.GetRequiredService<IPendingDeliveries>();
 
-        var pending = new DeferredOverlay(
-            host.Services.GetRequiredService<IPendingDeliveries>(), deferredSeq: sent, fromRun: 4242);
         await pending.AddAsync(id, sent, Ct);
+        await pending.StartAsync(id, sent, Ct);
+        await pending.DeferAsync(id, sent, fromRun: 4242, Ct);
 
-        var entry = Assert.Single(await QueuedInstructions.ForTeamAsync(pending, log, team, null, Ct));
-        Assert.Equal("deferred", entry.State);
-        Assert.Equal(4242, entry.DeferredFromRun);
-        Assert.Equal("Do Y after X", entry.Line);
+        var entry = Assert.Single(Queued(await manager.Status(team: team, cancellationToken: Ct)));
+        Assert.Equal(sent, entry.GetProperty("seq").GetInt64());
+        Assert.Equal("deferred", entry.GetProperty("state").GetString());
+        Assert.Equal(4242, entry.GetProperty("deferredFromRun").GetInt64());
+        Assert.Equal("Do Y after X", entry.GetProperty("line").GetString());
     }
 
     private static JsonElement[] Queued(string status)
@@ -229,23 +232,6 @@ public sealed class QueuedInstructionsToolTests(HostFixture host) : IClassFixtur
     {
         public HttpClient CreateClient(string name) =>
             new(handler, disposeHandler: false) { BaseAddress = new Uri("http://localhost") };
-    }
-
-    /// <summary>The durable queue with one row marked deferred, as the defer writes it: the store's
-    /// own persistence of the field belongs to the defer itself.</summary>
-    private sealed class DeferredOverlay(IPendingDeliveries inner, long deferredSeq, long fromRun) : IPendingDeliveries
-    {
-        public Task AddAsync(ContainerId subscriber, long seq, CancellationToken ct = default) => inner.AddAsync(subscriber, seq, ct);
-        public Task StartAsync(ContainerId subscriber, long seq, CancellationToken ct = default) => inner.StartAsync(subscriber, seq, ct);
-        public Task RemoveAsync(ContainerId subscriber, long seq, CancellationToken ct = default) => inner.RemoveAsync(subscriber, seq, ct);
-        public Task<int> RemoveAllAsync(ContainerId subscriber, CancellationToken ct = default) => inner.RemoveAllAsync(subscriber, ct);
-        public Task<int> RemoveAllForTeamAsync(string team, CancellationToken ct = default) => inner.RemoveAllForTeamAsync(team, ct);
-
-        public async Task<IReadOnlyList<PendingDelivery>> ForAsync(ContainerId subscriber, CancellationToken ct = default) =>
-            [.. (await inner.ForAsync(subscriber, ct)).Select(r => r.Seq == deferredSeq ? r with { DeferredFromRun = fromRun } : r)];
-
-        public async Task<IReadOnlyList<TeamPendingDelivery>> ForTeamAsync(string team, CancellationToken ct = default) =>
-            [.. (await inner.ForTeamAsync(team, ct)).Select(r => r.Seq == deferredSeq ? r with { DeferredFromRun = fromRun } : r)];
     }
 }
 
