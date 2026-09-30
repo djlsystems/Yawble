@@ -1,8 +1,10 @@
 using System.ComponentModel;
+using System.Text.Json;
 using Harness.Containers;
 using Harness.Contracts;
 using Harness.Kanban;
 using Harness.Host.Auth;
+using Microsoft.Data.Sqlite;
 
 namespace Harness.Host;
 
@@ -398,19 +400,39 @@ public static class BacklogEndpoints
                 outcomeId = outcome.Id;
             }
 
-            await backlog.UpdateAsync(id, request.Title, request.Body, request.State, ct);
-            if (request.OutcomeId is not null) await backlog.SetOutcomeAsync(id, outcomeId, ct);
+            // A PERSON'S SETTINGS WRITE: the fields, the outcome and their tenant rows are one
+            // transaction, and none of it happens when a row cannot be written (AGENTS.md).
+            var actorEmail = await ActorEmailOfAsync(context, principal, users, ct);
+            TriggerAudit Row(string action, object detail) => new(
+                principal.Id, actorEmail, action, PlatformBacklogId.Format(id), request.Title ?? item.Title,
+                JsonSerializer.Serialize(detail));
 
-            await WriteAuditAsync(
-                context, principal, users, audit, TenantActions.BacklogItemEdited, PlatformBacklogId.Format(id),
-                request.Title ?? item.Title, new { id, state = request.State, outcomeId = request.OutcomeId is null ? null : outcomeId ?? "" }, ct);
+            var rows = new List<TriggerAudit>
+            {
+                Row(TenantActions.BacklogItemEdited,
+                    new { id, state = request.State, outcomeId = request.OutcomeId is null ? null : outcomeId ?? "" }),
+            };
 
             if (request.State == BacklogStates.Implemented && item.State != BacklogStates.Implemented)
             {
-                await WriteAuditAsync(
-                    context, principal, users, audit, TenantActions.BacklogItemImplemented, PlatformBacklogId.Format(id),
-                    request.Title ?? item.Title,
-                    new { id, from = item.State, viaConcierge = principal.Kind == PrincipalKind.TenantConcierge }, ct);
+                rows.Add(Row(TenantActions.BacklogItemImplemented,
+                    new { id, from = item.State, viaConcierge = principal.Kind == PrincipalKind.TenantConcierge }));
+            }
+
+            try
+            {
+                await backlog.EditAsync(
+                    id, request.Title, request.Body, request.State, request.OutcomeId is not null, outcomeId, rows, ct);
+            }
+            catch (SqliteException exception)
+            {
+                return Results.Json(
+                    new
+                    {
+                        error = $"{PlatformBacklogId.Format(id)} was not changed: its record could not be written "
+                            + $"({exception.Message}).",
+                    },
+                    statusCode: StatusCodes.Status500InternalServerError);
             }
 
             return Results.Ok(Render((await backlog.GetAsync(id, ct))!, teams));

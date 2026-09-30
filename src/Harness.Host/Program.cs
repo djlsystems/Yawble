@@ -358,7 +358,9 @@ tenantSettings.Changed += name =>
     if (name == TenantSettings.SystemPackagesName) SystemPackages.WriteFile(dataRoot, tenantSettings.SystemPackages);
 };
 builder.Services.AddSingleton<ISkillStore>(new SqliteSkillStore(database));
-builder.Services.AddSingleton<IBacklogStore>(new SqliteBacklogStore(database));
+// A person's edit lands with its tenant_events row in one transaction, as the outcomes' writes do.
+builder.Services.AddSingleton<IBacklogStore>(
+    new SqliteBacklogStore(database, audit: TenantAuditRow.AppendAsync));
 builder.Services.AddSingleton<TenantLogging>();
 
 // THE THIRD STORE. Not the message log and not the tenant log: see IDiagnosticsLog for the

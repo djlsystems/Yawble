@@ -286,6 +286,22 @@ public interface IBacklogStore
         string? state = null,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// A PERSON'S EDIT, WITH ITS TENANT ROWS, IN ONE TRANSACTION: the fields (null leaves one alone,
+    /// as <see cref="UpdateAsync"/>), the outcome when <paramref name="setOutcome"/> (null clears it),
+    /// and every row in <paramref name="audit"/>. A row that cannot be written throws and nothing is
+    /// changed.
+    /// </summary>
+    Task EditAsync(
+        long id,
+        string? title,
+        string? body,
+        string? state,
+        bool setOutcome,
+        string? outcomeId,
+        IReadOnlyList<TriggerAudit> audit,
+        CancellationToken ct = default);
+
     /// <summary>Repoints the visibility link. Null clears it, which only a person may do.</summary>
     Task SetTeamAsync(long id, string? team, CancellationToken ct = default);
 
