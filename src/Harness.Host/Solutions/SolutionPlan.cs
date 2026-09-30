@@ -26,6 +26,9 @@ public sealed record SolutionPlan(
     /// has each set is the Host's, not the package's: the preview and the result add it.</summary>
     public IReadOnlyList<SolutionPlanSecret> Secrets { get; init; } = [];
 
+    /// <summary>What the solution's control panel and launcher tile take from the package.</summary>
+    public SolutionPanel Panel { get; init; } = SolutionPanel.None;
+
     /// <summary>Where an install copies <c>tools/</c>, as <c>{solution}</c> names it: under the
     /// team's folder, <c>&lt;teams root&gt;/&lt;team&gt;/solution</c>.</summary>
     public const string InstalledToolsFolder = "solution";
@@ -63,7 +66,12 @@ public sealed record SolutionPlan(
             [.. manifest.Inputs.Settings.Select(input =>
             {
                 var field = package.Plugin(manifest.Member(input.Member)?.PluginId)?.Manifest.Config.GetValueOrDefault(input.Setting);
-                return new SolutionPlanSetting(input.Member, input.Setting, input.Description, input.Required, field?.Type, field?.Default, field?.Enum);
+                return new SolutionPlanSetting(input.Member, input.Setting, input.Description, input.Required, field?.Type, field?.Default, field?.Enum)
+                {
+                    Min = field?.Min,
+                    Max = field?.Max,
+                    Integer = field?.Integer ?? false,
+                };
             })],
             manifest.Ignored)
         {
@@ -74,6 +82,7 @@ public sealed record SolutionPlan(
                     m.Name, binding.Key, binding.Value, declared?.Description ?? "", declared?.Required ?? false,
                     declared?.When is { } when ? new SolutionPlanSecretWhen(when.Setting, when.Value) : null);
             }))],
+            Panel = manifest.Panel,
         };
     }
 }
@@ -110,7 +119,15 @@ public sealed record SolutionPlanTools(string Folder, string InstalledAs, IReadO
 
 /// <summary>A person-only setting the install asks for, with what its manifest says of it.</summary>
 public sealed record SolutionPlanSetting(
-    string Member, string Setting, string Description, bool Required, string? Type, JsonElement? Default, IReadOnlyList<string>? Choices);
+    string Member, string Setting, string Description, bool Required, string? Type, JsonElement? Default, IReadOnlyList<string>? Choices)
+{
+    /// <summary>The plugin field's bounds, when it is a number that declares them.</summary>
+    public double? Min { get; init; }
+
+    public double? Max { get; init; }
+
+    public bool Integer { get; init; }
+}
 
 /// <summary>
 /// A secret a plugin member binds: the member (the package's name), the plugin's secret

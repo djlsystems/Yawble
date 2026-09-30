@@ -61,8 +61,11 @@ public sealed record SolutionManifest(
     public static IReadOnlySet<string> KnownKeys { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         "format", "id", "name", "version", "description", "team", "members", "triggers", "skills",
-        "sites", "inputs",
+        "sites", "inputs", "panel",
     };
+
+    /// <summary>What the solution's control panel and launcher tile show: its <c>panel</c> key.</summary>
+    public SolutionPanel Panel { get; init; } = SolutionPanel.None;
 
     /// <summary>Unknown top-level keys, in file order: kept, never acted on.</summary>
     public IReadOnlyList<string> Ignored => [.. Extra.Keys];
@@ -154,6 +157,7 @@ public sealed record SolutionManifest(
             var skills = ReadNames(read, root, "skills", "skill");
             var sites = ReadNames(read, root, "sites", "site");
             var inputs = ReadInputs(read, root, members);
+            var panel = ReadPanel(read, root, members, sites);
 
             var extra = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             foreach (var property in root.EnumerateObject())
@@ -162,7 +166,10 @@ public sealed record SolutionManifest(
             }
 
             return read.Answer(new SolutionManifest(
-                format, id ?? "", name ?? "", version ?? "", description ?? "", team, members, triggers, skills, sites, inputs, extra));
+                format, id ?? "", name ?? "", version ?? "", description ?? "", team, members, triggers, skills, sites, inputs, extra)
+            {
+                Panel = panel,
+            });
         }
     }
 
@@ -674,6 +681,137 @@ public sealed record SolutionManifest(
         return new SolutionInputs(settings, connections, documents);
     }
 
+    /// <summary>
+    /// <c>panel</c>: the primary site the tile opens, the documents folders the panel lists as
+    /// results, the plugin settings it shows first, and the status line template. What needs the
+    /// plugins' manifests (a setting the plugin has) is the checker's.
+    /// </summary>
+    private static SolutionPanel ReadPanel(Reader read, JsonElement root, IReadOnlyList<SolutionMember> members, IReadOnlyList<string> sites)
+    {
+        if (!root.TryGetProperty("panel", out var panel) || panel.ValueKind == JsonValueKind.Null) return SolutionPanel.None;
+
+        if (panel.ValueKind != JsonValueKind.Object)
+        {
+            read.Refuse("panel", "`panel` must be an object with `primarySite`, `outputs`, `settings` and `status`.");
+            return SolutionPanel.None;
+        }
+
+        // NAMED BUT REFUSED is not the same as not named: the status line's "no primarySite"
+        // refusal is for a package that names none, and would only mislead beside this one.
+        var primarySiteNamed = panel.TryGetProperty("primarySite", out var named) && named.ValueKind != JsonValueKind.Null;
+        var primarySite = read.Optional(panel, "primarySite", "panel.primarySite");
+        if (primarySite is not null && !sites.Contains(primarySite, StringComparer.OrdinalIgnoreCase))
+        {
+            read.Refuse("panel.primarySite", $"`panel.primarySite` '{primarySite}' is not one of this package's `sites`.");
+            primarySite = null;
+        }
+        else if (primarySite is not null)
+        {
+            primarySite = sites.First(s => string.Equals(s, primarySite, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var outputs = new List<string>();
+        if (panel.TryGetProperty("outputs", out var outputArray) && outputArray.ValueKind != JsonValueKind.Null)
+        {
+            if (outputArray.ValueKind != JsonValueKind.Array)
+            {
+                read.Refuse("panel.outputs", "`panel.outputs` must be an array of documents folder names, such as \"Applications\".");
+            }
+            else
+            {
+                var index = 0;
+                foreach (var item in outputArray.EnumerateArray())
+                {
+                    var at = $"panel.outputs[{index++}]";
+
+                    if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+                    {
+                        read.Refuse(at, $"`{at}` must be a documents folder name.");
+                        continue;
+                    }
+
+                    var folder = item.GetString()!;
+
+                    if (OutputRefusal(at, folder) is { } refusal)
+                    {
+                        read.Refuse(at, refusal);
+                        continue;
+                    }
+
+                    var trimmed = folder.Trim().Trim('/');
+                    if (outputs.Contains(trimmed, StringComparer.Ordinal))
+                    {
+                        read.Refuse(at, $"`{at}` names '{trimmed}' twice.");
+                        continue;
+                    }
+
+                    outputs.Add(trimmed);
+                }
+            }
+        }
+
+        var settings = new List<SolutionPanelSetting>();
+        foreach (var (item, at) in Items(read, panel, "settings", "panel.settings"))
+        {
+            var member = PluginMemberOf(read, item, at, members);
+            var setting = read.Required(item, "setting", $"{at}.setting");
+
+            if (member is null || setting is null) continue;
+
+            if (settings.Any(s => s.Member == member && s.Setting == setting))
+            {
+                read.Refuse($"{at}.setting", $"`{at}` lists {member}'s '{setting}' twice.");
+                continue;
+            }
+
+            settings.Add(new SolutionPanelSetting(member, setting));
+            read.Placed("panel.settings", Position(at));
+        }
+
+        var status = read.Optional(panel, "status", "panel.status");
+        if (status is not null)
+        {
+            var (template, refusal) = SolutionStatusTemplate.Parse(status);
+
+            if (refusal is not null)
+            {
+                read.Refuse("panel.status", $"`panel.status` {refusal}");
+                status = null;
+            }
+            else if (template!.ReadsData && primarySite is null && !primarySiteNamed)
+            {
+                read.Refuse("panel.status", "`panel.status` counts site data ({data.…}) but the package names no `panel.primarySite` to read it from.");
+                status = null;
+            }
+        }
+
+        return new SolutionPanel(primarySite, outputs, settings, status);
+    }
+
+    /// <summary>
+    /// An output folder: a folder of the team's documents named as a relative path - no <c>..</c>,
+    /// no leading <c>/</c>, no hidden (<c>.</c>) part and no wildcard - so the panel lists exactly
+    /// the folder the package named and nothing outside the documents.
+    /// </summary>
+    internal static string? OutputRefusal(string field, string folder)
+    {
+        if (RelativeRefusal(field, folder, allowEmpty: false) is { } escape) return escape;
+
+        var parts = folder.Trim().Trim('/').Split('/');
+
+        if (parts.Any(part => part.StartsWith('.')))
+        {
+            return $"`{field}` '{folder}' names a hidden folder; name a folder a person sees, such as Applications.";
+        }
+
+        if (folder.IndexOfAny(['*', '?', '[', ']', ':', '\0']) >= 0 || folder.Any(char.IsControl))
+        {
+            return $"`{field}` '{folder}' must be a plain folder name, with no wildcard.";
+        }
+
+        return null;
+    }
+
     private static IEnumerable<(JsonElement Item, string At)> Items(Reader read, JsonElement parent, string key, string field)
     {
         if (!parent.TryGetProperty(key, out var array) || array.ValueKind == JsonValueKind.Null) yield break;
@@ -974,3 +1112,20 @@ public sealed record SolutionConnectionInput(string Member, string Slot, string 
 
 /// <summary>A folder of the team's documents a person uploads into, such as <c>Resume</c>.</summary>
 public sealed record SolutionDocumentInput(string Folder, string Description, bool Required);
+
+/// <summary>
+/// <c>panel</c>: what the platform's control panel and launcher tile take from the package - the
+/// site the tile opens, the documents folders listed as results (relative, in the package's order),
+/// the plugin settings shown first, and the status line template (null for the default line).
+/// </summary>
+public sealed record SolutionPanel(
+    string? PrimarySite,
+    IReadOnlyList<string> Outputs,
+    IReadOnlyList<SolutionPanelSetting> Settings,
+    string? Status)
+{
+    public static readonly SolutionPanel None = new(null, [], [], null);
+}
+
+/// <summary>One plugin setting the panel shows first: the package's member name and the setting.</summary>
+public sealed record SolutionPanelSetting(string Member, string Setting);

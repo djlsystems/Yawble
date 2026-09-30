@@ -598,6 +598,19 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<TriggerSweep>());
 });
 
+// THE SOLUTIONS LAUNCHER AND A SOLUTION'S CONTROL PANEL: reads only; every control is an existing route.
+builder.Services.AddSingleton(sp => new SolutionPanels(
+    sp.GetRequiredService<ITeamSolutionStore>(),
+    sp.GetRequiredService<SolutionInstaller>(),
+    sp.GetRequiredService<TeamRegistry>(),
+    sp.GetRequiredService<ContainerHost>(),
+    sp.GetRequiredService<ITriggerStore>(),
+    sp.GetRequiredService<TriggerCost>(),
+    sp.GetRequiredService<IMessageLog>(),
+    sp.GetRequiredService<SiteService>(),
+    sp.GetRequiredService<TeamDocuments>(),
+    pluginCatalog));
+
 // The board's notice for a package a workflow wrote, checked through that one door when the
 // workflow is declared complete.
 builder.Services.AddSingleton(sp => new SolutionNotice(
@@ -5326,7 +5339,7 @@ documents.MapPost("/folders", (
 documents.MapPost("/upload", async (
     [Description(Describe.Team)] string team,
     HttpRequest request, TeamRegistry teams, TeamDocuments docs, FolderWatch folders,
-    HttpContext context, CancellationToken ct) =>
+    TenantLogging audit, HttpContext context, CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
@@ -5362,6 +5375,13 @@ documents.MapPost("/upload", async (
             context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown",
             ct);
 
+        // RECORDED LIKE EVERY OTHER PERSON'S WRITE: who put which file where, and how big it was.
+        // Never the contents - this table is readable by every person and kept forever.
+        await audit.WriteAsync(
+            context, TenantActions.DocumentUploaded, stored, saved.Path,
+            new { team = stored, path = saved.Path, size = saved.Size },
+            ct);
+
         return Results.Ok(saved);
     });
 })
@@ -5371,7 +5391,8 @@ documents.MapPost("/upload", async (
         "A multipart form with the file in `file` and an optional destination folder in `path`.\n\n"
         + "Only the LEAF of the uploaded filename is kept, so a name carrying directory separators "
         + "cannot place the file anywhere but where `path` says. 400 for a missing file, an empty "
-        + $"one, or one larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB."
+        + $"one, or one larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB. Audited as "
+        + "`document.uploaded`, with the path and size and never the contents."
         + Describe.Documents);
 
 documents.MapDelete("", async (

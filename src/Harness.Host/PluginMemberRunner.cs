@@ -289,8 +289,10 @@ public sealed class PluginMemberRunner(
     }
 
     /// <summary>The manifest's defaults under this member's own values, each checked against its
-    /// field. A required field with neither is a refusal naming it.</summary>
-    internal static (IReadOnlyDictionary<string, JsonNode?> Config, string? Refusal) EffectiveConfig(
+    /// field's type. A required field with neither is a refusal naming it. Bounds are a WRITE's
+    /// check (<see cref="SettingsRefusal"/>), not a run's: a value stored before its bounds existed
+    /// is never rewritten, and the member keeps running with it.</summary>
+    public static (IReadOnlyDictionary<string, JsonNode?> Config, string? Refusal) EffectiveConfig(
         PluginManifest manifest, PluginMemberSettings bound)
     {
         var config = new Dictionary<string, JsonNode?>(StringComparer.Ordinal);
@@ -299,7 +301,7 @@ public sealed class PluginMemberRunner(
         {
             if (bound.Config.TryGetValue(name, out var value))
             {
-                if (field.Refusal(name, value) is { } refusal) return (config, $"This member's configuration is invalid: {refusal}");
+                if (field.Refusal(name, value, bounds: false) is { } refusal) return (config, $"This member's configuration is invalid: {refusal}");
                 config[name] = JsonNode.Parse(value.GetRawText());
             }
             else if (field.Default is { } fallback)
@@ -316,6 +318,17 @@ public sealed class PluginMemberRunner(
     }
 
     /// <summary>
+    /// Each stored config value outside its field's bounds, by field, with the sentence a write of it
+    /// would be refused with. Reported on the settings read; the value itself is left as it is.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> OutOfRange(PluginManifest manifest, PluginMemberSettings stored) =>
+        stored.Config
+            .Where(c => manifest.Config.ContainsKey(c.Key))
+            .Select(c => (c.Key, Refusal: manifest.Config[c.Key].BoundsRefusal(c.Key, c.Value)))
+            .Where(c => c.Refusal is not null)
+            .ToDictionary(c => c.Key, c => c.Refusal!, StringComparer.Ordinal);
+
+    /// <summary>
     /// Why <paramref name="settings"/> cannot be saved for a member of <paramref name="manifest"/>,
     /// or null - checked at hire so a person hears it then, and not from the first run. Every
     /// field must be one the manifest declares and of its type; every secret binding must name a
@@ -323,7 +336,8 @@ public sealed class PluginMemberRunner(
     /// except for a solution install (<paramref name="requireSet"/> false), where a key not set yet is
     /// not a refusal: the member fails its runs, naming the key, until it is set.
     /// </summary>
-    public static string? SettingsRefusal(PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets, bool requireSet = true)
+    public static string? SettingsRefusal(
+        PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets, bool requireSet = true, PluginMemberSettings? stored = null)
     {
         foreach (var name in settings.Config.Keys)
         {
@@ -335,6 +349,16 @@ public sealed class PluginMemberRunner(
         }
 
         if (EffectiveConfig(manifest, settings).Refusal is { } configRefusal) return configRefusal;
+
+        // A NUMBER OUTSIDE ITS BOUNDS IS REFUSED, naming the field and the bound - by every writer,
+        // which all come here. The one exception is the value already STORED for the field, sent
+        // back unchanged: it is kept as it is (see OutOfRange), never rewritten, and it does not
+        // stop the rest of a form being saved.
+        foreach (var (name, value) in settings.Config)
+        {
+            if (stored is not null && stored.Config.TryGetValue(name, out var kept) && JsonElement.DeepEquals(kept, value)) continue;
+            if (manifest.Config[name].BoundsRefusal(name, value) is { } outside) return outside;
+        }
 
         foreach (var (name, key) in settings.Secrets)
         {

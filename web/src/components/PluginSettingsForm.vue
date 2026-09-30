@@ -6,9 +6,11 @@ import {
   addToList,
   defaultLabel,
   defaultValue,
+  fieldBoundsHint,
   hasSlots,
   isDefault,
   missingRequired,
+  outOfRange,
   setByPerson,
   settingsBody,
   type PluginFieldValues,
@@ -25,7 +27,9 @@ import ConnectionPicker from './ConnectionPicker.vue';
  * number, a toggle for a bool, a dropdown for a field with `enum`, chips for a list (type, Enter to
  * add, × to remove, limited to the `enum` when there is one) - so the shape saved is always one the
  * plugin accepts. Each field says its default, whether it is required and whether only a person may
- * set it, and can be put back to its default. Secrets are KEY NAMES, the logical key set with
+ * set it, and can be put back to its default. A number field with manifest bounds says them in its
+ * hint and shows a value outside them as out of range - typed, or already stored - and the dialogs
+ * hold Save until it is fixed, as they do for a missing required field (`outOfRange`). Secrets are KEY NAMES, the logical key set with
  * `secret set`, never a value: no route carries one. Connection slots are one picker each
  * (`ConnectionPicker`), storing a connection's id, never a token.
  *
@@ -40,6 +44,8 @@ const secrets = defineModel<Record<string, string>>('secrets', { required: true 
 const connections = defineModel<Record<string, string>>('connections', { default: () => ({}) });
 
 const missing = computed(() => missingRequired(props.shape, config.value, secrets.value));
+/** Number fields outside their bounds, with the sentence shown under each - typed or stored. */
+const bounds = computed(() => outOfRange(props.shape, config.value));
 
 const body = computed(() => settingsBody(props.shape, config.value, secrets.value, connections.value));
 
@@ -218,7 +224,10 @@ function secretHint(description: string | null | undefined, required: boolean) {
         dense
         :type="field.type === 'number' ? 'number' : 'text'"
         :label="String(key)"
-        :error="missing.includes(String(key)) ? true : undefined"
+        :hint="fieldBoundsHint(field) ?? undefined"
+        :error="missing.includes(String(key)) || bounds[key] ? true : undefined"
+        :error-message="bounds[key] ?? ''"
+        :data-out-of-range="bounds[key] ? '' : undefined"
         @update:model-value="(value) => set(String(key), value === null ? '' : String(value))"
       />
 

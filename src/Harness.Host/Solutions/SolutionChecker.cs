@@ -554,6 +554,17 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
             }
         }
 
+        for (var index = 0; index < manifest.Panel.Settings.Count; index++)
+        {
+            var listed = manifest.Panel.Settings[index];
+            var at = $"panel.settings[{read.At("panel.settings", index)}].setting";
+
+            if (PluginOf(listed.Member) is { } plugin && !plugin.Config.ContainsKey(listed.Setting))
+            {
+                refusals.Add(new(SolutionManifest.FileName, at, $"`{at}`: plugin {plugin.Id} has no setting '{listed.Setting}'."));
+            }
+        }
+
         // A REQUIRED SLOT NOBODY IS ASKED FOR blocks the member's every run, so the package must ask -
         // judged on a whole file only, as an input refused above may be the one that asks.
         if (read.Refusals.Count > 0) return;

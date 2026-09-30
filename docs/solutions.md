@@ -46,7 +46,8 @@ job-tracker/
   "triggers": [ … ],
   "skills": [ "job-search-playbook" ],
   "sites": [ "tracker" ],
-  "inputs": { "settings": [ … ], "connections": [ … ], "documents": [ … ] }
+  "inputs": { "settings": [ … ], "connections": [ … ], "documents": [ … ] },
+  "panel": { "primarySite": "tracker", "outputs": [ "Drafts" ], "settings": [ … ], "status": "…" }
 }
 ```
 
@@ -63,9 +64,10 @@ job-tracker/
 | `skills` | no | Names of team skills; each is `skills/<name>.md`. |
 | `sites` | no | Names of sites; each is published from `sites/<name>/`. |
 | `inputs` | no | What only a person provides, below. |
+| `panel` | no | What the solution's launcher tile and control panel show, below. |
 
 **Unknown top-level keys are kept and ignored**, never refused, so a package written for a later
-Host (with a control panel or status lines, say) still checks here. The check lists them as
+Host still checks here. The check lists them as
 `ignored`. Unknown keys inside an entry are ignored too.
 
 ### Members
@@ -174,6 +176,42 @@ default cannot be skipped: its plugin member cannot be hired without it.
 | `connections` | `{ "member", "slot", "description", "required" }`: a connection slot of a plugin member, bound to one of the person's connections ([connections.md](connections.md)). Every slot a plugin requires must be asked for. |
 | `documents` | `{ "folder", "description", "required" }`: a folder of the team's documents the person uploads into, such as `Resume`: "your reference resume, .docx or PDF". |
 
+### Panel
+
+Every installed solution has a tile in the **Solutions** launcher and a **control panel** the
+platform builds (below, [The launcher and the panel](#the-launcher-and-the-panel)). The package
+writes no UI for either; `panel` says what they show. Every key is optional.
+
+```json
+"panel": {
+  "primarySite": "tracker",
+  "outputs": ["Drafts"],
+  "settings": [ { "member": "Scout", "setting": "keywords" }, { "member": "Scout", "setting": "sources" } ],
+  "status": "{data.jobs.count status=new} new jobs · last checked {lastRun.at}"
+}
+```
+
+| Field | What it is |
+|---|---|
+| `primarySite` | The site the tile's **Open** opens in a new tab: one of the package's `sites`. Without it the tile has no Open. |
+| `outputs` | Documents folders the team writes results into, listed on the panel newest first with download links. Relative folder names: no `..`, no leading `/`, no hidden (`.`) part, no wildcard; `Applications/Sent` is fine. |
+| `settings` | Plugin settings shown first on the panel, each `{ "member", "setting" }`: a plugin member of the package and a setting its plugin's manifest declares. "All settings" reaches the rest, person-only settings included. |
+| `status` | The tile's status line: a template of at most 200 characters, below. Without it the line is the last run and the state. |
+
+**The status line** is text with placeholders the platform fills, and only these exist:
+
+| Placeholder | Filled with |
+|---|---|
+| `{data.<collection>.count}` | How many documents that collection of the primary site holds. |
+| `{data.<collection>.count <field>=<value>}` | How many of them have that top-level field equal to the value: a string by its characters, a number, `true`, `false` or `null` as JSON writes it. |
+| `{lastRun.at}` | When the latest run of any of the package's members ended, UTC (`2026-09-30T08:00:05Z`); `never` before any. |
+| `{lastRun.outcome}` | How it ended: `completed`, `handedBack`, `blocked` or `failed`; `none` before any. |
+
+The template is text, never code: there are no expressions, and a brace that is not one of these
+placeholders is refused by the check. Data that is missing - no such collection, no documents -
+counts as 0. The filled line is plain text; the platform renders it, and a site document's value
+that looks like HTML, as the characters it is. A `{data...}` placeholder needs `primarySite`.
+
 ## The check
 
 The check reads a package and answers either **what an install would create** or **everything
@@ -216,6 +254,10 @@ refuses:
   type on an agent member;
 - a preset this instance does not have;
 - a site that is not a slug, has no folder, or has no `index.html`;
+- a `panel.primarySite` that is not one of the package's sites, a `panel.outputs` folder that is not
+  a safe relative folder name, a `panel.settings` entry on a member that is not a plugin member or
+  naming a setting its plugin does not declare, and a `panel.status` with a placeholder this Host
+  does not fill (or `{data...}` with no primary site);
 - `{solution}` in an instruction when the package has no `tools/`;
 - **any path that escapes**: a folder trigger or document input outside the team's documents, a
   skill or site named by a path, a plugin's executable or skill outside its folder, and any link in
@@ -321,6 +363,53 @@ exactly what the matching route answers. An agent cannot write there, so it cann
 
 **Deleting the team** forgets its `team_solutions` row; the package's plugins stay installed
 (deleting a team never removes a plugin), and the delete dialog says so.
+
+## The launcher and the panel
+
+**Solutions**, a button near the start of the ribbon, opens the launcher: one tile per installed
+solution, with its name, version and team, its status line, a state badge, **Open** (the primary
+site, when it has one) and **Manage** (the panel). The badge is the first of: **paused** (the team
+is paused); **blocked**, naming what the team waits for ("Upload a file to Resume/"); **running**
+(a member is running now); **capped** (a trigger's measured spend today reached its daily cap);
+**idle**. The launcher reads `GET /api/solutions/installed`.
+
+**The control panel** (`GET /api/teams/{team}/solution/panel`) is the platform's own screen, not a
+site: its controls act with the person's authority, which a site is deliberately without. Its
+sections:
+
+- **Status**: each member's state and last run; each trigger with its next fire; anything blocked,
+  with the fix inline (an upload box for a missing document, a picker for a missing connection);
+  today's spend against each trigger's daily cap - **measured only**: the Triggers dialog's own
+  `spentToday`, with runs that reported no usage counted as unmeasured, never estimated.
+- **Controls**: pause and resume the team, **Run now** for each schedule, each trigger's on/off and
+  daily cap, the `panel.settings` first with "All settings" for the rest, and connection bindings.
+- **Results**: each `panel.outputs` folder newest first with download links, and recent runs with
+  their output.
+- **Maintenance**: the version and the folder it was installed from, **Update from a folder** (the
+  wizard's update path) and **Uninstall**.
+
+**Every control is an existing route**, with its own permit marker and tenant row - the panel adds
+none:
+
+| Control | Route |
+|---|---|
+| Pause, resume | `POST /api/teams/{team}/pause`, `POST /api/teams/{team}/resume` |
+| Run now | `POST /api/teams/{team}/triggers/{id}/run` |
+| A trigger's on/off and daily cap | `PATCH /api/teams/{team}/triggers/{id}` |
+| Plugin settings, connection bindings | `PUT /api/teams/{team}/members/{member}/plugin-settings` |
+| Upload a missing document | `POST /api/teams/{team}/documents/upload` |
+| Download a result | `GET /api/teams/{team}/documents/content` |
+| A run's transcript | `GET /api/teams/{team}/members/{member}/runs/{seq}/transcript` |
+| Update from a folder | `POST /api/solutions/preview`, `POST /api/solutions/update` |
+
+**Uninstall** (`POST /api/teams/{team}/solution/uninstall`, `{ removePlugins? }`, a person only)
+asks first - the asking is the panel's - and then removes the team's triggers, its members (the
+Manager stays, as every team has one, with the package's instructions cleared), its team skills,
+its sites with their data and its tools folder, and forgets the package with a
+`solution.uninstalled` row. **It keeps the team and its documents.** With `removePlugins: true` it
+removes each of the package's plugins that no other team has a member on, and names the ones it
+kept and the teams using them. Something that cannot be removed is named in `failures` and the rest
+still goes. Deleting the team itself is still the team delete.
 
 ## The board notice
 
@@ -452,6 +541,16 @@ the package the solution tests check and install.
   "skills": ["job-search-playbook"],
 
   "sites": ["tracker"],
+
+  "panel": {
+    "primarySite": "tracker",
+    "outputs": ["Drafts"],
+    "settings": [
+      { "member": "Scout", "setting": "keywords" },
+      { "member": "Scout", "setting": "sources" }
+    ],
+    "status": "{data.jobs.count status=new} new jobs · last checked {lastRun.at}"
+  },
 
   "inputs": {
     "settings": [
@@ -667,3 +766,13 @@ skill `interview-prep` and ships `job-board` 0.2.0. The tests make it the same w
   fire from a failed step - `SolutionInstallTests.A_failure_at_any_step_leaves_nothing_behind`; the
   wizard - `solution-wizard-first-runs.mount.spec.ts`; the CLI -
   `TestSolutionInstallNamesEachSchedulesFirstRun`.
+- The panel keys: `SolutionCheckTests` (`A_primary_site_the_package_does_not_have_is_refused`,
+  `An_output_folder_that_is_not_a_safe_relative_folder_name_is_refused`,
+  `A_panel_setting_the_plugin_does_not_have_is_refused`,
+  `A_status_line_with_a_placeholder_this_host_does_not_fill_is_refused` and the rest of that section).
+- The status line: `SolutionStatusTemplateTests` (every placeholder, missing data, a value that looks
+  like HTML, the refused forms, the default line).
+- The launcher and the panel: `SolutionPanelTests` (the tile's filled status line, state and Open; the
+  panel's status, controls and results with measured spend only; a cap changed through its existing
+  route showing at once; Uninstall removing what the package made and keeping the documents; a
+  plugin another team uses kept; a person's only).

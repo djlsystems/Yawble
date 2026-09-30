@@ -2407,6 +2407,11 @@ export interface PluginConfigField {
   enum: string[] | null
   /** `person`: only a person may set it - a Manager hiring on the plugin cannot. */
   setBy: 'person' | 'anyone'
+  /** A `number` field's bounds, when the manifest declares them. Absent from a Host older than bounds. */
+  min?: number | null
+  max?: number | null
+  /** A `number` field that takes whole numbers only. */
+  integer?: boolean
 }
 
 /** One secret a plugin's manifest names. Its NAME only: no route ever carries a value. */
@@ -2528,6 +2533,11 @@ export interface PluginMemberSettings {
   connections?: Record<string, string>
   /** The manifest's connection slots, as `GET /api/plugins` lists them. */
   connectionFields?: Record<string, ConnectionSlot>
+  /**
+   * Each STORED number outside its manifest bounds (bounds added after it was saved), with the
+   * Host's sentence. Always present on the read and the PUT answer; `{}` when none is.
+   */
+  outOfRange?: Record<string, string>
 }
 
 /** A plugin member's settings on hire: config values, and each secret bound to a LOGICAL KEY. */
@@ -2812,6 +2822,10 @@ export interface SolutionPersonSetting {
   type: string | null
   default: unknown
   choices: string[] | null
+  /** A number setting's bounds, from its plugin's manifest. Absent when it declares none. */
+  min?: number | null
+  max?: number | null
+  integer?: boolean
 }
 
 /** What installing the package would create. */
@@ -2848,6 +2862,35 @@ export interface InstalledSolution {
   installedAt: string
   installedBy: string
   plugins: string[]
+  /**
+   * THE LAUNCHER'S FIELDS. Optional on the client only, so a row from a Host that predates
+   * them still reads: the tile then shows no Open, no status line and no badge.
+   */
+  updatedAt?: string | null
+  /** The source folder of the installed version. */
+  folder?: string | null
+  /** The package's `panel.primarySite`; null when it declares none, and then there is no Open. */
+  primarySite?: SolutionPrimarySite | null
+  /** The filled status line. Package text: rendered as text, never HTML. */
+  status?: string
+  state?: SolutionState
+  paused?: boolean
+}
+
+/** A package's primary site. `url` is relative to the Host; unpublished means Open would 404. */
+export interface SolutionPrimarySite {
+  name: string
+  url: string
+  published: boolean
+}
+
+/** Which one holds, first that does: paused, blocked, running, capped, idle. */
+export type SolutionStateKind = 'running' | 'idle' | 'blocked' | 'paused' | 'capped'
+
+/** A solution's state and, for blocked and capped, why ("Upload a file to Resume/"). */
+export interface SolutionState {
+  kind: SolutionStateKind
+  reason: string | null
 }
 
 /** A connection a picker offers, as the preview lists it. */
@@ -3062,4 +3105,130 @@ export interface AgentToolsReport {
   at: string | null
   running: boolean
   presets: PresetToolReport[]
+}
+
+// --- One solution's control panel, `GET /api/teams/{team}/solution/panel` -----------------
+//
+// Every string that comes from a package or from site data - names, descriptions, the status line,
+// file names, run output - is PLAIN TEXT, rendered with `{{ }}` and never `v-html`.
+
+export interface SolutionPanelMember {
+  /** The package's own name for the member. */
+  packageName: string
+  /** The stored member name, for every `/members/{member}` and `/containers/{name}` route. */
+  member: string
+  kind: 'agent' | 'plugin'
+  role: 'manager' | 'member'
+  /** `missing`: the member is no longer on the team. */
+  state: 'running' | 'idle' | 'missing'
+  /** The container snapshot's own strings, null when there is nothing to say. */
+  blocked?: string | null
+  failed?: string | null
+  needsDecision?: string | null
+  queueDepth?: number
+  lastRun: { seq: number; at: string; outcome: string } | null
+}
+
+/**
+ * One of the package's triggers: EXACTLY the Triggers dialog's view of it (spend measured only,
+ * unmeasured runs counted), plus the package's name and kind for it and whether Run now applies.
+ */
+export interface SolutionPanelTrigger extends TeamTrigger {
+  packageName: string
+  packageKind: 'schedule' | 'event' | 'folder'
+  /** A schedule: Run now is offered. */
+  runNow: boolean
+}
+
+/** What the team waits for, with how to fix it where it is shown. */
+export interface SolutionPanelBlocked {
+  kind: 'document' | 'connection' | 'setting'
+  name: string
+  member: string | null
+  packageMember?: string | null
+  description: string
+  /** What to do, in a sentence: "Upload a file to Resume/". */
+  reason?: string | null
+  fix?: {
+    upload?: { folder: string } | null
+    connection?: { member: string; slot: string } | null
+  } | null
+}
+
+/** One of `panel.settings`, in the package's order: shown before "All settings". */
+export interface SolutionPanelSetting {
+  member: string
+  packageMember: string
+  setting: string
+  personOnly: boolean
+}
+
+export interface SolutionPanelFile {
+  path: string
+  name: string
+  size: number
+  modifiedAt: string
+  /** The download route, relative to the Host. */
+  download: string
+}
+
+/** One of `panel.outputs`: its files newest first, at most 50, `more` when there were more. */
+export interface SolutionPanelOutput {
+  folder: string
+  exists: boolean
+  files: SolutionPanelFile[]
+  more: boolean
+}
+
+export interface SolutionPanelRun {
+  member: string
+  packageMember: string
+  seq: number
+  startedAt: string | null
+  endedAt: string
+  outcome: string
+  /** A plugin member's output; null for an agent member's run. */
+  output: string | null
+  /** A blocked run's reason. */
+  reason: string | null
+  /** An agent member's run: its transcript can be read. */
+  transcript?: boolean
+}
+
+export interface SolutionPanel {
+  team: string
+  teamName: string
+  id: string
+  name: string
+  version: string
+  description: string
+  installedAt: string
+  updatedAt: string | null
+  installedBy: string
+  folder: string
+  paused: boolean
+  state: SolutionState
+  status: string
+  primarySite: SolutionPrimarySite | null
+  members: SolutionPanelMember[]
+  triggers: SolutionPanelTrigger[]
+  blocked: SolutionPanelBlocked[]
+  settings: SolutionPanelSetting[]
+  outputs: SolutionPanelOutput[]
+  recentRuns: SolutionPanelRun[]
+}
+
+/** `POST /api/teams/{team}/solution/uninstall`. The team and its documents stay. */
+export interface SolutionUninstallResult {
+  ok: boolean
+  team: string
+  id: string
+  version: string
+  removed: { triggers: string[]; members: string[]; skills: string[]; sites: string[]; tools: boolean }
+  plugins: { removed: string[]; kept: { id: string; usedBy: string[] }[] }
+  teamName?: string
+  /** The team's documents folder, kept. */
+  documentsKept: string | null
+  /** Anything that could not be removed, one sentence each. */
+  failures: string[]
 }

@@ -6,6 +6,7 @@ each new posting whose title holds a keyword it writes the posting to the tracke
 (`site.put`) and publishes `plugin.job-board.posting-found`. A run that found nothing new finishes
 quiet, so an hourly scan wakes nobody.
 """
+import datetime
 import json
 import os
 import sys
@@ -17,6 +18,28 @@ SEEN = ".job-board-seen.json"
 def emit(record):
     sys.stdout.write(json.dumps(record) + "\n")
     sys.stdout.flush()
+
+
+def wanted(posting, config):
+    """The salary, hourly and age filters. The Host holds each number inside the bounds plugin.json
+    declares (salary and hourly at least 0, archiveAfterDays a whole number of at least 1), so none
+    of them can quietly drop every posting."""
+    salary = posting.get("salary") or {}
+    per = {"year": ("salaryMin", "salaryMax"), "hour": ("hourlyMin", "hourlyMax")}.get(salary.get("per"))
+    if per:
+        low, high = config.get(per[0]), config.get(per[1])
+        if low is not None and salary.get("max", low) < low:
+            return False
+        if high is not None and salary.get("min", high) > high:
+            return False
+
+    days = config.get("archiveAfterDays")
+    if days is not None and posting.get("posted"):
+        age = datetime.date.today() - datetime.date.fromisoformat(posting["posted"])
+        if age.days > days:
+            return False
+
+    return True
 
 
 def main():
@@ -53,7 +76,7 @@ def main():
     found = []
     for posting in postings:
         title = posting["title"].lower()
-        if posting["id"] in seen or (keywords and not any(k in title for k in keywords)):
+        if posting["id"] in seen or (keywords and not any(k in title for k in keywords)) or not wanted(posting, config):
             continue
         emit({"t": "site.put", "site": "tracker", "collection": "jobs", "id": posting["id"],
               "doc": dict(posting, status="new")})
