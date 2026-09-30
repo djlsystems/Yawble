@@ -47,6 +47,7 @@ import { useTerminalDisplayStore } from '../../stores/terminalDisplay';
 import type { TenantSetting } from '../../api/types';
 import { normaliseTenantSettings } from '../../lib/tenantSettings';
 import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { addButtonIn, addChips, addDialogProblem, chipsIn } from '../../test/chipList';
 
 const setting = (name: string, value: unknown, extra: Partial<TenantSetting> = {}): TenantSetting => ({
   name,
@@ -416,6 +417,8 @@ describe('Concierge', () => {
   });
 });
 
+const packages = () => document.body.querySelector('[data-setting="system.packages"]')!;
+
 describe('System packages', () => {
   it('says what adding one costs, and never shows the key', async () => {
     const wrapper = await openDialog();
@@ -423,28 +426,40 @@ describe('System packages', () => {
 
     expect(bodyText()).toContain('Adding one costs a restart, not an image rebuild.');
     expect(bodyText()).not.toContain('system.packages');
-    expect(input(wrapper, 'System packages')!.props('modelValue')).toBe('htop');
+    expect(chipsIn(packages())).toEqual(['htop']);
   });
 
-  it('sends the typed names as a list', async () => {
+  it('sends the names added, one per line, as a list', async () => {
     const wrapper = await openDialog();
     await showTab(wrapper, 'system');
 
-    await type(wrapper, 'System packages', 'htop, ffmpeg  imagemagick');
+    await addChips(packages(), 'ffmpeg\nimagemagick');
+    expect(chipsIn(packages())).toEqual(['htop', 'ffmpeg', 'imagemagick']);
     await saveButton().click();
     await flushPromises();
 
     expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'system.packages': ['htop', 'ffmpeg', 'imagemagick'] });
   });
 
-  it('refuses a name that is not a package name before Save', async () => {
+  it('refuses a name that is not a package name in the Add dialog, adding nothing', async () => {
     const wrapper = await openDialog();
     await showTab(wrapper, 'system');
 
-    await type(wrapper, 'System packages', 'htop; rm -rf /');
+    await addChips(packages(), 'rm -rf /');
 
+    expect(addDialogProblem()).toContain("'-rf' is not a package name");
+    expect(chipsIn(packages())).toEqual(['htop']);
     expect(saveButton().disabled).toBe(true);
-    expect(bodyText()).toContain("'htop;' is not a package name");
+  });
+
+  it('opens its Add dialog above the lifted Settings dialog', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'system');
+
+    addButtonIn(packages())!.click();
+    await flushPromises();
+
+    expect(document.body.querySelector('.concierge-settings [data-chip-add-dialog]')).not.toBeNull();
   });
 });
 

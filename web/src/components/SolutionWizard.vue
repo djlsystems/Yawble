@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChipListInput from './ChipListInput.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   checkSolution,
@@ -307,46 +308,9 @@ function setValue(setting: SolutionPersonSetting, value: unknown) {
   values.value = { ...values.value, [settingKey(setting)]: value };
 }
 
-/**
- * WHAT IS TYPED INTO A LIST'S BOX BEFORE IT BECOMES A CHIP, per setting. Committed on Enter, when
- * the box loses focus, and before Next and Install - never dropped. A list used to take a value only
- * on Enter, so a person who typed "Systems Analyst" and pressed Next installed a team with no
- * positions at all, and nothing said so.
- */
-const listTyping = ref<Record<string, string>>({});
-
 function listOf(setting: SolutionPersonSetting): string[] {
   const value = values.value[settingKey(setting)];
   return Array.isArray(value) ? value.map(String) : [];
-}
-
-function commitList(setting: SolutionPersonSetting) {
-  const key = settingKey(setting);
-  const typed = (listTyping.value[key] ?? '').trim();
-  if (typed === '') return;
-
-  const current = listOf(setting);
-  if (!current.includes(typed)) setValue(setting, [...current, typed]);
-  listTyping.value = { ...listTyping.value, [key]: '' };
-}
-
-function removeFromList(setting: SolutionPersonSetting, item: string) {
-  setValue(setting, listOf(setting).filter((entry) => entry !== item));
-}
-
-/** Enter adds the chip and goes no further: it is not a request to move to the next step. */
-function onListKey(setting: SolutionPersonSetting, event: KeyboardEvent) {
-  if (event.key !== 'Enter' || event.isComposing) return;
-
-  event.preventDefault();
-  event.stopPropagation();
-  commitList(setting);
-}
-
-function commitAllLists() {
-  for (const setting of plan.value?.personSettings ?? []) {
-    if (settingInputKind(setting) === 'list') commitList(setting);
-  }
 }
 
 // WHAT AN UPDATE KEEPS is shown, not asked again: the Host never changes a kept member's settings
@@ -512,8 +476,6 @@ const installLine = computed(() => {
 async function install() {
   if (installing.value || succeeded.value || !plan.value || !settingsInRange.value) return;
 
-  commitAllLists();
-
   installing.value = true;
   result.value = null;
   installError.value = '';
@@ -593,7 +555,6 @@ function back() {
 }
 
 function next() {
-  commitAllLists();
   if (step.value === 'team') void nextFromTeam();
   else if (step.value === 'review') step.value = 'inputs';
   else if (step.value === 'inputs' && settingsInRange.value) step.value = 'install';
@@ -846,40 +807,25 @@ function next() {
                   @update:model-value="(value: boolean) => setValue(setting, value)"
                 />
                 <q-select
-                  v-else-if="settingInputKind(setting) === 'choice' || settingInputKind(setting) === 'choices'"
+                  v-else-if="settingInputKind(setting) === 'choice'"
                   :model-value="values[settingKey(setting)]"
                   :options="setting.choices ?? []"
-                  :multiple="settingInputKind(setting) === 'choices'"
                   outlined
                   dense
                   clearable
                   :label="`${setting.member}: ${setting.setting}`"
-                  @update:model-value="(value: unknown) => setValue(setting, value ?? (settingInputKind(setting) === 'choices' ? [] : ''))"
+                  @update:model-value="(value: unknown) => setValue(setting, value ?? '')"
                 />
-                <div v-else-if="settingInputKind(setting) === 'list'" :data-list-setting="settingKey(setting)">
-                  <div class="solution-list-chips">
-                    <q-chip
-                      v-for="item in listOf(setting)"
-                      :key="item"
-                      dense
-                      removable
-                      :remove-aria-label="`Remove ${item}`"
-                      :data-chip="item"
-                      @remove="removeFromList(setting, item)"
-                    >{{ item }}</q-chip>
-                  </div>
-                  <q-input
-                    :model-value="listTyping[settingKey(setting)] ?? ''"
-                    outlined
-                    dense
-                    :label="`${setting.member}: ${setting.setting}`"
-                    hint="Type a value and press Enter to add another; what is typed is kept when you move on."
-                    autocomplete="off"
-                    @update:model-value="(value) => (listTyping = { ...listTyping, [settingKey(setting)]: value === null ? '' : String(value) })"
-                    @keydown="(event: KeyboardEvent) => onListKey(setting, event)"
-                    @blur="commitList(setting)"
-                  />
-                </div>
+                <!-- A LIST - chosen from a fixed set, or free text added through its dialog - is the
+                     product's one list input, as a member's plugin settings are. -->
+                <ChipListInput
+                  v-else-if="settingInputKind(setting) === 'choices' || settingInputKind(setting) === 'list'"
+                  :model-value="listOf(setting)"
+                  :options="settingInputKind(setting) === 'choices' ? setting.choices ?? [] : null"
+                  :label="`${setting.member}: ${setting.setting}`"
+                  :data-list-setting="settingKey(setting)"
+                  @update:model-value="(value: string[]) => setValue(setting, value)"
+                />
                 <q-input
                   v-else
                   :model-value="values[settingKey(setting)] as string | number | null"
@@ -1131,11 +1077,6 @@ function next() {
 
 .solution-facts dd {
   margin: 0;
-}
-.solution-list-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
 }
 
 </style>

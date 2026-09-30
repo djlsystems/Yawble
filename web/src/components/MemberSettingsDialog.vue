@@ -34,7 +34,6 @@ import {
 import { initialBindings } from '../lib/connections';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 
-const settingsForm = ref<InstanceType<typeof PluginSettingsForm> | null>(null);
 
 /**
  * Settings for an existing member — the card's way into `PATCH /api/teams/{team}/containers/{name}`.
@@ -269,9 +268,6 @@ const form = ref<QForm | null>(null);
 const onEnter = submitOnEnter(() => form.value, () => valid.value && !busy.value);
 
 async function submit() {
-  // A value still typed in a list's box is part of what the person means to save.
-  settingsForm.value?.commitAllLists();
-
   if (!valid.value || busy.value) return;
 
   busy.value = true;
@@ -430,7 +426,6 @@ async function submit() {
         <div v-if="isPlugin" class="q-gutter-sm" data-member-plugin-settings>
           <div class="text-subtitle2">Settings</div>
           <PluginSettingsForm
-            ref="settingsForm"
             v-if="pluginShape"
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"

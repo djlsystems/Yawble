@@ -3,7 +3,6 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { listConnectionProviders, listConnections } from '../api/client';
 import type { Connection, ConnectionProvider } from '../api/types';
 import {
-  addToList,
   defaultLabel,
   defaultValue,
   fieldBoundsHint,
@@ -16,6 +15,7 @@ import {
   type PluginFieldValues,
   type PluginSettingsShape,
 } from '../lib/pluginSettings';
+import ChipListInput from './ChipListInput.vue';
 import ConnectionPicker from './ConnectionPicker.vue';
 
 /**
@@ -24,8 +24,8 @@ import ConnectionPicker from './ConnectionPicker.vue';
  * or what is saved.
  *
  * NO FREE-FORM JSON. One input per `config` field, typed - text for a string, a number box for a
- * number, a toggle for a bool, a dropdown for a field with `enum`, chips for a list (type, Enter to
- * add, × to remove, limited to the `enum` when there is one) - so the shape saved is always one the
+ * number, a toggle for a bool, a dropdown for a field with `enum`, chips for a list (`ChipListInput`:
+ * chosen from the `enum` when there is one, else added through its dialog; × removes) - so the shape saved is always one the
  * plugin accepts. Each field says its default, whether it is required and whether only a person may
  * set it, and can be put back to its default. A number field with manifest bounds says them in its
  * hint and shows a value outside them as out of range - typed, or already stored - and the dialogs
@@ -75,10 +75,6 @@ watch(() => props.shape, () => void loadConnections());
 const showJson = ref(false);
 const json = computed(() => JSON.stringify(body.value, null, 2));
 
-/** What is typed into each list field's box before Enter adds it, and why the last Enter did not. */
-const pending = ref<Record<string, string>>({});
-const listProblem = ref<Record<string, string>>({});
-
 function set(name: string, value: string | boolean | string[]) {
   config.value = { ...config.value, [name]: value };
 }
@@ -88,61 +84,6 @@ function reset(name: string) {
   if (!field) return;
 
   set(name, defaultValue(field));
-  listProblem.value = { ...listProblem.value, [name]: '' };
-}
-
-/**
- * Enter in a list's box adds the chip. It STOPS HERE: the dialog's form submits on Enter, and a
- * person adding a value has not asked to save.
- */
-function onListKey(name: string, event: KeyboardEvent) {
-  if (event.key !== 'Enter' || event.isComposing) return;
-
-  event.preventDefault();
-  event.stopPropagation();
-
-  commitList(name);
-}
-
-/**
- * THE TYPED VALUE BECOMES A CHIP ON ENTER AND WHEN THE BOX LOSES FOCUS - pressing Save included,
- * which takes the focus before its click. Only on Enter, a person who typed a position and pressed
- * Save saw "saved" while nothing was sent: the settings had not moved, so the dialog wrote nothing.
- */
-function commitList(name: string) {
-  if ((pending.value[name] ?? '').trim() === '') return;
-
-  const field = props.shape.config[name];
-  if (!field) return;
-
-  const result = addToList(field, config.value[name], pending.value[name] ?? '');
-
-  if ('problem' in result) {
-    listProblem.value = { ...listProblem.value, [name]: result.problem };
-    return;
-  }
-
-  set(name, result.list);
-  pending.value = { ...pending.value, [name]: '' };
-  listProblem.value = { ...listProblem.value, [name]: '' };
-}
-
-/**
- * Every list's typed-but-not-added value, made a chip - what a dialog calls as its Save or Hire
- * starts. Leaving a box does it too, but Quasar reports the focus loss on a timer, and a quick
- * click must not beat it.
- */
-function commitAllLists() {
-  for (const [name, field] of Object.entries(props.shape.config)) {
-    if (field.type === 'list') commitList(name);
-  }
-}
-
-defineExpose({ commitAllLists });
-
-function removeFromList(name: string, item: string) {
-  const current = config.value[name];
-  set(name, Array.isArray(current) ? current.filter((entry) => entry !== item) : []);
 }
 
 function listOf(name: string): string[] {
@@ -176,35 +117,13 @@ function secretHint(description: string | null | undefined, required: boolean) {
         @update:model-value="(value: boolean) => set(String(key), value)"
       />
 
-      <template v-else-if="field.type === 'list'">
-        <div class="text-body2">{{ key }}</div>
-        <div class="plugin-setting-chips" data-chips>
-          <q-chip
-            v-for="item in listOf(String(key))"
-            :key="item"
-            dense
-            removable
-            :remove-aria-label="`Remove ${item}`"
-            :data-chip="item"
-            @remove="removeFromList(String(key), item)"
-          >{{ item }}</q-chip>
-        </div>
-        <q-input
-          :model-value="pending[key] ?? ''"
-          outlined
-          dense
-          :label="`Add to ${key}`"
-          :hint="field.enum && field.enum.length > 0
-            ? `Type a value and press Enter to add another; what is typed is kept when you leave the box. Allowed: ${field.enum.join(', ')}.`
-            : 'Type a value and press Enter to add another; what is typed is kept when you leave the box.'"
-          :error="listProblem[key] ? true : undefined"
-          :error-message="listProblem[key] ?? ''"
-          autocomplete="off"
-          @update:model-value="(value) => (pending = { ...pending, [key]: value === null ? '' : String(value) })"
-          @keydown="(event: KeyboardEvent) => onListKey(String(key), event)"
-          @blur="commitList(String(key))"
-        />
-      </template>
+      <ChipListInput
+        v-else-if="field.type === 'list'"
+        :model-value="listOf(String(key))"
+        :label="String(key)"
+        :options="field.enum && field.enum.length > 0 ? field.enum : null"
+        @update:model-value="(value: string[]) => set(String(key), value)"
+      />
 
       <q-select
         v-else-if="field.enum && field.enum.length > 0"
@@ -300,9 +219,6 @@ function secretHint(description: string | null | undefined, required: boolean) {
 </template>
 
 <style scoped>
-.plugin-setting-chips {
-  min-height: 8px;
-}
 
 .plugin-settings-json {
   margin: 4px 0 0;

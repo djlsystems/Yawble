@@ -69,7 +69,7 @@ function selectLabelled(wrapper: { findAllComponents: (s: { name: string }) => u
   return found;
 }
 
-async function choose(wrapper: Parameters<typeof selectLabelled>[0], label: string, value: string) {
+async function choose(wrapper: Parameters<typeof selectLabelled>[0], label: string, value: string | string[]) {
   selectLabelled(wrapper, label).vm.$emit('update:modelValue', value);
   await settle();
 }
@@ -174,11 +174,9 @@ describe('AddMemberDialog, hiring a plugin', () => {
 
     expect(document.body.querySelector('[data-setting="allow"] [data-person-only]')?.textContent).toBe('Set by a person only');
 
-    await type('Add to allow', 'dev');
-    field('Add to allow').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await settle();
-
-    // Enter added the chip and did not hire.
+    // An enum list is chosen from its values, as chips.
+    await choose(wrapper, 'allow', ['dev']);
+    expect(document.body.querySelector('[data-setting="allow"] [data-chip="dev"]')).not.toBeNull();
     expect(addMember).not.toHaveBeenCalled();
 
     button('Add member').click();

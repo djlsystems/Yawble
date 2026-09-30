@@ -40,6 +40,7 @@ import {
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostField, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
 import { blur, button, field, fieldWrapper, hasError, isDisabled, settle, type } from '../../test/formProbe';
+import { addButtonIn, addChips, cancelAddDialog, chipsIn, removeChip, typeInAddDialog } from '../../test/chipList';
 
 const fields: Record<string, PluginConfigField> = {
   greeting: hostField({ type: 'string', description: 'What it says first.', default: 'hello' }),
@@ -112,14 +113,7 @@ function select(wrapper: { findAllComponents: (s: { name: string }) => unknown[]
   return found;
 }
 
-async function pressEnterIn(label: string) {
-  field(label).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-  await settle();
-}
-
-function chips(name: string) {
-  return [...setting(name).querySelectorAll('[data-chip]')].map((chip) => chip.getAttribute('data-chip'));
-}
+const chips = (name: string) => chipsIn(setting(name));
 
 function json() {
   return JSON.parse(bodyFind('[data-settings-json]')!.textContent ?? '');
@@ -143,10 +137,12 @@ describe('MemberSettingsDialog, a plugin member', () => {
     expect(select(wrapper, 'mode').props('modelValue')).toBe('upper');
     expect(setting('loud').querySelector('.q-toggle')).not.toBeNull();
 
-    // list: chips, with a box to add to it.
+    // list: chips - chosen from the enum where there is one, else added through the Add dialog.
     expect(chips('recipients')).toEqual(['ops']);
     expect(chips('labels')).toEqual([]);
-    expect(field('Add to labels')).toBeTruthy();
+    expect(addButtonIn(setting('labels'))).not.toBeNull();
+    expect(addButtonIn(setting('recipients'))).toBeNull();
+    expect(select(wrapper, 'recipients').props('options')).toEqual([{ label: 'dev', value: 'dev' }]);
 
     // Secrets as KEY NAMES, filled with the bound key.
     expect(field('Secret token: key name').value).toBe('ECHO_TOKEN');
@@ -176,29 +172,22 @@ describe('MemberSettingsDialog, a plugin member', () => {
     wrapper.unmount();
   });
 
-  it('adds a list value on Enter without saving, removes one with ×, and holds an enum list to its values', async () => {
+  it('adds a free-text list value through its dialog without saving, removes one with ×, and chooses an enum list from its values', async () => {
     const wrapper = await mountSettings();
 
-    await type('Add to labels', 'nightly');
-    await pressEnterIn('Add to labels');
+    await addChips(setting('labels'), 'nightly');
 
     expect(chips('labels')).toEqual(['nightly']);
-    expect(field('Add to labels').value).toBe('');
-    // Enter in the chip box added a chip; it did not submit the dialog.
+    // Adding a chip is not a save.
     expect(savePluginSettings).not.toHaveBeenCalled();
     expect(updateMember).not.toHaveBeenCalled();
 
-    await type('Add to recipients', 'everyone');
-    await pressEnterIn('Add to recipients');
-    expect(chips('recipients')).toEqual(['ops']);
-    expect(setting('recipients').textContent).toContain('everyone is not allowed. Choose from: ops, dev.');
-
-    await type('Add to recipients', 'dev');
-    await pressEnterIn('Add to recipients');
+    // An enum list has no free text: its values are chosen from the dropdown.
+    select(wrapper, 'recipients').vm.$emit('update:modelValue', ['ops', 'dev']);
+    await settle();
     expect(chips('recipients')).toEqual(['ops', 'dev']);
 
-    (setting('recipients').querySelector('[aria-label="Remove ops"]') as HTMLElement).click();
-    await settle();
+    await removeChip(setting('recipients'), 'ops');
     expect(chips('recipients')).toEqual(['dev']);
 
     wrapper.unmount();
@@ -264,35 +253,22 @@ describe('MemberSettingsDialog, a plugin member', () => {
     wrapper.unmount();
   });
 
-  // A value typed into a list's box and never Entered used to be dropped: Save saw no change, sent
-  // nothing, and still said "saved". Leaving the box - which pressing Save does first - keeps it.
-  it('keeps a list value typed without Enter when the box loses focus, and Save sends it', async () => {
+  // A typed value is added or cancelled in its dialog - never left in a box that Save ignores. What
+  // was added is sent by Save; what was cancelled is not.
+  it('sends what was added through the dialog on Save, and nothing that was cancelled', async () => {
     const wrapper = await mountSettings();
 
-    await type('Add to labels', 'Systems Analyst');
-    await blur('Add to labels');
+    await addChips(setting('labels'), 'Systems Analyst\nBoston, MA');
+    await typeInAddDialog(setting('labels'), 'Remote');
+    await cancelAddDialog();
 
-    expect(chips('labels')).toEqual(['Systems Analyst']);
+    expect(chips('labels')).toEqual(['Systems Analyst', 'Boston, MA']);
 
     button('Save').click();
     await settle();
 
     expect(savePluginSettings).toHaveBeenCalledTimes(1);
-    expect(savePluginSettings.mock.calls[0]![2]).toMatchObject({ config: { labels: ['Systems Analyst'] } });
-
-    wrapper.unmount();
-  });
-
-  // Quasar reports the focus loss on a timer; a click on Save that beats it still saves the value.
-  it('sends a list value still typed in its box when Save is pressed, with no focus change first', async () => {
-    const wrapper = await mountSettings();
-
-    await type('Add to labels', 'Remote');
-    button('Save').click();
-    await settle();
-
-    expect(savePluginSettings).toHaveBeenCalledTimes(1);
-    expect(savePluginSettings.mock.calls[0]![2]).toMatchObject({ config: { labels: ['Remote'] } });
+    expect(savePluginSettings.mock.calls[0]![2]).toMatchObject({ config: { labels: ['Systems Analyst', 'Boston, MA'] } });
 
     wrapper.unmount();
   });

@@ -1,16 +1,17 @@
 // @vitest-environment happy-dom
 //
-// A LIST SETTING IN THE WIZARD'S "YOUR PART" KEEPS WHAT IS TYPED. A free-text list (positions,
-// locations) takes a value on Enter, on leaving its box, and when Next or Install is pressed with
-// text still in it. It used to take one only on Enter, so a person who typed a position and pressed
-// Next installed a team with no positions and nothing said so.
+// A LIST SETTING IN THE WIZARD'S "YOUR PART" is the product's one list input: removable chips, and
+// free text (positions, locations) added through its Add dialog, one item per line. A typed value is
+// added or cancelled there - never left in a box that Next ignores, which once installed a team
+// with no positions and nothing said so.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import SolutionWizard from '../SolutionWizard.vue';
 import type { SolutionPlan } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
-import { button, field, settle, type } from '../../test/formProbe';
+import { button, settle, type } from '../../test/formProbe';
+import { addChips, cancelAddDialog, chipsIn, removeChip, typeInAddDialog } from '../../test/chipList';
 import { Folder, fakeHost, hostPlan, reply, sent, steps, wizardRoutes, type Call } from '../../test/solutionFixtures';
 
 let calls: Call[] = [];
@@ -78,44 +79,38 @@ async function install(): Promise<Record<string, unknown>> {
   return sent(calls, 'POST', '/api/solutions/install')[0]!.body as Record<string, unknown>;
 }
 
-const chips = () =>
-  [...bodyFind('[data-list-setting="Scout/positions"]')!.querySelectorAll('[data-chip]')].map((chip) => chip.getAttribute('data-chip'));
+const list = () => bodyFind('[data-list-setting="Scout/positions"]')!;
+const chips = () => chipsIn(list());
 
 describe('Solution wizard - a list setting', () => {
-  it('takes a value typed and left in the box when Next is pressed, and installs with it', async () => {
+  it('adds values through the dialog, one per line, without moving on, and installs with them', async () => {
     await yourPart();
     await type('Scout: region', 'Europe');
 
-    await type('Scout: positions', 'Systems Analyst');
-    const body = await install();
-
-    expect((body.settings as Record<string, Record<string, unknown>>).Scout!.positions).toEqual(['Systems Analyst']);
-  });
-
-  it('adds a chip on Enter and keeps the box for the next value, without moving to the next step', async () => {
-    await yourPart();
-
-    await type('Scout: positions', 'Systems Analyst');
-    field('Scout: positions').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await settle();
-    await type('Scout: positions', 'Business Analyst');
-    field('Scout: positions').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await settle();
-
+    await addChips(list(), 'Systems Analyst\nBusiness Analyst');
     expect(chips()).toEqual(['Systems Analyst', 'Business Analyst']);
     expect(bodyFind('[data-step="inputs"]')).not.toBeNull();
-    expect((field('Scout: positions') as HTMLInputElement).value).toBe('');
+
+    const body = await install();
+    expect((body.settings as Record<string, Record<string, unknown>>).Scout!.positions).toEqual(['Systems Analyst', 'Business Analyst']);
+  });
+
+  it('adds nothing when the dialog is cancelled', async () => {
+    await yourPart();
+
+    await typeInAddDialog(list(), 'Systems Analyst');
+    await cancelAddDialog();
+
+    expect(chips()).toEqual([]);
+    expect(bodyFind('[data-step="inputs"]')).not.toBeNull();
   });
 
   it('removes a chip with its ×, and an untouched list stays empty and unsent', async () => {
     await yourPart();
     await type('Scout: region', 'Europe');
 
-    await type('Scout: positions', 'Systems Analyst');
-    field('Scout: positions').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-    await settle();
-    (bodyFind('[aria-label="Remove Systems Analyst"]') as HTMLElement).click();
-    await settle();
+    await addChips(list(), 'Systems Analyst');
+    await removeChip(list(), 'Systems Analyst');
     expect(chips()).toEqual([]);
 
     const body = await install();

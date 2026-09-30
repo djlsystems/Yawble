@@ -9,6 +9,7 @@ import {
   rebuildAgentDefinition,
 } from '../lib/agentDefinitionDraft';
 import { validateTags } from '../lib/tenantSettings';
+import ChipListInput from './ChipListInput.vue';
 import {
   agentNameTaken,
   envLines,
@@ -74,6 +75,10 @@ const source = computed(() => props.agent ?? props.cloneOf ?? null);
 const locked = computed(() => props.readOnly === true && props.agent !== null);
 
 const tab = ref<'general' | 'isolation' | 'gaps'>('general');
+
+/** The tags as chips; the form keeps them as its one-per-line text, which the rebuild reads. */
+const tagList = computed(() => parseTags(tags.value) ?? []);
+const tagRefusal = (value: string) => validateTags([value]);
 
 /**
  * WHAT A MEMBER OF THIS PRESET CAN STILL LOAD that no launch switch turns off - the declaration's
@@ -458,19 +463,20 @@ function submit() {
             <li v-for="problem in envProblems" :key="problem">{{ problem }}</li>
           </ul>
 
-          <q-input
-            v-model="tags"
-            dense
-            outlined
-            type="textarea"
-            autogrow
+          <ChipListInput
+            :model-value="tagList"
             :label="locked ? 'Tags' : 'Tags (optional)'"
+            item-name="tag"
+            ignore-case
+            :validate="tagRefusal"
             :disable="busy"
+            data-agent-tags
             :error="tagProblem !== null"
             :error-message="tagProblem ?? undefined"
+            @update:model-value="(value: string[]) => (tags = joinTags(value))"
             :hint="locked
-              ? `One tag per line. The build's: ${(agent?.buildTags ?? []).join(', ') || 'none'}. Applies to the next hire.`
-              : 'One tag per line. Tenant-wide free-text advice on what this Agent is good at; matching is case-insensitive.'"
+              ? `The build's: ${(agent?.buildTags ?? []).join(', ') || 'none'}. Applies to the next hire.`
+              : 'Tenant-wide free-text advice on what this Agent is good at; matching is case-insensitive.'"
           />
           <div v-if="locked && agent?.tagsFromOperator" class="row justify-end">
             <q-btn
@@ -560,10 +566,22 @@ function submit() {
             <pre class="agent-readout mono">{{ isolation.arguments.join('\n') || '(none)' }}</pre>
             <div class="agent-readout-label">Environment set last, after the preset's and the team's</div>
             <pre class="agent-readout mono">{{ envPairs(isolation.env).join('\n') || '(none)' }}</pre>
-            <div class="agent-readout-label">The CLI's own tools a member may use</div>
-            <pre class="agent-readout mono">{{ (isolation.allowedTools ?? []).join(', ') || '(none)' }}</pre>
-            <div class="agent-readout-label">Servers besides the platform's own</div>
-            <pre class="agent-readout mono">{{ (isolation.allowedServers ?? []).join(', ') || '(none)' }}</pre>
+            <ChipListInput
+              class="q-mt-md"
+              :model-value="isolation.allowedTools ?? []"
+              label="The CLI's own tools a member may use"
+              readonly
+              mono
+              data-agent-allowed-tools
+            />
+            <ChipListInput
+              class="q-mt-md"
+              :model-value="isolation.allowedServers ?? []"
+              label="Servers besides the platform's own"
+              readonly
+              mono
+              data-agent-allowed-servers
+            />
           </template>
           <p v-else class="os-body text-warning">
             No isolation declared. A member run from this preset is shown as not verified, and any

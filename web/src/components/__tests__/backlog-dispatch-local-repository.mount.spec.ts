@@ -38,6 +38,8 @@ import { useConsoleStore } from '../../stores/console';
 import { useSessionStore } from '../../stores/session';
 import { remember } from '../../lib/newTeamDefaults';
 import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { addChips, chipsIn } from '../../test/chipList';
+
 
 const MISSING = 'https://github.com/acme/job-tracker';
 const OTHER = 'https://git.example.com/acme/other.git';
@@ -168,7 +170,7 @@ describe('Backlog dispatch to a new team: Create a local repository for this tea
   });
 });
 
-describe('Backlog dispatch to a new team: a URL typed in Team settings but not entered', () => {
+describe('Backlog dispatch to a new team: a URL added in Team settings', () => {
   const TYPED = 'https://github.com/owner/typed.git';
 
   function button(label: string): HTMLElement {
@@ -177,23 +179,20 @@ describe('Backlog dispatch to a new team: a URL typed in Team settings but not e
     return found as HTMLElement;
   }
 
-  /** Opens Team settings and types `url` into the repositories field without pressing Enter. */
-  async function typeWithoutEntering(url: string): Promise<HTMLInputElement> {
+  const reposList = () => document.body.querySelector('[data-settings-repos]')!;
+
+  /** Opens Team settings and adds `url` to the repositories through the list's Add dialog. */
+  async function addRepository(url: string) {
     button('Team settings').click();
     await flushPromises();
-    const input = document.body.querySelector<HTMLInputElement>('input[data-settings-repos]')!;
-    input.focus();
-    input.value = url;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    await flushPromises();
-    return input;
+    await addChips(reposList(), url);
   }
 
-  it('Use these adds it: the box hides, and Dispatch sends it in repos with no local repository requested', async () => {
+  it('Use these keeps it: the box hides, and Dispatch sends it in repos with no local repository requested', async () => {
     await openDispatchToNew([]);
     expect(checkbox()).not.toBeNull();
 
-    await typeWithoutEntering(`  ${TYPED}  `);
+    await addRepository(`  ${TYPED}  `);
     button('Use these').click();
     await flushPromises();
 
@@ -207,15 +206,11 @@ describe('Backlog dispatch to a new team: a URL typed in Team settings but not e
     expect(sent(0).localRepository).toBeUndefined();
   });
 
-  it('leaving the field adds it to the list, after the ones already there', async () => {
+  it('adds it after the ones already there', async () => {
     await openDispatchToNew([OTHER]);
 
-    const input = await typeWithoutEntering(TYPED);
-    input.blur();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    await flushPromises();
-    expect([...document.body.querySelectorAll('.q-chip')].map((chip) => chip.textContent)).toEqual(
-      expect.arrayContaining([expect.stringContaining(OTHER), expect.stringContaining(TYPED)]));
+    await addRepository(TYPED);
+    expect(chipsIn(reposList())).toEqual([OTHER, TYPED]);
     button('Use these').click();
     await flushPromises();
 

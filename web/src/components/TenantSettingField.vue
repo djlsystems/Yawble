@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TenantSetting } from '../api/types';
-import { sourceLine, ThemeChoices, type TenantSettingField } from '../lib/tenantSettings';
+import { packageNames, sourceLine, ThemeChoices, validateDraft, type TenantSettingField } from '../lib/tenantSettings';
+import ChipListInput from './ChipListInput.vue';
 
 /**
  * ONE INSTANCE-WIDE SETTING: its label, its box, why it is there, and where its value came from.
@@ -17,6 +18,9 @@ defineProps<{
 }>();
 
 const draft = defineModel<string>({ required: true });
+
+/** One package name's refusal before it joins the list, by the rule the whole box is held to. */
+const packageRefusal = (value: string) => validateDraft('packages', value);
 </script>
 
 <template>
@@ -31,6 +35,22 @@ const draft = defineModel<string>({ required: true });
       :disable="disable || !setting"
       :error="!!error"
       :error-message="error ?? undefined"
+    />
+    <!-- A LIST OF PACKAGES is the product's one list input. The draft stays the space-separated text
+         the setting is read and checked as; the chips are its names. Lifted with this dialog, which
+         sits above the Concierge panel, so its Add dialog opens in front of it. -->
+    <ChipListInput
+      v-else-if="field.kind === 'packages'"
+      :model-value="packageNames(draft)"
+      :label="field.label"
+      item-name="package"
+      mono
+      layer-class="concierge-settings"
+      :validate="packageRefusal"
+      :disable="disable || !setting"
+      :error="!!error"
+      :error-message="error ?? undefined"
+      @update:model-value="(value: string[]) => (draft = value.join(' '))"
     />
     <q-input
       v-else

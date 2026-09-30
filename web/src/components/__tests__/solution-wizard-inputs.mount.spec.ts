@@ -75,7 +75,7 @@ describe('Solution wizard - Your part', () => {
     const wrapper = await yourPart();
 
     const sources = selectLabelled(wrapper, 'Scout: sources');
-    expect(sources.props('options')).toEqual(['sample', 'other']);
+    expect((sources.props('options') as { value: string }[]).map((option) => option.value)).toEqual(['sample', 'other']);
     expect(sources.props('multiple')).toBe(true);
     expect(sources.props('modelValue')).toEqual([]);
 

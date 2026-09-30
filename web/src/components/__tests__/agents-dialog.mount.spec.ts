@@ -36,6 +36,9 @@ import AgentsDialog from '../AgentsDialog.vue';
 import type { Agent } from '../../api/types';
 import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, field, settle, type } from '../../test/formProbe';
+import { addButtonIn, addChips, chipsIn } from '../../test/chipList';
+
+const tagsList = () => document.body.querySelector('[data-agent-tags]')!;
 
 const liveView = { path: '~/.claude/projects/{sessionId}.jsonl', format: 'claude-jsonl' };
 
@@ -202,7 +205,10 @@ describe('AgentsDialog, mounted', () => {
     expect(field('Executable').readOnly).toBe(true);
     expect(field('Arguments').value).toBe('-p');
     expect(field('Arguments').readOnly).toBe(true);
-    expect(field('Tags').readOnly).toBe(false);
+    // Tags are the one editable thing: removable chips with an Add button.
+    expect(chipsIn(tagsList())).toEqual(['developer']);
+    expect(addButtonIn(tagsList())).not.toBeNull();
+    expect(tagsList().querySelector('.q-chip__icon--remove')).not.toBeNull();
     expect(button('Save tags')).toBeDefined();
     expect(bodyText()).toContain('clone it and edit the copy');
 
@@ -231,7 +237,7 @@ describe('AgentsDialog, mounted', () => {
 
     rowButton('claude-headless', 'Details')!.click();
     await settle();
-    await type('Tags', 'developer\ntester');
+    await addChips(tagsList(), 'tester');
     button('Save tags').click();
     await flushPromises();
 
@@ -271,7 +277,7 @@ describe('AgentsDialog, mounted', () => {
 
     rowButton('claude-headless', 'Details')!.click();
     await settle();
-    await type('Tags', 'x');
+    await addChips(tagsList(), 'x');
     button('Save tags').click();
     await flushPromises();
 

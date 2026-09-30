@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addToList,
   defaultLabel,
   defaultValue,
   initialConfig,
@@ -119,15 +118,5 @@ describe('settingsBody', () => {
   it('sends a number that does not parse as typed, so the refusal names it', () => {
     const config = { ...initialConfig(shape), limit: 'lots' };
     expect(settingsBody(shape, config, {}).config).toEqual({ limit: 'lots' });
-  });
-});
-
-describe('addToList', () => {
-  it('adds a value, and refuses a blank, a repeat or one outside the enum', () => {
-    const recipients = shape.config.recipients!;
-    expect(addToList(recipients, ['ops'], ' dev ')).toEqual({ list: ['ops', 'dev'] });
-    expect(addToList(recipients, ['ops'], ' ')).toEqual({ problem: 'Type a value first.' });
-    expect(addToList(recipients, ['ops'], 'ops')).toEqual({ problem: 'ops is already in the list.' });
-    expect(addToList(recipients, [], 'qa')).toEqual({ problem: 'qa is not allowed. Choose from: ops, dev.' });
   });
 });

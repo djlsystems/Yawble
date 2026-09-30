@@ -252,24 +252,3 @@ export function settingsBody(
 
   return body;
 }
-
-/**
- * What a list field would hold after `entry` is added, or the sentence saying why it is not: blank,
- * already there, or - for a list with an `enum` - not one of its values.
- */
-export function addToList(
-  field: PluginConfigField,
-  current: PluginFieldValue | undefined,
-  entry: string,
-): { list: string[] } | { problem: string } {
-  const list = Array.isArray(current) ? current : [];
-  const value = entry.trim();
-
-  if (value === '') return { problem: 'Type a value first.' };
-  if (list.includes(value)) return { problem: `${value} is already in the list.` };
-  if (field.enum && field.enum.length > 0 && !field.enum.includes(value)) {
-    return { problem: `${value} is not allowed. Choose from: ${field.enum.join(', ')}.` };
-  }
-
-  return { list: [...list, value] };
-}

@@ -118,7 +118,7 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     tab: 'system',
     kind: 'packages',
     label: 'System packages',
-    hint: `OS packages installed with apt-get when the container starts, separated by spaces. Agents are not root and cannot install one themselves. ${SystemPackagesRestartSentence}`,
+    hint: `OS packages installed with apt-get when the container starts. Agents are not root and cannot install one themselves. ${SystemPackagesRestartSentence}`,
   },
 ]
 

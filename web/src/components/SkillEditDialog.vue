@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChipListInput from './ChipListInput.vue'
 import { computed, ref, watch } from 'vue'
 import { useQuasar } from 'quasar'
 import {
@@ -47,10 +48,6 @@ const readOnly = computed(() => props.skill !== null && isReadOnlySkill(props.sk
 /** Trimmed before it is judged, because it is trimmed before it is sent. */
 const nameRules = [(value: unknown) => skillName(String(value ?? '').trim())]
 const descriptionRules = [required('A skill needs a description.')]
-const rolesRules = [
-  (value: readonly SkillRole[] | null) =>
-    (value?.length ?? 0) > 0 || 'Choose at least one role this skill is offered to.',
-]
 
 const roleOptions = SkillRoles.map((role) => ({ label: roleLabel(role), value: role }))
 
@@ -178,20 +175,18 @@ async function remove() {
             />
           </div>
           <div class="col-12 col-sm-7">
-            <q-select
-              v-model="formRoles"
-              dense
-              outlined
-              multiple
-              emit-value
-              map-options
-              use-chips
+            <ChipListInput
+              :model-value="formRoles"
               label="Roles"
               :options="roleOptions"
-              :rules="readOnly ? [] : rolesRules"
+              item-name="role"
               :readonly="readOnly"
               :disable="formBusy"
+              :error="!readOnly && formRoles.length === 0"
+              error-message="Choose at least one role this skill is offered to."
               :hint="readOnly ? undefined : 'Which agents are offered this skill. Any is every role.'"
+              data-skill-roles
+              @update:model-value="(value: string[]) => (formRoles = value as SkillRole[])"
             />
           </div>
         </div>

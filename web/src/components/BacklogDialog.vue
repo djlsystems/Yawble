@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import ChipListInput from './ChipListInput.vue';
 import { useQuasar } from 'quasar';
 import { useConsoleStore } from '../stores/console';
 import { useCursorList } from '../lib/useCursorList';
@@ -289,21 +290,10 @@ const settingsDraft = ref<{
   root: string | null
 } | null>(null);
 
-/**
- * A URL typed in the repositories field but not yet entered. QSelect only adds it on Enter or Tab and
- * clears it on blur, so pressing "Use these" or Save straight after typing would drop it. It is the
- * person's repository all the same: it joins the list on blur and on Save, as if Enter had been
- * pressed, and goes through the same rules and the same repository check as any other.
- */
-const settingsRepoTyped = ref('');
-
-function addTypedSettingsRepo() {
-  const url = settingsRepoTyped.value.trim();
-  settingsRepoTyped.value = '';
-  const draft = settingsDraft.value;
-  if (!url || draft === null || draft.repos.includes(url)) return;
-  draft.repos = [...draft.repos, url];
-}
+/** The list's problem, and one URL's refusal before it joins the list - the same rules. */
+const repoProblem = computed(() =>
+  settingsDraft.value === null ? null : firstProblem(repoListRules, settingsDraft.value.repos));
+const repoRefusal = (value: string, list: string[]) => firstProblem(repoListRules, [...list, value]);
 
 /** Says which of the two meanings above is in force, because they are genuinely different. */
 const settingsCaption = computed(() =>
@@ -362,7 +352,6 @@ function openSettings() {
     };
   }
 
-  settingsRepoTyped.value = '';
   settingsOpen.value = true;
 }
 
@@ -370,7 +359,6 @@ const settingsValid = computed(() =>
   settingsDraft.value !== null && firstProblem(repoListRules, settingsDraft.value.repos) === null);
 
 async function saveSettings() {
-  addTypedSettingsRepo();
   const draft = settingsDraft.value;
   if (draft === null || !settingsValid.value || settingsBusy.value) return;
 
@@ -1568,34 +1556,38 @@ function down(index: number) {
           <div class="text-caption os-text-muted">{{ settingsCaption }}</div>
 
           <!-- REPOS FIRST, because it is the field that decides whether the team can do the work at
-               all. `new-value-mode` lets a URL this browser has never seen be typed; the options are
-               the remembered ones. Order is kept - the first entry is the primary repo. -->
-          <q-select
-            v-model="settingsDraft.repos"
+               all. The product's one list input: a remembered URL is chosen from the dropdown, a new
+               one is added through its dialog and checked there. Order is kept - the first entry is
+               the primary repo. -->
+          <ChipListInput
+            :model-value="settingsDraft.repos"
             :options="repoSuggestions"
+            freeform
+            mono
             label="Repositories the platform clones"
-            hint="The first is the primary. Type a URL to add one this browser has not used before."
+            hint="The first is the primary. Choose a remembered one, or add a URL this browser has not used before."
+            item-name="repository URL"
             class="q-mt-md"
-            dense outlined multiple use-chips use-input
-            new-value-mode="add-unique"
-            popup-content-class="backlog-popup"
+            layer-class="backlog-popup"
             :disable="settingsBusy"
-            :rules="repoListRules"
+            :validate="repoRefusal"
+            :error="repoProblem !== null"
+            :error-message="repoProblem ?? undefined"
             data-settings-repos
-            :input-debounce="0"
-            @input-value="(value: string) => (settingsRepoTyped = value)"
-            @blur="addTypedSettingsRepo"
+            @update:model-value="(value: string[]) => settingsDraft && (settingsDraft.repos = value)"
           />
 
-          <q-select
-            v-model="settingsDraft.memberAgents"
+          <ChipListInput
+            :model-value="settingsDraft.memberAgents"
             :options="headlessAgents"
             label="Agents members may run"
             hint="An ordered allowlist. A hire naming none of these is refused."
+            item-name="Agent"
             class="q-mt-md"
-            dense outlined multiple use-chips
-            popup-content-class="backlog-popup"
+            layer-class="backlog-popup"
             :disable="settingsBusy"
+            data-settings-member-agents
+            @update:model-value="(value: string[]) => settingsDraft && (settingsDraft.memberAgents = value)"
           />
 
           <!-- MANAGER AND ROOT ARE NEW-TEAM ONLY. Repointing a LIVE Manager reaches the running
