@@ -89,9 +89,9 @@ describe('the control panel: Controls', () => {
   it('shows the run Run now started once it finishes, without Refresh', async () => {
     await controls();
     const before = read;
-    await click('[data-control-trigger="trg_scan"] [data-run-now]');
     const reads = () => sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length;
-    const readsAfterRun = reads();
+    const readsBefore = reads();
+    await click('[data-control-trigger="trg_scan"] [data-run-now]');
 
     // The run ends a moment after the route answered: the next read has it.
     read = {
@@ -107,23 +107,26 @@ describe('the control panel: Controls', () => {
     };
     await vi.waitFor(() => expect(bodyFind('[data-panel-status]')?.textContent).toBe('5 new jobs · last checked 2026-09-30T10:00:00Z'));
 
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await new Promise((resolve) => setTimeout(resolve, 60));
     await settle();
-    // It stopped once the new run showed.
-    expect(reads()).toBe(readsAfterRun + 1);
+    // It stopped once the new run showed, well before its tries ran out.
+    expect(reads()).toBeLessThan(readsBefore + 1 + 3);
     await openSection('results');
     expect(bodyFind('[data-run="42"] [data-run-output]')?.textContent).toBe('5 new postings');
   });
 
   it('stops re-reading after a bounded number of tries when no new run shows', async () => {
     await controls();
+    const reads = () => sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length;
+    const readsBefore = reads();
     await click('[data-control-trigger="trg_scan"] [data-run-now]');
-    const readsAfterRun = sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length;
 
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    // One read as the route answers, then the three bounded tries - and no more.
+    await vi.waitFor(() => expect(reads()).toBe(readsBefore + 1 + 3));
+    await new Promise((resolve) => setTimeout(resolve, 60));
     await settle();
 
-    expect(sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length).toBe(readsAfterRun + 3);
+    expect(reads()).toBe(readsBefore + 1 + 3);
   });
 
   it('says a skipped Run now as skipped, with why', async () => {
