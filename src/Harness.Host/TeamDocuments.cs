@@ -301,25 +301,20 @@ public sealed class TeamDocuments(TeamPaths paths)
             FilesUnder(target).Select(f => Relative(root, f)).ToList());
     }
 
-    /// <summary>Removes what <see cref="Plan"/> decided. Recursive only when the plan is a folder,
-    /// which a non-recursive plan admits only when it was empty.</summary>
-    public void Remove(DocumentsDeletion plan)
+    /// <summary>
+    /// Whether anything is still at <paramref name="absolute"/>, a link counted as itself. A path
+    /// that cannot be examined is counted as there: a delete is never reported done on a guess.
+    /// </summary>
+    public static bool StillThere(string absolute)
     {
-        if (!plan.IsFolder)
+        try
         {
-            File.Delete(plan.Absolute);
-            return;
+            return File.Exists(absolute) || Directory.Exists(absolute) || new FileInfo(absolute).LinkTarget is not null;
         }
-
-        Directory.Delete(plan.Absolute, recursive: true);
-    }
-
-    /// <summary>Plans and removes in one step, for a caller with nothing to record between.</summary>
-    public DocumentsDeletion Delete(string team, string path, bool recursive = false)
-    {
-        var plan = Plan(team, path, recursive);
-        Remove(plan);
-        return plan;
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
     }
 
     private static List<string> FilesUnder(string folder) =>
