@@ -7,8 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 
-const { cloneTeam, deleteTeam, getWip, listRemovals, pauseTeam, resumeTeam, retryRemoval, notify } = vi.hoisted(() => ({
+const { cloneTeam, deleteTeam, getWip, listLocalRepos, listRemovals, pauseTeam, resumeTeam, retryRemoval, notify } = vi.hoisted(() => ({
   cloneTeam: vi.fn(),
+  listLocalRepos: vi.fn(),
   listRemovals: vi.fn(),
   retryRemoval: vi.fn(),
   getWip: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   cloneTeam,
   deleteTeam,
   getWip,
+  listLocalRepos,
   listRemovals,
   pauseTeam,
   resumeTeam,
@@ -88,6 +90,7 @@ beforeEach(() => {
   resumeTeam.mockResolvedValue(undefined);
   getWip.mockResolvedValue({ max: 4, running: [], waiting: [] });
   listRemovals.mockResolvedValue([]);
+  listLocalRepos.mockResolvedValue([]);
 });
 
 afterEach(resetBody);
@@ -220,6 +223,118 @@ describe('the team delete dialog', () => {
     expect(text).toContain('Harness: 2 commits on no remote');
     expect(text).toContain('Type discard alpha to confirm losing those commits');
     expect(button('Delete team').disabled).toBe(true);
+  });
+});
+
+/**
+ * "ALSO DELETE ITS LOCAL REPOSITORY", off by default, offered for a `local:<name>` the team
+ * uses that no other team does, saying what is lost. One another team uses is named with that team
+ * and has no box; a URL never gets one.
+ */
+describe('the team delete dialog\'s local repository checkbox', () => {
+  const localRepo = (teams: string[]) => ({
+    name: 'alpha',
+    reference: 'local:alpha',
+    sizeBytes: 2048,
+    defaultBranch: 'main',
+    lastCommit: { sha: 'abc123', subject: 'last', committedAt: '2026-09-28T10:00:00+00:00' },
+    teams,
+    unused: teams.length === 0,
+    branches: ['main', 'team/alpha'],
+    commitCount: 12,
+  });
+
+  const withRepos = (repos: string[]) => ({ ...aTeam('alpha'), repos } as unknown as Team);
+
+  function checkbox(reference: string): HTMLElement | null {
+    return document.body.querySelector(`[data-delete-local-repo="${reference}"] .q-checkbox`);
+  }
+
+  it('offers an unticked box for a local repository no other team uses, with what it loses', async () => {
+    listLocalRepos.mockResolvedValue([localRepo(['alpha'])]);
+    await mountView([withRepos(['local:alpha'])]);
+    await click('Delete this team');
+
+    const box = checkbox('local:alpha');
+    expect(box).not.toBeNull();
+    expect(box!.getAttribute('aria-checked')).toBe('false');
+    expect(cardText('[data-delete-local-repo="local:alpha"]').trim())
+      .toBe('Also delete its local repository local:alpha Loses 12 commits on branches main, team/alpha, last commit 2026-09-28.');
+    // Unticked, it is still said to be kept.
+    expect(document.body.querySelector('[data-local-repos-kept]')).not.toBeNull();
+  });
+
+  it('sends the ticked repository with the delete and no longer says it is kept', async () => {
+    listLocalRepos.mockResolvedValue([localRepo(['alpha'])]);
+    deleteTeam.mockResolvedValue({ containers: 1, failures: [], localRepositoriesDeleted: ['local:alpha'] });
+    await mountView([withRepos(['local:alpha'])]);
+    await click('Delete this team');
+
+    checkbox('local:alpha')!.click();
+    await flushPromises();
+    expect(checkbox('local:alpha')!.getAttribute('aria-checked')).toBe('true');
+    expect(document.body.querySelector('[data-local-repos-kept]')).toBeNull();
+
+    await click('Delete team');
+
+    expect(deleteTeam).toHaveBeenCalledWith('alpha', undefined, ['local:alpha']);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'positive',
+      message: expect.stringContaining('Deleted: local:alpha.'),
+    }));
+  });
+
+  it('sends no repository when the box is left unticked', async () => {
+    listLocalRepos.mockResolvedValue([localRepo(['alpha'])]);
+    deleteTeam.mockResolvedValue({ containers: 1, failures: [], localRepositoriesKept: ['local:alpha'] });
+    await mountView([withRepos(['local:alpha'])]);
+    await click('Delete this team');
+    await click('Delete team');
+
+    expect(deleteTeam).toHaveBeenCalledWith('alpha', undefined);
+  });
+
+  it('offers no box for a local repository another team uses, and names that team', async () => {
+    listLocalRepos.mockResolvedValue([localRepo(['alpha', 'beta'])]);
+    await mountView([withRepos(['local:alpha']), aTeam('beta')]);
+    await click('Delete this team');
+
+    expect(checkbox('local:alpha')).toBeNull();
+    expect(document.body.querySelector('[data-delete-local-repo]')).toBeNull();
+    expect(cardText('[data-local-repo-shared="local:alpha"]').trim()).toBe('local:alpha is kept: Beta uses it.');
+    expect(document.body.querySelector('[data-local-repos-kept]')).toBeNull();
+  });
+
+  it('never offers a box for a URL repository', async () => {
+    listLocalRepos.mockResolvedValue([localRepo([])]);
+    await mountView([withRepos(['https://github.com/o/app.git'])]);
+    await click('Delete this team');
+
+    expect(document.body.querySelector('[data-delete-local-repo]')).toBeNull();
+    expect(document.body.querySelector('.teams-confirm-card .q-checkbox')).toBeNull();
+    expect(listLocalRepos).not.toHaveBeenCalled();
+  });
+
+  it('names a ticked repository that could not be deleted, and why, once the team is gone', async () => {
+    listLocalRepos.mockResolvedValue([localRepo(['alpha'])]);
+    deleteTeam.mockResolvedValue({
+      containers: 1,
+      failures: [],
+      localRepositoriesKept: ['local:alpha'],
+      localRepositoryFailures: [{ reference: 'local:alpha', reason: "'alpha' could not be deleted: busy. Delete it from Admin → Repositories." }],
+    });
+    await mountView([withRepos(['local:alpha'])]);
+    await click('Delete this team');
+    checkbox('local:alpha')!.click();
+    await flushPromises();
+    await click('Delete team');
+
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'warning',
+      message: expect.stringContaining(
+        "local:alpha was not deleted: 'alpha' could not be deleted: busy. Delete it from Admin → Repositories."),
+    }));
+    expect(board.refreshForTeamDeleted).toHaveBeenCalledWith('alpha');
   });
 });
 

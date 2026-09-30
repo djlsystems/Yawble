@@ -1,3 +1,5 @@
+using System.IO.Enumeration;
+
 namespace Harness.Host;
 
 /// <summary>A file or folder in a team's docs area. Paths are relative to that area's root.</summary>
@@ -291,7 +293,7 @@ public sealed class TeamDocuments(TeamPaths paths)
 
         if (!Directory.Exists(target)) throw new FileNotFoundException("No such document.", target);
 
-        if (!recursive && Directory.EnumerateFileSystemEntries(target).Any())
+        if (!recursive && NotKnownEmpty(target))
         {
             throw new InvalidOperationException("That folder is not empty.");
         }
@@ -301,29 +303,53 @@ public sealed class TeamDocuments(TeamPaths paths)
             FilesUnder(target).Select(f => Relative(root, f)).ToList());
     }
 
-    /// <summary>Removes what <see cref="Plan"/> decided. Recursive only when the plan is a folder,
-    /// which a non-recursive plan admits only when it was empty.</summary>
-    public void Remove(DocumentsDeletion plan)
+    /// <summary>
+    /// Whether anything is still at <paramref name="absolute"/>, a link counted as itself. A path
+    /// that cannot be examined is counted as there: a delete is never reported done on a guess.
+    /// </summary>
+    public static bool StillThere(string absolute)
     {
-        if (!plan.IsFolder)
+        try
         {
-            File.Delete(plan.Absolute);
-            return;
+            return File.Exists(absolute) || Directory.Exists(absolute) || new FileInfo(absolute).LinkTarget is not null;
         }
-
-        Directory.Delete(plan.Absolute, recursive: true);
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
     }
 
-    /// <summary>Plans and removes in one step, for a caller with nothing to record between.</summary>
-    public DocumentsDeletion Delete(string team, string path, bool recursive = false)
-    {
-        var plan = Plan(team, path, recursive);
-        Remove(plan);
-        return plan;
-    }
-
+    /// <summary>
+    /// The files under <paramref name="folder"/>, marker aside. A folder the Host cannot list (an
+    /// agent's owner-only directory, a mode-000 one) is passed over, not thrown on: the delete
+    /// still reaches <see cref="FolderRemoval"/>, which names it as left and why. A link to a
+    /// folder is listed as itself and never walked into.
+    /// </summary>
     private static List<string> FilesUnder(string folder) =>
-        [.. Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Where(file => !IsMarker(file))];
+        [.. new FileSystemEnumerable<string>(
+                folder,
+                (ref FileSystemEntry entry) => entry.ToFullPath(),
+                new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 })
+            {
+                ShouldIncludePredicate = (ref FileSystemEntry entry) =>
+                    !entry.IsDirectory || entry.Attributes.HasFlag(FileAttributes.ReparsePoint),
+                ShouldRecursePredicate = (ref FileSystemEntry entry) =>
+                    !entry.Attributes.HasFlag(FileAttributes.ReparsePoint),
+            }
+            .Where(file => !IsMarker(file))];
+
+    /// <summary>Whether a folder has anything in it; one the Host cannot list counts as not empty.</summary>
+    private static bool NotKnownEmpty(string folder)
+    {
+        try
+        {
+            return Directory.EnumerateFileSystemEntries(folder).Any();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
 
     /// <summary>Whether a folder's marker is there and its first line names <paramref name="team"/>.
     /// A retired folder's marker still names the team it belonged to.</summary>

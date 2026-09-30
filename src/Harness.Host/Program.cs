@@ -302,6 +302,7 @@ builder.Services.AddSingleton(new KanbanStore(store));
 // stopping between the two would drop the work with no redelivery to fall back on and nothing to
 // say it had happened.
 builder.Services.AddSingleton<IPendingDeliveries>(new SqlitePendingDeliveries(database));
+builder.Services.AddSingleton<PendingDeliveriesAtStart>();
 
 // Order carries no schema obligation - SchemaMigrator above has already applied every step
 // and set journal_mode on the file. These are readers and writers over a database that exists.
@@ -952,6 +953,10 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
 // agent. A team names one as `local:<name>`; see LocalRepos.
 builder.Services.AddSingleton(sp => new LocalRepos(dataRoot, sp.GetRequiredService<GitRunner>()));
 
+// The one delete of a local repository: Admin -> Repositories' and a team deletion's.
+builder.Services.AddSingleton(sp => new LocalRepoDeletion(
+    sp.GetRequiredService<LocalRepos>(), sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<ITenantLog>()));
+
 // FORGIVING TEAM REPOSITORIES (B001F): a team's default local repository, and the `ls-remote` check
 // with its choices before a URL is used. The registry is resolved per call: it is built after this.
 builder.Services.AddSingleton<IRemoteRepoCheck>(sp => new RemoteRepoCheck(sp.GetRequiredService<GitRunner>()));
@@ -1041,7 +1046,16 @@ builder.Services.AddSingleton(sp => new TeamReset(
     sp.GetRequiredService<IPendingDeliveries>(),
     sp.GetRequiredService<IMessageLog>(),
     sp.GetRequiredService<TeamPaths>(),
-    sp.GetRequiredService<FolderRemoval>()));
+    sp.GetRequiredService<FolderRemoval>(),
+    sp.GetRequiredService<RepositoryReset>()));
+
+// Reset repositories: trees through the one WorktreeRemoval, git through the one GitRunner (as the
+// agent, and into a local origin as the Host), kept branches named on the log.
+builder.Services.AddSingleton(sp => new RepositoryReset(
+    sp.GetRequiredService<GitRunner>(),
+    sp.GetRequiredService<WorktreeRemoval>(),
+    sp.GetRequiredService<TeamPaths>(),
+    sp.GetRequiredService<IMessageLog>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a deletion would silently
 // skip if it were optional, and a MemberDeletion missing its pending-delivery store leaves rows the
@@ -1699,6 +1713,9 @@ if (firehoseHolders.Count > 0)
 // nothing to hand work to before that. Says so when it did anything: work resumed silently is work
 // nobody knows was ever at risk, and an interrupted run is reported as a failure somebody has to
 // read to understand why their instruction came back unfinished.
+// FIRST, what deleted teams left queued: removed and logged, a live team's never touched.
+await app.Services.GetRequiredService<PendingDeliveriesAtStart>().SweepAsync();
+
 var resumed = await app.Services.GetRequiredService<ContainerHost>().ResumePendingAsync();
 
 // BOTH numbers, and a line whenever either is non-zero. An interrupted run is reported to the log
@@ -2787,7 +2804,12 @@ app.MapDelete("/api/teams/{team}", async (
         "Exact confirmation string required only when deletion would discard commits that are on "
         + "no remote.")]
     string? confirm,
-    TeamDeletion deletion, TenantLogging audit, TeamRegistry teams, TeamListPush listPush,
+    [Description(
+        "A `local:<name>` repository of this team's to delete after the team, repeated for each one "
+        + "the person ticked. Only a local repository the team uses; a URL is refused with 400.")]
+    string[]? deleteLocalRepository,
+    TeamDeletion deletion, LocalRepoDeletion localRepoDeletion, TenantLogging audit, TeamRegistry teams,
+    TeamListPush listPush,
     HttpContext context,
     CancellationToken ct) =>
 {
@@ -2804,9 +2826,26 @@ app.MapDelete("/api/teams/{team}", async (
     // KEPT, NEVER DELETED WITH THE TEAM (B001F): its local repositories live under
     // `<dataRoot>/repos`, outside the team's root, and show as unused in Admin -> Repositories,
     // where a person may delete them. Read before the deletion, which forgets the list.
-    var localRepositoriesKept = teams.ExistingName(team) is { } named
-        ? teams.ReposFor(named).Where(LocalRepos.IsLocal).ToArray()
+    var localRepositories = teams.ExistingName(team) is { } named
+        ? teams.ReposFor(named).Where(LocalRepos.IsLocal).Select(r => r.Trim()).ToArray()
         : [];
+
+    // DELETED WITH THE TEAM ONLY WHEN TICKED: each a `local:<name>` this team uses. Anything
+    // else - a URL, another team's repository - is refused before a single thing is deleted.
+    var ticked = new List<string>();
+    foreach (var asked in deleteLocalRepository ?? [])
+    {
+        if (localRepositories.FirstOrDefault(r => string.Equals(r, asked?.Trim(), StringComparison.Ordinal)) is not { } own)
+        {
+            return Results.BadRequest(new
+            {
+                error = $"'{asked}' is not a local repository this team uses, so nothing was deleted. Only a "
+                    + "team's own local:<name> repositories can be deleted with it.",
+            });
+        }
+
+        if (!ticked.Contains(own, StringComparer.Ordinal)) ticked.Add(own);
+    }
 
     TeamDeleted? removed;
     try
@@ -2825,6 +2864,32 @@ app.MapDelete("/api/teams/{team}", async (
 
     if (removed is null) return Results.NotFound(new { error = $"No team '{team}'." });
 
+    // AFTER THE TEAM, and through the one delete Admin -> Repositories uses: its own
+    // `local-repo.deleted` row first, the same refusal while another team uses it. One that fails
+    // leaves the team deleted - never the reverse - and is named with its reason and kept.
+    var localRepositoriesDeleted = new List<string>();
+    var localRepositoriesKept = new List<string>();
+    var localRepositoryFailures = new List<LocalRepositoryNotDeleted>();
+    foreach (var reference in localRepositories)
+    {
+        if (!ticked.Contains(reference, StringComparer.Ordinal))
+        {
+            localRepositoriesKept.Add(reference);
+            continue;
+        }
+
+        var result = await localRepoDeletion.DeleteAsync(LocalRepos.NameOf(reference), context.User, ct);
+        if (result.Deleted)
+        {
+            localRepositoriesDeleted.Add(reference);
+            continue;
+        }
+
+        if (result.Outcome != LocalRepoDeleteOutcome.NotFound) localRepositoriesKept.Add(reference);
+        localRepositoryFailures.Add(new LocalRepositoryNotDeleted(
+            reference, $"{result.Error} Delete it from Admin → Repositories."));
+    }
+
     // Exactly what went, because this is the one act in the system with nothing to inspect
     // afterwards. Written AFTER the delete: recording an intention that then failed would be worse
     // than recording nothing.
@@ -2842,7 +2907,14 @@ app.MapDelete("/api/teams/{team}", async (
 
             // Every path still on disk, one by one: the root keeps its marker and is retried.
             remaining = removed.Remaining,
+            localRepositoriesDeleted,
             localRepositoriesKept,
+            localRepositoryFailures = localRepositoryFailures
+                .Select(f => new { reference = f.Reference, reason = f.Reason }).ToArray(),
+
+            // The agent CLIs' session folders for its workspaces, and any still there.
+            sessionFolders = removed.SessionFolders,
+            sessionFoldersRemaining = removed.SessionFoldersRemaining,
         },
         ct);
 
@@ -2851,7 +2923,12 @@ app.MapDelete("/api/teams/{team}", async (
     // 200 with a body rather than 204. A deletion that could not remove a directory is still a
     // deletion - the team is gone from every list - and a caller that is told only "no content"
     // cannot say which files are still on disk.
-    return Results.Ok(removed with { LocalRepositoriesKept = localRepositoriesKept });
+    return Results.Ok(removed with
+    {
+        LocalRepositoriesKept = localRepositoriesKept,
+        LocalRepositoriesDeleted = localRepositoriesDeleted,
+        LocalRepositoryFailures = localRepositoryFailures,
+    });
 })
     .WithTags("Teams")
     .HumansOnly()
@@ -2869,8 +2946,17 @@ app.MapDelete("/api/teams/{team}", async (
         + "record of how that work was checked. They stay readable - by any person, once the "
         + "team that shared them is gone - through `GET /api/documents` and the documents routes "
         + "under this team's name.\n\n"
-        + "**ITS LOCAL REPOSITORIES ARE KEPT** (`localRepositoriesKept`, the `local:<name>` references it "
-        + "had): they are listed as unused in `GET /api/local-repos`, where a person may delete them.\n\n"
+        + "**ITS LOCAL REPOSITORIES ARE KEPT** unless named in `deleteLocalRepository` (`localRepositoriesKept`, "
+        + "the `local:<name>` references it had and still has on disk): they are listed as unused in "
+        + "`GET /api/local-repos`, where a person may delete them. One named in `deleteLocalRepository` is "
+        + "deleted AFTER the team through the same delete `DELETE /api/local-repos/{name}` does - its "
+        + "`local-repo.deleted` row first, refused while another team uses it - and listed in "
+        + "`localRepositoriesDeleted`; one that could not be deleted is kept and named with its reason in "
+        + "`localRepositoryFailures`, and the team is deleted either way.\n\n"
+        + "**The agent CLIs' session folders** keyed to the team's own workspaces are removed from the shared "
+        + "agent home (Claude's `~/.claude/projects/<workspace, dashed>` and `~/.cache/claude-cli-nodejs/...`, "
+        + "each built-in preset's `sessionFolders`), counted in `sessionFolders`; any path left is in "
+        + "`sessionFoldersRemaining` and `failures`. Nothing else in the home, and nothing of a live team's.\n\n"
         + "**The message log is not touched.** It is append-only, and a team's messages are the "
         + "history of what happened rather than a property of the team; deleting them would take "
         + "other teams' causally-linked messages with them.\n\n"
@@ -2891,19 +2977,15 @@ app.MapDelete("/api/teams/{team}", async (
 // Handing a team a clean slate WITHOUT deleting it: keep the Agent Containers, reset the substrate
 // underneath them.
 //
-// GATED STRUCTURALLY, and that is the whole permission model. It declares {team}, which is the same
-// declaration that lets its handler read a team at all, so TeamGate covers it - and "anyone who
-// works in this team may reset it" needs no tier and no filter.
-//
-// Deliberately NOT HumansOnly, which is what DELETING a team is. That destroys every member's
-// configuration; this destroys none of it.
+// It declares {team}, so TeamGate covers it, and it is HumansOnly (see below): a member able to
+// reset its own team could erase its own evidence, and Reset repositories removes code.
 //
 // The ORDER the work happens in is TeamReset's, and its doc comment is where the reasoning lives.
 // This route's job is authority, the two refusals, and reporting what actually happened.
 app.MapPost("/api/teams/{team}/reset", async (
     [Description(Describe.Team)] string team,
     TeamResetOptions options,
-    TeamReset reset, TenantLogging audit, TeamRegistry teams, HttpContext context,
+    TeamReset reset, TenantLogging audit, ITenantLog tenantLog, TeamRegistry teams, HttpContext context,
     CancellationToken ct) =>
 {
     // The LABEL, read before the reset - an audit row naming an identifier a person has never seen
@@ -2914,7 +2996,22 @@ app.MapPost("/api/teams/{team}/reset", async (
 
     try
     {
-        done = await reset.ResetAsync(team, options, ct);
+        // RESET REPOSITORIES' ROW COMES FIRST, and is not swallowed: a tree or branch removed with
+        // no record of who asked is the one outcome refused, so a row that cannot be written stops
+        // the whole reset before anything moves. It names what may go; the team.reset row after
+        // names what went and what was kept.
+        done = await reset.ResetAsync(team, options, ct, (plan, token) => tenantLog.WriteAsync(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+            context.User.FindFirstValue(ClaimTypes.Email),
+            TenantActions.TeamResetRepositories, teams.ExistingName(team) ?? team, label,
+            JsonSerializer.Serialize(new
+            {
+                members = options.Members,
+                worktrees = plan.Worktrees,
+                branches = plan.Branches,
+                teamBranch = plan.TeamBranch,
+            }, JsonSerializerOptions.Web),
+            token));
     }
     catch (TeamBusyException busy)
     {
@@ -2923,6 +3020,19 @@ app.MapPost("/api/teams/{team}/reset", async (
         // idle half - a team where some members remember the last task and others do not is a worse
         // state than either.
         return Results.Conflict(new { error = busy.Message, busy = busy.Busy });
+    }
+    catch (ResetDefaultBranchNotKnownException unknown)
+    {
+        // The team branch is reset to the STORED default branch or not at all, and the existing
+        // sentence says which. Nothing else changes: the refusal comes before anything moves.
+        await audit.WriteAsync(
+            context, TenantActions.TeamResetRepositories, teams.ExistingName(team) ?? team, label,
+            new { refused = true, reason = unknown.Message }, ct);
+        return Results.Conflict(new { error = unknown.Message, repo = unknown.Repo });
+    }
+    catch (ResetNotRecordedException unrecorded)
+    {
+        return Results.Json(new { error = unrecorded.Message }, statusCode: StatusCodes.Status500InternalServerError);
     }
 
     if (done is null) return Results.NotFound(new { error = $"No team '{team}'." });
@@ -2944,6 +3054,11 @@ app.MapPost("/api/teams/{team}/reset", async (
             cleared = done.Cleared,
             failures = done.Failures,
             remaining = done.Remaining,
+
+            // Each tree and branch removed, and each kept with its reason. Absent when not asked.
+            repositories = done.Repositories is null
+                ? (JsonElement?)null
+                : JsonSerializer.SerializeToElement(done.Repositories, JsonSerializerOptions.Web),
         },
         ct);
 
@@ -2978,10 +3093,33 @@ app.MapPost("/api/teams/{team}/reset", async (
         + "which is not a member and is never targeted.\n\n"
         + "409 when any named member is running or holds accepted work: the whole reset is refused, "
         + "never the idle half.\n\n"
+        + "`resetRepositories` removes each named member's worktrees (never forced) and its merged or "
+        + "empty branches, and with EVERY member named resets `team/<id>` to the stored default "
+        + "branch; `repositories` in the answer names each tree and branch removed and each kept, "
+        + "with the reason. Its `team.reset-repositories` tenant row is written before anything "
+        + "moves: 500 and nothing reset when it cannot be. 409 with the existing sentence, and "
+        + "nothing reset, when every member is named and a repository's default branch is not known.\n\n"
         + "404 for an unknown team. A member the team does not hold is skipped rather than "
         + "refused.\n\n"
-        + "**Anyone with access to the team.** Deleting a team is a person's action; this is not, "
-        + "because it destroys none of what a deletion does.");
+        + "**A person's action.**");
+
+// WHAT RESET REPOSITORIES WOULD REMOVE, read before the person confirms: the dialog lists the
+// ticked members' trees and branches, and the team branch when every member is ticked. HumansOnly
+// for the reason the reset itself is.
+app.MapGet("/api/teams/{team}/reset/repositories", async (
+    [Description(Describe.Team)] string team,
+    TeamReset reset, CancellationToken ct) =>
+    await reset.PreviewRepositoriesAsync(team, ct) is { } preview
+        ? Results.Ok(preview)
+        : Results.NotFound(new { error = $"No team '{team}'." }))
+    .WithTags("Teams")
+    .HumansOnly()
+    .WithSummary("List what Reset repositories would remove")
+    .WithDescription(
+        "Every member's worktrees and local branches in every team repository, each with its "
+        + "member, and the team branch `team/<id>` that is reset when every member is ticked. "
+        + "`defaultBranchNotKnown` names each repository whose default branch is not known, for "
+        + "which that reset is refused. Reads only; changes nothing. 404 for an unknown team.");
 
 app.MapPost("/api/teams/{team}/pause", async (
     [Description(Describe.Team)] string team,
@@ -5438,7 +5576,7 @@ documents.MapDelete("", async (
         "Delete a folder and everything in it. Without it a folder that still has something in it "
         + "is refused with 409.")]
     bool? recursive,
-    TeamRegistry teams, TeamDocuments docs, FolderWatch folders, ITenantLog tenantLog,
+    TeamRegistry teams, TeamDocuments docs, FolderWatch folders, FolderRemoval removal, ITenantLog tenantLog,
     HttpContext context, CancellationToken ct) =>
 {
     // RESOLVED LIKE THE READ ROUTES: a gone team's folder and a retired one can be cleared
@@ -5484,22 +5622,73 @@ documents.MapDelete("", async (
                 statusCode: StatusCodes.Status500InternalServerError);
         }
 
-        docs.Remove(plan);
+        // THROUGH FolderRemoval, never a recursive delete: an agent's owner-only folder is removed
+        // as the agent where the Host switches users, links are never followed, and what cannot go
+        // is named with why instead of escaping as an unhandled exception after the row above.
+        var root = docs.RootFor(stored);
+        var report = await removal.RemoveDocumentsAsync(root, plan.Absolute, TeamPaths.TeamOfDocumentsFolder(stored), ct);
+        var removed = plan.Files.Where(file => !TeamDocuments.StillThere(Path.Combine(root, file))).ToList();
 
-        // Announced after the delete succeeded, ONE ANNOUNCEMENT PER FOLDER a removed file
-        // was in, exactly as a single-file delete is announced. A gone team has no triggers.
+        // Announced after the delete, ONE ANNOUNCEMENT PER FOLDER a removed file was in, exactly
+        // as a single-file delete is announced - and only the files that went. A gone team has no
+        // triggers.
         if (live)
         {
             var actor = context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown";
 
-            foreach (var group in plan.Files.GroupBy(
+            foreach (var group in removed.GroupBy(
                 file => Path.GetDirectoryName(file)?.Replace('\\', '/') ?? "", StringComparer.Ordinal))
             {
                 await folders.AnnounceAsync(stored, group.Key, [.. group], actor, ct);
             }
         }
 
-        return Results.NoContent();
+        if (report.Complete) return Results.NoContent();
+
+        // WHAT WAS LEFT, AND WHY, as a row after the `documents.deleted` above - so the log never
+        // claims a deletion that did not happen - and as the answer's sentence.
+        var left = report.Refused is { } refused
+            ? [new DocumentLeft(plan.Path.Length == 0 ? "" : plan.Path, refused)]
+            : report.Remaining
+                .Select(path => new DocumentLeft(
+                    docs.Relative(root, path) is var relative && relative == "." ? "" : relative,
+                    report.Reasons?.GetValueOrDefault(path) ?? "still there after the delete"))
+                .ToList();
+        var nothing = removed.Count == 0 && TeamDocuments.StillThere(plan.Absolute);
+        var sentence =
+            (nothing
+                ? "Nothing was removed. "
+                : $"The delete did not finish: {removed.Count} of {plan.Files.Count} file(s) were removed. ")
+            + "Still there: "
+            + string.Join("; ", left.Select(l => $"{(l.Path.Length == 0 ? $"the folder {stored}" : l.Path)} ({l.Reason})"))
+            + ". Delete it again once that is fixed.";
+
+        try
+        {
+            await tenantLog.WriteAsync(
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+                context.User.FindFirstValue(ClaimTypes.Email),
+                TenantActions.DocumentsDeleteIncomplete,
+                stored,
+                plan.Path.Length == 0 ? stored : plan.Path,
+                JsonSerializer.Serialize(new
+                {
+                    folder = stored,
+                    path = plan.Path,
+                    files = plan.Files.Count,
+                    removed = removed.Count,
+                    remaining = left.Select(l => new { path = l.Path, reason = l.Reason }),
+                }),
+                ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            sentence += " The record of what was left could not be written.";
+        }
+
+        return Results.Json(
+            new { error = sentence, removed = removed.Count, remaining = left },
+            statusCode: StatusCodes.Status409Conflict);
     });
 })
     .HumansOnly()
@@ -5507,6 +5696,11 @@ documents.MapDelete("", async (
     .WithDescription(
         "204 on success. A folder that still has something in it is refused with 409 unless "
         + "`recursive=true` - the one refusal here a person is expected to meet and act on.\n\n"
+        + "A delete the Host cannot complete answers 409 with a sentence in `error` naming each path "
+        + "left and why (permission denied, in use), `remaining` listing them and `removed` counting "
+        + "the files that went; one that removed nothing says so. It is followed by a "
+        + "`documents.delete-incomplete` tenant event naming the paths left, and deleting again once "
+        + "they are removable finishes it.\n\n"
         + "Works for a team that no longer exists and for a retired folder, as the read routes do. "
         + "For those, and only those, omitting `path` deletes the whole documents folder, and only "
         + "when its marker says the platform created it. A live team's documents folder itself "
@@ -8598,3 +8792,6 @@ internal sealed class PumpService(
         }
     }
 }
+
+/// <summary>A path a documents delete left, relative to the documents folder, and why.</summary>
+internal sealed record DocumentLeft(string Path, string Reason);

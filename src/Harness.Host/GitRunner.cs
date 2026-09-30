@@ -399,6 +399,48 @@ public sealed class GitRunner
     }
 
     /// <summary>
+    /// Deletes origin's <paramref name="branch"/> ONLY WHILE IT STILL POINTS AT
+    /// <paramref name="expected"/>, the sha the caller compared:
+    /// <c>git push --force-with-lease=refs/heads/&lt;branch&gt;:&lt;expected&gt; origin :refs/heads/&lt;branch&gt;</c>,
+    /// or for a local origin <c>update-ref -d</c> in the bare repository against that sha, as the
+    /// Host. A push that landed after the caller read <paramref name="expected"/> refuses the delete
+    /// (<c>stale info</c>), so it is never lost.
+    /// </summary>
+    public async Task<GitInvocation> DeleteOriginBranchIfAtAsync(
+        string clonePath, string branch, string expected, CancellationToken ct = default)
+    {
+        using var semaphore = await AcquireSemaphoreAsync(clonePath);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
+
+        if (!BranchNames.IsValid(branch))
+        {
+            return new GitInvocation(1, string.Empty, $"error: '{branch}' is not a branch.");
+        }
+
+        var target = $"refs/heads/{branch}";
+
+        if (_localOriginFor?.Invoke(clonePath) is { } bare)
+        {
+            using var bareLock = await AcquireSemaphoreAsync(bare);
+
+            var deleted = await ExecuteGitAsync(bare, ["update-ref", "-d", target, expected], cts.Token, asHost: true);
+            if (deleted.ExitCode != 0)
+            {
+                return new GitInvocation(
+                    1, deleted.Stdout,
+                    $"! [rejected] {branch} (stale info): it no longer points at {expected}\n{deleted.Stderr}");
+            }
+
+            await ExecuteGitAsync(clonePath, ["update-ref", "-d", $"refs/remotes/{ContributorRemotes.Origin}/{branch}"], cts.Token);
+            return new GitInvocation(0, string.Empty, $"To {bare}\n - [deleted]         {branch}\n");
+        }
+
+        return await ExecuteGitAsync(
+            clonePath, ["push", $"--force-with-lease={target}:{expected}", "origin", $":{target}"], cts.Token);
+    }
+
+    /// <summary>
     /// A PUSH TO A LOCAL ORIGIN, made by the Host from the bare repository's side.
     ///
     /// <para>
@@ -532,6 +574,29 @@ public sealed class GitRunner
             parts[0], parts[2],
             DateTimeOffset.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var at) ? at : null);
+    }
+
+    /// <summary>
+    /// A local repository's branches, by short name, and how many commits its branches hold
+    /// together - what deleting it would lose, as a team's delete dialog says it. Empty and
+    /// null when git cannot read them.
+    /// </summary>
+    public async Task<(IReadOnlyList<string> Branches, int? CommitCount)> ReadLocalRepositoryContentsAsync(
+        string path, CancellationToken ct = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
+
+        var refs = await ExecuteGitAsync(
+            path, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"], cts.Token, asHost: true);
+        IReadOnlyList<string> branches = refs.ExitCode != 0
+            ? []
+            : refs.Stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (branches.Count == 0) return (branches, refs.ExitCode == 0 ? 0 : null);
+
+        var count = await ExecuteGitAsync(path, ["rev-list", "--count", "--branches"], cts.Token, asHost: true);
+        return (branches, count.ExitCode == 0 && int.TryParse(count.Stdout.Trim(), out var n) ? n : null);
     }
 
     private const string EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";

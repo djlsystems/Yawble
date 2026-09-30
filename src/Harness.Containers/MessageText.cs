@@ -295,6 +295,13 @@ public static class MessageText
                 + $"({Field(payload, PayloadFields.Repo) ?? "(unknown repo)"}). "
                 + (FailurePayloadText.FirstNonEmpty(payload, PayloadFields.Reason) ?? "(no detail)"),
 
+            // NEVER FORCED, SO SAID, as a tree left is.
+            MessageTypes.RepoBranchKept =>
+                $"The platform kept {who}'s branch rather than delete it: "
+                + $"{Field(payload, PayloadFields.Branch) ?? "(no branch)"} "
+                + $"({Field(payload, PayloadFields.Repo) ?? "(unknown repo)"}). "
+                + (FailurePayloadText.FirstNonEmpty(payload, PayloadFields.Reason) ?? "(no detail)"),
+
             // A person opened a pull request upstream from the Git dialog.
             MessageTypes.RepoPullRequestOpened =>
                 $"A pull request was opened upstream for {Field(payload, PayloadFields.Branch) ?? "(unknown branch)"} "

@@ -1,4 +1,4 @@
-import type { TeamResetRequest } from '../api/types'
+import type { RepoResetItem, RepositoryResetPreview, TeamResetRequest } from '../api/types'
 
 /**
  * What the Reset dialog is currently showing, as data.
@@ -27,6 +27,10 @@ export interface ResetChoices {
   clearWorkspaces: boolean
   clearSharedDocuments: boolean
 
+  /** Reset repositories: the ticked members' worktrees and branches, and with every member ticked
+   *  the team branch. Team-wide, off by default: it is the one box here that touches code. */
+  resetRepositories: boolean
+
   // THERE IS NO `resetConcierge`, AND ITS ABSENCE IS THE ENFORCEMENT. A Concierge is keyed on the
   // person, so a team reset ends none and cannot - and with the field gone from this record, a
   // dialog that reintroduces the box is a TYPECHECK FAILURE rather than a control that quietly
@@ -42,6 +46,7 @@ export function choicesFor(names: string[]): ResetChoices {
     deleteMemory: true,
     clearWorkspaces: false,
     clearSharedDocuments: false,
+    resetRepositories: false,
   }
 }
 
@@ -78,6 +83,7 @@ export function requestFrom(choices: ResetChoices): TeamResetRequest {
 
   if (choices.clearWorkspaces) request.clearWorkspaces = true
   if (choices.clearSharedDocuments) request.clearSharedDocuments = true
+  if (choices.resetRepositories) request.resetRepositories = true
   return request
 }
 
@@ -91,7 +97,36 @@ export function requestFrom(choices: ResetChoices): TeamResetRequest {
  */
 export function wouldDoSomething(choices: ResetChoices): boolean {
   const chosen = Object.values(choices.members).some(Boolean)
-  const perMember = chosen && (choices.deleteMemory || choices.clearWorkspaces)
+  const perMember = chosen && (choices.deleteMemory || choices.clearWorkspaces || choices.resetRepositories)
 
   return perMember || choices.clearSharedDocuments
+}
+
+/** What Reset repositories would remove for these choices, as the dialog lists it. */
+export interface RepositoryLosses {
+  worktrees: RepoResetItem[]
+  branches: RepoResetItem[]
+
+  /** `team/<id>`, only when EVERY member is ticked; null otherwise. */
+  teamBranch: string | null
+
+  /** Repositories whose default branch is not known: with every member ticked the reset is refused. */
+  refusedFor: string[]
+}
+
+/**
+ * The ticked members' lines of `preview`, and the team branch when every member is ticked - the
+ * server's own rule (`RepositoryReset`), repeated here only to SHOW it, never to decide it.
+ */
+export function repositoryLosses(preview: RepositoryResetPreview, choices: ResetChoices): RepositoryLosses {
+  const ticked = new Set(Object.entries(choices.members).filter(([, on]) => on).map(([name]) => name))
+  const everyone = ticked.size > 0 && Object.values(choices.members).every(Boolean)
+  const mine = (item: RepoResetItem) => item.member != null && ticked.has(item.member)
+
+  return {
+    worktrees: preview.worktrees.filter(mine),
+    branches: preview.branches.filter(mine),
+    teamBranch: everyone ? preview.teamBranch : null,
+    refusedFor: everyone ? preview.defaultBranchNotKnown : [],
+  }
 }

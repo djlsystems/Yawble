@@ -72,6 +72,7 @@ import type {
   TeamRollup,
   TeamTokenTotals,
   TeamWasReset,
+  RepositoryResetPreview,
   TeamWorkflowTiming,
   TeamWorkflows,
   TenantApiKey,
@@ -1005,8 +1006,13 @@ export const readVersion = () => json<BuildInfo>('/api/version')
  * so a caller can report a directory that could NOT be deleted. A deletion with failures is still a
  * deletion — the team is gone — so this resolves rather than throwing, and the caller shows them.
  */
-export const deleteTeam = async (team: TeamId, confirmation?: string) => {
-  const suffix = confirmation ? `?confirm=${encodeURIComponent(confirmation)}` : ''
+export const deleteTeam = async (team: TeamId, confirmation?: string, deleteLocalRepositories?: string[]) => {
+  // Each ticked `local:<name>` is deleted after the team, through Admin -> Repositories' own delete.
+  const query = [
+    ...(confirmation ? [`confirm=${encodeURIComponent(confirmation)}`] : []),
+    ...(deleteLocalRepositories ?? []).map((reference) => `deleteLocalRepository=${encodeURIComponent(reference)}`),
+  ]
+  const suffix = query.length > 0 ? `?${query.join('&')}` : ''
   const response = await fetch(`/api/teams/${encodeURIComponent(team)}${suffix}`, { method: 'DELETE' })
 
   if (!response.ok) {
@@ -1074,6 +1080,13 @@ export const resetTeam = (team: TeamId, body: TeamResetRequest) =>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
+
+/**
+ * What Reset repositories would remove for every member of the team, read when the person ticks
+ * the box - never on open, so a reset that does not touch repositories asks git nothing.
+ */
+export const previewResetRepositories = (team: TeamId) =>
+  json<RepositoryResetPreview>(`/api/teams/${encodeURIComponent(team)}/reset/repositories`)
 
 /** Every trigger currently stored for this team, oldest first. */
 export const listSchedules = (team: TeamId) =>

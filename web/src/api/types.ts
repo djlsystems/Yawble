@@ -345,6 +345,21 @@ export interface TeamDeleted {
 
   /** The `local:<name>` repositories the team had, which were KEPT; delete them in Admin -> Repositories. */
   localRepositoriesKept?: string[]
+
+  /** The `local:<name>` repositories the person ticked, deleted after the team. */
+  localRepositoriesDeleted?: string[]
+
+  /**
+   * A ticked local repository that could not be deleted, and why. The team is deleted either way;
+   * the repository is also in `localRepositoriesKept`, and is finished in Admin -> Repositories.
+   */
+  localRepositoryFailures?: { reference: string; reason: string }[]
+
+  /** How many agent CLI session folders keyed to the team's workspaces were removed. */
+  sessionFolders?: number
+
+  /** Every path of those session folders still on disk; each is also in `failures`. */
+  sessionFoldersRemaining?: string[]
 }
 
 /**
@@ -415,6 +430,41 @@ export interface TeamResetRequest {
   clearWorkspaces?: boolean
   clearTranscripts?: boolean
   clearSharedDocuments?: boolean
+  /** Remove the named members' worktrees and merged or empty branches, and with EVERY member
+   *  named reset `team/<id>` to the stored default branch. Never forced; what would lose work is
+   *  kept and named in `repositories`. */
+  resetRepositories?: boolean
+}
+
+/** A worktree (its path) or a branch (its name) a repository reset names, with its member (null for
+ *  the team branch) and why it was kept or what was done to it. */
+export interface RepoResetItem {
+  repo: string
+  name: string
+  member?: string | null
+  reason?: string | null
+}
+
+/** What Reset repositories did: each tree and branch removed, each kept with the reason. */
+export interface RepositoriesReset {
+  worktreesRemoved: RepoResetItem[]
+  worktreesKept: RepoResetItem[]
+  branchesDeleted: RepoResetItem[]
+  branchesKept: RepoResetItem[]
+  teamBranchReset: RepoResetItem[]
+  teamBranchKept: RepoResetItem[]
+}
+
+/**
+ * What Reset repositories would remove, for EVERY member of the team (`GET .../reset/repositories`).
+ * The dialog shows the ticked members' lines, and `teamBranch` when every member is ticked.
+ * `defaultBranchNotKnown` names each repository for which that team-branch reset is refused.
+ */
+export interface RepositoryResetPreview {
+  worktrees: RepoResetItem[]
+  branches: RepoResetItem[]
+  teamBranch: string
+  defaultBranchNotKnown: string[]
 }
 
 /**
@@ -436,6 +486,9 @@ export interface TeamWasReset {
 
   /** Every path a clear could not remove. Recorded and retried; a retry removes only these. */
   remaining?: string[]
+
+  /** What Reset repositories removed and kept; absent or null when it was not asked. */
+  repositories?: RepositoriesReset | null
 }
 
 /** What an unfinished removal was removing: a deleted team's root, a deleted member's workspace,
@@ -2728,6 +2781,10 @@ export interface LocalRepo {
    * deleted, so this is how one left behind is found and deleted. Optional only for an older Host.
    */
   unused?: boolean
+  /** Its branches, by short name: what deleting it loses. Optional only for an older Host. */
+  branches?: string[]
+  /** How many commits its branches hold together; null when the Host could not count them. */
+  commitCount?: number | null
 }
 
 /**

@@ -53,6 +53,12 @@ public static class TenantActions
     /// </summary>
     public const string TeamReset = "team.reset";
 
+    /// <summary>A person asked a reset to reset the team's repositories. Written BEFORE anything
+    /// moves, naming every tree and branch it may remove and whether the team branch is reset; when
+    /// it cannot be written nothing is reset. What was removed and kept is on the
+    /// <see cref="TeamReset"/> row after it.</summary>
+    public const string TeamResetRepositories = "team.reset-repositories";
+
     /// <summary>
     /// A team was created carrying another team's configuration. Its own verb rather than a
     /// <c>team.created</c> with a detail field, because the question an audit asks is "where did
@@ -169,6 +175,10 @@ public static class TenantActions
     /// <summary>A person deleted a document, a folder, or a gone team's whole documents folder
     /// Written BEFORE the delete, which does not happen when this row cannot be.</summary>
     public const string DocumentsDeleted = "documents.deleted";
+
+    /// <summary>A documents delete that left something: written after it, naming each path left
+    /// and why, so the log never claims a deletion that did not happen.</summary>
+    public const string DocumentsDeleteIncomplete = "documents.delete-incomplete";
 
     /// <summary>A person uploaded a document into a team's documents. Detail carries the team, the
     /// path and the size - never the file's contents.</summary>
