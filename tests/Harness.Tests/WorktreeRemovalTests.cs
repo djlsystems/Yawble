@@ -282,7 +282,15 @@ public sealed class WorktreeRemovalTests : IAsyncDisposable
         if (push)
         {
             var pushed = Git(tree, "push", "origin", branch);
-            Assert.True(pushed.ExitCode == 0, $"git push {branch}: exit {pushed.ExitCode}: {pushed.Output}");
+
+            // THE HOST MAY PUSH IT FIRST. Its publisher pushes a member's branch when a run of the
+            // member ends, and on a loaded machine that can land between this commit and this push,
+            // which git then refuses as "reference already exists". Origin holding this very commit
+            // is what the step wants either way.
+            var onOrigin = Git(tree, "ls-remote", "origin", $"refs/heads/{branch}").Output.Split('\t')[0].Trim();
+            var head = Git(tree, "rev-parse", "HEAD").Output.Trim();
+            Assert.True(pushed.ExitCode == 0 || onOrigin == head,
+                $"git push {branch}: exit {pushed.ExitCode}: {pushed.Output}");
         }
 
         return tree;
