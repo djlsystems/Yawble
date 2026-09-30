@@ -220,9 +220,16 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // THE REDACTED PAYLOAD, NOT THE ONE HANDED IN. This is what the row holds and what every
         // later reader gets, and `_waits.Publish` hands it straight to a live subscriber - returning
         // the original here would put the credential back into the one delivery that skips the read.
-        return new Message(
+        var stored = new Message(
             seq, message.Type, payload, message.Source,
             correlation, message.CausationSeq, depth, occurredAt);
+
+        // THE ACCOUNTING, IN THIS SAME TRANSACTION. A run's terminal row and a workflow's completion
+        // or close write their ledger row here, the one place every row is appended, so no caller
+        // can skip it; when it cannot be written this throws and the row is not stored either.
+        await LedgerRows.WriteAsync(connection, transaction, stored, backfilled: false, ct);
+
+        return stored;
     }
 
     public async Task<IReadOnlyList<Message>> ReadAfterAsync(
@@ -573,7 +580,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                      AND json_extract(payload, '$.tokensOut') IS NOT NULL
                      AND COALESCE(json_extract(payload, '$.tokensSource'), '') <> $excluded
                     THEN CAST(json_extract(payload, '$.tokensCacheCreation') AS INTEGER) END), 0),
-                {BillableSum}
+                {LogSpend.BillableSum}
             FROM messages
             WHERE type IN ($completed, $failed)
               AND json_extract(payload, '$.usageCountedOn') IS NULL
@@ -1828,26 +1835,23 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         SpendAsync(correlationId, sinceLastNudge: false, ct);
 
     /// <summary>
-    /// Billable tokens summed over completed/failed rows, weighted per row exactly as
-    /// <see cref="InvocationUsage.BillableTokens"/> weights one run: cache read / 10, cache write
-    /// * 5 / 4, a combined total as reported. <see cref="UsageSource.ExcludedEstimate"/> rows are
-    /// excluded. Binds <c>$excluded</c>.
-    /// Shared by the workflow spend and the team Tokens tile so the two cannot drift.
+    /// Billable tokens, measured runs and unmeasured runs over <c>usage_ledger</c> rows: the three
+    /// columns every spend read answers. <c>billable</c> is NULL for an unmeasured run, so SUM adds
+    /// nothing for it, and it is counted as unmeasured instead - never a zero. Shared by the workflow
+    /// spend and the trigger spend so the two cannot drift. The weights are the ledger writer's
+    /// (<see cref="LedgerRows.Usage"/>), held to the log's by <c>LedgerParityTests</c>.
     /// </summary>
-    private const string BillableSum =
+    private const string LedgerSpend =
         """
-        COALESCE(SUM(CASE
-            WHEN COALESCE(json_extract(payload, '$.tokensSource'), '') <> $excluded
-             AND (json_extract(payload, '$.tokensIn') IS NOT NULL
-               OR json_extract(payload, '$.tokensTotal') IS NOT NULL)
-            THEN IFNULL(CAST(json_extract(payload, '$.tokensIn') AS INTEGER), 0)
-               + IFNULL(CAST(json_extract(payload, '$.tokensOut') AS INTEGER), 0)
-               + IFNULL(CAST(json_extract(payload, '$.tokensTotal') AS INTEGER), 0)
-               + IFNULL(CAST(json_extract(payload, '$.tokensCachedIn') AS INTEGER), 0) / 10
-               + (IFNULL(CAST(json_extract(payload, '$.tokensCacheCreation') AS INTEGER), 0) * 5) / 4
-            END), 0)
+        COALESCE(SUM(billable), 0), COALESCE(SUM(measured), 0), COALESCE(SUM(1 - measured), 0)
         """;
 
+    /// <summary>
+    /// ON THE LEDGER, so Reset's "Delete memory" no longer lowers a workflow's spend: the member's
+    /// log rows go, its ledger rows stay. The NUDGE WINDOW is still the log's - a nudge is an
+    /// instruction row, not a run - so a Reset that deletes the nudge itself widens the window back
+    /// to the whole workflow: the budget reads more, never less.
+    /// </summary>
     private async Task<WorkflowSpend> SpendAsync(
         long correlationId, bool sinceLastNudge, CancellationToken ct)
     {
@@ -1856,12 +1860,10 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         command.CommandText =
             $"""
-            SELECT {BillableSum}, {MeasuredCount}
-            FROM messages
-            WHERE correlation_id = $id
-              AND type IN ($completed, $failed)
-              AND json_extract(payload, '$.usageCountedOn') IS NULL
-              AND seq > $since
+            SELECT {LedgerSpend}
+            FROM usage_ledger
+            WHERE correlation = $id
+              AND run_seq > $since
             """;
 
         // THE WINDOW. Zero for the whole-workflow figure, so the clause costs nothing there;
@@ -1886,100 +1888,12 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         command.Parameters.AddWithValue("$id", correlationId);
         command.Parameters.AddWithValue("$since", since);
-        command.Parameters.AddWithValue("$completed", MessageTypes.Completed);
-        command.Parameters.AddWithValue("$failed", MessageTypes.Failed);
-        command.Parameters.AddWithValue("$excluded", UsageSource.ExcludedEstimate);
-        command.Parameters.AddWithValue("$noModel", UsageSource.NoModel);
 
-        await using var reader = await command.ExecuteReaderAsync(ct);
-
-        if (await reader.ReadAsync(ct))
-        {
-            var tokensSpent = reader.GetInt64(0);
-            var runsWithMeasuredUsage = checked((int)reader.GetInt64(1));
-            var runsWithoutUsage = checked((int)reader.GetInt64(2));
-            return new WorkflowSpend(tokensSpent, runsWithMeasuredUsage, runsWithoutUsage);
-        }
-
-        return new WorkflowSpend(0, 0, 0);
+        return await ReadSpendAsync(command, ct);
     }
 
-    /// <summary>
-    /// Measured and unmeasured runs, the two columns after <see cref="BillableSum"/>. Shared by the
-    /// workflow spend and the trigger spend so a trigger's figure cannot drift from a workflow's.
-    /// A row carrying <see cref="UsageSource.NoModel"/> ran no model (a plugin's run): it is MEASURED,
-    /// and <see cref="BillableSum"/> adds nothing for it because it carries no figures. Any other row
-    /// with no figures is unmeasured, never a zero. Binds <c>$excluded</c> and <c>$noModel</c>.
-    /// </summary>
-    private const string MeasuredCount =
-        """
-        COALESCE(SUM(CASE
-            WHEN ((json_extract(payload, '$.tokensIn') IS NOT NULL
-              AND json_extract(payload, '$.tokensOut') IS NOT NULL)
-              OR json_extract(payload, '$.tokensTotal') IS NOT NULL)
-              AND COALESCE(json_extract(payload, '$.tokensSource'), '') <> $excluded
-              OR COALESCE(json_extract(payload, '$.tokensSource'), '') = $noModel
-            THEN 1 ELSE 0 END), 0),
-        COALESCE(SUM(CASE
-            WHEN ((json_extract(payload, '$.tokensIn') IS NULL
-              OR json_extract(payload, '$.tokensOut') IS NULL)
-              AND json_extract(payload, '$.tokensTotal') IS NULL
-              OR COALESCE(json_extract(payload, '$.tokensSource'), '') = $excluded)
-              AND COALESCE(json_extract(payload, '$.tokensSource'), '') <> $noModel
-            THEN 1 ELSE 0 END), 0)
-        """;
-
-    public async Task<WorkflowSpend> GetTriggerSpendAsync(
-        IReadOnlyCollection<string> sources, DateTimeOffset since, CancellationToken ct = default)
+    private static async Task<WorkflowSpend> ReadSpendAsync(SqliteCommand command, CancellationToken ct)
     {
-        if (sources.Count == 0) return new WorkflowSpend(0, 0, 0);
-
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        var names = sources.Select((_, index) => $"$source{index}").ToArray();
-
-        // THREE HOPS, all by causation: the trigger's instructions today; the rows that closed
-        // them (and the run's hand-back, which wakes the Manager on its own row); the rows that
-        // closed THOSE - the Manager runs they woke. Only terminal rows are counted.
-        command.CommandText =
-            $"""
-            WITH fires AS (
-                SELECT seq FROM messages
-                WHERE source IN ({string.Join(", ", names)})
-                  AND type LIKE 'agentContainer.instruction.%'
-                  AND occurred_at >= $since
-            ),
-            runs AS (
-                SELECT seq, type, payload FROM messages
-                WHERE causation_seq IN (SELECT seq FROM fires)
-                  AND type IN ($completed, $failed, $handback)
-            ),
-            counted AS (
-                SELECT payload FROM runs WHERE type IN ($completed, $failed)
-                UNION ALL
-                SELECT payload FROM messages
-                WHERE causation_seq IN (SELECT seq FROM runs)
-                  AND type IN ($completed, $failed)
-            )
-            SELECT {BillableSum}, {MeasuredCount}
-            FROM counted
-            WHERE json_extract(payload, '$.usageCountedOn') IS NULL
-            """;
-
-        var index = 0;
-        foreach (var source in sources)
-        {
-            command.Parameters.AddWithValue(names[index++], source);
-        }
-
-        command.Parameters.AddWithValue("$since", Stamp(since.ToUniversalTime()));
-        command.Parameters.AddWithValue("$completed", MessageTypes.Completed);
-        command.Parameters.AddWithValue("$failed", MessageTypes.Failed);
-        command.Parameters.AddWithValue("$handback", MessageTypes.Handback);
-        command.Parameters.AddWithValue("$excluded", UsageSource.ExcludedEstimate);
-        command.Parameters.AddWithValue("$noModel", UsageSource.NoModel);
-
         await using var reader = await command.ExecuteReaderAsync(ct);
 
         return await reader.ReadAsync(ct)
@@ -1990,33 +1904,40 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             : new WorkflowSpend(0, 0, 0);
     }
 
-    public async Task<IReadOnlyList<Message>> ReadRecentRunsAsync(
-        string member, int max, CancellationToken ct = default)
+    /// <summary>
+    /// ON THE LEDGER. Each run's row names the trigger fire it answered - directly, or as a Manager
+    /// run woken by such a run's `completed`, `failed` or `handback` row - and when that fire was
+    /// appended (<see cref="LedgerRows"/>), so a Reset that deletes the instruction rows between a
+    /// trigger and its runs no longer lowers the trigger's spend for the day.
+    /// </summary>
+    public async Task<WorkflowSpend> GetTriggerSpendAsync(
+        IReadOnlyCollection<string> sources, DateTimeOffset since, CancellationToken ct = default)
     {
-        if (max <= 0) return [];
+        if (sources.Count == 0) return new WorkflowSpend(0, 0, 0);
 
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
+        var names = sources.Select((_, index) => $"$source{index}").ToArray();
+
         command.CommandText =
             $"""
-             SELECT {MessageRows.Columns}
-             FROM messages
-             WHERE source = $member COLLATE NOCASE
-               AND type IN ($completed, $failed)
-               AND json_extract(payload, '$.usageCountedOn') IS NULL
-             ORDER BY seq DESC
-             LIMIT $max
-             """;
+            SELECT {LedgerSpend}
+            FROM usage_ledger
+            WHERE trigger_source IN ({string.Join(", ", names)})
+              AND trigger_fired_at >= $since
+            """;
 
-        command.Parameters.AddWithValue("$member", member);
-        command.Parameters.AddWithValue("$completed", MessageTypes.Completed);
-        command.Parameters.AddWithValue("$failed", MessageTypes.Failed);
-        command.Parameters.AddWithValue("$max", max);
+        var index = 0;
+        foreach (var source in sources)
+        {
+            command.Parameters.AddWithValue(names[index++], source);
+        }
 
-        return await MessageRows.ReadAllAsync(command, ct);
+        command.Parameters.AddWithValue("$since", Stamp(since.ToUniversalTime()));
+
+        return await ReadSpendAsync(command, ct);
     }
-
     public async Task<IReadOnlyList<Message>> ReadRangeAsync(
         long afterSeq, int max, CancellationToken ct = default)
     {

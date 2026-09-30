@@ -325,10 +325,11 @@ public interface IMessageLog
     /// <summary>
     /// One workflow's total spend for budget checking.
     ///
-    /// A projection of payload fields via json_extract, over completed/failed messages filtered on
-    /// correlation_id (no join). Returns TokensSpent = sum of (tokensIn + tokensOut + tokensTotal),
-    /// one figure combining all three to account for brands that report a combined total (codex).
-    /// Rows whose source is <see cref="UsageSource.ExcludedEstimate"/> are excluded.
+    /// READ FROM <c>usage_ledger</c>, NOT FROM THE LOG: one row per finished run, written with the
+    /// run's terminal row and never deleted, so Reset's "Delete memory" does not lower it (see
+    /// <see cref="IUsageLedger"/>). Each row's <c>billable</c> is
+    /// <see cref="InvocationUsage.BillableTokens"/> of its run - a combined total (codex) as reported;
+    /// an <see cref="UsageSource.ExcludedEstimate"/> is unmeasured.
     ///
     /// Unmeasured spend never convicts: if RunsWithoutUsage > 0 (indicating rows with no usage
     /// measurement), the refusal check must have an explicit arm to make it impossible to refuse
@@ -361,6 +362,9 @@ public interface IMessageLog
     Task<WorkflowSpend> GetSpendSinceNudgeAsync(long correlationId, CancellationToken ct = default);
 
     /// <summary>
+    /// Read from <c>usage_ledger</c>, whose rows name the trigger fire they answered, so a Reset does
+    /// not lower it.
+    ///
     /// What one trigger's runs have cost since <paramref name="since"/>: the runs whose instruction
     /// was appended by one of <paramref name="sources"/> (`schedule:&lt;id&gt;`, `trigger:&lt;id&gt;`)
     /// at or after that instant, plus the runs those runs WOKE - a Manager's run closing the
@@ -372,14 +376,6 @@ public interface IMessageLog
     /// </summary>
     Task<WorkflowSpend> GetTriggerSpendAsync(
         IReadOnlyCollection<string> sources, DateTimeOffset since, CancellationToken ct = default);
-
-    /// <summary>
-    /// The terminal rows of <paramref name="member"/>'s last <paramref name="max"/> runs, newest
-    /// first: its `completed` and `failed` rows that carry their run's figures (or its unknown
-    /// usage), never a batched run's extra rows. What the trigger dialog's measured cost reads.
-    /// </summary>
-    Task<IReadOnlyList<Message>> ReadRecentRunsAsync(
-        string member, int max, CancellationToken ct = default);
 
     /// <summary>
     /// Every message after <paramref name="afterSeq"/>, oldest first, at most

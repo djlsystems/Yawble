@@ -210,7 +210,8 @@ public static class BacklogEndpoints
             var dispatches = await backlog.DispatchesAsync(id, ct);
 
             var records = new List<BacklogExecutionStats>();
-            foreach (var d in dispatches) records.Add(await BacklogExecutionRecord.ForAsync(d, log, ct));
+            foreach (var d in dispatches) records.Add(await BacklogExecutionRecord.ForAsync(
+                d, log, ct, context.RequestServices.GetService<IUsageLedger>()));
 
             // THE SAME ANSWER THE LIST GAVE, from the current dispatch - the last - so a person who
             // opened the row does not read a different team than the row showed. The history is
@@ -1023,7 +1024,8 @@ public static class BacklogEndpoints
         // the only eraser: log retention purges rows nothing cites, so an archived item deriving
         // its history from the log would quietly lose it. Restoring thaws, and re-archiving freezes
         // again from whatever the log still holds.
-        await BacklogExecutionRecord.FreezeAsync(id, archived, backlog, log, ct);
+        await BacklogExecutionRecord.FreezeAsync(
+            id, archived, backlog, log, ct, context.RequestServices.GetService<IUsageLedger>());
 
         await WriteAuditAsync(
             context,

@@ -48,7 +48,7 @@ public sealed class ContainerTestBed : IAsyncDisposable
         Directory.CreateDirectory(_directory);
 
         var database = Path.Combine(_directory, "messages.db");
-        new SchemaMigrator(database).ApplyAsync(MessageSchema.Steps).GetAwaiter().GetResult();
+        new SchemaMigrator(database).ApplyAsync(SchemaModules.All).GetAwaiter().GetResult();
 
         Store = new SqliteMessageStore(database);
         Pending = pending ? new SqlitePendingDeliveries(database) : null;
