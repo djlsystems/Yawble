@@ -1725,6 +1725,12 @@ public sealed class MemberRuntime : IAsyncDisposable
                     Id.ToString(),
                     message.Seq));
 
+                // Set BESIDE the publication rather than instead of it, and only on the arm that
+                // chose Failed. Idempotent, so a batch of several messages marks the container once
+                // and pushes one frame. BEFORE the terminal hook: whoever sees the Failed row may
+                // read the reason at once, and must not wait on a reader of the run to find it.
+                if (!result.Succeeded) MarkFailed(failure, failureClass);
+
                 if (usageCountedOn is null && terminal is not null && _onTerminal is not null)
                 {
                     try
@@ -1737,11 +1743,6 @@ public sealed class MemberRuntime : IAsyncDisposable
                         // has already been recorded, and must not be lost to a reader's failure.
                     }
                 }
-
-                // Set BESIDE the publication rather than instead of it, and only on the arm that
-                // chose Failed. Idempotent, so a batch of several messages marks the container once
-                // and pushes one frame.
-                if (!result.Succeeded) MarkFailed(failure, failureClass);
             }
 
             // AFTER the publish: this window can double-report, and the alternative window goes
