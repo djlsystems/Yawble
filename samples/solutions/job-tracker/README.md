@@ -23,6 +23,21 @@ and the package the solution tests install.
 succeeds, and then every hour as usual. With a source ticked, the tracker page fills right after
 install instead of an hour later; the install's result says "Scan for postings ran now".
 
+## Bounded settings
+
+The Scout's number settings declare their bounds in `plugin.json`, so a stray keystroke cannot make
+it skip every posting (a `salaryMax` of -2 would):
+
+| Setting | Bounds | What it does |
+|---|---|---|
+| `salaryMin`, `salaryMax` | `min: 0` | skips a posting whose annual range is wholly outside them |
+| `hourlyMin`, `hourlyMax` | `min: 0` | the same for an hourly rate |
+| `archiveAfterDays` | `min: 1`, `integer: true` | skips a posting posted more than that many days ago |
+
+All are optional, set in the Scout's settings. The Host refuses a value outside its bounds from
+every writer - the settings form, Add member, and a solution install or update - naming the field
+and the bound, and writes nothing.
+
 ## Secrets
 
 The install binds the Scout's five secrets by key name; you do not bind them by hand. Each is

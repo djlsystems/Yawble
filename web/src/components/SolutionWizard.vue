@@ -51,6 +51,7 @@ import {
   updateCandidates,
   wakeWords,
 } from '../lib/solutions';
+import { boundsHint, boundsProblem } from '../lib/numberBounds';
 import { useConsoleStore } from '../stores/console';
 
 /**
@@ -393,6 +394,27 @@ const secretRows = computed(() =>
   }),
 );
 
+/**
+ * NUMBER SETTINGS OUTSIDE THEIR BOUNDS, by setting key, with the sentence shown under each. Unlike a
+ * skipped required setting - which installs and leaves the team blocked - an out-of-range value is
+ * one the Host refuses, so it is held here, before Install: Next stays off until it is fixed.
+ */
+const settingProblems = computed<Record<string, string>>(() => {
+  const problems: Record<string, string> = {};
+  for (const setting of askedSettings.value) {
+    if (settingInputKind(setting) !== 'number') continue;
+    const problem = boundsProblem(setting.setting, setting, values.value[settingKey(setting)]);
+    if (problem !== null) problems[settingKey(setting)] = problem;
+  }
+  return problems;
+});
+
+const settingsInRange = computed(() => Object.keys(settingProblems.value).length === 0);
+
+/** A number setting's bounds for its hint, or undefined when it has none. */
+const settingHint = (setting: SolutionPersonSetting) =>
+  settingInputKind(setting) === 'number' ? (boundsHint(setting) ?? undefined) : undefined;
+
 /** What only the person provides and was left out, by name, for the blocked sentence. */
 const skippedRequired = computed<string[]>(() => {
   const current = plan.value;
@@ -488,7 +510,7 @@ const installLine = computed(() => {
 });
 
 async function install() {
-  if (installing.value || succeeded.value || !plan.value) return;
+  if (installing.value || succeeded.value || !plan.value || !settingsInRange.value) return;
 
   commitAllLists();
 
@@ -574,7 +596,7 @@ function next() {
   commitAllLists();
   if (step.value === 'team') void nextFromTeam();
   else if (step.value === 'review') step.value = 'inputs';
-  else if (step.value === 'inputs') step.value = 'install';
+  else if (step.value === 'inputs' && settingsInRange.value) step.value = 'install';
 }
 </script>
 
@@ -865,6 +887,10 @@ function next() {
                   outlined
                   dense
                   :label="`${setting.member}: ${setting.setting}`"
+                  :hint="settingHint(setting)"
+                  :error="settingProblems[settingKey(setting)] ? true : undefined"
+                  :error-message="settingProblems[settingKey(setting)] ?? ''"
+                  :data-out-of-range="settingProblems[settingKey(setting)] ? '' : undefined"
                   @update:model-value="(value: string | number | null) => setValue(setting, settingInputKind(setting) === 'number' && value !== '' && value !== null ? Number(value) : value)"
                 />
                 <div class="text-caption os-text-muted">
@@ -1039,7 +1065,7 @@ function next() {
           color="primary"
           no-caps
           label="Next"
-          :disable="step === 'team' && !teamCanAdvance"
+          :disable="(step === 'team' && !teamCanAdvance) || (step === 'inputs' && !settingsInRange)"
           :loading="step === 'team' && previewing"
           @click="next"
         />

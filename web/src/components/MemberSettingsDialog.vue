@@ -26,6 +26,7 @@ import {
   initialConfig,
   initialSecrets,
   missingRequired,
+  refusedOutOfRange,
   settingsBody,
   type PluginFieldValues,
   type PluginSettingsShape,
@@ -151,6 +152,13 @@ const pluginProblem = ref<string | null>(null);
 const pluginMissing = computed(() =>
   pluginShape.value ? missingRequired(pluginShape.value, pluginConfig.value, pluginSecrets.value) : [],
 );
+/**
+ * Number fields outside their manifest bounds: held like a missing required field; the Host refuses
+ * them too. A stored out-of-range value left as it was is not held - the Host keeps it.
+ */
+const pluginOutOfRange = computed(() =>
+  pluginShape.value ? refusedOutOfRange(pluginShape.value, pluginConfig.value) : [],
+);
 
 const pluginBody = computed(() =>
   pluginShape.value ? settingsBody(pluginShape.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value) : null,
@@ -178,7 +186,7 @@ async function loadPluginSettings() {
     pluginConfig.value = initialConfig(shape, settings.config);
     pluginSecrets.value = initialSecrets(shape, settings.secrets);
     pluginConnections.value = initialBindings(shape.connections, settings.connections ?? {});
-    pluginShape.value = shape;
+    pluginShape.value = { ...shape, stored: { config: pluginConfig.value, outOfRange: settings.outOfRange ?? {} } };
     pluginSaved.value = JSON.stringify(settingsBody(shape, pluginConfig.value, pluginSecrets.value, pluginConnections.value));
   } catch (cause) {
     pluginProblem.value = `Could not read this member's settings: ${cause instanceof Error ? cause.message : String(cause)}`;
@@ -192,7 +200,7 @@ const valid = computed(
     // A plugin member kept on its plugin is not held to the team's Agent allowlist - a person may
     // hire any installed plugin, and editing its settings is not a repoint.
     ((isPlugin.value && agent.value === props.snapshot.agent) || allowlistIncludes(teamAllowlist.value, agent.value)) &&
-    pluginMissing.value.length === 0,
+    pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0,
 );
 
 /** Why the Agent picker cannot be used, as its own error state. Null while it has choices. */
@@ -278,8 +286,11 @@ async function submit() {
     // THE SETTINGS FIRST, and only when they moved: the Host validates them as it does a hire, and
     // a refusal naming a field should leave the rest of the dialog unsaved too.
     if (pluginShape.value && pluginChanged.value && pluginBody.value) {
-      await savePluginSettings(props.snapshot.team, props.snapshot.id, pluginBody.value);
+      const answer = await savePluginSettings(props.snapshot.team, props.snapshot.id, pluginBody.value);
       pluginSaved.value = JSON.stringify(pluginBody.value);
+      if (answer) {
+        pluginShape.value = { ...pluginShape.value, stored: { config: pluginConfig.value, outOfRange: answer.outOfRange ?? {} } };
+      }
     }
 
     // ONLY WHAT CHANGED. `name` goes only on a rename: the Host records every PATCH that names one

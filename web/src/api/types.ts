@@ -2363,6 +2363,11 @@ export interface PluginConfigField {
   enum: string[] | null
   /** `person`: only a person may set it - a Manager hiring on the plugin cannot. */
   setBy: 'person' | 'anyone'
+  /** A `number` field's bounds, when the manifest declares them. Absent from a Host older than bounds. */
+  min?: number | null
+  max?: number | null
+  /** A `number` field that takes whole numbers only. */
+  integer?: boolean
 }
 
 /** One secret a plugin's manifest names. Its NAME only: no route ever carries a value. */
@@ -2484,6 +2489,11 @@ export interface PluginMemberSettings {
   connections?: Record<string, string>
   /** The manifest's connection slots, as `GET /api/plugins` lists them. */
   connectionFields?: Record<string, ConnectionSlot>
+  /**
+   * Each STORED number outside its manifest bounds (bounds added after it was saved), with the
+   * Host's sentence. Always present on the read and the PUT answer; `{}` when none is.
+   */
+  outOfRange?: Record<string, string>
 }
 
 /** A plugin member's settings on hire: config values, and each secret bound to a LOGICAL KEY. */
@@ -2768,6 +2778,10 @@ export interface SolutionPersonSetting {
   type: string | null
   default: unknown
   choices: string[] | null
+  /** A number setting's bounds, from its plugin's manifest. Absent when it declares none. */
+  min?: number | null
+  max?: number | null
+  integer?: boolean
 }
 
 /** What installing the package would create. */
