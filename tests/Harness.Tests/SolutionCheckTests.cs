@@ -109,6 +109,12 @@ public sealed class SolutionCheckTests : IDisposable
         Assert.Equal(["sample", "adzuna", "usajobs", "themuse"], setting.Choices!);
         Assert.Empty(plan.Ignored);
 
+        // THE PANEL: the site the tile opens, the results folder, the settings shown first, the status line.
+        Assert.Equal("tracker", plan.Panel.PrimarySite);
+        Assert.Equal(["Drafts"], plan.Panel.Outputs);
+        Assert.Equal([("Scout", "keywords"), ("Scout", "sources")], plan.Panel.Settings.Select(s => (s.Member, s.Setting)));
+        Assert.Equal("{data.jobs.count status=new} new jobs · last checked {lastRun.at}", plan.Panel.Status);
+
         Assert.Equal(folder, check.Package!.Folder);
     }
 
@@ -145,6 +151,115 @@ public sealed class SolutionCheckTests : IDisposable
         Assert.True(check.Ok, string.Join("\n", check.Refusals));
         Assert.Equal(["controlPanel", "statusLines"], check.Plan!.Ignored);
         Assert.Equal("[\"jobs\"]", JsonSerializer.Serialize(check.Package!.Manifest.Extra["controlPanel"].GetProperty("tiles")));
+    }
+
+    // ---- The panel keys --------------------------------------------------------------------
+
+    [Fact]
+    public void A_package_without_a_panel_passes_with_none()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m.Remove("panel"));
+
+        var check = Check(folder);
+
+        Assert.True(check.Ok, string.Join("\n", check.Refusals));
+        Assert.Equal(SolutionPanel.None, check.Plan!.Panel);
+    }
+
+    [Fact]
+    public void A_primary_site_the_package_does_not_have_is_refused()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["panel"]!["primarySite"] = "dashboard");
+
+        var refusal = Refused(Check(folder), "solution.json", "panel.primarySite");
+        Assert.Contains("'dashboard' is not one of this package's `sites`", refusal.Reason);
+    }
+
+    [Theory]
+    [InlineData("../Elsewhere")]
+    [InlineData("/etc")]
+    [InlineData("Drafts/../..")]
+    [InlineData(".secrets")]
+    [InlineData("Drafts/.hidden")]
+    [InlineData("Drafts/*")]
+    [InlineData("C:\\Drafts")]
+    [InlineData("")]
+    public void An_output_folder_that_is_not_a_safe_relative_folder_name_is_refused(string folder)
+    {
+        var package = Sample();
+        SolutionSamples.Edit(package, m => m["panel"]!["outputs"] = new JsonArray("Drafts", folder));
+
+        Refused(Check(package), "solution.json", "panel.outputs[1]");
+    }
+
+    [Fact]
+    public void A_nested_output_folder_is_a_safe_name()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["panel"]!["outputs"] = new JsonArray("Drafts", "Applications/Sent"));
+
+        var check = Check(folder);
+
+        Assert.True(check.Ok, string.Join("\n", check.Refusals));
+        Assert.Equal(["Drafts", "Applications/Sent"], check.Plan!.Panel.Outputs);
+    }
+
+    [Fact]
+    public void A_panel_setting_the_plugin_does_not_have_is_refused()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["panel"]!["settings"]![1]!["setting"] = "salary");
+
+        var refusal = Refused(Check(folder), "solution.json", "panel.settings[1].setting");
+        Assert.Contains("plugin job-board has no setting 'salary'", refusal.Reason);
+    }
+
+    [Fact]
+    public void A_panel_setting_on_an_agent_member_or_no_member_is_refused()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["panel"]!["settings"] = new JsonArray(
+            new JsonObject { ["member"] = "Writer", ["setting"] = "keywords" },
+            new JsonObject { ["member"] = "Recruiter", ["setting"] = "keywords" }));
+
+        var check = Check(folder);
+
+        Assert.Contains("is an agent member", Assert.Single(check.Refusals, r => r.Field == "panel.settings[0].member").Reason);
+        Assert.Contains("names no member of this package", Assert.Single(check.Refusals, r => r.Field == "panel.settings[1].member").Reason);
+    }
+
+    [Theory]
+    [InlineData("{data.jobs.sum}")]
+    [InlineData("{event.title} found")]
+    [InlineData("<b>{lastRun.by}</b>")]
+    [InlineData("{lastRun.at")]
+    public void A_status_line_with_a_placeholder_this_host_does_not_fill_is_refused(string status)
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["panel"]!["status"] = status);
+
+        Assert.StartsWith("`panel.status` ", Refused(Check(folder), "solution.json", "panel.status").Reason);
+    }
+
+    [Fact]
+    public void A_status_line_counting_site_data_with_no_primary_site_is_refused()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["panel"]!.AsObject().Remove("primarySite"));
+
+        var refusal = Refused(Check(folder), "solution.json", "panel.status");
+        Assert.Contains("names no `panel.primarySite`", refusal.Reason);
+    }
+
+    [Fact]
+    public void A_panel_that_is_not_an_object_is_refused()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["panel"] = "tracker");
+
+        Refused(Check(folder), "solution.json", "panel");
     }
 
     [Fact]
