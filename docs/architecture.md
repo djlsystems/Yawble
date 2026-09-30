@@ -104,6 +104,16 @@ MCP servers, plugins, skills, memory and instruction files).
   `~/.grok/config.toml` (where the Host writes its own `harness` entry) and skills from
   `~/.grok/skills` and `~/.claude/skills`; Copilot reads `~/.copilot`'s MCP config, plugins,
   skills and instructions. Do not put anything there that a member must not have.
+- **Checked before a run, too.** At start and after every catalog save, the Host asks each
+  installed CLI what it would load, with the CLI's own listing and no model call (`claude mcp list`
+  and `plugin list`; `codex mcp list`, `features list` and `debug prompt-input`; `grok inspect`;
+  `copilot mcp`/`plugin`/`skill list`), run as the agent user: a member's preset with its
+  isolation, the Concierge's without it. `yawble doctor` (the `agent tools` row and block) and
+  Admin → Agents show each preset as *isolated*, *foreign tools found* (named), *not verified* or
+  *not measured*, with its gaps; the Concierge's connectors and servers are listed as
+  information. Skills and hooks are listed, never counted as tools. `claude mcp list` starts each
+  configured stdio server to check it, as the Concierge's own launch does. The result is
+  `GET /api/agents/tools`, and `<dataRoot>/agent-tools.json` for `--doctor`.
 
 ## Operations
 

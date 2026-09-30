@@ -2877,3 +2877,49 @@ export interface TeamSolution {
   plugins: string[]
   missing: SolutionMissing[]
 }
+
+/**
+ * One thing an agent CLI's own listing says it would load. `off` is null when it would load,
+ * otherwise why it does not (`disabled`, or the launch switch that turns it off).
+ */
+export interface ListedToolItem {
+  kind: 'server' | 'connector' | 'plugin' | 'skill' | 'hook'
+  name: string
+  source: string | null
+  off: string | null
+}
+
+/**
+ * The pre-flight's word for a preset. `notMeasured` is never isolated, and `concierge` is
+ * information, never a warning.
+ */
+export type ToolVerdict =
+  | 'isolated'
+  | 'foreignFound'
+  | 'notVerified'
+  | 'notMeasured'
+  | 'concierge'
+  | 'notAModel'
+
+/** One preset's pre-flight, from `GET /api/agents/tools`. A measurement: never folded into an `Agent`. */
+export interface PresetToolReport {
+  preset: string
+  mode: 'headless' | 'interactive'
+  command: string
+  verdict: ToolVerdict
+  /** What a member would be offered that it may not be. Always empty for the Concierge. */
+  foreign: ListedToolItem[]
+  loaded: ListedToolItem[]
+  switchedOff: ListedToolItem[]
+  /** What no launch switch reaches, as the preset records it. */
+  gaps: string[]
+  ran: string[]
+  detail: string | null
+}
+
+/** `GET /api/agents/tools`: the Host's last pre-flight. `at` is null before the first one ends. */
+export interface AgentToolsReport {
+  at: string | null
+  running: boolean
+  presets: PresetToolReport[]
+}
