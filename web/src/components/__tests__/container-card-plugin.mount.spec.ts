@@ -38,16 +38,16 @@ const runs: MemberRunsPage = {
   runs: [
     {
       seq: 42, workflow: 40, startedAt: '2026-09-27T10:00:00Z', endedAt: '2026-09-27T10:00:02Z',
-      durationMs: 2000, outcome: 'completed', output: 'olleh', reason: null, quiet: false,
+      durationMs: 2000, outcome: 'completed', output: 'olleh', reason: null, quiet: false, items: null, deferredFromRun: null,
     },
     {
       // Every item blocked: no completed row, so the run is its last `blocked` row, with its reason.
       seq: 36, workflow: 35, startedAt: '2026-09-27T09:30:00Z', endedAt: '2026-09-27T09:30:01Z',
-      durationMs: 1000, outcome: 'blocked', output: null, reason: 'no creds', quiet: false,
+      durationMs: 1000, outcome: 'blocked', output: null, reason: 'no creds', quiet: false, items: null, deferredFromRun: null,
     },
     {
       seq: 30, workflow: 29, startedAt: '2026-09-27T09:00:00Z', endedAt: '2026-09-27T09:00:01Z',
-      durationMs: 1000, outcome: 'failed', output: null, reason: null, quiet: false,
+      durationMs: 1000, outcome: 'failed', output: null, reason: null, quiet: false, items: null, deferredFromRun: null,
     },
   ],
   nextBefore: null,

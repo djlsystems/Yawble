@@ -40,7 +40,8 @@ public sealed class ContainerTestBed : IAsyncDisposable
         WipLedger? wip = null,
         Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? worktrees = null,
         long? workflowSpendLimit = null,
-        ITriggerStore? triggers = null)
+        ITriggerStore? triggers = null,
+        bool pending = false)
     {
         _directory = Path.Combine(Path.GetTempPath(), $"harness-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_directory);
@@ -49,6 +50,7 @@ public sealed class ContainerTestBed : IAsyncDisposable
         new SchemaMigrator(database).ApplyAsync(MessageSchema.Steps).GetAwaiter().GetResult();
 
         Store = new SqliteMessageStore(database);
+        Pending = pending ? new SqlitePendingDeliveries(database) : null;
 
         Context = new LedgerContextBuilder(new SqliteLedger(database));
         Runner = new AgentMemberRunner(Agent, Context);
@@ -57,6 +59,7 @@ public sealed class ContainerTestBed : IAsyncDisposable
         host = new ContainerHost(
             Store, Store, Store,
             new InMemoryTranscriptStore(),
+            pending: Pending,
             triggers: triggers,
             onRegistered: (id, ct) => Store.SetAsync(id, host.Find(id)!.Snapshot().Subscribes, ct),
             workflowSpendLimit: workflowSpendLimit,
@@ -66,6 +69,9 @@ public sealed class ContainerTestBed : IAsyncDisposable
     }
 
     public SqliteMessageStore Store { get; }
+
+    /// <summary>The pending-delivery rows, when the bed was asked for them; null otherwise.</summary>
+    public SqlitePendingDeliveries? Pending { get; }
 
     public ContainerHost Host { get; }
 
