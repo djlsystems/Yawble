@@ -47,7 +47,8 @@ public sealed class AgentCliVersionRouteTests(HostFixture host) : IClassFixture<
         // Not read at the newest start: null, never the last version that was.
         var codex = entries.Values.First(e => e.GetProperty("cli").GetString() == "codex");
         Assert.Equal(JsonValueKind.Null, codex.GetProperty("version").ValueKind);
-        Assert.Equal("start", codex.GetProperty("updatedBy").GetString());
+        Assert.Equal(JsonValueKind.Null, codex.GetProperty("updatedAt").ValueKind);
+        Assert.Equal(JsonValueKind.Null, codex.GetProperty("updatedBy").ValueKind);
 
         // Every built-in preset that launches a command has an entry.
         Assert.All(
@@ -58,6 +59,36 @@ public sealed class AgentCliVersionRouteTests(HostFixture host) : IClassFixture<
         using var container = host.Container(host.AlphaContainerKey);
         var redacted = await container.GetFromJsonAsync<JsonElement>("/api/agents", Ct);
         Assert.False(redacted.TryGetProperty("cliVersions", out _));
+    }
+
+    [Fact]
+    public async Task A_version_that_is_not_known_has_no_update_time_and_no_one_who_brought_it()
+    {
+        var history = host.Services.GetRequiredService<CliVersionHistory>();
+
+        // copilot and codex had versions, then the newest start could not read them: copilot's key is
+        // missing, codex's is null. The start where they went missing is not an update of anything.
+        await File.WriteAllLinesAsync(history.Path,
+        [
+            """{"at":"2026-09-25T15:22:00Z","versions":{"claude":"2.1.286 (Claude Code)","copilot":"GitHub Copilot CLI 1.0.88","codex":"codex-cli 0.157.0"}}""",
+            """{"at":"2026-09-29T20:17:30Z","versions":{"claude":"2.1.286 (Claude Code)","copilot":"GitHub Copilot CLI 1.0.89","codex":"codex-cli 0.157.0"},"by":"update","person":"person@example.test"}""",
+            """{"at":"2026-09-30T05:00:00Z","versions":{"claude":"2.1.286 (Claude Code)","codex":null}}""",
+        ], Ct);
+
+        using var person = await host.PersonAsync();
+        var body = await person.GetFromJsonAsync<JsonElement>("/api/agents", Ct);
+        var entries = body.GetProperty("cliVersions").EnumerateArray().ToList();
+
+        foreach (var cli in new[] { "copilot", "codex" })
+        {
+            var entry = entries.First(e => e.GetProperty("cli").GetString() == cli);
+            Assert.Equal(JsonValueKind.Null, entry.GetProperty("version").ValueKind);
+            Assert.Equal(JsonValueKind.Null, entry.GetProperty("updatedAt").ValueKind);
+            Assert.Equal(JsonValueKind.Null, entry.GetProperty("updatedBy").ValueKind);
+            Assert.Equal(JsonValueKind.Null, entry.GetProperty("person").ValueKind);
+            // How far back the record looked is still true of a version that is not known.
+            Assert.Equal(DateTimeOffset.Parse("2026-09-25T15:22:00Z"), entry.GetProperty("since").GetDateTimeOffset());
+        }
     }
 
     [Fact]

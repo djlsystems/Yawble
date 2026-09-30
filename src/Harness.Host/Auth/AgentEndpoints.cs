@@ -143,8 +143,8 @@ public static class AgentEndpoints
                 + "**`cliVersions`** (a person only) is one entry per preset that launches a command: "
                 + "`cli` (the command), `version` (null when the record has none - never guessed), `updatedAt` "
                 + "(when that version first appeared after a different one; null when the kept record "
-                + "never saw it change, and `since` is then how far back the record reaches), "
-                + "`updatedBy` (`start` or `person`) and `person` (that person's email when recorded). "
+                + "never saw it change, and `since` is then how far back the record reaches; null, with "
+                + "`updatedBy`, when the version is not known), `updatedBy` (`start` or `person`) and `person` (that person's email when recorded). "
                 + "Read from the Host's CLI version record, `cli-versions.jsonl`, which the operator CLI's `doctor` "
                 + "and `agents` read too.");
 

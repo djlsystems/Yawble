@@ -1557,6 +1557,7 @@ export interface AgentUpdateResult {
   agent: string
   command: string
   updated: boolean
+  /** Null when no update command ran: the preset declares none. */
   exitCode: number | null
   versionBefore: string | null
   versionAfter: string | null
@@ -1576,7 +1577,8 @@ export interface CliVersion {
   cli: string
   version: string | null
   /** When this version first appeared after a different one; null when the kept record never saw
-   *  it change, and `since` is then how far back the record reaches. */
+   *  it change, and `since` is then how far back the record reaches. Null, with `updatedBy`, when
+   *  the version is not known: a version nobody could read has no update time. */
   updatedAt: string | null
   since: string | null
   /** `start` for a container start, `person` for a person's update through the platform. A plain

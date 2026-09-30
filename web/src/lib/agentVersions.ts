@@ -59,15 +59,35 @@ export function versionLine(entry: CliVersion | undefined, format: (iso: string)
   }
 }
 
-/** What the row says once its update button has finished: the new version, or that it did not change. */
+/** What happened to the version between the reads before and after an update, as measured. */
+function versionMove(before: string | null, after: string | null): string {
+  if (after === null) return 'the version is not known'
+  if (before === after) return `the version stayed at ${after}`
+  if (before === null) return `the version is now ${after} (not known before)`
+
+  return `the version moved from ${before} to ${after}`
+}
+
+/**
+ * What the row says once its update button has finished. It says ONLY WHAT WAS MEASURED: whether a
+ * command ran, whether it succeeded, and the versions read before and after - a failed command can
+ * still have moved the version, so the versions are compared, never assumed.
+ */
 export function updateOutcome(result: AgentUpdateResult, format: (iso: string) => string = stamp): string {
   const at = format(result.at)
 
-  if (!result.updated) return `Update at ${at} did not complete; the version was not changed.`
+  // No exit code: nothing ran, because the preset declares no update command.
+  if (result.exitCode === null) return `Nothing was run at ${at}: this preset declares no update command.`
+
+  if (!result.updated) {
+    return `The update command failed at ${at} (exit ${result.exitCode}); ${versionMove(result.versionBefore, result.versionAfter)}.`
+  }
+
+  if (result.versionAfter === null) return `The update command ran at ${at}; the version is not known.`
 
   if (result.versionBefore === result.versionAfter) {
     return `Checked for an update at ${at}: already the newest, the version did not change.`
   }
 
-  return `Updated at ${at}: ${result.versionBefore ?? 'version not known'} → ${result.versionAfter ?? 'version not known'}.`
+  return `Updated at ${at}: ${result.versionBefore ?? 'version not known'} → ${result.versionAfter}.`
 }

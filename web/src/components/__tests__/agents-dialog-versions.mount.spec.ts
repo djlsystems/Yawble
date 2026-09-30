@@ -234,4 +234,119 @@ describe('AgentsDialog, the version line', () => {
 
     wrapper.unmount();
   });
+  it('says a failed update that still moved the version failed AND moved it', async () => {
+    // npm installed the new version, then its postinstall exited 1.
+    updateAgentCli.mockResolvedValue({
+      agent: 'claude-headless',
+      command: 'claude',
+      updated: false,
+      exitCode: 1,
+      versionBefore: '2.1.286 (Claude Code)',
+      versionAfter: '2.1.287 (Claude Code)',
+      at: '2026-09-30T05:30:00Z',
+      detail: '`npm install -g @anthropic-ai/claude-code@latest` exited 1: npm ERR! postinstall failed',
+      cliVersion: {
+        cli: 'claude',
+        version: '2.1.287 (Claude Code)',
+        updatedAt: '2026-09-30T05:30:00Z',
+        since: '2026-09-25T15:22:00Z',
+        updatedBy: 'person',
+        person: 'quinn@example.test',
+      },
+    } satisfies AgentUpdateResult);
+
+    const wrapper = await mountDialog(AgentsDialog);
+
+    row('claude-headless').querySelector<HTMLElement>('[aria-label="Update the CLI claude-headless runs"]')!.click();
+    await flushPromises();
+
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' }));
+    expect(versionLine('claude-headless')!.textContent).toContain('2.1.287 (Claude Code)');
+    const outcome = row('claude-headless').querySelector('.agent-version-outcome')?.textContent ?? '';
+    expect(outcome).toContain(
+      `The update command failed at ${stamp('2026-09-30T05:30:00Z')} (exit 1); `
+        + 'the version moved from 2.1.286 (Claude Code) to 2.1.287 (Claude Code).',
+    );
+    expect(outcome).not.toContain('not changed');
+
+    wrapper.unmount();
+  });
+
+  it('says a failed update that did not move the version failed and left it where it was', async () => {
+    updateAgentCli.mockResolvedValue({
+      agent: 'grok-headless',
+      command: 'grok',
+      updated: false,
+      exitCode: 2,
+      versionBefore: 'grok 1.0.44',
+      versionAfter: 'grok 1.0.44',
+      at: '2026-09-30T05:40:00Z',
+      detail: '`grok update` exited 2: network unreachable',
+      cliVersion: {
+        cli: 'grok',
+        version: 'grok 1.0.44',
+        updatedAt: '2026-09-29T16:16:19Z',
+        since: '2026-09-25T15:22:00Z',
+        updatedBy: 'start',
+        person: null,
+      },
+    } satisfies AgentUpdateResult);
+
+    const wrapper = await mountDialog(AgentsDialog);
+
+    row('grok-headless').querySelector<HTMLElement>('[aria-label="Update the CLI grok-headless runs"]')!.click();
+    await flushPromises();
+
+    expect(row('grok-headless').querySelector('.agent-version-outcome')?.textContent).toContain(
+      `The update command failed at ${stamp('2026-09-30T05:40:00Z')} (exit 2); the version stayed at grok 1.0.44.`,
+    );
+    expect(versionLine('grok-headless')!.textContent).toContain(
+      `updated ${stamp('2026-09-29T16:16:19Z')} at a container start`,
+    );
+
+    wrapper.unmount();
+  });
+
+  it('says nothing was run for a preset that declares no update command', async () => {
+    // The screen's catalog still listed an update command when it loaded; the Host's no longer
+    // does, so the route answers that it ran nothing - no exit code, no versions read.
+    updateAgentCli.mockResolvedValue({
+      agent: 'codex-headless',
+      command: 'codex',
+      updated: false,
+      exitCode: null,
+      versionBefore: null,
+      versionAfter: null,
+      at: '2026-09-30T05:50:00Z',
+      detail: "'codex-headless' declares no update command, so the platform cannot update it.",
+      cliVersion: null,
+    } satisfies AgentUpdateResult);
+
+    const wrapper = await mountDialog(AgentsDialog);
+
+    row('codex-headless').querySelector<HTMLElement>('[aria-label="Update the CLI codex-headless runs"]')!.click();
+    await flushPromises();
+
+    const outcome = row('codex-headless').querySelector('.agent-version-outcome')?.textContent ?? '';
+    expect(outcome).toContain(`Nothing was run at ${stamp('2026-09-30T05:50:00Z')}: this preset declares no update command.`);
+    expect(outcome).not.toContain('did not complete');
+    expect(outcome).not.toContain('version');
+    // The version line is what the record said before: nothing ran, so nothing changed it.
+    expect(versionLine('codex-headless')!.textContent).toContain('codex-cli 0.157.0');
+
+    wrapper.unmount();
+  });
+
+  it('offers no update button on a row whose preset declares no update command', async () => {
+    listCatalog.mockResolvedValue({
+      agents: [{ ...preset('codex-headless', 'codex'), updates: null }],
+      cliVersions: [codex],
+    });
+
+    const wrapper = await mountDialog(AgentsDialog);
+
+    expect(row('codex-headless').querySelector('[aria-label="Update the CLI codex-headless runs"]')).toBeNull();
+
+    wrapper.unmount();
+  });
 });

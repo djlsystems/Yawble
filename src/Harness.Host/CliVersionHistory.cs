@@ -11,11 +11,12 @@ public sealed record CliVersionsAtStart(
 
 /// <summary>A CLI's installed version and when it last changed, as the history says.</summary>
 /// <param name="UpdatedAt">The first line that recorded this version after a different one; null
-/// when every kept line has this version (no update recorded since <paramref name="Since"/>).</param>
+/// when every kept line has this version (no update recorded since <paramref name="Since"/>), and
+/// null when the version is not known.</param>
 /// <param name="Since">The oldest line kept.</param>
 /// <param name="UpdatedBy">Who brought this version, from the line at <paramref name="UpdatedAt"/>:
 /// `start` for a container start's line, `person` for a person's update through the platform; null
-/// when <paramref name="UpdatedAt"/> is.</param>
+/// when <paramref name="UpdatedAt"/> is, so always null for a version that is not known.</param>
 /// <param name="Person">That person's email when the line records it.</param>
 public sealed record CliVersionNow(
     string Cli, string? Version, DateTimeOffset? UpdatedAt, DateTimeOffset? Since,
@@ -72,6 +73,11 @@ public sealed class CliVersionHistory(string path)
 
         var version = newestFirst[0].Versions.GetValueOrDefault(cli);
         var since = newestFirst[^1].At;
+
+        // A version the newest line does not have is NOT KNOWN, and a not-known version has no
+        // update time and no one who brought it: the line where it went missing is when reading
+        // failed, not an update, and the last line that had a version speaks of a different one.
+        if (version is null) return new CliVersionNow(cli, null, null, since);
 
         for (var i = 1; i < newestFirst.Count; i++)
         {
