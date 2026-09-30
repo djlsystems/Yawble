@@ -278,6 +278,7 @@ builder.Services.AddSingleton(new KanbanStore(store));
 // stopping between the two would drop the work with no redelivery to fall back on and nothing to
 // say it had happened.
 builder.Services.AddSingleton<IPendingDeliveries>(new SqlitePendingDeliveries(database));
+builder.Services.AddSingleton<PendingDeliveriesAtStart>();
 
 // Order carries no schema obligation - SchemaMigrator above has already applied every step
 // and set journal_mode on the file. These are readers and writers over a database that exists.
@@ -1675,6 +1676,9 @@ if (firehoseHolders.Count > 0)
 // nothing to hand work to before that. Says so when it did anything: work resumed silently is work
 // nobody knows was ever at risk, and an interrupted run is reported as a failure somebody has to
 // read to understand why their instruction came back unfinished.
+// FIRST, what deleted teams left queued: removed and logged, a live team's never touched.
+await app.Services.GetRequiredService<PendingDeliveriesAtStart>().SweepAsync();
+
 var resumed = await app.Services.GetRequiredService<ContainerHost>().ResumePendingAsync();
 
 // BOTH numbers, and a line whenever either is non-zero. An interrupted run is reported to the log

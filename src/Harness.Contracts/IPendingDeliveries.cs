@@ -70,4 +70,8 @@ public interface IPendingDeliveries
     /// <summary>This team's outstanding deliveries, oldest first within each subscriber.</summary>
     Task<IReadOnlyList<TeamPendingDelivery>> ForTeamAsync(
         string team, CancellationToken ct = default);
+
+    /// <summary>Every outstanding delivery of every subscriber, for the start's sweep of what
+    /// deleted teams left behind.</summary>
+    Task<IReadOnlyList<TeamPendingDelivery>> AllAsync(CancellationToken ct = default);
 }
