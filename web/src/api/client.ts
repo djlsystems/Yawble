@@ -72,6 +72,7 @@ import type {
   TeamRollup,
   TeamTokenTotals,
   TeamWasReset,
+  RepositoryResetPreview,
   TeamWorkflowTiming,
   TeamWorkflows,
   TenantApiKey,
@@ -1074,6 +1075,13 @@ export const resetTeam = (team: TeamId, body: TeamResetRequest) =>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
+
+/**
+ * What Reset repositories would remove for every member of the team, read when the person ticks
+ * the box - never on open, so a reset that does not touch repositories asks git nothing.
+ */
+export const previewResetRepositories = (team: TeamId) =>
+  json<RepositoryResetPreview>(`/api/teams/${encodeURIComponent(team)}/reset/repositories`)
 
 /** Every trigger currently stored for this team, oldest first. */
 export const listSchedules = (team: TeamId) =>
