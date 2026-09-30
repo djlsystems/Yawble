@@ -65,7 +65,7 @@ public sealed class ContainerHost : IAsyncDisposable
     /// third of the cases it exists for.
     /// </para>
     /// </summary>
-    private readonly Func<ContainerId, long?, bool, CancellationToken, Task>? _onRunEnding;
+    private readonly Func<ContainerId, long?, bool, CancellationToken, Task<bool>>? _onRunEnding;
     private readonly WipLedger? _wip;
     private readonly ConcurrentDictionary<string, byte> _pausedTeams =
         new(StringComparer.OrdinalIgnoreCase);
@@ -182,7 +182,7 @@ public sealed class ContainerHost : IAsyncDisposable
         Func<ContainerId, CancellationToken, Task>? onRegistered = null,
         long? workflowSpendLimit = null,
         Func<string, CancellationToken, ValueTask<long?>>? effectiveWorkflowBudget = null,
-        Func<ContainerId, long?, bool, CancellationToken, Task>? onRunEnding = null,
+        Func<ContainerId, long?, bool, CancellationToken, Task<bool>>? onRunEnding = null,
         WipLedger? wip = null,
         Func<long>? workflowSpendLimitNow = null,
         Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? worktrees = null,
@@ -632,13 +632,23 @@ public sealed class ContainerHost : IAsyncDisposable
                 // could otherwise run again for each later one. Every row after the first names the
                 // first in `usageCountedOn` and carries every item's outcome (`items`) as the first
                 // does, so a subscriber holding the type in its BASE set is woken by the first alone.
+                //
+                // A WORKFLOW THE PLATFORM ALREADY DECLARED WAKES NO MANAGER ON ITS COMPLETION. A run whose
+                // workflow the platform declared as it ended, for an owner that cannot declare, closes on
+                // a `completed` row carrying PayloadFields.WorkflowDeclared: a Manager woken on it would
+                // pay for a run into a closed workflow to learn nothing needs doing. Passed over as on
+                // `wakeManager: never`: a subscriber holding the type in its BASE set only, so an event
+                // trigger naming `completed` still fires. Never a `failed` row, and a hand-back wakes on
+                // its own row. The rule is the row's key, never the member's kind.
                 var isCompleted = string.Equals(message.Type, MessageTypes.Completed, StringComparison.Ordinal);
                 var alreadyWoken = (container.HasBaseSubscription(message.Type) && IsLaterRowOfOneRun(message))
                     || (isCompleted
                     && ((types.Contains(MessageTypes.Handback) && CompletionSays(message.Payload, PayloadFields.HandedBack))
                         || CompletionSays(message.Payload, PayloadFields.Quiet)))
                     || (container.HasBaseSubscription(message.Type)
-                        && WakeManagerPolicy.PassesOver(message.Type, TerminalWakeManager(message.Payload)));
+                        && WakeManagerPolicy.PassesOver(message.Type, TerminalWakeManager(message.Payload)))
+                    || (isCompleted && container.HasBaseSubscription(message.Type)
+                        && CompletionSays(message.Payload, PayloadFields.WorkflowDeclared));
 
                 if (!alreadyWoken
                     && !string.Equals(message.Source, container.Id.ToString(), StringComparison.OrdinalIgnoreCase)
@@ -766,10 +776,6 @@ public sealed class ContainerHost : IAsyncDisposable
 
     public bool IsPaused(string team) => _pausedTeams.ContainsKey(team);
 
-    /// <summary>Whether a `completed` row carries <paramref name="field"/> as true
-    /// (<see cref="PayloadFields.HandedBack"/>, <see cref="PayloadFields.Quiet"/>). A payload that
-    /// does not parse, or predates the field, answers false: the wake happens, which is the
-    /// behaviour before the field existed.</summary>
     /// <summary>
     /// A `completed` or `failed` row after the first of a batched run: it names the first in
     /// <see cref="PayloadFields.UsageCountedOn"/>.
@@ -795,6 +801,10 @@ public sealed class ContainerHost : IAsyncDisposable
         }
     }
 
+    /// <summary>Whether a `completed` row carries <paramref name="field"/> as true
+    /// (<see cref="PayloadFields.HandedBack"/>, <see cref="PayloadFields.Quiet"/>,
+    /// <see cref="PayloadFields.WorkflowDeclared"/>). A payload that does not parse, or predates the
+    /// field, answers false: the wake happens, which is the behaviour before the field existed.</summary>
     private static bool CompletionSays(string payload, string field)
     {
         try

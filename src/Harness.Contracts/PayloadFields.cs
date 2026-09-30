@@ -49,6 +49,17 @@ public static class PayloadFields
     public const string WakeManager = "wakeManager";
 
     /// <summary>
+    /// On a `completed` row: true when the platform declared the run's workflow complete as the run
+    /// ended, because its owner cannot declare (`UndeclarableWorkflows`, `declaredByPlatform`) -
+    /// a person told a plugin member directly. The workflow is closed, so the pump passes over the
+    /// Manager (a subscriber holding the type in its BASE set) on it, as on `wakeManager: never`;
+    /// an event trigger naming the type still fires. Written only when true, never on a `failed`
+    /// row, never on a trigger's run (its <see cref="WakeManager"/> choice governs) and never on a
+    /// row closing a member's own `tell`, which that member is waiting on.
+    /// </summary>
+    public const string WorkflowDeclared = "workflowDeclared";
+
+    /// <summary>
     /// On a `completed` or `failed` row that closes a delivery its run shared with others: the
     /// causation seq of the row in the same batch that carries the run's token figures. This row
     /// carries none, and the spend queries skip it, so a run is billed once however many deliveries

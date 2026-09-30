@@ -2286,6 +2286,11 @@ export interface MemberRun {
   /** A run that finished quietly (`quiet: true` on its `completed` row), which woke nobody. */
   quiet: boolean
   /**
+   * The platform declared the run's workflow complete as it ended (`workflowDeclared: true` on its
+   * `completed` row), because its owner cannot declare: the Manager was not woken by it.
+   */
+  workflowDeclared: boolean
+  /**
    * What became of each item, for a run that carried more than one - answered, failed, blocked or
    * deferred - in prompt order. A deferred item was not closed by this run: it is delivered again
    * as its own run. Null on a run of one item.

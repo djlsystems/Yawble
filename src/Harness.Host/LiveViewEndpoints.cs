@@ -65,6 +65,9 @@ public static class LiveViewEndpoints
                 + "over, and it is listed once it is.\n\n"
                 + "`quiet` is true for a run that finished quiet: its `completed` row is marked "
                 + "`quiet` and woke nobody. It is false for every other run, a failure always.\n\n"
+                + "`workflowDeclared` is true for a run whose workflow the platform declared complete "
+                + "as it ended, because its owner cannot declare (a person told a plugin member "
+                + "directly): the Manager was not woken by it. False for every other run.\n\n"
                 + "`items` lists, for a run that carried more than one item, what became of each: "
                 + "`{ \"item\", \"seq\", \"outcome\", \"reason\" }` in prompt order, `outcome` one of "
                 + "`answered`, `failed`, `blocked` and `deferred`, `reason` set on a deferral only. A "
@@ -203,6 +206,10 @@ public static class LiveViewEndpoints
 
             // A quiet run woke nobody; its `completed` row says so. A failure is never quiet.
             quiet = run.Terminal.Type == MessageTypes.Completed && Bool(run.Terminal.Payload, PayloadFields.Quiet),
+
+            // The platform declared the run's workflow as it ended, so the Manager was not woken.
+            workflowDeclared = run.Terminal.Type == MessageTypes.Completed
+                && Bool(run.Terminal.Payload, PayloadFields.WorkflowDeclared),
 
             // WHAT BECAME OF EACH ITEM of a run that carried several, a deferral included. Null on
             // a run of one item, and on a blocked terminal, which closes one item only.

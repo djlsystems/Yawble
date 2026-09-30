@@ -817,7 +817,10 @@ builder.Services.AddSingleton(sp => new ContainerHost(
         // A WORKFLOW ITS OWNER CANNOT DECLARE - a person told a plugin member directly - is
         // declared by the platform when nothing is left working it. The offer above goes only to
         // an owner that CAN declare, so at most one of the two acts. See `UndeclarableWorkflows`.
-        await sp.GetRequiredService<UndeclarableWorkflows>()
+        //
+        // ITS ANSWER IS THE HOOK'S: the run's terminal row says the workflow was declared, and the
+        // pump passes over the Manager on it (PayloadFields.WorkflowDeclared).
+        return await sp.GetRequiredService<UndeclarableWorkflows>()
             .OnRunEndingAsync(member, causation, succeeded, ct);
     }));
 // A container's credential and its environment, in one place - see AgentEnvironment for why those

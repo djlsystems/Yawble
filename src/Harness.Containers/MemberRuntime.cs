@@ -262,8 +262,15 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// stopped. It is passed rather than inferred because the terminal row that carries the same
     /// fact has not been written yet when this fires.
     /// </para>
+    ///
+    /// <para>
+    /// THE ANSWER IS WHETHER THE PLATFORM DECLARED THE RUN'S WORKFLOW COMPLETE, for an owner that
+    /// cannot declare, and it is carried onto the terminal row as
+    /// <see cref="PayloadFields.WorkflowDeclared"/>. Asked here because the handler is the one place
+    /// that decided it, and the row has not been written yet.
+    /// </para>
     /// </summary>
-    private readonly Func<ContainerId, long?, bool, CancellationToken, Task>? _onRunEnding;
+    private readonly Func<ContainerId, long?, bool, CancellationToken, Task<bool>>? _onRunEnding;
 
     /// <summary>
     /// This member's tree for one card key, per repository, first repository first. Asked
@@ -306,7 +313,7 @@ public sealed class MemberRuntime : IAsyncDisposable
         IPendingDeliveries? pending = null,
         Func<ContainerId, IDisposable?>? claimStart = null,
         long sinceSeq = 0,
-        Func<ContainerId, long?, bool, CancellationToken, Task>? onRunEnding = null,
+        Func<ContainerId, long?, bool, CancellationToken, Task<bool>>? onRunEnding = null,
         Func<Task>? claimSignal = null,
         Action<ContainerId>? claimWithdraw = null,
         Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? worktrees = null,
@@ -1535,6 +1542,8 @@ public sealed class MemberRuntime : IAsyncDisposable
         // a run that was stopped: that is the whole case. The Host going down is the one thing that
         // does skip it, and correctly - the process is leaving, and the interrupted-run path in
         // `ContainerHost.ResumePendingAsync` publishes on the way back up.
+        var workflowDeclared = false;
+
         if (_onRunEnding is not null)
         {
             try
@@ -1545,7 +1554,11 @@ public sealed class MemberRuntime : IAsyncDisposable
                 // member a person has just Stopped, nor nudge a run the budget cut off. The two
                 // decisions live in the same moment and disagree about this one fact, so it is
                 // passed rather than inferred; every arm above has already converged on `result`.
-                await _onRunEnding(Id, cause, result.Succeeded, _shutdown.Token);
+                //
+                // ITS ANSWER IS WHETHER THE PLATFORM DECLARED THIS RUN'S WORKFLOW as it ended, for an
+                // owner that cannot declare; the terminal row below says so. See
+                // PayloadFields.WorkflowDeclared.
+                workflowDeclared = await _onRunEnding(Id, cause, result.Succeeded, _shutdown.Token) && result.Succeeded;
             }
             catch (Exception)
             {
@@ -1671,6 +1684,19 @@ public sealed class MemberRuntime : IAsyncDisposable
                 if (result.Succeeded && result.Quiet && !ContainerId.TryParse(message.Source, out _))
                 {
                     payload = payload[..^1] + $",\"{PayloadFields.Quiet}\":true}}";
+                }
+
+                // A WORKFLOW THE PLATFORM DECLARED AS THIS RUN ENDED, the same way: one key, only
+                // when true. It is closed, so the pump passes over the Manager on it; see
+                // PayloadFields.WorkflowDeclared. Every item of the run must be in that workflow -
+                // a later row of a batch is passed over with the first - and, as for quiet, never
+                // towards a member waiting on its own `tell`, nor on a trigger's run, whose own
+                // wake choice below governs.
+                if (workflowDeclared
+                    && batch.All(item => item.CorrelationId == batch[0].CorrelationId)
+                    && batch.All(item => !ContainerId.TryParse(item.Source, out _) && !WakeManagerPolicy.IsTriggerSource(item.Source)))
+                {
+                    payload = payload[..^1] + $",\"{PayloadFields.WorkflowDeclared}\":true}}";
                 }
 
                 // THE TRIGGER'S WAKE CHOICE, the same way: one key, only when the delivery this row
