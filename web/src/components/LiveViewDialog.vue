@@ -4,6 +4,7 @@ import { listMemberRuns, NoLiveView, openLiveView, readRunTranscript } from '../
 import type { MemberId, MemberRun, TeamId } from '../api/types';
 import { liveLineTime, parseLiveLine, type LiveLine } from '../lib/liveLines';
 import { runDuration, runItemsText, runItemText, runOutcomeLabel, runStartedText, runStartedTitle } from '../lib/memberRuns';
+import { QuietMark, WorkflowDeclaredMark } from '../lib/runMarks';
 
 /**
  * WATCHING ONE MEMBER. Two parts: at the top, the run in progress, streaming as it
@@ -386,8 +387,14 @@ onBeforeUnmount(end);
                 <!-- A QUIET RUN woke nobody when it finished: said here, beside how it ended, so a
                      list of runs nobody was told about is not mistaken for missed work. -->
                 <span v-if="run.quiet" class="earlier-run-quiet text-caption os-text-muted q-mr-xs">
-                  quiet
-                  <q-tooltip>This run finished quietly: nobody was woken by it.</q-tooltip>
+                  {{ QuietMark.label }}
+                  <q-tooltip>{{ QuietMark.tooltip }}</q-tooltip>
+                </span>
+                <!-- A WORKFLOW THE PLATFORM DECLARED as this run ended: marked as a quiet run is, so a
+                     person sees why the Manager did not run. -->
+                <span v-else-if="run.workflowDeclared" class="earlier-run-declared text-caption os-text-muted q-mr-xs">
+                  {{ WorkflowDeclaredMark.label }}
+                  <q-tooltip>{{ WorkflowDeclaredMark.tooltip }}</q-tooltip>
                 </span>
                 <q-badge class="earlier-run-outcome" :data-outcome="run.outcome" :label="runOutcomeLabel(run.outcome)" />
               </q-item-section>

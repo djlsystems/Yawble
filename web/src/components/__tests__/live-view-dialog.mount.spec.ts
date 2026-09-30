@@ -257,6 +257,7 @@ const run = (seq: number, over: Record<string, unknown> = {}) => ({
   output: null,
   reason: null,
   quiet: false,
+  workflowDeclared: false,
   items: null,
   deferredFromRun: null,
   ...over,
@@ -331,6 +332,19 @@ describe('the watch dialog: live run and earlier runs', () => {
     expect(quiet!.querySelector('.earlier-run-quiet')?.textContent?.trim()).toBe('quiet');
     expect(loud!.querySelector('.earlier-run-quiet')).toBeNull();
     expect(quiet!.querySelector('.earlier-run-outcome')!.textContent).toBe('completed');
+  });
+
+  it('marks a run whose workflow the platform declared, and a run without it not at all', async () => {
+    stubApi({
+      pages: { '': { runs: [run(9, { workflowDeclared: true }), run(7)], nextBefore: null } },
+    });
+    await mountDialog(LiveViewDialog, { ...props, running: false });
+
+    const [declared, plain] = runRows();
+    expect(declared!.querySelector('.earlier-run-declared')?.textContent?.trim()).toBe('workflow declared');
+    expect(declared!.querySelector('.earlier-run-quiet')).toBeNull();
+    expect(declared!.querySelector('.earlier-run-outcome')!.textContent).toBe('completed');
+    expect(plain!.querySelector('.earlier-run-declared')).toBeNull();
   });
 
   it("shows each item's outcome for a run of several, a deferral included, and the deferred item's own run", async () => {
