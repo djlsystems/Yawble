@@ -271,7 +271,10 @@ the workflow began, and checks each one exactly as the route does. For each it a
 - **It fails**: the notice names each problem by file and field, and offers no install.
 
 The backlog item the workflow was dispatched from shows the same notice under that dispatch. A
-package written in an earlier workflow is not checked again. So a team delivering a package writes it
+package written in an earlier workflow is not checked again, and a passing notice is not repeated:
+when two workflows were open while the package was written, only the first declared shows it, and a
+later one shows it again only if the folder's files changed since (each notice carries
+`contentHash`, a digest of the folder). So a team delivering a package writes it
 to `<team documents>/<id>-<version>/`; the built-in skill `packaging-solutions` tells the Concierge
 and the Manager so, and the Concierge hands the person the link on the address their browser uses
 (`HARNESS_PUBLIC_URL`).

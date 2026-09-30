@@ -314,4 +314,8 @@ public static class PayloadFields
 
     /// <summary>`solution.checked`: each problem, <c>&lt;file&gt; &lt;field&gt;: &lt;reason&gt;</c>, on a fail only.</summary>
     public const string Problems = "problems";
+
+    /// <summary>`solution.checked`: a digest of the package folder's files when it was checked; a
+    /// passing notice is not repeated on a team for the same folder, version and digest.</summary>
+    public const string ContentHash = "contentHash";
 }

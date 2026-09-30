@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Harness.Contracts;
 
@@ -16,6 +18,14 @@ namespace Harness.Host.Solutions;
 /// workflow deliver", and a folder left from an earlier round did not come from it. Nothing here
 /// installs or writes anything but the rows.
 /// </para>
+///
+/// <para>
+/// ONE PASSING NOTICE PER PACKAGE VERSION ON A TEAM. Two workflows open while a package is written
+/// both see it written during them; each would post "ready. **Review and install**" for the same
+/// thing. So every notice carries <c>contentHash</c>, a digest of the folder's files, and a pass is
+/// not posted when the team already has a passing notice for the same folder, version and digest.
+/// A changed folder has a new digest and gets a new notice; a failing notice is always posted.
+/// </para>
 /// </summary>
 public sealed class SolutionNotice(SolutionService solutions, TeamDocuments documents, IMessageLog log)
 {
@@ -25,6 +35,9 @@ public sealed class SolutionNotice(SolutionService solutions, TeamDocuments docu
     /// <summary>How many files one package folder is walked for before it counts as not written:
     /// a package is a handful of files, and the walk runs inside a declaration.</summary>
     private const int FilesWalked = 5000;
+
+    /// <summary>How many earlier notices are read per page when looking for a passing one.</summary>
+    private const int NoticesPerPage = 500;
 
     public static string LinkFor(string folder) => $"{InstallRoute}?folder={Uri.EscapeDataString(folder)}";
 
@@ -44,6 +57,7 @@ public sealed class SolutionNotice(SolutionService solutions, TeamDocuments docu
         if (await log.FindAsync(correlation, ct) is not { } began) return [];
 
         var appended = new List<Message>();
+        HashSet<(string Path, string? Version, string Hash)>? passed = null;
 
         foreach (var folder in Directory.EnumerateDirectories(root).Order(StringComparer.Ordinal))
         {
@@ -51,6 +65,14 @@ public sealed class SolutionNotice(SolutionService solutions, TeamDocuments docu
             if (!WrittenSince(folder, began.OccurredAt)) continue;
 
             var payload = Payload(folder, solutions.Check(folder));
+            var hash = ContentHash(folder);
+            payload[PayloadFields.ContentHash] = hash;
+
+            if (payload[PayloadFields.Ok] is true)
+            {
+                passed ??= await PassedAsync(team, ct);
+                if (!passed.Add((folder, payload[PayloadFields.Version] as string, hash))) continue;
+            }
 
             appended.Add(await log.AppendAsync(
                 new NewMessage(MessageTypes.SolutionChecked, JsonSerializer.Serialize(payload), declarer.ToString(), declaration.Seq),
@@ -58,6 +80,99 @@ public sealed class SolutionNotice(SolutionService solutions, TeamDocuments docu
         }
 
         return appended;
+    }
+
+    /// <summary>
+    /// Every passing notice already on the team, as folder, version and digest. The type is read in
+    /// the query, so this walks only <c>solution.checked</c> rows, then keeps the team's. A notice
+    /// written before digests were carried has none and matches nothing.
+    /// </summary>
+    private async Task<HashSet<(string Path, string? Version, string Hash)>> PassedAsync(string team, CancellationToken ct)
+    {
+        var passed = new HashSet<(string, string?, string)>();
+        string[] types = [MessageTypes.SolutionChecked];
+        long after = 0;
+
+        while (true)
+        {
+            var page = await log.ReadAfterAsync(after, types, NoticesPerPage, ct);
+            foreach (var row in page)
+            {
+                if (!string.Equals(MessageTeam.Of(row), team, StringComparison.Ordinal)) continue;
+                if (Passed(row) is { } key) passed.Add(key);
+            }
+
+            if (page.Count < NoticesPerPage) return passed;
+            after = page[^1].Seq;
+        }
+    }
+
+    private static (string, string?, string)? Passed(Message row)
+    {
+        try
+        {
+            var payload = JsonDocument.Parse(row.Payload).RootElement;
+            if (payload.ValueKind != JsonValueKind.Object) return null;
+            if (!payload.TryGetProperty(PayloadFields.Ok, out var ok) || ok.ValueKind != JsonValueKind.True) return null;
+            if (Text(payload, PayloadFields.Path) is not { } path) return null;
+            if (Text(payload, PayloadFields.ContentHash) is not { } hash) return null;
+            return (path, Text(payload, PayloadFields.Version), hash);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A digest of the folder's files: each relative path and its bytes, in ordinal path order, so
+    /// the same files give the same digest wherever and whenever they were written. Links are not
+    /// followed; a file that cannot be read counts by its path alone.
+    /// </summary>
+    public static string ContentHash(string folder)
+    {
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            AttributesToSkip = FileAttributes.ReparsePoint,
+        };
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+
+        IEnumerable<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(folder, "*", options)
+                .Take(FilesWalked)
+                .Select(file => Path.GetRelativePath(folder, file).Replace('\\', '/'))
+                .Order(StringComparer.Ordinal)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            files = [];
+        }
+
+        foreach (var relative in files)
+        {
+            var name = Encoding.UTF8.GetBytes(relative);
+            hash.AppendData(BitConverter.GetBytes(name.Length));
+            hash.AppendData(name);
+
+            try
+            {
+                var bytes = File.ReadAllBytes(Path.Combine(folder, relative));
+                hash.AppendData(BitConverter.GetBytes((long)bytes.Length));
+                hash.AppendData(bytes);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                hash.AppendData(BitConverter.GetBytes(-1L));
+            }
+        }
+
+        return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
     private static Dictionary<string, object?> Payload(string folder, SolutionFolderCheck answer)
