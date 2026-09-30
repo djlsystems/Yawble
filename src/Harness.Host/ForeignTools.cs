@@ -5,14 +5,15 @@ using Harness.Contracts;
 namespace Harness.Host;
 
 /// <summary>
-/// THE ONE SEAM TO THE PRESET ISOLATION MODEL: the CLI's own tools a preset allows beyond
-/// <c>harness</c>, by name, or null when the preset declares none and so is NOT VERIFIED. The per-run
-/// check asks nothing else of a preset. Program.cs passes the function that answers it.
+/// THE ONE SEAM TO THE PRESET ISOLATION MODEL: what a preset may be offered, as
+/// <see cref="AgentCatalog.Allowance"/> answers it, or null for a preset the tenant does not have.
+/// The per-run check asks nothing else of a preset. Program.cs passes the catalog's answer; a test
+/// may pass its own.
 /// </summary>
-public sealed class PresetAllowedTools(Func<string, IReadOnlyCollection<string>?> allowed)
+public sealed class PresetAllowedTools(Func<string, ToolAllowance?> allowance)
 {
-    /// <summary>The allowed local tools of <paramref name="agent"/>, or null when it is not verified.</summary>
-    public IReadOnlyCollection<string>? For(string agent) => allowed(agent);
+    /// <summary>The allowance of <paramref name="agent"/>, or null when there is no such preset.</summary>
+    public ToolAllowance? For(string agent) => allowance(agent);
 }
 
 /// <summary>What one run's check found. A clean run is <see cref="Clean"/>; the other two write a row.</summary>
@@ -21,6 +22,10 @@ public enum ForeignToolsStatus
     Clean,
     Foreign,
     NotMeasured,
+
+    /// <summary>The whole offer was read and nothing foreign was in it, but the preset declares no
+    /// allowed tools, so its own tools were not judged: not verified, never clean.</summary>
+    NotVerified,
 }
 
 /// <summary>
@@ -33,31 +38,34 @@ public sealed record ForeignToolsFinding(
     IReadOnlyList<TranscriptTool> Offered,
     string? Why = null)
 {
-    /// <summary>The payload's status word: <c>foreign</c> or <c>notMeasured</c>.</summary>
-    public string Word => Status == ForeignToolsStatus.Foreign ? "foreign" : "notMeasured";
+    /// <summary>The payload's status word: <c>foreign</c>, <c>notMeasured</c> or <c>notVerified</c>.</summary>
+    public string Word => Status switch
+    {
+        ForeignToolsStatus.Foreign => "foreign",
+        ForeignToolsStatus.NotVerified => "notVerified",
+        _ => "notMeasured",
+    };
 }
 
 /// <summary>
-/// WHAT IS FOREIGN. The platform gives a member the <c>harness</c> MCP server and the CLI's own
-/// tools its preset allows, and nothing else. So a tool from any other MCP server - an account
-/// connector, a home MCP server, a plugin's - is foreign whatever the preset says, and a CLI's own
-/// tool is foreign when the preset declares an allowed list without it.
+/// WHAT IS FOREIGN is the preset's <see cref="ToolAllowance"/>: the platform gives a member the
+/// <c>harness</c> MCP server, the servers its preset allows and the CLI's own tools its preset
+/// allows, and nothing else. A tool from any other MCP server - an account connector, a home MCP
+/// server, a plugin's - is foreign whatever the preset says; a CLI's own tool is foreign when the
+/// preset is isolated and does not list it. A NOT VERIFIED preset lists no tools, so only its
+/// servers are judged (<see cref="ToolAllowance.Allows"/>).
 ///
 /// UNKNOWN STAYS UNKNOWN. Clean needs both halves known: the transcript wrote down the whole offer,
-/// and the preset declares its allowed list. Anything less, with nothing foreign seen, is
-/// <see cref="ForeignToolsStatus.NotMeasured"/> - never clean. A foreign tool that IS seen is reported
+/// and the preset is isolated. With nothing foreign seen, an offer not written down is
+/// <see cref="ForeignToolsStatus.NotMeasured"/> and a preset that is not isolated is
+/// <see cref="ForeignToolsStatus.NotVerified"/> - never clean. A foreign tool that IS seen is reported
 /// whatever else is unknown: evidence is not an estimate.
 /// </summary>
 public static class ForeignToolsJudge
 {
-    /// <summary>The MCP server the platform gives every member.</summary>
-    public const string Harness = "harness";
-
-    public static ForeignToolsFinding Judge(TranscriptToolUse use, IReadOnlyCollection<string>? allowed)
+    public static ForeignToolsFinding Judge(TranscriptToolUse use, ToolAllowance allowance)
     {
-        bool Foreign(TranscriptTool tool) => tool.Server is { } server
-            ? !string.Equals(server, Harness, StringComparison.OrdinalIgnoreCase)
-            : allowed is not null && !allowed.Contains(tool.Name, StringComparer.Ordinal);
+        bool Foreign(TranscriptTool tool) => !allowance.Allows(tool.Server, tool.Name);
 
         var called = use.Called.Where(Foreign).OrderBy(t => t.ToString(), StringComparer.Ordinal).ToList();
         var offered = use.Offered.Where(Foreign)
@@ -69,25 +77,35 @@ public static class ForeignToolsJudge
 
         if (!use.OfferedComplete) return new(ForeignToolsStatus.NotMeasured, [], [], $"its transcript records {use.Measured}");
 
-        return allowed is null
-            ? new(ForeignToolsStatus.NotMeasured, [], [], "its preset declares no allowed tools, so it is not verified")
-            : new(ForeignToolsStatus.Clean, [], []);
+        return allowance.State == IsolationState.Isolated
+            ? new(ForeignToolsStatus.Clean, [], [])
+            : new(ForeignToolsStatus.NotVerified, [], [],
+                "its preset declares no allowed tools, so only its MCP servers were judged");
     }
 
     /// <summary>The finding as a person reads it, naming the member.</summary>
-    public static string Sentence(string member, ForeignToolsFinding finding)
+    public static string Sentence(string member, ForeignToolsFinding finding, ToolAllowance allowance)
     {
         static string Names(IEnumerable<TranscriptTool> tools) => string.Join(", ", tools.Select(t => t.ToString()));
+
+        var unverified = allowance.State == IsolationState.Isolated
+            ? ""
+            : $" Its preset {allowance.Preset} is not verified: it declares no allowed tools, so only MCP servers were judged.";
 
         return finding.Status switch
         {
             ForeignToolsStatus.Foreign when finding.Called.Count > 0 =>
                 $"{member} CALLED tools the platform did not give it: {Names(finding.Called)}."
-                + (finding.Offered.Count > 0 ? $" It was also offered: {Names(finding.Offered)}." : ""),
+                + (finding.Offered.Count > 0 ? $" It was also offered: {Names(finding.Offered)}." : "")
+                + unverified,
             ForeignToolsStatus.Foreign =>
-                $"{member} was offered tools the platform did not give it, and called none: {Names(finding.Offered)}.",
+                $"{member} was offered tools the platform did not give it, and called none: {Names(finding.Offered)}."
+                + unverified,
             ForeignToolsStatus.NotMeasured =>
-                $"{member}'s run was not measured for foreign tools: {finding.Why}.",
+                $"{member}'s run was not measured for foreign tools: {finding.Why}." + unverified,
+            ForeignToolsStatus.NotVerified =>
+                $"{member}'s run was offered no foreign MCP server, but its preset {allowance.Preset} is not "
+                + "verified: it declares no allowed tools, so the CLI's own tools were not judged.",
             _ => $"{member}'s run offered and called only the tools the platform gives it.",
         };
     }
@@ -98,8 +116,9 @@ public static class ForeignToolsJudge
 /// (<c>MemberRuntime</c>'s <c>onTerminal</c>). For that row: read the transcript the agent wrote, as the
 /// agent, judge its tools, and write what is not clean - an <c>agent.foreignTools</c> row on the
 /// team's log inside the run's workflow, so it lands on the member's card, and for a foreign tool a
-/// <c>tenant_events</c> row too. A row that is not a team member's run is not checked: the Concierge
-/// runs no team log rows and is never flagged. Never throws except on the token: a check that cannot
+/// <c>tenant_events</c> row too. Only a preset its <see cref="ToolAllowance"/> says is
+/// <see cref="ToolAllowance.Checked"/> is judged: a Concierge preset and one that runs no language
+/// model are never flagged, and a row that is not a team member's run is not checked at all. Never throws except on the token: a check that cannot
 /// read is not measured, and costs nothing else.
 /// </summary>
 public sealed class ForeignToolsCheck(
@@ -131,7 +150,11 @@ public sealed class ForeignToolsCheck(
             return null;
         }
 
-        if (catalog.Definition(member.Agent) is not { Launch.LanguageModel: true } definition) return null;
+        if (allowed.For(member.Agent) is not { Checked: true } allowance
+            || catalog.Definition(member.Agent) is not { } definition)
+        {
+            return null;
+        }
 
         var path = Text(root, PayloadFields.AgentTranscript);
 
@@ -140,7 +163,6 @@ public sealed class ForeignToolsCheck(
         // so. A preset that names NO transcript can never be measured, and each of its runs says so.
         if (path is null && definition.LiveView is not null) return null;
         var format = Text(root, PayloadFields.AgentTranscriptFormat) ?? LiveView.ClaudeJsonl;
-        var permitted = allowed.For(definition.Name);
 
         ForeignToolsFinding finding;
         string measured;
@@ -169,15 +191,15 @@ public sealed class ForeignToolsCheck(
             }
             else
             {
-                var use = TranscriptTools.Extract(format, text);
+                var use = TranscriptTools.Extract(format, text, await BesideAsync(path, format, ct));
                 measured = use.Measured;
-                finding = ForeignToolsJudge.Judge(use, permitted);
+                finding = ForeignToolsJudge.Judge(use, allowance);
             }
         }
 
         if (finding.Status == ForeignToolsStatus.Clean) return finding;
 
-        var sentence = ForeignToolsJudge.Sentence(id.Name, finding);
+        var sentence = ForeignToolsJudge.Sentence(id.Name, finding, allowance);
         var called = finding.Called.Select(t => t.ToString()).ToList();
         var offered = finding.Offered.Select(t => t.ToString()).ToList();
 
@@ -189,6 +211,7 @@ public sealed class ForeignToolsCheck(
                 [PayloadFields.ForeignCalled] = called,
                 [PayloadFields.ForeignOffered] = offered,
                 [PayloadFields.Agent] = definition.Name,
+                [PayloadFields.PresetVerified] = allowance.State == IsolationState.Isolated,
                 [PayloadFields.AgentTranscriptFormat] = format,
                 [PayloadFields.Measured] = measured,
                 [PayloadFields.Run] = terminal.Seq,
@@ -210,6 +233,7 @@ public sealed class ForeignToolsCheck(
                     team = id.Team,
                     member = id.Name,
                     agent = definition.Name,
+                    verified = allowance.State == IsolationState.Isolated,
                     format,
                     run = terminal.Seq.ToString(CultureInfo.InvariantCulture),
                     called,
@@ -219,6 +243,30 @@ public sealed class ForeignToolsCheck(
         }
 
         return finding;
+    }
+
+    /// <summary>
+    /// The files the format keeps beside its transcript that the extractor reads too (Grok's tool
+    /// definitions and MCP events), by name, read as the agent. One that is missing or unreadable is
+    /// left out, and the extractor then does not call the offer complete.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, string>> BesideAsync(string path, string format, CancellationToken ct)
+    {
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (Path.GetDirectoryName(path) is not { Length: > 0 } folder) return found;
+
+        foreach (var name in TranscriptTools.Beside(format))
+        {
+            try
+            {
+                if ((await AgentFiles.ReadAllAsync(Path.Combine(folder, name), runAs, ct)).Text is { } text) found[name] = text;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+            }
+        }
+
+        return found;
     }
 
     private static string? Text(JsonElement root, string name) =>

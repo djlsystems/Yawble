@@ -69,6 +69,12 @@ describe('a card whose run met a foreign tool says so', () => {
     expect(el.querySelector('.k-card-foreign-unmeasured')!.textContent).toContain('tools not measured');
   });
 
+  it('says a run of a preset with no allowed tools is not verified, rather than showing it clean', () => {
+    const el = render(card({ foreignTools: 'notVerified' }));
+
+    expect(el.querySelector('.k-card-foreign-unmeasured')!.textContent).toContain('preset not verified');
+  });
+
   it('shows nothing for a clean card, or one from a server that sends no field', () => {
     expect(render(card({ foreignTools: null })).querySelector('.k-card-foreign')).toBeNull();
     mounted?.unmount();

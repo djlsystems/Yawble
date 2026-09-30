@@ -374,8 +374,9 @@ public static class MessageTypes
     /// member run that ended, the platform reads the agent's own transcript and names each tool it
     /// was offered or called that is outside <c>harness</c> and its preset's allowed list: an account
     /// connector, a home MCP server, a plugin. <c>foreign</c>: tools named, called apart from offered.
-    /// <c>notMeasured</c>: the format cannot list what was offered, or the preset declares no allowed
-    /// list, and nothing foreign was seen - never reported clean. A clean run writes nothing. Source
+    /// <c>notMeasured</c>: the format cannot list what was offered, and nothing foreign was seen.
+    /// <c>notVerified</c>: the offer was read whole and held no foreign server, but the preset declares
+    /// no allowed tools. Neither is ever reported clean. A clean run writes nothing. Source
     /// is the member and causation the run's terminal row, so it lands on the member's card. The
     /// Concierge is not a member and is never checked.
     /// </summary>

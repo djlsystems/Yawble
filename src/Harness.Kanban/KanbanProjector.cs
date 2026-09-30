@@ -1108,14 +1108,18 @@ public static class KanbanForeignTools
     /// <summary>A run on this card was offered one, and called none.</summary>
     public const string Offered = "offered";
 
-    /// <summary>A run on this card could not be checked.</summary>
+    /// <summary>A run on this card could not be checked: its transcript does not list what was offered.</summary>
     public const string NotMeasured = "notMeasured";
+
+    /// <summary>A run on this card offered no foreign server, but its preset declares no allowed tools.</summary>
+    public const string NotVerified = "notVerified";
 
     private static int Rank(string? mark) => mark switch
     {
-        Called => 3,
-        Offered => 2,
-        NotMeasured => 1,
+        Called => 4,
+        Offered => 3,
+        NotMeasured => 2,
+        NotVerified => 1,
         _ => 0,
     };
 
@@ -1137,6 +1141,7 @@ public static class KanbanForeignTools
                         ? Called
                         : Offered,
                 "notMeasured" => NotMeasured,
+                "notVerified" => NotVerified,
                 _ => null,
             };
         }

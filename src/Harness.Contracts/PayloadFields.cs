@@ -315,7 +315,7 @@ public static class PayloadFields
     /// <summary>`solution.checked`: each problem, <c>&lt;file&gt; &lt;field&gt;: &lt;reason&gt;</c>, on a fail only.</summary>
     public const string Problems = "problems";
 
-    /// <summary>`agent.foreignTools`: <c>foreign</c> or <c>notMeasured</c>. A clean run writes no row.</summary>
+    /// <summary>`agent.foreignTools`: <c>foreign</c>, <c>notMeasured</c> or <c>notVerified</c>. A clean run writes no row.</summary>
     public const string ForeignToolsStatus = "foreignStatus";
 
     /// <summary>`agent.foreignTools`: each foreign tool the run CALLED, as <c>server/tool</c> or the tool alone.</summary>
@@ -326,6 +326,9 @@ public static class PayloadFields
 
     /// <summary>`agent.foreignTools`: what the run's transcript format records about tools, in words.</summary>
     public const string Measured = "measured";
+
+    /// <summary>`agent.foreignTools`: whether the preset declares its allowed tools. False: only MCP servers were judged.</summary>
+    public const string PresetVerified = "presetVerified";
 
     /// <summary>`agent.foreignTools`: the preset the run launched as.</summary>
     public const string Agent = "agent";

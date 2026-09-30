@@ -1327,9 +1327,10 @@ builder.Services.AddHostedService<PumpService>();
 builder.Services.AddHostedService<KanbanChangePush>();
 
 // THE PER-RUN FOREIGN TOOLS CHECK, called by every member at the end of its run (`onTerminal`
-// above). What a preset allows is this seam; until a preset declares its list it is not verified,
-// and its runs are never reported clean. See ForeignToolsCheck.
-builder.Services.AddSingleton(new PresetAllowedTools(_ => null));
+// above). What a preset allows is the catalog's isolation model (AgentCatalog.Allowance); a preset
+// that declares no allowed tools is not verified, and its runs are never reported clean. See
+// ForeignToolsCheck.
+builder.Services.AddSingleton(sp => new PresetAllowedTools(sp.GetRequiredService<AgentCatalog>().Allowance));
 builder.Services.AddSingleton<ForeignToolsCheck>();
 builder.Services.AddHostedService<DefaultBranchAtStart>();
 // The operator CLI's `plugin install` asks for a rescan by writing a file the Host polls: no restart, no API key.

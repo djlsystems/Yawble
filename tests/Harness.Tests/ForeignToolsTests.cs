@@ -21,22 +21,47 @@ public sealed class ForeignToolsTests
     internal static string Fixture(string folder, string file) =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", folder, file));
 
+    /// <summary>A transcript and the files its format keeps beside it, read as the check reads them.</summary>
+    private static TranscriptToolUse Extract(string format, string folder, string file)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", folder, file);
+        var beside = TranscriptTools.Beside(format)
+            .Where(name => File.Exists(Path.Combine(Path.GetDirectoryName(path)!, name)))
+            .ToDictionary(name => name, name => File.ReadAllText(Path.Combine(Path.GetDirectoryName(path)!, name)));
+
+        return TranscriptTools.Extract(format, File.ReadAllText(path), beside);
+    }
+
     private static IReadOnlyList<string> Names(IEnumerable<TranscriptTool> tools) =>
         [.. tools.Select(t => t.ToString()).Order(StringComparer.Ordinal)];
 
-    /// <summary>Claude's own tools in the isolated probe: what a preset's allowed list would name.</summary>
-    internal static readonly IReadOnlyCollection<string> ClaudeLocal =
-    [
-        "Agent", "Bash", "Edit", "ListAgents", "Read", "ReportFindings", "ScheduleWakeup", "Skill", "ToolSearch",
-        "Workflow", "Write", "CronCreate", "CronDelete", "CronList", "DesignSync", "EnterWorktree", "ExitWorktree",
-        "Monitor", "NotebookEdit", "PushNotification", "RemoteTrigger", "SendMessage", "TaskCreate", "TaskGet",
-        "TaskList", "TaskStop", "TaskUpdate", "WebFetch", "WebSearch",
-    ];
+    /// <summary>The built-in presets, and the isolation model's answer for them: the real wiring.</summary>
+    private static readonly AgentCatalog Catalog = new(AgentCatalogFile.BuiltIns());
+
+    internal static ToolAllowance Allowance(string preset) => Catalog.Allowance(preset)!;
+
+    /// <summary>The same preset with its declaration taken away: what the model says of an undeclared one.</summary>
+    internal static ToolAllowance NotVerified(string preset) =>
+        AgentIsolationPolicy.For(Catalog.Definition(preset)! with { Isolation = null })!;
+
+    [Fact]
+    public void The_built_in_presets_are_checked_by_the_isolation_models_states()
+    {
+        Assert.Equal(IsolationState.Isolated, Allowance("claude-headless").State);
+        Assert.Equal(IsolationState.NotVerified, NotVerified("claude-headless").State);
+        Assert.Null(NotVerified("claude-headless").AllowedTools);
+
+        // The Concierge and a program are never checked, so never flagged.
+        Assert.Equal(IsolationState.Concierge, Allowance("claude").State);
+        Assert.False(Allowance("claude").Checked);
+        Assert.Equal(IsolationState.NotAModel, Allowance("echo").State);
+        Assert.False(Allowance("echo").Checked);
+    }
 
     [Fact]
     public void Claude_names_the_whole_offer_and_every_call()
     {
-        var use = TranscriptTools.Extract(LiveView.ClaudeJsonl, Fixture("ForeignTools", "claude-offers-connectors.jsonl"));
+        var use = Extract(LiveView.ClaudeJsonl, "ForeignTools", "claude-offers-connectors.jsonl");
 
         Assert.True(use.OfferedComplete);
         var offered = Names(use.Offered);
@@ -51,13 +76,13 @@ public sealed class ForeignToolsTests
     }
 
     [Fact]
-    public void A_member_offered_account_connectors_is_foreign_whatever_its_preset_allows()
+    public void A_member_offered_account_connectors_is_foreign_whether_or_not_its_preset_is_verified()
     {
-        var use = TranscriptTools.Extract(LiveView.ClaudeJsonl, Fixture("ForeignTools", "claude-offers-connectors.jsonl"));
+        var use = Extract(LiveView.ClaudeJsonl, "ForeignTools", "claude-offers-connectors.jsonl");
 
-        foreach (var allowed in new[] { null, ClaudeLocal })
+        foreach (var allowance in new[] { Allowance("claude-headless"), NotVerified("claude-headless") })
         {
-            var finding = ForeignToolsJudge.Judge(use, allowed);
+            var finding = ForeignToolsJudge.Judge(use, allowance);
 
             Assert.Equal(ForeignToolsStatus.Foreign, finding.Status);
             Assert.Empty(finding.Called);
@@ -65,15 +90,21 @@ public sealed class ForeignToolsTests
             Assert.Contains(finding.Offered, t => t.ToString() == "claude.ai Google Calendar");
             Assert.DoesNotContain(finding.Offered, t => t.Server == "harness");
             Assert.StartsWith("DeveloperTobias was offered tools the platform did not give it, and called none: ",
-                ForeignToolsJudge.Sentence("DeveloperTobias", finding), StringComparison.Ordinal);
+                ForeignToolsJudge.Sentence("DeveloperTobias", finding, allowance), StringComparison.Ordinal);
         }
+
+        // Not verified: only servers are judged, and the finding says so.
+        var unverified = ForeignToolsJudge.Judge(use, NotVerified("claude-headless"));
+        Assert.DoesNotContain(unverified.Offered, t => t.Server is null);
+        Assert.Contains("is not verified", ForeignToolsJudge.Sentence("Dev", unverified, NotVerified("claude-headless")), StringComparison.Ordinal);
     }
 
     [Fact]
     public void A_call_is_named_apart_from_an_offer()
     {
-        var use = TranscriptTools.Extract(LiveView.ClaudeJsonl, Fixture("ForeignTools", "claude-calls-connectors.jsonl"));
-        var finding = ForeignToolsJudge.Judge(use, ClaudeLocal);
+        var use = Extract(LiveView.ClaudeJsonl, "ForeignTools", "claude-calls-connectors.jsonl");
+        var allowance = Allowance("claude-headless");
+        var finding = ForeignToolsJudge.Judge(use, allowance);
 
         Assert.Equal(ForeignToolsStatus.Foreign, finding.Status);
         Assert.Equal(
@@ -82,80 +113,135 @@ public sealed class ForeignToolsTests
         Assert.DoesNotContain(finding.Offered, t => finding.Called.Contains(t));
         Assert.Contains(finding.Offered, t => t.ToString() == "claude_ai_Gmail/send_message");
 
-        // Artifact is one of the Concierge's own tools, not in a member preset's list: a local tool
-        // outside the allowed list is foreign too.
+        // Artifact is one of the Concierge's own tools, not in the headless preset's list: a local
+        // tool outside the allowed list is foreign too.
         Assert.Contains(finding.Called, t => t.ToString() == "Artifact");
-        Assert.StartsWith("Dev CALLED tools the platform did not give it: ", ForeignToolsJudge.Sentence("Dev", finding), StringComparison.Ordinal);
+        Assert.StartsWith("Dev CALLED tools the platform did not give it: ", ForeignToolsJudge.Sentence("Dev", finding, allowance), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void An_isolated_claude_run_is_clean_only_when_its_preset_declares_an_allowed_list()
+    public void An_isolated_claude_member_is_clean_under_its_preset_and_never_clean_when_not_verified()
     {
-        var use = TranscriptTools.Extract(LiveView.ClaudeJsonl, Fixture("ForeignTools", "claude-isolated.jsonl"));
+        var use = Extract(LiveView.ClaudeJsonl, "ForeignTools", "claude-isolated-member.jsonl");
 
         Assert.True(use.OfferedComplete);
+        Assert.Equal(["Bash", "ToolSearch", "harness/progress"], Names(use.Called));
+        Assert.Equal(ForeignToolsStatus.Clean, ForeignToolsJudge.Judge(use, Allowance("claude-headless")).Status);
+
+        var unverified = ForeignToolsJudge.Judge(use, NotVerified("claude-headless"));
+        Assert.Equal(ForeignToolsStatus.NotVerified, unverified.Status);
+        Assert.Equal("notVerified", unverified.Word);
+        Assert.Contains("not verified", ForeignToolsJudge.Sentence("Dev", unverified, NotVerified("claude-headless")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_launch_that_only_drops_mcp_servers_still_offers_claude_tools_outside_the_preset()
+    {
+        // --strict-mcp-config alone: no foreign server, but the CLI's own tools that reach the
+        // account and other sessions are offered, and the preset does not list them.
+        var use = Extract(LiveView.ClaudeJsonl, "ForeignTools", "claude-isolated.jsonl");
         Assert.DoesNotContain(use.Offered, t => t.Server is { } server && server != "harness");
-        Assert.Equal(ForeignToolsStatus.Clean, ForeignToolsJudge.Judge(use, ClaudeLocal).Status);
 
-        // Not verified: nothing foreign, and still never clean.
-        var unverified = ForeignToolsJudge.Judge(use, null);
-        Assert.Equal(ForeignToolsStatus.NotMeasured, unverified.Status);
-        Assert.Contains("not verified", unverified.Why, StringComparison.Ordinal);
-
-        // A declared list that leaves out a tool the CLI offered makes that tool foreign.
-        var narrower = ForeignToolsJudge.Judge(use, [.. ClaudeLocal.Where(n => n != "WebSearch")]);
-        Assert.Equal(ForeignToolsStatus.Foreign, narrower.Status);
-        Assert.Equal(["WebSearch"], Names(narrower.Offered));
-    }
-
-    [Fact]
-    public void Copilot_names_the_servers_whose_instructions_it_carries_and_every_call()
-    {
-        var github = TranscriptTools.Extract(LiveView.CopilotEvents, Fixture("LiveView", "copilot-events.jsonl"));
-        Assert.False(github.OfferedComplete);
-        Assert.Equal(["github-mcp-server"], Names(github.Offered));
-        Assert.Equal(["bash", "harness/team_current", "view"], Names(github.Called));
-
-        var finding = ForeignToolsJudge.Judge(github, null);
+        var finding = ForeignToolsJudge.Judge(use, Allowance("claude-headless"));
         Assert.Equal(ForeignToolsStatus.Foreign, finding.Status);
-        Assert.Equal(["github-mcp-server"], Names(finding.Offered));
+        Assert.Contains(finding.Offered, t => t.ToString() == "RemoteTrigger");
+        Assert.Contains(finding.Offered, t => t.ToString() == "SendMessage");
+        Assert.All(finding.Offered, t => Assert.Null(t.Server));
 
-        var none = TranscriptTools.Extract(LiveView.CopilotEvents, Fixture("ForeignTools", "copilot-no-builtin-servers.jsonl"));
-        Assert.Empty(none.Offered);
-        Assert.Equal(["view"], Names(none.Called));
-        Assert.Equal(ForeignToolsStatus.NotMeasured, ForeignToolsJudge.Judge(none, ["view", "bash"]).Status);
+        // Not verified, its own tools are not judged: nothing foreign, and still not clean.
+        Assert.Equal(ForeignToolsStatus.NotVerified, ForeignToolsJudge.Judge(use, NotVerified("claude-headless")).Status);
     }
 
     [Fact]
-    public void Grok_names_every_call_and_what_its_tool_search_found()
+    public void Copilot_names_its_whole_offer_from_its_usage_checkpoint()
     {
-        var stub = TranscriptTools.Extract(LiveView.GrokUpdates, Fixture("ForeignTools", "grok-calls-stub-server.jsonl"));
-        Assert.False(stub.OfferedComplete);
-        Assert.Equal(["stubfs/echo"], Names(stub.Offered));
-        Assert.Equal(["search_tool", "stubfs/echo"], Names(stub.Called));
+        var member = Extract(LiveView.CopilotEvents, "ForeignTools", "copilot-isolated-member.jsonl");
+        Assert.True(member.OfferedComplete);
+        Assert.Contains(member.Offered, t => t.ToString() == "harness/tell");
+        Assert.Contains(member.Offered, t => t.ToString() == "bash");
+        Assert.DoesNotContain(member.Offered, t => t.Server is { } server && server != "harness");
+        Assert.Equal(ForeignToolsStatus.Clean, ForeignToolsJudge.Judge(member, Allowance("copilot-headless")).Status);
 
-        var finding = ForeignToolsJudge.Judge(stub, null);
+        // The built-in GitHub server: a server name with `-` in it, split by the server the run named.
+        var github = Extract(LiveView.CopilotEvents, "LiveView", "copilot-events.jsonl");
+        Assert.True(github.OfferedComplete);
+        Assert.Contains(github.Offered, t => t.ToString() == "github-mcp-server/search_code");
+        Assert.Equal(["bash", "harness/team_current", "view"], Names(github.Called));
+        var finding = ForeignToolsJudge.Judge(github, Allowance("copilot-headless"));
+        Assert.Equal(ForeignToolsStatus.Foreign, finding.Status);
+        Assert.Contains(finding.Offered, t => t.ToString() == "github-mcp-server/search_code");
+        Assert.DoesNotContain(finding.Offered, t => t.Server == "harness");
+    }
+
+    [Fact]
+    public void Copilot_offers_different_own_tools_on_another_model_and_the_preset_list_judges_them()
+    {
+        // mai-code-1.1-flash is offered create, edit and grep where gpt-6-luna gets apply_patch; the
+        // copilot preset lists the latter, so a run on that model is offered tools it does not list.
+        var use = Extract(LiveView.CopilotEvents, "ForeignTools", "copilot-no-builtin-servers.jsonl");
+        Assert.True(use.OfferedComplete);
+        Assert.DoesNotContain(use.Offered, t => t.Server is not null);
+
+        var finding = ForeignToolsJudge.Judge(use, Allowance("copilot-headless"));
+        Assert.Equal(["create", "edit", "grep"], Names(finding.Offered));
+        Assert.Equal(ForeignToolsStatus.NotVerified, ForeignToolsJudge.Judge(use, NotVerified("copilot-headless")).Status);
+    }
+
+    [Fact]
+    public void A_copilot_run_stopped_before_its_checkpoint_is_not_measured()
+    {
+        var use = Extract(LiveView.CopilotEvents, "ForeignTools", "copilot-stopped-before-checkpoint.jsonl");
+
+        Assert.False(use.OfferedComplete);
+        Assert.Equal(["view"], Names(use.Called));
+        var finding = ForeignToolsJudge.Judge(use, Allowance("copilot-headless"));
+        Assert.Equal(ForeignToolsStatus.NotMeasured, finding.Status);
+        Assert.Contains("no usage checkpoint", finding.Why, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Grok_names_its_whole_offer_from_the_files_beside_its_transcript()
+    {
+        var member = Extract(LiveView.GrokUpdates, "ForeignTools", Path.Combine("grok-member", "updates.jsonl"));
+        Assert.True(member.OfferedComplete);
+        Assert.Contains(member.Offered, t => t.ToString() == "run_terminal_command");
+        Assert.Contains(member.Offered, t => t.ToString() == "harness/progress");
+        Assert.Contains(member.Called, t => t.ToString() == "web_search");
+        Assert.Contains(member.Called, t => t.ToString() == "harness/handback");
+        Assert.Equal(ForeignToolsStatus.Clean, ForeignToolsJudge.Judge(member, Allowance("grok-headless")).Status);
+
+        var stub = Extract(LiveView.GrokUpdates, "ForeignTools", Path.Combine("grok-calls-stub-server", "updates.jsonl"));
+        Assert.True(stub.OfferedComplete);
+        Assert.Contains(stub.Offered, t => t.ToString() == "stubfs/echo");
+        Assert.Equal(["search_tool", "stubfs/echo"], Names(stub.Called));
+        var finding = ForeignToolsJudge.Judge(stub, Allowance("grok-headless"));
         Assert.Equal(ForeignToolsStatus.Foreign, finding.Status);
         Assert.Equal(["stubfs/echo"], Names(finding.Called));
         Assert.Empty(finding.Offered);
+    }
 
-        var harness = TranscriptTools.Extract(LiveView.GrokUpdates, Fixture("LiveView", "grok-updates.jsonl"));
+    [Fact]
+    public void A_grok_transcript_without_the_files_beside_it_is_not_measured()
+    {
+        var harness = Extract(LiveView.GrokUpdates, "LiveView", "grok-updates.jsonl");
+
+        Assert.False(harness.OfferedComplete);
         Assert.Contains(harness.Called, t => t.ToString() == "harness/status");
-        Assert.Equal(ForeignToolsStatus.NotMeasured, ForeignToolsJudge.Judge(harness, null).Status);
+        Assert.Equal(ForeignToolsStatus.NotMeasured, ForeignToolsJudge.Judge(harness, Allowance("grok-headless")).Status);
     }
 
     [Fact]
     public void Codex_names_every_call_and_no_offer()
     {
-        var stub = TranscriptTools.Extract(LiveView.CodexRollout, Fixture("ForeignTools", "codex-calls-stub-server.jsonl"));
+        var stub = Extract(LiveView.CodexRollout, "ForeignTools", "codex-calls-stub-server.jsonl");
         Assert.False(stub.OfferedComplete);
         Assert.Empty(stub.Offered);
         Assert.Equal(["exec", "stubfs/echo"], Names(stub.Called));
-        Assert.Equal(["stubfs/echo"], Names(ForeignToolsJudge.Judge(stub, null).Called));
+        Assert.Equal(["stubfs/echo"], Names(ForeignToolsJudge.Judge(stub, Allowance("codex-headless")).Called));
 
-        var harness = TranscriptTools.Extract(LiveView.CodexRollout, Fixture("LiveView", "codex-rollout.jsonl"));
+        var harness = Extract(LiveView.CodexRollout, "LiveView", "codex-rollout.jsonl");
         Assert.Equal(["exec", "harness/team_current"], Names(harness.Called));
-        var finding = ForeignToolsJudge.Judge(harness, ["exec"]);
+        var finding = ForeignToolsJudge.Judge(harness, Allowance("codex-headless"));
         Assert.Equal(ForeignToolsStatus.NotMeasured, finding.Status);
         Assert.Contains("lists no offer", finding.Why, StringComparison.Ordinal);
     }
@@ -167,7 +253,7 @@ public sealed class ForeignToolsTests
 
         Assert.Empty(use.Offered);
         Assert.Empty(use.Called);
-        var finding = ForeignToolsJudge.Judge(use, ClaudeLocal);
+        var finding = ForeignToolsJudge.Judge(use, Allowance("claude-headless"));
         Assert.Equal(ForeignToolsStatus.NotMeasured, finding.Status);
         Assert.Contains("some-new-cli", finding.Why, StringComparison.Ordinal);
     }
@@ -180,6 +266,8 @@ public sealed class ForeignToolsTests
         Assert.Equal(KanbanForeignTools.Offered, KanbanForeignTools.Worse(KanbanForeignTools.NotMeasured, KanbanForeignTools.Offered));
         Assert.Equal(KanbanForeignTools.NotMeasured, KanbanForeignTools.Worse(null, KanbanForeignTools.NotMeasured));
         Assert.Equal(KanbanForeignTools.NotMeasured, KanbanForeignTools.Worse(KanbanForeignTools.NotMeasured, null));
+        Assert.Equal(KanbanForeignTools.NotMeasured, KanbanForeignTools.Worse(KanbanForeignTools.NotVerified, KanbanForeignTools.NotMeasured));
+        Assert.Equal(KanbanForeignTools.NotVerified, KanbanForeignTools.Worse(null, KanbanForeignTools.NotVerified));
     }
 }
 
@@ -199,29 +287,30 @@ public sealed class ForeignToolsCheckTests : IAsyncDisposable
 
     private CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    public static TheoryData<string, string, string, string?, string[], string[]> Runs => new()
+    public static TheoryData<string, string, string, string, string?, string[], string[]> Runs => new()
     {
-        // format, folder, file, the card's mark (null: clean), called, offered (a sample)
-        { LiveView.ClaudeJsonl, "ForeignTools", "claude-offers-connectors.jsonl", KanbanForeignTools.Offered, [], ["claude_ai_Gmail/send_message", "claude.ai Google Drive"] },
-        { LiveView.ClaudeJsonl, "ForeignTools", "claude-calls-connectors.jsonl", KanbanForeignTools.Called, ["claude_ai_Claude_Docs/create"], ["claude_ai_Gmail/forward"] },
-        { LiveView.ClaudeJsonl, "ForeignTools", "claude-isolated.jsonl", null, [], [] },
-        { LiveView.CopilotEvents, "LiveView", "copilot-events.jsonl", KanbanForeignTools.Offered, [], ["github-mcp-server"] },
-        { LiveView.CopilotEvents, "ForeignTools", "copilot-no-builtin-servers.jsonl", KanbanForeignTools.NotMeasured, [], [] },
-        { LiveView.GrokUpdates, "ForeignTools", "grok-calls-stub-server.jsonl", KanbanForeignTools.Called, ["stubfs/echo"], [] },
-        { LiveView.GrokUpdates, "LiveView", "grok-updates.jsonl", KanbanForeignTools.NotMeasured, [], [] },
-        { LiveView.CodexRollout, "ForeignTools", "codex-calls-stub-server.jsonl", KanbanForeignTools.Called, ["stubfs/echo"], [] },
-        { LiveView.CodexRollout, "LiveView", "codex-rollout.jsonl", KanbanForeignTools.NotMeasured, [], [] },
+        // preset, format, folder, file, the card's mark (null: clean), called, offered (a sample)
+        { "claude-headless", LiveView.ClaudeJsonl, "ForeignTools", "claude-offers-connectors.jsonl", KanbanForeignTools.Offered, [], ["claude_ai_Gmail/send_message", "claude.ai Google Drive"] },
+        { "claude-headless", LiveView.ClaudeJsonl, "ForeignTools", "claude-calls-connectors.jsonl", KanbanForeignTools.Called, ["claude_ai_Claude_Docs/create"], ["claude_ai_Gmail/forward"] },
+        { "claude-headless", LiveView.ClaudeJsonl, "ForeignTools", "claude-isolated-member.jsonl", null, [], [] },
+        { "copilot-headless", LiveView.CopilotEvents, "LiveView", "copilot-events.jsonl", KanbanForeignTools.Offered, [], ["github-mcp-server/search_code"] },
+        { "copilot-headless", LiveView.CopilotEvents, "ForeignTools", "copilot-isolated-member.jsonl", null, [], [] },
+        { "copilot-headless", LiveView.CopilotEvents, "ForeignTools", "copilot-stopped-before-checkpoint.jsonl", KanbanForeignTools.NotMeasured, [], [] },
+        { "grok-headless", LiveView.GrokUpdates, "ForeignTools", "grok-calls-stub-server/updates.jsonl", KanbanForeignTools.Called, ["stubfs/echo"], [] },
+        { "grok-headless", LiveView.GrokUpdates, "ForeignTools", "grok-member/updates.jsonl", null, [], [] },
+        { "grok-headless", LiveView.GrokUpdates, "LiveView", "grok-updates.jsonl", KanbanForeignTools.NotMeasured, [], [] },
+        { "codex-headless", LiveView.CodexRollout, "ForeignTools", "codex-calls-stub-server.jsonl", KanbanForeignTools.Called, ["stubfs/echo"], [] },
+        { "codex-headless", LiveView.CodexRollout, "LiveView", "codex-rollout.jsonl", KanbanForeignTools.NotMeasured, [], [] },
     };
 
     [Theory]
     [MemberData(nameof(Runs))]
     public async Task A_member_run_is_checked_and_what_is_not_clean_lands_on_the_log_the_tenant_log_and_the_card(
-        string format, string folder, string file, string? mark, string[] called, string[] offered)
+        string preset, string format, string folder, string file, string? mark, string[] called, string[] offered)
     {
-        // The preset declares Claude's own tools, Copilot's, Grok's and Codex's that the fixtures call:
-        // a stand-in for the isolation declaration, through the one seam the check reads.
-        await StartAsync(new PresetAllowedTools(_ =>
-            [.. ForeignToolsTests.ClaudeLocal, "view", "bash", "search_tool", "use_tool", "exec", "read_file", "run_terminal_command", "todo_write"]));
+        // THE REAL WIRING: no seam replaced; the member's built-in preset and the catalog's
+        // isolation model decide what is foreign.
+        await StartAsync(null, preset);
         var transcript = Path.Combine(AppContext.BaseDirectory, "Fixtures", folder, file);
         var person = await PersonAsync();
 
@@ -258,6 +347,7 @@ public sealed class ForeignToolsCheckTests : IAsyncDisposable
         if (mark == KanbanForeignTools.NotMeasured)
         {
             Assert.Equal("notMeasured", payload.GetProperty(PayloadFields.ForeignToolsStatus).GetString());
+            Assert.True(payload.GetProperty(PayloadFields.PresetVerified).GetBoolean());
             Assert.Empty(calledNames);
             Assert.Empty(offeredNames);
             Assert.Contains("not measured", payload.GetProperty(PayloadFields.Text).GetString(), StringComparison.Ordinal);
@@ -268,6 +358,7 @@ public sealed class ForeignToolsCheckTests : IAsyncDisposable
         else
         {
             Assert.Equal("foreign", payload.GetProperty(PayloadFields.ForeignToolsStatus).GetString());
+            Assert.Equal(preset, payload.GetProperty(PayloadFields.Agent).GetString());
 
             // The tenant row: the same finding, about the member, written just after the log row.
             tenant = await EventuallyAsync(async () => await TenantRowsAsync() is { Count: > 0 } rows ? rows : null);
@@ -290,29 +381,58 @@ public sealed class ForeignToolsCheckTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task A_run_whose_preset_is_not_verified_is_never_reported_clean()
+    public async Task A_run_whose_preset_is_not_verified_says_so_and_is_never_reported_clean()
     {
-        await StartAsync(new PresetAllowedTools(_ => null));
-        var transcript = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ForeignTools", "claude-isolated.jsonl");
+        // The isolation model's own answer for the claude preset with its declaration taken away.
+        await StartAsync(new PresetAllowedTools(ForeignToolsTests.NotVerified), "claude-headless");
+        var transcript = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ForeignTools", "claude-isolated-member.jsonl");
         var person = await PersonAsync();
 
         (await person.PostAsJsonAsync($"/api/teams/{_team}/containers/Dev/tell", new { instruction = "do the work" }, Ct)).EnsureSuccessStatusCode();
         var terminal = await TerminalAsync(transcript, LiveView.ClaudeJsonl);
 
         var row = await EventuallyAsync(async () => (await DevRowsAsync()).FirstOrDefault());
-        Assert.Equal("notMeasured", JsonDocument.Parse(row.Payload).RootElement.GetProperty(PayloadFields.ForeignToolsStatus).GetString());
-        Assert.Equal(KanbanForeignTools.NotMeasured, (await CardAsync(person, terminal)).GetProperty("foreignTools").GetString());
+        var payload = JsonDocument.Parse(row.Payload).RootElement;
+        Assert.Equal("notVerified", payload.GetProperty(PayloadFields.ForeignToolsStatus).GetString());
+        Assert.False(payload.GetProperty(PayloadFields.PresetVerified).GetBoolean());
+        Assert.Contains("not verified", payload.GetProperty(PayloadFields.Text).GetString(), StringComparison.Ordinal);
+        Assert.Equal(KanbanForeignTools.NotVerified, (await CardAsync(person, terminal)).GetProperty("foreignTools").GetString());
+        Assert.Empty(await TenantRowsAsync());
+    }
+
+    [Fact]
+    public async Task A_member_whose_preset_runs_no_model_is_never_flagged()
+    {
+        // THE REAL WIRING: a member on `echo`, whose allowance is NotAModel, handing back a transcript
+        // that called the person's connectors, is not checked.
+        await StartAsync(null, "claude-headless", otherMember: "echo");
+        var services = _factory.Services;
+        var transcript = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ForeignTools", "claude-calls-connectors.jsonl");
+        var row = await services.GetRequiredService<IMessageLog>().AppendAsync(new NewMessage(
+            MessageTypes.Completed,
+            JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                [PayloadFields.AgentTranscript] = transcript,
+                [PayloadFields.AgentTranscriptFormat] = LiveView.ClaudeJsonl,
+            }),
+            new ContainerId(_team, "Con").ToString()), Ct);
+
+        Assert.Equal(IsolationState.NotAModel, services.GetRequiredService<AgentCatalog>().Allowance("echo")!.State);
+        Assert.Null(await services.GetRequiredService<ForeignToolsCheck>().CheckAsync(row, Ct));
+        Assert.DoesNotContain(await RowsAsync(MessageTypes.AgentForeignTools), r => r.Source == row.Source);
     }
 
     [Fact]
     public async Task The_concierge_is_never_checked()
     {
-        await StartAsync(new PresetAllowedTools(_ => ForeignToolsTests.ClaudeLocal));
+        await StartAsync(null, "claude-headless");
         var services = _factory.Services;
         var log = services.GetRequiredService<IMessageLog>();
 
-        // The Concierge's own session, which called the person's connectors, on a terminal row whose
-        // source is not a team member - the only shape a non-member's row could take.
+        // THE REAL WIRING. The Concierge presets' allowance is Concierge, and the Concierge is not a
+        // team member: its own session, which called the person's connectors, on a terminal row whose
+        // source is not a team member - the only shape a non-member's row could take - is not checked.
+        Assert.Equal(IsolationState.Concierge, services.GetRequiredService<AgentCatalog>().Allowance("claude")!.State);
         var transcript = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ForeignTools", "claude-calls-connectors.jsonl");
         var row = await log.AppendAsync(new NewMessage(
             MessageTypes.Completed,
@@ -337,7 +457,12 @@ public sealed class ForeignToolsCheckTests : IAsyncDisposable
     private string? _transcript;
     private string? _format;
 
-    private async Task StartAsync(PresetAllowedTools allowed)
+    /// <summary>
+    /// A Host with a team whose member Dev launches as <paramref name="preset"/>, and, when
+    /// <paramref name="otherMember"/> is given, a member Con launched as that preset. A null
+    /// <paramref name="allowed"/> keeps Program.cs's own wiring.
+    /// </summary>
+    private async Task StartAsync(PresetAllowedTools? allowed, string preset, string? otherMember = null)
     {
         var dataRoot = Path.Combine(_root, "data");
         Directory.CreateDirectory(dataRoot);
@@ -350,16 +475,14 @@ public sealed class ForeignToolsCheckTests : IAsyncDisposable
             .ConfigureTestServices(services =>
             {
                 services.AddSingleton<IAgentRunner>(agent);
-                services.AddSingleton(allowed);
+                if (allowed is not null) services.AddSingleton(allowed);
             }));
 
         var services = _factory.Services;
         var registry = services.GetRequiredService<TeamRegistry>();
-        var preset = services.GetRequiredService<AgentCatalog>().Definitions
-            .First(d => d.Mode == AgentMode.Headless && d.Launch.LanguageModel).Name;
-
         _team = (await registry.CreateAsync("Alpha", preset, memberAgent: preset, ct: Ct)).Id;
         await registry.AddContainerAsync(_team, "Dev", preset, "", [], permits: new HashSet<string>(Permits.All), ct: Ct);
+        if (otherMember is not null) await registry.AddContainerAsync(_team, "Con", otherMember, "", [], ct: Ct);
         await services.GetRequiredService<IUserStore>().CreateAsync("person@example.test", Password);
     }
 

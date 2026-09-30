@@ -116,6 +116,14 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
       >
         <q-tooltip>A run on this card could not be checked for foreign tools, so it is not reported clean.</q-tooltip>
       </q-badge>
+      <q-badge
+        v-else-if="card.foreignTools === 'notVerified'"
+        class="k-card-foreign k-card-foreign-unmeasured"
+        outline
+        label="preset not verified"
+      >
+        <q-tooltip>This member's preset declares no allowed tools, so only its MCP servers were checked. It is not reported clean.</q-tooltip>
+      </q-badge>
 
       <!-- HELD BY THE WIP LIMIT: the work has not failed and nothing refused it; it starts when a
            slot is released. A mark beside the status, never instead of it. -->

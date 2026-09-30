@@ -560,13 +560,16 @@ public static class EventCatalog
                 Source,
                 new(PayloadFields.ForeignToolsStatus, EventFieldKind.String,
                     "`foreign`: the run was offered or called a tool outside `harness` and its preset's allowed list. "
-                    + "`notMeasured`: nothing foreign was seen, but the transcript cannot list what was offered or the "
-                    + "preset declares no allowed list, so the run is not reported clean."),
+                    + "`notMeasured`: nothing foreign was seen, but the transcript cannot list what was offered, so the "
+                    + "run is not reported clean. `notVerified`: the whole offer was read and no foreign MCP server was "
+                    + "in it, but the preset declares no allowed tools, so the CLI's own tools were not judged."),
                 new(PayloadFields.ForeignCalled, EventFieldKind.List,
                     "Each foreign tool the run called, as `server/tool`, or the tool alone for the CLI's own."),
                 new(PayloadFields.ForeignOffered, EventFieldKind.List,
                     "Each foreign tool or MCP server the run was offered and did not call."),
                 new(PayloadFields.Agent, EventFieldKind.String, "The preset the run launched as."),
+                new(PayloadFields.PresetVerified, EventFieldKind.Boolean,
+                    "Whether the preset declares its allowed tools. False: it is not verified, and only MCP servers were judged."),
                 new(PayloadFields.AgentTranscriptFormat, EventFieldKind.String, "The transcript format that was read."),
                 new(PayloadFields.Measured, EventFieldKind.String, "What that format records about tools, in words."),
                 new(PayloadFields.Run, EventFieldKind.Integer, "The seq of the run's terminal row."),

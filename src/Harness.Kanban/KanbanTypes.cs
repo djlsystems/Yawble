@@ -98,7 +98,8 @@ public record KanbanCard(
     /// <summary>
     /// What the per-run tools check found on this card's runs, the strongest mark so far:
     /// <c>called</c> (a run called a tool the platform did not give it), <c>offered</c> (a run was
-    /// offered one and called none), <c>notMeasured</c> (a run could not be checked), or null when
+    /// offered one and called none), <c>notMeasured</c> (a run could not be checked),
+    /// <c>notVerified</c> (a run's preset declares no allowed tools, so it was not verified), or null when
     /// every run checked clean or none has been checked. A FLAG, like <see cref="Paused"/>, not a status.
     /// </summary>
     string? ForeignTools = null)
