@@ -285,6 +285,6 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
 }
 
 .k-card-foreign-unmeasured {
-  color: var(--q-grey-7, #616161);
+  color: var(--os-ink-muted);
 }
 </style>
