@@ -10,8 +10,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 
-const { listCatalog, saveCatalog, getAgentAuth, getTenantSettings, saveTenantSettings } = vi.hoisted(() => ({
+const { listCatalog, saveCatalog, getAgentAuth, getAgentTools, getTenantSettings, saveTenantSettings } = vi.hoisted(() => ({
   listCatalog: vi.fn(),
+  getAgentTools: vi.fn(),
   saveCatalog: vi.fn(),
   getAgentAuth: vi.fn(),
   getTenantSettings: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   listCatalog,
   saveCatalog,
   getAgentAuth,
+  getAgentTools,
   getTenantSettings,
   saveTenantSettings,
 }));
@@ -67,6 +69,8 @@ beforeEach(() => {
   saveCatalog.mockResolvedValue(undefined);
   getAgentAuth.mockReset();
   getAgentAuth.mockResolvedValue([]);
+  getAgentTools.mockReset();
+  getAgentTools.mockResolvedValue({ at: null, running: false, presets: [] });
   getTenantSettings.mockReset();
   getTenantSettings.mockResolvedValue({
     settings: [{

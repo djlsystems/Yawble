@@ -122,6 +122,147 @@ public static class AgentCatalogFile
             "https://docs.x.ai/build/overview",
             "The container installs grok on startup. Set XAI_API_KEY to sign it in.");
 
+        // WHAT A MEMBER MAY BE OFFERED, per headless preset. Each switch below was MEASURED
+        // with a real launch on the CLI in the image (claude 2.1.285, codex-cli 0.157.0, grok
+        // 1.0.44, copilot 1.0.88), the shared home left exactly as it was; `Gaps` is what no launch
+        // switch reached. The Concierge presets carry none: the person's own session keeps
+        // everything they set up.
+        //
+        // CLAUDE. A plain `-p` launch picks up the signed-in claude.ai account's connectors
+        // (38 `mcp__claude_ai_*` tools: Gmail send/forward/trash, Claude Docs, Calendar, Drive)
+        // - NOT in the init event but as a deferred-tools delta after the first tool call, which is
+        // why a short probe misses them. `--strict-mcp-config` removes them and every home MCP
+        // server while keeping `--mcp-config`; ENABLE_CLAUDEAI_MCP_SERVERS=false removes them on
+        // its own too, and both are set so neither is load-bearing alone. `--setting-sources
+        // project,local` drops the user layer: `~/.claude/CLAUDE.md`, `~/.claude/skills` (the
+        // account's synced `anthropic-skills:*` among them), user hooks and enabled plugins -
+        // measured with canaries in a scratch CLAUDE_CONFIG_DIR. Auto-memory stays on without
+        // CLAUDE_CODE_DISABLE_AUTO_MEMORY=1. `--tools` is an ALLOWLIST of built-in tools, so a tool
+        // a later CLI adds is not offered until somebody lists it here: RemoteTrigger (cloud
+        // routines on the account), PushNotification and DesignSync reach the account, and
+        // SendMessage/ListAgents reach other sessions on this machine - none is listed.
+        // `--safe-mode` is NOT used: it drops `--mcp-config` too, and with it `harness`.
+        string[] claudeTools =
+        [
+            "Agent", "Bash", "Edit", "Glob", "Grep", "Monitor", "NotebookEdit", "Read", "Skill",
+            "TaskCreate", "TaskGet", "TaskList", "TaskStop", "TaskUpdate", "ToolSearch", "WebFetch",
+            "WebSearch", "Write",
+        ];
+
+        var claudeIsolation = new AgentIsolation(
+            ["--strict-mcp-config", "--setting-sources", "project,local", "--tools", string.Join(",", claudeTools)],
+            Env: new Dictionary<string, string>
+            {
+                ["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false",
+                ["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1",
+            },
+            // `Task` as well as `Agent`: the CLI's init event names the subagent tool `Task`.
+            AllowedTools: [.. claudeTools, "Task"],
+            Gaps:
+            [
+                "A repository's own .claude/settings.json (project hooks) still loads; that is the "
+                    + "checkout's configuration, not the shared home's.",
+            ]);
+
+        // CODEX. A plain `codex exec` offers the ChatGPT account's apps as `mcp__codex_apps__*`
+        // (sites deploy, parental-control settings, pets, plugin management) and
+        // `request_plugin_install`. `--disable apps`, `plugins` and `remote_plugin` remove them;
+        // `--ignore-user-config` drops `~/.codex/config.toml` (its MCP servers and hooks) while the
+        // `-c` harness entry stays; `-c skills.include_instructions=false` drops the skill listing
+        // from `~/.codex/skills` and `~/.agents/skills` (measured with canaries through `codex debug
+        // prompt-input` on a scratch CODEX_HOME). All of them are accepted after `exec`, which is
+        // where the token sits. CODEX_HOME is NOT moved: `auth.json` holds a rotating ChatGPT
+        // refresh token, and a copy that refreshes signs the Concierge out.
+        var codexIsolation = new AgentIsolation(
+            [
+                "--disable", "apps", "--disable", "plugins", "--disable", "remote_plugin",
+                "--disable", "hooks", "--disable", "memories",
+                "-c", "skills.include_instructions=false",
+                "--ignore-user-config", "--ignore-rules",
+            ],
+            // CODE MODE: the model calls `exec` (and `wait`, `request_user_input`) at the top level
+            // and the rest from inside it, so both levels are listed, by the names the runtime's own
+            // `ALL_TOOLS` gave in a real isolated session.
+            AllowedTools:
+            [
+                "exec", "wait", "request_user_input", "request_user_input_async",
+                "exec_command", "write_stdin", "apply_patch", "view_image", "web__run",
+                "image_gen__imagegen", "clock__curr_time", "clock.sleep",
+                "create_goal", "get_goal", "update_goal",
+                "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource",
+                "collaboration.spawn_agent", "collaboration.send_message", "collaboration.wait_agent",
+                "collaboration.list_agents", "collaboration.interrupt_agent", "collaboration.followup_task",
+            ],
+            Gaps:
+            [
+                "~/.codex/AGENTS.md, the user's own instructions file, still loads: no launch switch "
+                    + "reaches it short of moving CODEX_HOME, which would copy the account's credential.",
+            ]);
+
+        // GROK. Its launch already has AgentEnvironment.Isolated (the Claude and Cursor surfaces,
+        // for every container); the Codex surfaces are the same leak and are switched off here, with
+        // cross-session memory. The `harness` server comes from `~/.grok/config.toml`, which the
+        // Host writes, so grok's MCP servers cannot be narrowed at launch: the GROK_CONFIG overlay
+        // accepts `[features]` and refuses `[skills]` and `[mcp_servers]` (measured). The tool list
+        // is `tool_definitions.json` in a real session plus the server-side search tools; a
+        // subagent's session (`session_kind: subagent`) is also offered `wait_commands_or_subagents`.
+        var grokIsolation = new AgentIsolation(
+            [],
+            Env: new Dictionary<string, string>
+            {
+                ["GROK_CODEX_SKILLS_ENABLED"] = "false",
+                ["GROK_CODEX_AGENTS_ENABLED"] = "false",
+                ["GROK_CODEX_RULES_ENABLED"] = "false",
+                ["GROK_CODEX_HOOKS_ENABLED"] = "false",
+                ["GROK_CODEX_MCPS_ENABLED"] = "false",
+                ["GROK_MEMORY"] = "0",
+            },
+            AllowedTools:
+            [
+                "run_terminal_command", "read_file", "search_replace", "list_dir", "grep", "write",
+                "kill_command_or_subagent", "get_command_or_subagent_output", "spawn_subagent",
+                "wait_commands_or_subagents",
+                "todo_write", "scheduler_create", "scheduler_delete", "scheduler_list", "monitor",
+                "search_tool", "use_tool", "workflow", "enter_plan_mode", "exit_plan_mode",
+                "ask_user_question", "send_feedback", "web_fetch", "web_search", "open_page",
+                "open_page_with_find", "x_user_search", "x_semantic_search", "x_keyword_search",
+                "x_thread_fetch", "image_gen", "image_edit", "image_to_video", "reference_to_video",
+            ],
+            Gaps:
+            [
+                "MCP servers a person adds to ~/.grok/config.toml reach grok members: the platform's "
+                    + "own entry lives in that file, and no launch switch narrows it.",
+                "Skills in ~/.grok/skills and ~/.claude/skills (the Claude account's synced skills "
+                    + "among them) still load: grok reads ~/.claude/skills as its own user folder, "
+                    + "and the config overlay refuses [skills].",
+            ]);
+
+        // COPILOT. A plain launch offers `github-mcp-server-*` (Copilot Spaces, code and user
+        // search), the built-in server GH_TOKEN drives; `--disable-builtin-mcps` removes it. GH_TOKEN
+        // itself STAYS: it is how copilot signs in here (unset, the launch fails asking for a login),
+        // so the choice written down is "no GitHub server", and allowing it means naming
+        // `github-mcp-server` in AllowedServers and dropping the flag. The tool list is the
+        // `tools` of `session.usage_checkpoint` in a real session's events. The file tools depend on
+        // the model `--model auto` routes to: gpt-6-luna is offered `apply_patch` and `rg`,
+        // mai-code-1.1-flash `create`, `edit` and `grep` instead, so both sets are listed.
+        var copilotIsolation = new AgentIsolation(
+            ["--disable-builtin-mcps"],
+            AllowedTools:
+            [
+                "bash", "read_bash", "stop_bash", "list_bash", "view", "apply_patch", "rg", "glob",
+                "create", "edit", "grep",
+                "web_fetch", "fetch_copilot_cli_documentation", "search_code_subagent", "skill", "sql",
+                "session_store_sql", "task", "read_agent", "list_agents", "write_agent",
+            ],
+            Gaps:
+            [
+                "The local tool set varies by model: only the models `--model auto` has routed to here "
+                    + "(gpt-6-luna, mai-code-1.1-flash) were measured, and a run on another model may be "
+                    + "offered a file tool not listed, which the check then names.",
+                "~/.copilot/mcp-config.json, its installed plugins, skills and instructions still load: "
+                    + "moving COPILOT_HOME would move the session transcript the live view reads.",
+            ]);
+
         return
         [
             new AgentDefinition(
@@ -141,7 +282,7 @@ public static class AgentCatalogFile
                     // `--session-id {sessionId}` names the transcript before the run starts, so the
                     // live view below knows its file. Measured with `-p` on the container:
                     // the transcript is named by that id. The output format is unchanged.
-                    ["-p", "--dangerously-skip-permissions", "--mcp-config", "{mcpConfig}", "--session-id", "{sessionId}", "--output-format", "json", .. claudeModel],
+                    [AgentIsolation.Token, "-p", "--dangerously-skip-permissions", "--mcp-config", "{mcpConfig}", "--session-id", "{sessionId}", "--output-format", "json", .. claudeModel],
                     claudeArguments,
                     UsageFormat: "claude-json"),
                 // Thirty minutes, a platform default: an invocation whose agent leaves a long-lived
@@ -178,7 +319,8 @@ public static class AgentCatalogFile
                 // Claude writes its session to this file as it works, named by the
                 // `--session-id` above; the cwd is the folder name with every `/` and `.` as `-`.
                 LiveView: new AgentLiveView(
-                    "~/.claude/projects/{workspaceDashed}/{sessionId}.jsonl", LiveView.ClaudeJsonl)),
+                    "~/.claude/projects/{workspaceDashed}/{sessionId}.jsonl", LiveView.ClaudeJsonl),
+                Isolation: claudeIsolation),
 
             // The three other coding CLIs, verified against their own --help rather than from
             // documentation, which disagreed with the binaries in several places.
@@ -209,7 +351,7 @@ public static class AgentCatalogFile
                     "codex",
                     // --skip-git-repo-check because a container's workspace is a scratch directory
                     // rather than a checkout, and codex otherwise refuses to run outside a repo.
-                    ["exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", .. codexMcp],
+                    ["exec", AgentIsolation.Token, "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", .. codexMcp],
                     InstructionsFile: AgentsFile,
                     // ONE COMBINED FIGURE, WHICH BEATS SILENCE. codex emits no JSON envelope and no
                     // in/out split - it prints `tokens used N` as its last line - so without this
@@ -242,7 +384,8 @@ public static class AgentCatalogFile
                 // launch whose first line (`session_meta`) names this workspace as its `cwd`.
                 LiveView: new AgentLiveView(
                     null, LiveView.CodexRollout,
-                    new AgentLiveViewFind("~/.codex/sessions", "*/*/*/rollout-*.jsonl", LiveView.CwdFromFirstLine))),
+                    new AgentLiveViewFind("~/.codex/sessions", "*/*/*/rollout-*.jsonl", LiveView.CwdFromFirstLine)),
+                Isolation: codexIsolation),
 
             new AgentDefinition(
                 "copilot",
@@ -327,6 +470,8 @@ public static class AgentCatalogFile
                     // It must come before `-p`: after it, it is discarded with everything else
                     // and looks ineffective.
                     [
+                        // Before `-p`, for the reason below.
+                        AgentIsolation.Token,
                         "--allow-all",
                         "--add-dir", ".",
                         "--silent",
@@ -379,7 +524,8 @@ public static class AgentCatalogFile
                 // Copilot writes its session's events here, in the folder named by the
                 // `--session-id` above.
                 LiveView: new AgentLiveView(
-                    "~/.copilot/session-state/{sessionId}/events.jsonl", LiveView.CopilotEvents)),
+                    "~/.copilot/session-state/{sessionId}/events.jsonl", LiveView.CopilotEvents),
+                Isolation: copilotIsolation),
 
             new AgentDefinition(
                 "grok",
@@ -403,6 +549,7 @@ public static class AgentCatalogFile
                     // under `~/.grok/sessions/<workspace>/` is the id passed), so its
                     // transcript is known before launch.
                     [
+                        AgentIsolation.Token,
                         "--no-auto-update",
                         "--session-id", "{sessionId}",
                         "-p", "{userPrompt}",
@@ -436,7 +583,8 @@ public static class AgentCatalogFile
                 // `chat_history.jsonl` (no time): it carries a tool's input, its result and when.
                 // The workspace folder is the working directory percent-encoded, `/` as `%2F`.
                 LiveView: new AgentLiveView(
-                    "~/.grok/sessions/{workspaceEncoded}/{sessionId}/updates.jsonl", LiveView.GrokUpdates)),
+                    "~/.grok/sessions/{workspaceEncoded}/{sessionId}/updates.jsonl", LiveView.GrokUpdates),
+                Isolation: grokIsolation),
 
             new AgentDefinition(
                 "echo",

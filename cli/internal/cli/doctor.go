@@ -69,6 +69,7 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 				report, reportErr = doctor.FetchHostReport(cmd.Context(), e, observed.ContainerKnown && observed.Container == engine.StateRunning)
 			}
 			checks = append(checks, doctor.InstanceChecks(report, reportErr, deps.Now())...)
+			checks = append(checks, doctor.AgentToolsCheck(report, reportErr))
 			checks = append(checks, doctor.BackupCheck(deps.ConfigDir, deps.Now()))
 
 			if asJSON {
@@ -82,6 +83,9 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 				}
 			} else {
 				doctor.Render(out, checks)
+				if report != nil {
+					doctor.RenderAgentTools(out, report.AgentTools)
+				}
 			}
 			if doctor.AnyFailed(checks) {
 				return errChecksFailed

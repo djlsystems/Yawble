@@ -1515,6 +1515,25 @@ export interface Agent {
 
   /** The tags a built-in carries in the build, shown beside the operator's. Null for a custom preset. */
   buildTags?: string[] | null
+
+  /**
+   * How a member's launch of this preset is kept to the platform's tools: the arguments and
+   * environment that switch off the account's connectors and the shared home's configuration, and
+   * the CLI's own tools it may use. A headless preset without one is NOT VERIFIED.
+   *
+   * CARRIED THROUGH AN EDIT for the reason `install` is: the dialog rebuilds what it saves and
+   * `PUT /api/agents` replaces the catalog, so a field it drops is a declaration the save deletes.
+   */
+  isolation?: AgentIsolation | null
+}
+
+/** A preset's isolation declaration. See `AgentIsolation` in the Host. */
+export interface AgentIsolation {
+  arguments: string[]
+  env?: Record<string, string> | null
+  allowedTools?: string[] | null
+  allowedServers?: string[] | null
+  gaps?: string[] | null
 }
 
 /** Where to get the CLI a preset launches. Data in the catalog, never a table in code. */
@@ -2882,4 +2901,50 @@ export interface TeamSolution {
   installedBy: string
   plugins: string[]
   missing: SolutionMissing[]
+}
+
+/**
+ * One thing an agent CLI's own listing says it would load. `off` is null when it would load,
+ * otherwise why it does not (`disabled`, or the launch switch that turns it off).
+ */
+export interface ListedToolItem {
+  kind: 'server' | 'connector' | 'plugin' | 'skill' | 'hook'
+  name: string
+  source: string | null
+  off: string | null
+}
+
+/**
+ * The pre-flight's word for a preset. `notMeasured` is never isolated, and `concierge` is
+ * information, never a warning.
+ */
+export type ToolVerdict =
+  | 'isolated'
+  | 'foreignFound'
+  | 'notVerified'
+  | 'notMeasured'
+  | 'concierge'
+  | 'notAModel'
+
+/** One preset's pre-flight, from `GET /api/agents/tools`. A measurement: never folded into an `Agent`. */
+export interface PresetToolReport {
+  preset: string
+  mode: 'headless' | 'interactive'
+  command: string
+  verdict: ToolVerdict
+  /** What a member would be offered that it may not be. Always empty for the Concierge. */
+  foreign: ListedToolItem[]
+  loaded: ListedToolItem[]
+  switchedOff: ListedToolItem[]
+  /** What no launch switch reaches, as the preset records it. */
+  gaps: string[]
+  ran: string[]
+  detail: string | null
+}
+
+/** `GET /api/agents/tools`: the Host's last pre-flight. `at` is null before the first one ends. */
+export interface AgentToolsReport {
+  at: string | null
+  running: boolean
+  presets: PresetToolReport[]
 }

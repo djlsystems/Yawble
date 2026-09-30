@@ -14,6 +14,8 @@ import {
 } from '../lib/agentInstall';
 import { useAgentInstallations } from '../lib/useAgentInstallations';
 import { authReportFor, authStatus, refreshAgentAuth, useAgentAuth } from '../lib/useAgentAuth';
+import { toolsReportFor, toolsStatus } from '../lib/agentTools';
+import type { PresetToolReport } from '../api/types';
 import AgentEditDialog from './AgentEditDialog.vue';
 
 /**
@@ -75,6 +77,24 @@ const statusOf = (agent: Agent) => installStatus(installationFor(installations.v
 
 /** The sign-in caption. `Not measured` is grey and never a warning - see `authStatus`. */
 const authOf = (agent: Agent) => authStatus(authReportFor(authReports.value, agent.name));
+
+/**
+ * What each preset's CLI would load, from the Host's last pre-flight (`GET /api/agents/tools`).
+ * A third measurement, held beside the catalog like the other two and never folded into an `Agent`.
+ * Empty until it answers, which every row reads as "not listed yet", never as isolated.
+ */
+const toolReports = ref<PresetToolReport[]>([]);
+
+async function loadTools() {
+  try {
+    toolReports.value = (await api.getAgentTools()).presets;
+  } catch {
+    toolReports.value = [];
+  }
+}
+
+const toolsReportOf = (agent: Agent) => toolsReportFor(toolReports.value, agent.name);
+const toolsOf = (agent: Agent) => toolsStatus(toolsReportOf(agent));
 
 /** The tags a row shows, joined. Empty when it carries none. */
 const tagsText = (tags: string[] | null | undefined) => (tags ?? []).join(', ');
@@ -162,6 +182,7 @@ watch(open, (showing) => {
   // Its own call, beside the catalog load rather than inside it: the probe runs each CLI's own
   // status command and is the slower of the two, and a list that waited for it would open blank.
   void refreshAgentAuth();
+  void loadTools();
 });
 
 /**
@@ -420,6 +441,40 @@ const rowBusy = computed(() => busy.value || formBusy.value || removing.value !=
                 <span v-if="authOf(agent).detail" class="os-text-muted">
                   {{ authOf(agent).detail }}
                 </span>
+              </q-item-label>
+
+              <!-- THE FOURTH CAPTION: what this preset's CLI would load, as the Host listed it.
+                   A member's preset is isolated, has foreign tools (named), is not verified, or
+                   was not measured - never green without a listing. The Concierge's tools are
+                   information in grey, never a warning. Its recorded gaps follow, verbatim. -->
+              <q-item-label v-if="toolsOf(agent)" caption class="agent-tools-line">
+                <q-icon
+                  :name="toolsOf(agent)!.icon"
+                  size="14px"
+                  class="q-mr-xs"
+                  aria-hidden="true"
+                />
+                <span
+                  :class="{
+                    'text-positive': toolsOf(agent)!.tone === 'ok',
+                    'text-warning': toolsOf(agent)!.tone === 'warn',
+                    'os-text-muted': toolsOf(agent)!.tone === 'info',
+                  }"
+                >{{ toolsOf(agent)!.text }}</span>
+                <span v-if="toolsOf(agent)!.names.length" class="mono agent-tools-names q-ml-xs">
+                  {{ toolsOf(agent)!.names.join(', ') }}
+                </span>
+                <span v-if="toolsReportOf(agent)?.detail" class="os-text-muted q-ml-xs">
+                  {{ toolsReportOf(agent)?.detail }}
+                </span>
+              </q-item-label>
+              <q-item-label
+                v-for="gap in toolsReportOf(agent)?.gaps ?? []"
+                :key="gap"
+                caption
+                class="os-text-muted agent-tools-gap"
+              >
+                Gap: {{ gap }}
               </q-item-label>
             </q-item-section>
 
