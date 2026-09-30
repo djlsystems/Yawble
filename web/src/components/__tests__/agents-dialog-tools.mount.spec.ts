@@ -4,6 +4,7 @@
 // isolated, has foreign tools (named), is not verified, or was not measured - never green without a
 // listing - and shows its recorded gaps. The Concierge's connectors and servers are listed as
 // information, never as a warning.
+import { flushPromises } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { listCatalog, getAgentAuth, getAgentTools, getTenantSettings } = vi.hoisted(() => ({
@@ -93,7 +94,7 @@ beforeEach(() => {
 afterEach(resetBody);
 
 function toolsLine(name: string): HTMLElement {
-  const found = [...document.body.querySelectorAll<HTMLElement>('.q-item')]
+  const found = [...document.body.querySelectorAll<HTMLElement>('.agent-tile')]
     .find((item) => item.querySelector('.mono')?.textContent?.trim().split(/\s+/)[0] === name);
   if (!found) throw new Error(`no row for ${name}`);
   const line = found.querySelector<HTMLElement>('.agent-tools-line');
@@ -143,13 +144,22 @@ describe('AgentsDialog, the tools caption', () => {
     wrapper.unmount();
   });
 
-  it("shows a preset's recorded gaps under it", async () => {
+  it("counts a preset's gaps on its tile and lists them, with what they mean, on the Details Gaps tab", async () => {
     const wrapper = await mountDialog(AgentsDialog);
 
-    const row = toolsLine('claude-headless').closest('.q-item')!;
-    expect(row.querySelector('.agent-tools-gap')?.textContent).toContain(
-      "Gap: A repository's own .claude/settings.json still loads.",
-    );
+    const tile = toolsLine('claude-headless').closest('.agent-tile')!;
+    expect(tile.querySelector('.agent-gap-count')?.textContent).toContain('1 gap, explained in Details');
+    // The gap itself is no longer printed on the tile.
+    expect(tile.textContent).not.toContain('settings.json');
+
+    tile.querySelector<HTMLElement>('[aria-label="Details claude-headless"]')!.click();
+    await flushPromises();
+    [...document.body.querySelectorAll<HTMLElement>('.q-tab')].find((t) => t.textContent?.includes('Gaps'))!.click();
+    await flushPromises();
+
+    const gaps = document.body.querySelector('[data-agent-gaps]')!;
+    expect(gaps.textContent).toContain("A repository's own .claude/settings.json still loads.");
+    expect(gaps.textContent).toContain('no launch switch turns off');
 
     wrapper.unmount();
   });

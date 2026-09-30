@@ -5,8 +5,10 @@ import {
   joinEnv,
   joinLines,
   joinTags,
+  parseTags,
   rebuildAgentDefinition,
 } from '../lib/agentDefinitionDraft';
+import { validateTags } from '../lib/tenantSettings';
 import {
   agentNameTaken,
   envLines,
@@ -47,9 +49,42 @@ const props = defineProps<{
   agent: Agent | null;
   busy: boolean;
   error: string;
+  /**
+   * A BUILT-IN, SHOWN WHOLE. Every field is read-only except Tags, which save through `save-tags`
+   * (the tenant setting `agents.tags`) and never through the catalog, which refuses a changed
+   * built-in. The full launch is here so a person can SEE what a built-in runs - before this, the
+   * screen showed its name and nothing of its command line.
+   */
+  readOnly?: boolean;
+  /**
+   * CREATE FROM A COPY: a new Agent filled in from this one (its name already changed by the
+   * caller), every field editable. Ignored while `agent` is set.
+   */
+  cloneOf?: Agent | null;
+  /** The gaps the Host's pre-flight listed for this preset, beside the ones it declares. */
+  reportGaps?: string[] | null;
 }>();
 
-const emit = defineEmits<{ save: [Agent] }>();
+const emit = defineEmits<{ save: [Agent]; 'save-tags': [string[]]; 'reset-tags': [] }>();
+
+/** What the form is filled from: the Agent being edited, else the one being cloned. */
+const source = computed(() => props.agent ?? props.cloneOf ?? null);
+
+/** Everything but Tags, on a built-in. */
+const locked = computed(() => props.readOnly === true && props.agent !== null);
+
+const tab = ref<'general' | 'isolation' | 'gaps'>('general');
+
+/**
+ * WHAT A MEMBER OF THIS PRESET CAN STILL LOAD that no launch switch turns off - the declaration's
+ * own `gaps`, and any the pre-flight listed, once each.
+ */
+const gaps = computed(() => [...new Set([...(source.value?.isolation?.gaps ?? []), ...(props.reportGaps ?? [])])]);
+
+const isolation = computed(() => source.value?.isolation ?? null);
+const updates = computed(() => source.value?.updates ?? null);
+const envPairs = (env: Record<string, string> | null | undefined) =>
+  Object.entries(env ?? {}).map(([key, value]) => `${key}=${value}`);
 
 const name = ref('');
 const mode = ref<AgentMode>('Headless');
@@ -82,6 +117,11 @@ const installHint = ref('');
 const timeout = ref('');
 
 const isNew = computed(() => props.agent === null);
+
+const title = computed(() => {
+  if (props.agent) return props.agent.name;
+  return props.cloneOf ? 'New Agent, cloned' : 'New Agent';
+});
 
 /**
  * Whether the run timeout applies at all.
@@ -142,19 +182,20 @@ watch(
   (showing) => {
     if (!showing) return;
 
-    name.value = props.agent?.name ?? '';
-    mode.value = props.agent?.mode ?? 'Headless';
-    fileName.value = props.agent?.launch?.fileName ?? '';
-    args.value = joinLines(props.agent?.launch?.arguments);
-    systemPromptArguments.value = joinLines(props.agent?.launch?.systemPromptArguments);
-    instructionsFile.value = props.agent?.launch?.instructionsFile ?? '';
-    usageFormat.value = props.agent?.launch?.usageFormat ?? '';
-    languageModel.value = props.agent?.launch?.languageModel ?? true;
-    env.value = joinEnv(props.agent?.env);
-    tags.value = joinTags(props.agent?.tags);
-    timeout.value = props.agent?.timeoutSeconds ? String(props.agent.timeoutSeconds) : '';
-    installUrl.value = props.agent?.install?.url ?? '';
-    installHint.value = props.agent?.install?.hint ?? '';
+    tab.value = 'general';
+    name.value = source.value?.name ?? '';
+    mode.value = source.value?.mode ?? 'Headless';
+    fileName.value = source.value?.launch?.fileName ?? '';
+    args.value = joinLines(source.value?.launch?.arguments);
+    systemPromptArguments.value = joinLines(source.value?.launch?.systemPromptArguments);
+    instructionsFile.value = source.value?.launch?.instructionsFile ?? '';
+    usageFormat.value = source.value?.launch?.usageFormat ?? '';
+    languageModel.value = source.value?.launch?.languageModel ?? true;
+    env.value = joinEnv(source.value?.env);
+    tags.value = joinTags(source.value?.tags);
+    timeout.value = source.value?.timeoutSeconds ? String(source.value.timeoutSeconds) : '';
+    installUrl.value = source.value?.install?.url ?? '';
+    installHint.value = source.value?.install?.hint ?? '';
   },
   { immediate: true },
 );
@@ -183,8 +224,12 @@ const envProblems = computed(() => [
 /** The server refused this name (a duplicate), so the field is marked as well as the banner. */
 const nameRefused = computed(() => props.error !== '' && agentNameTaken(props.error));
 
+/** A built-in's tags, checked as the setting checks them before anything is sent. */
+const tagProblem = computed(() => (locked.value ? validateTags(parseTags(tags.value) ?? []) : null));
+
 const valid = computed(
   () =>
+    locked.value ? tagProblem.value === null :
     (!isNew.value || firstProblem(nameRules, name.value) === null) &&
     firstProblem(fileNameRules, fileName.value) === null &&
     firstProblem(usageFormatRules, usageFormat.value) === null &&
@@ -196,6 +241,11 @@ const valid = computed(
 
 function submit() {
   if (!valid.value || props.busy) return;
+
+  if (locked.value) {
+    emit('save-tags', parseTags(tags.value) ?? []);
+    return;
+  }
 
   emit(
     'save',
@@ -213,8 +263,8 @@ function submit() {
       tags: tags.value,
       installUrl: installUrl.value,
       installHint: installHint.value,
-      isolation: props.agent?.isolation ?? null,
-      updates: props.agent?.updates ?? null,
+      isolation: source.value?.isolation ?? null,
+      updates: source.value?.updates ?? null,
     }),
   );
 }
@@ -224,12 +274,31 @@ function submit() {
   <q-dialog v-model="open" no-backdrop-dismiss>
     <q-card class="os-dialog-lg">
       <q-card-section class="row items-center q-pb-none">
-        <div class="os-dialog-title">{{ isNew ? 'New Agent' : agent?.name }}</div>
+        <div class="os-dialog-title mono">{{ title }}</div>
+        <q-badge v-if="locked" color="grey-7" label="Built-in" class="q-ml-sm" />
         <q-space />
         <q-btn v-close-popup flat round dense icon="close" :disable="busy" />
       </q-card-section>
 
+      <q-card-section v-if="locked" class="os-body os-text-muted q-pt-xs q-pb-none" data-agent-read-only-note>
+        Built into this build: shown in full, read-only apart from its tags, which hiring matches
+        on. To change how it launches, clone it and edit the copy.
+      </q-card-section>
+      <q-card-section v-else-if="cloneOf && isNew" class="os-body os-text-muted q-pt-xs q-pb-none" data-agent-clone-note>
+        A copy, carrying its isolation, updates and live view. Name it, change what you need and
+        save it as your own Agent.
+      </q-card-section>
+
+      <q-tabs v-model="tab" dense no-caps align="left" class="text-primary q-px-md" data-agent-tabs>
+        <q-tab name="general" label="General" />
+        <q-tab name="isolation" label="Isolation" />
+        <q-tab name="gaps" :label="gaps.length ? `Gaps (${gaps.length})` : 'Gaps'" />
+      </q-tabs>
+      <q-separator />
+
       <q-form lazy-rules="ondemand" @submit="submit">
+        <q-tab-panels v-model="tab" keep-alive class="agent-edit-panels">
+        <q-tab-panel name="general" class="q-pa-none">
         <q-card-section class="q-gutter-md">
           <!-- Editable only when creating. To rename, delete and recreate: the name is what every
                member row and every team's Concierge setting references, and renaming in place
@@ -259,6 +328,7 @@ function submit() {
             outlined
             label="Mode"
             :disable="busy"
+            :readonly="locked"
             hint="Headless: a Team Member woken by a message. Concierge: a terminal a person types into."
           />
 
@@ -281,6 +351,7 @@ function submit() {
             outlined
             label="Executable"
             :disable="busy"
+            :readonly="locked"
             :rules="fileNameRules"
             hint="The program to run — claude, codex, grok, copilot, cmd.exe."
           />
@@ -293,6 +364,7 @@ function submit() {
             autogrow
             label="Arguments"
             :disable="busy"
+            :readonly="locked"
             hint="One per line. This is also where the WORK is delivered: {userPrompt} puts that text on the command line, {userPromptFile} writes it to a temporary file and substitutes the path — safer where a CLI supports it, since a prompt carries newlines and quotes. Use neither and it goes to the agent on stdin."
           />
 
@@ -311,7 +383,7 @@ function submit() {
             type="textarea"
             autogrow
             label="System-prompt arguments (optional)"
-            :disable="busy || promptArgumentsLocked"
+            :disable="busy || promptArgumentsLocked" :readonly="locked"
             hint="How this Agent is handed the Prompt chosen for the member — one argument per line, with {systemPromptFile} where the path goes. The platform composes that Prompt, writes it to a temporary file and substitutes the path here. Leave empty for a CLI with no such flag; use the instructions file below instead."
           />
 
@@ -329,7 +401,7 @@ function submit() {
             dense
             outlined
             label="Instructions file (optional)"
-            :disable="busy || instructionsFileLocked"
+            :disable="busy || instructionsFileLocked" :readonly="locked"
             :hint="instructionsFileLocked
               ? 'Not used while system-prompt arguments are set — one mechanism per preset, or the same Prompt is handed over twice and billed twice.'
               : 'The other way the member’s Prompt reaches this Agent: the composed text is written into this file in the working directory before every launch. AGENTS.md for codex, copilot and grok, which have no system-prompt flag. Leave empty for a CLI that takes one.'"
@@ -347,6 +419,7 @@ function submit() {
             outlined
             label="Usage format (optional)"
             :disable="busy"
+            :readonly="locked"
             :rules="usageFormatRules"
             hint="How this preset reports usage. None where this preset does not report usage."
           />
@@ -357,7 +430,7 @@ function submit() {
                preset through this screen silently turned a `languageModel: false` program back into
                a billed, probed, firehose-eligible model. Placed beside Usage format, the closest
                sibling: both describe what kind of preset this is rather than how it launches. -->
-          <q-checkbox v-model="languageModel" dense label="Language model" :disable="busy" />
+          <q-checkbox v-model="languageModel" dense label="Language model" :disable="busy || locked" />
           <div class="text-caption os-text-muted q-mt-xs">
             Clear this for a preset that runs an ordinary program rather than a model — it is then not
             billed, not probed for CLI use, and may subscribe to high-volume events.
@@ -375,6 +448,7 @@ function submit() {
             autogrow
             label="Environment (optional)"
             :disable="busy"
+            :readonly="locked"
             :rules="envRules"
             hint="KEY=value, one per line. Merged first — the platform's own HARNESS_* variables are injected last and win, and a key starting HARNESS_ is refused."
           />
@@ -390,10 +464,25 @@ function submit() {
             outlined
             type="textarea"
             autogrow
-            label="Tags (optional)"
+            :label="locked ? 'Tags' : 'Tags (optional)'"
             :disable="busy"
-            hint="One tag per line. Tenant-wide free-text advice on what this Agent is good at; matching is case-insensitive."
+            :error="tagProblem !== null"
+            :error-message="tagProblem ?? undefined"
+            :hint="locked
+              ? `One tag per line. The build's: ${(agent?.buildTags ?? []).join(', ') || 'none'}. Applies to the next hire.`
+              : 'One tag per line. Tenant-wide free-text advice on what this Agent is good at; matching is case-insensitive.'"
           />
+          <div v-if="locked && agent?.tagsFromOperator" class="row justify-end">
+            <q-btn
+              flat
+              dense
+              no-caps
+              icon="undo"
+              label="Reset to the build's tags"
+              :disable="busy"
+              @click="emit('reset-tags')"
+            />
+          </div>
 
           <!-- WHERE TO GET THE CLI, and OPTIONAL in the ordinary sense rather than the grudging one.
                A preset with no link reads the same sentence without one, and nothing anywhere
@@ -412,6 +501,7 @@ function submit() {
             outlined
             label="Install link (optional)"
             :disable="busy"
+            :readonly="locked"
             :rules="installUrlRules"
             hint="Where a person goes to install this Agent's CLI, shown when its command is not found on this machine's PATH. Empty means no link is shown — nothing is guessed."
           />
@@ -421,7 +511,7 @@ function submit() {
             dense
             outlined
             label="Install hint (optional)"
-            :disable="busy || installUrl.trim().length === 0"
+            :disable="busy || installUrl.trim().length === 0" :readonly="locked"
             :hint="installUrl.trim().length === 0
               ? 'Needs an install link — a hint with nowhere to go is a remedy nobody can follow.'
               : 'One line beside the link, in practice the install command.'"
@@ -442,17 +532,77 @@ function submit() {
             outlined
             type="number"
             label="Run timeout in seconds (optional)"
-            :disable="busy || interactive"
+            :disable="busy || interactive" :readonly="locked"
             :rules="interactive ? [] : timeoutRules"
             :hint="interactive
               ? 'Not used by the Concierge — a terminal has no run to bound. Unattended sessions are ended by the Concierge idle timeout instead. Switch Mode to Headless to set one.'
               : 'How long ONE run may take before the platform stops it and reports the member as failed. Empty means no limit, which is the default — a run then continues until the agent ends it.'"
           />
 
-          <!-- The server's words, VERBATIM, and here rather than behind this dialog: it names what
-               would break - a duplicate name, an Agent a member still runs - and a paraphrase is how
-               two descriptions of one rule start disagreeing. -->
-          <q-banner v-if="error" dense class="os-bg-tint-error text-negative">
+        </q-card-section>
+        </q-tab-panel>
+
+        <!-- ISOLATION: what a MEMBER's launch of this preset switches off, and how its CLI's own
+             updater is kept off. Read-only everywhere: a clone carries the declaration as it is. -->
+        <q-tab-panel name="isolation" class="agent-edit-readout" data-agent-isolation>
+          <template v-if="mode === 'Interactive'">
+            <p class="os-body">
+              The Concierge is the person's own session: it keeps the signed-in account's connectors
+              and everything set up in the shared home. Nothing is switched off for it.
+            </p>
+          </template>
+          <template v-else-if="isolation">
+            <p class="os-body os-text-muted">
+              A member launched from this preset gets the platform's tools and its CLI's own, and
+              nothing from the signed-in account or the shared home. These are the switches that do it.
+            </p>
+            <div class="agent-readout-label">Arguments added to a member's launch</div>
+            <pre class="agent-readout mono">{{ isolation.arguments.join('\n') || '(none)' }}</pre>
+            <div class="agent-readout-label">Environment set last, after the preset's and the team's</div>
+            <pre class="agent-readout mono">{{ envPairs(isolation.env).join('\n') || '(none)' }}</pre>
+            <div class="agent-readout-label">The CLI's own tools a member may use</div>
+            <pre class="agent-readout mono">{{ (isolation.allowedTools ?? []).join(', ') || '(none)' }}</pre>
+            <div class="agent-readout-label">Servers besides the platform's own</div>
+            <pre class="agent-readout mono">{{ (isolation.allowedServers ?? []).join(', ') || '(none)' }}</pre>
+          </template>
+          <p v-else class="os-body text-warning">
+            No isolation declared. A member run from this preset is shown as not verified, and any
+            server other than the platform's is reported as foreign.
+          </p>
+
+          <div class="agent-readout-label q-mt-md">Automatic updates</div>
+          <template v-if="updates">
+            <div class="os-body os-text-muted q-mb-xs">
+              Turned off on every launch; the platform updates the CLI at container start and when a
+              person asks.
+            </div>
+            <pre class="agent-readout mono">{{ [...envPairs(updates.env), ...(updates.arguments ?? [])].join('\n') || '(no switch)' }}</pre>
+            <div class="agent-readout-label">Update command</div>
+            <pre class="agent-readout mono">{{ (updates.update ?? []).join(' ') || '(none: the platform cannot update it)' }}</pre>
+          </template>
+          <div v-else class="os-body os-text-muted">None declared: this CLI updates itself, if it does.</div>
+        </q-tab-panel>
+
+        <!-- GAPS: what still loads that no switch reaches. Moved here from the list, with what it
+             means, because a bare "Gap:" line on a tile left a person with nothing to do about it. -->
+        <q-tab-panel name="gaps" class="agent-edit-readout" data-agent-gaps>
+          <p class="os-body os-text-muted">
+            What a member of this preset can still load that no launch switch turns off. There is
+            nothing to do unless something is put there: keep those places free of tools a member
+            should not have, and give members account access through Connections instead.
+          </p>
+          <ul v-if="gaps.length" class="agent-gaps">
+            <li v-for="gap in gaps" :key="gap" class="os-body">{{ gap }}</li>
+          </ul>
+          <div v-else class="os-body os-text-muted">No gaps recorded.</div>
+        </q-tab-panel>
+        </q-tab-panels>
+
+        <!-- The server's words, VERBATIM, and here rather than behind this dialog: it names what
+             would break - a duplicate name, an Agent a member still runs - and a paraphrase is how
+             two descriptions of one rule start disagreeing. Outside the tabs, so it shows on any. -->
+        <q-card-section v-if="error" class="q-pt-none">
+          <q-banner dense class="os-bg-tint-error text-negative">
             <template #avatar><q-icon name="error" /></template>
             {{ error }}
           </q-banner>
@@ -464,7 +614,7 @@ function submit() {
             unelevated
             color="primary"
             no-caps
-            label="Save"
+            :label="locked ? 'Save tags' : 'Save'"
             type="submit"
             :loading="busy"
             :disable="!valid || busy"
@@ -474,3 +624,37 @@ function submit() {
     </q-card>
   </q-dialog>
 </template>
+
+<style scoped>
+/* The tabs' content scrolls under a fixed title and fixed actions. */
+.agent-edit-panels {
+  height: min(62vh, 40rem);
+  overflow-y: auto;
+}
+
+.agent-readout-label {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.agent-readout {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--os-rule);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.agent-gaps {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.agent-gaps li + li {
+  margin-top: 6px;
+}
+</style>

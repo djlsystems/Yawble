@@ -101,7 +101,7 @@ beforeEach(() => {
 afterEach(resetBody);
 
 function row(name: string): HTMLElement {
-  const found = [...document.body.querySelectorAll<HTMLElement>('.q-item')]
+  const found = [...document.body.querySelectorAll<HTMLElement>('.agent-tile')]
     .find((item) => item.querySelector('.mono')?.textContent?.trim().split(/\s+/)[0] === name);
   if (!found) throw new Error(`no row for ${name}`);
   return found;

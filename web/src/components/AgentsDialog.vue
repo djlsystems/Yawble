@@ -4,8 +4,7 @@ import { useQuasar } from 'quasar';
 import * as api from '../api/client';
 import { type Agent } from '../api/types';
 import { visibleAgents } from '../lib/hiddenAgents';
-import { joinTags, parseTags } from '../lib/agentDefinitionDraft';
-import { AgentTags, tagMapOf, validateTags } from '../lib/tenantSettings';
+import { AgentTags, tagMapOf } from '../lib/tenantSettings';
 import {
   installGuidance,
   installStatus,
@@ -143,6 +142,9 @@ const formError = ref('');
 const editingAgent = ref<Agent | null>(null);
 const agentEditOpen = ref(false);
 
+/** The new Agent a Clone fills the dialog from, already renamed; null for a plain create or edit. */
+const cloneSource = ref<Agent | null>(null);
+
 /**
  * Each preset's CLI version, from `cliVersions` on `GET /api/agents` - the Host's CLI version record,
  * the one the operator CLI's `doctor` and `agents` read. Beside the catalog for `installations`' reason.
@@ -188,8 +190,45 @@ async function updateCli(agent: Agent) {
 }
 const confirmingAgent = ref<Agent | null>(null);
 
-/** A preset serves exactly one mode, so this is the picker it would turn up in. */
-const captionFor = (agent: Agent) => (agent.mode === 'Headless' ? 'headless' : 'interactive');
+/** A preset serves exactly one mode, so this is the picker it would turn up in. The wire value stays
+ *  `Interactive`; a person reads "concierge", as the edit dialog's Mode select says. */
+const captionFor = (agent: Agent) => (agent.mode === 'Headless' ? 'headless' : 'concierge');
+
+/**
+ * THE FILTER. Free text matched, case-insensitively, against everything a tile says about how the
+ * preset launches - its name, its command and arguments, its mode, its tags and whether it is built
+ * in - so "claude" finds every preset that runs claude, whatever it is called. And one checkbox per
+ * mode, both on at first.
+ */
+const filterText = ref('');
+const showHeadless = ref(true);
+const showConcierge = ref(true);
+
+function searchText(agent: Agent): string {
+  return [
+    agent.name,
+    captionFor(agent),
+    isBuiltIn(agent) ? 'built-in' : 'custom',
+    agent.launch?.fileName ?? '',
+    ...(agent.launch?.arguments ?? []),
+    ...(agent.tags ?? []),
+  ].join(' ').toLowerCase();
+}
+
+/** WHAT IS RENDERED after the filter - `shownAgents` narrowed, and never what is submitted. */
+const filteredAgents = computed(() => {
+  const words = filterText.value.toLowerCase().split(/\s+/).filter((word) => word.length > 0);
+
+  return shownAgents.value.filter((agent) => {
+    if (agent.mode === 'Headless' ? !showHeadless.value : !showConcierge.value) return false;
+    const text = searchText(agent);
+    return words.every((word) => text.includes(word));
+  });
+});
+
+/** The gaps a tile counts: the preset's declared ones and the pre-flight's, once each. */
+const gapCount = (agent: Agent) =>
+  new Set([...(agent.isolation?.gaps ?? []), ...(toolsReportOf(agent)?.gaps ?? [])]).size;
 const reportsUsage = (agent: Agent) => (agent.launch?.usageFormat ?? null) !== null;
 
 async function load() {
@@ -219,7 +258,7 @@ watch(open, (showing) => {
 
   agentEditOpen.value = false;
   confirmingAgent.value = null;
-  taggingAgent.value = null;
+  cloneSource.value = null;
   error.value = '';
   formError.value = '';
   updateOutcomes.value = {};
@@ -256,18 +295,53 @@ async function save(nextAgents: Agent[], successMessage: string): Promise<boolea
   }
 }
 
+/**
+ * Opens the details dialog. A BUILT-IN OPENS TOO, read-only apart from its tags: a person can see
+ * its whole launch, which this screen used to hide. Its tags save through `agents.tags`.
+ */
 function openAgent(agent: Agent | null) {
-  // A built-in is never opened for editing: the route would refuse the save anyway.
-  if (agent !== null && isBuiltIn(agent)) return;
-
   formError.value = '';
+  cloneSource.value = null;
   editingAgent.value = agent;
   agentEditOpen.value = true;
 }
 
+/** A free name for a copy of `name`: `<name>-copy`, then `-copy-2`, ... within the 32 characters. */
+function copyName(name: string): string {
+  const taken = new Set(agents.value.map((agent) => agent.name.toLowerCase()));
+
+  for (let n = 1; ; n++) {
+    const suffix = n === 1 ? '-copy' : `-copy-${n}`;
+    const candidate = `${name.slice(0, 32 - suffix.length)}${suffix}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/** What a preset carries that says where it came from rather than how it launches. */
+function ownFields(agent: Agent): Agent {
+  const { builtIn: _builtIn, tagsFromOperator: _operator, buildTags: _build, ...rest } = agent;
+  return { ...rest, hidden: false };
+}
+
+/**
+ * CLONE: a new custom Agent filled in from this one - its launch, isolation, updates and live view
+ * all carried - to change what it needs (a model on the command line, say) and save as a person's
+ * own. Nothing is saved until the dialog is.
+ */
+function cloneAgent(agent: Agent) {
+  formError.value = '';
+  editingAgent.value = null;
+  cloneSource.value = { ...ownFields(agent), name: copyName(agent.name) };
+  agentEditOpen.value = true;
+}
+
 async function saveAgent(next: Agent) {
+  // EVERY FIELD THE DIALOG DOES NOT REBUILD IS CARRIED from what it was filled from - `liveView`
+  // above all, which the form has no box for: a save that rebuilt only what it shows would drop it,
+  // and a clone of a watchable preset would come out unwatchable. What the dialog rebuilt wins.
+  const base = editingAgent.value ?? cloneSource.value;
   // A person's preset is never built in, whatever the dialog handed back.
-  const custom: Agent = { ...next, builtIn: false };
+  const custom: Agent = { ...(base ? ownFields(base) : {}), ...next, builtIn: false };
 
   const list =
     editingAgent.value === null
@@ -294,18 +368,8 @@ async function removeAgent(agent: Agent) {
   removing.value = null;
 }
 
-/** The built-in whose tags are being edited, the text in the box, and the refusal a save met. */
-const taggingAgent = ref<Agent | null>(null);
-const tagDraft = ref('');
+/** The refusal a save of a built-in's tags met. */
 const tagError = ref('');
-
-function openTags(agent: Agent) {
-  if (!isBuiltIn(agent)) return;
-
-  tagError.value = '';
-  tagDraft.value = joinTags(agent.tags);
-  taggingAgent.value = agent;
-}
 
 /**
  * Writes `agents.tags` as it will read after this change. The setting is ONE value, so the map is
@@ -342,18 +406,23 @@ async function saveTags(agent: Agent, tags: string[] | null, successMessage: str
   }
 }
 
-async function submitTags() {
-  const agent = taggingAgent.value;
-  if (agent === null) return;
+/** A built-in's tags from its details dialog, which stays OPEN with the server's words on a refusal. */
+async function saveDetailsTags(tags: string[]) {
+  const agent = editingAgent.value;
+  if (agent === null || !isBuiltIn(agent)) return;
 
-  const tags = parseTags(tagDraft.value) ?? [];
-  const problem = validateTags(tags);
-  if (problem !== null) {
-    tagError.value = problem;
-    return;
-  }
+  formError.value = '';
+  if (await saveTags(agent, tags, `${agent.name}'s tags saved.`)) agentEditOpen.value = false;
+  else formError.value = tagError.value;
+}
 
-  if (await saveTags(agent, tags, `${agent.name}'s tags saved.`)) taggingAgent.value = null;
+async function resetDetailsTags() {
+  const agent = editingAgent.value;
+  if (agent === null || !isBuiltIn(agent)) return;
+
+  formError.value = '';
+  if (await saveTags(agent, null, `${agent.name} carries the build's tags again.`)) agentEditOpen.value = false;
+  else formError.value = tagError.value;
 }
 
 async function resetTags(agent: Agent) {
@@ -370,7 +439,7 @@ const rowBusy = computed(
 
 <template>
   <q-dialog v-model="open">
-    <q-card class="agents-card os-dialog-lg">
+    <q-card class="agents-card os-dialog-xl">
       <q-card-section class="row items-center q-pb-none">
         <div class="os-dialog-title">Agents</div>
         <q-space />
@@ -378,8 +447,28 @@ const rowBusy = computed(
       </q-card-section>
 
       <q-card-section class="os-body os-text-muted q-pt-xs q-pb-sm">
-        How each CLI is launched. Built-in presets come with this build and are read-only apart from
-        their tags, which hiring matches on; add your own below. What an agent is told comes with this build, by its role.
+        How each CLI is launched. Built-in Agents come with this build: open one to see its whole
+        launch, read-only apart from its tags, which hiring matches on, or clone it to make your own
+        with a different launch. What an agent is told comes with this build, by its role.
+      </q-card-section>
+
+      <!-- THE FILTER: free text over name, command, arguments, mode and tags, and one checkbox per
+           mode. It narrows what is SHOWN only; a save still sends the whole catalog. -->
+      <q-card-section class="agent-filters q-py-sm" data-agent-filters>
+        <q-input
+          v-model="filterText"
+          dense
+          outlined
+          clearable
+          class="agent-filter-text"
+          placeholder="Filter: name, command, argument or tag"
+          aria-label="Filter Agents"
+          data-agent-filter
+        >
+          <template #prepend><q-icon name="search" /></template>
+        </q-input>
+        <q-checkbox v-model="showHeadless" dense label="Headless" data-agent-show="headless" />
+        <q-checkbox v-model="showConcierge" dense label="Concierge" data-agent-show="concierge" />
       </q-card-section>
 
       <q-separator />
@@ -387,245 +476,201 @@ const rowBusy = computed(
       <q-card-section v-if="error" class="q-py-sm text-negative">{{ error }}</q-card-section>
 
       <q-card-section class="agents-list">
-        <q-list v-if="shownAgents.length > 0" bordered separator>
-          <q-item v-for="agent in shownAgents" :key="agent.name">
-            <q-item-section avatar><q-icon name="terminal" /></q-item-section>
+        <div v-if="filteredAgents.length > 0" class="agent-tiles">
+          <div
+            v-for="agent in filteredAgents"
+            :key="agent.name"
+            class="agent-tile"
+            :data-agent-tile="agent.name"
+          >
+            <div class="agent-tile-head">
+              <q-icon name="terminal" size="18px" aria-hidden="true" />
+              <span class="mono agent-name text-weight-medium">{{ agent.name }}</span>
+              <q-badge
+                :outline="!isBuiltIn(agent)"
+                :color="isBuiltIn(agent) ? 'grey-7' : 'primary'"
+                :label="isBuiltIn(agent) ? 'Built-in' : 'Custom'"
+                class="agent-kind"
+              />
+            </div>
+            <div class="agent-tile-line os-text-muted">
+              {{ captionFor(agent) }} · <span class="mono">{{ agent.launch?.fileName }}</span>
+            </div>
 
-            <q-item-section>
-              <q-item-label class="mono">
-                {{ agent.name }}
-                <q-badge
-                  :outline="!isBuiltIn(agent)"
-                  :color="isBuiltIn(agent) ? 'grey-7' : 'primary'"
-                  :label="isBuiltIn(agent) ? 'Built-in' : 'Custom'"
-                  class="q-ml-xs agent-kind"
-                />
-              </q-item-label>
-              <q-item-label caption>
-                {{ captionFor(agent) }} · {{ agent.launch?.fileName }}
-              </q-item-label>
-              <!-- TAGS, on a built-in: the ones hiring uses, whose they are, and the build's beside
-                   the operator's so a person can see what Reset would bring back. -->
-              <q-item-label v-if="isBuiltIn(agent)" caption class="agent-tags-line">
-                <span v-if="tagsText(agent.tags)">{{ tagsText(agent.tags) }}</span>
-                <span v-else class="os-text-muted">no tags</span>
+            <!-- TAGS: the ones hiring uses, whose they are, and on a built-in the build's beside
+                 the operator's so a person can see what Reset would bring back. -->
+            <div class="agent-tile-line agent-tags-line">
+              <span v-if="tagsText(agent.tags)">{{ tagsText(agent.tags) }}</span>
+              <span v-else class="os-text-muted">no tags</span>
+              <template v-if="isBuiltIn(agent)">
                 <span v-if="tagsFromOperator(agent)" class="os-text-muted">
                   (yours; build's: {{ tagsText(agent.buildTags) || 'none' }})
                 </span>
                 <span v-else class="os-text-muted">(from the build)</span>
-              </q-item-label>
+              </template>
+            </div>
 
-              <q-item-label caption>
-                <span v-if="reportsUsage(agent)" class="text-positive">reports usage</span>
-                <span v-else class="os-text-muted">does not report usage</span>
-              </q-item-label>
+            <div class="agent-tile-line">
+              <span v-if="reportsUsage(agent)" class="text-positive">reports usage</span>
+              <span v-else class="os-text-muted">does not report usage</span>
+            </div>
 
-              <!-- THE STATE, ON EVERY ROW. A seeded preset this tenant never uses, reading "not
-                   found on this machine", is information rather than a problem - the screen lists
-                   what exists and the ribbon badge warns about what is in USE.
+            <!-- THE STATE, ON EVERY TILE. TEXT PLUS ICON, NEVER COLOUR ALONE. Material SYMBOLS names:
+                 the app loads Symbols Outlined only. -->
+            <div class="agent-tile-line">
+              <q-icon :name="statusOf(agent).icon" size="14px" class="q-mr-xs" aria-hidden="true" />
+              <span
+                :class="{
+                  'text-warning': statusOf(agent).tone === 'warn',
+                  'os-text-muted': statusOf(agent).tone !== 'warn',
+                }"
+              >{{ statusOf(agent).text }}</span>
+            </div>
 
-                   TEXT PLUS ICON, NEVER COLOUR ALONE. The colour class is an addition to both and carries nothing on its
-                   own. Material SYMBOLS names: the app loads Symbols Outlined only, and an Icons-only
-                   name renders as its own letters and throws the row out of line. -->
-              <q-item-label caption>
-                <q-icon
-                  :name="statusOf(agent).icon"
-                  size="14px"
-                  class="q-mr-xs"
-                  aria-hidden="true"
+            <!-- THE CLI'S VERSION, on a built-in: what the Host's CLI version record says, when it
+                 last changed and who brought it. "version not known" is never a guess. -->
+            <div v-if="isBuiltIn(agent)" class="agent-tile-line agent-version-line">
+              <q-icon name="sync" size="14px" class="q-mr-xs" aria-hidden="true" />
+              <span v-if="versionOf(agent).version" class="mono agent-version">{{ versionOf(agent).version }}</span>
+              <span v-else class="os-text-muted agent-version">version not known</span>
+              <span v-if="versionOf(agent).updated" class="os-text-muted q-ml-xs agent-version-updated">
+                · {{ versionOf(agent).updated }}
+              </span>
+            </div>
+            <div v-if="outcomeOf(agent)" class="agent-tile-line agent-version-outcome">
+              {{ outcomeOf(agent) }}
+            </div>
+
+            <!-- The remedy, and ONLY where there is something to remedy; the link is an addition,
+                 never a substitute, and nothing composes one from the preset's name. -->
+            <div v-if="missing(agent)" class="agent-tile-line agent-install-help">
+              {{ guidanceFor(agent).text }}
+              <a
+                v-if="guidanceFor(agent).url"
+                :href="guidanceFor(agent).url ?? undefined"
+                target="_blank"
+                rel="noopener"
+              >How to install it</a>
+              <span v-if="guidanceFor(agent).hint" class="mono">{{ guidanceFor(agent).hint }}</span>
+            </div>
+
+            <!-- Signed in or not. "Not measured" is grey and carries no warning glyph. -->
+            <div class="agent-tile-line agent-auth-line">
+              <q-icon :name="authOf(agent).icon" size="14px" class="q-mr-xs" aria-hidden="true" />
+              <span
+                :class="{
+                  'text-positive': authOf(agent).tone === 'ok',
+                  'text-warning': authOf(agent).tone === 'warn',
+                  'os-text-muted': authOf(agent).tone === 'unknown',
+                }"
+              >{{ authOf(agent).text }}</span>
+              <span v-if="authOf(agent).detail" class="os-text-muted">{{ authOf(agent).detail }}</span>
+            </div>
+
+            <!-- What this preset's CLI would load, as the Host listed it. Its gaps are counted here
+                 and explained in Details, where they have room to say what they mean. -->
+            <div v-if="toolsOf(agent)" class="agent-tile-line agent-tools-line">
+              <q-icon :name="toolsOf(agent)!.icon" size="14px" class="q-mr-xs" aria-hidden="true" />
+              <span
+                :class="{
+                  'text-positive': toolsOf(agent)!.tone === 'ok',
+                  'text-warning': toolsOf(agent)!.tone === 'warn',
+                  'os-text-muted': toolsOf(agent)!.tone === 'info',
+                }"
+              >{{ toolsOf(agent)!.text }}</span>
+              <span v-if="toolsOf(agent)!.names.length" class="mono agent-tools-names q-ml-xs">
+                {{ toolsOf(agent)!.names.join(', ') }}
+              </span>
+              <span v-if="toolsReportOf(agent)?.detail" class="os-text-muted q-ml-xs">
+                {{ toolsReportOf(agent)?.detail }}
+              </span>
+            </div>
+            <div v-if="gapCount(agent) > 0" class="agent-tile-line os-text-muted agent-gap-count">
+              {{ gapCount(agent) === 1 ? '1 gap' : `${gapCount(agent)} gaps` }}, explained in Details
+            </div>
+
+            <!-- ACTIONS. Details on every tile (a built-in's is read-only apart from its tags);
+                 Update where the preset declares an update command; Clone on every tile; Reset only
+                 when there is an operator's override to remove; Remove on a custom one. -->
+            <div class="agent-tile-actions">
+              <span v-if="isBuiltIn(agent)" class="os-text-muted agent-read-only q-mr-auto">
+                <q-icon name="lock" size="14px" aria-hidden="true" /> Read-only
+              </span>
+
+              <span v-if="canUpdate(agent)" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="upgrade"
+                  :loading="updating === agent.name"
+                  :disable="rowBusy"
+                  :aria-label="`Update the CLI ${agent.name} runs`"
+                  @click="updateCli(agent)"
                 />
-                <span
-                  :class="{
-                    'text-warning': statusOf(agent).tone === 'warn',
-                    'os-text-muted': statusOf(agent).tone !== 'warn',
-                  }"
-                >{{ statusOf(agent).text }}</span>
-              </q-item-label>
+                <q-tooltip>Update the {{ agent.launch?.fileName }} CLI now (waits for its runs, holds new ones)</q-tooltip>
+              </span>
 
-              <!-- THE CLI'S VERSION, on a built-in's row: what the Host's CLI version record says,
-                   when it last changed and who brought it - the record the doctor reads. A version
-                   the record does not have is "version not known", never a guess. After this row's
-                   update button, what that update came to. -->
-              <q-item-label v-if="isBuiltIn(agent)" caption class="agent-version-line">
-                <q-icon name="sync" size="14px" class="q-mr-xs" aria-hidden="true" />
-                <span v-if="versionOf(agent).version" class="mono agent-version">{{ versionOf(agent).version }}</span>
-                <span v-else class="os-text-muted agent-version">version not known</span>
-                <span v-if="versionOf(agent).updated" class="os-text-muted q-ml-xs agent-version-updated">
-                  · {{ versionOf(agent).updated }}
-                </span>
-              </q-item-label>
-              <q-item-label v-if="outcomeOf(agent)" caption class="agent-version-outcome">
-                {{ outcomeOf(agent) }}
-              </q-item-label>
-
-              <!-- The remedy, and ONLY where there is something to remedy. The sentence claims
-                   exactly what was checked: that a command of this name does not resolve on this
-                   machine's PATH. It does not say the CLI is broken, out of date or signed out,
-                   because the probe did not ask any of those - it resolves a name to a path and
-                   stops, running no candidate binary.
-
-                   THE LINK IS AN ADDITION, NEVER A SUBSTITUTE. A preset with no `install` renders
-                   the identical sentence with no link, and nothing here composes a URL from the
-                   preset's name: a lookup table mapping brands to vendors' documentation would
-                   work everywhere immediately, and it is the change refused, because nothing in
-                   code may name an Agent. -->
-              <q-item-label v-if="missing(agent)" caption class="agent-install-help">
-                {{ guidanceFor(agent).text }}
-                <a
-                  v-if="guidanceFor(agent).url"
-                  :href="guidanceFor(agent).url ?? undefined"
-                  target="_blank"
-                  rel="noopener"
-                >How to install it</a>
-                <span v-if="guidanceFor(agent).hint" class="mono">
-                  {{ guidanceFor(agent).hint }}
-                </span>
-              </q-item-label>
-
-              <!-- THE THIRD CAPTION: signed in or not, from `GET /api/agents/auth`. Three states,
-                   and the third is the one that has to be right: "Not measured" is grey and
-                   carries no warning glyph, because a CLI the probe could not ask is not a CLI
-                   that will fail. The probe's own sentence follows a "no", verbatim, since it
-                   names what was run and what came back. -->
-              <q-item-label caption class="agent-auth-line">
-                <q-icon
-                  :name="authOf(agent).icon"
-                  size="14px"
-                  class="q-mr-xs"
-                  aria-hidden="true"
+              <span v-if="isBuiltIn(agent) && tagsFromOperator(agent)" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="undo"
+                  :disable="rowBusy"
+                  :aria-label="`Reset to the build's tags ${agent.name}`"
+                  @click="resetTags(agent)"
                 />
-                <span
-                  :class="{
-                    'text-positive': authOf(agent).tone === 'ok',
-                    'text-warning': authOf(agent).tone === 'warn',
-                    'os-text-muted': authOf(agent).tone === 'unknown',
-                  }"
-                >{{ authOf(agent).text }}</span>
-                <span v-if="authOf(agent).detail" class="os-text-muted">
-                  {{ authOf(agent).detail }}
-                </span>
-              </q-item-label>
+                <q-tooltip>Reset to the build's tags</q-tooltip>
+              </span>
 
-              <!-- THE FOURTH CAPTION: what this preset's CLI would load, as the Host listed it.
-                   A member's preset is isolated, has foreign tools (named), is not verified, or
-                   was not measured - never green without a listing. The Concierge's tools are
-                   information in grey, never a warning. Its recorded gaps follow, verbatim. -->
-              <q-item-label v-if="toolsOf(agent)" caption class="agent-tools-line">
-                <q-icon
-                  :name="toolsOf(agent)!.icon"
-                  size="14px"
-                  class="q-mr-xs"
-                  aria-hidden="true"
+              <span class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="content_copy"
+                  :disable="rowBusy"
+                  :aria-label="`Clone ${agent.name}`"
+                  @click="cloneAgent(agent)"
                 />
-                <span
-                  :class="{
-                    'text-positive': toolsOf(agent)!.tone === 'ok',
-                    'text-warning': toolsOf(agent)!.tone === 'warn',
-                    'os-text-muted': toolsOf(agent)!.tone === 'info',
-                  }"
-                >{{ toolsOf(agent)!.text }}</span>
-                <span v-if="toolsOf(agent)!.names.length" class="mono agent-tools-names q-ml-xs">
-                  {{ toolsOf(agent)!.names.join(', ') }}
-                </span>
-                <span v-if="toolsReportOf(agent)?.detail" class="os-text-muted q-ml-xs">
-                  {{ toolsReportOf(agent)?.detail }}
-                </span>
-              </q-item-label>
-              <q-item-label
-                v-for="gap in toolsReportOf(agent)?.gaps ?? []"
-                :key="gap"
-                caption
-                class="os-text-muted agent-tools-gap"
-              >
-                Gap: {{ gap }}
-              </q-item-label>
-            </q-item-section>
+                <q-tooltip>Clone: a new Agent of your own, starting from this one</q-tooltip>
+              </span>
 
-            <!-- A BUILT-IN HAS ITS TAG CONTROLS AND NO OTHERS, rather than disabled ones: nothing
-                 else a person does here can change it, and a greyed button reads as "not right now".
-                 Reset appears only when there is an override to remove. -->
-            <q-item-section v-if="isBuiltIn(agent)" side>
-              <div class="row q-gutter-xs no-wrap items-center">
-                <span class="os-text-muted agent-read-only">
-                  <q-icon name="lock" size="14px" aria-hidden="true" /> Read-only
-                </span>
+              <span class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  :icon="isBuiltIn(agent) ? 'visibility' : 'edit'"
+                  :disable="rowBusy"
+                  :aria-label="`Details ${agent.name}`"
+                  @click="openAgent(agent)"
+                />
+                <q-tooltip>{{ isBuiltIn(agent) ? 'Details, and edit its tags' : 'Details and edit' }}</q-tooltip>
+              </span>
 
-                <span v-if="canUpdate(agent)" class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="download"
-                    :loading="updating === agent.name"
-                    :disable="rowBusy"
-                    :aria-label="`Update the CLI ${agent.name} runs`"
-                    @click="updateCli(agent)"
-                  />
-                  <q-tooltip>Update its CLI now (waits for its runs, holds new ones)</q-tooltip>
-                </span>
+              <span v-if="!isBuiltIn(agent)" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  color="negative"
+                  icon="delete"
+                  :loading="removing === agent.name"
+                  :disable="rowBusy"
+                  :aria-label="`Remove ${agent.name}`"
+                  @click="confirmingAgent = agent"
+                />
+                <q-tooltip>Remove</q-tooltip>
+              </span>
+            </div>
+          </div>
+        </div>
 
-                <span class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="edit"
-                    :disable="rowBusy"
-                    :aria-label="`Edit tags ${agent.name}`"
-                    @click="openTags(agent)"
-                  />
-                  <q-tooltip>Edit tags</q-tooltip>
-                </span>
-
-                <span v-if="tagsFromOperator(agent)" class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="undo"
-                    :disable="rowBusy"
-                    :aria-label="`Reset to the build's tags ${agent.name}`"
-                    @click="resetTags(agent)"
-                  />
-                  <q-tooltip>Reset to the build's tags</q-tooltip>
-                </span>
-              </div>
-            </q-item-section>
-
-            <q-item-section v-else side>
-              <div class="row q-gutter-xs no-wrap">
-                <span class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="tune"
-                    :disable="rowBusy"
-                    :aria-label="`Edit ${agent.name}`"
-                    @click="openAgent(agent)"
-                  />
-                  <q-tooltip>Edit</q-tooltip>
-                </span>
-
-                <span class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    color="negative"
-                    icon="delete"
-                    :loading="removing === agent.name"
-                    :disable="rowBusy"
-                    :aria-label="`Remove ${agent.name}`"
-                    @click="confirmingAgent = agent"
-                  />
-                  <q-tooltip>Remove</q-tooltip>
-                </span>
-              </div>
-            </q-item-section>
-          </q-item>
-        </q-list>
-
+        <div v-else-if="!busy && shownAgents.length > 0" class="os-text-muted q-pa-lg text-center" data-agent-none-match>
+          No Agent matches the filter.
+        </div>
         <div v-else-if="!busy" class="os-text-muted q-pa-lg text-center">
           No Agents yet. Add one below.
         </div>
@@ -648,44 +693,15 @@ const rowBusy = computed(
   <AgentEditDialog
     v-model="agentEditOpen"
     :agent="editingAgent"
+    :clone-of="cloneSource"
+    :read-only="editingAgent !== null && isBuiltIn(editingAgent)"
+    :report-gaps="editingAgent ? toolsReportOf(editingAgent)?.gaps ?? [] : []"
     :busy="formBusy"
     :error="formError"
     @save="saveAgent"
+    @save-tags="saveDetailsTags"
+    @reset-tags="resetDetailsTags"
   />
-
-  <!-- A BUILT-IN'S TAGS, and only those. Left OPEN on a refusal with the server's words, for the
-       reason the edit dialog is. -->
-  <q-dialog :model-value="taggingAgent !== null" @update:model-value="taggingAgent = null">
-    <q-card class="os-dialog-sm">
-      <q-card-section class="os-dialog-title">Tags for {{ taggingAgent?.name }}</q-card-section>
-
-      <q-card-section class="q-pt-none">
-        <q-input
-          v-model="tagDraft"
-          dense
-          outlined
-          type="textarea"
-          autogrow
-          label="Tags"
-          :disable="formBusy"
-          :hint="`One tag per line. The build's: ${tagsText(taggingAgent?.buildTags) || 'none'}. Applies to the next hire.`"
-        />
-        <div v-if="tagError" class="text-negative q-mt-sm">{{ tagError }}</div>
-      </q-card-section>
-
-      <q-card-actions align="right">
-        <q-btn v-close-popup flat no-caps label="Cancel" :disable="formBusy" />
-        <q-btn
-          unelevated
-          color="primary"
-          no-caps
-          label="Save tags"
-          :loading="formBusy"
-          @click="submitTags"
-        />
-      </q-card-actions>
-    </q-card>
-  </q-dialog>
 
   <!-- Its own `q-dialog` in this template rather than `$q.dialog()`. The plugin's `class` option
        lands on the inner card and not on the dialog root, so a confirmation opened this way cannot
@@ -720,8 +736,59 @@ const rowBusy = computed(
    and no way to reach its buttons. On the list rather than the card, so the title stays put while
    the list moves under it. */
 .agents-list {
-  max-height: 28rem;
+  max-height: min(64vh, 44rem);
   overflow-y: auto;
+}
+
+/* WRAPPED TILES: as many columns as fit, each at least wide enough for a version line. */
+.agent-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: 12px;
+}
+
+.agent-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px 8px;
+  border: 1px solid var(--os-rule-strong);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.agent-tile-line {
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.agent-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.agent-tile-actions {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.agent-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.agent-filter-text {
+  flex: 1 1 16rem;
+  max-width: 28rem;
 }
 
 .agent-kind {
