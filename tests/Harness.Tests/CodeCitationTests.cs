@@ -20,6 +20,20 @@ public sealed class CodeCitationTests
     /// <summary>The format examples the documentation uses; none of them names a real item.</summary>
     private static readonly string[] DocumentedExamples = ["B000H", "B001F", "B0O1H"];
 
+    /// <summary>
+    /// The incident the Concierge's prompt and skill teach from - a real item and card, quoted so an
+    /// agent recognises the shape - allowed only in the files that carry it and the test that pins
+    /// it. It is a worked case the agent reads, not a citation of the work that produced the code.
+    /// </summary>
+    private static readonly string[] WorkedCase = ["B00" + "1P", "card " + "2236"];
+
+    private static readonly string[] WorkedCaseHolders =
+    [
+        "src/Harness.Host/BuiltInPrompts.cs",
+        "src/Harness.Host/BuiltInSkills.cs",
+        "tests/Harness.Tests/ConciergeContinuesWorkflowTests.cs",
+    ];
+
     /// <summary>Fixtures that quote a member's transcript word for word, citations included.</summary>
     private static readonly string[] TranscriptFixtures = ["tests/Harness.Tests/LiveViewTests.cs"];
 
@@ -75,6 +89,7 @@ public sealed class CodeCitationTests
         // `card <id>`: in those files that is the feature, not a citation.
         var backlogOwn = relative.Contains("backlog", StringComparison.OrdinalIgnoreCase);
         var kanbanOwn = relative.Contains("kanban", StringComparison.OrdinalIgnoreCase);
+        var workedCase = WorkedCaseHolders.Contains(relative, StringComparer.Ordinal);
         if (TranscriptFixtures.Contains(relative, StringComparer.Ordinal)) yield break;
 
         var number = 0;
@@ -86,14 +101,19 @@ public sealed class CodeCitationTests
             {
                 foreach (Match match in Item.Matches(line))
                 {
-                    if (!DocumentedExamples.Contains(match.Value, StringComparer.Ordinal))
+                    if (!DocumentedExamples.Contains(match.Value, StringComparer.Ordinal)
+                        && !(workedCase && WorkedCase.Contains(match.Value, StringComparer.Ordinal)))
                         yield return $"{relative}:{number}: cites {match.Value}";
                 }
             }
 
             if (!kanbanOwn)
             {
-                foreach (Match match in Card.Matches(line)) yield return $"{relative}:{number}: cites {match.Value}";
+                foreach (Match match in Card.Matches(line))
+                {
+                    if (!(workedCase && WorkedCase.Contains(match.Value, StringComparer.Ordinal)))
+                        yield return $"{relative}:{number}: cites {match.Value}";
+                }
             }
         }
     }

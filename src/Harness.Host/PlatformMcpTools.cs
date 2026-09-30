@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host.Auth;
 using ModelContextProtocol.Server;
@@ -184,6 +185,8 @@ public sealed partial class PlatformMcpTools(
         "The roster and what each member is doing, including who they were hired for and why a run "
         + "failed, then each member's queued and deferred instructions (seq, first line, source): "
         + "a queued instruction is delivered in turn, so do not send it again. "
+        + "Then each card that belongs to an open workflow, with that workflow and its latest row: "
+        + "pass the latest row as causation on tell to continue that card's work in its workflow. "
         + "This is harness status. Do not request /api/overview or /api/teams yourself.")]
     public async Task<string> Status(
         [Description(
@@ -210,6 +213,17 @@ public sealed partial class PlatformMcpTools(
             cancellationToken);
 
         roster += Environment.NewLine + Environment.NewLine + queued;
+
+        // WHICH WORKFLOW EACH CARD IS STILL OPEN IN, so resuming one joins it rather than rooting a
+        // new workflow nobody dispatched the item on.
+        var board = await SendAsync(
+            HttpMethod.Get,
+            "/api/teams/" + Uri.EscapeDataString(resolved) + "/kanban/board"
+                + (string.IsNullOrWhiteSpace(member) ? "" : "?member=" + Uri.EscapeDataString(member.Trim())),
+            null,
+            cancellationToken);
+
+        roster += Environment.NewLine + Environment.NewLine + OpenWorkflowLines(board);
         if (string.IsNullOrWhiteSpace(member)) return roster;
 
         var tail = await SendAsync(
@@ -221,6 +235,57 @@ public sealed partial class PlatformMcpTools(
             cancellationToken);
 
         return roster + Environment.NewLine + Environment.NewLine + tail;
+    }
+
+    /// <summary>
+    /// One line per card that belongs to an open workflow, read off the board's JSON. A board that
+    /// did not answer 200 is passed through as it came, so a refusal is not rendered as "none".
+    /// </summary>
+    internal static string OpenWorkflowLines(string board)
+    {
+        var split = board.Split(Environment.NewLine, 2);
+        if (split.Length != 2 || split[0] != "HTTP 200") return board;
+
+        var lines = new List<string>();
+        try
+        {
+            using var document = JsonDocument.Parse(split[1]);
+            if (!document.RootElement.TryGetProperty("cards", out var cards)
+                || cards.ValueKind != JsonValueKind.Array)
+            {
+                return board;
+            }
+
+            foreach (var card in cards.EnumerateArray())
+            {
+                if (!card.TryGetProperty("openWorkflow", out var open)
+                    || open.ValueKind != JsonValueKind.Object
+                    || !open.TryGetProperty("workflow", out var workflow)
+                    || !open.TryGetProperty("latestSeq", out var latest))
+                {
+                    continue;
+                }
+
+                var id = card.TryGetProperty("id", out var cardId) ? cardId.ToString() : "?";
+                var title = card.TryGetProperty("title", out var cardTitle) ? cardTitle.GetString() : "";
+                var who = card.TryGetProperty("member", out var cardMember) && cardMember.ValueKind == JsonValueKind.String
+                    ? cardMember.GetString()
+                    : "nobody";
+                var lane = card.TryGetProperty("laneId", out var cardLane) ? cardLane.GetString() : "";
+
+                lines.Add(
+                    $"- card {id} \"{title}\" ({who}, {lane}): workflow {workflow}, latest row {latest}");
+            }
+        }
+        catch (JsonException)
+        {
+            return board;
+        }
+
+        return lines.Count == 0
+            ? "No card belongs to an open workflow."
+            : "Cards in open workflows (to continue one, pass its latest row as causation on tell):"
+                + Environment.NewLine + string.Join(Environment.NewLine, lines);
     }
 
     [McpServerTool(Name = "hiring"), Description(

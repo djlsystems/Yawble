@@ -66,3 +66,22 @@ public sealed class SteeringLaunchTests : IDisposable
         catch (IOException) { }
     }
 }
+
+/// <summary>
+/// WITH NO WORKFLOW SELECTED, `STEERING.md` STILL SENDS RESUMED WORK TO ITS WORKFLOW. The note a
+/// running Concierge reads says what the Concierge prompt and the `tell` skill say: new work starts
+/// a workflow; a request naming a workflow, a card or blocked work in an open workflow joins it.
+/// </summary>
+public sealed class SteeringNoteTests
+{
+    [Fact]
+    public void The_note_with_nothing_selected_joins_named_work_to_its_open_workflow()
+    {
+        var note = SteeringFile.Note(null);
+
+        Assert.Contains("No workflow is selected.", note);
+        Assert.Contains("about new work", note);
+        Assert.Contains("a card or a member's blocked work that belongs to an open workflow", note);
+        Assert.Contains("latest row as causation", note);
+    }
+}

@@ -93,13 +93,33 @@ public record KanbanCard(
     /// Ask <see cref="BelongsTo"/> rather than comparing <see cref="WorkflowSeq"/>.
     /// </para>
     /// </summary>
-    IReadOnlyList<long>? Workflows = null)
+    IReadOnlyList<long>? Workflows = null,
+
+    /// <summary>
+    /// The OPEN workflow this card belongs to, and that workflow's latest row, or null when every
+    /// workflow in <see cref="Workflows"/> has ended.
+    ///
+    /// <para>
+    /// SET BY THE HOST AT THE FETCH, never by the projection: whether a workflow is open is the
+    /// log's own predicate, which a pure walk of rows does not ask. It is here so a Concierge asked
+    /// to resume a card continues the workflow the card belongs to - `LatestSeq` is the causation
+    /// that joins it - instead of working that out from the log or rooting a new one.
+    /// </para>
+    /// </summary>
+    CardWorkflow? OpenWorkflow = null)
 {
     /// <summary>Whether this card is work of the workflow <paramref name="correlation"/>: born in it,
     /// or claimed or told in it since. See <see cref="Workflows"/>.</summary>
     public bool BelongsTo(long correlation) =>
         WorkflowSeq == correlation || (Workflows?.Contains(correlation) ?? false);
 }
+
+/// <summary>
+/// An open workflow a card belongs to. <paramref name="Workflow"/> is its correlation id, the number
+/// a person and `workflow_show` use; <paramref name="LatestSeq"/> is its newest row, what a `tell`
+/// passes as causation to join it.
+/// </summary>
+public sealed record CardWorkflow(long Workflow, long LatestSeq);
 
 public sealed record ProgressItem(DateTime At, string Text);
 

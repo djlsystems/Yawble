@@ -8,6 +8,7 @@ import {
   archiveBacklogItem,
   backlogItem,
   backlogItems,
+  closeWorkflow,
   createBacklogItem,
   deleteBacklogItem,
   dispatchBacklogItem,
@@ -56,6 +57,7 @@ import {
   efficiencyLine,
   inFlightText,
   inFlightTitle,
+  strandedTitle,
   itemFromDocument,
   itemLabel,
   landedMark,
@@ -490,6 +492,25 @@ const dragReason = computed(() => {
 
   return '';
 });
+
+/**
+ * A PERSON CLOSES THE WORKFLOW THE WORK LEFT BEHIND - through the existing person-only close route,
+ * with the reason the server suggested. The platform offered it and changed nothing; this click is
+ * the act. The list is re-read after, so the notice goes the moment the workflow is closed.
+ */
+async function closeStranded(row: BacklogItemView) {
+  const stranded = row.stranded;
+  if (!stranded) return;
+
+  errorText.value = '';
+
+  try {
+    await closeWorkflow(asTeamId(stranded.teamId), stranded.workflow, stranded.close.reason);
+    await load();
+  } catch (cause) {
+    errorText.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
 
 async function load() {
   errorText.value = '';
@@ -1057,6 +1078,29 @@ function down(index: number) {
                 >
                   <q-icon :name="row.inFlight.running ? 'play_arrow' : 'hourglass_empty'" size="12px" />
                   {{ inFlightText(row.inFlight) }}
+                </span>
+                <!-- THE WORKFLOW THE WORK LEFT BEHIND: open and Blocked or Failed, while a later
+                     workflow finished its card. The words say where the work went; the button is
+                     the person's close, and nothing is closed until it is pressed. `.stop` so the
+                     press does not also open the item. -->
+                <span
+                  v-if="row.stranded"
+                  class="backlog-stranded"
+                  :title="strandedTitle(row.stranded)"
+                  :aria-label="strandedTitle(row.stranded)"
+                >
+                  <q-icon name="warning" size="12px" />
+                  {{ row.stranded.notice }}
+                  <q-btn
+                    flat
+                    dense
+                    no-caps
+                    size="sm"
+                    class="backlog-stranded-close"
+                    :label="`Close #${row.stranded.workflow}`"
+                    :title="`Close workflow #${row.stranded.workflow}: ${row.stranded.close.reason}`"
+                    @click.stop="closeStranded(row)"
+                  />
                 </span>
                 <!-- WHERE THE WORK ACTUALLY IS, which is not what the Status cell says. A person
                      reading the Backlog has to be able to
@@ -1688,6 +1732,22 @@ function down(index: number) {
   background: var(--os-tint-ok);
   color: var(--os-ok);
   border-color: color-mix(in srgb, var(--os-ok) 30%, transparent);
+}
+
+/* A workflow left behind. Amber, the board's colour for work waiting on a person - which is what
+   this is: the close is theirs. */
+.backlog-stranded {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 2px;
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--q-warning) 30%, transparent);
+  border-radius: 10px;
+  color: var(--q-warning);
+  font-size: 11px;
+  line-height: 18px;
 }
 
 /* The mark itself. Blue while the workflow is open and idle, green (above) while a member is

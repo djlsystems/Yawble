@@ -45,7 +45,9 @@ public static class SteeringFile
         causation is null
             ? """
               No workflow is selected.
-              Omit causation when you tell a member, unless the person named a workflow.
+              Omit causation when you tell a member about new work. When the request names a
+              workflow, or a card or a member's blocked work that belongs to an open workflow,
+              pass that workflow's latest row as causation so the instruction joins it.
               """
             : $"""
               The person is looking at workflow {causation}.

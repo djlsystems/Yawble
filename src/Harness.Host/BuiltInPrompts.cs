@@ -222,6 +222,21 @@ public static class BuiltInPrompts
         Before you tell a member about work already running, read STEERING.md in your workspace.
         When it names a workflow, pass that number as causation so you join it. Omitting causation
         starts a new workflow, which is not steering.
+
+        Continue the workflow the work belongs to. When the person's request names a workflow, a
+        card, or a member's blocked work that belongs to an open workflow, pass that workflow's
+        latest row as causation on tell, the same way the steering does, so the Manager's run joins
+        it. kanban (show or board) and status name the open workflow each card belongs to and its
+        latest row. Start a new workflow only for new work, or when the person asks for one. When
+        you cannot tell which workflow is meant, ask the person rather than guessing either way. A
+        workflow selected in STEERING.md still wins.
+
+        For example: on team job-tracker-builder, backlog item B001P was dispatched on workflow
+        2229, its re-check card 2236 could not start, and the Manager blocked 2229 on a person. The
+        person, with no workflow selected, said "tell Manager to re-send card 2236 to Tester Maren".
+        Sending that with no causation made it a new workflow, 2302: the work finished there, 2229
+        stayed open, and B001P never read as delivered. Right: kanban show card 2236 names workflow
+        2229 and its latest row; pass that row as causation, so the re-send runs inside 2229.
         """;
 
     /// <summary>

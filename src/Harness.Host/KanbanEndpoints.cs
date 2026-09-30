@@ -134,7 +134,8 @@ public static class KanbanEndpoints
     /// already see, never a widening of it, so it does not exist here.
     /// </summary>
     private static async Task<KanbanBoard> BoardAsync(
-        IMessageLog log, TeamRegistry teams, string team, KanbanFilter? filter = null)
+        IMessageLog log, TeamRegistry teams, string team, KanbanFilter? filter = null,
+        CancellationToken ct = default)
     {
         // FROM THIS TEAM'S FLOOR, NOT FROM ZERO. See `AboveTheirFloors` - a board that reads the
         // whole log shows a recreated team the cards of the team it replaced.
@@ -146,7 +147,10 @@ public static class KanbanEndpoints
         // while the team is replaced by the gated one.
         var scoped = (filter ?? new KanbanFilter()) with { Team = team };
 
-        return KanbanProjector.Project(messages, scoped);
+        var board = KanbanProjector.Project(messages, scoped);
+
+        // EACH CARD NAMES ITS OPEN WORKFLOW, so a Concierge resuming it joins that workflow.
+        return board with { Cards = await CardOpenWorkflows.AttachAsync(board.Cards, messages, log, ct) };
     }
 
     /// <summary>
@@ -162,13 +166,18 @@ public static class KanbanEndpoints
     /// carry none.
     /// </summary>
     private static async Task<KanbanCardDetail?> CardAsync(
-        IMessageLog log, TeamRegistry teams, string team, string id) =>
-        KanbanProjector.ProjectCard(
-            AboveTheirFloors(
-                await log.ReadRangeAsync(0, int.MaxValue),
-                _ => teams.FloorFor(team)),
-            id,
-            new KanbanFilter(Team: team));
+        IMessageLog log, TeamRegistry teams, string team, string id, CancellationToken ct = default)
+    {
+        var messages = AboveTheirFloors(
+            await log.ReadRangeAsync(0, int.MaxValue),
+            _ => teams.FloorFor(team));
+
+        if (KanbanProjector.ProjectCard(messages, id, new KanbanFilter(Team: team)) is not { } card)
+            return null;
+
+        // THE OPEN WORKFLOW, as the board's cards carry it.
+        return (await CardOpenWorkflows.AttachAsync([card], messages, log, ct))[0];
+    }
 
     /// <summary>
     /// The rows that belong to the CURRENT incarnation of each team, dropping those a previous one
@@ -238,7 +247,7 @@ public static class KanbanEndpoints
         {
             var filter = new KanbanFilter(Member: member, Status: status);
 
-            return Results.Ok(WithLaneLimits(await BoardAsync(log, teams, team, filter), settings));
+            return Results.Ok(WithLaneLimits(await BoardAsync(log, teams, team, filter, ct), settings));
         }
         catch (Exception ex)
         {
@@ -321,9 +330,13 @@ public static class KanbanEndpoints
 
             // ONE PROJECTION, THEN THE SCOPE. The filter carries no team - every other narrowing
             // the caller asked for still runs inside the projection, exactly where it did.
-            var cards = KanbanProjector.Project(messages, filter).Cards
-                .Where(card => scope.Contains(card.Team))
-                .ToList();
+            var cards = await CardOpenWorkflows.AttachAsync(
+                KanbanProjector.Project(messages, filter).Cards
+                    .Where(card => scope.Contains(card.Team))
+                    .ToList(),
+                messages,
+                log,
+                ct);
 
             // The filter is echoed back as the caller ASKED it, `team` included - which is how the
             // console can show what the board is actually narrowed to. It is not the resolved
@@ -346,7 +359,7 @@ public static class KanbanEndpoints
     {
         try
         {
-            var card = await CardAsync(log, teams, team, id);
+            var card = await CardAsync(log, teams, team, id, ct);
 
             if (card is null)
             {

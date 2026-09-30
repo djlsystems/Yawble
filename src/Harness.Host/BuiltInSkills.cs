@@ -544,7 +544,10 @@ public static class BuiltInSkills
             Never reset the team, delete a member, re-hire or recreate anything to recover: a reset
             makes the team forget the task it was part-way through. The recovery for almost
             everything is one `tell` naming the next step, with `causation` set so it joins the same
-            workflow.
+            workflow: the latest row of the open workflow the work belongs to, which `kanban` action
+            `show` names as a card's `openWorkflow` and `status` lists per card. Omitting it starts a
+            new workflow and leaves the stopped one open for good. When you cannot tell which
+            workflow the work belongs to, ask.
 
             ## Report what you resumed from
 
@@ -631,6 +634,35 @@ public static class BuiltInSkills
             - A team with no Manager is unusual; say so. Address its containers by the names
               `status` returned, and sequence the job yourself.
             - A team with no containers is wrong. Say exactly what you found and stop.
+
+            ## Continue the workflow the work belongs to
+
+            Causation joins a workflow and omitting it roots a new one. So when the person's
+            request names a workflow, a card, or a member's blocked work that belongs to an OPEN
+            workflow, pass that workflow's latest row as `causation` on `tell`, the same way the
+            steering does, and the Manager's run joins it:
+
+            1. A workflow selected in `STEERING.md` still wins: pass that number.
+            2. Otherwise find the workflow the work belongs to. `kanban` action `show` with card
+               <id> (or action `board`) gives each card `openWorkflow` - its `workflow` and that
+               workflow's `latestSeq` - and `status` for the team lists every card in an open
+               workflow with both. `workflow_show` reads a workflow the person named.
+            3. `tell  member: Manager  team: <id>  instruction: "<request>"  causation: <latestSeq>`.
+
+            Start a new workflow (no `causation`) only for new work, or when the person asks for a
+            new one. When you cannot tell which workflow is meant - two open ones fit, or none of
+            the named work's workflows is open - ask the person which, rather than guessing either
+            way. Joining a workflow does not declare it: its owner still declares, and only a person
+            closes one.
+
+            The worked case: on team job-tracker-builder, backlog item B001P was dispatched on
+            workflow 2229. Its re-check, card 2236, could not start, and the Manager blocked 2229 on
+            a person. The person, with no workflow selected, asked to "tell Manager to re-send card
+            2236 to Tester Maren". Sent with no causation, it became a new workflow, 2302: the work
+            finished there, 2229 stayed open, and B001P's dispatch never read as delivered. The right
+            call reads `kanban  action: show  card: 2236  team: job-tracker-builder`, sees
+            `openWorkflow` naming workflow 2229 and its latest row, and passes that row as
+            `causation`, so the re-send runs inside 2229 and the Manager can declare it.
 
             ## When no team fits the work
 
