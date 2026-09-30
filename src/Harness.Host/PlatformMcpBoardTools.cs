@@ -11,6 +11,8 @@ public sealed partial class PlatformMcpTools
 {
     [McpServerTool(Name = "kanban"), Description(
         "The board. action is board, show, move, comment, edit, plan, or filter. "
+        + "A card's openWorkflow names the open workflow it belongs to (workflow) and that "
+        + "workflow's latest row (latestSeq): pass latestSeq as causation on tell to continue it. "
         + "This is harness kanban. Do not request /api yourself.")]
     public async Task<string> Kanban(
         [Description("board, show, move, comment, edit, plan, or filter.")] string action,
