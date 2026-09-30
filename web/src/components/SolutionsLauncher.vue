@@ -99,7 +99,7 @@ watch(() => wizard.value.open, (showing, was) => {
             :key="row.team"
             flat
             bordered
-            class="solution-tile column"
+            class="solution-tile column no-wrap"
             :data-solution-tile="row.team"
           >
             <q-card-section class="q-pb-xs">
@@ -178,7 +178,9 @@ watch(() => wizard.value.open, (showing, was) => {
 }
 
 /* A LONG NAME IS CUT INSIDE THE TILE, never pushing Open and Manage out of it: a grid item and a
-   flex item both refuse to shrink below their content unless told `min-width: 0`. */
+   flex item both refuse to shrink below their content unless told `min-width: 0`, and the tile's
+   column must not wrap (`no-wrap` in the template): a wrapping column's line is as wide as its
+   widest child, so the name would never shrink. */
 .solution-tile {
   min-height: 11rem;
   min-width: 0;
