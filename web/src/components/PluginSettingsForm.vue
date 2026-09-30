@@ -95,6 +95,17 @@ function onListKey(name: string, event: KeyboardEvent) {
   event.preventDefault();
   event.stopPropagation();
 
+  commitList(name);
+}
+
+/**
+ * THE TYPED VALUE BECOMES A CHIP ON ENTER AND WHEN THE BOX LOSES FOCUS - pressing Save included,
+ * which takes the focus before its click. Only on Enter, a person who typed a position and pressed
+ * Save saw "saved" while nothing was sent: the settings had not moved, so the dialog wrote nothing.
+ */
+function commitList(name: string) {
+  if ((pending.value[name] ?? '').trim() === '') return;
+
   const field = props.shape.config[name];
   if (!field) return;
 
@@ -109,6 +120,19 @@ function onListKey(name: string, event: KeyboardEvent) {
   pending.value = { ...pending.value, [name]: '' };
   listProblem.value = { ...listProblem.value, [name]: '' };
 }
+
+/**
+ * Every list's typed-but-not-added value, made a chip - what a dialog calls as its Save or Hire
+ * starts. Leaving a box does it too, but Quasar reports the focus loss on a timer, and a quick
+ * click must not beat it.
+ */
+function commitAllLists() {
+  for (const [name, field] of Object.entries(props.shape.config)) {
+    if (field.type === 'list') commitList(name);
+  }
+}
+
+defineExpose({ commitAllLists });
 
 function removeFromList(name: string, item: string) {
   const current = config.value[name];
@@ -165,13 +189,14 @@ function secretHint(description: string | null | undefined, required: boolean) {
           dense
           :label="`Add to ${key}`"
           :hint="field.enum && field.enum.length > 0
-            ? `Type a value and press Enter. Allowed: ${field.enum.join(', ')}.`
-            : 'Type a value and press Enter.'"
+            ? `Type a value and press Enter to add another; what is typed is kept when you leave the box. Allowed: ${field.enum.join(', ')}.`
+            : 'Type a value and press Enter to add another; what is typed is kept when you leave the box.'"
           :error="listProblem[key] ? true : undefined"
           :error-message="listProblem[key] ?? ''"
           autocomplete="off"
           @update:model-value="(value) => (pending = { ...pending, [key]: value === null ? '' : String(value) })"
           @keydown="(event: KeyboardEvent) => onListKey(String(key), event)"
+          @blur="commitList(String(key))"
         />
       </template>
 

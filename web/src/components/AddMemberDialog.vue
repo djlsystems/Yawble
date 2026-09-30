@@ -20,6 +20,8 @@ import { initialBindings } from '../lib/connections';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 import { MemberInstructionsHint, MemberInstructionsLabel } from '../lib/memberInstructions';
 
+const settingsForm = ref<InstanceType<typeof PluginSettingsForm> | null>(null);
+
 /**
  * Adds a member to a team.
  *
@@ -207,6 +209,9 @@ const form = ref<QForm | null>(null);
 const onEnter = submitOnEnter(() => form.value, () => valid.value && !busy.value);
 
 async function submit() {
+  // A value still typed in a list's box is part of what the person means to save.
+  settingsForm.value?.commitAllLists();
+
   if (!valid.value || busy.value) return;
 
   busy.value = true;
@@ -325,6 +330,7 @@ async function submit() {
           <div class="text-caption os-text-muted">{{ plugin.description }}</div>
 
           <PluginSettingsForm
+            ref="settingsForm"
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"
             v-model:connections="pluginConnections"
