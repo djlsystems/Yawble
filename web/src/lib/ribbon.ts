@@ -74,6 +74,13 @@ export const SitesAction = 'admin-sites';
 /** Active Team > Sites, the same screen filtered to the active team. `team-`, so it needs one. */
 export const TeamSitesAction = 'team-sites';
 
+/**
+ * Solutions, the launcher: one tile per team installed from a solution package, each opening its
+ * site and its control panel. NEAR THE START and NOT UNDER ADMIN: it is where a person goes every
+ * day, not a place they configure the instance. UNPREFIXED, like `backlog`: it needs no active team.
+ */
+export const SolutionsAction = 'solutions';
+
 /** Admin > Settings, the instance-wide Tenant Settings dialog. */
 export const TenantSettingsAction = 'admin-settings';
 
@@ -85,6 +92,11 @@ export const Ribbon: RibbonSpec = {
       items: [
         { kind: 'button', action: 'admin-new-team', label: 'New Team', icon: 'group_add', size: 'large' },
       ],
+    },
+    {
+      id: 'solutions',
+      label: 'Solutions',
+      items: [{ kind: 'button', action: SolutionsAction, label: 'Solutions', icon: 'apps', size: 'large' }],
     },
     {
       id: 'teams',

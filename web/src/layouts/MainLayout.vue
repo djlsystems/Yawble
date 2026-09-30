@@ -42,6 +42,7 @@ import {
   PluginsAction,
   RepositoriesAction,
   SitesAction,
+  SolutionsAction,
   TeamSitesAction,
   TenantSettingsAction,
 } from '../lib/ribbon';
@@ -272,6 +273,9 @@ function onRibbonAction(action: string) {
   else if (action === RepositoriesAction) repositoriesOpen.value = true;
   else if (action === SitesAction) openSites(null);
   else if (action === TenantSettingsAction) tenantSettingsOpen.value = true;
+  // NOT A DIALOG: an address, `#/solutions`, so a tile's Manage, the board header and the
+  // Concierge reach the same screens. Unprefixed: it needs no active team.
+  else if (action === SolutionsAction) void router.push('/solutions');
 }
 
 /** Every team's sites, or one team's. */
