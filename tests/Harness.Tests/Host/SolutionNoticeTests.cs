@@ -104,6 +104,36 @@ public sealed class SolutionNoticeTests(HostFixture host) : IClassFixture<HostFi
             m => m.Type == MessageTypes.WorkflowCompleted);
     }
 
+    [Fact]
+    public async Task Two_workflows_declared_after_one_package_was_written_show_one_notice_and_a_changed_folder_a_new_one()
+    {
+        // Two workflows open on one team, then the package is written: both saw it written during
+        // them (job-tracker-builder, workflows 2229 and 2302).
+        var (team, first, _) = await WorkflowAsync("Notice Once");
+        var (second, _) = await AnotherWorkflowAsync(team, "Notice Once again");
+        var (third, _) = await AnotherWorkflowAsync(team, "Notice Once changed");
+        var folder = SolutionSamples.JobTracker("1.0.0", Documents(team));
+        File.SetLastWriteTimeUtc(Path.Combine(folder, "solution.json"), DateTime.UtcNow);
+
+        await DeclareAsync(team, first);
+        await DeclareAsync(team, second);
+
+        var notice = Assert.Single(await NoticesAsync(first));
+        Assert.Empty(await NoticesAsync(second));
+        var hash = JsonDocument.Parse(notice.Payload).RootElement.GetProperty(PayloadFields.ContentHash).GetString();
+        Assert.Equal(SolutionNotice.ContentHash(folder), hash);
+
+        // The folder changes, same version: the change is news, so a new notice with a new digest.
+        File.AppendAllText(Path.Combine(folder, "README.md"), "\nOne more line.\n");
+
+        await DeclareAsync(team, third);
+
+        var again = JsonDocument.Parse(Assert.Single(await NoticesAsync(third)).Payload).RootElement;
+        Assert.True(again.GetProperty(PayloadFields.Ok).GetBoolean());
+        Assert.Equal("Job Tracker 1.0.0 is ready. **Review and install**", again.GetProperty(PayloadFields.Text).GetString());
+        Assert.NotEqual(hash, again.GetProperty(PayloadFields.ContentHash).GetString());
+    }
+
     private string Documents(string team) => host.Services.GetRequiredService<TeamDocuments>().EnsureFor(team);
 
     /// <summary>A team of its own, a backlog item dispatched to it, and the workflow's root: an
@@ -113,7 +143,13 @@ public sealed class SolutionNoticeTests(HostFixture host) : IClassFixture<HostFi
         var registry = host.Services.GetRequiredService<TeamRegistry>();
         var agent = host.Services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;
         var team = (await registry.CreateAsync(name, agent, memberAgent: agent)).Id;
+        var (root, item) = await AnotherWorkflowAsync(team, name);
+        return (team, root, item);
+    }
 
+    /// <summary>A second workflow on the same team, dispatched from its own backlog item.</summary>
+    private async Task<(long Root, long Item)> AnotherWorkflowAsync(string team, string name)
+    {
         var log = host.Services.GetRequiredService<IMessageLog>();
         var root = await log.AppendAsync(new NewMessage(
             MessageTypes.InstructionFor(new ContainerId(team, TeamRegistry.DefaultManagerName)),
@@ -123,7 +159,7 @@ public sealed class SolutionNoticeTests(HostFixture host) : IClassFixture<HostFi
         var item = await backlog.CreateAsync(null, "Job tracker", "Build it as a package.", "person@example.test", Ct);
         await backlog.AddDispatchAsync(item.Id, team, name, root.CorrelationId, "person@example.test", Ct);
 
-        return (team, root.CorrelationId, item.Id);
+        return (root.CorrelationId, item.Id);
     }
 
     [Theory]
