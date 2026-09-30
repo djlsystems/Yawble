@@ -34,15 +34,72 @@ public sealed partial class ProcessAgentRunner(
     ILogger<ProcessAgentRunner>? log = null,
     IDiagnosticsLog? diagnostics = null,
     AgentLaunchUser? runAs = null,
-    LiveRuns? live = null) : IAgentRunner
+    LiveRuns? live = null,
+    IMemberReports? reports = null,
+    LaunchLookup? lookup = null,
+    AgentUpdateGate? updates = null) : IAgentRunner
 {
+    /// <summary>How long a launch looks for a program missing from PATH; the Host's is ~30s.</summary>
+    private readonly LaunchLookup _lookup = lookup ?? LaunchLookup.Default;
+
     private const string ClaudeJson = "claude-json";
     private const string GrokJson = "grok-json";
     private const string CopilotUsageFile = "copilot-usage-file";
     private const string CodexTotal = "codex-total";
     private const string AntigravityJson = "antigravity-json";
 
+    /// <summary>
+    /// The launch error for a program that never appeared: what was looked for, for how long, and
+    /// that re-sending tries again. It asks nobody to repair anything.
+    /// </summary>
+    public static string LaunchMissingText(string fileName, LaunchLookup lookup) =>
+        $"`{fileName}` is not an executable file on PATH: it was not found when this run started"
+        + (lookup.Window > TimeSpan.Zero ? $", nor in the {lookup.WindowText} after" : string.Empty)
+        + ", so this member was not started. It may be being installed or updated; re-sending the "
+        + "instruction will try again.";
+
+    /// <summary>
+    /// The run, holding a share of its CLI's install for as long as the child runs. While the
+    /// platform updates that CLI the run WAITS - it is not failed - and says so once, the way a
+    /// run waiting for a pool slot waits; an update in turn waits for the runs in flight.
+    /// </summary>
     public async Task<AgentResult> RunAsync(AgentInvocation invocation, CancellationToken ct = default)
+    {
+        if (updates is null || catalog.For(invocation.Agent) is not { } launching)
+        {
+            return await RunLaunchAsync(invocation, ct);
+        }
+
+        IDisposable share;
+
+        try
+        {
+            share = await updates.EnterRunAsync(
+                launching.FileName,
+                reports is null
+                    ? null
+                    : () => reports.ProgressAsync(
+                        invocation.Container,
+                        $"Waiting: the platform is updating `{launching.FileName}`, and this run starts when it is done.",
+                        CancellationToken.None),
+                ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return new AgentResult(
+                -1,
+                string.Empty,
+                $"This run was stopped while it waited for the platform's update of `{launching.FileName}`, so it did not start.",
+                FailureClass: FailureClasses.Interrupted);
+        }
+
+        using (share)
+        {
+            return await RunLaunchAsync(invocation, ct);
+        }
+    }
+
+    private async Task<AgentResult> RunLaunchAsync(AgentInvocation invocation, CancellationToken ct)
     {
         // FIRST OF THE FOUR REFUSALS, and the order is chosen: the other three are about what this
         // member is CONFIGURED with, and this one is about whether its files are there at all. A
@@ -128,9 +185,31 @@ public sealed partial class ProcessAgentRunner(
                 + "costs money and answers noise.");
         }
 
-        // RESOLVED ONCE, HERE, so a miss is RECORDED and reported as a launch failure
-        // rather than surfacing later as a spawn error naming a bare command.
-        var resolvedFileName = PathSearch.Find(command.FileName);
+        // RESOLVED HERE, so a miss is RECORDED and reported as a launch failure rather than
+        // surfacing later as a spawn error naming a bare command. A miss is looked at again for
+        // about 30 seconds first: the shared install is replaced in place while a CLI updates, and
+        // a launch landing in that gap is not an agent fault. The only trace of a program that
+        // reappears is the one progress line saying the run waited for it.
+        var resolvedFileName = await ChildProcess.FindAsync(
+            command.FileName,
+            _lookup,
+            reports is null
+                ? null
+                : () => reports.ProgressAsync(
+                    invocation.Container,
+                    $"`{command.FileName}` was not on PATH when this run started; looking again for up to "
+                    + $"{_lookup.WindowText}, as it may be being installed or updated.",
+                    CancellationToken.None),
+            ct);
+
+        if (resolvedFileName is null && ct.IsCancellationRequested)
+        {
+            return new AgentResult(
+                -1,
+                string.Empty,
+                $"This run was stopped while it waited for `{command.FileName}` to appear on PATH, so it did not start.",
+                FailureClass: FailureClasses.Interrupted);
+        }
 
         if (resolvedFileName is null)
         {
@@ -149,10 +228,14 @@ public sealed partial class ProcessAgentRunner(
                     ct: ct);
             }
 
+            // NOT AN AGENT FAULT, AND NO REPAIR IS ASKED OF ANYBODY: nothing ran, and the likeliest
+            // cause is an install or update in progress, so the words say what is true and the
+            // class tells the Manager to re-send.
             return new AgentResult(
                 -1,
                 string.Empty,
-                $"`{command.FileName}` is not an executable file on PATH, so this member could not be started.");
+                LaunchMissingText(command.FileName, _lookup),
+                FailureClass: FailureClasses.LaunchMissing);
         }
 
         // From a system directory, never PATH: setsid runs before the agent prefix, so
@@ -347,6 +430,19 @@ public sealed partial class ProcessAgentRunner(
         }
 
         foreach (var (name, value) in invocation.Environment) start.Environment[name] = value;
+
+        // The preset's isolation, AFTER the invocation's environment (the preset's env and the
+        // team's), so neither can switch a connector or the home's configuration back on.
+        if (command.IsolationEnvironment is { } isolation)
+        {
+            foreach (var (name, value) in isolation) start.Environment[name] = value;
+        }
+
+        // And the CLI's own updater off, for the same reason and in the same place.
+        if (command.UpdateEnvironment is { } updateOff)
+        {
+            foreach (var (name, value) in updateOff) start.Environment[name] = value;
+        }
 
         if (mcp is not null)
         {
@@ -1228,7 +1324,13 @@ public sealed record AgentCommand(
     IReadOnlyList<string>? SystemPromptArguments = null,
     string? InstructionsFile = null,
     string? UsageFormat = null,
-    bool LanguageModel = true);
+    bool LanguageModel = true,
+    // A member's isolation variables (AgentIsolation.Env), set LAST at the spawn site so no preset
+    // or team env can switch isolation back on. Null for the Concierge and an undeclared preset.
+    IReadOnlyDictionary<string, string>? IsolationEnvironment = null,
+    // What turns the CLI's own updater off (AgentUpdates.Env), set LAST at every spawn site, the
+    // Concierge's included, so no preset or team env can turn self-update back on.
+    IReadOnlyDictionary<string, string>? UpdateEnvironment = null);
 
 /// <summary>
 /// Which command each container's agent is. Configuration, not code - the reason a container is data
@@ -1284,7 +1386,14 @@ public sealed class AgentCatalog(
     public IReadOnlyList<AgentDefinition> Custom =>
         [.. _definitions.Where(d => !AgentCatalogFile.IsBuiltIn(d.Name))];
 
-    public void Replace(IReadOnlyList<AgentDefinition> definitions) => _definitions = definitions;
+    public void Replace(IReadOnlyList<AgentDefinition> definitions)
+    {
+        _definitions = definitions;
+        Changed?.Invoke();
+    }
+
+    /// <summary>Raised after <see cref="Replace"/>: the pre-flight lists the CLIs again.</summary>
+    public event Action? Changed;
 
     /// <summary>
     /// The headless command for a preset, or null.
@@ -1317,10 +1426,25 @@ public sealed class AgentCatalog(
     {
         var definition = Definition(agent);
 
-        return definition is not null && definition.Mode == mode && definition.Launch is { } launch
-            ? launch.ToCommand()
-            : null;
+        if (definition is null || definition.Mode != mode || definition.Launch is not { } launch) return null;
+
+        // ONLY THE HEADLESS COMMAND IS ISOLATED. A member gets the platform's tools and its CLI's
+        // own; the Concierge is the person's session and launches exactly as it always has.
+        // THE UPDATE-OFF ON EVERY LAUNCH, member and Concierge alike: the install is shared.
+        return AgentUpdates.Apply(
+            mode == AgentMode.Headless
+                ? AgentIsolationPolicy.Apply(launch.ToCommand(), definition.Isolation)
+                : launch.ToCommand(),
+            definition.Updates);
     }
+
+    /// <summary>
+    /// The tools a run of <paramref name="agent"/> may be offered, or null for a preset this tenant
+    /// does not have: `harness` plus the preset's declared servers and local tools, or
+    /// <see cref="IsolationState.NotVerified"/> for a headless preset with no declaration. What the
+    /// per-run foreign-tool check and the pre-flight report read.
+    /// </summary>
+    public ToolAllowance? Allowance(string agent) => AgentIsolationPolicy.For(Definition(agent));
 
     /// <summary>Case-insensitive, matching how a stored `team_members.agent` is read back.</summary>
     public AgentDefinition? Definition(string agent) =>

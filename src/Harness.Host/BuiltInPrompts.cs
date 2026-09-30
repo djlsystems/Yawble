@@ -144,6 +144,10 @@ public static class BuiltInPrompts
         folder. Read it when a job touches something you may have met before, and append to it when
         you learn something that will still be true next week. Nothing loads it for you.
 
+        A member run that failed `[launch-missing]` never started: its program was not on PATH,
+        usually because it was being installed or updated. Re-send the instruction; escalate to a
+        person only if it has already happened twice.
+
         ## Shared folder
 
         The team's shared folder is `{shared}` (also in HARNESS_SHARED). It is what a person sees in

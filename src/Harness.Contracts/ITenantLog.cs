@@ -106,6 +106,10 @@ public static class TenantActions
 
     public const string AgentsSaved = "agents.saved";
 
+    /// <summary>A person had the platform update an agent CLI. Subject is the preset; detail names the
+    /// command, the versions before and after, and whether it succeeded.</summary>
+    public const string AgentUpdated = "agent.updated";
+
     /// <summary>A person re-read the installed plugins, so a plugin installed or upgraded on disk is
     /// registered without a restart.</summary>
     public const string PluginsRescanned = "plugins.rescanned";
@@ -207,6 +211,14 @@ public static class TenantActions
     /// would put `git ls-remote` and its failure modes inside a background sweep -- a detector that
     /// reports a finding because GitHub was briefly unreachable is one nobody trusts.
     /// </summary>
+    /// <summary>
+    /// A member's run was offered, or called, a tool outside <c>harness</c> and its preset's allowed
+    /// list: the same finding as the team log's <c>agent.foreignTools</c> row, kept here because it
+    /// is about what reached a person's accounts, and outlives the team. Subject is the member,
+    /// detail the tools called and offered.
+    /// </summary>
+    public const string AgentForeignTools = "agent.foreign-tools";
+
     public const string SweepWrapUpNotPushed = "sweep.wrap-up-not-pushed";
     public const string SweepWrapUpNotPushedCleared = "sweep.wrap-up-not-pushed-cleared";
 

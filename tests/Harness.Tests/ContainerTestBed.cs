@@ -41,7 +41,8 @@ public sealed class ContainerTestBed : IAsyncDisposable
         Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? worktrees = null,
         long? workflowSpendLimit = null,
         ITriggerStore? triggers = null,
-        bool pending = false)
+        bool pending = false,
+        Func<Message, CancellationToken, Task>? onTerminal = null)
     {
         _directory = Path.Combine(Path.GetTempPath(), $"harness-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_directory);
@@ -64,7 +65,8 @@ public sealed class ContainerTestBed : IAsyncDisposable
             onRegistered: (id, ct) => Store.SetAsync(id, host.Find(id)!.Snapshot().Subscribes, ct),
             workflowSpendLimit: workflowSpendLimit,
             wip: wip,
-            worktrees: worktrees);
+            worktrees: worktrees,
+            onTerminal: onTerminal);
         Host = host;
     }
 

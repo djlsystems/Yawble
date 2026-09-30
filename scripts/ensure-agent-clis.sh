@@ -3,11 +3,18 @@
 #
 # The image contains git, curl, and Node. The agent CLIs are downloaded onto the
 # data volume (/data), so replacing the image does not make the board forget them.
-# A CLI that is already on the volume is left alone. A download that fails is
-# reported and does not stop the host: the board is more useful than a container
-# that refuses to boot because one vendor was unreachable.
+# A download that fails is reported and does not stop the host: the board is more
+# useful than a container that refuses to boot because one vendor was unreachable.
 #
-# Set HARNESS_REINSTALL_AGENTS=1 to download them again.
+# THIS IS ONE OF THE TWO PLACES AN AGENT CLI IS UPDATED. Every launch the Host makes
+# turns the CLI's own updater off (each preset's `updates` declaration), because the
+# install is shared and a CLI replacing it in place leaves a member launched in that
+# moment with no program. So a CLI already on the volume is brought to its newest
+# version here, before the Host runs and nothing can be launching from it; the other
+# place is a person's request on the Agents screen, which the Host holds launches for.
+#
+# Set HARNESS_REINSTALL_AGENTS=1 to download them again, HARNESS_UPDATE_AGENTS=0 to
+# leave installed CLIs at the version they have.
 
 set -u
 
@@ -22,13 +29,34 @@ if [ "${HARNESS_REINSTALL_AGENTS:-}" = "1" ]; then
   reinstall=1
 fi
 
+update=1
+if [ "${HARNESS_UPDATE_AGENTS:-}" = "0" ]; then
+  update=0
+fi
+
+# The CLIs' own updaters off for everything this script runs (their --version included), the same
+# switches the presets declare: the update below is the platform's, and the only one.
+export DISABLE_AUTOUPDATER=1
+export COPILOT_AUTO_UPDATE=false
+export GROK_DISABLE_AUTOUPDATER=1
+
 install_npm() {
   name="$1"
   package="$2"
   target="/data/npm-global/bin/$name"
 
   if [ "$reinstall" -eq 0 ] && [ -x "$target" ]; then
-    echo "agent cli: $name is already installed"
+    if [ "$update" -eq 0 ]; then
+      echo "agent cli: $name is already installed"
+      return 0
+    fi
+    echo "agent cli: updating $name ($package@latest)"
+    sh "$(dirname "$0")/npm-torn-install.sh" /data/npm-global "$package"
+    if npm install -g "$package@latest"; then
+      echo "agent cli: $name is at its newest version"
+    else
+      echo "agent cli: FAILED to update $name; the installed version stays. The board will still start."
+    fi
     return 0
   fi
 
@@ -75,7 +103,17 @@ install_grok() {
   target="$HOME/.grok/bin/grok"
 
   if [ "$reinstall" -eq 0 ] && [ -x "$target" ]; then
-    echo "agent cli: grok is already installed"
+    if [ "$update" -eq 0 ]; then
+      echo "agent cli: grok is already installed"
+      return 0
+    fi
+    echo "agent cli: updating grok (grok update)"
+    # Its own updater switch is for LAUNCHES; the explicit update must not read it.
+    if env -u GROK_DISABLE_AUTOUPDATER timeout 300 "$target" update </dev/null; then
+      echo "agent cli: grok is at its newest version"
+    else
+      echo "agent cli: FAILED to update grok; the installed version stays. The board will still start."
+    fi
     return 0
   fi
 

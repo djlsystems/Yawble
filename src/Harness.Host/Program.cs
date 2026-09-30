@@ -637,6 +637,15 @@ builder.Services.AddSingleton(_ => AgentLaunchUser.Resolve(
     builder.Configuration["Agents:RunAs"] ?? Environment.GetEnvironmentVariable("HARNESS_AGENT_USER")));
 // The runs in flight, for the live route. The runner records; nothing is stored.
 builder.Services.AddSingleton<LiveRuns>();
+// WHO MAY USE AN AGENT CLI'S SHARED INSTALL: member runs share it, a platform update has it alone,
+// and a launch that arrives during an update waits for it. One per Host, shared by the runner, the
+// Concierge's launch and the updater, or the hold holds nothing.
+builder.Services.AddSingleton<AgentUpdateGate>();
+builder.Services.AddSingleton(sp => new AgentCliUpdater(
+    sp.GetRequiredService<AgentCatalog>(),
+    sp.GetRequiredService<AgentUpdateGate>(),
+    sp.GetRequiredService<AgentLaunchUser>(),
+    dataRoot));
 builder.Services.AddSingleton<ProcessAgentRunner>();
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
@@ -781,6 +790,12 @@ builder.Services.AddSingleton(sp => new ContainerHost(
     // workflow whose branches have not been pushed yet would be racing the push it is about to
     // accept - the same ordering argument `workflow-complete` makes for publishing before it
     // appends. See `IdleWorkflowOffer` for what it decides and every reason it decides not to.
+    // THE PER-RUN FOREIGN TOOLS CHECK, on the row that carries the run, inside the run: the
+    // transcript the agent wrote is read for tools the platform did not give it. Late-bound for
+    // the reason above. See ForeignToolsCheck.
+    onTerminal: async (terminal, ct) =>
+        await sp.GetRequiredService<ForeignToolsCheck>().CheckAsync(terminal, ct),
+
     onRunEnding: async (member, causation, succeeded, ct) =>
     {
         // THE PUBLISH IGNORES `succeeded` AND THAT IS THE WHOLE POINT: a run killed between
@@ -1078,7 +1093,8 @@ builder.Services.AddSingleton(sp => new ConciergeLaunchFactory(
     sp.GetRequiredService<IPrincipalStore>(),
     sp.GetRequiredService<AgentCatalog>(),
     sp.GetRequiredService<SkillDirectory>(),
-    sp.GetRequiredService<AgentLaunchUser>()));
+    sp.GetRequiredService<AgentLaunchUser>(),
+    sp.GetRequiredService<AgentUpdateGate>()));
 builder.Services.AddSingleton(sp =>
 {
     // Resolved ONCE, here, and captured - never re-resolved inside the delegates. The revoke runs
@@ -1324,6 +1340,13 @@ builder.Services.AddSingleton<PumpHeartbeat>();
 builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddHostedService<PumpService>();
 builder.Services.AddHostedService<KanbanChangePush>();
+
+// THE PER-RUN FOREIGN TOOLS CHECK, called by every member at the end of its run (`onTerminal`
+// above). What a preset allows is the catalog's isolation model (AgentCatalog.Allowance); a preset
+// that declares no allowed tools is not verified, and its runs are never reported clean. See
+// ForeignToolsCheck.
+builder.Services.AddSingleton(sp => new PresetAllowedTools(sp.GetRequiredService<AgentCatalog>().Allowance));
+builder.Services.AddSingleton<ForeignToolsCheck>();
 builder.Services.AddHostedService<DefaultBranchAtStart>();
 // The operator CLI's `plugin install` asks for a rescan by writing a file the Host polls: no restart, no API key.
 builder.Services.AddHostedService<PluginRescanRequests>();
@@ -1366,6 +1389,14 @@ builder.Services.ConfigureHttpJsonOptions(options => ConfigureHostJson(options.S
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<AgentAuthProbe>();
+
+// THE PRE-FLIGHT: what each preset's CLI would load, listed by the CLI itself as the agent user,
+// once the Host is serving and again after every catalog save. Never on the start path.
+builder.Services.AddSingleton<IListingRunner>(sp => new CliListingRunner(sp.GetRequiredService<AgentLaunchUser>()));
+builder.Services.AddSingleton(sp => new AgentToolPreflight(
+    sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<IListingRunner>(), dataRoot,
+    sp.GetRequiredService<ILogger<AgentToolPreflight>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentToolPreflight>());
 builder.Services.AddMcpServer()
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
     .WithTools<PlatformMcpTools>();

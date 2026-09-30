@@ -213,6 +213,8 @@ function submit() {
       tags: tags.value,
       installUrl: installUrl.value,
       installHint: installHint.value,
+      isolation: props.agent?.isolation ?? null,
+      updates: props.agent?.updates ?? null,
     }),
   );
 }

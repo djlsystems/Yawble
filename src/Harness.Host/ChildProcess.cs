@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Harness.Contracts;
+using Harness.Pty;
 
 namespace Harness.Host;
 
@@ -27,6 +28,43 @@ public static class ChildProcess
     /// value - it is "stop waiting", which is what a bound gives.
     /// </summary>
     public static readonly TimeSpan DrainGrace = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// <paramref name="command"/> resolved with <see cref="PathSearch.Find"/>, LOOKING AGAIN after a
+    /// pause while <paramref name="lookup"/>'s window lasts, or null when it never appeared.
+    ///
+    /// A MISS IS NOT FINAL AT ONCE, because the install every member launches from is shared and is
+    /// replaced in place while it updates: a launch that lands in that gap of a few seconds finds
+    /// no program, and a second look finds the new one. <paramref name="onFirstMiss"/> is called
+    /// once, before the first pause, so the run can say what it is waiting for; a program that
+    /// appears is returned and nothing else is recorded. A cancelled wait answers null.
+    /// </summary>
+    public static async Task<string?> FindAsync(
+        string command, LaunchLookup lookup, Func<Task>? onFirstMiss, CancellationToken ct)
+    {
+        if (PathSearch.Find(command) is { } found) return found;
+        if (lookup.Window <= TimeSpan.Zero) return null;
+
+        if (onFirstMiss is not null) await onFirstMiss();
+
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+
+        while (waited.Elapsed < lookup.Window)
+        {
+            try
+            {
+                await Task.Delay(lookup.Pause, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
+
+            if (PathSearch.Find(command) is { } appeared) return appeared;
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// The start info for <paramref name="resolvedFileName"/>, or null when `setsid` is not in a
@@ -303,6 +341,22 @@ public static class ChildProcess
 
     [DllImport("libc", SetLastError = true)]
     private static extern int kill(int pid, int signal);
+}
+
+/// <summary>
+/// How long a launch keeps looking for a program that is not on PATH, and how long it pauses
+/// between looks. <see cref="Default"/> is the Host's; a test passes a short one.
+/// </summary>
+public sealed record LaunchLookup(TimeSpan Window, TimeSpan Pause)
+{
+    /// <summary>About 30 seconds, looking every 3: longer than an in-place CLI update takes.</summary>
+    public static readonly LaunchLookup Default = new(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(3));
+
+    /// <summary>One look and no wait.</summary>
+    public static readonly LaunchLookup Once = new(TimeSpan.Zero, TimeSpan.Zero);
+
+    /// <summary>The window in words: "30 seconds".</summary>
+    public string WindowText => $"{(int)Math.Round(Window.TotalSeconds)} seconds";
 }
 
 /// <summary>What became of one child process.</summary>

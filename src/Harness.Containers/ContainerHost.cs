@@ -66,6 +66,9 @@ public sealed class ContainerHost : IAsyncDisposable
     /// </para>
     /// </summary>
     private readonly Func<ContainerId, long?, bool, CancellationToken, Task<bool>>? _onRunEnding;
+
+    /// <summary>Passed to every member: see <c>MemberRuntime</c>'s own.</summary>
+    private readonly Func<Message, CancellationToken, Task>? _onTerminal;
     private readonly WipLedger? _wip;
     private readonly ConcurrentDictionary<string, byte> _pausedTeams =
         new(StringComparer.OrdinalIgnoreCase);
@@ -187,8 +190,10 @@ public sealed class ContainerHost : IAsyncDisposable
         Func<long>? workflowSpendLimitNow = null,
         Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? worktrees = null,
         Func<string, bool>? watchable = null,
-        Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? triggerCapped = null)
+        Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? triggerCapped = null,
+        Func<Message, CancellationToken, Task>? onTerminal = null)
     {
+        _onTerminal = onTerminal;
         _triggerCapped = triggerCapped;
         _watchable = watchable;
         _workflowSpendLimitNow = workflowSpendLimitNow;
@@ -323,7 +328,7 @@ public sealed class ContainerHost : IAsyncDisposable
             definition with { Subscribes = types }, runner, _log, _transcripts,
             pending: _pending, claimStart: TryClaimStart, sinceSeq: floorSeq,
             onRunEnding: _onRunEnding, claimSignal: ClaimSignal, claimWithdraw: WithdrawClaim, worktrees: _worktrees,
-            watchable: _watchable);
+            watchable: _watchable, onTerminal: _onTerminal);
         container.Changed += OnChanged;
 
         // The re-check that makes the ContainsKey guard above correct rather than merely fast:

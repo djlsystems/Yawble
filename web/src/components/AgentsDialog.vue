@@ -14,6 +14,8 @@ import {
 } from '../lib/agentInstall';
 import { useAgentInstallations } from '../lib/useAgentInstallations';
 import { authReportFor, authStatus, refreshAgentAuth, useAgentAuth } from '../lib/useAgentAuth';
+import { toolsReportFor, toolsStatus } from '../lib/agentTools';
+import type { PresetToolReport } from '../api/types';
 import AgentEditDialog from './AgentEditDialog.vue';
 
 /**
@@ -76,6 +78,24 @@ const statusOf = (agent: Agent) => installStatus(installationFor(installations.v
 /** The sign-in caption. `Not measured` is grey and never a warning - see `authStatus`. */
 const authOf = (agent: Agent) => authStatus(authReportFor(authReports.value, agent.name));
 
+/**
+ * What each preset's CLI would load, from the Host's last pre-flight (`GET /api/agents/tools`).
+ * A third measurement, held beside the catalog like the other two and never folded into an `Agent`.
+ * Empty until it answers, which every row reads as "not listed yet", never as isolated.
+ */
+const toolReports = ref<PresetToolReport[]>([]);
+
+async function loadTools() {
+  try {
+    toolReports.value = (await api.getAgentTools()).presets;
+  } catch {
+    toolReports.value = [];
+  }
+}
+
+const toolsReportOf = (agent: Agent) => toolsReportFor(toolReports.value, agent.name);
+const toolsOf = (agent: Agent) => toolsStatus(toolsReportOf(agent));
+
 /** The tags a row shows, joined. Empty when it carries none. */
 const tagsText = (tags: string[] | null | undefined) => (tags ?? []).join(', ');
 
@@ -124,6 +144,31 @@ const agentEditOpen = ref(false);
 
 /** The row mid-DELETE, not a plain boolean, so the spinner lands on the row that is going. */
 const removing = ref<string | null>(null);
+
+/** The preset whose CLI the platform is updating now, or null. One at a time from this screen. */
+const updating = ref<string | null>(null);
+
+/** Whether the platform can update this preset's CLI: it declares an update command. */
+const canUpdate = (agent: Agent) => (agent.updates?.update?.length ?? 0) > 0;
+
+/**
+ * Has the platform update this preset's CLI. It waits for that CLI's runs in flight and holds new
+ * ones meanwhile - they wait, never fail - so this can take a while. The server's sentence is shown
+ * VERBATIM: it names the versions before and after.
+ */
+async function updateCli(agent: Agent) {
+  updating.value = agent.name;
+
+  try {
+    const result = await api.updateAgentCli(agent.name);
+    $q.notify({ type: result.updated ? 'positive' : 'warning', message: result.detail });
+    await load();
+  } catch (failure) {
+    $q.notify({ type: 'negative', message: (failure as Error).message });
+  } finally {
+    updating.value = null;
+  }
+}
 const confirmingAgent = ref<Agent | null>(null);
 
 /** A preset serves exactly one mode, so this is the picker it would turn up in. */
@@ -162,6 +207,7 @@ watch(open, (showing) => {
   // Its own call, beside the catalog load rather than inside it: the probe runs each CLI's own
   // status command and is the slower of the two, and a list that waited for it would open blank.
   void refreshAgentAuth();
+  void loadTools();
 });
 
 /**
@@ -297,7 +343,9 @@ async function resetTags(agent: Agent) {
   }
 }
 
-const rowBusy = computed(() => busy.value || formBusy.value || removing.value !== null);
+const rowBusy = computed(
+  () => busy.value || formBusy.value || removing.value !== null || updating.value !== null,
+);
 </script>
 
 <template>
@@ -421,6 +469,40 @@ const rowBusy = computed(() => busy.value || formBusy.value || removing.value !=
                   {{ authOf(agent).detail }}
                 </span>
               </q-item-label>
+
+              <!-- THE FOURTH CAPTION: what this preset's CLI would load, as the Host listed it.
+                   A member's preset is isolated, has foreign tools (named), is not verified, or
+                   was not measured - never green without a listing. The Concierge's tools are
+                   information in grey, never a warning. Its recorded gaps follow, verbatim. -->
+              <q-item-label v-if="toolsOf(agent)" caption class="agent-tools-line">
+                <q-icon
+                  :name="toolsOf(agent)!.icon"
+                  size="14px"
+                  class="q-mr-xs"
+                  aria-hidden="true"
+                />
+                <span
+                  :class="{
+                    'text-positive': toolsOf(agent)!.tone === 'ok',
+                    'text-warning': toolsOf(agent)!.tone === 'warn',
+                    'os-text-muted': toolsOf(agent)!.tone === 'info',
+                  }"
+                >{{ toolsOf(agent)!.text }}</span>
+                <span v-if="toolsOf(agent)!.names.length" class="mono agent-tools-names q-ml-xs">
+                  {{ toolsOf(agent)!.names.join(', ') }}
+                </span>
+                <span v-if="toolsReportOf(agent)?.detail" class="os-text-muted q-ml-xs">
+                  {{ toolsReportOf(agent)?.detail }}
+                </span>
+              </q-item-label>
+              <q-item-label
+                v-for="gap in toolsReportOf(agent)?.gaps ?? []"
+                :key="gap"
+                caption
+                class="os-text-muted agent-tools-gap"
+              >
+                Gap: {{ gap }}
+              </q-item-label>
             </q-item-section>
 
             <!-- A BUILT-IN HAS ITS TAG CONTROLS AND NO OTHERS, rather than disabled ones: nothing
@@ -430,6 +512,20 @@ const rowBusy = computed(() => busy.value || formBusy.value || removing.value !=
               <div class="row q-gutter-xs no-wrap items-center">
                 <span class="os-text-muted agent-read-only">
                   <q-icon name="lock" size="14px" aria-hidden="true" /> Read-only
+                </span>
+
+                <span v-if="canUpdate(agent)" class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    icon="download"
+                    :loading="updating === agent.name"
+                    :disable="rowBusy"
+                    :aria-label="`Update the CLI ${agent.name} runs`"
+                    @click="updateCli(agent)"
+                  />
+                  <q-tooltip>Update its CLI now (waits for its runs, holds new ones)</q-tooltip>
                 </span>
 
                 <span class="row-btn-wrap">

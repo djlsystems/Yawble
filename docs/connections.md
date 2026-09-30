@@ -8,6 +8,9 @@ credential ever leaves the Host.
 
 - **Where:** Admin → **Connections** in the web UI, or `yawble connect` on the operator's computer.
 - **Who:** people only. No agent tool, skill, environment variable or route gives an agent a token.
+- **Not the agent home:** an account signed in for the Concierge in `/data/agent-home` (a CLI's
+  connectors, MCP servers) reaches the Concierge only; members are launched without it. Anything a
+  member should act on belongs here. See [architecture.md](architecture.md#the-shared-agent-home).
 - **For plugin authors:** declare a slot in the manifest and read the token on stdin; see
   [plugins.md](plugins.md#connections-oauth-accounts).
 

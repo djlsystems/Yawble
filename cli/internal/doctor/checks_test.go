@@ -566,3 +566,48 @@ func TestTheContributorRowSaysWhichTokenContributorModeNeeds(t *testing.T) {
 		}
 	}
 }
+
+// Which version of each agent CLI is installed and when it last changed, as its own row: the
+// platform updates them only at start and on a person's request, and this is where that shows.
+func TestTheAgentVersionsRowSaysWhichVersionAndWhenItWasUpdated(t *testing.T) {
+	r := sampleReport()
+	r.Agents[0].UpdatedAt = strp("2026-09-29T20:46:21+00:00")
+	r.Agents[2].Version = strp("GitHub Copilot CLI 1.0.88.")
+	r.Agents[2].VersionsSince = strp("2026-09-25T15:22:00+00:00")
+
+	row := find(t, doctor.InstanceChecks(r, nil, now), "agent versions")
+
+	if row.Verdict != doctor.Info {
+		t.Errorf("an information row, never a verdict: %+v", row)
+	}
+	for _, want := range []string{
+		"claude 2.1.280, updated 2026-09-29 20:46 UTC",
+		"copilot GitHub Copilot CLI 1.0.88., unchanged since 2026-09-25 15:22 UTC",
+	} {
+		if !strings.Contains(row.Detail, want) {
+			t.Errorf("agent versions should say %q: %+v", want, row)
+		}
+	}
+	if strings.Contains(row.Detail, "agy") || strings.Contains(row.Detail, "codex") {
+		t.Errorf("a CLI with no version or not installed is left out: %+v", row)
+	}
+
+	var out bytes.Buffer
+	doctor.RenderAgents(&out, r.Agents)
+	if !strings.Contains(out.String(), "installed   yes, 2.1.280, updated 2026-09-29 20:46 UTC") {
+		t.Errorf("yawble agents should say when it was updated:\n%s", out.String())
+	}
+}
+
+// No version anywhere: no row, rather than an empty one.
+func TestNoAgentVersionsRowWithoutVersions(t *testing.T) {
+	r := sampleReport()
+	for i := range r.Agents {
+		r.Agents[i].Version = nil
+	}
+	for _, c := range doctor.InstanceChecks(r, nil, now) {
+		if c.Name == "agent versions" {
+			t.Errorf("no versions, no row: %+v", c)
+		}
+	}
+}

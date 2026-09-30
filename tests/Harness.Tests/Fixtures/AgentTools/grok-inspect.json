@@ -1,0 +1,409 @@
+{
+  "grokVersion": "1.0.44",
+  "channel": "stable",
+  "cwd": "/tmp/harness-tool-listing-x",
+  "projectRoot": null,
+  "projectTrusted": true,
+  "projectInstructions": [],
+  "permissions": {
+    "sources": [],
+    "loaded": 0,
+    "skipped": [],
+    "mcpServerAllowlist": [],
+    "mcpLockdownSources": [],
+    "mcpManagedServersOnly": "off",
+    "marketplaceAllowlist": [],
+    "marketplaceLockdownSources": [],
+    "managedMarketplaces": [],
+    "managedSettingsPath": "/etc/claude-code/managed-settings.json",
+    "managedSettingsExists": false,
+    "managedSettingsActive": false,
+    "claudeBypassLockAdvisory": false
+  },
+  "loginPolicy": {
+    "disableApiKeyAuth": null,
+    "forceLoginTeamUuid": null,
+    "apiKeyAuthDisabled": false
+  },
+  "hooks": [],
+  "skills": [
+    {
+      "name": "docs",
+      "description": "docs (editable docs people share and comment on; the default for any document, n",
+      "source": {
+        "type": "user",
+        "path": "/data/agent-home/.claude/skills/synced/00000000-0000-0000-0000-000000000000_00000000-0000-0000-0000-000000000000/docs/SKILL.md"
+      },
+      "userInvocable": true,
+      "vendor": "claude",
+      "disabled": true,
+      "compatibilityStatus": "disabled",
+      "collidesWith": "docs",
+      "invocableAs": "user:docs"
+    },
+    {
+      "name": "google-workspace",
+      "description": "Read this before the first Google Drive, Docs, Sheets or Slides connector call w",
+      "source": {
+        "type": "user",
+        "path": "/data/agent-home/.claude/skills/synced/00000000-0000-0000-0000-000000000000_00000000-0000-0000-0000-000000000000/google-workspace/SKILL.md"
+      },
+      "userInvocable": true,
+      "vendor": "claude",
+      "disabled": true,
+      "compatibilityStatus": "disabled"
+    },
+    {
+      "name": "import-memory",
+      "description": "Import a memory export from another AI assistant into Claude's memory \u2014 conversa",
+      "source": {
+        "type": "user",
+        "path": "/data/agent-home/.claude/skills/synced/00000000-0000-0000-0000-000000000000_00000000-0000-0000-0000-000000000000/import-memory/SKILL.md"
+      },
+      "userInvocable": true,
+      "vendor": "claude",
+      "disabled": true,
+      "compatibilityStatus": "disabled"
+    },
+    {
+      "name": "morning",
+      "description": "Render the user's morning brief as a styled HTML artifact, or set it up as a rec",
+      "source": {
+        "type": "user",
+        "path": "/data/agent-home/.claude/skills/synced/00000000-0000-0000-0000-000000000000_00000000-0000-0000-0000-000000000000/morning/SKILL.md"
+      },
+      "userInvocable": true,
+      "vendor": "claude",
+      "disabled": true,
+      "compatibilityStatus": "disabled"
+    },
+    {
+      "name": "build-with-ai",
+      "description": "Default to SpaceXAI when building AI/LLM features into an app. Use whenever addi",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/build-with-ai/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "code-review",
+      "description": "Run an extremely strict maintainability review for abstraction quality, giant fi",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/code-review/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "create-skill",
+      "description": "Interactively create a new Grok skill (SKILL.md + optional scripts/references). ",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/create-skill/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "create-workflow",
+      "description": "Create a Grok Build workflow: author a Rhai orchestration script (agents, phases",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/create-workflow/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "design",
+      "description": "Run the full design-doc-writer and design-doc-reviewer loop until consensus. Pro",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/design/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "docx",
+      "description": "Use this skill whenever the user wants to create, read, edit, or manipulate Word",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/docx/SKILL.md"
+      },
+      "userInvocable": false
+    },
+    {
+      "name": "execute-plan",
+      "description": "Execute a PR Plan DAG from a design document. Parses the plan, topologically sor",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/execute-plan/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "game-assets",
+      "description": "Game art and 3D models with the Imagine tools: sprites, sprite sheets, animation",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/game-assets/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "imagine",
+      "description": "Using the Imagine tools in Grok Build (image_gen, image_edit, reference_to_video",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/imagine/SKILL.md"
+      },
+      "userInvocable": true,
+      "collidesWith": "imagine",
+      "invocableAs": "bundled:imagine"
+    },
+    {
+      "name": "implement",
+      "description": "Run the full implement-review-fix loop using implementer and reviewer personas. ",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/implement/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "learn",
+      "description": "Learn from your own Grok Build sessions and tune your setup: add skills for thin",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/learn/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "long-running-background-tasks",
+      "description": "Required reading before you start, watch, or wait on anything that keeps running",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/long-running-background-tasks/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "pdf",
+      "description": "Read, create, and transform PDF files. Covers pulling text and tables out of PDF",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/pdf/SKILL.md"
+      },
+      "userInvocable": false
+    },
+    {
+      "name": "pptx",
+      "description": "Use this skill any time a .pptx file is involved in any way \u2014 as input, output, ",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/pptx/SKILL.md"
+      },
+      "userInvocable": false
+    },
+    {
+      "name": "pr-babysit",
+      "description": "Monitor PRs, fix CI failures, address review comments (human and bot/automated),",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/pr-babysit/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "resume-claude",
+      "description": "Resume or continue work from a recent Claude Code session. Use when the user swi",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/resume-claude/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "resume-codex",
+      "description": "Resume or continue work from a recent Codex CLI or Codex VS Code session. Use wh",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/resume-codex/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "resume-cursor",
+      "description": "Resume or continue work from a recent Cursor CLI or Cursor Desktop session. Use ",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/resume-cursor/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "review",
+      "description": "Run a reviewer subagent against your whole branch vs main, your uncommitted work",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/review/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "skill-design-principles",
+      "description": "Concise, high-signal principles for writing and editing skills well. Use wheneve",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/skill-design-principles/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "statusline",
+      "description": "Configure the Grok Build status line.",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/statusline/SKILL.md"
+      },
+      "userInvocable": true
+    },
+    {
+      "name": "threejs-frame-conventions",
+      "description": "Rules and a self-test for writing Three.js (and other y-up, right-handed) game c",
+      "source": {
+        "type": "bundled",
+        "path": "/data/agent-home/.grok/bundled/skills/threejs-frame-conventions/SKILL.md"
+      },
+      "userInvocable": true
+    }
+  ],
+  "agents": [
+    {
+      "name": "general-purpose",
+      "description": "General purpose agent for multi-step tasks.",
+      "source": {
+        "type": "builtin"
+      }
+    },
+    {
+      "name": "explore",
+      "description": "Fast, read-only agent specialized for codebase exploration.",
+      "source": {
+        "type": "builtin"
+      }
+    },
+    {
+      "name": "plan",
+      "description": "Software architect for planning implementation strategies.",
+      "source": {
+        "type": "builtin"
+      }
+    }
+  ],
+  "plugins": [],
+  "marketplaces": [],
+  "mcpServers": [
+    {
+      "name": "harness",
+      "transport": "http",
+      "target": "http://127.0.0.1:8080/mcp",
+      "source": {
+        "type": "configToml",
+        "path": "/data/agent-home/.grok/config.toml"
+      }
+    }
+  ],
+  "lspServers": [],
+  "configSources": {
+    "layers": [
+      {
+        "role": "user",
+        "path": "/data/agent-home/.grok/config.toml"
+      }
+    ]
+  },
+  "externalCompat": {
+    "remoteSettingsLoaded": false,
+    "cells": [
+      {
+        "vendor": "cursor",
+        "surface": "skills",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "cursor",
+        "surface": "rules",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "cursor",
+        "surface": "agents",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "cursor",
+        "surface": "mcps",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "cursor",
+        "surface": "hooks",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "cursor",
+        "surface": "sessions",
+        "enabled": true,
+        "source": "default"
+      },
+      {
+        "vendor": "claude",
+        "surface": "skills",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "claude",
+        "surface": "rules",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "claude",
+        "surface": "agents",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "claude",
+        "surface": "mcps",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "claude",
+        "surface": "hooks",
+        "enabled": false,
+        "source": "env"
+      },
+      {
+        "vendor": "claude",
+        "surface": "sessions",
+        "enabled": true,
+        "source": "default"
+      },
+      {
+        "vendor": "codex",
+        "surface": "sessions",
+        "enabled": true,
+        "source": "default"
+      }
+    ]
+  }
+}

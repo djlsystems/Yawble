@@ -94,7 +94,10 @@ public sealed class ProcessAgentRunnerLaunchTests : IDisposable
                 new AgentLaunch(fileName, arguments, LanguageModel: false)),
         ]);
 
-        var runner = new ProcessAgentRunner(catalog, new RunHeartbeat());
+        // A SHORT LOOKUP: a missing command is looked for again before it fails, and these tests
+        // do not wait the Host's 30 seconds for one that never appears.
+        var runner = new ProcessAgentRunner(
+            catalog, new RunHeartbeat(), lookup: new LaunchLookup(TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(100)));
 
         return runner.RunAsync(new AgentInvocation(
             new ContainerId("alpha", "worker"),
@@ -112,6 +115,7 @@ public sealed class ProcessAgentRunnerLaunchTests : IDisposable
 
         Assert.Equal(-1, result.ExitCode);
         Assert.Contains("not an executable file on PATH", result.LaunchError);
+        Assert.Equal(FailureClasses.LaunchMissing, result.FailureClass);
     }
 
     [Fact]

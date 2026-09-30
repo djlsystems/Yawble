@@ -188,6 +188,57 @@ public static class AgentEndpoints
                 + "Interactive one, so changing a preset's mode breaks the reference exactly as "
                 + "deleting it would. 204 on success."
                 + PeopleOnly);
+
+        // THE PLATFORM UPDATES AN AGENT CLI ONLY HERE AND AT THE CONTAINER'S START. Every launch
+        // carries what turns the CLI's own updater off, so this is how a person brings one current
+        // without restarting: it waits for the runs of that CLI in flight, holds new ones (they
+        // wait, never fail), runs the preset's declared update and lets them go.
+        app.MapPost("/api/agents/{name}/update", async (
+            [System.ComponentModel.Description("The preset whose CLI to update. Presets that launch "
+                + "the same command share one install, so updating one updates them all.")]
+            string name,
+            AgentCliUpdater updater, ITenantLog tenantLog, HttpContext context, CancellationToken ct) =>
+        {
+            if (await updater.UpdateAsync(name, ct) is not { } result)
+            {
+                return Results.NotFound(new { error = $"No Agent '{name}'." });
+            }
+
+            var row = TenantLogging.Row(
+                context, TenantActions.AgentUpdated, result.Agent, result.Agent,
+                new
+                {
+                    command = result.Command,
+                    updated = result.Updated,
+                    exitCode = result.ExitCode,
+                    versionBefore = result.VersionBefore,
+                    versionAfter = result.VersionAfter,
+                });
+
+            try
+            {
+                await tenantLog.WriteAsync(
+                    row.ActorId, row.ActorEmail, row.Action, row.Subject, row.SubjectName, row.Detail, ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // The update happened; only its row is missing, and saying so beats hiding the result.
+            }
+
+            return Results.Ok(result);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Update an Agent's CLI now")
+            .WithDescription(
+                "Runs the preset's declared `updates.update` command as the user agents run as. It "
+                + "WAITS until no run of that command is in flight, and from the moment it is asked "
+                + "new launches of that command wait for it - they are held, never failed - so no "
+                + "run finds its program half-replaced. Answers with the versions before and after, "
+                + "which are also recorded in the CLI version history.\n\n"
+                + "`updated` is false, with a sentence, when the preset declares no update command "
+                + "or the command failed. 404 for an unknown preset."
+                + PeopleOnly);
     }
 
     /// <summary>

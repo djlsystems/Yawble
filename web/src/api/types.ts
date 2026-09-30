@@ -159,8 +159,8 @@ export interface ContainerSnapshot {
   unresolvedAgents?: UnresolvedAgent[]
 
   /**
-   * WHAT KIND of failure `failed` was — `quota`, `rate`, `transport`, `agent-fault`, `timeout`,
-   * `interrupted` or `unknown` — and `null` when this member's last run did not fail.
+   * WHAT KIND of failure `failed` was — `quota`, `rate`, `transport`, `agent-fault`, `launch-missing`,
+   * `timeout`, `interrupted` or `unknown` — and `null` when this member's last run did not fail.
    *
    * A SECOND VALUE ON ONE MARK, not a second mark. It is set and cleared with `failed` on the same
    * lines, because a card wearing a class from one run beside a reason from another would be worse
@@ -1527,6 +1527,50 @@ export interface Agent {
 
   /** The tags a built-in carries in the build, shown beside the operator's. Null for a custom preset. */
   buildTags?: string[] | null
+
+  /**
+   * How a member's launch of this preset is kept to the platform's tools: the arguments and
+   * environment that switch off the account's connectors and the shared home's configuration, and
+   * the CLI's own tools it may use. A headless preset without one is NOT VERIFIED.
+   *
+   * CARRIED THROUGH AN EDIT for the reason `install` is: the dialog rebuilds what it saves and
+   * `PUT /api/agents` replaces the catalog, so a field it drops is a declaration the save deletes.
+   */
+  isolation?: AgentIsolation | null
+
+  /**
+   * What turns this CLI's own automatic update off on every launch, and the command the platform
+   * runs to update it when a person asks. Carried through an edit for `isolation`'s reason.
+   */
+  updates?: AgentUpdates | null
+}
+
+/** A preset's update declaration. See `AgentUpdates` in the Host. */
+export interface AgentUpdates {
+  env?: Record<string, string> | null
+  arguments?: string[] | null
+  update?: string[] | null
+}
+
+/** What `POST /api/agents/{name}/update` came to. */
+export interface AgentUpdateResult {
+  agent: string
+  command: string
+  updated: boolean
+  exitCode: number | null
+  versionBefore: string | null
+  versionAfter: string | null
+  at: string
+  detail: string
+}
+
+/** A preset's isolation declaration. See `AgentIsolation` in the Host. */
+export interface AgentIsolation {
+  arguments: string[]
+  env?: Record<string, string> | null
+  allowedTools?: string[] | null
+  allowedServers?: string[] | null
+  gaps?: string[] | null
 }
 
 /** Where to get the CLI a preset launches. Data in the catalog, never a table in code. */
@@ -2972,4 +3016,50 @@ export interface TeamSolution {
   installedBy: string
   plugins: string[]
   missing: SolutionMissing[]
+}
+
+/**
+ * One thing an agent CLI's own listing says it would load. `off` is null when it would load,
+ * otherwise why it does not (`disabled`, or the launch switch that turns it off).
+ */
+export interface ListedToolItem {
+  kind: 'server' | 'connector' | 'plugin' | 'skill' | 'hook'
+  name: string
+  source: string | null
+  off: string | null
+}
+
+/**
+ * The pre-flight's word for a preset. `notMeasured` is never isolated, and `concierge` is
+ * information, never a warning.
+ */
+export type ToolVerdict =
+  | 'isolated'
+  | 'foreignFound'
+  | 'notVerified'
+  | 'notMeasured'
+  | 'concierge'
+  | 'notAModel'
+
+/** One preset's pre-flight, from `GET /api/agents/tools`. A measurement: never folded into an `Agent`. */
+export interface PresetToolReport {
+  preset: string
+  mode: 'headless' | 'interactive'
+  command: string
+  verdict: ToolVerdict
+  /** What a member would be offered that it may not be. Always empty for the Concierge. */
+  foreign: ListedToolItem[]
+  loaded: ListedToolItem[]
+  switchedOff: ListedToolItem[]
+  /** What no launch switch reaches, as the preset records it. */
+  gaps: string[]
+  ran: string[]
+  detail: string | null
+}
+
+/** `GET /api/agents/tools`: the Host's last pre-flight. `at` is null before the first one ends. */
+export interface AgentToolsReport {
+  at: string | null
+  running: boolean
+  presets: PresetToolReport[]
 }

@@ -15,6 +15,8 @@ export function publishSteering(correlationId: number | null): void {
 import type {
   Agent,
   AgentAuthReport,
+  AgentToolsReport,
+  AgentUpdateResult,
   BacklogDispatchView,
   BacklogExecutionStats,
   BacklogItemView,
@@ -1512,6 +1514,17 @@ export const listCatalog = () => json<Catalog>('/api/agents')
  * false alarm.
  */
 export const getAgentAuth = () => json<AgentAuthReport[]>('/api/agents/auth')
+
+/** Has the platform update a preset's CLI now. It waits for that CLI's runs in flight and holds new
+ *  ones until it is done, so it can take minutes; the answer names the versions before and after. */
+export const updateAgentCli = (name: string) =>
+  json<AgentUpdateResult>(`/api/agents/${encodeURIComponent(name)}/update`, { method: 'POST' })
+
+/**
+ * What each preset's CLI would load, as the Host's last pre-flight listed it: a member's preset with
+ * its isolation, the Concierge's without. People only.
+ */
+export const getAgentTools = () => json<AgentToolsReport>('/api/agents/tools')
 
 /**
  * One page of skills, newest first, for `useCursorList`: the rows strictly older than

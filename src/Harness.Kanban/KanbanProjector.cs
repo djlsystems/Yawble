@@ -23,7 +23,7 @@ public static class KanbanProjector
             or MessageTypes.Failed or MessageTypes.Completed or MessageTypes.WorkflowCompleted
             or MessageTypes.WorkflowPaused or MessageTypes.WorkflowResumed or MessageTypes.NeedsDecision
             or "needs-decision" or MessageTypes.Handback or MessageTypes.ContainerRemoved
-            or MessageTypes.RepoDefaultBranchMoved;
+            or MessageTypes.RepoDefaultBranchMoved or MessageTypes.AgentForeignTools;
 
     /// <summary>
     /// Project a sequence of messages into a board snapshot.
@@ -192,6 +192,17 @@ public static class KanbanProjector
             {
                 Record(moved, msg, FirstStringField(msg, PayloadFields.Reason));
                 moved.UpdatedAt = msg.OccurredAt.DateTime;
+            }
+        }
+        else if (msgType == MessageTypes.AgentForeignTools)
+        {
+            // On the member's card, as a trail row and a mark; the status is the run's. The mark
+            // only ever rises - called over offered over not measured - since a later clean run does
+            // not undo what reached an earlier one.
+            if (CardFor(msg, cardStates) is { } checkedCard)
+            {
+                Record(checkedCard, msg, FirstStringField(msg, PayloadFields.Text));
+                checkedCard.ForeignTools = KanbanForeignTools.Worse(checkedCard.ForeignTools, KanbanForeignTools.Of(msg));
             }
         }
     }
@@ -1042,6 +1053,9 @@ public static class KanbanProjector
 
         public bool Created { get; set; }
 
+        /// <summary>The card's foreign tools mark, or null. See <see cref="KanbanCard.ForeignTools"/>.</summary>
+        public string? ForeignTools { get; set; }
+
         /// <summary>Every workflow this card was planned, claimed or told in, oldest first. See
         /// <see cref="KanbanCard.Workflows"/>.</summary>
         public List<long> Workflows { get; } = [];
@@ -1080,6 +1094,60 @@ public static class KanbanProjector
             UpdatedAt,
             AwaitingManager,
             Paused,
-            Workflows.ToList());
+            Workflows.ToList(),
+            ForeignTools: ForeignTools);
+    }
+}
+
+/// <summary>The marks an <c>agent.foreignTools</c> row puts on a card, strongest first.</summary>
+public static class KanbanForeignTools
+{
+    /// <summary>A run on this card CALLED a tool the platform did not give it.</summary>
+    public const string Called = "called";
+
+    /// <summary>A run on this card was offered one, and called none.</summary>
+    public const string Offered = "offered";
+
+    /// <summary>A run on this card could not be checked: its transcript does not list what was offered.</summary>
+    public const string NotMeasured = "notMeasured";
+
+    /// <summary>A run on this card offered no foreign server, but its preset declares no allowed tools.</summary>
+    public const string NotVerified = "notVerified";
+
+    private static int Rank(string? mark) => mark switch
+    {
+        Called => 4,
+        Offered => 3,
+        NotMeasured => 2,
+        NotVerified => 1,
+        _ => 0,
+    };
+
+    public static string? Worse(string? a, string? b) => Rank(b) > Rank(a) ? b : a;
+
+    /// <summary>The mark one row makes.</summary>
+    public static string? Of(Message msg)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(msg.Payload);
+            var root = document.RootElement;
+            if (!root.TryGetProperty(PayloadFields.ForeignToolsStatus, out var status)) return null;
+
+            return status.GetString() switch
+            {
+                "foreign" => root.TryGetProperty(PayloadFields.ForeignCalled, out var called)
+                    && called.ValueKind == JsonValueKind.Array && called.GetArrayLength() > 0
+                        ? Called
+                        : Offered,
+                "notMeasured" => NotMeasured,
+                "notVerified" => NotVerified,
+                _ => null,
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 }

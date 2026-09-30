@@ -27,7 +27,7 @@ func RenderAgents(w io.Writer, agents []Agent) {
 		case !a.Installed:
 			fmt.Fprintln(w, "  installed   no")
 		case a.Version != nil && *a.Version != "":
-			fmt.Fprintf(w, "  installed   yes, %s (at the last start)\n", *a.Version)
+			fmt.Fprintf(w, "  installed   yes, %s\n", a.UpdatedText())
 		default:
 			fmt.Fprintln(w, "  installed   yes")
 		}
