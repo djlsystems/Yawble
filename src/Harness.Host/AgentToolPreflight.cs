@@ -92,7 +92,7 @@ public sealed record AgentToolsRecord(DateTimeOffset At, IReadOnlyList<PresetToo
 /// <summary>
 /// THE PRE-FLIGHT: at start and whenever the catalog changes, what each preset's CLI would load
 /// when run as the agent user - a member's preset WITH its isolation applied, the Concierge's
-/// without it - held against <see cref="AgentCatalog.Allowance"/>. `yawble doctor` and Admin →
+/// without it - held against <see cref="AgentCatalog.Allowance"/>. The operator CLI's doctor and Admin →
 /// Agents read the result.
 ///
 /// NEVER ON THE START PATH: the first pass begins once the Host is serving, and a CLI that hangs

@@ -33,7 +33,6 @@ public static class SurfaceEndpoints
                     running = preflight.Running,
                     presets = preflight.Current?.Presets ?? [],
                 }))
-            .RequirePermit(Permits.Read)
             .HumansOnly()
             .WithTags("Agents")
             .WithSummary("What each preset's CLI would load, and whether a member gets only the platform's tools")
