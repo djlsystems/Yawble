@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // HostReport mirrors HostDoctor's JSON, camelCase. Pointers are fields the Host reports as null
@@ -56,6 +57,33 @@ type Agent struct {
 	// no sign-in, and is dropped when the report is read.
 	Kind          string `json:"kind,omitempty"`
 	LanguageModel *bool  `json:"languageModel,omitempty"`
+	// UpdatedAt is when the installed version arrived: the first line of the Host's CLI version
+	// history - a start, or a person's update through the platform - that had it after a different
+	// one. Nil when the kept history never saw it change; VersionsSince is how far back that reaches.
+	UpdatedAt     *string `json:"updatedAt,omitempty"`
+	VersionsSince *string `json:"versionsSince,omitempty"`
+}
+
+// UpdatedText says which version is installed and when it last changed, in one phrase, or "" when
+// the report carried no version.
+func (a Agent) UpdatedText() string {
+	if a.Version == nil || *a.Version == "" {
+		return ""
+	}
+	day := func(stamp string) string {
+		if t, err := time.Parse(time.RFC3339, stamp); err == nil {
+			return t.UTC().Format("2006-01-02 15:04 UTC")
+		}
+		return stamp
+	}
+	switch {
+	case a.UpdatedAt != nil && *a.UpdatedAt != "":
+		return *a.Version + ", updated " + day(*a.UpdatedAt)
+	case a.VersionsSince != nil && *a.VersionsSince != "":
+		return *a.Version + ", unchanged since " + day(*a.VersionsSince)
+	default:
+		return *a.Version
+	}
 }
 
 // IsModelAgent is an entry that signs in to a model provider: no kind or kind "agent", and not

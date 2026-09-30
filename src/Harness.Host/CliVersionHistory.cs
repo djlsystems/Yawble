@@ -3,8 +3,16 @@ using System.Text.Json;
 namespace Harness.Host;
 
 /// <summary>One container start and the version each agent CLI reported at it. A null version is
-/// a CLI that was not installed at that start.</summary>
-public sealed record CliVersionsAtStart(DateTimeOffset At, IReadOnlyDictionary<string, string?> Versions);
+/// a CLI that was not installed at that start. <paramref name="By"/> is null for a start's line and
+/// `update` for the line the Host writes after a person's update of one CLI.</summary>
+public sealed record CliVersionsAtStart(
+    DateTimeOffset At, IReadOnlyDictionary<string, string?> Versions, string? By = null);
+
+/// <summary>A CLI's installed version and when it last changed, as the history says.</summary>
+/// <param name="UpdatedAt">The first line that recorded this version after a different one; null
+/// when every kept line has this version (no update recorded since <paramref name="Since"/>).</param>
+/// <param name="Since">The oldest line kept.</param>
+public sealed record CliVersionNow(string Cli, string? Version, DateTimeOffset? UpdatedAt, DateTimeOffset? Since);
 
 /// <summary>
 /// Which CLI versions this VOLUME has started with, newest first.
@@ -46,6 +54,68 @@ public sealed class CliVersionHistory(string path)
         return [.. starts.OrderByDescending(start => start.At).Take(Math.Clamp(take, 1, MaxTake))];
     }
 
+    /// <summary>
+    /// The version of <paramref name="cli"/> the newest line records, and when it last CHANGED: the
+    /// oldest line of the newest run of lines that agree on it. A start and a person's update are
+    /// both lines, so either one that brought a new version is when it was updated.
+    /// </summary>
+    public static CliVersionNow Now(string cli, IReadOnlyList<CliVersionsAtStart> newestFirst)
+    {
+        if (newestFirst.Count == 0) return new CliVersionNow(cli, null, null, null);
+
+        var version = newestFirst[0].Versions.GetValueOrDefault(cli);
+        var since = newestFirst[^1].At;
+
+        for (var i = 1; i < newestFirst.Count; i++)
+        {
+            if (!string.Equals(newestFirst[i].Versions.GetValueOrDefault(cli), version, StringComparison.Ordinal))
+            {
+                return new CliVersionNow(cli, version, newestFirst[i - 1].At, since);
+            }
+        }
+
+        return new CliVersionNow(cli, version, null, since);
+    }
+
+    /// <summary>
+    /// Appends a line: the newest line's versions with <paramref name="changed"/> laid over them,
+    /// marked <paramref name="by"/>, keeping the newest <see cref="MaxTake"/>. Rewritten IN PLACE,
+    /// never moved over, for the start script's reason: the Host may write the file and may not
+    /// replace an entry in the data root. False when it could not be written; never throws.
+    /// </summary>
+    public async Task<bool> AppendAsync(
+        IReadOnlyDictionary<string, string?> changed, string by, CancellationToken ct = default)
+    {
+        try
+        {
+            var newest = (await ReadAsync(1, ct)).FirstOrDefault();
+            var versions = new SortedDictionary<string, string?>(StringComparer.Ordinal);
+            foreach (var (cli, version) in newest?.Versions ?? new Dictionary<string, string?>()) versions[cli] = version;
+            foreach (var (cli, version) in changed) versions[cli] = version;
+
+            var line = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["at"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture),
+                ["versions"] = versions,
+                ["by"] = by,
+            });
+
+            var lines = File.Exists(Path) ? [.. await File.ReadAllLinesAsync(Path, ct)] : new List<string>();
+            lines.Add(line);
+            var kept = lines.Where(l => !string.IsNullOrWhiteSpace(l)).TakeLast(MaxTake);
+
+            await using var file = new FileStream(Path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
+            file.SetLength(0);
+            await using var writer = new StreamWriter(file);
+            foreach (var l in kept) await writer.WriteLineAsync(l.AsMemory(), ct);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private static CliVersionsAtStart? Parse(string line)
     {
         if (string.IsNullOrWhiteSpace(line)) return null;
@@ -69,7 +139,11 @@ public sealed class CliVersionHistory(string path)
                 map[cli.Name] = cli.Value.ValueKind == JsonValueKind.String ? cli.Value.GetString() : null;
             }
 
-            return new CliVersionsAtStart(when, map);
+            var by = root.TryGetProperty("by", out var byValue) && byValue.ValueKind == JsonValueKind.String
+                ? byValue.GetString()
+                : null;
+
+            return new CliVersionsAtStart(when, map, by);
         }
         catch (JsonException)
         {

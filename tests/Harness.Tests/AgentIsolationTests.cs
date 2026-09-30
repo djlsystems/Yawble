@@ -51,7 +51,8 @@ public sealed class AgentIsolationTests
             Assert.DoesNotContain(AgentIsolation.Token, preset.Launch.Arguments);
 
             var command = catalog.Interactive(preset.Name)!;
-            Assert.Equal(preset.Launch.Arguments, command.Arguments);
+            // Exactly the launch's arguments, then the CLI's own update-off (AgentUpdates) and nothing else.
+            Assert.Equal([.. preset.Launch.Arguments, .. preset.Updates?.Arguments ?? []], command.Arguments);
             Assert.Null(command.IsolationEnvironment);
 
             var allowance = catalog.Allowance(preset.Name)!;

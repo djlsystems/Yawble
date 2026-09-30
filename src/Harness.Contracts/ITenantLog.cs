@@ -106,6 +106,10 @@ public static class TenantActions
 
     public const string AgentsSaved = "agents.saved";
 
+    /// <summary>A person had the platform update an agent CLI. Subject is the preset; detail names the
+    /// command, the versions before and after, and whether it succeeded.</summary>
+    public const string AgentUpdated = "agent.updated";
+
     /// <summary>A person re-read the installed plugins, so a plugin installed or upgraded on disk is
     /// registered without a restart.</summary>
     public const string PluginsRescanned = "plugins.rescanned";

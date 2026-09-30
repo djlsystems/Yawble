@@ -24,7 +24,12 @@ public sealed record DoctorBackups(string Directory, int DailyCount, DateTimeOff
 /// sign-in hint rather than carrying its own copy of the list.</param>
 public sealed record DoctorAgent(
     string Agent, bool Installed, string? Version, bool? Authenticated, string Detail,
-    string? CredentialVariable = null);
+    string? CredentialVariable = null,
+    // WHEN THE INSTALLED VERSION ARRIVED: the first recorded line - a start, or a person's update
+    // through the platform - that had it after a different one. Null when the kept history never
+    // saw it change; `VersionsSince` is then how far back that history reaches.
+    DateTimeOffset? UpdatedAt = null,
+    DateTimeOffset? VersionsSince = null);
 
 public sealed record DoctorReport(
     DateTimeOffset At,
@@ -63,6 +68,7 @@ public static class HostDoctor
     {
         var database = Path.Combine(dataRoot, "messages.db");
         var (recordedAt, versions) = await NewestVersionsAsync(dataRoot, ct);
+        var history = await CliVersionHistory.In(dataRoot).ReadAsync(CliVersionHistory.MaxTake, ct);
 
         return new DoctorReport(
             DateTimeOffset.UtcNow,
@@ -70,7 +76,7 @@ public static class HostDoctor
             await DatabaseAsync(database, ct),
             Backups(database, Path.Combine(dataRoot, "backups")),
             recordedAt,
-            await AgentsAsync(versions, ct),
+            await AgentsAsync(versions, history, ct),
             // Who the Host said, at its last start, agent children run as - and, when it
             // refuses them, why. Recorded by the Host, because the doctor is a different process.
             AgentLaunchRecord.Read(dataRoot));
@@ -102,7 +108,7 @@ public static class HostDoctor
     /// PATH now").
     /// </summary>
     private static async Task<IReadOnlyList<DoctorAgent>> AgentsAsync(
-        IReadOnlyDictionary<string, string?> versions, CancellationToken ct)
+        IReadOnlyDictionary<string, string?> versions, IReadOnlyList<CliVersionsAtStart> history, CancellationToken ct)
     {
         var specs = AgentAuthProbe.LoadSpecs();
         var agents = new List<DoctorAgent>(specs.Count);
@@ -115,9 +121,11 @@ public static class HostDoctor
         {
             var (installed, authenticated, detail) = await AgentAuthProbe.ProbeCommandAsync(command, specs, ct, runAs);
             versions.TryGetValue(command, out var version);
+            var now = CliVersionHistory.Now(command, history);
 
             agents.Add(new DoctorAgent(
-                command, installed, version, authenticated, detail, specs[command].CredentialVariable));
+                command, installed, version, authenticated, detail, specs[command].CredentialVariable,
+                now.UpdatedAt, now.Since));
         }
 
         return agents;

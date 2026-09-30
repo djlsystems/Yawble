@@ -126,3 +126,21 @@ The console is also copied into the size-limited host log under `/data/logs`. Th
 At every container start, `scripts/ensure-agent-clis.sh` appends one line to `/data/cli-versions.jsonl`. The line records the start time and the version reported by `claude`, `codex`, `copilot`, `grok`, `agy`, `gh`, `git`, `node`, and the headless Chromium build. A CLI that was not installed is recorded as `null`. The file keeps the newest 200 starts and lives on the volume, so the history survives image rebuilds.
 
 To see it, open **Admin › Diagnostics › Agent CLI versions**. The newest start is first. A version in bold differs from the start before it. The same data is available from `GET /api/diagnostics/cli-versions` (people only). A host started outside the container has no such file and shows an empty history.
+
+## When agent CLIs are updated
+
+Every member launches its agent CLI from one shared install on the volume. A CLI that updated itself would replace that install while other members were being launched from it, and a launch in that moment would find no program. So the CLIs never update themselves. Updates happen in two places only:
+
+- **At every container start**, before the Host runs, `scripts/ensure-agent-clis.sh` brings each installed CLI to its newest version (`npm install -g <package>@latest`, and `grok update`). Nothing can be launching then. Set `HARNESS_UPDATE_AGENTS=0` to keep the installed versions.
+- **When a person asks**, with the update button beside a built-in preset on the **Agents** screen (`POST /api/agents/{name}/update`, people only). The Host waits until no run of that CLI is in flight. New launches of it wait until the update is done: they are held, like a run waiting for a free slot, and never failed. The versions before and after are shown, recorded in the tenant log (`agent.updated`), and added to `/data/cli-versions.jsonl` as a line marked `"by":"update"`.
+
+Every launch the Host makes turns the CLI's own updater off: a member, the Concierge's terminal and the sign-in probe. Each preset declares how in its `updates` field:
+
+| CLI | Switch | What it would otherwise do |
+| --- | --- | --- |
+| `claude` | `DISABLE_AUTOUPDATER=1` | Replace the npm install in the background. |
+| `codex` | `-c check_for_update_on_startup=false` | Check at start, and offer to run `npm install -g` in the terminal. |
+| `copilot` | `COPILOT_AUTO_UPDATE=false` | Download a newer build into `~/.cache/copilot` and run that instead of the installed one. |
+| `grok` | `GROK_DISABLE_AUTOUPDATER=1` | Install itself under `~/.grok/downloads` and repoint `~/.grok/bin/grok`. |
+
+**Which version is installed, and when it last changed.** `yawble doctor` shows an `agent versions` row, and `yawble agents` shows it per CLI. Examples: `claude 2.1.285, updated 2026-09-29 20:46 UTC`, or `unchanged since <date>` when the history never saw that version change. The time is the first line in `/data/cli-versions.jsonl` that recorded the version after a different one: either a start or a person's update.

@@ -150,7 +150,15 @@ public sealed class AgentAuthProbe(AgentCatalog catalog, AgentLaunchUser? runAs 
                 process.StartInfo.ArgumentList.Add(resolved);
             }
 
+            // WITH THE CLI'S OWN UPDATER OFF, as every launch the Host makes of it: a probe that
+            // started an update would replace the install members launch from.
+            var updateOff = AgentUpdates.ForCommand(command);
+            foreach (var arg in updateOff?.Arguments ?? []) process.StartInfo.ArgumentList.Add(arg);
             foreach (var arg in args) process.StartInfo.ArgumentList.Add(arg);
+            foreach (var (key, value) in updateOff?.Environment ?? new Dictionary<string, string>())
+            {
+                process.StartInfo.Environment[key] = value;
+            }
 
             if (!process.Start()) return (true, null, "The status command could not be started.");
 

@@ -168,4 +168,27 @@ describe('rebuildAgentDefinition', () => {
 
     expect(rebuilt.isolation).toEqual(isolation)
   })
+
+  it('carries a preset\'s update declaration through an edit unchanged', () => {
+    const updates = { env: { DISABLE_AUTOUPDATER: '1' }, update: ['npm', 'install', '-g', 'x@latest'] }
+
+    const rebuilt = rebuildAgentDefinition({
+      name: 'mine',
+      mode: 'Headless',
+      fileName: 'claude',
+      args: '-p',
+      systemPromptArguments: '',
+      instructionsFile: '',
+      usageFormat: '',
+      env: '',
+      timeout: '',
+      tags: '',
+      installUrl: '',
+      installHint: '',
+      languageModel: true,
+      updates,
+    })
+
+    expect(rebuilt.updates).toEqual(updates)
+  })
 })

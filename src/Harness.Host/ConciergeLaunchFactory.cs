@@ -8,7 +8,7 @@ namespace Harness.Host;
 /// </summary>
 public sealed class ConciergeLaunchFactory(
     TeamPaths paths, string baseAddress, IPrincipalStore principals, AgentCatalog agents,
-    SkillDirectory? skills = null, AgentLaunchUser? runAs = null)
+    SkillDirectory? skills = null, AgentLaunchUser? runAs = null, AgentUpdateGate? updates = null)
 {
     /// <summary>
     /// What a console's agent may cause. It is a human's door into a team, so it reads and
@@ -111,6 +111,10 @@ public sealed class ConciergeLaunchFactory(
             ?? throw new InvalidOperationException(
                 $"'{agent}' is not an Agent this tenant has, or has no interactive command.");
 
+        // HELD WHILE THE PLATFORM UPDATES THIS CLI, the way a member's launch is, without holding
+        // an update back in turn: a terminal can stay open for days.
+        if (updates is not null) await updates.WaitUntilNotUpdatingAsync(command.FileName, ct);
+
         // Minted per call, and MintAsync upserts on the id - so re-opening a console ROTATES the
         // key rather than accumulating a row per attach, and the previous one stops working.
         //
@@ -155,6 +159,10 @@ public sealed class ConciergeLaunchFactory(
         // console ALWAYS reaches the four assignments below, so ordering alone is the guarantee.
         // TeamEnv.Validate has refused an HARNESS_ key at the write in any case.
         foreach (var (key, value) in teamEnv) environment[key] = value;
+
+        // THE CLI'S OWN UPDATER OFF, after the preset's and the team's env so neither can turn it
+        // back on: this terminal launches from the install every member shares.
+        foreach (var (key, value) in command.UpdateEnvironment ?? new Dictionary<string, string>()) environment[key] = value;
 
         // NO HARNESS_TEAM, AND ITS ABSENCE IS THE MECHANISM RATHER THAN AN OMISSION.
         //

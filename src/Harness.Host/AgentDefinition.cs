@@ -157,7 +157,16 @@ public sealed record AgentDefinition(
         + "MCP servers, plugins, skills, hooks and memory, and the CLI's own tools it may use. "
         + "Applied to a headless launch only - the Concierge keeps every tool. A headless preset "
         + "without one is NOT VERIFIED, and says so wherever it is listed.")]
-    AgentIsolation? Isolation = null)
+    AgentIsolation? Isolation = null,
+
+    [property: Description(
+        "What turns this CLI's own automatic update off - variables, or arguments where it has no "
+        + "variable - carried by every launch the Host makes of it: a member, the Concierge's "
+        + "terminal and the sign-in probe. The CLI's install is shared by every member, so a CLI "
+        + "that replaced it while others launched from it would leave them no program. Updates "
+        + "happen only where the platform chooses: at the container's start, and when a person "
+        + "asks, with `update` the command it runs then.")]
+    AgentUpdates? Updates = null)
 {
     /// <summary>Whether this preset is compiled into the build. Computed from the name, never
     /// stored: a file cannot make a custom preset built-in, or a built-in custom.</summary>

@@ -1,4 +1,4 @@
-import type { Agent, AgentInstall, AgentIsolation, AgentMode } from '../api/types'
+import type { Agent, AgentInstall, AgentIsolation, AgentMode, AgentUpdates } from '../api/types'
 import { launchFromDialogState } from './agentLaunch'
 
 export interface AgentDraft {
@@ -35,6 +35,9 @@ export interface AgentDraft {
    * next save.
    */
   isolation?: AgentIsolation | null
+
+  /** The preset's update declaration, carried unchanged for `isolation`'s reason. */
+  updates?: AgentUpdates | null
 }
 
 const parseLines = (text: string): string[] =>
@@ -109,6 +112,7 @@ export function rebuildAgentDefinition(draft: AgentDraft): Agent {
     tags: parseTags(draft.tags),
     install: parseInstall(draft.installUrl, draft.installHint),
     ...(draft.isolation ? { isolation: draft.isolation } : {}),
+    ...(draft.updates ? { updates: draft.updates } : {}),
   }
 }
 

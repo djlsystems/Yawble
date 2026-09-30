@@ -635,6 +635,15 @@ builder.Services.AddSingleton(_ => AgentLaunchUser.Resolve(
     builder.Configuration["Agents:RunAs"] ?? Environment.GetEnvironmentVariable("HARNESS_AGENT_USER")));
 // The runs in flight, for the live route. The runner records; nothing is stored.
 builder.Services.AddSingleton<LiveRuns>();
+// WHO MAY USE AN AGENT CLI'S SHARED INSTALL: member runs share it, a platform update has it alone,
+// and a launch that arrives during an update waits for it. One per Host, shared by the runner, the
+// Concierge's launch and the updater, or the hold holds nothing.
+builder.Services.AddSingleton<AgentUpdateGate>();
+builder.Services.AddSingleton(sp => new AgentCliUpdater(
+    sp.GetRequiredService<AgentCatalog>(),
+    sp.GetRequiredService<AgentUpdateGate>(),
+    sp.GetRequiredService<AgentLaunchUser>(),
+    dataRoot));
 builder.Services.AddSingleton<ProcessAgentRunner>();
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
@@ -1073,7 +1082,8 @@ builder.Services.AddSingleton(sp => new ConciergeLaunchFactory(
     sp.GetRequiredService<IPrincipalStore>(),
     sp.GetRequiredService<AgentCatalog>(),
     sp.GetRequiredService<SkillDirectory>(),
-    sp.GetRequiredService<AgentLaunchUser>()));
+    sp.GetRequiredService<AgentLaunchUser>(),
+    sp.GetRequiredService<AgentUpdateGate>()));
 builder.Services.AddSingleton(sp =>
 {
     // Resolved ONCE, here, and captured - never re-resolved inside the delegates. The revoke runs

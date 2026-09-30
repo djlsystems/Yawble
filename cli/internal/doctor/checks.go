@@ -424,7 +424,29 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 		fix = "yawble agents"
 	}
 	checks = append(checks, Check{"agents", verdict, strings.Join(parts, " · "), fix})
+	if row, ok := versionsRow(r.Agents); ok {
+		checks = append(checks, row)
+	}
 	return checks
+}
+
+// versionsRow says which version of each agent CLI is installed and when it last changed. The
+// platform updates them only at start and when a person asks, so this is where a person sees what
+// that came to. Information, never a verdict; absent when the report carried no version at all.
+func versionsRow(agents []Agent) (Check, bool) {
+	var parts []string
+	for _, a := range agents {
+		if !a.IsModelAgent() || !a.Installed {
+			continue
+		}
+		if text := a.UpdatedText(); text != "" {
+			parts = append(parts, a.Agent+" "+text)
+		}
+	}
+	if len(parts) == 0 {
+		return Check{}, false
+	}
+	return Check{"agent versions", Info, strings.Join(parts, " · "), ""}, true
 }
 
 // SignInHint is what a person does about one agent, or "" when nothing is needed.

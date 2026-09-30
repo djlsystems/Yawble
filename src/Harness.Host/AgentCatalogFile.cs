@@ -255,6 +255,37 @@ public static class AgentCatalogFile
                     + "moving COPILOT_HOME would move the session transcript the live view reads.",
             ]);
 
+        // WHAT TURNS EACH CLI'S OWN UPDATER OFF, on every launch the Host makes of it. Found in the
+        // CLI in the image and checked with a real launch (claude 2.1.285, codex-cli 0.157.0, grok
+        // 1.0.44, copilot 1.0.88): the version and the update record were unchanged afterwards.
+        //
+        // - claude: DISABLE_AUTOUPDATER turns off the BACKGROUND update only; `claude update`
+        //   still works, where DISABLE_UPDATES would refuse the platform's own update too.
+        // - codex: the npm build installs nothing by itself, but checks at start and offers to
+        //   run `npm install -g` in the terminal. It has no variable for it; `-c` sets the key
+        //   for this launch alone, after the launch's own arguments (`codex exec ... -c`).
+        // - copilot: without it, copilot downloads a newer build into ~/.cache/copilot and runs
+        //   that; with it, it runs the build the platform installed.
+        // - grok: installs itself under ~/.grok/downloads and repoints ~/.grok/bin/grok.
+        //
+        // THE PLATFORM'S OWN UPDATE is the package manager for an npm install, so the program on
+        // PATH is the one updated, and grok's own updater for grok.
+        var claudeUpdates = new AgentUpdates(
+            new Dictionary<string, string> { ["DISABLE_AUTOUPDATER"] = "1" },
+            Update: ["npm", "install", "-g", "@anthropic-ai/claude-code@latest"]);
+
+        var codexUpdates = new AgentUpdates(
+            Arguments: ["-c", "check_for_update_on_startup=false"],
+            Update: ["npm", "install", "-g", "@openai/codex@latest"]);
+
+        var copilotUpdates = new AgentUpdates(
+            new Dictionary<string, string> { ["COPILOT_AUTO_UPDATE"] = "false" },
+            Update: ["npm", "install", "-g", "@github/copilot@latest"]);
+
+        var grokUpdates = new AgentUpdates(
+            new Dictionary<string, string> { ["GROK_DISABLE_AUTOUPDATER"] = "1" },
+            Update: ["grok", "update"]);
+
         return
         [
             new AgentDefinition(
@@ -264,7 +295,8 @@ public static class AgentCatalogFile
                     "claude",
                     ["--dangerously-skip-permissions", "--mcp-config", "{mcpConfig}", .. claudeModel],
                     claudeArguments),
-                Install: claudeInstall),
+                Install: claudeInstall,
+                Updates: claudeUpdates),
 
             new AgentDefinition(
                 "claude-headless",
@@ -312,7 +344,8 @@ public static class AgentCatalogFile
                 // `--session-id` above; the cwd is the folder name with every `/` and `.` as `-`.
                 LiveView: new AgentLiveView(
                     "~/.claude/projects/{workspaceDashed}/{sessionId}.jsonl", LiveView.ClaudeJsonl),
-                Isolation: claudeIsolation),
+                Isolation: claudeIsolation,
+                Updates: claudeUpdates),
 
             // The three other coding CLIs, verified against their own --help rather than from
             // documentation, which disagreed with the binaries in several places.
@@ -334,7 +367,8 @@ public static class AgentCatalogFile
                     "codex",
                     ["--dangerously-bypass-approvals-and-sandbox", .. codexMcp],
                     InstructionsFile: AgentsFile),
-                Install: codexInstall),
+                Install: codexInstall,
+                Updates: codexUpdates),
 
             new AgentDefinition(
                 "codex-headless",
@@ -377,7 +411,8 @@ public static class AgentCatalogFile
                 LiveView: new AgentLiveView(
                     null, LiveView.CodexRollout,
                     new AgentLiveViewFind("~/.codex/sessions", "*/*/*/rollout-*.jsonl", LiveView.CwdFromFirstLine)),
-                Isolation: codexIsolation),
+                Isolation: codexIsolation,
+                Updates: codexUpdates),
 
             new AgentDefinition(
                 "copilot",
@@ -415,7 +450,8 @@ public static class AgentCatalogFile
                         "--additional-mcp-config", "@{mcpConfig}",
                     ],
                     InstructionsFile: AgentsFile),
-                Install: copilotInstall),
+                Install: copilotInstall,
+                Updates: copilotUpdates),
 
             new AgentDefinition(
                 "copilot-headless",
@@ -517,7 +553,8 @@ public static class AgentCatalogFile
                 // `--session-id` above.
                 LiveView: new AgentLiveView(
                     "~/.copilot/session-state/{sessionId}/events.jsonl", LiveView.CopilotEvents),
-                Isolation: copilotIsolation),
+                Isolation: copilotIsolation,
+                Updates: copilotUpdates),
 
             new AgentDefinition(
                 "grok",
@@ -526,7 +563,8 @@ public static class AgentCatalogFile
                     "grok",
                     [],
                     InstructionsFile: AgentsFile),
-                Install: grokInstall),
+                Install: grokInstall,
+                Updates: grokUpdates),
 
             new AgentDefinition(
                 "grok-headless",
@@ -576,7 +614,8 @@ public static class AgentCatalogFile
                 // The workspace folder is the working directory percent-encoded, `/` as `%2F`.
                 LiveView: new AgentLiveView(
                     "~/.grok/sessions/{workspaceEncoded}/{sessionId}/updates.jsonl", LiveView.GrokUpdates),
-                Isolation: grokIsolation),
+                Isolation: grokIsolation,
+                Updates: grokUpdates),
 
             new AgentDefinition(
                 "echo",

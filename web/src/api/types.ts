@@ -1525,6 +1525,31 @@ export interface Agent {
    * `PUT /api/agents` replaces the catalog, so a field it drops is a declaration the save deletes.
    */
   isolation?: AgentIsolation | null
+
+  /**
+   * What turns this CLI's own automatic update off on every launch, and the command the platform
+   * runs to update it when a person asks. Carried through an edit for `isolation`'s reason.
+   */
+  updates?: AgentUpdates | null
+}
+
+/** A preset's update declaration. See `AgentUpdates` in the Host. */
+export interface AgentUpdates {
+  env?: Record<string, string> | null
+  arguments?: string[] | null
+  update?: string[] | null
+}
+
+/** What `POST /api/agents/{name}/update` came to. */
+export interface AgentUpdateResult {
+  agent: string
+  command: string
+  updated: boolean
+  exitCode: number | null
+  versionBefore: string | null
+  versionAfter: string | null
+  at: string
+  detail: string
 }
 
 /** A preset's isolation declaration. See `AgentIsolation` in the Host. */

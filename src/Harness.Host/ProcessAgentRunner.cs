@@ -36,7 +36,8 @@ public sealed partial class ProcessAgentRunner(
     AgentLaunchUser? runAs = null,
     LiveRuns? live = null,
     IMemberReports? reports = null,
-    LaunchLookup? lookup = null) : IAgentRunner
+    LaunchLookup? lookup = null,
+    AgentUpdateGate? updates = null) : IAgentRunner
 {
     /// <summary>How long a launch looks for a program missing from PATH; the Host's is ~30s.</summary>
     private readonly LaunchLookup _lookup = lookup ?? LaunchLookup.Default;
@@ -57,7 +58,48 @@ public sealed partial class ProcessAgentRunner(
         + ", so this member was not started. It may be being installed or updated; re-sending the "
         + "instruction will try again.";
 
+    /// <summary>
+    /// The run, holding a share of its CLI's install for as long as the child runs. While the
+    /// platform updates that CLI the run WAITS - it is not failed - and says so once, the way a
+    /// run waiting for a pool slot waits; an update in turn waits for the runs in flight.
+    /// </summary>
     public async Task<AgentResult> RunAsync(AgentInvocation invocation, CancellationToken ct = default)
+    {
+        if (updates is null || catalog.For(invocation.Agent) is not { } launching)
+        {
+            return await RunLaunchAsync(invocation, ct);
+        }
+
+        IDisposable share;
+
+        try
+        {
+            share = await updates.EnterRunAsync(
+                launching.FileName,
+                reports is null
+                    ? null
+                    : () => reports.ProgressAsync(
+                        invocation.Container,
+                        $"Waiting: the platform is updating `{launching.FileName}`, and this run starts when it is done.",
+                        CancellationToken.None),
+                ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return new AgentResult(
+                -1,
+                string.Empty,
+                $"This run was stopped while it waited for the platform's update of `{launching.FileName}`, so it did not start.",
+                FailureClass: FailureClasses.Interrupted);
+        }
+
+        using (share)
+        {
+            return await RunLaunchAsync(invocation, ct);
+        }
+    }
+
+    private async Task<AgentResult> RunLaunchAsync(AgentInvocation invocation, CancellationToken ct)
     {
         // FIRST OF THE FOUR REFUSALS, and the order is chosen: the other three are about what this
         // member is CONFIGURED with, and this one is about whether its files are there at all. A
@@ -394,6 +436,12 @@ public sealed partial class ProcessAgentRunner(
         if (command.IsolationEnvironment is { } isolation)
         {
             foreach (var (name, value) in isolation) start.Environment[name] = value;
+        }
+
+        // And the CLI's own updater off, for the same reason and in the same place.
+        if (command.UpdateEnvironment is { } updateOff)
+        {
+            foreach (var (name, value) in updateOff) start.Environment[name] = value;
         }
 
         if (mcp is not null)
@@ -1279,7 +1327,10 @@ public sealed record AgentCommand(
     bool LanguageModel = true,
     // A member's isolation variables (AgentIsolation.Env), set LAST at the spawn site so no preset
     // or team env can switch isolation back on. Null for the Concierge and an undeclared preset.
-    IReadOnlyDictionary<string, string>? IsolationEnvironment = null);
+    IReadOnlyDictionary<string, string>? IsolationEnvironment = null,
+    // What turns the CLI's own updater off (AgentUpdates.Env), set LAST at every spawn site, the
+    // Concierge's included, so no preset or team env can turn self-update back on.
+    IReadOnlyDictionary<string, string>? UpdateEnvironment = null);
 
 /// <summary>
 /// Which command each container's agent is. Configuration, not code - the reason a container is data
@@ -1372,9 +1423,12 @@ public sealed class AgentCatalog(
 
         // ONLY THE HEADLESS COMMAND IS ISOLATED. A member gets the platform's tools and its CLI's
         // own; the Concierge is the person's session and launches exactly as it always has.
-        return mode == AgentMode.Headless
-            ? AgentIsolationPolicy.Apply(launch.ToCommand(), definition.Isolation)
-            : launch.ToCommand();
+        // THE UPDATE-OFF ON EVERY LAUNCH, member and Concierge alike: the install is shared.
+        return AgentUpdates.Apply(
+            mode == AgentMode.Headless
+                ? AgentIsolationPolicy.Apply(launch.ToCommand(), definition.Isolation)
+                : launch.ToCommand(),
+            definition.Updates);
     }
 
     /// <summary>
