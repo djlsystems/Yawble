@@ -219,6 +219,36 @@ public sealed class PullRequestTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Contributor_mode_records_no_tip_and_stores_no_landed_so_the_merged_pull_request_stays_the_only_proof()
+    {
+        var (team, _) = await ContributorTeamAsync("Theta");
+        var sha = PushTeamBranch(team, "team work");
+        var person = await PersonAsync();
+        Assert.Equal(HttpStatusCode.OK, (await ActAsync(person, team, "fetch")).StatusCode);
+
+        var services = _factory.Services;
+        var backlog = services.GetRequiredService<IBacklogStore>();
+        var item = await backlog.CreateAsync(null, "An item", "body", "person@example.test", Ct);
+        var dispatch = await backlog.AddDispatchAsync(item.Id, team, team, long.MaxValue, "person@example.test", Ct);
+
+        // The publish's tip is not recorded for a fork.
+        await services.GetRequiredService<BacklogTipRecorder>().RecordTipAsync(team, Repo, sha, null, Ct);
+        Assert.Empty(await backlog.TipsAsync(dispatch.Id, Ct));
+
+        var registry = services.GetRequiredService<TeamRegistry>();
+        await registry.RecordPullRequestAsync(team, Repo, new RepoPullRequest(FakeGitHub.Url, FakeGitHub.Number, PullRequestStates.Open, DateTimeOffset.UnixEpoch), Ct);
+
+        // Merged upstream reads landed, and nothing of it is stored: GitHub stays the proof.
+        _gitHub.State = PullRequestStates.Merged;
+        Assert.Equal(BacklogLandedStates.Landed, (await LandedAsync(team, backlog, dispatch)).State);
+        Assert.Null((await backlog.DispatchesAsync(item.Id, Ct))[^1].LandedAt);
+
+        _gitHub.State = PullRequestStates.Closed;
+        await registry.RecordPullRequestAsync(team, Repo, new RepoPullRequest(FakeGitHub.Url, FakeGitHub.Number, PullRequestStates.Open, DateTimeOffset.UtcNow.AddHours(-1)), Ct);
+        Assert.Equal(BacklogLandedStates.Declined, (await LandedAsync(team, backlog, dispatch)).State);
+    }
+
+    [Fact]
     public async Task GitHub_is_asked_about_one_pull_request_at_most_once_a_minute()
     {
         var (team, _) = await ContributorTeamAsync("Theta");
@@ -317,15 +347,15 @@ public sealed class PullRequestTests : IAsyncDisposable
         Assert.Contains("public_repo", refused.Refusal, StringComparison.Ordinal);
     }
 
-    private async Task<BacklogLanded> LandedAsync(string team)
+    private async Task<BacklogLanded> LandedAsync(string team, IBacklogStore? store = null, BacklogDispatch? stored = null)
     {
         var services = _factory.Services;
-        var dispatch = new BacklogDispatch(1, 42, team, team, long.MaxValue, "", "", null, null);
+        var dispatch = stored ?? new BacklogDispatch(1, 42, team, team, long.MaxValue, "", "", null, null);
         var landed = await BacklogLandedState.ForAsync(
             [dispatch], services.GetRequiredService<TeamRegistry>(), services.GetRequiredService<TeamPaths>(),
             services.GetRequiredService<GitRunner>(), new BacklogLandedCache(TimeSpan.Zero), Ct,
-            new PullRequestStateReader(_gitHub, services.GetRequiredService<TeamRegistry>()));
-        return landed[42];
+            new PullRequestStateReader(_gitHub, services.GetRequiredService<TeamRegistry>()), store);
+        return landed[dispatch.Item];
     }
 
     /// <summary>Pushes commits to the fork as team/{id}, answering the last one's sha.</summary>

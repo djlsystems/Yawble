@@ -298,6 +298,15 @@ public sealed class SqliteBacklogStore : IBacklogStore
         // foreign key to `backlog_items` on purpose - a cascade there would take the execution
         // record with an item, and the archive exists to keep exactly that. Delete is the one
         // operation that really is meant to take it, so it says so itself.
+        await using (var tips = connection.CreateCommand())
+        {
+            tips.Transaction = transaction;
+            tips.CommandText =
+                "DELETE FROM backlog_dispatch_tips WHERE dispatch IN (SELECT id FROM backlog_dispatches WHERE item = $id)";
+            tips.Parameters.AddWithValue("$id", Key(id));
+            await tips.ExecuteNonQueryAsync(ct);
+        }
+
         await using (var dispatches = connection.CreateCommand())
         {
             dispatches.Transaction = transaction;
@@ -324,7 +333,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            "SELECT id, item, team_id, team_name, correlation, dispatched_at, dispatched_by, frozen_at, frozen_stats"
+            "SELECT " + DispatchColumns
             + " FROM backlog_dispatches WHERE item = $item ORDER BY id";
         command.Parameters.AddWithValue("$item", Key(item));
 
@@ -396,7 +405,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            "SELECT id, item, team_id, team_name, correlation, dispatched_at, dispatched_by, frozen_at, frozen_stats"
+            "SELECT " + DispatchColumns
             + " FROM backlog_dispatches"
             + " WHERE id IN (SELECT MAX(id) FROM backlog_dispatches GROUP BY item)"
             + " ORDER BY item";
@@ -409,6 +418,11 @@ public sealed class SqliteBacklogStore : IBacklogStore
         return rows;
     }
 
+    /// <summary>Every column <see cref="ReadDispatch"/> reads, in its order.</summary>
+    private const string DispatchColumns =
+        "id, item, team_id, team_name, correlation, dispatched_at, dispatched_by, frozen_at, frozen_stats,"
+        + " landed_at, landed_sha, landed_branch";
+
     public async Task<BacklogDispatch?> DispatchForCorrelationAsync(
         long correlation, CancellationToken ct = default)
     {
@@ -416,13 +430,73 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            "SELECT id, item, team_id, team_name, correlation, dispatched_at, dispatched_by, frozen_at, frozen_stats"
+            "SELECT " + DispatchColumns
             + " FROM backlog_dispatches WHERE correlation = $correlation ORDER BY id LIMIT 1";
         command.Parameters.AddWithValue("$correlation", correlation);
 
         await using var reader = await command.ExecuteReaderAsync(ct);
 
         return await reader.ReadAsync(ct) ? ReadDispatch(reader) : null;
+    }
+
+    public async Task RecordTipAsync(long dispatchId, string repo, string sha, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        // REPLACED, NOT APPENDED: the tip is where the work stands now, and the newer publish is
+        // the one that says so.
+        command.CommandText =
+            """
+            INSERT INTO backlog_dispatch_tips (dispatch, repo, sha, recorded_at)
+            VALUES ($dispatch, $repo, $sha, $now)
+            ON CONFLICT (dispatch, repo) DO UPDATE SET sha = excluded.sha, recorded_at = excluded.recorded_at;
+            """;
+        command.Parameters.AddWithValue("$dispatch", dispatchId);
+        command.Parameters.AddWithValue("$repo", repo);
+        command.Parameters.AddWithValue("$sha", sha);
+        command.Parameters.AddWithValue("$now", Now());
+
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<BacklogDispatchTip>> TipsAsync(long dispatchId, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            "SELECT dispatch, repo, sha, recorded_at FROM backlog_dispatch_tips WHERE dispatch = $dispatch ORDER BY repo";
+        command.Parameters.AddWithValue("$dispatch", dispatchId);
+
+        var rows = new List<BacklogDispatchTip>();
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new BacklogDispatchTip(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+        }
+
+        return rows;
+    }
+
+    public async Task<bool> RecordLandedAsync(
+        long dispatchId, string sha, string branch, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        // `landed_at IS NULL` IS THE WHOLE RULE: a proven landed is never downgraded, cleared or
+        // moved, whoever proves it again later.
+        command.CommandText =
+            "UPDATE backlog_dispatches SET landed_at = $now, landed_sha = $sha, landed_branch = $branch"
+            + " WHERE id = $id AND landed_at IS NULL";
+        command.Parameters.AddWithValue("$id", dispatchId);
+        command.Parameters.AddWithValue("$sha", sha);
+        command.Parameters.AddWithValue("$branch", branch);
+        command.Parameters.AddWithValue("$now", Now());
+
+        return await command.ExecuteNonQueryAsync(ct) == 1;
     }
 
     private static BacklogItem Read(SqliteDataReader reader) =>
@@ -448,7 +522,10 @@ public sealed class SqliteBacklogStore : IBacklogStore
             reader.GetString(5),
             reader.GetString(6),
             reader.IsDBNull(7) ? null : reader.GetString(7),
-            reader.IsDBNull(8) ? null : reader.GetString(8));
+            reader.IsDBNull(8) ? null : reader.GetString(8),
+            reader.IsDBNull(9) ? null : reader.GetString(9),
+            reader.IsDBNull(10) ? null : reader.GetString(10),
+            reader.IsDBNull(11) ? null : reader.GetString(11));
 
     /// <summary>The stored key for an item: the citation itself, <c>B001F</c>. The contract
     /// keeps the number, so the conversion lives here and nowhere else.</summary>

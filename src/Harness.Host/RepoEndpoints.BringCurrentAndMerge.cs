@@ -45,6 +45,8 @@ public static partial class RepoEndpoints
         TeamPaths paths,
         ContainerHost host,
         ITenantLog log,
+        BacklogTipRecorder landedRecorder,
+        BacklogLandedCache landedCache,
         CancellationToken ct)
     {
         if (teams.ExistingName(team) is not { } stored)
@@ -274,7 +276,7 @@ public static partial class RepoEndpoints
             : $"origin/{branch} merged into {teamBranch} ({ShortenSha(mergeCommit)}) and pushed.{localNote}";
 
         // THEN MERGE TO MAIN, THE SAME HANDLER ITS OWN BUTTON CALLS - every check it makes, and its own row.
-        var merged = await MergeToMainAsync(team, repo, httpContext, teams, gitRunner, paths, host, log, ct);
+        var merged = await MergeToMainAsync(team, repo, httpContext, teams, gitRunner, paths, host, log, landedRecorder, landedCache, ct);
         if (merged is IValueHttpResult { Value: RepoActionResult done })
         {
             return Results.Ok(done with { Message = $"{broughtCurrent} {done.Message}" });
