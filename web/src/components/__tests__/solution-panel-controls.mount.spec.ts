@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE CONTROL PANEL'S CONTROLS SECTION (B001J), each through an EXISTING route: pause and resume the
+// THE CONTROL PANEL'S CONTROLS SECTION, each through an EXISTING route: pause and resume the
 // team, Run now per schedule (and only a schedule), each trigger's on/off and daily cap, the settings
 // the package lists first, "All settings" with the person-only ones, and the connection bindings.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

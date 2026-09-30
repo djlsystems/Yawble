@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE SOLUTIONS LAUNCHER (B001J): one tile per installed solution - name, version, team, status line
+// THE SOLUTIONS LAUNCHER: one tile per installed solution - name, version, team, status line
 // and a state badge - with Open only when the package has a primary site (a real link, new tab) and
 // Manage. Package text is text: a status that looks like HTML makes no element. Nothing installed
 // explains how solutions arrive.

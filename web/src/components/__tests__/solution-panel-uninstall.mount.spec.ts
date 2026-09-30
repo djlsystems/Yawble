@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// UNINSTALL (B001J) ASKS FIRST: it names what goes and says the team and its documents stay, offers
+// UNINSTALL ASKS FIRST: it names what goes and says the team and its documents stay, offers
 // the package's plugins only when it has some, sends nothing until confirmed, sends `removePlugins`
 // as chosen, and then says what it did - plugins kept and who uses them, the documents folder kept,
 // and anything it could not remove.

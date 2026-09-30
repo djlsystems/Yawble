@@ -2,7 +2,7 @@ import { asTeamId, type InstalledSolution, type PluginMemberSettings, type Solut
 import { reply, type Route } from './solutionFixtures';
 
 /**
- * THE LAUNCHER AND CONTROL PANEL IN THE HOST'S SHAPE, key for key as the B001J contract writes them
+ * THE LAUNCHER AND CONTROL PANEL IN THE HOST'S SHAPE, key for key as the Host's solution routes write them
  * (`GET /api/solutions/installed` extended, `GET /api/teams/{team}/solution/panel`), modelled on the
  * Job Tracker sample. Shared so every panel spec reads the same shape the Host sends.
  */
