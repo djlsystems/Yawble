@@ -68,7 +68,7 @@ public sealed record WorkflowLedgerRow(
     DateTimeOffset? RootAt,
     DateTimeOffset ClosedAt,
     string HowClosed,
-    long? OutcomeIdAtClose,
+    string? OutcomeIdAtClose,
     bool Backfilled)
 {
     public const string Completed = "completed";

@@ -51,9 +51,9 @@ public sealed class SqliteBacklogStore : IBacklogStore
         // IN - not its state. An `implemented` item stays in the backlog until somebody archives it,
         // which is what makes the two axes visible rather than theoretical.
         command.CommandText = archived
-            ? "SELECT id, team, title, body, state, position, archived_at, created_at, updated_at, created_by"
+            ? "SELECT id, team, title, body, state, position, archived_at, created_at, updated_at, created_by, outcome_id"
               + " FROM backlog_items WHERE archived_at IS NOT NULL ORDER BY position, id"
-            : "SELECT id, team, title, body, state, position, archived_at, created_at, updated_at, created_by"
+            : "SELECT id, team, title, body, state, position, archived_at, created_at, updated_at, created_by, outcome_id"
               + " FROM backlog_items WHERE archived_at IS NULL ORDER BY position, id";
 
         var rows = new List<BacklogItem>();
@@ -104,7 +104,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            "SELECT id, team, title, body, state, position, archived_at, created_at, updated_at, created_by"
+            "SELECT id, team, title, body, state, position, archived_at, created_at, updated_at, created_by, outcome_id"
             + " FROM backlog_items WHERE id = $id";
         command.Parameters.AddWithValue("$id", Key(id));
 
@@ -214,6 +214,19 @@ public sealed class SqliteBacklogStore : IBacklogStore
         command.CommandText = "UPDATE backlog_items SET team = $team, updated_at = $now WHERE id = $id";
         command.Parameters.AddWithValue("$id", Key(id));
         command.Parameters.AddWithValue("$team", (object?)team ?? DBNull.Value);
+        command.Parameters.AddWithValue("$now", Now());
+
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task SetOutcomeAsync(long id, string? outcomeId, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText = "UPDATE backlog_items SET outcome_id = $outcome, updated_at = $now WHERE id = $id";
+        command.Parameters.AddWithValue("$id", Key(id));
+        command.Parameters.AddWithValue("$outcome", (object?)outcomeId ?? DBNull.Value);
         command.Parameters.AddWithValue("$now", Now());
 
         await command.ExecuteNonQueryAsync(ct);
@@ -436,7 +449,10 @@ public sealed class SqliteBacklogStore : IBacklogStore
             reader.IsDBNull(6) ? null : reader.GetString(6),
             reader.GetString(7),
             reader.GetString(8),
-            reader.GetString(9));
+            reader.GetString(9))
+        {
+            OutcomeId = reader.IsDBNull(10) ? null : reader.GetString(10),
+        };
 
     private static BacklogDispatch ReadDispatch(SqliteDataReader reader) =>
         new(

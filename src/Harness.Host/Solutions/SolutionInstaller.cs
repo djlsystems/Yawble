@@ -172,7 +172,8 @@ public sealed class SolutionInstaller(
     TeamAnnouncements? announce = null,
     int group = -1,
     ISecretStore? secretStore = null,
-    TriggerSweep? sweep = null)
+    TriggerSweep? sweep = null,
+    Harness.Messaging.SqliteOutcomeStore? outcomes = null)
 {
     public const string StepPlugins = "plugins";
     public const string StepTeam = "team";
@@ -1529,6 +1530,8 @@ public sealed class SolutionInstaller(
         string team, SolutionTrigger trigger, IReadOnlyDictionary<string, string> memberIds, string? tools,
         SolutionActor actor, Run run, CancellationToken ct)
     {
+        var outcomeId = trigger.Outcome is { } named ? await OutcomeForAsync(named, actor, run, ct) : null;
+
         var request = new NewTrigger(
             trigger.Name,
             memberIds.GetValueOrDefault(trigger.Member) ?? trigger.Member,
@@ -1550,7 +1553,8 @@ public sealed class SolutionInstaller(
             WatchPath: trigger.Folder?.Path,
             WatchGlob: trigger.Folder?.Glob,
             WakeManager: trigger.WakeManager,
-            DailyTokenCap: trigger.DailyTokenCap);
+            DailyTokenCap: trigger.DailyTokenCap,
+            OutcomeId: outcomeId);
 
         var created = await triggers.CreateAsync(team, request, actor.Label,
             row => actor.Row(TenantActions.ScheduleCreated, row.Id, row.Name, new { team = row.Team, member = row.Container, solution = true }), ct);
@@ -1561,6 +1565,29 @@ public sealed class SolutionInstaller(
             actor.Row(TenantActions.ScheduleDeleted, made.Id, made.Name, new { team, reason = "install undone" }), CancellationToken.None));
 
         return made;
+    }
+
+    /// <summary>
+    /// THE OUTCOME A PACKAGE'S TRIGGER NAMES, by name: the live outcome of that name, or one created
+    /// <c>active</c> - a person's install is a person's confirmation - with its <c>outcome.created</c>
+    /// row. One the install created goes again when the install is undone, while nothing links to it.
+    /// </summary>
+    private async Task<string> OutcomeForAsync(string name, SolutionActor actor, Run run, CancellationToken ct)
+    {
+        if (outcomes is null) throw new SolutionStepException($"The outcome \"{name}\" cannot be made: this Host keeps no outcomes.");
+
+        if (await outcomes.FindLiveByNameAsync(name, ct) is { } live) return live.Id;
+
+        var created = await outcomes.CreateAsync(
+            name, new OutcomeEdit(), new OutcomeActor(actor.Label, OutcomeActorKind.Person, actor.UserId, actor.Email),
+            actor.Row(TenantActions.OutcomeCreated, null, name, new { solution = true, status = OutcomeStatus.Active }), ct);
+
+        if (created.Outcome is not { } made) throw new SolutionStepException($"The outcome \"{name}\" was refused: {created.Refusal}");
+
+        run.Made($"outcome {made.Name}", () => outcomes.UndoCreateAsync(
+            made.Id, actor.Row(TenantActions.OutcomeRejected, made.Id, made.Name, new { reason = "install undone" }), CancellationToken.None));
+
+        return made.Id;
     }
 
     /// <summary>Each document input's folder, made now so a folder trigger can watch it and a

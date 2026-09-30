@@ -23,6 +23,7 @@ public sealed class ConciergeLaunchFactory(
             Permits.CreateTeam,
             Permits.Skills,
             Permits.Sites,
+            Permits.Outcomes,
         };
 
     /// <summary>

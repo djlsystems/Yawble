@@ -27,7 +27,7 @@ public static class BuiltInSkills
         """
         ## How you reach the platform
 
-        The platform is reached through the MCP tools on the server named `harness`, and through nothing else. The tools are `skills_get`, `skills_search`, `tell`, `progress`, `blocked`, `handback`, `needs_decision`, `workflow_complete`, `workflow_show`, `team_list`, `team_current`, `team_create`, `wip`, `status`, `hiring`, `member`, `kanban`, `backlog`, `repo`, and `site`. `skills_get` loads a skill by name and `skills_search` finds skills for your role by text. Pass `HARNESS_CAUSATION` as `causation` on every `tell`; a Concierge uses the number in `STEERING.md` instead when it is set. A tool refusal is the answer - there is no URL to fetch by hand.
+        The platform is reached through the MCP tools on the server named `harness`, and through nothing else. The tools are `skills_get`, `skills_search`, `tell`, `progress`, `blocked`, `handback`, `needs_decision`, `workflow_complete`, `workflow_show`, `team_list`, `team_current`, `team_create`, `wip`, `status`, `hiring`, `member`, `kanban`, `backlog`, `repo`, `site`, and `outcome`. `skills_get` loads a skill by name and `skills_search` finds skills for your role by text. Pass `HARNESS_CAUSATION` as `causation` on every `tell`; a Concierge uses the number in `STEERING.md` instead when it is set. A tool refusal is the answer - there is no URL to fetch by hand.
 
         ## Processes you start
 
@@ -260,6 +260,25 @@ public static class BuiltInSkills
 
             `tell` returns a workflow number immediately and nothing blocks. You are woken again when
             that member finishes, with what it reported. Decide the next step then.
+
+            ## Every workflow serves an outcome
+
+            Every workflow you work in must have an outcome. An outcome names the result being
+            produced, not the tasks performed. Before proposing one, list the active outcomes and
+            reuse one that means the same result; propose a new one only when the intended result is
+            materially different. Name outcomes as results ("Maintain a current pipeline of qualified
+            job openings"), never activities ("Run the job crawler every 15 minutes"). Ask the person
+            only when you cannot tell which outcome applies.
+
+            Your run context says which outcome the workflow serves, or that it has none. With none:
+
+                outcome  action: list
+                outcome  action: set  outcome: <id or exact name>  causation: HARNESS_CAUSATION
+                outcome  action: propose  name: "<the result>"  description: "<what it means>"  causation: HARNESS_CAUSATION
+
+            A proposal is usable at once; only a person confirms, renames, merges, retires or
+            rejects an outcome. A workflow a person linked - by dispatching a backlog item, through
+            a trigger, or by choosing one - is theirs: `set` is refused there, so do not try again.
 
             ## An instruction already queued is delivered in turn
 
@@ -691,6 +710,14 @@ public static class BuiltInSkills
             `openWorkflow` naming workflow 2229 and its latest row, and passes that row as
             `causation`, so the re-send runs inside 2229 and the Manager can declare it.
 
+            ## Name the outcome a new piece of work serves
+
+            When a request starts new work (no `causation`) and clearly belongs to one outcome, pass
+            it on `tell` as `outcome`: an active or proposed outcome's id or exact name, from
+            `outcome  action: list  team: <id>`. When it is not clear, leave it out: the team's
+            Manager chooses one. Never pass `outcome` with `causation` - a workflow that already
+            exists keeps its own.
+
             ## When no team fits the work
 
             If the person asks you to spin up a team, or no existing team fits, load the `new-team`
@@ -977,9 +1004,11 @@ public static class BuiltInSkills
             `kanban  action: filter` - the filters the board takes
             `kanban  action: board` - all cards
             `kanban  action: board  team: <team>` / `member: <member>` / `status: <status>` - filtered
+            `kanban  action: board  outcome: <outcomeId>` - the Outcome filter: cards whose workflow serves that outcome; `outcome: none` for cards with none
             `kanban  action: show  card: <cardId>` - one card with its full trail
 
-            Team, member and status are the whole list; any other filter is refused. Read a
+            Team, member, status and outcome are the whole list; any other filter is refused. An
+            outcome's id comes from `outcome  action: list`. Read a
             workflow with `workflow_show` with correlationId <n>. Free-text search is the console
             board's box, not a parameter.
 
