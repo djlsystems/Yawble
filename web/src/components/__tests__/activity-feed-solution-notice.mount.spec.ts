@@ -49,18 +49,33 @@ describe('ActivityFeed solution notice', () => {
     expect(link.attributes('href')).toBe(`#/solutions/install?folder=${encodeURIComponent(folder)}`);
   });
 
-  it('names the problems of a failing package and offers no install', () => {
+  it('names the problems of a failing package, one line each, and offers no install', async () => {
     const wrapper = mountFeed([
       checked(42, {
         ok: false,
-        text: 'Job Tracker 1.0.0 did not pass the check: solution.json triggers[0].member: names no member.',
+        text: 'Job Tracker 1.0.0 did not pass the check:\nsolution.json triggers[0].member: names no member; its members are Coordinator, Scout, Writer.\nsolution.json members[1].pluginId: is not a plugin in this package.\nskills/job-search-playbook.md roles: must say who it is for.',
         link: null,
-        problems: ['solution.json triggers[0].member: names no member'],
+        problems: [
+          'solution.json triggers[0].member: names no member; its members are Coordinator, Scout, Writer.',
+          'solution.json members[1].pluginId: is not a plugin in this package',
+          'skills/job-search-playbook.md roles: must say who it is for.',
+        ],
       }),
     ]);
 
     expect(wrapper.text()).toContain('did not pass the check: solution.json triggers[0].member');
+    expect(wrapper.text()).not.toContain('.;');
     expect(wrapper.find('a.feed-install').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('Review and install');
+
+    // Opened, each problem is its own line ending in its own full stop.
+    await wrapper.find('.q-item').trigger('click');
+    const body = document.querySelector('[data-feed-body]')!.textContent!;
+    expect(body).not.toContain('.;');
+    expect(body.split('\n').slice(1)).toEqual([
+      'solution.json triggers[0].member: names no member; its members are Coordinator, Scout, Writer.',
+      'solution.json members[1].pluginId: is not a plugin in this package.',
+      'skills/job-search-playbook.md roles: must say who it is for.',
+    ]);
   });
 });

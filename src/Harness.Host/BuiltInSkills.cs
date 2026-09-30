@@ -1432,6 +1432,12 @@ public static class BuiltInSkills
             triggers' full instruction text and its daily caps are all in the package; nothing is
             left for a person to type in except what `inputs` asks them for.
 
+            When the package's point is a schedule (a page it fills, a feed it fetches), give that
+            schedule trigger `"runAtInstall": true`: the install runs it once as soon as its last
+            step succeeds, then on its schedule, so the person does not look at an empty page until
+            the first due time. It is for a `schedule` trigger only; the check refuses it on an
+            `event` or `folder` one. Say in the README that the page fills right after install.
+
             ## 2. Done when
 
             A spec for a package names, in its Done-when:
@@ -1439,7 +1445,8 @@ public static class BuiltInSkills
             - "`/api/solutions/check` passes" on the package folder;
             - the folder is `<team documents>/<id>-<version>/`;
             - what the person will be asked for at install: the person-only settings, the
-              connections to bind and the documents to upload.
+              connections to bind and the documents to upload;
+            - the secrets each plugin member binds, by key name.
 
             A member cannot call the check itself, and does not need to. When the Manager declares
             the workflow complete, the platform runs the check on every package written during that
@@ -1448,7 +1455,19 @@ public static class BuiltInSkills
             fails: the notice names each problem by file and field, nothing is offered for install,
             and the fix is a new round of the same work.
 
-            ## 3. The team that builds it is not the team that runs it
+            ## 3. Secrets are key names, never values
+
+            A plugin member binds each secret its plugin's manifest declares to a logical key name
+            in its `secrets`: `"secrets": { "apiKey": "ACME_API_KEY" }`. Never write a value there,
+            in the README, or anywhere in the package. The check refuses a field the manifest does
+            not declare, a key that is not a legal environment variable name and anything that
+            looks like a value. The install binds each field itself, so the README never tells the
+            person to open the member's settings and bind by hand. Where a secret is needed only
+            for one source, say so in the manifest (`"when": { "sources": "adzuna" }`). The install
+            shows each key, whether the Host has it set and how the operator sets it; an unset key
+            is not a refusal, its source fails until it is set.
+
+            ## 4. The team that builds it is not the team that runs it
 
             The build team writes code, a plugin and a package. The solution then runs on a new
             team the install creates, named after the package, with the package's members, skills
@@ -1456,7 +1475,7 @@ public static class BuiltInSkills
             triggers or register the skills on itself: that is what the install does, on the other
             team, after a person has reviewed it.
 
-            ## 4. When the build finishes
+            ## 5. When the build finishes
 
             The Concierge hands the person the deep link and one line on what they will be asked
             for. Build the link on `HARNESS_PUBLIC_URL`, the address the person's browser uses,

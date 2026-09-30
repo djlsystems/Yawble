@@ -109,13 +109,26 @@ describe('BacklogDialog solution notice', () => {
     expect(link.getAttribute('href')).toBe(`#/solutions/install?folder=${encodeURIComponent(folder)}`);
   });
 
-  it('shows the problems of a failing package and no link', async () => {
+  it('shows the problems of a failing package, one line each, and no link', async () => {
     await openItem([{
-      ok: false, text: 'Job Tracker 1.0.0 did not pass the check: solution.json version: is required.', folder,
-      name: 'Job Tracker', version: null, link: null, problems: ['solution.json version: is required'],
+      ok: false, text: 'Job Tracker 1.0.0 did not pass the check:\nsolution.json triggers[0].member: names no member; its members are Coordinator, Scout, Writer.\nsolution.json members[1].pluginId: is not a plugin in this package.\nskills/job-search-playbook.md roles: must say who it is for.', folder,
+      name: 'Job Tracker', version: null, link: null,
+      problems: [
+        'solution.json triggers[0].member: names no member; its members are Coordinator, Scout, Writer.',
+        'solution.json members[1].pluginId: is not a plugin in this package',
+        'skills/job-search-playbook.md roles: must say who it is for.',
+      ],
     }]);
 
-    expect(notice()?.textContent).toContain('did not pass the check: solution.json version: is required.');
+    const text = notice()!.textContent!;
+    expect(text).toContain('did not pass the check:');
+    expect(text).not.toContain('.;');
+    expect(text.trim().split('\n').slice(1)).toEqual([
+      'solution.json triggers[0].member: names no member; its members are Coordinator, Scout, Writer.',
+      'solution.json members[1].pluginId: is not a plugin in this package.',
+      'skills/job-search-playbook.md roles: must say who it is for.',
+    ]);
+    expect((notice() as HTMLElement).style.whiteSpace).toBe('pre-line');
     expect(notice()!.querySelector('a')).toBeNull();
   });
 

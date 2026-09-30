@@ -319,9 +319,11 @@ public sealed class PluginMemberRunner(
     /// Why <paramref name="settings"/> cannot be saved for a member of <paramref name="manifest"/>,
     /// or null - checked at hire so a person hears it then, and not from the first run. Every
     /// field must be one the manifest declares and of its type; every secret binding must name a
-    /// declared secret and a usable logical key; a required secret must be bound and set NOW.
+    /// declared secret and a usable logical key; a required secret must be bound and set NOW -
+    /// except for a solution install (<paramref name="requireSet"/> false), where a key not set yet is
+    /// not a refusal: the member fails its runs, naming the key, until it is set.
     /// </summary>
-    public static string? SettingsRefusal(PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets)
+    public static string? SettingsRefusal(PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets, bool requireSet = true)
     {
         foreach (var name in settings.Config.Keys)
         {
@@ -357,7 +359,7 @@ public sealed class PluginMemberRunner(
                 return $"Plugin '{manifest.Id}' requires the secret `{name}`: bind it to a logical key, as in \"secrets\": {{\"{name}\": \"MY_KEY\"}}.";
             }
 
-            if (secrets?.TryGet(key) is null)
+            if (requireSet && secrets?.TryGet(key) is null)
             {
                 return $"The secret `{key}` bound for `{name}` is not set on this Host. Set it with `secret set {key}` and restart the Host.";
             }

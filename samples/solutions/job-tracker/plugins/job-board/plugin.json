@@ -16,11 +16,18 @@
     },
     "sources": {
       "type": "list",
-      "enum": ["sample"],
+      "enum": ["sample", "adzuna", "usajobs", "themuse"],
       "default": [],
       "setBy": "person",
-      "description": "The boards this member may read. Empty reads none."
+      "description": "The boards this member may read. Empty reads none. adzuna, usajobs and themuse each need their keys set on the Host."
     }
+  },
+  "secrets": {
+    "adzunaAppId": { "description": "Your Adzuna application id, from developer.adzuna.com. Needed to read Adzuna.", "when": { "sources": "adzuna" } },
+    "adzunaAppKey": { "description": "Your Adzuna application key, from developer.adzuna.com. Needed to read Adzuna.", "when": { "sources": "adzuna" } },
+    "usajobsApiKey": { "description": "Your USAJOBS API key, from developer.usajobs.gov. Needed to read USAJOBS.", "when": { "sources": "usajobs" } },
+    "usajobsUserAgent": { "description": "The email address you registered the USAJOBS key with; USAJOBS asks for it on every request.", "when": { "sources": "usajobs" } },
+    "themuseApiKey": { "description": "Your The Muse API key, from themuse.com/developers. Needed to read The Muse.", "when": { "sources": "themuse" } }
   },
   "events": {
     "publishes": [

@@ -58,6 +58,7 @@ import type {
   SkillKindFilter,
   SkillRecord,
   TeamTrigger,
+  TriggerRunNowResult,
   Team,
   TeamCloned,
   TeamCreated,
@@ -1111,6 +1112,13 @@ export const updateSchedule = (
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     },
+  )
+
+/** Run now: fires a schedule once, the same fire its schedule makes, and says what happened. */
+export const runScheduleNow = (team: TeamId, id: string) =>
+  json<TriggerRunNowResult>(
+    `/api/teams/${encodeURIComponent(team)}/triggers/${encodeURIComponent(id)}/run`,
+    { method: 'POST' },
   )
 
 /** 204 on success, so this goes through `send()`. */

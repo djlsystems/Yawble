@@ -471,6 +471,18 @@ export interface RemovalRetried {
 
 export type TriggerKindWire = 'cron' | 'every' | 'once' | 'event' | 'folderChange'
 
+/**
+ * What `POST /api/teams/{team}/triggers/{id}/run` did: the fire the schedule makes, `fired`, or
+ * `skipped` (paused team, busy idle-only member), `capped` (its daily cap), `member-missing`.
+ * `trigger` is the row after it, as the list routes return it.
+ */
+export interface TriggerRunNowResult {
+  outcome: 'fired' | 'skipped' | 'capped' | 'member-missing'
+  reason: string | null
+  seq: number | null
+  trigger: TeamTrigger
+}
+
 export interface TeamTrigger {
   id: string
   team: TeamId
@@ -2672,6 +2684,8 @@ export interface SolutionPlanTrigger {
   filter: string | null
   folderPath: string | null
   folderGlob: string | null
+  /** Fired once right after the install's last step, then on its clock; `schedule` then says so. */
+  runAtInstall?: boolean
 }
 
 export interface SolutionPlanSkill {
@@ -2785,6 +2799,25 @@ export interface SolutionDiff {
   plugins: SolutionDiffSection
 }
 
+/**
+ * A secret a package's plugin member binds, by KEY NAME - never a value. `set` is whether the Host
+ * has the key set (by name only). `needed` is false for a secret whose setting the person left off
+ * (a source not ticked), true when needed, and null in a preview where it waits on the person's
+ * answer to `when`'s setting. `setWith` is the exact way to set it. Unset is not a refusal: the
+ * secret's source fails until it is set.
+ */
+export interface SolutionSecret {
+  member: string
+  field: string
+  key: string
+  description: string
+  required: boolean
+  when: { setting: string; value: string } | null
+  set: boolean
+  needed: boolean | null
+  setWith: string
+}
+
 /** `POST /api/solutions/preview`: what installing or updating would do. Writes nothing. */
 export type SolutionPreview =
   | {
@@ -2794,6 +2827,8 @@ export type SolutionPreview =
       nameRefusal: string | null
       plan: SolutionPlan
       connections: SolutionConnectionOption[]
+      /** The package's secrets and whether the Host has each set (a Host before it answers without). */
+      secrets?: SolutionSecret[]
     }
   | {
       ok: true
@@ -2807,6 +2842,8 @@ export type SolutionPreview =
       connections: SolutionConnectionOption[]
       /** The person's part the update keeps (a Host before it answers without). */
       kept?: SolutionKept
+      /** The secrets as the update leaves them: a binding the person changed is kept. */
+      secrets?: SolutionSecret[]
     }
   | { ok: false; error?: string; refusals?: SolutionRefusal[] }
 
@@ -2856,6 +2893,22 @@ export interface SolutionUpdateRequest extends SolutionInstallInputs {
   team: string
 }
 
+/**
+ * One schedule's first run after an install. `outcome` is `fired` when the install ran it
+ * (`ranNow`), `scheduled` when it waits for its first due time, and for a first run at install that
+ * did not happen the fire's own word (`skipped`, `capped`, `member-missing`) or `failed` - the run's
+ * outcome, never the install's. `at` is when it ran, or when it first runs.
+ */
+export interface SolutionFirstRun {
+  trigger: string
+  member: string
+  runAtInstall: boolean
+  ranNow: boolean
+  outcome: string
+  at: string | null
+  next: string | null
+}
+
 /** `POST /api/solutions/install` and `/update`. A 409 or 400 is thrown with the Host's sentence. */
 export type SolutionInstallResult =
   | {
@@ -2868,6 +2921,12 @@ export type SolutionInstallResult =
       diff?: SolutionDiff
       from?: string
       to?: string
+      /** Every secret the team's plugin members bind, set or not, needed or not. */
+      secrets?: SolutionSecret[]
+      /** The keys still to set: bound, needed and not set on the Host. */
+      unset?: string[]
+      /** Each schedule's first run: ran now at install, or when it first comes due. */
+      firstRuns?: SolutionFirstRun[]
     }
   | { ok: false; step: string; stepNumber: number; reason: string; steps: SolutionStep[] }
   | { ok: false; refusals: SolutionRefusal[] }

@@ -161,6 +161,84 @@ type previewBody struct {
 	Diff        *solutionDiff   `json:"diff"`
 	Connections []connectionRow `json:"connections"`
 	Kept        *keptPart       `json:"kept"`
+	Secrets     []secretRow     `json:"secrets"`
+}
+
+// secretRow is one secret a package's plugin member binds, by KEY NAME - never a value: whether
+// the Host has it set, whether it is needed (nil in a preview, where it waits on the person's
+// answer to When's setting), and the exact way to set it.
+type secretRow struct {
+	Member      string `json:"member"`
+	Field       string `json:"field"`
+	Key         string `json:"key"`
+	Description string `json:"description"`
+	Required    bool   `json:"required"`
+	When        *struct {
+		Setting string `json:"setting"`
+		Value   string `json:"value"`
+	} `json:"when"`
+	Set     bool   `json:"set"`
+	Needed  *bool  `json:"needed"`
+	SetWith string `json:"setWith"`
+}
+
+// needed answers from the Host's word, else from the value chosen for the setting it depends on.
+func (r secretRow) needed(value any) bool {
+	if r.Needed != nil {
+		return *r.Needed
+	}
+	if r.When == nil {
+		return true
+	}
+	switch v := value.(type) {
+	case []any:
+		for _, item := range v {
+			if item == r.When.Value {
+				return true
+			}
+		}
+	case []string:
+		for _, item := range v {
+			if item == r.When.Value {
+				return true
+			}
+		}
+	case string:
+		return v == r.When.Value
+	}
+	return false
+}
+
+// secretSetWith is the exact way to set key: this CLI prompts for the value, and the Host reads it
+// when it restarts.
+func secretSetWith(key string) string {
+	return "yawble secret set " + key + " (it prompts for the value), then yawble up to restart the Host"
+}
+
+// renderSecrets prints each secret by key name: set, not set (its source fails until it is, and
+// how to set it), or not needed for a setting left off. valueOf answers the chosen setting.
+func renderSecrets(out io.Writer, rows []secretRow, valueOf func(member, setting string) any) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "\nSecrets (bound by key name; values are set on the Host, never here):")
+	for _, r := range rows {
+		var value any
+		if r.When != nil && valueOf != nil {
+			value = valueOf(r.Member, r.When.Setting)
+		}
+		switch {
+		case !r.needed(value):
+			fmt.Fprintf(out, "  %s (%s): not needed - %s's %s leaves %s off.\n", r.Key, r.Member, r.Member, r.When.Setting, r.When.Value)
+		case r.Set:
+			fmt.Fprintf(out, "  %s (%s): set on this Host.\n", r.Key, r.Member)
+		default:
+			fmt.Fprintf(out, "  %s (%s): not set - its source fails until it is set. Set it with: %s.\n", r.Key, r.Member, secretSetWith(r.Key))
+		}
+		if r.Description != "" {
+			fmt.Fprintf(out, "      %s\n", r.Description)
+		}
+	}
 }
 
 // keptPart is what an update keeps of the person's part: a kept member's person-only settings
@@ -264,6 +342,54 @@ type connectionRow struct {
 	Status   string `json:"status"`
 }
 
+// firstRunRow is one schedule's first run in the install's answer: ran now, or when it first runs.
+type firstRunRow struct {
+	Trigger      string  `json:"trigger"`
+	Member       string  `json:"member"`
+	RunAtInstall bool    `json:"runAtInstall"`
+	RanNow       bool    `json:"ranNow"`
+	Outcome      string  `json:"outcome"`
+	At           *string `json:"at"`
+}
+
+// renderFirstRuns names each schedule's first run: "Fetch jobs ran now", "Fetch jobs first runs at
+// 8:51 PM", or for a first run at install that did not happen, why and when it first runs instead.
+func renderFirstRuns(out io.Writer, runs []firstRunRow, now time.Time) {
+	if len(runs) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "\nSchedules:")
+	for _, r := range runs {
+		if r.RanNow {
+			fmt.Fprintf(out, "  %s ran now.\n", r.Trigger)
+			continue
+		}
+		at := " runs on its schedule"
+		if r.At != nil {
+			if when, err := time.Parse(time.RFC3339Nano, *r.At); err == nil {
+				at = " first runs at " + firstRunTime(when, now)
+			}
+		}
+		switch {
+		case !r.RunAtInstall || r.Outcome == "scheduled":
+			fmt.Fprintf(out, "  %s%s.\n", r.Trigger, at)
+		case r.Outcome == "failed":
+			fmt.Fprintf(out, "  %s could not run now; it%s.\n", r.Trigger, at)
+		default:
+			fmt.Fprintf(out, "  %s did not run now (%s); it%s.\n", r.Trigger, r.Outcome, at)
+		}
+	}
+}
+
+// firstRunTime is a first run's local time: "8:51 PM" today, "Thu 8:00 AM" on another day.
+func firstRunTime(when, now time.Time) string {
+	when, now = when.Local(), now.Local()
+	if when.Year() == now.Year() && when.YearDay() == now.YearDay() {
+		return when.Format("3:04 PM")
+	}
+	return when.Format("Mon 3:04 PM")
+}
+
 // installBody is POST /api/solutions/install's (and update's) answer.
 type installBody struct {
 	OK         bool         `json:"ok"`
@@ -283,7 +409,10 @@ type installBody struct {
 		Member      *string `json:"member"`
 		Description string  `json:"description"`
 	} `json:"missing"`
-	Steps []struct {
+	Secrets   []secretRow   `json:"secrets"`
+	Unset     []string      `json:"unset"`
+	FirstRuns []firstRunRow `json:"firstRuns"`
+	Steps     []struct {
 		Step   string `json:"step"`
 		Number int    `json:"number"`
 		Title  string `json:"title"`
@@ -339,6 +468,14 @@ func (in *solutionInstall) run(fromInstance bool, team string, yes bool) error {
 	}
 	connections := in.askConnections(p.Plan, p.Connections, p.Kept)
 	documents := in.askDocuments(p.Plan, p.Kept)
+	renderSecrets(in.out, p.Secrets, func(member, setting string) any {
+		if raw, ok := p.Kept.setting(member, setting); ok {
+			var kept any
+			_ = json.Unmarshal(raw, &kept)
+			return kept
+		}
+		return settings[member][setting]
+	})
 
 	question := fmt.Sprintf("Install %s %s as team %s?", p.Plan.Package.Name, p.Plan.Package.Version, p.TeamName)
 	if p.Mode == "update" {
@@ -816,15 +953,23 @@ func (in *solutionInstall) result(p previewBody, status int, raw json.RawMessage
 	}
 	if len(b.Missing) == 0 {
 		fmt.Fprintln(in.out, "Nothing is missing: the team is ready.")
-		return nil
-	}
-	fmt.Fprintf(in.out, "The team shows as blocked until %s provided:\n", map[bool]string{true: "this is", false: "these are"}[len(b.Missing) == 1])
-	for _, m := range b.Missing {
-		name := m.Name
-		if m.Member != nil && *m.Member != "" {
-			name = *m.Member + "'s " + name
+	} else {
+		fmt.Fprintf(in.out, "The team shows as blocked until %s provided:\n", map[bool]string{true: "this is", false: "these are"}[len(b.Missing) == 1])
+		for _, m := range b.Missing {
+			name := m.Name
+			if m.Member != nil && *m.Member != "" {
+				name = *m.Member + "'s " + name
+			}
+			fmt.Fprintf(in.out, "  Blocked: waiting for %s - %s\n", name, m.Description)
 		}
-		fmt.Fprintf(in.out, "  Blocked: waiting for %s - %s\n", name, m.Description)
+	}
+	renderFirstRuns(in.out, b.FirstRuns, time.Now())
+	renderSecrets(in.out, b.Secrets, nil)
+	if len(b.Unset) > 0 {
+		fmt.Fprintln(in.out, "\nThese keys are still not set on the Host. Each one's source fails until it is set:")
+		for _, key := range b.Unset {
+			fmt.Fprintf(in.out, "  %s - %s\n", key, secretSetWith(key))
+		}
 	}
 	return nil
 }
