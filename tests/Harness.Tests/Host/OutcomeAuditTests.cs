@@ -73,7 +73,6 @@ public sealed class OutcomeAuditTests : IAsyncLifetime
         var workflow = (await told.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("correlationId").GetInt64();
 
         var before = await Outcomes.ListAsync(Ct);
-        var messagesBefore = await MessageCountAsync();
 
         await using (var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false"))
         {
@@ -108,15 +107,17 @@ public sealed class OutcomeAuditTests : IAsyncLifetime
         Assert.Null(await Outcomes.CurrentLinkAsync(workflow, Ct));
 
         // The tell's instruction did not land either: it, its link and its row are one transaction.
-        Assert.Equal(messagesBefore, await MessageCountAsync());
+        // Its own text is looked for, not a row count: the platform appends rows of its own meanwhile.
+        Assert.Equal(0, await RowsSayingAsync("never told"));
     }
 
-    private async Task<long> MessageCountAsync()
+    private async Task<long> RowsSayingAsync(string text)
     {
         await using var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false");
         await connection.OpenAsync(Ct);
         await using var count = connection.CreateCommand();
-        count.CommandText = "SELECT COUNT(*) FROM messages";
+        count.CommandText = "SELECT COUNT(*) FROM messages WHERE instr(payload, $text) > 0";
+        count.Parameters.AddWithValue("$text", text);
         return (long)(await count.ExecuteScalarAsync(Ct))!;
     }
 }
