@@ -35,7 +35,8 @@ public sealed record TeamResetOptions(
         + "NOT being deleted is retained and counted - nulling its causation would destroy the one "
         + "field that records what caused what. That citing message is often another member of this "
         + "same team, a member since removed, or the team's Concierge; the purge does not "
-        + "determine which and does not report it.")]
+        + "determine which and does not report it. A row still queued for another member's run is "
+        + "retained the same way, because that run's own rows will cite it.")]
     bool Purge = false,
 
     [property: Description(
