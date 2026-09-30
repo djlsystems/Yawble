@@ -1,4 +1,4 @@
-import type { RunOutcome } from '../api/types';
+import type { MemberRunItem, RunOutcome } from '../api/types';
 
 /**
  * HOW AN EARLIER RUN READS IN THE WATCH DIALOG'S LIST: when it started, how long it took and
@@ -46,4 +46,23 @@ export function runStartedTitle(iso: string | null): string | undefined {
   if (iso === null) return undefined;
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? undefined : at.toLocaleString();
+}
+
+/**
+ * A run that carried several items, in one line for the list: `1 answered · 2 deferred`, in prompt
+ * order. Empty for a run of one item, which has nothing to add to its outcome.
+ */
+export function runItemsText(items: MemberRunItem[] | null): string {
+  if (!items || items.length === 0) return '';
+  return items.map((entry) => `${entry.item} ${entry.outcome}`).join(' · ');
+}
+
+/**
+ * One item of such a run, in the opened run: `Item 2 (seq 6): deferred - after X`. A deferral says
+ * it runs again, so it is not read as work that was dropped.
+ */
+export function runItemText(entry: MemberRunItem): string {
+  const head = `Item ${entry.item} (seq ${entry.seq}): ${entry.outcome}`;
+  if (entry.outcome !== 'deferred') return head;
+  return `${head}, delivered again as its own run${entry.reason ? ` - ${entry.reason}` : ''}`;
 }

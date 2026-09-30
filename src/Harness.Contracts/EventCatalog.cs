@@ -164,6 +164,10 @@ public static class EventCatalog
                 new(PayloadFields.TokensReasoning, EventFieldKind.Integer, "Absent, not zero, when usage is unknown."),
                 new(PayloadFields.TokensSource, EventFieldKind.String, "Which brand's usage format was parsed, if any."),
                 new(PayloadFields.UsageCountedOn, EventFieldKind.Integer, "Set when this run answered several deliveries: the causation of the row that carries its token figures. This row carries none."),
+                new(PayloadFields.Item, EventFieldKind.Integer, "Set when this run carried several items: the number, in the prompt, of the item this row closes."),
+                new(PayloadFields.ItemOutcome, EventFieldKind.String, "Set when this run carried several items: `answered` or `failed` for the item this row closes."),
+                new(PayloadFields.Items, EventFieldKind.List, "Set when this run carried several items: every item's `{ item, seq, outcome }`, outcome `answered`, `failed`, `blocked` or `deferred`. A deferred item is delivered again as its own run."),
+                new(PayloadFields.DeferredFromRun, EventFieldKind.Integer, "Set when this run was a deferred item delivered again: the `started` seq of the run it was deferred from."),
 
                 // DECLARED ON BOTH ARMS BECAUSE THERE IS ONE JSON OBJECT. These two entries share a
                 // call site, so a field added to one is written - as null - by the other, and
@@ -190,6 +194,10 @@ public static class EventCatalog
                 new(PayloadFields.TokensReasoning, EventFieldKind.Integer, "Absent, not zero, when usage is unknown."),
                 new(PayloadFields.TokensSource, EventFieldKind.String, "Which brand's usage format was parsed, if any."),
                 new(PayloadFields.UsageCountedOn, EventFieldKind.Integer, "Set when this run answered several deliveries: the causation of the row that carries its token figures. This row carries none."),
+                new(PayloadFields.Item, EventFieldKind.Integer, "Set when this run carried several items: the number, in the prompt, of the item this row closes."),
+                new(PayloadFields.ItemOutcome, EventFieldKind.String, "Set when this run carried several items: `answered` or `failed` for the item this row closes."),
+                new(PayloadFields.Items, EventFieldKind.List, "Set when this run carried several items: every item's `{ item, seq, outcome }`, outcome `answered`, `failed`, `blocked` or `deferred`. A deferred item is delivered again as its own run."),
+                new(PayloadFields.DeferredFromRun, EventFieldKind.Integer, "Set when this run was a deferred item delivered again: the `started` seq of the run it was deferred from."),
                 new(PayloadFields.FailureClass, EventFieldKind.String,
                     "What KIND of failure this was - quota, rate, transport, agent-fault, timeout, "
                     + "interrupted, or unknown. Absent on every row written before classes existed; "

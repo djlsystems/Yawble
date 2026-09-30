@@ -65,6 +65,15 @@ public static class LiveViewEndpoints
                 + "over, and it is listed once it is.\n\n"
                 + "`quiet` is true for a run that finished quiet: its `completed` row is marked "
                 + "`quiet` and woke nobody. It is false for every other run, a failure always.\n\n"
+                + "`workflowDeclared` is true for a run whose workflow the platform declared complete "
+                + "as it ended, because its owner cannot declare (a person told a plugin member "
+                + "directly): the Manager was not woken by it. False for every other run.\n\n"
+                + "`items` lists, for a run that carried more than one item, what became of each: "
+                + "`{ \"item\", \"seq\", \"outcome\", \"reason\" }` in prompt order, `outcome` one of "
+                + "`answered`, `failed`, `blocked` and `deferred`, `reason` set on a deferral only. A "
+                + "deferred item is delivered again as its own run, whose `deferredFromRun` is the "
+                + "`started` seq of the run it was deferred from. `items` is null on a run of one "
+                + "item and `deferredFromRun` null on every run that is not a deferred item's.\n\n"
                 + "Runs from before transcripts were recorded are not listed.\n\n"
                 + "Writes nothing.\n\n"
                 + "**A person's action; no machine principal.**");
@@ -197,6 +206,17 @@ public static class LiveViewEndpoints
 
             // A quiet run woke nobody; its `completed` row says so. A failure is never quiet.
             quiet = run.Terminal.Type == MessageTypes.Completed && Bool(run.Terminal.Payload, PayloadFields.Quiet),
+
+            // The platform declared the run's workflow as it ended, so the Manager was not woken.
+            workflowDeclared = run.Terminal.Type == MessageTypes.Completed
+                && Bool(run.Terminal.Payload, PayloadFields.WorkflowDeclared),
+
+            // WHAT BECAME OF EACH ITEM of a run that carried several, a deferral included. Null on
+            // a run of one item, and on a blocked terminal, which closes one item only.
+            items = Items(run.Terminal.Payload),
+
+            // The run a deferred item was deferred from, on the run it was delivered again in.
+            deferredFromRun = Long(run.Terminal.Payload, PayloadFields.DeferredFromRun),
         }).ToList();
 
         return Results.Ok(new
@@ -286,6 +306,37 @@ public static class LiveViewEndpoints
         return document.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+    }
+
+    private static long? Long(string payload, string name)
+    {
+        using var document = JsonDocument.Parse(payload);
+        return document.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+            ? value.GetInt64()
+            : null;
+    }
+
+    /// <summary>A terminal row's <see cref="PayloadFields.Items"/>, as the route sends them: every
+    /// key always present, `reason` null on all but a deferral.</summary>
+    public static List<object>? Items(string payload)
+    {
+        using var document = JsonDocument.Parse(payload);
+        if (!document.RootElement.TryGetProperty(PayloadFields.Items, out var items)
+            || items.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return items.EnumerateArray()
+            .Where(entry => entry.ValueKind == JsonValueKind.Object)
+            .Select(entry => (object)new
+            {
+                item = entry.TryGetProperty("item", out var n) && n.ValueKind == JsonValueKind.Number ? n.GetInt32() : 0,
+                seq = entry.TryGetProperty("seq", out var q) && q.ValueKind == JsonValueKind.Number ? q.GetInt64() : 0,
+                outcome = entry.TryGetProperty("outcome", out var o) && o.ValueKind == JsonValueKind.String ? o.GetString() : null,
+                reason = entry.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : null,
+            })
+            .ToList();
     }
 
     private static bool Bool(string payload, string name)

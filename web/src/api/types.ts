@@ -2249,6 +2249,18 @@ export interface TenantSettings {
 /** How a finished run ended, as `GET .../runs` words it. */
 export type RunOutcome = 'completed' | 'handedBack' | 'blocked' | 'failed'
 
+/** What became of one item of a run that carried several, as `GET .../runs` words it. */
+export type RunItemOutcome = 'answered' | 'failed' | 'blocked' | 'deferred'
+
+/** One item of a run that carried several: its number in the prompt, its seq, and its outcome. */
+export interface MemberRunItem {
+  item: number
+  seq: number
+  outcome: RunItemOutcome
+  /** Why the agent deferred it; null for every other outcome. */
+  reason: string | null
+}
+
 /** One finished run of one member, from the terminal row that closed it. */
 export interface MemberRun {
   /** The terminal row's seq: the run's address for `runs/{seq}/transcript`. */
@@ -2273,6 +2285,19 @@ export interface MemberRun {
   reason: string | null
   /** A run that finished quietly (`quiet: true` on its `completed` row), which woke nobody. */
   quiet: boolean
+  /**
+   * The platform declared the run's workflow complete as it ended (`workflowDeclared: true` on its
+   * `completed` row), because its owner cannot declare: the Manager was not woken by it.
+   */
+  workflowDeclared: boolean
+  /**
+   * What became of each item, for a run that carried more than one - answered, failed, blocked or
+   * deferred - in prompt order. A deferred item was not closed by this run: it is delivered again
+   * as its own run. Null on a run of one item.
+   */
+  items: MemberRunItem[] | null
+  /** For a deferred item's own run: the `started` seq of the run it was deferred from. Null otherwise. */
+  deferredFromRun: number | null
 }
 
 /** One page of `GET .../runs`: newest first, and the cursor for the next older page or null. */

@@ -3,7 +3,8 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { listMemberRuns, NoLiveView, openLiveView, readRunTranscript } from '../api/client';
 import type { MemberId, MemberRun, TeamId } from '../api/types';
 import { liveLineTime, parseLiveLine, type LiveLine } from '../lib/liveLines';
-import { runDuration, runOutcomeLabel, runStartedText, runStartedTitle } from '../lib/memberRuns';
+import { runDuration, runItemsText, runItemText, runOutcomeLabel, runStartedText, runStartedTitle } from '../lib/memberRuns';
+import { QuietMark, WorkflowDeclaredMark } from '../lib/runMarks';
 
 /**
  * WATCHING ONE MEMBER. Two parts: at the top, the run in progress, streaming as it
@@ -314,6 +315,20 @@ onBeforeUnmount(end);
           </div>
         </div>
 
+        <!-- A RUN OF SEVERAL ITEMS says what became of each, a deferral included: never one
+             outcome for all of them. A deferred item's own run says where it came from. -->
+        <div v-if="selected?.items" class="os-body q-mb-xs run-items">
+          <div
+            v-for="entry in selected.items"
+            :key="entry.seq"
+            class="run-item"
+            :data-outcome="entry.outcome"
+          >{{ runItemText(entry) }}</div>
+        </div>
+        <div v-if="selected && selected.deferredFromRun !== null" class="os-body os-text-muted q-mb-xs run-deferred-from">
+          Deferred from run {{ selected.deferredFromRun }}.
+        </div>
+
         <template v-if="selected && plugin">
           <!-- A run that blocked every item wrote no output row: what it said is the block's reason. -->
           <div v-if="selected.reason" class="os-body q-mb-xs run-reason">Blocked: {{ selected.reason }}</div>
@@ -357,6 +372,12 @@ onBeforeUnmount(end);
                 <q-item-label class="earlier-run-when" :title="runStartedTitle(run.startedAt)">
                   {{ runStartedText(run.startedAt) }}
                 </q-item-label>
+                <q-item-label v-if="run.items" caption class="earlier-run-items">
+                  items {{ runItemsText(run.items) }}
+                </q-item-label>
+                <q-item-label v-if="run.deferredFromRun !== null" caption class="earlier-run-deferred-from">
+                  deferred from run {{ run.deferredFromRun }}
+                </q-item-label>
               </q-item-section>
               <q-item-section side class="earlier-run-workflow">
                 {{ run.workflow !== null ? `workflow #${run.workflow}` : 'no workflow' }}
@@ -366,8 +387,14 @@ onBeforeUnmount(end);
                 <!-- A QUIET RUN woke nobody when it finished: said here, beside how it ended, so a
                      list of runs nobody was told about is not mistaken for missed work. -->
                 <span v-if="run.quiet" class="earlier-run-quiet text-caption os-text-muted q-mr-xs">
-                  quiet
-                  <q-tooltip>This run finished quietly: nobody was woken by it.</q-tooltip>
+                  {{ QuietMark.label }}
+                  <q-tooltip>{{ QuietMark.tooltip }}</q-tooltip>
+                </span>
+                <!-- A WORKFLOW THE PLATFORM DECLARED as this run ended: marked as a quiet run is, so a
+                     person sees why the Manager did not run. -->
+                <span v-else-if="run.workflowDeclared" class="earlier-run-declared text-caption os-text-muted q-mr-xs">
+                  {{ WorkflowDeclaredMark.label }}
+                  <q-tooltip>{{ WorkflowDeclaredMark.tooltip }}</q-tooltip>
                 </span>
                 <q-badge class="earlier-run-outcome" :data-outcome="run.outcome" :label="runOutcomeLabel(run.outcome)" />
               </q-item-section>
