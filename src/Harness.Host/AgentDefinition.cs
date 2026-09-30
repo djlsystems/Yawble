@@ -149,7 +149,15 @@ public sealed record AgentDefinition(
         + "person can watch a run. Null means this preset has no live view, and the live "
         + "route says so rather than streaming nothing. Read-only: the launch, its usage parser "
         + "and its completion output are the same with or without it.")]
-    AgentLiveView? LiveView = null)
+    AgentLiveView? LiveView = null,
+
+    [property: Description(
+        "How a member's launch of this preset is kept to the tools the platform gives it: the "
+        + "arguments and environment that switch off the account's connectors, the shared home's "
+        + "MCP servers, plugins, skills, hooks and memory, and the CLI's own tools it may use. "
+        + "Applied to a headless launch only - the Concierge keeps every tool. A headless preset "
+        + "without one is NOT VERIFIED, and says so wherever it is listed.")]
+    AgentIsolation? Isolation = null)
 {
     /// <summary>Whether this preset is compiled into the build. Computed from the name, never
     /// stored: a file cannot make a custom preset built-in, or a built-in custom.</summary>

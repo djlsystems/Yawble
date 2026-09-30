@@ -348,6 +348,13 @@ public sealed partial class ProcessAgentRunner(
 
         foreach (var (name, value) in invocation.Environment) start.Environment[name] = value;
 
+        // The preset's isolation, AFTER the invocation's environment (the preset's env and the
+        // team's), so neither can switch a connector or the home's configuration back on.
+        if (command.IsolationEnvironment is { } isolation)
+        {
+            foreach (var (name, value) in isolation) start.Environment[name] = value;
+        }
+
         if (mcp is not null)
         {
             start.Environment["HARNESS_MCP_CONFIG"] = mcp.JsonPath;
@@ -1228,7 +1235,10 @@ public sealed record AgentCommand(
     IReadOnlyList<string>? SystemPromptArguments = null,
     string? InstructionsFile = null,
     string? UsageFormat = null,
-    bool LanguageModel = true);
+    bool LanguageModel = true,
+    // A member's isolation variables (AgentIsolation.Env), set LAST at the spawn site so no preset
+    // or team env can switch isolation back on. Null for the Concierge and an undeclared preset.
+    IReadOnlyDictionary<string, string>? IsolationEnvironment = null);
 
 /// <summary>
 /// Which command each container's agent is. Configuration, not code - the reason a container is data
@@ -1317,10 +1327,22 @@ public sealed class AgentCatalog(
     {
         var definition = Definition(agent);
 
-        return definition is not null && definition.Mode == mode && definition.Launch is { } launch
-            ? launch.ToCommand()
-            : null;
+        if (definition is null || definition.Mode != mode || definition.Launch is not { } launch) return null;
+
+        // ONLY THE HEADLESS COMMAND IS ISOLATED. A member gets the platform's tools and its CLI's
+        // own; the Concierge is the person's session and launches exactly as it always has.
+        return mode == AgentMode.Headless
+            ? AgentIsolationPolicy.Apply(launch.ToCommand(), definition.Isolation)
+            : launch.ToCommand();
     }
+
+    /// <summary>
+    /// The tools a run of <paramref name="agent"/> may be offered, or null for a preset this tenant
+    /// does not have: `harness` plus the preset's declared servers and local tools, or
+    /// <see cref="IsolationState.NotVerified"/> for a headless preset with no declaration. What the
+    /// per-run foreign-tool check and the pre-flight report read.
+    /// </summary>
+    public ToolAllowance? Allowance(string agent) => AgentIsolationPolicy.For(Definition(agent));
 
     /// <summary>Case-insensitive, matching how a stored `team_members.agent` is read back.</summary>
     public AgentDefinition? Definition(string agent) =>

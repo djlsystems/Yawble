@@ -1515,6 +1515,25 @@ export interface Agent {
 
   /** The tags a built-in carries in the build, shown beside the operator's. Null for a custom preset. */
   buildTags?: string[] | null
+
+  /**
+   * How a member's launch of this preset is kept to the platform's tools (B001K): the arguments and
+   * environment that switch off the account's connectors and the shared home's configuration, and
+   * the CLI's own tools it may use. A headless preset without one is NOT VERIFIED.
+   *
+   * CARRIED THROUGH AN EDIT for the reason `install` is: the dialog rebuilds what it saves and
+   * `PUT /api/agents` replaces the catalog, so a field it drops is a declaration the save deletes.
+   */
+  isolation?: AgentIsolation | null
+}
+
+/** A preset's isolation declaration. See `AgentIsolation` in the Host. */
+export interface AgentIsolation {
+  arguments: string[]
+  env?: Record<string, string> | null
+  allowedTools?: string[] | null
+  allowedServers?: string[] | null
+  gaps?: string[] | null
 }
 
 /** Where to get the CLI a preset launches. Data in the catalog, never a table in code. */
