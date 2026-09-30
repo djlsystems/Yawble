@@ -964,7 +964,7 @@ builder.Services.AddSingleton<ITeamPublisher>(sp => new TeamPublisher(
     // Resolved per call, not at construction, so the publisher does not need the registry
     // to exist before it does.
     (team, repo) => sp.GetRequiredService<TeamRegistry>().DefaultBranchFor(team, repo).Branch,
-    // THE TIP A DISPATCH RECORDS, so `landed` outlives the branch and the team (B0025).
+    // THE TIP A DISPATCH RECORDS, so `landed` outlives the branch and the team.
     (team, repo, sha, causation, ct) =>
         sp.GetRequiredService<BacklogTipRecorder>().RecordTipAsync(team, repo, sha, causation, ct)));
 

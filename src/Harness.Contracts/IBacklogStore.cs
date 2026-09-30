@@ -168,7 +168,7 @@ public static class BacklogStates
 /// goes back to deriving.
 /// </param>
 /// <param name="LandedAt">
-/// LANDED, ONCE PROVEN, IS KEPT (B0025). Set the first time the work was proven reachable from
+/// LANDED, ONCE PROVEN, IS KEPT. Set the first time the work was proven reachable from
 /// origin's default branch - by ancestry, or by the Git dialog's Merge to main - and never cleared
 /// or moved afterwards, so a dispatch whose branch, clone and team are all gone still reads
 /// <c>landed</c>. Null until then. A later rewrite of the default branch that drops the commit is
@@ -193,7 +193,7 @@ public sealed record BacklogDispatch(
     string? LandedBranch = null);
 
 /// <summary>
-/// THE WORK'S TIP IN ONE REPOSITORY, as the team's publish last pushed it (B0025). One row per
+/// THE WORK'S TIP IN ONE REPOSITORY, as the team's publish last pushed it. One row per
 /// dispatch and repository, replaced by the newer tip on every publish. It is what lets
 /// <c>landed</c> be read after the team's clone is gone: the sha is checked against another clone
 /// of the same repository.

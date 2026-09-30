@@ -154,8 +154,8 @@ public interface ITeamPublisher
 /// </param>
 /// <param name="teamBranchPublished">
 /// Told (team, repository, sha, causation) each time `team/{team}` reaches origin, after its
-/// receipt row - the tip a dispatch records so `landed` outlives the branch and the team (B0025,
-/// <see cref="BacklogTipRecorder"/>). Null records nothing. It cannot fail a publish: anything it
+/// receipt row - the tip a dispatch records so `landed` outlives the branch and the team
+/// (<see cref="BacklogTipRecorder"/>). Null records nothing. It cannot fail a publish: anything it
 /// throws, other than the caller's own cancellation, is swallowed.
 /// </param>
 public sealed class TeamPublisher(

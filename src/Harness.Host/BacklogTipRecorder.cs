@@ -3,7 +3,7 @@ using Harness.Contracts;
 namespace Harness.Host;
 
 /// <summary>
-/// WRITES WHAT <see cref="BacklogLandedState"/> NEEDS TO OUTLIVE A TIDY-UP (B0025): the tip the
+/// WRITES WHAT <see cref="BacklogLandedState"/> NEEDS TO OUTLIVE A TIDY-UP: the tip the
 /// team's publish pushed, and landed at the moment the Git dialog's Merge to main lands the branch.
 ///
 /// <para>

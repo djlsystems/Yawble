@@ -80,7 +80,7 @@ public static class BacklogSchema
             CREATE INDEX backlog_dispatches_item ON backlog_dispatches(item, id);
             """),
 
-        // LANDED SURVIVES CLEANUP (B0025). The work's tip per dispatch and repository, recorded
+        // LANDED SURVIVES CLEANUP. The work's tip per dispatch and repository, recorded
         // when the team's publish pushes its branch, and landed stored on the dispatch once proven
         // so it outlives the branch, the clone and the team. Nullable columns: every dispatch
         // before this step simply has not been proven yet.

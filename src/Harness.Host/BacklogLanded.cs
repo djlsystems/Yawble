@@ -69,7 +69,7 @@ public static class BacklogLandedStates
 /// when GitHub last gave it. Null for every answer derived from the clone alone.
 /// </param>
 /// <param name="LandedAt">
-/// WHEN LANDED WAS FIRST PROVEN AND STORED (B0025). Set on every <c>landed</c> answered from the
+/// WHEN LANDED WAS FIRST PROVEN AND STORED. Set on every <c>landed</c> answered from the
 /// dispatch's stored proof, which is what outlives the branch, the clone and the team. Null for
 /// every other answer.
 /// </param>
@@ -94,7 +94,7 @@ public sealed record LandedProof(string Repo, string Sha, string Branch);
 /// <para>
 /// THE SHAPE IS <see cref="BacklogInFlightState"/>'S, DELIBERATELY, because that class is the
 /// discipline wanted here: one store query for every item's latest dispatch, and a dispatch at or
-/// below its team's floor derives nothing. ONE THING IS STORED, AND ONLY ONE (B0025): <c>landed</c>,
+/// below its team's floor derives nothing. ONE THING IS STORED, AND ONLY ONE: <c>landed</c>,
 /// once proven by ancestry, is kept on the dispatch and answered from there ever after, because the
 /// branch, clone and team it was proven from are tidied away. Nothing short of that is stored, so
 /// nothing short of that can get stuck.
@@ -119,7 +119,7 @@ public sealed record LandedProof(string Repo, string Sha, string Branch);
 /// </para>
 ///
 /// <para>
-/// NO NETWORK ON THE TEAM'S OWN PATH, AND ONE FETCH ON THE RECORDED-TIP PATH (B0025). The one
+/// NO NETWORK ON THE TEAM'S OWN PATH, AND ONE FETCH ON THE RECORDED-TIP PATH. The one
 /// exception is <c>FromRecordedTipsAsync</c>: a dispatch that nothing else can answer, whose tip was
 /// recorded, fetches the clone it asks - paid only until landed is proven and stored, cached per
 /// dispatch, and inside the same budget. Everything else below is local: <c>rev-parse</c>, <c>merge-base</c>,
@@ -184,7 +184,7 @@ public static class BacklogLandedState
 
         foreach (var dispatch in latest)
         {
-            // LANDED, ONCE PROVEN, IS KEPT (B0025). The stored proof is answered before anything
+            // LANDED, ONCE PROVEN, IS KEPT. The stored proof is answered before anything
             // else is asked, because the branch, the clone and the team it was proven from may all
             // be gone - and a proven fact is not re-derived into `unknown`. Never downgraded; a
             // later rewrite of the default branch that drops the commit is out of scope.
@@ -306,7 +306,7 @@ public static class BacklogLandedState
     }
 
     /// <summary>
-    /// THE RECORDED TIP, ASKED OF A CLONE OF THE SAME REPOSITORY (B0025). For a dispatch whose
+    /// THE RECORDED TIP, ASKED OF A CLONE OF THE SAME REPOSITORY. For a dispatch whose
     /// team is gone (<paramref name="own"/> null), or whose team's own clone answered
     /// <c>unknown</c> - its branch deleted after the merge, or the clone gone. The team's own clone
     /// is asked first when it has one, then every other team's. Null when nothing was recorded,
@@ -655,7 +655,7 @@ public static class BacklogLandedState
 
         if (ancestor.ExitCode == 0)
         {
-            // THE SHA IS THE PROOF THAT IS KEPT (B0025): the ref names a branch that will be
+            // THE SHA IS THE PROOF THAT IS KEPT: the ref names a branch that will be
             // deleted, the commit it points at now is the fact.
             var tip = await git.RunGitAsync(clonePath, ["rev-parse", "--verify", work], ct);
 

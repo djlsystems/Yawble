@@ -1792,7 +1792,7 @@ public static partial class RepoEndpoints
         await log.WriteAsync(userId, email, TenantActions.RepoMergeToMain, $"{stored}/{repo}", null,
             JsonSerializer.Serialize(new { success = true, mergedFrom = resolvedRef, mergeCommit }), ct);
 
-        // LANDED IS STORED AT THE MOMENT IT LANDS (B0025). This route has just put the team's sha
+        // LANDED IS STORED AT THE MOMENT IT LANDS. This route has just put the team's sha
         // on origin/<default> and knows it without asking anybody, so the backlog item reads
         // `landed` from here on - after the branch, the clone and the team are gone too. On the
         // merge arm the team's sha is the merge commit's second parent, reachable all the same.

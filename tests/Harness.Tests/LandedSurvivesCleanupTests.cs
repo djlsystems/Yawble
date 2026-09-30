@@ -14,7 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// B0025: a dispatch records its team branch's tip when the publish pushes it, and <c>landed</c>,
+/// A dispatch records its team branch's tip when the publish pushes it, and <c>landed</c>,
 /// once proven, is stored on the dispatch and kept after the branch, the clone and the team are
 /// gone. A team that is gone is read from its recorded tip in another team's clone; with no clone
 /// anywhere it is <c>unknown</c>, saying so. Merge to main stores landed at once. Every origin is a
@@ -66,7 +66,7 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         var team = await TeamAsync("Alpha");
         var item = await DispatchAsync(team);
 
-        // The work reaches origin as team/{id} and is merged to trunk outside Yawble.
+        // The work reaches origin as team/{id} and is merged to trunk outside the platform.
         var sha = PushWork(team, "the work", alsoTo: "trunk");
         Git(Clone(team), "fetch", "origin");
 
@@ -125,7 +125,7 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         // Another team's clone exists BEFORE the merge, so only a fetch can show it.
         var other = await TeamAsync("Gamma");
 
-        // Merged outside Yawble, then the branch and the team are tidied away unread.
+        // Merged outside the platform, then the branch and the team are tidied away unread.
         Git(clone, "checkout", "trunk");
         Git(clone, "branch", "-D", $"team/{team}");
         Git(_origin, "update-ref", "refs/heads/trunk", sha);
