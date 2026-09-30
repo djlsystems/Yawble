@@ -78,6 +78,33 @@ The product name, Yawble, lives in the web app's presentation layer
   kept in an owner-only file on the operator's machine and handed to the container at `yawble up`.
   Nothing is baked into the image.
 
+## The shared agent home
+
+Every agent CLI runs as the `agent` user with one shared home, `/data/agent-home`: the CLIs' own
+sign-ins live there, and so does anything a person sets up for the Concierge (account connectors,
+MCP servers, plugins, skills, memory and instruction files).
+
+- **The Concierge keeps every tool.** It is the person's own session and launches as it always has,
+  with the signed-in account's connectors (for Claude, `claude_ai_*`: Gmail, Claude Docs, Calendar,
+  Drive), the home's MCP servers, plugins and skills. That is an accepted risk, like the Concierge's
+  provider keys: text it reads - a document, a team's output, a README - can ask it to use the
+  person's accounts.
+- **A member gets only the platform's tools**: the `harness` MCP server and its CLI's own local
+  tools. Each headless Agent preset declares `isolation` - the launch arguments and environment
+  that switch the account and the home off for a member, the CLI's own tools it may use, and the
+  gaps no switch reaches - and a headless preset without one is shown as *not verified*. Nothing in
+  the home is edited or removed to do it. Members never get the Concierge's tools, even when the
+  Concierge tells them what to do.
+- **What a person may put in the home:** the CLIs' sign-ins and their own settings for the
+  Concierge. **What belongs in Connections instead:** anything account-scoped an agent should act
+  on - a mailbox, a drive, a calendar, an API. A connection reaches a member only when a person
+  binds it ([connections.md](connections.md)).
+- **What still reaches a member from the home**, measured on the CLIs in the image and listed in
+  each built-in preset's `gaps`: Codex reads `~/.codex/AGENTS.md`; Grok reads MCP servers from
+  `~/.grok/config.toml` (where the Host writes its own `harness` entry) and skills from
+  `~/.grok/skills` and `~/.claude/skills`; Copilot reads `~/.copilot`'s MCP config, plugins,
+  skills and instructions. Do not put anything there that a member must not have.
+
 ## Operations
 
 - [ops/releases-and-updates.md](ops/releases-and-updates.md): updating an instance and cutting a release.

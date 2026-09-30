@@ -1517,7 +1517,7 @@ export interface Agent {
   buildTags?: string[] | null
 
   /**
-   * How a member's launch of this preset is kept to the platform's tools (B001K): the arguments and
+   * How a member's launch of this preset is kept to the platform's tools: the arguments and
    * environment that switch off the account's connectors and the shared home's configuration, and
    * the CLI's own tools it may use. A headless preset without one is NOT VERIFIED.
    *

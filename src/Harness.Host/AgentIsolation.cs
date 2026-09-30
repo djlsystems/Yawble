@@ -5,7 +5,7 @@ namespace Harness.Host;
 /// <summary>
 /// How a headless preset keeps a member to the tools the platform gives it: the `harness` MCP
 /// server and the CLI's own local tools, and nothing the shared agent home or the signed-in account
-/// brings along (B001K).
+/// brings along.
 ///
 /// THE HOME IS SHARED AND IS NEVER EDITED. The Concierge is the person's own session and keeps
 /// every connector, home MCP server, plugin and skill they set up; a member reaches none of them.
@@ -67,8 +67,8 @@ public enum IsolationState
 }
 
 /// <summary>
-/// The tools one preset may be offered: THE ANSWER THE PER-RUN CHECK (card 2373) AND THE PRE-FLIGHT
-/// REPORT (card 2374) READ, from <see cref="AgentCatalog.Allowance"/>. Never a second store: it is
+/// The tools one preset may be offered: THE ANSWER THE PER-RUN FOREIGN-TOOL CHECK AND THE PRE-FLIGHT
+/// REPORT READ, from <see cref="AgentCatalog.Allowance"/>. Never a second store: it is
 /// derived from the preset each time it is asked.
 /// </summary>
 public sealed record ToolAllowance(

@@ -122,7 +122,7 @@ public static class AgentCatalogFile
             "https://docs.x.ai/build/overview",
             "The container installs grok on startup. Set XAI_API_KEY to sign it in.");
 
-        // WHAT A MEMBER MAY BE OFFERED, per headless preset (B001K). Each switch below was MEASURED
+        // WHAT A MEMBER MAY BE OFFERED, per headless preset. Each switch below was MEASURED
         // with a real launch on the CLI in the image (claude 2.1.285, codex-cli 0.157.0, grok
         // 1.0.44, copilot 1.0.88), the shared home left exactly as it was; `Gaps` is what no launch
         // switch reached. The Concierge presets carry none: the person's own session keeps
