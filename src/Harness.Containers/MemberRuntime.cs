@@ -258,6 +258,14 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// repoint or a catalog edit shows on the next one. Null answers false.</summary>
     private readonly Func<string, bool>? _watchable;
 
+    /// <summary>
+    /// Called with a run's FIRST terminal row - the one that carries the run, its usage and its
+    /// transcript - right after it is appended, still inside the run. Here so what a run leaves
+    /// behind can be read against it before the member is free for its next wake: the Host's
+    /// per-run tools check. Null is what a fixture wants. A handler's failure is not the run's.
+    /// </summary>
+    private readonly Func<Message, CancellationToken, Task>? _onTerminal;
+
     /// <summary>The member's tree for this card in the team's first repository.</summary>
     public const string WorktreeVariable = "HARNESS_WORKTREE";
 
@@ -292,9 +300,11 @@ public sealed class MemberRuntime : IAsyncDisposable
         Func<Task>? claimSignal = null,
         Action<ContainerId>? claimWithdraw = null,
         Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? worktrees = null,
-        Func<string, bool>? watchable = null)
+        Func<string, bool>? watchable = null,
+        Func<Message, CancellationToken, Task>? onTerminal = null)
     {
         _watchable = watchable;
+        _onTerminal = onTerminal;
         _claimSignal = claimSignal;
         _claimWithdraw = claimWithdraw;
         _onRunEnding = onRunEnding;
@@ -1477,11 +1487,24 @@ public sealed class MemberRuntime : IAsyncDisposable
                         + $",\"{PayloadFields.WakeManager}\":{JsonSerializer.Serialize(wakeManager)}}}";
                 }
 
-                await SafeAppendAsync(new NewMessage(
+                var terminal = await SafeAppendAsync(new NewMessage(
                     result.Succeeded ? MessageTypes.Completed : MessageTypes.Failed,
                     payload,
                     Id.ToString(),
                     message.Seq));
+
+                if (usageCountedOn is null && terminal is not null && _onTerminal is not null)
+                {
+                    try
+                    {
+                        await _onTerminal(terminal, _shutdown.Token);
+                    }
+                    catch (Exception) when (!_shutdown.IsCancellationRequested)
+                    {
+                        // Whatever it was reading has its own way of saying it could not; the run
+                        // has already been recorded, and must not be lost to a reader's failure.
+                    }
+                }
 
                 // Set BESIDE the publication rather than instead of it, and only on the arm that
                 // chose Failed. Idempotent, so a batch of several messages marks the container once
@@ -1509,14 +1532,15 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// container wedged mid-message with its queue stalled - a far worse outcome than a missing
     /// signal, which is recoverable by looking.
     /// </summary>
-    private async Task SafeAppendAsync(NewMessage message)
+    private async Task<Message?> SafeAppendAsync(NewMessage message)
     {
         try
         {
-            await _log.AppendAsync(message, _shutdown.Token);
+            return await _log.AppendAsync(message, _shutdown.Token);
         }
         catch (Exception) when (!_shutdown.IsCancellationRequested)
         {
+            return null;
         }
     }
 

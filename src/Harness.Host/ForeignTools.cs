@@ -94,7 +94,8 @@ public static class ForeignToolsJudge
 }
 
 /// <summary>
-/// THE PER-RUN CHECK. For a member run's terminal row: read the transcript the agent wrote, as the
+/// THE PER-RUN CHECK, called by the member itself with its run's first terminal row, inside the run
+/// (<c>MemberRuntime</c>'s <c>onTerminal</c>). For that row: read the transcript the agent wrote, as the
 /// agent, judge its tools, and write what is not clean - an <c>agent.foreignTools</c> row on the
 /// team's log inside the run's workflow, so it lands on the member's card, and for a foreign tool a
 /// <c>tenant_events</c> row too. A row that is not a team member's run is not checked: the Concierge
@@ -133,6 +134,11 @@ public sealed class ForeignToolsCheck(
         if (catalog.Definition(member.Agent) is not { Launch.LanguageModel: true } definition) return null;
 
         var path = Text(root, PayloadFields.AgentTranscript);
+
+        // A preset that names a transcript and a run that left none: the run did not get far
+        // enough to write one (a launch that failed, a run stopped at once), and its own row says
+        // so. A preset that names NO transcript can never be measured, and each of its runs says so.
+        if (path is null && definition.LiveView is not null) return null;
         var format = Text(root, PayloadFields.AgentTranscriptFormat) ?? LiveView.ClaudeJsonl;
         var permitted = allowed.For(definition.Name);
 
@@ -217,55 +223,4 @@ public sealed class ForeignToolsCheck(
 
     private static string? Text(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-}
-
-/// <summary>
-/// Runs <see cref="ForeignToolsCheck"/> on every terminal row appended while the Host runs: a tail
-/// of the log, as <c>KanbanChangePush</c> is, because runs end in more than one place and the log
-/// sees them all.
-/// </summary>
-internal sealed class ForeignToolsWatch(
-    IMessageLog log, ForeignToolsCheck check, ILogger<ForeignToolsWatch> logger) : BackgroundService
-{
-    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(1);
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        var last = await log.HighestSeqAsync(stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(Interval, stoppingToken);
-
-                var rows = await log.ReadRangeAsync(last, 500, stoppingToken);
-                if (rows.Count == 0) continue;
-
-                last = rows[^1].Seq;
-
-                foreach (var row in rows)
-                {
-                    if (row.Type is not (MessageTypes.Completed or MessageTypes.Failed)) continue;
-
-                    try
-                    {
-                        await check.CheckAsync(row, stoppingToken);
-                    }
-                    catch (Exception exception) when (exception is not OperationCanceledException)
-                    {
-                        logger.LogWarning(exception, "The foreign tools check of run {Seq} failed.", row.Seq);
-                    }
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception exception)
-            {
-                logger.LogWarning(exception, "The foreign tools watch failed a pass; trying again on the next one.");
-            }
-        }
-    }
 }
