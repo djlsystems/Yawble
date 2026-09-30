@@ -13,7 +13,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Harness.Tests;
 
 /// <summary>
-/// A TEAM DELETION RECORDS FIRST (B0027). <c>team.deleting</c> is appended to the tenant log BEFORE
+/// A TEAM DELETION RECORDS FIRST: no tenant log row, no deletion. <c>team.deleting</c> is appended to the tenant log BEFORE
 /// anything is removed, and not through the swallowing <c>TenantLogging</c>: when it cannot be
 /// written the delete answers 500 with a sentence and the team, its containers and its root are all
 /// still there. <c>team.deleted</c> stays the row after the act, carrying the result.
