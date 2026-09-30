@@ -90,6 +90,33 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
            the next `container.started` resets and a pause does not. -->
       <q-badge v-if="card.paused" class="k-card-paused os-kanban-teal" label="paused" />
 
+      <!-- A RUN ON THIS CARD MET A TOOL THE PLATFORM DID NOT GIVE IT. A call is marked above an
+           offer: a filled badge in the negative colour for a call, the warning colour for an offer,
+           and a quiet outline for a run that could not be checked - never nothing, since unknown is
+           not clean. A badge beside the status, like the two above. -->
+      <q-badge
+        v-if="card.foreignTools === 'called'"
+        class="k-card-foreign k-card-foreign-called"
+        label="foreign tool called"
+      >
+        <q-tooltip>A run on this card called a tool the platform did not give it. See the card's trail.</q-tooltip>
+      </q-badge>
+      <q-badge
+        v-else-if="card.foreignTools === 'offered'"
+        class="k-card-foreign k-card-foreign-offered"
+        label="foreign tool offered"
+      >
+        <q-tooltip>A run on this card was offered a tool the platform did not give it, and called none.</q-tooltip>
+      </q-badge>
+      <q-badge
+        v-else-if="card.foreignTools === 'notMeasured'"
+        class="k-card-foreign k-card-foreign-unmeasured"
+        outline
+        label="tools not measured"
+      >
+        <q-tooltip>A run on this card could not be checked for foreign tools, so it is not reported clean.</q-tooltip>
+      </q-badge>
+
       <!-- HELD BY THE WIP LIMIT: the work has not failed and nothing refused it; it starts when a
            slot is released. A mark beside the status, never instead of it. -->
       <q-badge v-if="waiting" class="k-card-waiting" label="waiting for a slot">
@@ -238,5 +265,26 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
   background: var(--os-kanban-accent);
   color: white;
   font-size: 10px;
+}
+
+/* A CALL IS LOUDER THAN AN OFFER: the negative fill, bold, for a call; the warning fill for an
+   offer; an outline in the muted text colour for a run that could not be checked. */
+.k-card-foreign {
+  font-size: 10px;
+}
+
+.k-card-foreign-called {
+  background: var(--q-negative);
+  color: white;
+  font-weight: 700;
+}
+
+.k-card-foreign-offered {
+  background: var(--q-warning);
+  color: black;
+}
+
+.k-card-foreign-unmeasured {
+  color: var(--q-grey-7, #616161);
 }
 </style>

@@ -145,6 +145,15 @@ export interface KanbanCard {
    * rows, and the browser must not invent either.
    */
   paused: boolean
+
+  /**
+   * What the platform found when it checked this card's runs for tools it did not give the
+   * member: `called` (a run CALLED one - an account connector, a home MCP server, a plugin),
+   * `offered` (a run was offered one and called none), `notMeasured` (a run's transcript could not
+   * say, so it is not reported clean), or null (every checked run was clean, or none was checked).
+   * The strongest mark so far; the server only ever raises it. Absent from an older server.
+   */
+  foreignTools?: 'called' | 'offered' | 'notMeasured' | null
 }
 
 /**
