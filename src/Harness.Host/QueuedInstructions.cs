@@ -18,8 +18,8 @@ public sealed record QueuedInstruction(
 /// WHAT IS WAITING FOR EACH MEMBER, read from the durable queue rather than the in-memory channel.
 ///
 /// A Manager that cannot see a member's queue re-sends what is already in it when the member's
-/// last hand-back is accepted - the b001h duplicate that cost a full member run and a Manager wake
-/// to repeat itself. `status` shows this list and `tell` names a queued match, so the Manager has
+/// last hand-back is accepted - a duplicate that costs a full member run and a Manager wake to
+/// repeat itself. `status` shows this list and `tell` names a queued match, so the Manager has
 /// what it needs not to do that.
 ///
 /// QUEUED MEANS ACCEPTED AND NOT STARTED: <see cref="PendingDelivery.Started"/> false. Every item

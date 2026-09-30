@@ -5552,9 +5552,9 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
         joins = found.CorrelationId;
     }
 
-    // A DUPLICATE IS NAMED, NOT HELD. The b001h Manager re-sent an instruction already queued to a
-    // busy member when its predecessor was accepted, and paid a member run and a Manager wake to
-    // hear it repeated. The reply names the queued seq so the sender learns that - but the row is
+    // A DUPLICATE IS NAMED, NOT HELD. A Manager that re-sends an instruction already queued to a
+    // busy member when its predecessor is accepted pays a member run and a Manager wake to hear it
+    // repeated. The reply names the queued seq so the sender learns that - but the row is
     // still appended below, because `tell` is never held: text that matches is not proof the sender
     // meant the same thing, and a refusal the sender misreads loses work silently.
     var duplicate = joins is { } correlation

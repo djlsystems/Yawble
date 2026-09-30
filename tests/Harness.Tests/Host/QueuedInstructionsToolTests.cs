@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests.Host;
 
 /// <summary>
-/// B001M §4-5: the Manager sees what is queued for each member, and a `tell` that repeats a queued
+/// The Manager sees what is queued for each member, and a `tell` that repeats a queued
 /// instruction says so - through the MCP tools a Manager actually calls.
 ///
 /// Each test has its own PAUSED team, so the pump offers nothing and a delivery stays exactly where
@@ -82,12 +82,12 @@ public sealed class QueuedInstructionsToolTests(HostFixture host) : IClassFixtur
         var member = await HireAsync(team, "Developer Ada");
         var id = new ContainerId(team, member);
 
-        var first = await TellAsync(manager, team, member, "Do card 2072: the notice.");
+        var first = await TellAsync(manager, team, member, "Build the notice: the folder link.");
         await host.Services.GetRequiredService<IPendingDeliveries>().AddAsync(id, first, Ct);
 
         // Same words, spaced and cased differently, in the same workflow.
         var reply = await manager.Tell(
-            member, "do card 2072:  the notice.", team: team, causation: first.ToString(), cancellationToken: Ct);
+            member, "build the notice:  the folder link.", team: team, causation: first.ToString(), cancellationToken: Ct);
 
         Assert.StartsWith("HTTP 200", reply);
         var body = Body(reply);
@@ -107,16 +107,16 @@ public sealed class QueuedInstructionsToolTests(HostFixture host) : IClassFixtur
         var member = await HireAsync(team, "Developer Ada");
         var id = new ContainerId(team, member);
 
-        var first = await TellAsync(manager, team, member, "Do card 2072.");
+        var first = await TellAsync(manager, team, member, "Build the notice.");
         await host.Services.GetRequiredService<IPendingDeliveries>().AddAsync(id, first, Ct);
 
         var different = Body(await manager.Tell(
-            member, "Do card 2074 after 2072.", team: team, causation: first.ToString(), cancellationToken: Ct));
+            member, "Build the settings page after the notice.", team: team, causation: first.ToString(), cancellationToken: Ct));
         Assert.Equal(JsonValueKind.Null, different.GetProperty("duplicateOf").ValueKind);
         Assert.Equal(JsonValueKind.Null, different.GetProperty("duplicateNotice").ValueKind);
 
         // No causation: a new workflow, where nothing of this one is queued.
-        var elsewhere = Body(await manager.Tell(member, "Do card 2072.", team: team, cancellationToken: Ct));
+        var elsewhere = Body(await manager.Tell(member, "Build the notice.", team: team, cancellationToken: Ct));
         Assert.Equal(JsonValueKind.Null, elsewhere.GetProperty("duplicateOf").ValueKind);
     }
 
@@ -128,16 +128,16 @@ public sealed class QueuedInstructionsToolTests(HostFixture host) : IClassFixtur
         var id = new ContainerId(team, member);
         var pending = host.Services.GetRequiredService<IPendingDeliveries>();
 
-        var first = await TellAsync(manager, team, member, "Do card 2072.");
+        var first = await TellAsync(manager, team, member, "Build the notice.");
         await pending.AddAsync(id, first, Ct);
         await pending.StartAsync(id, first, Ct);
 
         var reply = Body(await manager.Tell(
-            member, "Do card 2072.", team: team, causation: first.ToString(), cancellationToken: Ct));
+            member, "Build the notice.", team: team, causation: first.ToString(), cancellationToken: Ct));
         Assert.Equal(JsonValueKind.Null, reply.GetProperty("duplicateOf").ValueKind);
     }
 
-    /// <summary>The shared contract with the defer (card 2370): a pending row carrying
+    /// <summary>The shared contract with the defer: a pending row carrying
     /// <see cref="PendingDelivery.DeferredFromRun"/> is listed as deferred, naming the run.</summary>
     [Fact]
     public async Task A_delivery_deferred_from_a_run_is_listed_as_deferred()
@@ -232,7 +232,7 @@ public sealed class QueuedInstructionsToolTests(HostFixture host) : IClassFixtur
     }
 
     /// <summary>The durable queue with one row marked deferred, as the defer writes it: the store's
-    /// own persistence of the field is card 2370's.</summary>
+    /// own persistence of the field belongs to the defer itself.</summary>
     private sealed class DeferredOverlay(IPendingDeliveries inner, long deferredSeq, long fromRun) : IPendingDeliveries
     {
         public Task AddAsync(ContainerId subscriber, long seq, CancellationToken ct = default) => inner.AddAsync(subscriber, seq, ct);
@@ -250,7 +250,7 @@ public sealed class QueuedInstructionsToolTests(HostFixture host) : IClassFixtur
 }
 
 /// <summary>
-/// B001M: what the Manager and Member are TOLD about queued instructions and batched runs. The
+/// What the Manager and Member are TOLD about queued instructions and batched runs. The
 /// option to defer an item is named as the MCP tool that blocks one - never a shell verb, which
 /// <see cref="McpContractTests"/> holds for every skill and prompt.
 /// </summary>
