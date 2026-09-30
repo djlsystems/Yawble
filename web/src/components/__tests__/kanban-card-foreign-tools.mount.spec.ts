@@ -15,8 +15,8 @@ import type { KanbanCard as Card } from '../../api/kanban';
 
 function card(over: Partial<Card> = {}): Card {
   return {
-    id: '2373',
-    workflowSeq: 2352,
+    id: '4101',
+    workflowSeq: 4100,
     team: 'alpha',
     member: 'DeveloperIlse',
     item: 51,
