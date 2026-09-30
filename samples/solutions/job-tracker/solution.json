@@ -88,6 +88,16 @@
 
   "sites": ["tracker"],
 
+  "panel": {
+    "primarySite": "tracker",
+    "outputs": ["Drafts"],
+    "settings": [
+      { "member": "Scout", "setting": "keywords" },
+      { "member": "Scout", "setting": "sources" }
+    ],
+    "status": "{data.jobs.count status=new} new jobs · last checked {lastRun.at}"
+  },
+
   "inputs": {
     "settings": [
       {

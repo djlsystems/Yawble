@@ -598,6 +598,19 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<TriggerSweep>());
 });
 
+// THE SOLUTIONS LAUNCHER AND A SOLUTION'S CONTROL PANEL: reads only; every control is an existing route.
+builder.Services.AddSingleton(sp => new SolutionPanels(
+    sp.GetRequiredService<ITeamSolutionStore>(),
+    sp.GetRequiredService<SolutionInstaller>(),
+    sp.GetRequiredService<TeamRegistry>(),
+    sp.GetRequiredService<ContainerHost>(),
+    sp.GetRequiredService<ITriggerStore>(),
+    sp.GetRequiredService<TriggerCost>(),
+    sp.GetRequiredService<IMessageLog>(),
+    sp.GetRequiredService<SiteService>(),
+    sp.GetRequiredService<TeamDocuments>(),
+    pluginCatalog));
+
 // The board's notice for a package a workflow wrote, checked through that one door when the
 // workflow is declared complete.
 builder.Services.AddSingleton(sp => new SolutionNotice(

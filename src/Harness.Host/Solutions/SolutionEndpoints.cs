@@ -52,14 +52,20 @@ public static class SolutionEndpoints
                 + "outside the instance's documents and every team's folder. A person and the Concierge "
                 + "only; a member is refused with 403.");
 
-        app.MapGet("/api/solutions/installed", async (SolutionInstaller installer, CancellationToken ct) =>
-            Results.Ok(await installer.InstalledAsync(ct)))
+        app.MapGet("/api/solutions/installed", async (SolutionPanels panels, CancellationToken ct) =>
+            Results.Ok(await panels.TilesAsync(ct)))
             .WithTags(Area)
             .HumansOnly()
-            .WithSummary("Every team installed from a solution package")
+            .WithSummary("Every team installed from a solution package: the Solutions launcher")
             .WithDescription(
-                "200 `[{ team, teamName, id, name, version, installedAt, updatedAt, installedBy, plugins }]`: "
-                + "each team's package id and version, which the install wizard offers to update.");
+                "200 `[{ team, teamName, id, name, version, installedAt, updatedAt, installedBy, plugins, folder, "
+                + "primarySite, status, state, paused }]`, by team name: each team's package id and version, "
+                + "which the install wizard offers to update, and its launcher tile. `primarySite` is "
+                + "`{ name, url, published }` for the package's `panel.primarySite`, or null. `status` is the "
+                + "package's `panel.status` filled in - plain text, never markup - or, without one, the last "
+                + "run and the state. `state` is `{ kind, reason }`: `paused`, `blocked` (naming what the team "
+                + "waits for), `running`, `capped` (a trigger reached its daily cap today, measured spend "
+                + "only) or `idle`, the first that holds.");
 
         app.MapPost("/api/solutions/preview", async (SolutionPreviewRequest request, SolutionInstaller installer, CancellationToken ct) =>
             Answer(await installer.PreviewAsync(request.Folder, request.Team, ct)))
@@ -129,6 +135,46 @@ public static class SolutionEndpoints
                 + "missing: [{ kind, name, member, description }] }`. A team with anything `missing` is "
                 + "blocked on it: a required document folder with no file in it, or a required connection "
                 + "slot with none bound. 404 for a team not installed from a package, or no such team.");
+
+        app.MapGet("/api/teams/{team}/solution/panel", async (
+            [Description(Describe.Team)] string team, SolutionPanels panels, CancellationToken ct) =>
+            await panels.PanelAsync(team, ct) is { } panel
+                ? Results.Ok(panel)
+                : Results.NotFound(new { error = $"'{team}' was not installed from a solution package." }))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("A solution's control panel: its status, controls, results and maintenance")
+            .WithDescription(
+                "Writes nothing. 200 with the launcher tile's fields and `description`, `members` (each "
+                + "`{ packageName, member, kind, role, state, blocked, failed, needsDecision, queueDepth, "
+                + "lastRun }`), `triggers` (each the Triggers dialog's own view - `spentToday` is measured "
+                + "billable tokens with `measuredRuns` and `unmeasuredRuns`, never estimated - plus "
+                + "`packageName`, `packageKind` and `runNow`), `blocked` (each `{ kind, name, member, "
+                + "packageMember, description, reason, fix }`, `fix` an `upload` folder or a `connection` "
+                + "member and slot), `settings` (the package's `panel.settings`, first in the panel), "
+                + "`outputs` (each `panel.outputs` folder's files newest first, with a `download` link) and "
+                + "`recentRuns`. Every control on the panel is an existing route: pause and resume, Run "
+                + "now, a trigger's PATCH, plugin settings, the documents upload and the wizard's update. "
+                + "Package text is text: render it as text, never HTML. 404 for a team not installed from "
+                + "a package, or no such team.");
+
+        app.MapPost("/api/teams/{team}/solution/uninstall", async (
+            [Description(Describe.Team)] string team, SolutionUninstallBody? request, SolutionInstaller installer,
+            PluginRemover remover, HttpContext context, CancellationToken ct) =>
+            Answer(await installer.UninstallAsync(team, request?.RemovePlugins ?? false, ActorOf(context), remover, ct)))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Uninstall the solution a team was installed from")
+            .WithDescription(
+                "Body `{ removePlugins?: false }`. Removes the team's triggers, members (the Manager stays, "
+                + "with the package's instructions cleared), team skills, sites with their data, and tools "
+                + "folder, and forgets the package (`solution.uninstalled`). KEEPS the team and its "
+                + "documents. With `removePlugins: true`, each of the package's plugins is removed when no "
+                + "other team has a member on it. 200 `{ ok, team, teamName, id, version, removed: { "
+                + "triggers, members, skills, sites, tools }, plugins: { removed, kept: [{ id, usedBy }] }, "
+                + "documentsKept, failures }`; `ok` is false when something could not be removed, each named "
+                + "in `failures`. Asking first is the caller's: this acts when called. 404 for a team not "
+                + "installed from a package. A person only.");
     }
 
     private static IResult Answer(SolutionOutcome outcome) => Results.Json(outcome.Body, statusCode: outcome.Status);
@@ -183,3 +229,8 @@ public sealed record SolutionUpdateBody(
     Dictionary<string, Dictionary<string, JsonElement>>? Settings = null,
     [property: Description("Package member name to slot to connection id, for members the update adds.")]
     Dictionary<string, Dictionary<string, string>>? Connections = null);
+
+/// <summary>Body of <c>POST /api/teams/{team}/solution/uninstall</c>.</summary>
+public sealed record SolutionUninstallBody(
+    [property: Description("True to remove each of the package's plugins that no other team has a member on. Defaults to false.")]
+    bool? RemovePlugins = null);

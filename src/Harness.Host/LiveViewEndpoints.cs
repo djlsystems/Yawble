@@ -268,7 +268,7 @@ public static class LiveViewEndpoints
     }
 
     /// <summary>How a run ended, in the words the dialog shows: a failure, then a block, then a hand-back.</summary>
-    private static string Outcome(RunRow run)
+    internal static string Outcome(RunRow run)
     {
         if (run.Terminal.Type == MessageTypes.Failed) return "failed";
         if (run.Blocked) return "blocked";
@@ -294,13 +294,13 @@ public static class LiveViewEndpoints
         Results.NotFound(new { error = $"No member '{member}' in team '{team}'." });
 
     /// <summary>What a run reported: a launch error first, as the failure row's own text reads it, then its output.</summary>
-    private static string? RunOutput(string payload)
+    internal static string? RunOutput(string payload)
     {
         using var document = JsonDocument.Parse(payload);
         return FailurePayloadText.FirstNonEmpty(document.RootElement, PayloadFields.LaunchError, PayloadFields.Output);
     }
 
-    private static string? Field(string payload, string name)
+    internal static string? Field(string payload, string name)
     {
         using var document = JsonDocument.Parse(payload);
         return document.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
