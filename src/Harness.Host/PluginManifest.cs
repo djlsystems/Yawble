@@ -194,9 +194,45 @@ public sealed record PluginManifest(
                         return (null, $"`secrets.{secret.Name}` carries a value. A manifest names a secret; the value is set with `secret set` and bound by a logical key.");
                     }
 
+                    // WHEN IT IS NEEDED, optionally: only while a list or choice setting holds one value
+                    // (`"when": {"sources": "adzuna"}`), so an install can say a secret for a source the
+                    // person left off is not needed.
+                    PluginSecretWhen? when = null;
+
+                    if (secret.Value.TryGetProperty("when", out var whenElement) && whenElement.ValueKind != JsonValueKind.Null)
+                    {
+                        var at = $"`secrets.{secret.Name}.when`";
+                        if (whenElement.ValueKind != JsonValueKind.Object || whenElement.EnumerateObject().Count() != 1)
+                        {
+                            return (null, $"{at} must name one setting and one value, as in {{\"sources\": \"adzuna\"}}.");
+                        }
+
+                        var condition = whenElement.EnumerateObject().Single();
+
+                        if (!config.TryGetValue(condition.Name, out var setting))
+                        {
+                            return (null, $"{at} names '{condition.Name}', which is not a `config` field of this plugin.");
+                        }
+
+                        if (condition.Value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(condition.Value.GetString()))
+                        {
+                            return (null, $"`secrets.{secret.Name}.when.{condition.Name}` must be one of the setting's values, as a string.");
+                        }
+
+                        if (setting.Enum is { } choices && !choices.Contains(condition.Value.GetString()!, StringComparer.Ordinal))
+                        {
+                            return (null, $"`secrets.{secret.Name}.when.{condition.Name}` must be one of: {string.Join(", ", choices)}.");
+                        }
+
+                        when = new PluginSecretWhen(condition.Name, condition.Value.GetString()!);
+                    }
+
                     secrets[secret.Name] = new PluginSecret(
                         Text(secret.Value, "description") ?? "",
-                        secret.Value.TryGetProperty("required", out var required) && required.ValueKind == JsonValueKind.True);
+                        secret.Value.TryGetProperty("required", out var required) && required.ValueKind == JsonValueKind.True)
+                    {
+                        When = when,
+                    };
                 }
             }
 
@@ -509,7 +545,25 @@ public sealed record PluginConfigField(
 }
 
 /// <summary>A secret the plugin needs, by name. The manifest never holds its value.</summary>
-public sealed record PluginSecret(string Description, bool Required);
+public sealed record PluginSecret(string Description, bool Required)
+{
+    /// <summary>Needed only while this setting holds this value; null when always needed.</summary>
+    public PluginSecretWhen? When { get; init; }
+}
+
+/// <summary>
+/// A secret needed only while <paramref name="Setting"/> holds <paramref name="Value"/>: equals it,
+/// or for a list, contains it.
+/// </summary>
+public sealed record PluginSecretWhen(string Setting, string Value)
+{
+    public bool HoldsIn(JsonElement? current) => current switch
+    {
+        { ValueKind: JsonValueKind.String } text => text.GetString() == Value,
+        { ValueKind: JsonValueKind.Array } list => list.EnumerateArray().Any(v => v.ValueKind == JsonValueKind.String && v.GetString() == Value),
+        _ => false,
+    };
+}
 
 /// <summary>An event the plugin declares it may publish, as a suffix of <c>plugin.&lt;id&gt;.</c>:
 /// the only suffixes a <c>publish</c> record may name.</summary>

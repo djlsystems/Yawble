@@ -435,6 +435,16 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
                 }
             }
 
+            foreach (var name in member.Secrets.Keys)
+            {
+                if (!plugin.Manifest.Secrets.ContainsKey(name))
+                {
+                    var field = $"{at}.secrets.{name}";
+                    var known = plugin.Manifest.Secrets.Count == 0 ? "it declares none" : "it declares " + string.Join(", ", plugin.Manifest.Secrets.Keys);
+                    refusals.Add(new(SolutionManifest.FileName, field, $"`{field}`: plugin {plugin.Id} declares no secret '{name}' in its manifest; {known}."));
+                }
+            }
+
             foreach (var (name, config) in plugin.Manifest.Config)
             {
                 // AN ABSENCE IS JUDGED ON A WHOLE FILE ONLY: an input refused above may be the one

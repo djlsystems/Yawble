@@ -276,9 +276,11 @@ public sealed record SolutionManifest(
                     }
                 }
 
+                var secrets = ReadSecrets(read, item, at);
+
                 if (name is not null && pluginId is not null)
                 {
-                    members.Add(new SolutionMember(name, MemberRef.PluginKind, RoleMember, null, "", pluginId, settings));
+                    members.Add(new SolutionMember(name, MemberRef.PluginKind, RoleMember, null, "", pluginId, settings) { Secrets = secrets });
                     read.Placed("members", index - 1);
                 }
 
@@ -293,6 +295,11 @@ public sealed record SolutionManifest(
             if (item.TryGetProperty("settings", out var agentSettings) && agentSettings.ValueKind != JsonValueKind.Null)
             {
                 read.Refuse($"{at}.settings", $"`{at}.settings` belongs to a plugin member; an agent member takes instructions.");
+            }
+
+            if (item.TryGetProperty("secrets", out var agentSecrets) && agentSecrets.ValueKind != JsonValueKind.Null)
+            {
+                read.Refuse($"{at}.secrets", $"`{at}.secrets` belongs to a plugin member; an agent member binds no secrets.");
             }
 
             var role = (read.Optional(item, "role", $"{at}.role") ?? RoleMember).ToLowerInvariant();
@@ -727,6 +734,68 @@ public sealed record SolutionManifest(
         return null;
     }
 
+    /// <summary>
+    /// A plugin member's <c>secrets</c>: each field of its plugin's manifest <c>secrets</c> bound to a
+    /// LOGICAL KEY, never a value. A refusal names the file and the field and NEVER REPEATS THE
+    /// ENTRY: what was written there may be the credential itself.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> ReadSecrets(Reader read, JsonElement item, string at)
+    {
+        var secrets = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        if (!item.TryGetProperty("secrets", out var element) || element.ValueKind == JsonValueKind.Null) return secrets;
+
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            read.Refuse($"{at}.secrets", $"`{at}.secrets` must be an object of the plugin's secret field to a key name, as in {{\"apiKey\": \"ACME_API_KEY\"}}.");
+            return secrets;
+        }
+
+        foreach (var entry in element.EnumerateObject())
+        {
+            var field = $"{at}.secrets.{entry.Name}";
+
+            if (entry.Value.ValueKind != JsonValueKind.String || LooksLikeValue(entry.Value.GetString()!))
+            {
+                read.Refuse(field, $"`{field}` looks like a secret's value. A package names a key, never a value: bind it to a key name such as ACME_API_KEY, and set the value on the Host with `yawble secret set`.");
+                continue;
+            }
+
+            var key = entry.Value.GetString()!;
+
+            if (EnvironmentSecretStore.Refusal(key) is not null)
+            {
+                read.Refuse(field, IsEnvironmentName(key)
+                    ? $"`{field}` names a key the platform keeps for itself (its own HARNESS_ variables and model providers' credentials); bind another key name."
+                    : $"`{field}` is not a legal environment variable name: use upper-case letters, digits and underscores, starting with a letter, as in ACME_API_KEY.");
+                continue;
+            }
+
+            secrets[entry.Name] = key;
+        }
+
+        return secrets;
+    }
+
+    private static bool IsEnvironmentName(string key) =>
+        key.Length is > 0 and <= 128
+        && (char.IsAsciiLetterUpper(key[0]) || key[0] == '_')
+        && key.All(c => char.IsAsciiLetterUpper(c) || char.IsAsciiDigit(c) || c == '_');
+
+    /// <summary>
+    /// Whether a secrets entry reads as a credential rather than a key name: a known credential
+    /// prefix, a PEM block, or a long run of letters and digits with no underscore to separate words
+    /// (<c>AKIA...</c>, a hex or base64 token). A key name reads as words: <c>ADZUNA_APP_KEY</c>.
+    /// </summary>
+    public static bool LooksLikeValue(string entry)
+    {
+        string[] prefixes = ["sk-", "sk_", "pk_", "rk_", "ghp_", "gho_", "ghs_", "ghu_", "github_pat_", "glpat-", "xox", "AKIA", "ASIA", "AIza", "eyJ", "-----BEGIN"];
+
+        if (prefixes.Any(p => entry.StartsWith(p, StringComparison.Ordinal))) return true;
+
+        return entry.Length >= 16 && !entry.Contains('_') && entry.Any(char.IsAsciiDigit) && entry.Any(char.IsAsciiLetter);
+    }
+
     /// <summary>The index in a field such as <c>inputs.settings[3]</c>.</summary>
     private static int Position(string at) =>
         int.Parse(at[(at.LastIndexOf('[') + 1)..^1], System.Globalization.CultureInfo.InvariantCulture);
@@ -823,7 +892,12 @@ public sealed record SolutionMember(
     string? Preset,
     string Instructions,
     string? PluginId,
-    IReadOnlyDictionary<string, JsonElement> Settings);
+    IReadOnlyDictionary<string, JsonElement> Settings)
+{
+    /// <summary>A plugin member's secret bindings: its plugin's secret field to a LOGICAL KEY, never a
+    /// value. The install binds them as a person's binding in the member's settings would.</summary>
+    public IReadOnlyDictionary<string, string> Secrets { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+}
 
 /// <summary>
 /// One trigger. <paramref name="Kind"/> is <c>schedule</c>, <c>event</c> or <c>folder</c>, and

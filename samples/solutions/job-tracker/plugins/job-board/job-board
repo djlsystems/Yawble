@@ -26,6 +26,15 @@ def main():
     sources = config.get("sources") or []
     workspace = request.get("workingDirectory") or "."
 
+    # THE REAL BOARDS: this stand-in never calls them. It says which ticked board has its keys and
+    # which does not - the secrets arrive on stdin, by field name, only when the Host has them set.
+    secrets = request.get("secrets") or {}
+    needs = {"adzuna": ["adzunaAppId", "adzunaAppKey"], "usajobs": ["usajobsApiKey", "usajobsUserAgent"],
+             "themuse": ["themuseApiKey"]}
+    unset = [board for board in sources if board in needs and not all(secrets.get(f) for f in needs[board])]
+    if unset:
+        emit({"t": "progress", "status": "Not read, their keys are not set on the Host: " + ", ".join(unset)})
+
     if "sample" not in sources:
         emit({"t": "result", "ok": True, "quiet": True,
               "output": "No board is allowed yet: a person ticks the sources this member may read."})

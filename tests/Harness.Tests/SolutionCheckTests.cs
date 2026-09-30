@@ -106,7 +106,7 @@ public sealed class SolutionCheckTests : IDisposable
         Assert.Equal(("Resume", true), (document.Folder, document.Required));
         var setting = Assert.Single(plan.PersonSettings);
         Assert.Equal(("Scout", "sources", "list", false), (setting.Member, setting.Setting, setting.Type, setting.Required));
-        Assert.Equal(["sample"], setting.Choices!);
+        Assert.Equal(["sample", "adzuna", "usajobs", "themuse"], setting.Choices!);
         Assert.Empty(plan.Ignored);
 
         Assert.Equal(folder, check.Package!.Folder);
@@ -319,6 +319,118 @@ public sealed class SolutionCheckTests : IDisposable
         SolutionSamples.Edit(folder, m => m[key] = new JsonArray(name));
 
         Assert.Contains("is a path", Refused(Check(folder), "solution.json", $"{key}[0]").Reason);
+    }
+
+    // ---- Secrets: key names, never values ------------------------------------------------------
+
+    [Fact]
+    public void A_valid_secrets_block_passes_and_the_plan_names_each_key_and_what_it_is_for()
+    {
+        var check = Check(Sample());
+
+        Assert.True(check.Ok, string.Join("\n", check.Refusals));
+        Assert.Equal(
+            [
+                ("Scout", "adzunaAppId", "ADZUNA_APP_ID", "adzuna"),
+                ("Scout", "adzunaAppKey", "ADZUNA_APP_KEY", "adzuna"),
+                ("Scout", "usajobsApiKey", "USAJOBS_API_KEY", "usajobs"),
+                ("Scout", "usajobsUserAgent", "USAJOBS_USER_AGENT", "usajobs"),
+                ("Scout", "themuseApiKey", "THEMUSE_API_KEY", "themuse"),
+            ],
+            check.Plan!.Secrets.Select(s => (s.Member, s.Field, s.Key, s.When!.Value)));
+        Assert.All(check.Plan.Secrets, s => Assert.Equal("sources", s.When!.Setting));
+        Assert.Contains("developer.adzuna.com", check.Plan.Secrets[0].Description);
+    }
+
+    [Fact]
+    public void A_secret_field_the_plugin_manifest_does_not_declare_is_refused_naming_file_and_field()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["members"]![1]!["secrets"]!["linkedinToken"] = "LINKEDIN_TOKEN");
+
+        var refusal = Refused(Check(folder), "solution.json", "members[1].secrets.linkedinToken");
+        Assert.Contains("declares no secret 'linkedinToken'", refusal.Reason);
+        Assert.Contains("adzunaAppId", refusal.Reason);
+    }
+
+    [Theory]
+    [InlineData("adzuna_app_id")]
+    [InlineData("1ADZUNA")]
+    [InlineData("ADZUNA APP ID")]
+    [InlineData("HARNESS_KEY")]
+    [InlineData("ANTHROPIC_API_KEY")]
+    public void A_secret_key_that_is_not_a_legal_environment_variable_name_is_refused_naming_file_and_field(string key)
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["members"]![1]!["secrets"]!["adzunaAppId"] = key);
+
+        var refusal = Refused(Check(folder), "solution.json", "members[1].secrets.adzunaAppId");
+        Assert.Matches("not a legal environment variable name|keeps for itself", refusal.Reason);
+        Assert.DoesNotContain(key, refusal.Reason);
+    }
+
+    public static TheoryData<string> ValueLooking => new()
+    {
+        "sk-ant-api03-Zx9Qw7Lm2Np4Rt6Vy8Bc0Df",
+        "AKIAIOSFODNN7EXAMPLE",
+        "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+        "eyJhbGciOiJIUzI1NiJ9.e30.ZRrHA1JJJW8opsbCGfG_HACGpVUMN_a9IV7pAx_Zmeo",
+        "{\"value\": \"hunter2hunter2\"}",
+    };
+
+    [Theory]
+    [MemberData(nameof(ValueLooking))]
+    public void A_value_looking_secret_entry_is_refused_naming_file_and_field_and_never_repeated(string entry)
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["members"]![1]!["secrets"]!["adzunaAppKey"] =
+            entry.StartsWith('{') ? JsonNode.Parse(entry) : JsonValue.Create(entry));
+
+        var check = Check(folder);
+        var refusal = Refused(check, "solution.json", "members[1].secrets.adzunaAppKey");
+        Assert.Contains("looks like a secret's value", refusal.Reason);
+
+        // WHAT WAS WRITTEN THERE MAY BE THE CREDENTIAL: no refusal, and nothing the route answers, repeats it.
+        var body = JsonSerializer.Serialize(SolutionEndpoints.Body(check), JsonSerializerOptions.Web);
+        Assert.DoesNotContain(entry.StartsWith('{') ? "hunter2hunter2" : entry, body);
+    }
+
+    [Fact]
+    public void Every_secrets_refusal_is_named_at_once()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m =>
+        {
+            var secrets = m["members"]![1]!["secrets"]!;
+            secrets["linkedinToken"] = "LINKEDIN_TOKEN";
+            secrets["adzunaAppId"] = "adzuna-app-id";
+            secrets["adzunaAppKey"] = "AKIAIOSFODNN7EXAMPLE";
+        });
+
+        var fields = Check(folder).Refusals.Where(r => r.File == "solution.json").Select(r => r.Field).Order(StringComparer.Ordinal).ToList();
+
+        Assert.Equal(["members[1].secrets.adzunaAppId", "members[1].secrets.adzunaAppKey", "members[1].secrets.linkedinToken"], fields);
+    }
+
+    [Theory]
+    [InlineData("keywordz", "adzuna", "secrets.adzunaAppId.when", "not a `config` field")]
+    [InlineData("sources", "linkedin", "secrets.adzunaAppId.when.sources", "must be one of: sample, adzuna, usajobs, themuse")]
+    public void A_manifest_secret_needed_when_an_unknown_setting_or_value_is_refused(string setting, string value, string field, string says)
+    {
+        var folder = Sample();
+        SolutionSamples.EditJson(Path.Combine(folder, "plugins", "job-board", "plugin.json"),
+            p => p["secrets"]!["adzunaAppId"]!["when"] = new JsonObject { [setting] = value });
+
+        Assert.Contains(says, Refused(Check(folder), "plugins/job-board/plugin.json", field).Reason);
+    }
+
+    [Fact]
+    public void An_agent_member_naming_secrets_is_refused()
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["members"]![2]!["secrets"] = new JsonObject { ["x"] = "X_KEY" });
+
+        Assert.Contains("belongs to a plugin member", Refused(Check(folder), "solution.json", "members[2].secrets").Reason);
     }
 
     // ---- Malformed or missing, one row per case ---------------------------------------------

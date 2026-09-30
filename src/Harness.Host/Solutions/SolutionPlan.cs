@@ -22,6 +22,10 @@ public sealed record SolutionPlan(
     IReadOnlyList<SolutionPlanSetting> PersonSettings,
     IReadOnlyList<string> Ignored)
 {
+    /// <summary>Every secret a plugin member binds, by KEY NAME - never a value. Whether the Host
+    /// has each set is the Host's, not the package's: the preview and the result add it.</summary>
+    public IReadOnlyList<SolutionPlanSecret> Secrets { get; init; } = [];
+
     /// <summary>Where an install copies <c>tools/</c>, as <c>{solution}</c> names it: under the
     /// team's folder, <c>&lt;teams root&gt;/&lt;team&gt;/solution</c>.</summary>
     public const string InstalledToolsFolder = "solution";
@@ -54,7 +58,16 @@ public sealed record SolutionPlan(
                 var field = package.Plugin(manifest.Member(input.Member)?.PluginId)?.Manifest.Config.GetValueOrDefault(input.Setting);
                 return new SolutionPlanSetting(input.Member, input.Setting, input.Description, input.Required, field?.Type, field?.Default, field?.Enum);
             })],
-            manifest.Ignored);
+            manifest.Ignored)
+        {
+            Secrets = [.. manifest.Members.SelectMany(m => m.Secrets.Select(binding =>
+            {
+                var declared = package.Plugin(m.PluginId)?.Manifest.Secrets.GetValueOrDefault(binding.Key);
+                return new SolutionPlanSecret(
+                    m.Name, binding.Key, binding.Value, declared?.Description ?? "", declared?.Required ?? false,
+                    declared?.When is { } when ? new SolutionPlanSecretWhen(when.Setting, when.Value) : null);
+            }))],
+        };
     }
 }
 
@@ -86,3 +99,14 @@ public sealed record SolutionPlanTools(string Folder, string InstalledAs, IReadO
 /// <summary>A person-only setting the install asks for, with what its manifest says of it.</summary>
 public sealed record SolutionPlanSetting(
     string Member, string Setting, string Description, bool Required, string? Type, JsonElement? Default, IReadOnlyList<string>? Choices);
+
+/// <summary>
+/// A secret a plugin member binds: the member (the package's name), the plugin's secret
+/// <paramref name="Field"/>, the logical <paramref name="Key"/> it is bound to, and what the
+/// manifest says of it. <paramref name="When"/> is the setting and value it is needed for, or null
+/// when always needed.
+/// </summary>
+public sealed record SolutionPlanSecret(
+    string Member, string Field, string Key, string Description, bool Required, SolutionPlanSecretWhen? When);
+
+public sealed record SolutionPlanSecretWhen(string Setting, string Value);
