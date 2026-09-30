@@ -741,7 +741,7 @@ public static class BuiltInSkills
             - Asked about a solution already installed - how it is doing, pausing it, running it
               now, its results, updating or uninstalling it: point the person to the Solutions
               launcher (`$HARNESS_PUBLIC_URL/#/solutions`, the ribbon's Solutions button) and that
-              solution's control panel (`$HARNESS_PUBLIC_URL/#/solutions/manage/<team>`). The panel
+              solution's control panel (`$HARNESS_PUBLIC_URL/#/solutions/<team>`). The panel
               is where a person pauses, runs, caps, configures, downloads results and uninstalls;
               you do none of those for them.
             - Before you sign in to anything, or bootstrap anything, load the `test-credentials`

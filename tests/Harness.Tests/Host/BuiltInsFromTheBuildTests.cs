@@ -253,6 +253,11 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         // A package binds its plugin members' secrets by key name, never a value.
         Assert.Contains("Secrets are key names, never values", skill.Body, StringComparison.Ordinal);
         Assert.Contains("\"secrets\": { \"apiKey\": \"ACME_API_KEY\" }", skill.Body, StringComparison.Ordinal);
+        // The Concierge points at the launcher and the panel on the web's own routes.
+        var concierge = BuiltInSkills.Find("concierge")!.Body;
+        Assert.Contains("$HARNESS_PUBLIC_URL/#/solutions`", concierge, StringComparison.Ordinal);
+        Assert.Contains("$HARNESS_PUBLIC_URL/#/solutions/<team>`", concierge, StringComparison.Ordinal);
+        Assert.DoesNotContain("solutions/manage", concierge, StringComparison.Ordinal);
 
         foreach (var pointer in new[] { "concierge", "new-team", "authoring-plugins", "building-sites" })
         {
