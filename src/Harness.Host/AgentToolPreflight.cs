@@ -180,7 +180,7 @@ public sealed class AgentToolPreflight(
             var allowance = AgentIsolationPolicy.For(definition)!;
             CliListing? listing = null;
 
-            if (allowance.State != IsolationState.NotAModel)
+            if (launch.LanguageModel && allowance.State != IsolationState.NotAModel)
             {
                 var (arguments, environment) = LaunchShape(definition);
                 var key = string.Join('\u0001', [launch.FileName, .. arguments, .. environment.Select(e => e.Key + "=" + e.Value)]);
@@ -244,7 +244,8 @@ public sealed class AgentToolPreflight(
             ? [.. loaded.Where(i => ListedKinds.OffersTools(i.Kind) && !allowance.Allows(i.Name, i.Name))]
             : [];
 
-        var verdict = allowance.State switch
+        // A program with no model (an interactive `shell` as much as a headless `cat`) has no tools to list.
+        var verdict = definition.Launch is { LanguageModel: false } ? ToolVerdicts.NotAModel : allowance.State switch
         {
             IsolationState.NotAModel => ToolVerdicts.NotAModel,
             IsolationState.Concierge => ToolVerdicts.Concierge,

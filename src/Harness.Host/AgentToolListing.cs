@@ -120,6 +120,9 @@ public sealed class CliListingRunner(AgentLaunchUser? runAs = null) : IListingRu
             foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
             foreach (var (name, value) in environment) process.StartInfo.Environment[name] = value;
 
+            // Every provider key but this CLI's own taken out, as at a member's spawn.
+            AgentEnvironment.ScopeProviderKeys(process.StartInfo.Environment, command, environment);
+
             if (!process.Start()) return new ListingRun(null, "", "It could not be started.");
             process.StandardInput.Close();
 

@@ -211,7 +211,11 @@ public sealed class AgentToolPreflightTests
         var clis = new RecordedClis();
         var script = new AgentDefinition("script", AgentMode.Headless, new AgentLaunch("cat", [], LanguageModel: false));
 
-        Assert.Equal(ToolVerdicts.NotAModel, Named(await Reports([script], clis), "script").Verdict);
+        var shell = new AgentDefinition("shell", AgentMode.Interactive, new AgentLaunch("bash", [], LanguageModel: false));
+
+        var reports = await Reports([script, shell], clis);
+        Assert.Equal(ToolVerdicts.NotAModel, Named(reports, "script").Verdict);
+        Assert.Equal(ToolVerdicts.NotAModel, Named(reports, "shell").Verdict);
         Assert.Empty(clis.Calls);
     }
 
