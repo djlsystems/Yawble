@@ -283,7 +283,7 @@ installs, and person-only settings stay person-only):
 
 | Route | |
 |---|---|
-| `POST /api/solutions/preview` `{ folder, team? }` | What installing would do, writing nothing: `mode: install` with the team name and why it cannot be used, or `mode: update` with `from`, `to` and the diff. Both carry `secrets`: `{ member, field, key, description, required, when, set, needed, setWith }` per binding - `needed` is null while it waits on the person's answer to `when`'s setting. |
+| `POST /api/solutions/preview` `{ folder, team? }` | What installing would do, writing nothing: `mode: install` with the team name and why it cannot be used, or `mode: update` with `from`, `to` and the diff. Both carry `secrets`: `{ member, field, key, description, required, when, set, needed, setWith }` per binding - `needed` is null while it waits on the person's answer to `when`'s setting, and `setWith` names the operator CLI's `secret set <KEY>` and `up` (the wizard and the CLI print the full commands). |
 | `POST /api/solutions/install` `{ folder, teamName?, agent?, localRepository?, settings?, connections? }` | The install. `{ ok: true, team, missing, steps, secrets, unset }` (`unset`: the keys bound, needed and not set on the Host), or `{ ok: false, step, stepNumber, title, reason, undone }`. 409 for a taken name. |
 | `POST /api/solutions/update` `{ folder, team, settings?, connections? }` | The update, with `from` and `diff`. |
 | `GET /api/solutions/installed` | Every team installed from a package, with its id and version. |

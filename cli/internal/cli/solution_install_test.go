@@ -596,7 +596,7 @@ func secretRows(needed map[string]any) []any {
 		return map[string]any{
 			"member": "Scout", "field": field, "key": key, "description": description, "required": false,
 			"when": when, "set": set, "needed": needed[key],
-			"setWith": "yawble secret set " + key + " (it prompts for the value), then yawble up to restart the Host",
+			"setWith": "the operator CLI's `secret set " + key + "` (it prompts for the value), then its `up` to restart the Host",
 		}
 	}
 	return []any{

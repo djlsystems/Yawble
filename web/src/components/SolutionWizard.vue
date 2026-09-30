@@ -38,6 +38,7 @@ import {
   refusalLine,
   removedItems,
   secretNeeded,
+  secretSetWith,
   secretSentence,
   secretState,
   settingInputKind,
@@ -412,7 +413,7 @@ const unsetSecrets = computed(() => {
   const done = succeeded.value;
   if (!done) return [];
   const unset = done.unset ?? [];
-  return unset.map((key) => done.secrets?.find((secret) => secret.key === key) ?? { key, setWith: `yawble secret set ${key}` });
+  return unset.map((key) => ({ key, setWith: secretSetWith(key) }));
 });
 const failedStep = computed(() => (result.value && !result.value.ok && 'step' in result.value ? result.value : null));
 const failedCheck = computed(() => (result.value && !result.value.ok && 'refusals' in result.value ? result.value : null));

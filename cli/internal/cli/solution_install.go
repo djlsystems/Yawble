@@ -209,6 +209,12 @@ func (r secretRow) needed(value any) bool {
 	return false
 }
 
+// secretSetWith is the exact way to set key: this CLI prompts for the value, and the Host reads it
+// when it restarts.
+func secretSetWith(key string) string {
+	return "yawble secret set " + key + " (it prompts for the value), then yawble up to restart the Host"
+}
+
 // renderSecrets prints each secret by key name: set, not set (its source fails until it is, and
 // how to set it), or not needed for a setting left off. valueOf answers the chosen setting.
 func renderSecrets(out io.Writer, rows []secretRow, valueOf func(member, setting string) any) {
@@ -227,7 +233,7 @@ func renderSecrets(out io.Writer, rows []secretRow, valueOf func(member, setting
 		case r.Set:
 			fmt.Fprintf(out, "  %s (%s): set on this Host.\n", r.Key, r.Member)
 		default:
-			fmt.Fprintf(out, "  %s (%s): not set - its source fails until it is set. Set it with: %s.\n", r.Key, r.Member, r.SetWith)
+			fmt.Fprintf(out, "  %s (%s): not set - its source fails until it is set. Set it with: %s.\n", r.Key, r.Member, secretSetWith(r.Key))
 		}
 		if r.Description != "" {
 			fmt.Fprintf(out, "      %s\n", r.Description)
@@ -912,13 +918,7 @@ func (in *solutionInstall) result(p previewBody, status int, raw json.RawMessage
 	if len(b.Unset) > 0 {
 		fmt.Fprintln(in.out, "\nThese keys are still not set on the Host. Each one's source fails until it is set:")
 		for _, key := range b.Unset {
-			setWith := "yawble secret set " + key
-			for _, r := range b.Secrets {
-				if r.Key == key {
-					setWith = r.SetWith
-				}
-			}
-			fmt.Fprintf(in.out, "  %s - %s\n", key, setWith)
+			fmt.Fprintf(in.out, "  %s - %s\n", key, secretSetWith(key))
 		}
 	}
 	return nil

@@ -757,7 +757,7 @@ public sealed record SolutionManifest(
 
             if (entry.Value.ValueKind != JsonValueKind.String || LooksLikeValue(entry.Value.GetString()!))
             {
-                read.Refuse(field, $"`{field}` looks like a secret's value. A package names a key, never a value: bind it to a key name such as ACME_API_KEY, and set the value on the Host with `yawble secret set`.");
+                read.Refuse(field, $"`{field}` looks like a secret's value. A package names a key, never a value: bind it to a key name such as ACME_API_KEY, and set the value on the Host with the operator CLI's `secret set`.");
                 continue;
             }
 

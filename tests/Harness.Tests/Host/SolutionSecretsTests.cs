@@ -99,7 +99,7 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
             Assert.Equal(("sources", "usajobs"),
                 (planned["USAJOBS_API_KEY"].GetProperty("when").GetProperty("setting").GetString(),
                  planned["USAJOBS_API_KEY"].GetProperty("when").GetProperty("value").GetString()));
-            Assert.Equal("yawble secret set USAJOBS_API_KEY (it prompts for the value), then yawble up to restart the Host",
+            Assert.Equal("the operator CLI's `secret set USAJOBS_API_KEY` (it prompts for the value), then its `up` to restart the Host",
                 planned["USAJOBS_API_KEY"].GetProperty("setWith").GetString());
 
             // THE INSTALL: Adzuna and USAJOBS ticked, The Muse left off.

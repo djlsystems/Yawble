@@ -10,6 +10,7 @@ import type {
   SolutionStep,
   SolutionWakeManager,
 } from '../api/types';
+import { productCli } from '../presentation/product';
 
 /**
  * THE WORDS OF THE SOLUTION INSTALL WIZARD, kept out of the component so each can be read and
@@ -262,5 +263,11 @@ export function secretSentence(secret: SolutionSecret, state: SecretState): stri
     return `Not needed: ${why}.`;
   }
   if (state === 'set') return 'Set on this Host.';
-  return `Not set on this Host. That is not a problem for the install, but its source fails until it is set. Set it with: ${secret.setWith}.`;
+  return `Not set on this Host. That is not a problem for the install, but its source fails until it is set. Set it with: ${secretSetWith(secret.key)}.`;
+}
+
+/** The exact commands that set a key, under the operator CLI's own name: it prompts for the value, and
+ * the Host reads it when it restarts. */
+export function secretSetWith(key: string): string {
+  return `${productCli} secret set ${key} (it prompts for the value), then ${productCli} up to restart the Host`;
 }

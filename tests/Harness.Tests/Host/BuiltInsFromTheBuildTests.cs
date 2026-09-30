@@ -250,7 +250,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.Contains("The team that builds it is not the team that runs it", skill.Body, StringComparison.Ordinal);
         Assert.Contains("$HARNESS_PUBLIC_URL/#/solutions/install?folder=", skill.Body, StringComparison.Ordinal);
         Assert.Contains("one line on what they will be asked", skill.Body, StringComparison.Ordinal);
-        // A package binds its plugin members' secrets by key name, never a value (B001T).
+        // A package binds its plugin members' secrets by key name, never a value.
         Assert.Contains("Secrets are key names, never values", skill.Body, StringComparison.Ordinal);
         Assert.Contains("\"secrets\": { \"apiKey\": \"ACME_API_KEY\" }", skill.Body, StringComparison.Ordinal);
 

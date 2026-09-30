@@ -12,6 +12,7 @@ import { QSelect } from 'quasar';
 import SolutionWizard from '../SolutionWizard.vue';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, settle } from '../../test/formProbe';
+import { productCli } from '../../presentation/product';
 import { Folder, fakeHost, hostSecrets, reply, steps, wizardRoutes, type Call } from '../../test/solutionFixtures';
 
 let calls: Call[] = [];
@@ -82,13 +83,13 @@ describe('Solution wizard - secrets', () => {
     expect(unset.dataset.secretState).toBe('unset');
     expect(unset.textContent).toContain('not set');
     expect(unset.textContent).toContain('its source fails until it is set');
-    expect(unset.textContent).toContain('yawble secret set USAJOBS_API_KEY (it prompts for the value), then yawble up to restart the Host');
+    expect(unset.textContent).toContain(`${productCli} secret set USAJOBS_API_KEY (it prompts for the value), then ${productCli} up to restart the Host`);
 
     // THE MUSE'S SOURCE IS NOT TICKED (sources starts empty): not needed, and says why.
     const notNeeded = secret('THEMUSE_API_KEY');
     expect(notNeeded.dataset.secretState).toBe('not-needed');
     expect(notNeeded.textContent).toContain("Not needed: Scout's sources leaves other off.");
-    expect(notNeeded.textContent).not.toContain('yawble secret set');
+    expect(notNeeded.textContent).not.toContain('secret set');
   });
 
   it('follows the person ticking the source a secret belongs to', async () => {
@@ -98,7 +99,7 @@ describe('Solution wizard - secrets', () => {
     await settle();
 
     expect(secret('THEMUSE_API_KEY').dataset.secretState).toBe('unset');
-    expect(secret('THEMUSE_API_KEY').textContent).toContain('yawble secret set THEMUSE_API_KEY');
+    expect(secret('THEMUSE_API_KEY').textContent).toContain(`${productCli} secret set THEMUSE_API_KEY`);
   });
 
   it('the result lists the keys still unset, each with the way to set it', async () => {
@@ -113,7 +114,7 @@ describe('Solution wizard - secrets', () => {
     expect(list).not.toBeNull();
     expect(list.textContent).toContain('still not set on the Host');
     const row = bodyFind('[data-unset-secret="USAJOBS_API_KEY"]')!;
-    expect(row.textContent).toContain('yawble secret set USAJOBS_API_KEY (it prompts for the value), then yawble up to restart the Host');
+    expect(row.textContent).toContain(`${productCli} secret set USAJOBS_API_KEY (it prompts for the value), then ${productCli} up to restart the Host`);
     expect(bodyFind('[data-unset-secret="ADZUNA_APP_ID"]')).toBeNull();
     expect(bodyFind('[data-unset-secret="THEMUSE_API_KEY"]')).toBeNull();
   });

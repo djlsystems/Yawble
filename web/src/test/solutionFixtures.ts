@@ -197,7 +197,7 @@ export function hostPlan(version = '1.1.0'): SolutionPlan {
  * `other` - which waits on the person's answer, so the Host says `needed: null`.
  */
 export function hostSecrets(): SolutionSecret[] {
-  const setWith = (key: string) => `yawble secret set ${key} (it prompts for the value), then yawble up to restart the Host`;
+  const setWith = (key: string) => `the operator CLI's \`secret set ${key}\` (it prompts for the value), then its \`up\` to restart the Host`;
   return [
     { member: 'Scout', field: 'adzunaAppId', key: 'ADZUNA_APP_ID', description: 'Your Adzuna application id.', required: false, when: null, set: true, needed: true, setWith: setWith('ADZUNA_APP_ID') },
     { member: 'Scout', field: 'usajobsApiKey', key: 'USAJOBS_API_KEY', description: 'Your USAJOBS API key.', required: false, when: null, set: false, needed: true, setWith: setWith('USAJOBS_API_KEY') },
