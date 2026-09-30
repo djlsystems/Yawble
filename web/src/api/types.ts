@@ -1553,6 +1553,41 @@ export interface AgentUpdates {
 }
 
 /** What `POST /api/agents/{name}/update` came to. */
+/** A run holding, or waiting for, a share of a CLI's install, named as `/api/wip` names a slot's holder. */
+export interface AgentRunHolder {
+  team: string
+  member: string
+}
+
+/** `none` until one is asked for; `waiting` (cancellable) and `updating` while it is in the gate; then
+ *  the last one's outcome. */
+export type AgentUpdatePhase = 'none' | 'waiting' | 'updating' | 'done' | 'cancelled' | 'failed'
+
+/**
+ * What the Host's update gate says about one command's update, read from the gate and never
+ * estimated: `POST`, `GET` and `DELETE /api/agents/{name}/update`, and `GET /api/agents/updates`.
+ */
+export interface AgentUpdateState {
+  command: string
+  phase: AgentUpdatePhase
+  agent: string | null
+  requestedBy: string | null
+  requestedAt: string | null
+  /** Runs of the command in flight now. */
+  running: number
+  /** The team and member of each of those runs. */
+  inFlight: AgentRunHolder[]
+  /** The team and member of each launch held behind the update. */
+  held: AgentRunHolder[]
+  startedAt: string | null
+  finishedAt: string | null
+  /** What the update measured, once `done`. */
+  result: AgentUpdateResult | null
+  /** Why it did not finish, when `failed`. */
+  error: string | null
+  cancelledBy: string | null
+}
+
 export interface AgentUpdateResult {
   agent: string
   command: string

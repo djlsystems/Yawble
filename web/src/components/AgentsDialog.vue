@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import * as api from '../api/client';
 import { type Agent } from '../api/types';
@@ -14,8 +14,8 @@ import {
 import { useAgentInstallations } from '../lib/useAgentInstallations';
 import { authReportFor, authStatus, refreshAgentAuth, useAgentAuth } from '../lib/useAgentAuth';
 import { toolsReportFor, toolsStatus } from '../lib/agentTools';
-import { cliVersionFor, updateOutcome, versionLine, withCliVersion } from '../lib/agentVersions';
-import type { CliVersion, PresetToolReport } from '../api/types';
+import { cliVersionFor, heldLine, updateInGate, updateStateLine, versionLine, withCliVersion } from '../lib/agentVersions';
+import type { AgentUpdateState, CliVersion, PresetToolReport } from '../api/types';
 import AgentEditDialog from './AgentEditDialog.vue';
 
 /**
@@ -152,40 +152,100 @@ const cloneSource = ref<Agent | null>(null);
 const cliVersions = ref<(CliVersion & { agent: string })[]>([]);
 const versionOf = (agent: Agent) => versionLine(cliVersionFor(cliVersions.value, agent.name));
 
-/** What each CLI's last update from this screen came to, keyed by command: every preset that
- *  launches it shows the outcome, since they share one install. Cleared on every opening. */
-const updateOutcomes = ref<Record<string, string>>({});
-const outcomeOf = (agent: Agent) => (agent.launch ? updateOutcomes.value[agent.launch.fileName] : undefined);
+/**
+ * EACH CLI'S UPDATE AS THE HOST'S GATE HOLDS IT, keyed by command: every preset that launches it
+ * shows it, since they share one install. Read from the Host on every opening and polled while one is
+ * waiting or updating, so closing the dialog or reloading loses nothing - the update lives in the
+ * gate, not in this screen.
+ */
+const updateStates = ref<Record<string, AgentUpdateState>>({});
+const updateStateOf = (agent: Agent) => (agent.launch ? updateStates.value[agent.launch.fileName] : undefined);
+const outcomeOf = (agent: Agent) => updateStateLine(updateStateOf(agent)) ?? undefined;
+const heldOf = (agent: Agent) => heldLine(updateStateOf(agent));
+const inGate = (agent: Agent) => updateInGate(updateStateOf(agent));
+const canCancel = (agent: Agent) => updateStateOf(agent)?.phase === 'waiting';
+
+/** How often the row re-reads an update still in the gate. */
+const UpdatePollMs = 2000;
+let pollTimer: ReturnType<typeof setTimeout> | 0 = 0;
+
+function stopPolling() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = 0;
+}
+
+function pollWhileInGate() {
+  stopPolling();
+  if (!open.value || !Object.values(updateStates.value).some(updateInGate)) return;
+  pollTimer = setTimeout(() => void readUpdates(), UpdatePollMs);
+}
+
+/**
+ * Lays a state from the Host over the row. When an update this screen saw in the gate has left it
+ * (or a request answered its outcome at once), the outcome is announced and the version line is read
+ * again, laid over from the update's own answer in case that read raced the write.
+ */
+async function applyUpdateState(state: AgentUpdateState, announce: boolean) {
+  const before = updateStates.value[state.command];
+  updateStates.value = { ...updateStates.value, [state.command]: state };
+
+  if (updateInGate(state) || !(announce || updateInGate(before))) return;
+
+  if (state.phase === 'done' && state.result) {
+    $q.notify({ type: state.result.updated ? 'positive' : 'warning', message: state.result.detail });
+    await load();
+    if (state.result.cliVersion) cliVersions.value = withCliVersion(cliVersions.value, state.result.cliVersion);
+  } else if (state.phase === 'failed' && state.error) {
+    $q.notify({ type: 'negative', message: state.error });
+  }
+}
+
+/** Reads every update the gate holds. A failed read keeps what the row showed. */
+async function readUpdates() {
+  try {
+    const states = await api.listAgentUpdates();
+    for (const state of states) await applyUpdateState(state, false);
+  } catch {
+    // The row keeps its last state; the next opening reads again.
+  }
+
+  pollWhileInGate();
+}
 
 /** The row mid-DELETE, not a plain boolean, so the spinner lands on the row that is going. */
 const removing = ref<string | null>(null);
 
-/** The preset whose CLI the platform is updating now, or null. One at a time from this screen. */
+/** The preset whose update request is on its way to the Host, or null. Brief: the Host answers at once. */
 const updating = ref<string | null>(null);
 
 /** Whether the platform can update this preset's CLI: it declares an update command. */
 const canUpdate = (agent: Agent) => (agent.updates?.update?.length ?? 0) > 0;
 
 /**
- * Has the platform update this preset's CLI. It waits for that CLI's runs in flight and holds new
- * ones meanwhile - they wait, never fail - so this can take a while. The server's sentence is shown
- * VERBATIM: it names the versions before and after.
+ * Asks the platform to update this preset's CLI. The Host answers AT ONCE with the gate's state: it
+ * waits for that CLI's runs in flight and holds new ones - they wait, never fail - and the row polls
+ * it through waiting and updating to its outcome, whose server sentence is shown VERBATIM.
  */
 async function updateCli(agent: Agent) {
   updating.value = agent.name;
 
   try {
-    const result = await api.updateAgentCli(agent.name);
-    $q.notify({ type: result.updated ? 'positive' : 'warning', message: result.detail });
-    await load();
-    // IN PLACE, from the update's own answer: the entry as the record reads after its line, laid
-    // over what the reload brought in case that read raced the write.
-    if (result.cliVersion) cliVersions.value = withCliVersion(cliVersions.value, result.cliVersion);
-    updateOutcomes.value = { ...updateOutcomes.value, [result.command]: updateOutcome(result) };
+    await applyUpdateState(await api.updateAgentCli(agent.name), true);
+    pollWhileInGate();
   } catch (failure) {
     $q.notify({ type: 'negative', message: (failure as Error).message });
   } finally {
     updating.value = null;
+  }
+}
+
+/** Cancels an update still waiting; the launches it held go ahead. A running one the Host refuses. */
+async function cancelUpdate(agent: Agent) {
+  try {
+    await applyUpdateState(await api.cancelAgentUpdate(agent.name), false);
+  } catch (failure) {
+    $q.notify({ type: 'negative', message: (failure as Error).message });
+    await readUpdates();
   }
 }
 const confirmingAgent = ref<Agent | null>(null);
@@ -254,20 +314,26 @@ async function load() {
 // Reset on every OPENING rather than at mount: this is constructed once at layout mount and reused
 // for the tab's life, so state left behind is state the next opening starts in.
 watch(open, (showing) => {
-  if (!showing) return;
+  if (!showing) {
+    stopPolling();
+    return;
+  }
 
   agentEditOpen.value = false;
   confirmingAgent.value = null;
   cloneSource.value = null;
   error.value = '';
   formError.value = '';
-  updateOutcomes.value = {};
+  updateStates.value = {};
   void load();
+  void readUpdates();
   // Its own call, beside the catalog load rather than inside it: the probe runs each CLI's own
   // status command and is the slower of the two, and a list that waited for it would open blank.
   void refreshAgentAuth();
   void loadTools();
 });
+
+onUnmounted(stopPolling);
 
 /**
  * The catalog as it will read after this edit, sent whole - built-ins included and exactly as they
@@ -537,8 +603,30 @@ const rowBusy = computed(
                 · {{ versionOf(agent).updated }}
               </span>
             </div>
-            <div v-if="outcomeOf(agent)" class="agent-tile-line agent-version-outcome">
-              {{ outcomeOf(agent) }}
+            <!-- ITS UPDATE, AS THE HOST'S GATE HOLDS IT: who it waits for by team and member, that it is
+                 updating, or what it came to. A waiting one can be cancelled; a running one cannot. -->
+            <div
+              v-if="outcomeOf(agent)"
+              class="agent-tile-line agent-version-outcome"
+              :data-phase="updateStateOf(agent)?.phase"
+            >
+              <q-spinner v-if="inGate(agent)" size="12px" class="q-mr-xs" aria-hidden="true" />
+              <span class="agent-update-text">{{ outcomeOf(agent) }}</span>
+              <q-btn
+                v-if="canCancel(agent)"
+                dense
+                flat
+                no-caps
+                size="sm"
+                color="negative"
+                class="q-ml-xs agent-update-cancel"
+                label="Cancel"
+                :aria-label="`Cancel the waiting ${agent.launch?.fileName} update`"
+                @click="cancelUpdate(agent)"
+              />
+            </div>
+            <div v-if="heldOf(agent)" class="agent-tile-line os-text-muted agent-update-held">
+              {{ heldOf(agent) }}
             </div>
 
             <!-- The remedy, and ONLY where there is something to remedy; the link is an addition,
@@ -604,7 +692,7 @@ const rowBusy = computed(
                   round
                   icon="upgrade"
                   :loading="updating === agent.name"
-                  :disable="rowBusy"
+                  :disable="rowBusy || inGate(agent)"
                   :aria-label="`Update the CLI ${agent.name} runs`"
                   @click="updateCli(agent)"
                 />

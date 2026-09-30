@@ -20,6 +20,8 @@ const props = defineProps<{
   card: KanbanCard;
   /** This card's member is waiting for a WIP slot. The board decides; the card only draws it. */
   waiting?: boolean;
+  /** The CLI whose update holds this card's launch, or null. The board decides; the card only draws it. */
+  updateWait?: string | null;
 }>();
 
 defineEmits<{ open: [id: string] }>();
@@ -41,6 +43,7 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
     :data-colour="colour"
     :data-awaiting="card.awaitingManager ? 'yes' : null"
     :data-waiting="waiting ? 'yes' : null"
+    :data-update-wait="updateWait || null"
     :data-card-id="card.id"
     :aria-label="`${card.title} — ${KanbanStatusLabel[card.status]}`"
     @click="$emit('open', card.id)"
@@ -129,6 +132,12 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
            slot is released. A mark beside the status, never instead of it. -->
       <q-badge v-if="waiting" class="k-card-waiting" label="waiting for a slot">
         <q-tooltip>Every running slot is taken. This member starts when one is released.</q-tooltip>
+      </q-badge>
+
+      <!-- HELD BEHIND AN AGENT CLI UPDATE: held, never failed; it starts when the update is done or
+           cancelled. -->
+      <q-badge v-if="updateWait" class="k-card-waiting k-card-update-wait" :label="`waiting for the ${updateWait} update`">
+        <q-tooltip>The platform is updating {{ updateWait }}. This member's run starts when the update is done.</q-tooltip>
       </q-badge>
     </div>
   </button>

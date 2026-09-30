@@ -136,10 +136,129 @@ public sealed class AgentCliVersionRouteTests(HostFixture host) : IClassFixture<
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
     }
 
+    [Fact]
+    public async Task An_update_asked_while_a_run_is_in_flight_answers_at_once_waiting_on_that_run_and_reads_the_same_when_the_dialog_reopens()
+    {
+        using var person = await host.PersonAsync();
+        await SaveStubAsync(person, "stub-waiting", "printf");
+        var gate = host.Services.GetRequiredService<AgentUpdateGate>();
+
+        // alpha/worker holds a share of printf's install: a run in flight.
+        var inFlight = await gate.EnterRunAsync("printf", null, Ct, new AgentRunHolder("alpha", "worker"));
+
+        // ANSWERED AT ONCE, 202, with the gate's own state: waiting for that run, naming it.
+        var answer = await person.PostAsync("/api/agents/stub-waiting/update", null, Ct);
+        Assert.Equal(HttpStatusCode.Accepted, answer.StatusCode);
+        var asked = await answer.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        AssertWaitingOnAlphaWorker(asked);
+
+        // Closing the dialog cancels nothing; opening it again reads the same state.
+        var reopened = await person.GetFromJsonAsync<JsonElement>("/api/agents/stub-waiting/update", Ct);
+        AssertWaitingOnAlphaWorker(reopened);
+        Assert.Equal(asked.GetProperty("requestedAt").GetDateTimeOffset(), reopened.GetProperty("requestedAt").GetDateTimeOffset());
+
+        // A launch arriving now is held, and the list the board reads names it.
+        var held = gate.EnterRunAsync("printf", null, Ct, new AgentRunHolder("beta", "builder"));
+        await UntilAsync(async () => (await person.GetFromJsonAsync<JsonElement>("/api/agents/updates", Ct))
+            .EnumerateArray().Any(s => s.GetProperty("command").GetString() == "printf"
+                && s.GetProperty("held").GetArrayLength() == 1));
+        Assert.False(held.IsCompleted);
+
+        // A machine principal may neither read nor cancel it.
+        using var container = host.Container(host.AlphaContainerKey);
+        Assert.Equal(HttpStatusCode.Forbidden, (await container.GetAsync("/api/agents/stub-waiting/update", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await container.DeleteAsync("/api/agents/stub-waiting/update", Ct)).StatusCode);
+
+        // Cancel removes the waiting update and releases the launch it held.
+        var cancel = await person.DeleteAsync("/api/agents/stub-waiting/update", Ct);
+        Assert.Equal(HttpStatusCode.OK, cancel.StatusCode);
+        var cancelled = await cancel.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        Assert.Equal("cancelled", cancelled.GetProperty("phase").GetString());
+        Assert.Equal("person@example.test", cancelled.GetProperty("cancelledBy").GetString());
+        using (await held.WaitAsync(TimeSpan.FromSeconds(10), Ct)) { }
+        Assert.False(gate.Updating("printf"));
+        Assert.Equal("cancelled", (await person.GetFromJsonAsync<JsonElement>("/api/agents/stub-waiting/update", Ct))
+            .GetProperty("phase").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await person.DeleteAsync("/api/agents/stub-waiting/update", Ct)).StatusCode);
+
+        // Asked again: it waits for the run, then updates, then says what it measured.
+        Assert.Equal(HttpStatusCode.Accepted, (await person.PostAsync("/api/agents/stub-waiting/update", null, Ct)).StatusCode);
+        Assert.Equal("waiting", (await person.GetFromJsonAsync<JsonElement>("/api/agents/stub-waiting/update", Ct))
+            .GetProperty("phase").GetString());
+        inFlight.Dispose();
+
+        var done = await DoneAsync(person, "stub-waiting");
+        Assert.True(done.GetProperty("result").GetProperty("updated").GetBoolean());
+        Assert.NotEqual(JsonValueKind.Null, done.GetProperty("startedAt").ValueKind);
+    }
+
+    [Fact]
+    public async Task A_running_update_cannot_be_cancelled()
+    {
+        using var person = await host.PersonAsync();
+        var gate = host.Services.GetRequiredService<AgentUpdateGate>();
+        var go = new TaskCompletionSource<AgentUpdateResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Nothing in flight, so the update runs at once, and waits here until let go.
+        gate.Request("sleep", "stub-running", "person@example.test", _ => go.Task);
+        await SaveStubAsync(person, "stub-running", "sleep");
+
+        var cancel = await person.DeleteAsync("/api/agents/stub-running/update", Ct);
+        Assert.Equal(HttpStatusCode.Conflict, cancel.StatusCode);
+        Assert.Contains("cannot be cancelled", (await cancel.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+        Assert.Equal("updating", (await person.GetFromJsonAsync<JsonElement>("/api/agents/stub-running/update", Ct))
+            .GetProperty("phase").GetString());
+
+        go.SetResult(new AgentUpdateResult("stub-running", "sleep", true, 0, "1", "1", DateTimeOffset.UtcNow, "ran"));
+        Assert.Equal("done", (await DoneAsync(person, "stub-running")).GetProperty("phase").GetString());
+    }
+
+    private static void AssertWaitingOnAlphaWorker(JsonElement state)
+    {
+        Assert.Equal("waiting", state.GetProperty("phase").GetString());
+        Assert.Equal("printf", state.GetProperty("command").GetString());
+        Assert.Equal(1, state.GetProperty("running").GetInt32());
+        var run = Assert.Single(state.GetProperty("inFlight").EnumerateArray());
+        Assert.Equal("alpha", run.GetProperty("team").GetString());
+        Assert.Equal("worker", run.GetProperty("member").GetString());
+        Assert.Equal("person@example.test", state.GetProperty("requestedBy").GetString());
+    }
+
+    private static async Task SaveStubAsync(HttpClient person, string name, string command)
+    {
+        var custom = new AgentDefinition(
+            name, AgentMode.Headless, new AgentLaunch(command, [], LanguageModel: false),
+            Updates: new AgentUpdates(new Dictionary<string, string>(), Update: ["true"]));
+        var saved = await person.PutAsJsonAsync("/api/agents", new { agents = new[] { custom } }, Ct);
+        Assert.True(saved.StatusCode == HttpStatusCode.NoContent, await saved.Content.ReadAsStringAsync(Ct));
+    }
+
     private static async Task<JsonElement> UpdateAsync(HttpClient person)
     {
+        // Answered at once; the outcome is read back, as the row polls it.
         var answer = await person.PostAsync("/api/agents/stub-updatable/update", null, Ct);
-        Assert.Equal(HttpStatusCode.OK, answer.StatusCode);
-        return await answer.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        Assert.Equal(HttpStatusCode.Accepted, answer.StatusCode);
+        return (await DoneAsync(person, "stub-updatable")).GetProperty("result");
+    }
+
+    private static async Task<JsonElement> DoneAsync(HttpClient person, string name)
+    {
+        JsonElement state = default;
+        await UntilAsync(async () =>
+        {
+            state = await person.GetFromJsonAsync<JsonElement>($"/api/agents/{name}/update", Ct);
+            return state.GetProperty("phase").GetString() is "done" or "failed";
+        });
+        return state;
+    }
+
+    private static async Task UntilAsync(Func<Task<bool>> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (!await condition())
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("The condition did not hold in time.");
+            await Task.Delay(50, Ct);
+        }
     }
 }

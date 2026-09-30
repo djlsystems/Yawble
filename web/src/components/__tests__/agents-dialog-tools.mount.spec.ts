@@ -16,6 +16,8 @@ const { listCatalog, getAgentAuth, getAgentTools, getTenantSettings } = vi.hoist
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  // The gate holds no update: the dialog reads it on every opening.
+  listAgentUpdates: async () => [],
   listCatalog,
   getAgentAuth,
   getAgentTools,

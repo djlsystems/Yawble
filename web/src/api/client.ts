@@ -16,7 +16,7 @@ import type {
   Agent,
   AgentAuthReport,
   AgentToolsReport,
-  AgentUpdateResult,
+  AgentUpdateState,
   BacklogDispatchView,
   BacklogExecutionStats,
   BacklogItemView,
@@ -1519,10 +1519,23 @@ export const listCatalog = () => json<Catalog>('/api/agents')
  */
 export const getAgentAuth = () => json<AgentAuthReport[]>('/api/agents/auth')
 
-/** Has the platform update a preset's CLI now. It waits for that CLI's runs in flight and holds new
- *  ones until it is done, so it can take minutes; the answer names the versions before and after. */
+/** Asks the platform to update a preset's CLI. ANSWERED AT ONCE with the update's state: it waits in
+ *  the Host's gate for that CLI's runs in flight and holds new ones, and is read back with
+ *  `getAgentUpdate` - closing the screen does not cancel it. */
 export const updateAgentCli = (name: string) =>
-  json<AgentUpdateResult>(`/api/agents/${encodeURIComponent(name)}/update`, { method: 'POST' })
+  json<AgentUpdateState>(`/api/agents/${encodeURIComponent(name)}/update`, { method: 'POST' })
+
+/** The state of a preset's CLI update: waiting, updating, or the last one's outcome. */
+export const getAgentUpdate = (name: string) =>
+  json<AgentUpdateState>(`/api/agents/${encodeURIComponent(name)}/update`)
+
+/** Cancels an update still waiting for runs in flight, releasing the launches it held. A running
+ *  one is refused with the Host's sentence. */
+export const cancelAgentUpdate = (name: string) =>
+  json<AgentUpdateState>(`/api/agents/${encodeURIComponent(name)}/update`, { method: 'DELETE' })
+
+/** Every command's update the gate holds, with the launches each holds. */
+export const listAgentUpdates = () => json<AgentUpdateState[]>('/api/agents/updates')
 
 /**
  * What each preset's CLI would load, as the Host's last pre-flight listed it: a member's preset with
