@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE SOLUTIONS SCREENS AS ADDRESSES (B001J), through a real router with the app's route shape:
+// THE SOLUTIONS SCREENS AS ADDRESSES, through a real router with the app's route shape:
 // `#/solutions` opens the launcher over the Console, a tile's Manage goes to `#/solutions/<team>` and
 // opens that solution's panel, the panel's back arrow returns to the launcher, and closing leaves for
 // the plain Console.

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE CONTROL PANEL'S RESULTS SECTION (B001J): each `panel.outputs` folder's files newest first, as
+// THE CONTROL PANEL'S RESULTS SECTION: each `panel.outputs` folder's files newest first, as
 // the Host orders them, each with its download link; a folder with nothing yet says so; recent runs
 // with their output, as text.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE CONTROL PANEL'S STATUS SECTION (B001J): each member's state and last run, when each schedule
+// THE CONTROL PANEL'S STATUS SECTION: each member's state and last run, when each schedule
 // next fires, what the team is blocked on with the fix inline - an upload box into the missing folder,
 // a connection picker that binds the slot through the member's own settings route - and today's
 // MEASURED spend against each cap, unmeasured runs counted as such. Package text stays text.

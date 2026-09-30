@@ -2805,7 +2805,7 @@ export interface InstalledSolution {
   installedBy: string
   plugins: string[]
   /**
-   * THE LAUNCHER'S FIELDS (B001J). Optional on the client only, so a row from a Host that predates
+   * THE LAUNCHER'S FIELDS. Optional on the client only, so a row from a Host that predates
    * them still reads: the tile then shows no Open, no status line and no badge.
    */
   updatedAt?: string | null
@@ -3003,7 +3003,7 @@ export interface TeamSolution {
   missing: SolutionMissing[]
 }
 
-// --- B001J: one solution's control panel, `GET /api/teams/{team}/solution/panel` -----------------
+// --- One solution's control panel, `GET /api/teams/{team}/solution/panel` -----------------
 //
 // Every string that comes from a package or from site data - names, descriptions, the status line,
 // file names, run output - is PLAIN TEXT, rendered with `{{ }}` and never `v-html`.

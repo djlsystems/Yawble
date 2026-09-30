@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE CONTROL PANEL'S MAINTENANCE SECTION (B001J): the version and source folder, and Update from a
+// THE CONTROL PANEL'S MAINTENANCE SECTION: the version and source folder, and Update from a
 // folder, which opens the folder picker and then the install wizard on that folder - the wizard's own
 // update path, not a second one.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
