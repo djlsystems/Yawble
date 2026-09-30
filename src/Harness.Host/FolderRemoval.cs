@@ -230,9 +230,19 @@ public sealed class FolderRemoval(
     /// same workspace path can belong to a team created later under the same name, whose session
     /// folder a retry would then take. What remains is named, and the caller says it.
     /// </summary>
-    public async Task<FolderRemovalReport> RemoveSessionFolderAsync(string home, string folder, CancellationToken ct = default)
+    public Task<FolderRemovalReport> RemoveSessionFolderAsync(string home, string folder, CancellationToken ct = default) =>
+        RemoveInsideAsync(home, folder, ct);
+
+    /// <summary>
+    /// Removes <paramref name="folder"/>, anywhere agents can write, the way a session folder is
+    /// removed: everything in it, then the folder, the Host first and then the agent, links removed
+    /// and never followed. REFUSED when the folder is not strictly inside
+    /// <paramref name="boundary"/> with no symbolic link on the way. NOT RECORDED: what remains is
+    /// named, and the caller says it (or throws it).
+    /// </summary>
+    public async Task<FolderRemovalReport> RemoveInsideAsync(string boundary, string folder, CancellationToken ct = default)
     {
-        home = Path.TrimEndingDirectorySeparator(Path.GetFullPath(home));
+        var home = Path.TrimEndingDirectorySeparator(Path.GetFullPath(boundary));
         folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
 
         if (!Exists(folder)) return FolderRemovalReport.Done;
@@ -256,6 +266,19 @@ public sealed class FolderRemoval(
         }
 
         return new FolderRemovalReport([.. remaining.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)]);
+    }
+
+    /// <summary>
+    /// <see cref="RemoveInsideAsync"/> for a caller whose own removal used to throw: an
+    /// <see cref="IOException"/> naming every path left, or the refusal, when it is not complete.
+    /// </summary>
+    public async Task RemoveInsideOrThrowAsync(string boundary, string folder, CancellationToken ct = default)
+    {
+        var report = await RemoveInsideAsync(boundary, folder, ct);
+        if (report.Complete) return;
+
+        throw new IOException(report.Refused
+            ?? $"{folder} was not removed completely; left: {string.Join(", ", report.Remaining)}");
     }
 
     /// <summary>

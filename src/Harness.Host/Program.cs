@@ -326,7 +326,8 @@ builder.Services.AddSingleton(sp => new SiteService(
     sp.GetRequiredService<ISiteStore>(),
     team => sp.GetRequiredService<TeamRegistry>().ExistingName(team),
     sp.GetRequiredService<TeamPaths>(),
-    sp.GetRequiredService<IMessageLog>()));
+    sp.GetRequiredService<IMessageLog>(),
+    removal: sp.GetRequiredService<FolderRemoval>()));
 builder.Services.AddSingleton<SiteCapability>();
 
 // The folders a deletion or reset could not finish removing (auth-012), retried at start and on
@@ -620,7 +621,8 @@ builder.Services.AddSingleton(sp =>
             }),
         runAs.Switches ? runAs.Gid : -1,
         sp.GetRequiredService<ISecretStore>(),
-        sp.GetRequiredService<TriggerSweep>());
+        sp.GetRequiredService<TriggerSweep>(),
+        sp.GetRequiredService<FolderRemoval>());
 });
 
 // THE SOLUTIONS LAUNCHER AND A SOLUTION'S CONTROL PANEL: reads only; every control is an existing route.
