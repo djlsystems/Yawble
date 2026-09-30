@@ -57,6 +57,29 @@ public static class PayloadFields
     public const string UsageCountedOn = "usageCountedOn";
 
     /// <summary>
+    /// On each `completed` or `failed` row of a run that carried MORE THAN ONE item: what became of
+    /// EVERY item of that run, as a list of <c>{ item, seq, outcome }</c> in prompt order, where
+    /// outcome is one of <see cref="ItemOutcomes"/>. A deferred item has no terminal row of its own
+    /// in that run - it is delivered again - so this list is where the run says so. Absent on a
+    /// run of one item.
+    /// </summary>
+    public const string Items = "items";
+
+    /// <summary>
+    /// On each `completed` or `failed` row of a run that carried more than one item: what became of
+    /// THE item this row closes - `answered` or `failed`, see <see cref="ItemOutcomes"/>. Beside
+    /// <see cref="Item"/>, its number in the prompt. Absent on a run of one item.
+    /// </summary>
+    public const string ItemOutcome = "itemOutcome";
+
+    /// <summary>
+    /// On a delivery the member DEFERRED out of a batched run and on the terminal row of the run it
+    /// was delivered again in: the seq of the `agentContainer.started` row of the run it was
+    /// deferred from. The same value sits on its pending delivery (<c>PendingDelivery.DeferredFromRun</c>).
+    /// </summary>
+    public const string DeferredFromRun = "deferredFromRun";
+
+    /// <summary>
     /// On the Host's repository-setup instruction to a Manager: the clone paths that could not be
     /// made. It roots a workflow the Manager reports the block in, and when a person later makes one
     /// of these clones (Fetch or Bring current in the Git dialog) the Host finds that workflow by
@@ -314,4 +337,24 @@ public static class PayloadFields
 
     /// <summary>`solution.checked`: each problem, <c>&lt;file&gt; &lt;field&gt;: &lt;reason&gt;</c>, on a fail only.</summary>
     public const string Problems = "problems";
+}
+
+/// <summary>
+/// What became of one item of a batched run, as <see cref="PayloadFields.Items"/> and
+/// <see cref="PayloadFields.ItemOutcome"/> spell it. Never a bare `completed` copied from another
+/// item: a run that carried several instructions says which it answered, blocked and deferred.
+/// </summary>
+public static class ItemOutcomes
+{
+    /// <summary>The run finished and the item was neither blocked nor deferred.</summary>
+    public const string Answered = "answered";
+
+    /// <summary>The run itself failed; the item's row is `failed`.</summary>
+    public const string Failed = "failed";
+
+    /// <summary>The agent blocked the item by its number; its `blocked` row closed it.</summary>
+    public const string Blocked = "blocked";
+
+    /// <summary>The agent deferred the item by its number; it is delivered again as its own run.</summary>
+    public const string Deferred = "deferred";
 }

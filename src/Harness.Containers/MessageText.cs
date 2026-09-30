@@ -21,7 +21,7 @@ public static class MessageText
         if (messages.Count == 0) return string.Empty;
         if (messages.Count == 1) return Of(messages[0]);
 
-        var lines = new List<string>(messages.Count + 1)
+        var lines = new List<string>(messages.Count + 2)
         {
             $"You have {messages.Count} new messages. They arrived in this order (oldest first, newest last):",
         };
@@ -34,8 +34,20 @@ public static class MessageText
                 $"{i + 1}. [seq {message.Seq}] from {message.Source}{newest}: {Of(message)}");
         }
 
+        // SAID TO EVERY AGENT, IN EVERY BATCH. The run closes every item it carried, so an item left
+        // "for later" is lost unless it is deferred: there is no later run for it otherwise.
+        lines.Add(BatchRule);
+
         return string.Join("\n", lines);
     }
+
+    /// <summary>What a prompt carrying more than one item says about them, after the list.</summary>
+    public const string BatchRule =
+        "Each numbered item above is yours now, in this run: there is no later run for it. "
+        + "For every item, do it, defer it, or block it with a reason. "
+        + "To defer one, call the `blocked` tool with its number as `item` and `defer` true: it is "
+        + "delivered to you again as its own next run. To block one, call `blocked` with its number "
+        + "as `item` and your reason. An item you neither defer nor block is recorded as answered by this run.";
 
     /// <summary>
     /// What the class and any pending resume say, with a trailing space, or EMPTY when the row
@@ -82,7 +94,15 @@ public static class MessageText
             // line of one. An agent handed that would be told LESS THAN THE PERSON WROTE, would
             // start work on a fragment, and NOTHING WOULD FAIL: the run reports success against an
             // instruction nobody gave. The board may summarise; the worker may not.
-            return Field(payload, PayloadFields.Instruction) ?? message.Payload;
+            var instruction = Field(payload, PayloadFields.Instruction) ?? message.Payload;
+
+            // A DEFERRED ITEM, delivered again as its own run, says so: it is not new work.
+            return payload is { ValueKind: JsonValueKind.Object } deferred
+                && deferred.TryGetProperty(PayloadFields.DeferredFromRun, out var from)
+                && from.ValueKind == JsonValueKind.Number
+                    ? $"You deferred this from run {from.GetInt64()}, where it was one item of several. "
+                        + $"This run is for it alone: do it now, or block it with a reason.\n{instruction}"
+                    : instruction;
         }
 
         // The BARE name. `Message.Source` carries the qualified `Team/Name`, and that form is an

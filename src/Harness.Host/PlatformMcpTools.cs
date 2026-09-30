@@ -80,11 +80,16 @@ public sealed partial class PlatformMcpTools(
         CancellationToken cancellationToken = default) =>
         OwnAsync("progress", new { status }, cancellationToken);
 
-    [McpServerTool(Name = "blocked"), Description("Stop without finishing, and say why. Use this instead of exiting quietly.")]
+    [McpServerTool(Name = "blocked"), Description(
+        "Stop without finishing, and say why. Use this instead of exiting quietly. When your prompt "
+        + "lists several numbered items, pass item to block only that one, or item with defer true "
+        + "to have it delivered again as its own next run.")]
     public Task<string> Blocked(
-        [Description("Why you stopped, in one or two sentences.")] string reason,
+        [Description("Why you stopped, in one or two sentences. For a deferral, why the item waits.")] string reason,
+        [Description("Optional: the number of one item of this run's prompt, to block or defer only that item.")] int? item = null,
+        [Description("Optional, with item: defer that item to its own next run instead of blocking it. Refused for the only item of a run.")] bool? defer = null,
         CancellationToken cancellationToken = default) =>
-        OwnAsync("blocked", new { reason }, cancellationToken);
+        OwnAsync("blocked", new { reason, item, defer }, cancellationToken);
 
     [McpServerTool(Name = "handback"), Description("Hand finished work back to your manager.")]
     public Task<string> Handback(

@@ -65,5 +65,14 @@ public static class MessageSchema
                 PRIMARY KEY (subscriber, seq)
             );
             """),
+
+        // A batch item the agent DEFERRED goes back on this table as its own pending delivery,
+        // un-started, naming the run it was deferred from (that run's `started` seq). NULL on every
+        // other row. A restart re-offers it as its own run, as the live runtime does.
+        new MigrationStep(
+            "messages-002",
+            """
+            ALTER TABLE pending_deliveries ADD COLUMN deferred_from_run INTEGER NULL;
+            """),
     ];
 }

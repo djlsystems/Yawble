@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { listMemberRuns, NoLiveView, openLiveView, readRunTranscript } from '../api/client';
 import type { MemberId, MemberRun, TeamId } from '../api/types';
 import { liveLineTime, parseLiveLine, type LiveLine } from '../lib/liveLines';
-import { runDuration, runOutcomeLabel, runStartedText, runStartedTitle } from '../lib/memberRuns';
+import { runDuration, runItemsText, runItemText, runOutcomeLabel, runStartedText, runStartedTitle } from '../lib/memberRuns';
 
 /**
  * WATCHING ONE MEMBER. Two parts: at the top, the run in progress, streaming as it
@@ -314,6 +314,20 @@ onBeforeUnmount(end);
           </div>
         </div>
 
+        <!-- A RUN OF SEVERAL ITEMS says what became of each, a deferral included: never one
+             outcome for all of them. A deferred item's own run says where it came from. -->
+        <div v-if="selected?.items" class="os-body q-mb-xs run-items">
+          <div
+            v-for="entry in selected.items"
+            :key="entry.seq"
+            class="run-item"
+            :data-outcome="entry.outcome"
+          >{{ runItemText(entry) }}</div>
+        </div>
+        <div v-if="selected && selected.deferredFromRun !== null" class="os-body os-text-muted q-mb-xs run-deferred-from">
+          Deferred from run {{ selected.deferredFromRun }}.
+        </div>
+
         <template v-if="selected && plugin">
           <!-- A run that blocked every item wrote no output row: what it said is the block's reason. -->
           <div v-if="selected.reason" class="os-body q-mb-xs run-reason">Blocked: {{ selected.reason }}</div>
@@ -356,6 +370,12 @@ onBeforeUnmount(end);
               <q-item-section>
                 <q-item-label class="earlier-run-when" :title="runStartedTitle(run.startedAt)">
                   {{ runStartedText(run.startedAt) }}
+                </q-item-label>
+                <q-item-label v-if="run.items" caption class="earlier-run-items">
+                  items {{ runItemsText(run.items) }}
+                </q-item-label>
+                <q-item-label v-if="run.deferredFromRun !== null" caption class="earlier-run-deferred-from">
+                  deferred from run {{ run.deferredFromRun }}
                 </q-item-label>
               </q-item-section>
               <q-item-section side class="earlier-run-workflow">

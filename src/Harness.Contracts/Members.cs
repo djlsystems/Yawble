@@ -117,6 +117,12 @@ public interface IMemberReports
 
     Task<MemberReportOutcome> BlockedAsync(ContainerId member, string reason, int? item = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// Defers one item of the running batch by its 1-based number: it is not closed when the run
+    /// ends but delivered again as its own next run. Refused for the only item of a run.
+    /// </summary>
+    Task<MemberReportOutcome> DeferAsync(ContainerId member, int item, string reason, CancellationToken ct = default);
+
     Task<MemberReportOutcome> NeedsDecisionAsync(ContainerId member, string question, CancellationToken ct = default);
 
     Task<MemberReportOutcome> HandbackAsync(ContainerId member, string delivered, CancellationToken ct = default);

@@ -500,7 +500,10 @@ public sealed class ContainerHost : IAsyncDisposable
                     continue;
                 }
 
-                if (await container.OfferAsync(message, ct))
+                // A DEFERRED ITEM is re-offered as the run it was promised: its own, with its note.
+                if (row.DeferredFromRun is { } fromRun
+                        ? container.Redeliver(message, fromRun)
+                        : await container.OfferAsync(message, ct))
                 {
                     resumed++;
                 }
@@ -623,8 +626,15 @@ public sealed class ContainerHost : IAsyncDisposable
                 // found nothing wakes nobody - and `never` on the `failed` row too. "The Manager" is a
                 // subscriber holding the type in its BASE set: an event trigger naming
                 // `completed` is a person's own explicit choice, and still fires. See WakeManagerPolicy.
+                //
+                // AND A BATCHED RUN WAKES ITS MANAGER ONCE. A run that carried several items closes each
+                // on its own row, and the rows land one after another: a Manager woken by the first
+                // could otherwise run again for each later one. Every row after the first names the
+                // first in `usageCountedOn` and carries every item's outcome (`items`) as the first
+                // does, so a subscriber holding the type in its BASE set is woken by the first alone.
                 var isCompleted = string.Equals(message.Type, MessageTypes.Completed, StringComparison.Ordinal);
-                var alreadyWoken = (isCompleted
+                var alreadyWoken = (container.HasBaseSubscription(message.Type) && IsLaterRowOfOneRun(message))
+                    || (isCompleted
                     && ((types.Contains(MessageTypes.Handback) && CompletionSays(message.Payload, PayloadFields.HandedBack))
                         || CompletionSays(message.Payload, PayloadFields.Quiet)))
                     || (container.HasBaseSubscription(message.Type)
@@ -760,6 +770,31 @@ public sealed class ContainerHost : IAsyncDisposable
     /// (<see cref="PayloadFields.HandedBack"/>, <see cref="PayloadFields.Quiet"/>). A payload that
     /// does not parse, or predates the field, answers false: the wake happens, which is the
     /// behaviour before the field existed.</summary>
+    /// <summary>
+    /// A `completed` or `failed` row after the first of a batched run: it names the first in
+    /// <see cref="PayloadFields.UsageCountedOn"/>.
+    /// </summary>
+    private static bool IsLaterRowOfOneRun(Message message)
+    {
+        if (message.Type is not (MessageTypes.Completed or MessageTypes.Failed)
+            || !message.Payload.Contains(PayloadFields.UsageCountedOn, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(message.Payload);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty(PayloadFields.UsageCountedOn, out var value)
+                && value.ValueKind == JsonValueKind.Number;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static bool CompletionSays(string payload, string field)
     {
         try
