@@ -252,7 +252,7 @@ const keptLocalRepos = computed(() => doomedLocalRepos.value.filter((reference) 
 function losesLine(repo: LocalRepo): string {
   const commits = repo.commitCount == null
     ? 'commits not counted'
-    : `${repo.commitCount} ${repo.commitCount === 1 ? 'commit' : 'commits'}`;
+    : `${repo.commitCount} commit${repo.commitCount === 1 ? '' : 's'}`;
   const branches = (repo.branches ?? []).length > 0
     ? `on ${repo.branches!.length === 1 ? 'branch' : 'branches'} ${repo.branches!.join(', ')}`
     : 'on no branch';
