@@ -5,6 +5,7 @@ import {
   listConnectionProviders,
   listConnections,
   pauseTeam,
+  readRunTranscript,
   resumeTeam,
   runScheduleNow,
   savePluginSettings,
@@ -20,7 +21,9 @@ import {
   type Connection,
   type ConnectionProvider,
   type SolutionPanel,
+  type MemberId,
   type SolutionPanelBlocked,
+  type SolutionPanelRun,
   type SolutionPanelTrigger,
   type SolutionUninstallResult,
 } from '../api/types';
@@ -32,7 +35,8 @@ import {
   type PluginSettingsShape,
 } from '../lib/pluginSettings';
 import { missingLine } from '../lib/solutions';
-import { nextFireLine, parseCap, sizeWords, spendLine, stateBadge, whenWords } from '../lib/solutionPanel';
+import { memberStateLine, nextFireLine, parseCap, sizeWords, stateBadge, whenWords } from '../lib/solutionPanel';
+import { cappedLine, spentTodayLine } from '../lib/triggers';
 import ConnectionPicker from './ConnectionPicker.vue';
 import HostPathPicker from './HostPathPicker.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
@@ -100,6 +104,7 @@ function reset() {
   notice.value = '';
   settings.value = {};
   caps.value = {};
+  transcripts.value = {};
   uninstall.value = { asking: false, plugins: [], removePlugins: false, busy: false, result: null, problem: '' };
 }
 
@@ -120,7 +125,6 @@ async function act(key: string, action: () => Promise<unknown>) {
 }
 
 const badge = computed(() => stateBadge(panel.value?.state));
-const schedules = computed(() => (panel.value?.triggers ?? []).filter((trigger) => trigger.kind === 'schedule'));
 const memberName = (member: string) =>
   panel.value?.members.find((candidate) => candidate.member === member)?.packageName ?? member;
 
@@ -180,10 +184,10 @@ async function runNow(trigger: SolutionPanelTrigger) {
   let said = '';
   await act(`run:${trigger.id}`, async () => {
     const run = await runScheduleNow(asTeamId(props.team), trigger.id);
-    if (run.outcome === 'fired') said = `${trigger.name} is running now.`;
+    if (run.outcome === 'fired') said = `${trigger.packageName} is running now.`;
     else {
       const why = run.outcome === 'member-missing' ? 'its member is gone' : (run.reason ?? run.outcome);
-      said = `${trigger.name} was skipped: ${why}.`;
+      said = `${trigger.packageName} was skipped: ${why}.`;
     }
   });
   if (said) notice.value = said;
@@ -299,6 +303,30 @@ async function saveSettings(member: string) {
     panel.value = { ...read };
   } catch (cause) {
     state.problem = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    busy.value = '';
+  }
+}
+
+// --- Results: an agent member's transcript, read when asked ---------------------------------------
+
+const transcripts = ref<Record<string, string>>({});
+const runKey = (run: SolutionPanelRun) => `${run.member}/${run.seq}`;
+
+async function toggleTranscript(run: SolutionPanelRun) {
+  const key = runKey(run);
+  if (transcripts.value[key]) {
+    const { [key]: _, ...rest } = transcripts.value;
+    transcripts.value = rest;
+    return;
+  }
+  busy.value = `transcript:${key}`;
+  problem.value = '';
+  try {
+    const lines = await readRunTranscript(asTeamId(props.team), run.member as MemberId, run.seq);
+    transcripts.value = { ...transcripts.value, [key]: lines.join('\n') || '(empty)' };
+  } catch (cause) {
+    problem.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     busy.value = '';
   }
@@ -437,6 +465,7 @@ function closeUninstall() {
               :data-blocked="item.name"
             >
               <div class="os-body">{{ missingLine(item) }}</div>
+              <div v-if="item.reason" class="text-caption text-weight-medium" data-blocked-reason>{{ item.reason }}</div>
               <q-file
                 v-if="item.kind === 'document'"
                 :model-value="null"
@@ -476,7 +505,7 @@ function closeUninstall() {
             <tbody>
               <tr v-for="member in panel.members" :key="member.member" :data-member="member.member">
                 <td>{{ member.packageName }}<span v-if="member.role === 'manager'" class="os-text-muted"> (Manager)</span></td>
-                <td>{{ member.state }}</td>
+                <td data-member-state>{{ memberStateLine(member) }}</td>
                 <td>
                   <template v-if="member.lastRun">{{ whenWords(member.lastRun.at) }} · {{ member.lastRun.outcome }}</template>
                   <span v-else class="os-text-muted">No runs yet</span>
@@ -493,9 +522,12 @@ function closeUninstall() {
             </thead>
             <tbody>
               <tr v-for="trigger in panel.triggers" :key="trigger.id" :data-trigger="trigger.id">
-                <td>{{ trigger.name }} <span class="os-text-muted">· {{ memberName(trigger.member) }}</span></td>
+                <td>{{ trigger.packageName }} <span class="os-text-muted">· {{ memberName(trigger.container) }}</span></td>
                 <td data-next-fire>{{ nextFireLine(trigger) }}</td>
-                <td data-spend :class="{ 'text-negative': trigger.capped }">{{ spendLine(trigger) }}</td>
+                <td data-spend :class="{ 'text-negative': trigger.capReachedToday }">
+                  {{ spentTodayLine(trigger) ?? 'spent today not known (no cap)' }}
+                  <div v-if="cappedLine(trigger)" class="text-caption" data-capped>{{ cappedLine(trigger) }}</div>
+                </td>
               </tr>
             </tbody>
           </q-markup-table>
@@ -527,13 +559,13 @@ function closeUninstall() {
             </thead>
             <tbody>
               <tr v-for="trigger in panel.triggers" :key="trigger.id" :data-control-trigger="trigger.id">
-                <td>{{ trigger.name }}<div class="text-caption os-text-muted">{{ nextFireLine(trigger) }}</div></td>
+                <td>{{ trigger.packageName }}<div class="text-caption os-text-muted">{{ nextFireLine(trigger) }}</div></td>
                 <td>
                   <q-toggle
                     :model-value="trigger.enabled"
                     dense
                     :disable="busy !== ''"
-                    :aria-label="`${trigger.name} on`"
+                    :aria-label="`${trigger.packageName} on`"
                     data-trigger-enabled
                     @update:model-value="(value: boolean) => setEnabled(trigger, value)"
                   />
@@ -548,7 +580,7 @@ function closeUninstall() {
                       class="cap-input"
                       :error="capProblem(trigger) !== '' ? true : undefined"
                       :error-message="capProblem(trigger)"
-                      :aria-label="`${trigger.name} daily cap`"
+                      :aria-label="`${trigger.packageName} daily cap`"
                       data-trigger-cap
                       @update:model-value="(value) => (caps = { ...caps, [trigger.id]: value === null ? '' : String(value) })"
                     />
@@ -688,10 +720,23 @@ function closeUninstall() {
           <q-list v-else dense bordered separator data-recent-runs>
             <q-item v-for="run in panel.recentRuns" :key="`${run.member}/${run.seq}`" :data-run="run.seq">
               <q-item-section>
-                <q-item-label>{{ run.packageMember }} · {{ run.outcome }}<span v-if="run.quiet" class="os-text-muted"> · quiet</span></q-item-label>
+                <q-item-label>{{ run.packageMember }} · {{ run.outcome }}</q-item-label>
                 <q-item-label caption>{{ whenWords(run.endedAt) }}</q-item-label>
                 <div v-if="run.output" class="run-output mono" data-run-output>{{ run.output }}</div>
                 <div v-if="run.reason" class="run-output text-negative" data-run-reason>{{ run.reason }}</div>
+                <div v-if="transcripts[runKey(run)]" class="run-output mono transcript" data-run-transcript>{{ transcripts[runKey(run)] }}</div>
+              </q-item-section>
+              <q-item-section v-if="run.transcript" side top>
+                <q-btn
+                  flat
+                  dense
+                  no-caps
+                  size="sm"
+                  :label="transcripts[runKey(run)] ? 'Hide transcript' : 'Transcript'"
+                  :loading="busy === `transcript:${runKey(run)}`"
+                  data-run-transcript-toggle
+                  @click="toggleTranscript(run)"
+                />
               </q-item-section>
             </q-item>
           </q-list>
@@ -742,7 +787,7 @@ function closeUninstall() {
       <q-card-section v-if="!uninstall.result && panel" class="os-body" data-uninstall-ask>
         <div class="q-mb-xs">This removes, from team {{ panel.teamName }}:</div>
         <ul class="q-my-none">
-          <li v-if="panel.triggers.length > 0">Triggers: {{ panel.triggers.map((trigger) => trigger.name).join(', ') }}</li>
+          <li v-if="panel.triggers.length > 0">Triggers: {{ panel.triggers.map((trigger) => trigger.packageName).join(', ') }}</li>
           <li v-if="panel.members.some((member) => member.role !== 'manager')">
             Members: {{ panel.members.filter((member) => member.role !== 'manager').map((member) => member.packageName).join(', ') }}
           </li>
@@ -764,7 +809,10 @@ function closeUninstall() {
       </q-card-section>
 
       <q-card-section v-else-if="uninstall.result" class="os-body" data-uninstall-result>
-        <div>{{ panel?.name ?? uninstall.result.id }} {{ uninstall.result.version }} was uninstalled.</div>
+        <div>
+          {{ panel?.name ?? uninstall.result.id }} {{ uninstall.result.version }} was uninstalled{{ uninstall.result.ok ? '' : ', except what is named below' }}.
+          Team {{ uninstall.result.teamName ?? panel?.teamName ?? uninstall.result.team }} stays, with its Manager.
+        </div>
         <ul class="q-my-sm">
           <li v-if="uninstall.result.removed.triggers.length">Triggers removed: {{ uninstall.result.removed.triggers.join(', ') }}</li>
           <li v-if="uninstall.result.removed.members.length">Members removed: {{ uninstall.result.removed.members.join(', ') }}</li>
@@ -776,7 +824,10 @@ function closeUninstall() {
             Plugin {{ kept.id }} kept{{ kept.usedBy.length ? `: used by ${kept.usedBy.join(', ')}` : '' }}
           </li>
         </ul>
-        <div data-documents-kept>Documents kept in <span class="mono">{{ uninstall.result.documentsKept }}</span>.</div>
+        <div data-documents-kept>
+          <template v-if="uninstall.result.documentsKept">Documents kept in <span class="mono">{{ uninstall.result.documentsKept }}</span>.</template>
+          <template v-else>The team's documents were kept.</template>
+        </div>
         <div v-for="failure in uninstall.result.failures" :key="failure" class="text-negative q-mt-xs" data-uninstall-failure>{{ failure }}</div>
       </q-card-section>
 
@@ -828,6 +879,11 @@ function closeUninstall() {
 }
 
 /* Run output is plain text from the plugin: kept as written, wrapped, never interpreted. */
+.transcript {
+  max-height: 20rem;
+  overflow: auto;
+}
+
 .run-output {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

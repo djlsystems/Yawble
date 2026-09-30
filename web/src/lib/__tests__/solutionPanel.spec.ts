@@ -1,10 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LauncherPath, nextFireLine, panelPath, parseCap, sizeWords, spendLine, stateBadge } from '../solutionPanel';
+import { LauncherPath, memberStateLine, nextFireLine, panelPath, parseCap, sizeWords, stateBadge } from '../solutionPanel';
 import { needsActiveWorkTeam, Ribbon, SolutionsAction } from '../ribbon';
-
-const spend = (tokens: number, measuredRuns: number, unmeasuredRuns: number) => ({ tokens, measuredRuns, unmeasuredRuns });
 
 describe('a solution state badge', () => {
   it('says each state in words, and names why when blocked or capped', () => {
@@ -17,34 +15,25 @@ describe('a solution state badge', () => {
   });
 });
 
-describe("a trigger's spend today", () => {
-  it('is measured tokens against the cap', () => {
-    expect(spendLine({ spentToday: spend(12345, 3, 0), dailyTokenCap: 200000, capped: false })).toBe('12,345 of 200,000 tokens today');
-  });
-
-  it('counts unmeasured runs as such and never adds a guess for them', () => {
-    expect(spendLine({ spentToday: spend(100, 1, 2), dailyTokenCap: 1000, capped: false })).toBe(
-      '100 of 1,000 tokens today (2 runs not measured)',
-    );
-  });
-
-  it('does not claim zero when nothing was measured', () => {
-    expect(spendLine({ spentToday: spend(0, 0, 1), dailyTokenCap: 1000, capped: false })).toBe('nothing measured today (1 run not measured)');
-  });
-
-  it('says no cap, and says a reached cap', () => {
-    expect(spendLine({ spentToday: spend(0, 0, 0), dailyTokenCap: null, capped: false })).toBe('0 tokens today, no cap');
-    expect(spendLine({ spentToday: spend(1000, 2, 0), dailyTokenCap: 1000, capped: true })).toBe('1,000 of 1,000 tokens today - cap reached');
+describe('when a trigger next fires', () => {
+  it('says off, event, folder and unscheduled in words', () => {
+    expect(nextFireLine({ packageKind: 'schedule', enabled: false, nextDueAt: '2026-10-01T00:00:00Z' })).toBe('Off');
+    expect(nextFireLine({ packageKind: 'event', enabled: true, nextDueAt: null })).toBe('Fires on its event');
+    expect(nextFireLine({ packageKind: 'folder', enabled: true, nextDueAt: null })).toBe('Fires when a file changes');
+    expect(nextFireLine({ packageKind: 'schedule', enabled: true, nextDueAt: null })).toBe('Not scheduled');
+    expect(nextFireLine({ packageKind: 'schedule', enabled: true, nextDueAt: '2026-10-01T00:00:00Z' })).toMatch(/^Next /);
   });
 });
 
-describe('when a trigger next fires', () => {
-  it('says off, event, folder and unscheduled in words', () => {
-    expect(nextFireLine({ kind: 'schedule', enabled: false, nextFireAt: '2026-10-01T00:00:00Z' })).toBe('Off');
-    expect(nextFireLine({ kind: 'event', enabled: true, nextFireAt: null })).toBe('Fires on its event');
-    expect(nextFireLine({ kind: 'folder', enabled: true, nextFireAt: null })).toBe('Fires when a file changes');
-    expect(nextFireLine({ kind: 'schedule', enabled: true, nextFireAt: null })).toBe('Not scheduled');
-    expect(nextFireLine({ kind: 'schedule', enabled: true, nextFireAt: '2026-10-01T00:00:00Z' })).toMatch(/^Next /);
+describe("a member's state", () => {
+  it('says the state, and what the snapshot says when it says something', () => {
+    expect(memberStateLine({ state: 'idle' })).toBe('idle');
+    expect(memberStateLine({ state: 'missing' })).toBe('no longer on the team');
+    expect(memberStateLine({ state: 'running', queueDepth: 2 })).toBe('running · 2 queued');
+    expect(memberStateLine({ state: 'idle', blocked: 'mailbox is not bound', needsDecision: null, failed: null })).toBe(
+      'idle · blocked: mailbox is not bound',
+    );
+    expect(memberStateLine({ state: 'idle', failed: 'exit 1' })).toBe('idle · failed: exit 1');
   });
 });
 

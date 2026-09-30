@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SolutionPanel from '../SolutionPanel.vue';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { settle } from '../../test/formProbe';
-import { fakeHost, type Call } from '../../test/solutionFixtures';
+import { fakeHost, sent, type Call } from '../../test/solutionFixtures';
 import { openSection, panelRead, panelRoutes } from '../../test/solutionPanelFixtures';
 import type { SolutionPanel as PanelShape } from '../../api/types';
 
@@ -64,5 +64,39 @@ describe('the control panel: Results', () => {
     expect(run.textContent).toContain('completed');
     expect(run.querySelector('[data-run-output]')?.textContent).toBe('3 new postings <script>x</script>');
     expect(run.querySelector('script')).toBeNull();
+    expect(run.querySelector('[data-run-transcript-toggle]')).toBeNull();
+  });
+
+  it("reads an agent member's run transcript when asked, as text, and hides it again", async () => {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        fakeHost(
+          [
+            (call) =>
+              call.url === '/api/teams/job-tracker/members/Manager/runs/40/transcript'
+                ? new Response('08:00\tRead the posting <b>now</b>\n08:01\tHanded back\n', { status: 200 })
+                : undefined,
+            ...panelRoutes(() => read),
+          ],
+          calls,
+        ),
+      ),
+    );
+    await results();
+
+    const run = bodyFind('[data-run="40"]')!;
+    (run.querySelector('[data-run-transcript-toggle]') as HTMLElement).click();
+    await settle();
+
+    expect(sent(calls, 'GET', '/api/teams/job-tracker/members/Manager/runs/40/transcript')).toHaveLength(1);
+    const transcript = bodyFind('[data-run="40"] [data-run-transcript]')!;
+    expect(transcript.textContent).toContain('Read the posting <b>now</b>');
+    expect(transcript.querySelector('b')).toBeNull();
+
+    (bodyFind('[data-run="40"] [data-run-transcript-toggle]') as HTMLElement).click();
+    await settle();
+    expect(bodyFind('[data-run="40"] [data-run-transcript]')).toBeNull();
   });
 });

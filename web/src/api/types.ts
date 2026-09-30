@@ -3015,30 +3015,25 @@ export interface SolutionPanelMember {
   member: string
   kind: 'agent' | 'plugin'
   role: 'manager' | 'member'
-  /** The container's status string, as the containers route says it. */
-  state: string
+  /** `missing`: the member is no longer on the team. */
+  state: 'running' | 'idle' | 'missing'
+  /** The container snapshot's own strings, null when there is nothing to say. */
+  blocked?: string | null
+  failed?: string | null
+  needsDecision?: string | null
+  queueDepth?: number
   lastRun: { seq: number; at: string; outcome: string } | null
 }
 
-/** Today's spend: measured tokens only, and the runs that reported none counted, never estimated. */
-export interface SolutionPanelSpend {
-  tokens: number
-  measuredRuns: number
-  unmeasuredRuns: number
-}
-
-export interface SolutionPanelTrigger {
-  id: string
-  name: string
-  kind: 'schedule' | 'event' | 'folder'
-  member: string
-  enabled: boolean
-  nextFireAt: string | null
+/**
+ * One of the package's triggers: EXACTLY the Triggers dialog's view of it (spend measured only,
+ * unmeasured runs counted), plus the package's name and kind for it and whether Run now applies.
+ */
+export interface SolutionPanelTrigger extends TeamTrigger {
+  packageName: string
+  packageKind: 'schedule' | 'event' | 'folder'
   /** A schedule: Run now is offered. */
   runNow: boolean
-  dailyTokenCap: number | null
-  spentToday: SolutionPanelSpend
-  capped: boolean
 }
 
 /** What the team waits for, with how to fix it where it is shown. */
@@ -3048,9 +3043,11 @@ export interface SolutionPanelBlocked {
   member: string | null
   packageMember?: string | null
   description: string
+  /** What to do, in a sentence: "Upload a file to Resume/". */
+  reason?: string | null
   fix?: {
-    upload?: { folder: string }
-    connection?: { member: string; slot: string }
+    upload?: { folder: string } | null
+    connection?: { member: string; slot: string } | null
   } | null
 }
 
@@ -3086,9 +3083,12 @@ export interface SolutionPanelRun {
   startedAt: string | null
   endedAt: string
   outcome: string
+  /** A plugin member's output; null for an agent member's run. */
   output: string | null
+  /** A blocked run's reason. */
   reason: string | null
-  quiet: boolean
+  /** An agent member's run: its transcript can be read. */
+  transcript?: boolean
 }
 
 export interface SolutionPanel {
@@ -3122,7 +3122,9 @@ export interface SolutionUninstallResult {
   version: string
   removed: { triggers: string[]; members: string[]; skills: string[]; sites: string[]; tools: boolean }
   plugins: { removed: string[]; kept: { id: string; usedBy: string[] }[] }
-  documentsKept: string
+  teamName?: string
+  /** The team's documents folder, kept. */
+  documentsKept: string | null
   /** Anything that could not be removed, one sentence each. */
   failures: string[]
 }

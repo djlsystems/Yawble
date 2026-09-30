@@ -86,7 +86,7 @@ describe('the solutions addresses', () => {
   it('leaves for the Console when the launcher is closed', async () => {
     const router = await app('/solutions');
 
-    bodyFind<HTMLElement>('[data-solutions-launcher] [aria-label="Close"]')!.click();
+    (bodyFind('[data-solutions-launcher] [aria-label="Close"]') as HTMLElement).click();
     await settle();
     await settle();
 

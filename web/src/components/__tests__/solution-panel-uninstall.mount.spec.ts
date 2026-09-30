@@ -32,12 +32,13 @@ const record: Route = (call) =>
 const uninstall: Route = (call) =>
   call.method === 'POST' && call.url === '/api/teams/job-tracker/solution/uninstall'
     ? reply(200, {
-        ok: true,
+        ok: false,
         team: 'job-tracker',
         id: 'job-tracker',
         version: '1.1.0',
         removed: { triggers: ['Scan for postings', 'Apply pressed'], members: ['scout'], skills: ['job-search-playbook'], sites: ['tracker'], tools: true },
         plugins: { removed: [], kept: [{ id: 'job-board', usedBy: ['other-team'] }] },
+        teamName: 'Job Tracker',
         documentsKept: '/data/documents/job-tracker',
         failures: ['The site tracker could not be unpublished: it is locked.'],
       })
@@ -98,6 +99,8 @@ describe('Uninstall', () => {
     ]);
     const result = bodyFind('[data-uninstall-result]')!;
     expect(result.textContent).toContain('Members removed: scout');
+    expect(result.textContent).toContain('except what is named below');
+    expect(result.textContent).toContain('Team Job Tracker stays, with its Manager.');
     expect(bodyFind('[data-plugin-kept]')?.textContent).toContain('Plugin job-board kept: used by other-team');
     expect(bodyFind('[data-documents-kept]')?.textContent).toContain('/data/documents/job-tracker');
     expect(bodyFind('[data-uninstall-failure]')?.textContent).toBe('The site tracker could not be unpublished: it is locked.');

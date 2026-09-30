@@ -1,9 +1,10 @@
-import type { SolutionPanelTrigger, SolutionState } from '../api/types';
+import type { SolutionPanelMember, SolutionPanelTrigger, SolutionState } from '../api/types';
 
 /**
  * THE WORDS OF THE SOLUTIONS LAUNCHER AND CONTROL PANEL, kept out of the components so each can be
- * read and tested on its own: a state badge, a trigger's spend today against its cap, when a
- * schedule next fires, a file's size.
+ * read and tested on its own: a state badge, when a schedule next fires, a member's state, a file's
+ * size. A trigger's spend today is the Triggers dialog's own line (`spentTodayLine`), so the two
+ * screens say it the same way.
  *
  * Every string passed in from a package or its site data stays a string: nothing here builds markup.
  */
@@ -43,38 +44,28 @@ export function stateBadge(state: SolutionState | null | undefined): StateBadge 
   }
 }
 
-const tokens = (count: number) => count.toLocaleString('en-US');
-
-/**
- * Today's spend against the cap, MEASURED ONLY: "12,345 of 200,000 tokens today". Runs that reported
- * no usage are counted as such - "1 run not measured" - never added in as a guess, and a day with only
- * unmeasured runs does not claim zero.
- */
-export function spendLine(trigger: Pick<SolutionPanelTrigger, 'spentToday' | 'dailyTokenCap' | 'capped'>): string {
-  const spent = trigger.spentToday ?? { tokens: 0, measuredRuns: 0, unmeasuredRuns: 0 };
-  const cap = trigger.dailyTokenCap;
-  const measured =
-    spent.measuredRuns === 0 && spent.unmeasuredRuns > 0
-      ? 'nothing measured'
-      : cap === null || cap === undefined
-        ? `${tokens(spent.tokens)} tokens`
-        : `${tokens(spent.tokens)} of ${tokens(cap)} tokens`;
-  const noCap = cap === null || cap === undefined ? ', no cap' : '';
-  const unmeasured =
-    spent.unmeasuredRuns > 0
-      ? ` (${spent.unmeasuredRuns} ${spent.unmeasuredRuns === 1 ? 'run' : 'runs'} not measured)`
-      : '';
-  const capped = trigger.capped ? ' - cap reached' : '';
-  return `${measured} today${noCap}${unmeasured}${capped}`;
+/** When a schedule next fires, as a person reads it; why it does not for the rest. */
+export function nextFireLine(trigger: Pick<SolutionPanelTrigger, 'packageKind' | 'enabled' | 'nextDueAt'>, now = new Date()): string {
+  if (!trigger.enabled) return 'Off';
+  if (trigger.packageKind === 'event') return 'Fires on its event';
+  if (trigger.packageKind === 'folder') return 'Fires when a file changes';
+  if (!trigger.nextDueAt) return 'Not scheduled';
+  return `Next ${whenWords(trigger.nextDueAt, now)}`;
 }
 
-/** When a schedule next fires, as a person reads it; why it does not for the rest. */
-export function nextFireLine(trigger: Pick<SolutionPanelTrigger, 'kind' | 'enabled' | 'nextFireAt'>, now = new Date()): string {
-  if (!trigger.enabled) return 'Off';
-  if (trigger.kind === 'event') return 'Fires on its event';
-  if (trigger.kind === 'folder') return 'Fires when a file changes';
-  if (!trigger.nextFireAt) return 'Not scheduled';
-  return `Next ${whenWords(trigger.nextFireAt, now)}`;
+/**
+ * A member's state in words, with what its snapshot says when it has something to say: blocked,
+ * failed, waiting on a decision, or work queued.
+ */
+export function memberStateLine(member: Pick<SolutionPanelMember, 'state' | 'blocked' | 'failed' | 'needsDecision' | 'queueDepth'>): string {
+  const state = member.state === 'missing' ? 'no longer on the team' : member.state;
+  const notes = [
+    member.failed ? `failed: ${member.failed}` : '',
+    member.blocked ? `blocked: ${member.blocked}` : '',
+    member.needsDecision ? `waiting for a decision: ${member.needsDecision}` : '',
+    member.queueDepth ? `${member.queueDepth} queued` : '',
+  ].filter((note) => note !== '');
+  return [state, ...notes].join(' · ');
 }
 
 /** "8:51 PM" today, "Thu 8:00 AM" on another day; the input itself when it is not a date. */

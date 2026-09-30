@@ -54,7 +54,7 @@ describe('the control panel: Status', () => {
 
     const scout = bodyFind('[data-member="scout"]')!;
     expect(scout.textContent).toContain('Scout');
-    expect(scout.textContent).toContain('idle');
+    expect(scout.querySelector('[data-member-state]')?.textContent).toBe('idle');
     expect(scout.textContent).toContain('completed');
     expect(bodyFind('[data-member="Manager"]')?.textContent).toContain('No runs yet');
   });
@@ -69,10 +69,45 @@ describe('the control panel: Status', () => {
   it("shows today's measured spend against the cap and counts unmeasured runs, never estimating them", async () => {
     await panel();
 
-    expect(bodyFind('[data-trigger="trg_scan"] [data-spend]')?.textContent).toBe(
-      '12,345 of 200,000 tokens today (1 run not measured)',
+    // The Triggers dialog's own words (`spentTodayLine`), so the two screens cannot disagree.
+    expect(bodyFind('[data-trigger="trg_scan"] [data-spend]')?.textContent?.trim()).toBe(
+      'spent today 12,345 tokens + 1 run not measured / cap 200,000 tokens',
     );
-    expect(bodyFind('[data-trigger="trg_apply"] [data-spend]')?.textContent).toBe('0 tokens today, no cap');
+    expect(bodyFind('[data-trigger="trg_apply"] [data-spend]')?.textContent?.trim()).toBe('spent today 0 tokens (no cap)');
+  });
+
+  it('does not claim zero for a day whose runs were none of them measured, and says a reached cap', async () => {
+    read = panelRead({
+      triggers: [
+        { ...panelRead().triggers[0]!, spentToday: { billableTokens: 0, measuredRuns: 0, unmeasuredRuns: 2 }, capReachedToday: true, cappedUntil: '2026-10-01T00:00:00Z' },
+      ],
+    });
+    await panel();
+
+    const spend = bodyFind('[data-trigger="trg_scan"] [data-spend]')!;
+    expect(spend.textContent).toContain('nothing measured + 2 runs not measured / cap 200,000 tokens');
+    expect(spend.textContent).toContain('cap reached');
+    expect(spend.querySelector('[data-capped]')?.textContent).toContain('Capped until 2026-10-01 00:00 UTC');
+  });
+
+  it('says what each blocked item needs, in the Host\'s words', async () => {
+    await panel();
+
+    expect(bodyFind('[data-blocked="Resume/"] [data-blocked-reason]')?.textContent).toBe('Upload a file to Resume/');
+    expect(bodyFind('[data-blocked="mailbox"] [data-blocked-reason]')?.textContent).toBe("Connect Scout's mailbox");
+  });
+
+  it('shows what a member snapshot says: blocked, a decision it waits for, work queued, or gone', async () => {
+    read = panelRead({
+      members: [
+        { ...panelRead().members[1]!, state: 'running', blocked: null, failed: null, needsDecision: 'Which region?', queueDepth: 2 },
+        { packageName: 'Writer', member: 'writer', kind: 'agent', role: 'member', state: 'missing', lastRun: null },
+      ],
+    });
+    await panel();
+
+    expect(bodyFind('[data-member="scout"] [data-member-state]')?.textContent).toBe('running · waiting for a decision: Which region? · 2 queued');
+    expect(bodyFind('[data-member="writer"] [data-member-state]')?.textContent).toBe('no longer on the team');
   });
 
   it('uploads a missing document into its folder and reads the panel again', async () => {

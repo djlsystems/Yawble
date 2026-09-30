@@ -1,4 +1,4 @@
-import type { InstalledSolution, PluginMemberSettings, SolutionPanel } from '../api/types';
+import { asTeamId, type InstalledSolution, type PluginMemberSettings, type SolutionPanel, type SolutionPanelTrigger } from '../api/types';
 import { reply, type Route } from './solutionFixtures';
 
 /**
@@ -26,6 +26,40 @@ export function launcherRow(over: Partial<InstalledSolution> = {}): InstalledSol
     status: '3 new jobs · last checked 2026-09-30T08:00:00Z',
     state: { kind: 'idle', reason: null },
     paused: false,
+    ...over,
+  };
+}
+
+/** A trigger as the panel sends it: the Triggers dialog's own view plus the package's name and kind. */
+export function panelTrigger(over: Partial<SolutionPanelTrigger> & Pick<SolutionPanelTrigger, 'id' | 'packageName' | 'packageKind'>): SolutionPanelTrigger {
+  return {
+    team: asTeamId('job-tracker'),
+    container: 'Manager',
+    name: over.packageName,
+    instruction: 'Do the thing.',
+    kind: 'every',
+    expression: null,
+    timezone: null,
+    intervalSeconds: null,
+    fireAt: null,
+    idleOnly: true,
+    enabled: true,
+    nextDueAt: null,
+    lastFiredAt: null,
+    lastOutcome: null,
+    lastSeq: null,
+    missedCount: 0,
+    createdAt: '2026-09-29T10:00:00Z',
+    createdBy: 'dana@example.com',
+    eventType: null,
+    filter: null,
+    wakeManager: 'onHandbackOrFailure',
+    dailyTokenCap: null,
+    spentToday: { billableTokens: 0, measuredRuns: 0, unmeasuredRuns: 0 },
+    capReachedToday: false,
+    cappedUntil: null,
+    skippedToday: 0,
+    runNow: false,
     ...over,
   };
 }
@@ -58,30 +92,32 @@ export function panelRead(over: Partial<SolutionPanel> = {}): SolutionPanel {
       },
     ],
     triggers: [
-      {
+      panelTrigger({
         id: 'trg_scan',
         name: 'Scan for postings',
-        kind: 'schedule',
-        member: 'scout',
-        enabled: true,
-        nextFireAt: '2026-09-30T12:00:00Z',
+        packageName: 'Scan for postings',
+        packageKind: 'schedule',
+        kind: 'every',
+        intervalSeconds: 3600,
+        container: 'scout',
+        nextDueAt: '2026-09-30T12:00:00Z',
         runNow: true,
         dailyTokenCap: 200000,
-        spentToday: { tokens: 12345, measuredRuns: 3, unmeasuredRuns: 1 },
-        capped: false,
-      },
-      {
+        spentToday: { billableTokens: 12345, measuredRuns: 3, unmeasuredRuns: 1 },
+      }),
+      panelTrigger({
         id: 'trg_apply',
         name: 'Apply pressed',
+        packageName: 'Apply pressed',
+        packageKind: 'event',
         kind: 'event',
-        member: 'Manager',
-        enabled: true,
-        nextFireAt: null,
+        eventType: 'site.action',
+        container: 'Manager',
+        nextDueAt: null,
         runNow: false,
         dailyTokenCap: null,
-        spentToday: { tokens: 0, measuredRuns: 0, unmeasuredRuns: 0 },
-        capped: false,
-      },
+        spentToday: { billableTokens: 0, measuredRuns: 0, unmeasuredRuns: 0 },
+      }),
     ],
     blocked: [
       {
@@ -89,7 +125,8 @@ export function panelRead(over: Partial<SolutionPanel> = {}): SolutionPanel {
         name: 'Resume/',
         member: null,
         description: 'Your reference resume, .docx or PDF.',
-        fix: { upload: { folder: 'Resume' } },
+        reason: 'Upload a file to Resume/',
+        fix: { upload: { folder: 'Resume' }, connection: null },
       },
       {
         kind: 'connection',
@@ -97,7 +134,8 @@ export function panelRead(over: Partial<SolutionPanel> = {}): SolutionPanel {
         member: 'scout',
         packageMember: 'Scout',
         description: 'Where postings are emailed from.',
-        fix: { connection: { member: 'scout', slot: 'mailbox' } },
+        reason: "Connect Scout's mailbox",
+        fix: { upload: null, connection: { member: 'scout', slot: 'mailbox' } },
       },
     ],
     settings: [{ member: 'scout', packageMember: 'Scout', setting: 'keywords', personOnly: false }],
@@ -135,7 +173,18 @@ export function panelRead(over: Partial<SolutionPanel> = {}): SolutionPanel {
         outcome: 'completed',
         output: '3 new postings <script>x</script>',
         reason: null,
-        quiet: false,
+        transcript: false,
+      },
+      {
+        member: 'Manager',
+        packageMember: 'Manager',
+        seq: 40,
+        startedAt: '2026-09-30T07:00:00Z',
+        endedAt: '2026-09-30T07:05:00Z',
+        outcome: 'handedBack',
+        output: null,
+        reason: null,
+        transcript: true,
       },
     ],
     ...over,
