@@ -622,6 +622,8 @@ public sealed class SolutionCheckTests : IDisposable
         new("agent member with settings", Json(m => m["members"]![2]!["settings"] = new JsonObject()), "solution.json", "members[2].settings", "belongs to a plugin member"),
         new("preset unknown", Json(m => m["members"]![2]!["preset"] = "no-such-agent"), "solution.json", "members[2].preset", "not a headless Agent preset"),
         new("plugin setting unknown", Json(m => m["members"]![1]!["settings"]!["salary"] = 1), "solution.json", "members[1].settings.salary", "has no setting 'salary'"),
+        new("plugin setting outside its bounds", Json(m => m["members"]![1]!["settings"]!["archiveAfterDays"] = 0), "solution.json", "members[1].settings.archiveAfterDays", "`archiveAfterDays` must be at least 1; 0 is below it."),
+        new("plugin setting not whole when integer", Json(m => m["members"]![1]!["settings"]!["archiveAfterDays"] = 2.5), "solution.json", "members[1].settings.archiveAfterDays", "must be a whole number"),
         new("plugin setting of the wrong type", Json(m => m["members"]![1]!["settings"]!["keywords"] = "engineer"), "solution.json", "members[1].settings.keywords", "must be a list of strings"),
         new("person-only setting set by the package", Json(m => m["members"]![1]!["settings"]!["sources"] = new JsonArray("sample")), "solution.json", "members[1].settings.sources", "set by a person only"),
         new("triggers not an array", Json(m => m["triggers"] = "hourly"), "solution.json", "triggers", "must be an array"),

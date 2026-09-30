@@ -14,6 +14,11 @@
     "python3"
   ],
   "config": {
+    "salaryMin": { "type": "number", "min": 0, "setBy": "person", "description": "Lowest annual salary wanted. A posting whose stated annual range is wholly below it is skipped; one that states no annual salary is kept." },
+    "salaryMax": { "type": "number", "min": 0, "setBy": "person", "description": "Highest annual salary to look at. A posting whose stated annual range is wholly above it is skipped." },
+    "hourlyMin": { "type": "number", "min": 0, "setBy": "person", "description": "Lowest hourly rate wanted. A posting whose stated hourly range is wholly below it is skipped; one that states no hourly rate is kept." },
+    "hourlyMax": { "type": "number", "min": 0, "setBy": "person", "description": "Highest hourly rate to look at. A posting whose stated hourly range is wholly above it is skipped." },
+    "archiveAfterDays": { "type": "number", "min": 1, "integer": true, "setBy": "person", "description": "Skip a posting posted more than this many days ago. A posting with no posted date is kept. Unset keeps every posting." },
     "keywords": {
       "type": "list",
       "description": "A posting matches when its title holds one of these words. Empty matches every posting.",

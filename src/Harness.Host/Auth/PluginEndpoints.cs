@@ -153,9 +153,11 @@ public static class PluginEndpoints
             .HumansOnly()
             .WithSummary("A plugin member's settings")
             .WithDescription(
-                "`{ team, member, plugin, version, config, secrets, fields, secretFields }`: what is stored "
+                "`{ team, member, plugin, version, config, secrets, fields, secretFields, outOfRange }`: what is stored "
                 + "for this plugin member - its configuration, and each secret's LOGICAL KEY (never a value) - "
-                + "with its plugin's declarations to build the form from. 404 for an unknown member, 400 "
+                + "with its plugin's declarations to build the form from, and `outOfRange` - each stored number "
+                + "outside its field's bounds, by field, with the sentence a write of it is refused with; never "
+                + "rewritten, `{}` when none. 404 for an unknown member, 400 "
                 + "for a member that is not a plugin, 409 when its plugin is not installed.");
 
         app.MapPut("/api/teams/{team}/members/{member}/plugin-settings", async (
@@ -178,8 +180,11 @@ public static class PluginEndpoints
                 Connections = request.Connections ?? (await settings.ForAsync(id, ct)).Connections,
             };
 
-            // EXACTLY AS A HIRE: the same check the hire runs, against the active manifest.
-            if (PluginMemberRunner.SettingsRefusal(plugin!.Manifest, changed, secrets) is { } invalid)
+            var before = await settings.ForAsync(id, ct);
+
+            // EXACTLY AS A HIRE: the same check the hire runs, against the active manifest - except
+            // that a value already stored, sent back unchanged, is kept even outside its bounds.
+            if (PluginMemberRunner.SettingsRefusal(plugin!.Manifest, changed, secrets, stored: before) is { } invalid)
             {
                 return Results.BadRequest(new { error = invalid });
             }
@@ -190,8 +195,6 @@ public static class PluginEndpoints
             {
                 return Results.BadRequest(bindingRefusal.Body());
             }
-
-            var before = await settings.ForAsync(id, ct);
 
             try
             {
@@ -222,8 +225,10 @@ public static class PluginEndpoints
                 + "with `reconnect: { connectionId, scopes }` when only scopes are missing; a change appends "
                 + "`member.connections-changed` in the same transaction. (send "
                 + "only the fields that differ from their default). Validated exactly as a hire is - "
-                + "field names, types, `enum`, required fields and secrets, the logical key's form and "
-                + "that it is set - and refused 400 naming the field, with nothing written. Secrets are "
+                + "field names, types, `enum`, a number's `min`/`max`/`integer`, required fields and secrets, "
+                + "the logical key's form and that it is set - and refused 400 naming the field (and the bound), "
+                + "with nothing written. A value already stored outside bounds added later may be sent back "
+                + "unchanged: it is kept, and `outOfRange` names it. Secrets are "
                 + "logical keys only; a value is never taken or answered. Saved with a "
                 + "`member.plugin-settings-changed` tenant row in the same transaction, and read by the "
                 + "member's next run. Answers as GET does.");
@@ -374,6 +379,7 @@ public static class PluginEndpoints
         fields = Fields(plugin.Manifest),
         secretFields = SecretFields(plugin.Manifest),
         connectionFields = ConnectionFields(plugin.Manifest),
+        outOfRange = PluginMemberRunner.OutOfRange(plugin.Manifest, stored),
     };
 
     private static Dictionary<string, object> Fields(PluginManifest manifest) => manifest.Config.ToDictionary(
@@ -386,6 +392,9 @@ public static class PluginEndpoints
             @default = c.Value.Default,
             @enum = c.Value.Enum,
             setBy = c.Value.PersonOnly ? "person" : "anyone",
+            min = c.Value.Min,
+            max = c.Value.Max,
+            integer = c.Value.Integer,
         });
 
     /// <summary>Each connection slot, its scopes in the object form, and the Plugins screen's line.</summary>
