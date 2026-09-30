@@ -272,11 +272,32 @@ describe('PluginsDialog', () => {
     wrapper.unmount();
   });
 
+  it('shows each version as a tile and narrows the tiles by the filter', async () => {
+    const wrapper = await mountPlugins();
+
+    expect(document.body.querySelector('.plugin-tiles [data-plugin="sample-echo"]')).not.toBeNull();
+
+    const filter = document.body.querySelector<HTMLInputElement>('input[data-plugin-filter], [data-plugin-filter] input')!;
+    filter.value = 'BROKEN';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(row('sample-echo')).toBeNull();
+    expect(row('broken')).not.toBeNull();
+
+    filter.value = 'nothing-is-called-this';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(document.body.querySelector('[data-plugin-none-match]')).not.toBeNull();
+
+    wrapper.unmount();
+  });
+
   it('views a manifest read-only and formatted', async () => {
     const wrapper = await mountPlugins();
 
     getPluginManifest.mockResolvedValue('{"id":"sample-echo","version":"0.2.0","config":{"mode":{"type":"string"}}}');
-    const view = [...row('sample-echo')!.querySelectorAll('button')].find((b) => b.textContent?.includes('View manifest'))!;
+    const view = row('sample-echo')!.querySelector('[data-view-manifest]') as HTMLElement;
+    expect(view.getAttribute('aria-label')).toBe('View manifest sample-echo 0.2.0');
     view.click();
     await settle();
 

@@ -64,9 +64,18 @@ async function load() {
   }
 }
 
+/** Which tab shows: the accounts, or the providers they are connected through. */
+const tab = ref<'connections' | 'providers'>('connections');
+
 watch(open, (showing) => {
   if (showing) void load();
 });
+
+/** How many of the accounts go through a provider, for its tile. */
+function connectionsOf(provider: ConnectionProvider) {
+  const count = connections.value.filter((connection) => connection.provider === provider.id).length;
+  return count === 0 ? 'None' : count === 1 ? '1 account' : `${count} accounts`;
+}
 
 /** The redirect URI for the address the person is using now. */
 const redirectUri = computed(() => redirectUriFor(currentOrigin()));
@@ -310,11 +319,10 @@ async function removeProvider(provider: ConnectionProvider) {
 
 <template>
   <q-dialog v-model="open">
-    <q-card class="connections-card os-dialog-lg" data-connections-dialog>
+    <q-card class="connections-card os-dialog-xl" data-connections-dialog>
       <q-card-section class="row items-center q-pb-none">
         <div class="os-dialog-title">Connections</div>
         <q-space />
-        <q-btn flat dense no-caps icon="add" label="Connect an account…" :disable="!loaded" @click="startConnect" />
         <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
       </q-card-section>
 
@@ -324,7 +332,7 @@ async function removeProvider(provider: ConnectionProvider) {
         to a member in the member's settings.
       </q-card-section>
 
-      <q-card-section class="q-pt-none connections-body">
+      <q-card-section v-if="noticeText || error" class="q-py-none">
         <q-banner
           v-if="noticeText"
           dense
@@ -337,93 +345,178 @@ async function removeProvider(provider: ConnectionProvider) {
           <template #avatar><q-icon name="error" /></template>
           {{ error }}
         </q-banner>
-
-        <div v-if="loading && !loaded" class="os-text-muted">Reading the connections…</div>
-        <div v-else-if="loaded && connections.length === 0" class="os-text-muted q-mb-md" data-no-connections>
-          No account is connected yet. Connect one to bind it to a plugin member.
-        </div>
-
-        <q-card
-          v-for="connection in connections"
-          :key="connection.id"
-          flat
-          bordered
-          class="q-mb-sm"
-          :data-connection="connection.id"
-        >
-          <q-card-section class="row items-center q-gutter-x-sm q-py-sm">
-            <span class="text-weight-medium" data-connection-name>{{ connection.name }}</span>
-            <span class="os-text-muted" data-connection-provider>{{ nameOf(connection.provider) }}</span>
-            <span class="mono" data-connection-account>{{ connection.account }}</span>
-            <q-space />
-            <q-badge
-              :color="connection.status === 'ok' ? 'positive' : 'negative'"
-              :label="statusLabel(connection)"
-              data-connection-status
-            />
-            <q-btn flat dense no-caps size="sm" icon="sync" label="Reconnect" :disable="leaving" @click="reconnect(connection)" />
-            <q-btn flat dense no-caps size="sm" icon="edit" label="Rename" @click="startRename(connection)" />
-            <q-btn flat dense no-caps size="sm" icon="delete" label="Disconnect" @click="startDisconnect(connection)" />
-          </q-card-section>
-
-          <q-card-section class="q-pt-none">
-            <div v-if="connection.status !== 'ok'" class="text-negative q-mb-xs" data-connection-reason>
-              {{ connection.statusReason ?? 'The provider gave no reason.' }} Reconnect it to clear this.
-            </div>
-            <dl class="connection-facts">
-              <dt>Scopes</dt>
-              <dd data-connection-scopes>
-                <template v-if="connection.scopes.length === 0">None</template>
-                <span v-for="scope in connection.scopes" :key="scope" class="mono q-mr-sm">{{ scope }}</span>
-              </dd>
-              <dt>Connected</dt>
-              <dd data-connection-connected>{{ when(connection.connectedAt) }}</dd>
-              <dt>Last refreshed</dt>
-              <dd data-connection-refreshed>{{ when(connection.refreshedAt) }}</dd>
-              <dt>Used by</dt>
-              <dd data-connection-used-by>
-                <template v-if="connection.usedBy.length === 0">No member</template>
-                <div v-for="label in usedByLabels(connection)" :key="label">{{ label }}</div>
-              </dd>
-            </dl>
-            <div v-if="rowProblem[connection.id]" class="text-negative text-caption" data-row-problem>
-              {{ rowProblem[connection.id] }}
-            </div>
-          </q-card-section>
-        </q-card>
-
-        <div class="row items-center q-mt-lg q-mb-sm">
-          <div class="text-subtitle2">Providers</div>
-          <q-space />
-          <q-btn flat dense no-caps size="sm" icon="add" label="Add a custom provider…" @click="setUpClient(null)" />
-        </div>
-
-        <q-card v-for="provider in providers" :key="provider.id" flat bordered class="q-mb-sm" :data-provider="provider.id">
-          <q-card-section class="row items-center q-gutter-x-sm q-py-sm">
-            <span class="text-weight-medium">{{ provider.name }}</span>
-            <span class="mono os-text-muted">{{ provider.id }}</span>
-            <q-space />
-            <span data-client-state>{{ provider.configured ? 'Client set up' : 'Client not set up' }}</span>
-            <q-btn flat dense no-caps size="sm" icon="settings" label="Set up client…" @click="setUpClient(provider)" />
-            <q-btn
-              v-if="provider.kind === 'custom'"
-              flat
-              dense
-              no-caps
-              size="sm"
-              icon="delete"
-              label="Remove"
-              @click="removeProvider(provider)"
-            />
-          </q-card-section>
-          <q-card-section class="q-pt-none text-caption os-text-muted">
-            <div>
-              Client ID: <span class="mono" data-client-id>{{ provider.clientId ?? 'not set' }}</span> ·
-              Client secret: <span data-client-secret>{{ provider.clientSecretSet ? 'set' : 'not set' }}</span>
-            </div>
-          </q-card-section>
-        </q-card>
       </q-card-section>
+
+      <!-- TWO TABS: the accounts, and the providers whose clients they are connected through. -->
+      <q-tabs v-model="tab" dense align="left" no-caps class="q-px-md" active-color="primary" indicator-color="primary">
+        <q-tab name="connections" :label="`Connections (${connections.length})`" data-connections-tab="connections" />
+        <q-tab name="providers" :label="`Providers (${providers.length})`" data-connections-tab="providers" />
+      </q-tabs>
+      <q-separator />
+
+      <q-tab-panels v-model="tab" animated class="connections-body">
+        <q-tab-panel name="connections" data-connections-panel="connections">
+          <div class="row items-center q-mb-sm">
+            <q-space />
+            <q-btn flat dense no-caps icon="add" label="Connect an account…" :disable="!loaded" @click="startConnect" />
+          </div>
+
+          <div v-if="loading && !loaded" class="os-text-muted">Reading the connections…</div>
+          <div v-else-if="loaded && connections.length === 0" class="os-text-muted q-pa-lg text-center" data-no-connections>
+            No account is connected yet. Connect one to bind it to a plugin member.
+          </div>
+
+          <div v-if="connections.length > 0" class="conn-tiles">
+            <div
+              v-for="connection in connections"
+              :key="connection.id"
+              class="conn-tile"
+              :data-connection="connection.id"
+            >
+              <div class="conn-tile-head">
+                <q-icon name="link" size="18px" aria-hidden="true" />
+                <span class="text-weight-medium" data-connection-name>{{ connection.name }}</span>
+                <q-space />
+                <q-badge
+                  :color="connection.status === 'ok' ? 'positive' : 'negative'"
+                  :label="statusLabel(connection)"
+                  data-connection-status
+                />
+              </div>
+              <div class="conn-tile-line">
+                <span class="os-text-muted" data-connection-provider>{{ nameOf(connection.provider) }}</span>
+                · <span class="mono" data-connection-account>{{ connection.account }}</span>
+              </div>
+
+              <div v-if="connection.status !== 'ok'" class="conn-tile-line text-negative" data-connection-reason>
+                {{ connection.statusReason ?? 'The provider gave no reason.' }} Reconnect it to clear this.
+              </div>
+
+              <dl class="conn-facts q-mt-xs">
+                <dt>Scopes</dt>
+                <dd data-connection-scopes>
+                  <template v-if="connection.scopes.length === 0">None</template>
+                  <span v-for="scope in connection.scopes" :key="scope" class="mono q-mr-sm">{{ scope }}</span>
+                </dd>
+                <dt>Connected</dt>
+                <dd data-connection-connected>{{ when(connection.connectedAt) }}</dd>
+                <dt>Last refreshed</dt>
+                <dd data-connection-refreshed>{{ when(connection.refreshedAt) }}</dd>
+                <dt>Used by</dt>
+                <dd data-connection-used-by>
+                  <template v-if="connection.usedBy.length === 0">No member</template>
+                  <div v-for="label in usedByLabels(connection)" :key="label">{{ label }}</div>
+                </dd>
+              </dl>
+              <div v-if="rowProblem[connection.id]" class="conn-tile-line text-negative" data-row-problem>
+                {{ rowProblem[connection.id] }}
+              </div>
+
+              <div class="conn-tile-actions">
+                <span class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    icon="sync"
+                    :disable="leaving"
+                    :aria-label="`Reconnect ${connection.name}`"
+                    @click="reconnect(connection)"
+                  />
+                  <q-tooltip>Reconnect: agree again at the provider</q-tooltip>
+                </span>
+                <span class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    icon="edit"
+                    :aria-label="`Rename ${connection.name}`"
+                    @click="startRename(connection)"
+                  />
+                  <q-tooltip>Rename</q-tooltip>
+                </span>
+                <span class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    color="negative"
+                    icon="link_off"
+                    :aria-label="`Disconnect ${connection.name}`"
+                    @click="startDisconnect(connection)"
+                  />
+                  <q-tooltip>Disconnect</q-tooltip>
+                </span>
+              </div>
+            </div>
+          </div>
+        </q-tab-panel>
+
+        <q-tab-panel name="providers" data-connections-panel="providers">
+          <div class="row items-center q-mb-sm">
+            <q-space />
+            <q-btn flat dense no-caps icon="add" label="Add a custom provider…" @click="setUpClient(null)" />
+          </div>
+
+          <div class="conn-tiles">
+            <div v-for="provider in providers" :key="provider.id" class="conn-tile" :data-provider="provider.id">
+              <div class="conn-tile-head">
+                <q-icon name="key" size="18px" aria-hidden="true" />
+                <span class="text-weight-medium">{{ provider.name }}</span>
+                <q-badge
+                  :outline="provider.kind === 'custom'"
+                  :color="provider.kind === 'custom' ? 'primary' : 'grey-7'"
+                  :label="provider.kind === 'custom' ? 'Custom' : 'Built-in'"
+                />
+                <q-space />
+                <q-badge
+                  :color="provider.configured ? 'positive' : 'grey-7'"
+                  :outline="!provider.configured"
+                >
+                  <span data-client-state>{{ provider.configured ? 'Client set up' : 'Client not set up' }}</span>
+                </q-badge>
+              </div>
+              <div class="conn-tile-line mono os-text-muted">{{ provider.id }}</div>
+
+              <dl class="conn-facts q-mt-xs">
+                <dt>Client ID</dt>
+                <dd class="mono" data-client-id>{{ provider.clientId ?? 'not set' }}</dd>
+                <dt>Client secret</dt>
+                <dd data-client-secret>{{ provider.clientSecretSet ? 'set' : 'not set' }}</dd>
+                <dt>Connections</dt>
+                <dd data-provider-connections>{{ connectionsOf(provider) }}</dd>
+              </dl>
+
+              <div class="conn-tile-actions">
+                <span class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    icon="settings"
+                    :aria-label="`Set up client… ${provider.name}`"
+                    @click="setUpClient(provider)"
+                  />
+                  <q-tooltip>Set up its client</q-tooltip>
+                </span>
+                <span v-if="provider.kind === 'custom'" class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    color="negative"
+                    icon="delete"
+                    :aria-label="`Remove ${provider.name}`"
+                    @click="removeProvider(provider)"
+                  />
+                  <q-tooltip>Remove this provider</q-tooltip>
+                </span>
+              </div>
+            </div>
+          </div>
+        </q-tab-panel>
+      </q-tab-panels>
     </q-card>
   </q-dialog>
 
@@ -652,25 +745,73 @@ async function removeProvider(provider: ConnectionProvider) {
 
 <style scoped>
 .connections-body {
-  max-height: 70vh;
+  max-height: min(64vh, 44rem);
   overflow-y: auto;
 }
 
-.connection-facts {
+/* WRAPPED TILES, as the Agents and Plugins screens lay theirs out: as many columns as fit. */
+.conn-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 12px;
+}
+
+.conn-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px 8px;
+  border: 1px solid var(--os-rule-strong);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.conn-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.conn-tile-line {
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.conn-tile-actions {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.conn-facts {
+  font-size: 12px;
+  line-height: 1.45;
   display: grid;
   grid-template-columns: max-content 1fr;
   column-gap: 16px;
-  row-gap: 4px;
+  row-gap: 2px;
   margin: 0;
 }
 
-.connection-facts dt {
+.conn-facts dt {
   color: var(--os-ink-muted);
   font-weight: 500;
 }
 
-.connection-facts dd {
+.conn-facts dd {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The tooltip lives on this WRAPPER because a disabled q-btn swallows pointer events. */
+.row-btn-wrap {
+  display: inline-flex;
 }
 
 .connect-redirect {

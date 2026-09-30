@@ -504,6 +504,7 @@ watch(open, (showing) => {
              still be named forty rows down; the sentinel in the footer asks for older rows. -->
         <q-virtual-scroll
           v-else
+          v-resizable-columns="'diagnostics'"
           type="table"
           class="diagnostics-scroll"
           dense
@@ -516,7 +517,7 @@ watch(open, (showing) => {
           <template #before>
             <thead class="diagnostics-head">
               <tr>
-                <th v-for="column in visibleColumns" :key="column.name" class="text-left">
+                <th v-for="column in visibleColumns" :key="column.name" :data-col="column.name" class="text-left">
                   {{ column.label }}
                 </th>
               </tr>
@@ -678,5 +679,13 @@ watch(open, (showing) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A resized table's column is as wide as a person dragged it: the cap above is for the natural
+   layout only. `lib/resizableColumns.ts` marks a pinned table `os-cols-fixed` at run time, inside
+   the virtual scroll, hence :deep. */
+:deep(.os-cols-fixed) .diagnostics-detail,
+:deep(.os-cols-fixed) .diagnostics-message {
+  max-width: none;
 }
 </style>

@@ -55,6 +55,23 @@ describe('the tenant log', () => {
     expect(bodyText()).toContain('The start of the log.');
   });
 
+  // Every table's columns resize (lib/resizableColumns.ts); this pins that the log's table is one.
+  it('gives each column a resize handle and takes back the widths stored for this table', async () => {
+    readTenantLog.mockResolvedValue({ events: [event(9)], total: 1 });
+    localStorage.setItem('harness.columns.tenant-log', JSON.stringify({ When: 200 }));
+    try {
+      await mountDialog(TenantLogDialog);
+      await settle();
+
+      const cells = Array.from(document.body.querySelectorAll('thead th')) as HTMLElement[];
+      expect(cells.length).toBe(5);
+      expect(cells.every((th) => th.querySelector('.os-col-resizer'))).toBe(true);
+      expect(cells[0]?.style.width).toBe('200px');
+    } finally {
+      localStorage.removeItem('harness.columns.tenant-log');
+    }
+  });
+
   it('reads older rows below the lowest seq it holds, below the rows already shown', async () => {
     readTenantLog.mockResolvedValueOnce({
       events: Array.from({ length: 50 }, (_, i) => event(100 - i)),

@@ -4,6 +4,7 @@ import { listSkillsPage } from '../api/client'
 import type { SkillRecord } from '../api/types'
 import { kindLabel, lastModified, rolesLabel, teamLabel } from '../lib/skills'
 import { useCursorList } from '../lib/useCursorList'
+import { vResizableColumns } from '../lib/resizableColumns'
 import { useConsoleStore } from '../stores/console'
 import CursorSentinel from './CursorSentinel.vue'
 import SkillEditDialog from './SkillEditDialog.vue'
@@ -92,6 +93,7 @@ const teamOf = (row: SkillRecord) => teamLabel(row.team ?? null, board.teams)
         </q-input>
 
         <q-virtual-scroll
+          v-resizable-columns="'skills'"
           type="table"
           class="skills-scroll"
           dense
@@ -184,6 +186,13 @@ const teamOf = (row: SkillRecord) => teamLabel(row.team ?? null, board.teams)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A resized table's column is as wide as a person dragged it: the cap above is for the natural
+   layout only. `lib/resizableColumns.ts` marks a pinned table `os-cols-fixed` at run time, inside
+   the virtual scroll, hence :deep. */
+:deep(.os-cols-fixed) .skills-description {
+  max-width: none;
 }
 
 .skills-when,

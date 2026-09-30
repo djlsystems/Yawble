@@ -148,6 +148,23 @@ describe('SkillsDialog table, mounted', () => {
     wrapper.unmount();
   });
 
+  // Every table's columns resize (lib/resizableColumns.ts); this pins that the Skills table is one.
+  it('gives each column a resize handle and takes back the widths stored for this table', async () => {
+    localStorage.setItem('harness.columns.skills', JSON.stringify({ Name: 220 }))
+    try {
+      const wrapper = await mountSkills()
+
+      const cells = Array.from(document.body.querySelectorAll('thead th')) as HTMLElement[]
+      expect(cells.length).toBe(6)
+      expect(cells.every((th) => th.querySelector('.os-col-resizer'))).toBe(true)
+      expect(cells[0]?.style.width).toBe('220px')
+
+      wrapper.unmount()
+    } finally {
+      localStorage.removeItem('harness.columns.skills')
+    }
+  })
+
   it('asks for Custom skills by default, through the cursor', async () => {
     const wrapper = await mountSkills();
 

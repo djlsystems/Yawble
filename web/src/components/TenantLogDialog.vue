@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import { readTenantLog } from '../api/client';
 import type { TenantEvent } from '../api/types';
 import { useCursorList } from '../lib/useCursorList';
+import { vResizableColumns } from '../lib/resizableColumns';
 import CursorSentinel from './CursorSentinel.vue';
 
 /**
@@ -108,6 +109,7 @@ watch(open, (showing) => {
              still be named forty rows down, and the sentinel in the footer asks for older rows as
              it comes into view. -->
         <q-virtual-scroll
+          v-resizable-columns="'tenant-log'"
           type="table"
           class="tenant-log-scroll"
           dense
@@ -194,5 +196,12 @@ watch(open, (showing) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A resized table's column is as wide as a person dragged it: the cap above is for the natural
+   layout only. `lib/resizableColumns.ts` marks a pinned table `os-cols-fixed` at run time, inside
+   the virtual scroll, hence :deep. */
+:deep(.os-cols-fixed) .tenant-log-detail {
+  max-width: none;
 }
 </style>

@@ -38,6 +38,20 @@ const board = useConsoleStore();
 const list = ref<PluginList | null>(null);
 const rows = computed<PluginRow[]>(() => (list.value ? pluginRows(list.value) : []));
 
+/** The filter's text; empty (or cleared, which is null) shows every version. */
+const filterText = ref<string | null>('');
+
+const shownRows = computed<PluginRow[]>(() => {
+  const words = (filterText.value ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return rows.value;
+
+  return rows.value.filter((row) => {
+    const description = row.verdict === 'installed' ? row.plugin.description ?? '' : '';
+    const text = [row.name, row.id, row.version ?? '', description].join(' ').toLowerCase();
+    return words.every((word) => text.includes(word));
+  });
+});
+
 const loading = ref(false);
 const error = ref('');
 
@@ -267,7 +281,7 @@ const verdictText = computed(() => {
 
 <template>
   <q-dialog v-model="open">
-    <q-card class="plugins-card os-dialog-lg" data-plugins-dialog>
+    <q-card class="plugins-card os-dialog-xl" data-plugins-dialog>
       <q-card-section class="row items-center q-pb-none">
         <div class="os-dialog-title">Plugins</div>
         <q-space />
@@ -296,6 +310,23 @@ const verdictText = computed(() => {
         changing plugins is a person's action; agents can only hire what is installed.
       </q-card-section>
 
+      <!-- THE FILTER: free text over name, id, version and description. It narrows what is SHOWN
+           only. -->
+      <q-card-section class="q-pt-none q-pb-sm">
+        <q-input
+          v-model="filterText"
+          dense
+          outlined
+          clearable
+          class="plugin-filter-text"
+          placeholder="Filter: name, id or description"
+          aria-label="Filter plugins"
+          data-plugin-filter
+        >
+          <template #prepend><q-icon name="search" /></template>
+        </q-input>
+      </q-card-section>
+
       <q-card-section class="q-pt-none plugins-body">
         <q-banner v-if="error" dense class="os-bg-tint-error text-negative q-mb-md">
           <template #avatar><q-icon name="error" /></template>
@@ -314,130 +345,147 @@ const verdictText = computed(() => {
           No plugins are installed. Install one from a folder inside the instance.
         </div>
 
-        <q-card
-          v-for="row in rows"
-          :key="row.key"
-          flat
-          bordered
-          class="plugin-row q-mb-sm"
-          :data-plugin="row.id"
-          :data-plugin-version="row.version ?? ''"
-          :data-verdict="row.verdict"
-        >
-          <q-card-section class="row items-center q-gutter-x-sm q-py-sm">
-            <span class="text-weight-medium">{{ row.name }}</span>
-            <span class="mono os-text-muted">{{ row.id }}</span>
-            <span v-if="row.version" class="mono">{{ row.version }}</span>
-            <q-badge v-if="row.active" outline color="primary" label="Active" data-active />
-            <q-space />
-            <q-badge :color="verdictColor[row.verdict]" :label="verdictLabel[row.verdict]" />
-            <q-btn
-              v-if="row.version"
-              flat
-              dense
-              no-caps
-              size="sm"
-              icon="description"
-              label="View manifest"
-              @click="viewManifest(row.id, row.version!)"
-            />
-            <q-btn
-              v-if="row.version && (versionCounts.get(row.id) ?? 0) > 1"
-              flat
-              dense
-              no-caps
-              size="sm"
-              color="negative"
-              icon="delete"
-              label="Remove version"
-              data-remove-version
-              @click="askRemove(row, false)"
-            />
-            <q-btn
-              v-if="firstOfPlugin(row)"
-              flat
-              dense
-              no-caps
-              size="sm"
-              color="negative"
-              icon="delete"
-              label="Remove plugin"
-              data-remove-plugin
-              @click="askRemove(row, true)"
-            />
-          </q-card-section>
+        <div v-else-if="list && shownRows.length === 0" class="os-text-muted q-pa-lg text-center" data-plugin-none-match>
+          No plugin matches the filter.
+        </div>
 
-          <q-card-section v-if="row.verdict === 'refused'" class="q-pt-none text-negative" data-reason>
-            {{ row.reason ?? 'The Host gave no reason.' }}
-          </q-card-section>
+        <!-- ONE TILE PER VERSION, as the Agents screen shows its presets: the Host's verdict on
+             the head, what an installed version declares in the body, the actions at the foot. -->
+        <div v-if="shownRows.length > 0" class="plugin-tiles">
+          <div
+            v-for="row in shownRows"
+            :key="row.key"
+            class="plugin-tile"
+            :data-plugin="row.id"
+            :data-plugin-version="row.version ?? ''"
+            :data-verdict="row.verdict"
+          >
+            <div class="plugin-tile-head">
+              <q-icon name="extension" size="18px" class="plugin-icon" aria-hidden="true" />
+              <span class="text-weight-medium">{{ row.name }}</span>
+              <span v-if="row.version" class="mono">{{ row.version }}</span>
+              <q-badge v-if="row.active" outline color="primary" label="Active" data-active />
+              <q-space />
+              <q-badge :color="verdictColor[row.verdict]" :label="verdictLabel[row.verdict]" />
+            </div>
+            <div class="plugin-tile-line mono os-text-muted">{{ row.id }}</div>
 
-          <q-card-section v-else-if="row.verdict === 'inactive'" class="q-pt-none os-text-muted" data-reason>
-            {{ row.reason ?? 'Kept on disk and not in use: another version of this plugin is active.' }}
-          </q-card-section>
+            <div v-if="row.verdict === 'refused'" class="plugin-tile-line text-negative" data-reason>
+              {{ row.reason ?? 'The Host gave no reason.' }}
+            </div>
 
-          <q-card-section v-else-if="row.verdict === 'installed'" class="q-pt-none plugin-detail">
-            <div v-if="row.plugin.description" class="q-mb-sm" data-description>{{ row.plugin.description }}</div>
+            <div v-else-if="row.verdict === 'inactive'" class="plugin-tile-line os-text-muted" data-reason>
+              {{ row.reason ?? 'Kept on disk and not in use: another version of this plugin is active.' }}
+            </div>
 
-            <dl class="plugin-facts">
-              <dt>Settings</dt>
-              <dd data-config>
-                <template v-if="Object.keys(row.plugin.config).length === 0">None</template>
-                <div v-for="(field, key) in row.plugin.config" :key="key" :data-config-field="key">
-                  <span class="mono">{{ key }}</span>
-                  <span class="os-text-muted"> · {{ field.type }}</span>
-                  <span v-if="defaultLabel(field)" class="os-text-muted"> · {{ defaultLabel(field) }}</span>
-                  <span v-if="field.required" class="os-text-muted"> · Required</span>
-                  <span v-if="setByPerson(field)" class="os-text-muted"> · Set by a person only</span>
-                </div>
-              </dd>
+            <template v-else-if="row.verdict === 'installed'">
+              <div v-if="row.plugin.description" class="plugin-tile-line q-mt-xs" data-description>{{ row.plugin.description }}</div>
 
-              <dt>Secrets</dt>
-              <dd data-secrets>
-                <template v-if="Object.keys(row.plugin.secrets).length === 0">None</template>
-                <span v-for="(secret, key) in row.plugin.secrets" :key="key" class="mono q-mr-sm">{{ key }}</span>
-              </dd>
+              <dl class="plugin-facts q-mt-xs">
+                <dt>Settings</dt>
+                <dd data-config>
+                  <template v-if="Object.keys(row.plugin.config).length === 0">None</template>
+                  <div v-for="(field, key) in row.plugin.config" :key="key" :data-config-field="key">
+                    <span class="mono">{{ key }}</span>
+                    <span class="os-text-muted"> · {{ field.type }}</span>
+                    <span v-if="defaultLabel(field)" class="os-text-muted"> · {{ defaultLabel(field) }}</span>
+                    <span v-if="field.required" class="os-text-muted"> · Required</span>
+                    <span v-if="setByPerson(field)" class="os-text-muted"> · Set by a person only</span>
+                  </div>
+                </dd>
 
-              <dt>Connections</dt>
-              <dd data-connections>
-                <template v-if="Object.keys(row.plugin.connections ?? {}).length === 0">None</template>
-                <div v-for="(wanted, key) in row.plugin.connections ?? {}" :key="key" :data-connection-slot="key">
-                  <span class="mono">{{ key }}</span>
-                  <span class="os-text-muted"> · {{ slotSummary(wanted) }}</span>
-                  <span v-if="wanted.required" class="os-text-muted"> · Required</span>
-                  <span v-if="wanted.description" class="os-text-muted"> · {{ wanted.description }}</span>
-                </div>
-              </dd>
+                <dt>Secrets</dt>
+                <dd data-secrets>
+                  <template v-if="Object.keys(row.plugin.secrets).length === 0">None</template>
+                  <span v-for="(secret, key) in row.plugin.secrets" :key="key" class="mono q-mr-sm">{{ key }}</span>
+                </dd>
 
-              <dt>Events</dt>
-              <dd data-events>
-                <template v-if="pluginEvents(row.plugin).length === 0">None</template>
-                <div v-for="event in pluginEvents(row.plugin)" :key="event.type">
-                  <span class="mono">{{ event.type }}</span>
-                  <span v-if="event.summary" class="os-text-muted"> · {{ event.summary }}</span>
-                </div>
-              </dd>
+                <dt>Connections</dt>
+                <dd data-connections>
+                  <template v-if="Object.keys(row.plugin.connections ?? {}).length === 0">None</template>
+                  <div v-for="(wanted, key) in row.plugin.connections ?? {}" :key="key" :data-connection-slot="key">
+                    <span class="mono">{{ key }}</span>
+                    <span class="os-text-muted"> · {{ slotSummary(wanted) }}</span>
+                    <span v-if="wanted.required" class="os-text-muted"> · Required</span>
+                    <span v-if="wanted.description" class="os-text-muted"> · {{ wanted.description }}</span>
+                  </div>
+                </dd>
 
-              <dt>Skill</dt>
-              <dd data-skill>
-                <span v-if="pluginSkill(row.plugin)" class="mono">{{ pluginSkill(row.plugin) }}</span>
-                <template v-else>None</template>
-              </dd>
+                <dt>Events</dt>
+                <dd data-events>
+                  <template v-if="pluginEvents(row.plugin).length === 0">None</template>
+                  <div v-for="event in pluginEvents(row.plugin)" :key="event.type">
+                    <span class="mono">{{ event.type }}</span>
+                    <span v-if="event.summary" class="os-text-muted"> · {{ event.summary }}</span>
+                  </div>
+                </dd>
 
-              <dt>Members</dt>
-              <dd data-members>
-                <template v-if="row.plugin.members.length === 0">None hired</template>
-                <div v-for="member in row.plugin.members" :key="`${member.team}/${member.member}`">
-                  <a
-                    href="#"
-                    class="plugin-member-link"
-                    :data-member-link="`${member.team}/${member.member}`"
-                    @click.prevent="openMember(member)"
-                  >{{ teamLabel(member) }} / {{ memberLabel(member) }}</a>
-                </div>
-              </dd>
-            </dl>
-          </q-card-section>
-        </q-card>
+                <dt>Skill</dt>
+                <dd data-skill>
+                  <span v-if="pluginSkill(row.plugin)" class="mono">{{ pluginSkill(row.plugin) }}</span>
+                  <template v-else>None</template>
+                </dd>
+
+                <dt>Members</dt>
+                <dd data-members>
+                  <template v-if="row.plugin.members.length === 0">None hired</template>
+                  <div v-for="member in row.plugin.members" :key="`${member.team}/${member.member}`">
+                    <a
+                      href="#"
+                      class="plugin-member-link"
+                      :data-member-link="`${member.team}/${member.member}`"
+                      @click.prevent="openMember(member)"
+                    >{{ teamLabel(member) }} / {{ memberLabel(member) }}</a>
+                  </div>
+                </dd>
+              </dl>
+            </template>
+
+            <!-- ACTIONS, icons with their words in a tooltip and an aria-label, as on an Agent's
+                 tile. Remove version only where the plugin has another; Remove plugin on its first
+                 tile. -->
+            <div class="plugin-tile-actions">
+              <span v-if="row.version" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="description"
+                  :aria-label="`View manifest ${row.id} ${row.version}`"
+                  data-view-manifest
+                  @click="viewManifest(row.id, row.version!)"
+                />
+                <q-tooltip>View manifest</q-tooltip>
+              </span>
+              <span v-if="row.version && (versionCounts.get(row.id) ?? 0) > 1" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  color="negative"
+                  icon="delete"
+                  :aria-label="`Remove version ${row.version} of ${row.id}`"
+                  data-remove-version
+                  @click="askRemove(row, false)"
+                />
+                <q-tooltip>Remove this version</q-tooltip>
+              </span>
+              <span v-if="firstOfPlugin(row)" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  color="negative"
+                  icon="delete_forever"
+                  :aria-label="`Remove plugin ${row.id}`"
+                  data-remove-plugin
+                  @click="askRemove(row, true)"
+                />
+                <q-tooltip>Remove the plugin, every version</q-tooltip>
+              </span>
+            </div>
+          </div>
+        </div>
       </q-card-section>
     </q-card>
   </q-dialog>
@@ -571,11 +619,65 @@ const verdictText = computed(() => {
 
 <style scoped>
 .plugins-body {
-  max-height: 70vh;
+  max-height: min(64vh, 44rem);
   overflow-y: auto;
 }
 
+/* WRAPPED TILES, as the Agents screen lays out its presets: as many columns as fit. */
+.plugin-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  gap: 12px;
+}
+
+.plugin-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px 8px;
+  border: 1px solid var(--os-rule-strong);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.plugin-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.plugin-icon {
+  color: var(--os-plugin-accent);
+}
+
+.plugin-tile-line {
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.plugin-tile-actions {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.plugin-filter-text {
+  max-width: 28rem;
+}
+
+/* The tooltip lives on this WRAPPER because a disabled q-btn swallows pointer events. */
+.row-btn-wrap {
+  display: inline-flex;
+}
+
 .plugin-facts {
+  font-size: 12px;
+  line-height: 1.45;
   display: grid;
   grid-template-columns: max-content 1fr;
   column-gap: 16px;
@@ -590,6 +692,8 @@ const verdictText = computed(() => {
 
 .plugin-facts dd {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .plugin-manifest {

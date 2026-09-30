@@ -129,13 +129,22 @@ function select(wrapper: { findAllComponents: (s: { name: string }) => unknown[]
   return found;
 }
 
-/** A button inside one element, by its label. */
+/** A button inside one element, by its label: its words, or a tile icon's aria-label naming it. */
 function buttonIn(container: Element, label: string): HTMLButtonElement {
-  const found = [...container.querySelectorAll('button')].find(
-    (candidate) => (candidate.querySelector('.block') ?? candidate).textContent?.trim() === label,
-  );
+  const found = [...container.querySelectorAll('button')].find((candidate) => {
+    const aria = candidate.getAttribute('aria-label') ?? '';
+    return (candidate.querySelector('.block') ?? candidate).textContent?.trim() === label
+      || aria === label
+      || aria.startsWith(`${label} `);
+  });
   if (!found) throw new Error(`no button labelled "${label}" in the element`);
   return found as HTMLButtonElement;
+}
+
+/** Opens a tab: the connections, or the providers. */
+async function showTab(name: 'connections' | 'providers') {
+  (bodyFind(`[data-connections-tab="${name}"]`) as HTMLElement).click();
+  await settle();
 }
 
 describe('ConnectionsDialog, the list', () => {
@@ -162,8 +171,25 @@ describe('ConnectionsDialog, the list', () => {
     wrapper.unmount();
   });
 
+  it('shows the connections and the providers on two tabs, each as tiles', async () => {
+    const wrapper = await mountConnections();
+
+    expect(bodyFind('[data-connections-tab="connections"]')!.textContent).toContain('Connections (2)');
+    expect(bodyFind('[data-connections-tab="providers"]')!.textContent).toContain('Providers (2)');
+    expect(bodyFind('[data-connection="conn-work"]')).not.toBeNull();
+    expect(bodyFind('[data-provider="google"]')).toBeNull();
+
+    await showTab('providers');
+    expect(bodyFind('[data-provider="google"]')).not.toBeNull();
+    expect(bodyFind('[data-provider="google"] [data-provider-connections]')!.textContent).toBe('1 account');
+    expect(bodyFind('[data-connection="conn-work"]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
   it('shows a provider client secret only as "set", never a value', async () => {
     const wrapper = await mountConnections();
+    await showTab('providers');
 
     expect(bodyFind('[data-provider="google"] [data-client-secret]')!.textContent).toBe('set');
     expect(bodyFind('[data-provider="google"] [data-client-id]')!.textContent).toBe('123.apps.googleusercontent.com');
@@ -227,6 +253,7 @@ describe('ConnectionsDialog, connecting an account', () => {
       button('Cancel').click();
       await settle();
 
+      await showTab('providers');
       buttonIn(bodyFind('[data-provider="google"]')!, 'Set up client…').click();
       await settle();
       expect(bodyFind('[data-client-dialog] [data-redirect-warning]')!.textContent).toContain('http://localhost:8080');
@@ -270,6 +297,7 @@ describe('ConnectionsDialog, connecting an account', () => {
 
   it('never fills the client secret, and an empty one keeps what is stored', async () => {
     const wrapper = await mountConnections();
+    await showTab('providers');
 
     buttonIn(bodyFind('[data-provider="google"]')!, 'Set up client…').click();
     await settle();

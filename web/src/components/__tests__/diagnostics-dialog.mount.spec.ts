@@ -149,6 +149,23 @@ describe('Admin > Diagnostics', () => {
     expect(readDiagnostics).toHaveBeenCalledWith({}, undefined, 50);
   });
 
+  // Every table's columns resize (lib/resizableColumns.ts); this pins that the events table is one,
+  // its columns known by name so hiding one never hands its width to another.
+  it('gives each event column a resize handle and takes back the widths stored for this table', async () => {
+    readDiagnostics.mockResolvedValue(view({ events: [row()], total: 1 }));
+    localStorage.setItem('harness.columns.diagnostics', JSON.stringify({ occurredAt: 210 }));
+    try {
+      await open();
+
+      const cells = Array.from(document.body.querySelectorAll('.diagnostics-head th')) as HTMLElement[];
+      expect(cells.length).toBeGreaterThan(1);
+      expect(cells.every((th) => th.querySelector('.os-col-resizer'))).toBe(true);
+      expect(cells.find((th) => th.dataset.col === 'occurredAt')?.style.width).toBe('210px');
+    } finally {
+      localStorage.removeItem('harness.columns.diagnostics');
+    }
+  });
+
   it('lists what was captured', async () => {
     readDiagnostics.mockResolvedValue(view({ events: [row()], total: 1 }));
 
