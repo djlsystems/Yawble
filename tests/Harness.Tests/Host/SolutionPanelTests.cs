@@ -6,6 +6,9 @@ using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Solutions;
+using Harness.Host.Auth;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Harness.Tests.Host;
@@ -104,6 +107,7 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
 
         // Pausing is the existing route; the badge follows it.
         Assert.Equal(HttpStatusCode.NoContent, (await person.PostAsync($"/api/teams/{team}/pause", null, Ct)).StatusCode);
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.TeamPaused, team, Ct));
         var paused = Tile(await JsonAsync(await person.GetAsync("/api/solutions/installed", Ct)), team);
         Assert.Equal(SolutionPanels.StatePaused, paused.GetProperty("state").GetProperty("kind").GetString());
         Assert.True(paused.GetProperty("paused").GetBoolean());
@@ -191,7 +195,7 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         var team = await InstallAsync(Package(), "Cap");
         using var person = await host.PersonAsync();
         var panel = await JsonAsync(await person.GetAsync($"/api/teams/{team}/solution/panel", Ct));
-        var id = panel.GetProperty("triggers")[1].GetProperty("id").GetString();
+        var id = panel.GetProperty("triggers")[1].GetProperty("id").GetString()!;
 
         var patched = await person.PatchAsJsonAsync($"/api/teams/{team}/triggers/{id}", new { dailyTokenCap = 1234, enabled = false }, Ct);
         Assert.Equal(HttpStatusCode.OK, patched.StatusCode);
@@ -199,6 +203,9 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         var after = (await JsonAsync(await person.GetAsync($"/api/teams/{team}/solution/panel", Ct))).GetProperty("triggers")[1];
         Assert.Equal(1234, after.GetProperty("dailyTokenCap").GetInt64());
         Assert.False(after.GetProperty("enabled").GetBoolean());
+
+        // The existing route's own tenant row, as the Triggers dialog's change writes it.
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.ScheduleChanged, id, Ct));
     }
 
     [Fact]
@@ -273,5 +280,96 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         Assert.Equal(HttpStatusCode.Forbidden, (await agent.GetAsync($"/api/teams/{team}/solution/panel", Ct)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await agent.PostAsJsonAsync($"/api/teams/{team}/solution/uninstall", new { }, Ct)).StatusCode);
         Assert.NotNull(await Get<ITeamSolutionStore>().FindAsync(team, Ct));
+    }
+
+    // ---- AGENTS.md, Solution packages: the panel's three rules ------------------------------
+
+    [Fact]
+    public void Every_control_on_the_panel_is_an_existing_route_with_its_permit_marker()
+    {
+        var endpoints = Get<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().ToList();
+
+        foreach (var (control, method, route) in SolutionPanels.Controls)
+        {
+            var endpoint = endpoints.SingleOrDefault(e =>
+                string.Equals(e.RoutePattern.RawText, route, StringComparison.Ordinal)
+                && e.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods.Contains(method) == true);
+
+            Assert.True(endpoint is not null, $"{control}: no {method} {route}");
+            Assert.True(
+                endpoint!.Metadata.GetMetadata<HumansOnlyMarker>() is not null || endpoint.Metadata.GetMetadata<PermitRequirement>() is not null,
+                $"{control}: {method} {route} carries no permit marker");
+        }
+
+        // THE PANEL ADDS NO WRITE ROUTE BUT UNINSTALL: under a team's solution there are its two
+        // reads and Uninstall, and nothing else.
+        var solutionRoutes = endpoints
+            .Where(e => e.RoutePattern.RawText?.StartsWith("/api/teams/{team}/solution", StringComparison.Ordinal) == true)
+            .Select(e => $"{string.Join(",", e.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods)} {e.RoutePattern.RawText}")
+            .Order(StringComparer.Ordinal);
+        Assert.Equal(
+            ["GET /api/teams/{team}/solution", "GET /api/teams/{team}/solution/panel", "POST /api/teams/{team}/solution/uninstall"],
+            solutionRoutes);
+    }
+
+    [Fact]
+    public async Task Package_text_is_answered_as_the_characters_it_is_never_as_markup()
+    {
+        var folder = PackageWithPlugin("jb-markup");
+        SolutionSamples.Edit(folder, m =>
+        {
+            m["description"] = "<script>alert(1)</script> & <b>jobs</b>";
+            m["panel"]!["status"] = "<img src=x onerror=alert(1)> {data.jobs.count status=<i>new</i>} & {lastRun.outcome}";
+        });
+        var team = await InstallAsync(folder, "Markup");
+        await Get<SiteService>().PutDocumentAsync(team, "tracker", "jobs", "a", "{\"status\":\"<i>new</i>\"}",
+            SiteActor.Person("person-id", "person@example.test"), Ct);
+        using var person = await host.PersonAsync();
+
+        var panel = await JsonAsync(await person.GetAsync($"/api/teams/{team}/solution/panel", Ct));
+
+        Assert.Equal("<script>alert(1)</script> & <b>jobs</b>", panel.GetProperty("description").GetString());
+        Assert.StartsWith("<img src=x onerror=alert(1)> 1 & ", panel.GetProperty("status").GetString());
+        Assert.Equal(panel.GetProperty("status").GetString(),
+            Tile(await JsonAsync(await person.GetAsync("/api/solutions/installed", Ct)), team).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void The_webs_solution_screens_never_render_markup_from_a_string()
+    {
+        var web = Path.Combine(SolutionSamples.RepoRoot(), "web", "src");
+        var screens = Directory.EnumerateFiles(web, "*.*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".vue", StringComparison.Ordinal) || f.EndsWith(".ts", StringComparison.Ordinal))
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}__tests__{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(f => Path.GetFileName(f).Contains("olution", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.NotEmpty(screens);
+        var offending = screens.Where(f => File.ReadAllText(f) is var text
+            && (text.Contains("v-html", StringComparison.Ordinal) || text.Contains("innerHTML", StringComparison.Ordinal)));
+        Assert.Empty(offending);
+    }
+
+    [Fact]
+    public async Task Nothing_on_the_panel_is_estimated_its_spend_is_the_triggers_own_measured_view()
+    {
+        var team = await InstallAsync(Package(), "Measured");
+        using var person = await host.PersonAsync();
+
+        var raw = await (await person.GetAsync($"/api/teams/{team}/solution/panel", Ct)).Content.ReadAsStringAsync(Ct);
+        Assert.DoesNotContain("estimat", raw, StringComparison.OrdinalIgnoreCase);
+
+        var panel = JsonDocument.Parse(raw).RootElement.GetProperty("triggers").EnumerateArray().ToList();
+        var own = (await JsonAsync(await person.GetAsync($"/api/teams/{team}/triggers", Ct))).EnumerateArray()
+            .ToDictionary(t => t.GetProperty("id").GetString()!);
+
+        Assert.Equal(5, panel.Count);
+        foreach (var trigger in panel)
+        {
+            var theirs = own[trigger.GetProperty("id").GetString()!];
+            Assert.Equal(theirs.GetProperty("spentToday").GetRawText(), trigger.GetProperty("spentToday").GetRawText());
+            Assert.Equal(theirs.GetProperty("capReachedToday").GetBoolean(), trigger.GetProperty("capReachedToday").GetBoolean());
+            Assert.Equal(theirs.GetProperty("dailyTokenCap").GetRawText(), trigger.GetProperty("dailyTokenCap").GetRawText());
+        }
     }
 }

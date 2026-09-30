@@ -44,6 +44,23 @@ public sealed class SolutionPanels(
     public const string StatePaused = "paused";
     public const string StateCapped = "capped";
 
+    /// <summary>
+    /// EVERY CONTROL THE PANEL OFFERS, and the existing route each one is. The panel adds no write
+    /// route but Uninstall: each of these carries its own permit marker and appends its own tenant
+    /// row, and a test holds this list against the Host's endpoints.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Control, string Method, string Route)> Controls =
+    [
+        ("Pause", "POST", "/api/teams/{team}/pause"),
+        ("Resume", "POST", "/api/teams/{team}/resume"),
+        ("Run now", "POST", "/api/teams/{team}/triggers/{id}/run"),
+        ("A trigger's on/off and daily cap", "PATCH", "/api/teams/{team}/triggers/{id}"),
+        ("Plugin settings and connection bindings", "PUT", "/api/teams/{team}/members/{member}/plugin-settings"),
+        ("Upload a missing document", "POST", "/api/teams/{team}/documents/upload"),
+        ("Update from a folder", "POST", "/api/solutions/update"),
+        ("Uninstall", "POST", "/api/teams/{team}/solution/uninstall"),
+    ];
+
     /// <summary>How many files one output folder lists, newest first.</summary>
     public const int OutputFiles = 50;
 

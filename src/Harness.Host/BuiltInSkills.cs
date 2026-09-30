@@ -738,6 +738,12 @@ public static class BuiltInSkills
             - Planning work that includes a plugin, a site or triggers: load the
               `packaging-solutions` skill. The delivery is a package the person installs in one
               pass, and when it is ready you hand them its link.
+            - Asked about a solution already installed - how it is doing, pausing it, running it
+              now, its results, updating or uninstalling it: point the person to the Solutions
+              launcher (`$HARNESS_PUBLIC_URL/#/solutions`, the ribbon's Solutions button) and that
+              solution's control panel (`$HARNESS_PUBLIC_URL/#/solutions/manage/<team>`). The panel
+              is where a person pauses, runs, caps, configures, downloads results and uninstalls;
+              you do none of those for them.
             - Before you sign in to anything, or bootstrap anything, load the `test-credentials`
               skill.
 
@@ -1507,7 +1513,30 @@ public static class BuiltInSkills
             triggers or register the skills on itself: that is what the install does, on the other
             team, after a person has reviewed it.
 
-            ## 5. When the build finishes
+            ## 5. The panel keys
+
+            Every installed solution gets a tile in the Solutions launcher and a control panel the
+            platform builds; the package writes no UI for either. `panel` in `solution.json` says
+            what they show, and the check refuses a key that points at nothing:
+
+            - `primarySite`: the site the tile's **Open** opens - the page the person uses every
+              day, such as the tracker. It must be one of the package's `sites`. Leave it out when
+              the package has no page; the tile then shows only Manage.
+            - `outputs`: the documents folders the team writes results into, such as `Drafts` or
+              `Applications`, listed newest first with downloads. Name the folders the members'
+              instructions and triggers actually write to - a folder nothing writes stays empty.
+              Relative folder names only: no `..`, no leading `/`, no hidden folder, no wildcard.
+            - `settings`: the plugin settings a person changes often, each `{ "member", "setting" }`
+              on a plugin member (keywords, sources). They are shown first; "All settings" reaches
+              the rest, so list only the few that matter.
+            - `status`: one line for the tile, filled from the primary site's data and the last run.
+              Only four placeholders exist: `{data.<collection>.count}`, `{data.<collection>.count
+              <field>=<value>}`, `{lastRun.at}` and `{lastRun.outcome}`. It is text, never markup.
+              Count what the person acts on: `"{data.jobs.count status=new} new jobs · last checked
+              {lastRun.at}"`. A `{data...}` placeholder needs `primarySite`. Leave `status` out and
+              the tile shows the last run and the state.
+
+            ## 6. When the build finishes
 
             The Concierge hands the person the deep link and one line on what they will be asked
             for. Build the link on `HARNESS_PUBLIC_URL`, the address the person's browser uses,
