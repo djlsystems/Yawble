@@ -357,8 +357,9 @@ and a salary maximum of -2 makes a job board drop every posting that states a sa
 ```
 
 - **The manifest is refused**, naming the field, when `min` or `max` is not a number, `integer` is
-  not `true` or `false`, a bound is on a field that is not a number, `min` is greater than `max`, or
-  the `default` is outside the bounds (or not whole when `integer`).
+  not `true` or `false`, a bound is on a field that is not a number, `min`, `max` or the `default` is
+  too large to hold (`1e400`), `min` is greater than `max`, or the `default` is outside the bounds
+  (or not whole when `integer`).
 - **Every writer refuses a value outside them** - Member settings (`PUT .../plugin-settings`), a hire
   (`POST /api/teams/{team}/containers`, Add member and a Manager's `member` tool), and a solution
   install or update (a package's `members[].settings` in the check, a person's `inputs.settings`
@@ -373,6 +374,10 @@ and a salary maximum of -2 makes a job board drop every posting that states a sa
   another value outside the bounds is refused.
 - The settings read's `fields.<field>`, `GET /api/plugins`' `config.<field>` and a solution plan's
   `personSettings[]` carry `min`, `max` (null when not declared) and `integer`.
+- A number too large to hold (`1e400`, `-1e400`) is refused by every writer on any number field,
+  bounded or not.
+
+Pinned by `PluginNumberBoundsTests` and `SolutionNumberBoundsTests`.
 
 ### Connections: OAuth accounts
 

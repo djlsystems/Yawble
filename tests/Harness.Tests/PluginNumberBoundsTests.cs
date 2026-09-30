@@ -107,6 +107,9 @@ public sealed class PluginNumberBoundsTests : IAsyncLifetime
     [InlineData("""{"type":"string","min":0}""", "`config.salaryMax.min` applies only to a number field.")]
     [InlineData("""{"type":"number","max":"10"}""", "`config.salaryMax.max` must be a number.")]
     [InlineData("""{"type":"number","integer":"yes"}""", "`config.salaryMax.integer` must be true or false.")]
+    [InlineData("""{"type":"number","min":1e400}""", "`config.salaryMax.min` must be a finite number; 1e400 is too large to hold.")]
+    [InlineData("""{"type":"number","max":-1e400}""", "`config.salaryMax.max` must be a finite number; -1e400 is too large to hold.")]
+    [InlineData("""{"type":"number","default":1e400}""", "`config.salaryMax.default`: `salaryMax` must be a finite number; 1e400 is too large to hold.")]
     public void A_bound_that_is_not_a_number_or_not_on_a_number_is_refused(string json, string expected) =>
         Assert.Equal(expected, Field(json).Refusal);
 
@@ -183,6 +186,28 @@ public sealed class PluginNumberBoundsTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
         Assert.Equal(0, (await StoredAsync("Fetcher")).Config["salaryMax"].GetInt32());
         Assert.Single(await TenantRowsAsync(TenantActions.MemberPluginSettingsChanged));
+    }
+
+    [Fact]
+    public async Task The_settings_route_refuses_a_number_too_large_to_hold_and_writes_nothing()
+    {
+        using var person = await PersonAsync();
+        Assert.True((await HireAsync(person, "Fetcher", new { salaryMax = 100 })).IsSuccessStatusCode);
+        var rows = await TenantRowCountAsync();
+
+        // 1e400 reads as infinity, which is neither below a min nor fractional: refused on its own.
+        foreach (var body in (string[])["""{"config":{"days":1e400}}""", """{"config":{"salaryMax":-1e400}}"""])
+        {
+            var refusal = await RefusalAsync(await person.PutAsync(SettingsRoute("Fetcher"),
+                new StringContent(body, System.Text.Encoding.UTF8, "application/json"), Ct));
+            Assert.Contains("must be a finite number", refusal);
+        }
+
+        var stored = await StoredAsync("Fetcher");
+        Assert.Equal(100, stored.Config["salaryMax"].GetInt32());
+        Assert.False(stored.Config.ContainsKey("days"));
+        Assert.Equal(rows, await TenantRowCountAsync());
+        Assert.Empty(await TenantRowsAsync(TenantActions.MemberPluginSettingsChanged));
     }
 
     [Fact]
