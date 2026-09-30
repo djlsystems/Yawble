@@ -83,6 +83,12 @@ public static class TenantActions
     public const string BacklogItemCreated = "backlog.item-created";
 
     public const string BacklogItemEdited = "backlog.item-edited";
+    /// <summary>An item was marked implemented: who confirmed the work is in the product. Its own verb
+    /// rather than read out of <c>BacklogItemEdited</c>, because the item's detail answers "who said
+    /// so" from it, and that includes a person's word when landed could not be proven. Subject is the
+    /// citation; detail names the state it moved from and whether a Concierge wrote it for them.</summary>
+    public const string BacklogItemImplemented = "backlog.item-implemented";
+
     public const string BacklogItemArchived = "backlog.item-archived";
     public const string BacklogItemRestored = "backlog.item-restored";
 

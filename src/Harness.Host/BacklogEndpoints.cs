@@ -199,7 +199,7 @@ public static class BacklogEndpoints
             long id, HttpContext context, IBacklogStore backlog, TeamRegistry teams,
             TeamAccess access, IMessageLog log, ContainerHost host, TeamPaths paths, GitRunner git,
             BacklogLandedCache landedCache, PullRequestStateReader pullRequests, KanbanStore kanban,
-            CancellationToken ct) =>
+            ITenantLog tenantLog, CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
             if (!MayReach(principal)) return RefuseKind();
@@ -240,9 +240,23 @@ public static class BacklogEndpoints
                 : (await BacklogLandedState.ForAsync([current], teams, paths, git, landedCache, ct, pullRequests, backlog))
                     .GetValueOrDefault(id);
 
+            // WHO SAID THE WORK IS IN THE PRODUCT, while it is marked so. The row outlives the person
+            // and the team; a person's word when landed could not be proven reads the same way.
+            var implemented = item.State == BacklogStates.Implemented
+                ? await tenantLog.FindLatestAsync(TenantActions.BacklogItemImplemented, PlatformBacklogId.Format(id), ct)
+                : null;
+
             return Results.Ok(new
             {
                 item = Render(item, teams, inFlight, current, landed, stranded),
+                implementedBy = implemented is null
+                    ? null
+                    : new
+                    {
+                        by = implemented.ActorEmail ?? implemented.ActorId,
+                        at = implemented.OccurredAt,
+                        viaConcierge = ViaConcierge(implemented.Detail),
+                    },
                 dispatches = dispatches.Select(d => new
                 {
                     d.Id,
@@ -267,7 +281,10 @@ public static class BacklogEndpoints
                 + "`teamGone` says the team a dispatch ran on no longer exists. The record keeps its "
                 + "NAME regardless, which is the one field the message log cannot answer for.\n\n"
                 + "The item's own `dispatchedTeam` is the CURRENT dispatch - the last of this list "
-                + "- so a person who opened a row reads the same team the row showed.");
+                + "- so a person who opened a row reads the same team the row showed.\n\n"
+                + "`implementedBy` says who marked the item implemented - `by` (their email), `at`, "
+                + "and `viaConcierge` when a Concierge wrote it on the person's word - while it is "
+                + "implemented; null otherwise, or for an item marked before it was recorded.");
 
         app.MapPost("/api/backlog", async (
             CreateBacklogItem request, HttpContext context, IBacklogStore backlog,
@@ -373,6 +390,14 @@ public static class BacklogEndpoints
             await WriteAuditAsync(
                 context, principal, users, audit, TenantActions.BacklogItemEdited, PlatformBacklogId.Format(id),
                 request.Title ?? item.Title, new { id, state = request.State }, ct);
+
+            if (request.State == BacklogStates.Implemented && item.State != BacklogStates.Implemented)
+            {
+                await WriteAuditAsync(
+                    context, principal, users, audit, TenantActions.BacklogItemImplemented, PlatformBacklogId.Format(id),
+                    request.Title ?? item.Title,
+                    new { id, from = item.State, viaConcierge = principal.Kind == PrincipalKind.TenantConcierge }, ct);
+            }
 
             return Results.Ok(Render((await backlog.GetAsync(id, ct))!, teams));
         })
@@ -1111,6 +1136,22 @@ public static class BacklogEndpoints
     /// Who did it, for a denormalised `created_by`. The ticket's claim is first when it exists; a
     /// Concierge falls back to its owner's email so the stored actor keeps naming the person.
     /// </summary>
+    /// <summary>Whether a <c>backlog.item-implemented</c> row was written by a Concierge acting on
+    /// the person's word. A row whose detail cannot be read says no.</summary>
+    private static bool ViaConcierge(string? detail)
+    {
+        if (detail is null) return false;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(detail);
+            return doc.RootElement.TryGetProperty("viaConcierge", out var via) && via.ValueKind == System.Text.Json.JsonValueKind.True;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
     private static async Task<string> ActorOfAsync(
         HttpContext context, Principal principal, IUserStore users, CancellationToken ct) =>
         await ActorEmailOfAsync(context, principal, users, ct)

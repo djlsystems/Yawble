@@ -770,6 +770,8 @@ export interface BacklogItemDetail {
   item: BacklogItemView
   dispatches: BacklogDispatchView[]
   stats: BacklogExecutionStats[]
+  /** Who marked the item implemented, while it is: `viaConcierge` when a Concierge wrote it on their word. */
+  implementedBy?: { by: string; at: string; viaConcierge: boolean } | null
 }
 
 /**

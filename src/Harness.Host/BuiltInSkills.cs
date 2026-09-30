@@ -1346,6 +1346,12 @@ public static class BuiltInSkills
               and name the Git dialog as the place to merge. Merging to the default branch is the
               person's action; you never merge, push or ask an agent to. When the item reads
               landed, mark it implemented (`backlog  action: edit  id: <id>  state: implemented`).
+            - **Merged outside the platform:** when the person tells you they merged the work
+              outside the platform (on GitHub, or by hand) and `landed` still reads `unknown`, the
+              person's word marks the item implemented: mark it, and tell them it was on their
+              word. The item's history records who confirmed it. Only `unknown` gives way to their
+              word; an item that reads `pushed`, `local`, `in-review` or `declined` is not marked
+              on it: tell the person what `landed` says instead.
             - **A defect in scope:** tell the same team to fix it, continuing the dispatch workflow:
               `tell  member: Manager  team: <team>  instruction: <what to fix>  causation: <the dispatch workflow's latest row>`.
               Assess again when it completes.
@@ -1360,9 +1366,12 @@ public static class BuiltInSkills
               as what it depends on has landed.
             - Keep going until every item in the plan is implemented or the person stops it.
 
-            ## Tidy up, once an item is implemented and its branch has landed
+            ## Tidy up, once an item is implemented
 
             - Archive the item: `backlog  action: archive  id: <id>`.
+            - Read `landed` (`backlog  action: show`) before asking the person to delete the
+              finished team: the team's branch is what `landed` is read from until it is proven.
+              When it does not read landed, say so and what it reads, and let the person decide.
             - Ask the person to delete the finished team; team deletion is the person's action. Say
               what deletion keeps: its documents, and a local repository unless the person ticks it.
             - Say which documents the team left, and ask whether to keep them.
@@ -1379,7 +1388,8 @@ public static class BuiltInSkills
             - Never merge or push a default branch.
             - Never delete a team.
             - Never close a workflow.
-            - Never mark an item implemented before it has landed.
+            - Never mark an item implemented before it has landed, unless the person says they
+              merged it outside the platform and `landed` reads `unknown`.
             - Never estimate a figure you were not given.
 
             Ask the person for each of these, and keep going with everything else meanwhile.
