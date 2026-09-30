@@ -2174,25 +2174,11 @@ public static partial class RepoEndpoints
 
     /// <summary>
     /// Whether the local team/{id} is ahead of origin's copy, or origin has none: what Push
-    /// publishes as a fast-forward. False when origin has it, or holds commits the clone lacks
-    /// (Push refuses that). Asked of the remote-tracking ref, so only after a fetch.
+    /// publishes as a fast-forward. See <see cref="GitRunner.BranchAheadOfOriginAsync"/>.
     /// </summary>
-    private static async Task<bool> TeamBranchUnpushedAsync(
-        GitRunner gitRunner, string clonePath, string storedTeamId, CancellationToken ct)
-    {
-        var local = $"refs/heads/team/{storedTeamId}";
-        var remote = $"refs/remotes/origin/team/{storedTeamId}";
-        if ((await gitRunner.RunGitAsync(clonePath, ["rev-parse", "--verify", "--quiet", remote], ct)).ExitCode != 0)
-        {
-            return true;
-        }
-
-        var onOrigin = await gitRunner.RunGitAsync(clonePath, ["merge-base", "--is-ancestor", local, remote], ct);
-        if (onOrigin.ExitCode == 0) return false;
-
-        var originBehind = await gitRunner.RunGitAsync(clonePath, ["merge-base", "--is-ancestor", remote, local], ct);
-        return originBehind.ExitCode == 0;
-    }
+    private static Task<bool> TeamBranchUnpushedAsync(
+        GitRunner gitRunner, string clonePath, string storedTeamId, CancellationToken ct) =>
+        gitRunner.BranchAheadOfOriginAsync(clonePath, $"team/{storedTeamId}", ct);
 
     /// <summary>'person', 'remote', or null when not known. See <see cref="RepoStatus.DefaultBranchSource"/>.</summary>
     private static string? DefaultBranchSource(RepoDefaultBranch branch) =>
