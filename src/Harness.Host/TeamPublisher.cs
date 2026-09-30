@@ -237,7 +237,7 @@ public sealed class TeamPublisher(
 
         try
         {
-            return await PushBranchesAsync(repo, clonePath, defaultBranchOf?.Invoke(team, repo), ct);
+            return await PushBranchesAsync(team, repo, clonePath, defaultBranchOf?.Invoke(team, repo), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -262,7 +262,7 @@ public sealed class TeamPublisher(
     }
 
     private async Task<RepoPublishOutcome> PushBranchesAsync(
-        string repo, string clonePath, string? defaultBranch, CancellationToken ct)
+        string team, string repo, string clonePath, string? defaultBranch, CancellationToken ct)
     {
         var candidates = (await git.LocalBranchesAsync(clonePath, ct))
             .Where(branch => !NeverPublished.Contains(branch)
@@ -283,7 +283,15 @@ public sealed class TeamPublisher(
             // loss this whole item exists to stop.
             var ahead = await git.CountCommitsNotOnAnyRemoteAsync(clonePath, branch, ct);
 
-            if (ahead is 0) continue;
+            // THE TEAM BRANCH IS ALSO ASKED WHERE ORIGIN'S COPY IS. A Manager fast-forwards it to
+            // a member's tip, which the member's own branch already put on origin, so no commit is
+            // new and the count above is 0 - while origin's team branch has not moved. That is the
+            // integrated work a person merges from, left behind on every completion.
+            if (ahead is 0
+                && !(branch == $"team/{team}" && await git.BranchAheadOfOriginAsync(clonePath, branch, ct)))
+            {
+                continue;
+            }
 
             unpublished.Add(branch);
         }

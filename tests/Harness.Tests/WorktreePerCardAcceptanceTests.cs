@@ -335,6 +335,56 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
         Assert.Equal(new[] { dirty, unpushed }.Order(), named.Order());
     }
 
+    /// <summary>
+    /// A MANAGER MOVING THE TEAM BRANCH TO A COMMIT ORIGIN ALREADY HOLDS. The member's branch put the
+    /// commit on origin, so no commit in the clone is new, but origin's team branch has not moved.
+    /// The run that moved it publishes it - through the <c>workflow-complete</c> route when the
+    /// Manager declares, through the run's end when it does not - and the <c>repo.pushed</c> row
+    /// naming it lands before the row that accepts the workflow or ends the run.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_team_branch_fast_forwarded_to_a_commit_already_on_origin_is_pushed_by_the_run_that_moved_it(
+        bool declares)
+    {
+        await StartAsync();
+        var person = await PersonAsync();
+
+        var teamBranch = $"team/{_team}";
+        Assert.Equal(0, Git(_clone, "branch", teamBranch, "main").ExitCode);
+        Assert.Equal(0, Git(_clone, "push", "origin", teamBranch).ExitCode);
+        var before = OriginSha(teamBranch);
+
+        // An earlier run's card, already on origin under the member's own branch name.
+        var memberTree = CutTree(new ContainerId(_team, "Dev"), "2196", push: true);
+        var memberBranch = Worktrees.BranchHint("Dev", "2196");
+        var memberTip = Git(memberTree, "rev-parse", "HEAD").Output.Trim();
+        Assert.NotEqual(before, memberTip);
+
+        await TellAsync(person, "Manager", $"{(declares ? "#ffdeclare" : "#ff")} {memberBranch}");
+        var pushed = await EventuallyRowAsync(MessageTypes.RepoPushed, r => Field(r, "branches").Contains(teamBranch));
+
+        Assert.Equal(memberTip, OriginSha(teamBranch));
+
+        Message ending;
+        if (declares)
+        {
+            await EventuallyAsync(() => _declarations.Any(d => d.Tag == memberBranch) ? "yes" : null);
+            Assert.Equal(HttpStatusCode.NoContent, _declarations.Single(d => d.Tag == memberBranch).Status);
+            ending = Assert.Single(await RowsAsync(MessageTypes.WorkflowCompleted));
+        }
+        else
+        {
+            ending = await EventuallyRowAsync(
+                MessageTypes.Completed, r => r.Source == $"{_team}/Manager" && r.CorrelationId == pushed.CorrelationId);
+        }
+
+        Assert.Equal(ending.CorrelationId, pushed.CorrelationId);
+        Assert.True(pushed.Seq < ending.Seq, $"repo.pushed at {pushed.Seq} is not before {ending.Type} at {ending.Seq}.");
+        Assert.Empty(await RowsAsync(MessageTypes.RepoPushFailed));
+    }
+
     /// <summary>No source names a single per-member tree: every tree is a card's.</summary>
     [Fact]
     public void No_source_still_names_the_single_per_member_tree()
@@ -427,6 +477,22 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
 
                     _declarations.Enqueue((declare, declared.StatusCode, text));
                     break;
+                }
+            }
+            else if ((Directive(prompt, "#ffdeclare") ?? Directive(prompt, "#ff")) is { } target)
+            {
+                // "#ff <branch>": fast-forward the team branch in the main clone to it, as a Manager
+                // integrating a member's card does; "#ffdeclare" then declares the workflow.
+                var clone = Path.Combine(_paths.ReposFor(_team), Repo, "main");
+                var moved = Git(clone, "branch", "-f", $"team/{_team}", target);
+                Assert.True(moved.ExitCode == 0, moved.Output);
+
+                if (Directive(prompt, "#ffdeclare") is not null)
+                {
+                    var declared = await client.PostAsJsonAsync(
+                        $"/api/teams/{_team}/containers/Manager/workflow-complete",
+                        new { delivered = $"delivered {target}" }, ct);
+                    _declarations.Enqueue((target, declared.StatusCode, await declared.Content.ReadAsStringAsync(ct)));
                 }
             }
             else if (Directive(prompt, "#resume") is { } resume)
@@ -645,6 +711,18 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
 
         var still = string.Join(", ", host.Snapshots().Select(s => $"{s.Name}={s.State}/q{s.QueueDepth}"));
         throw new TimeoutException($"A run never ended after the pause: {still}.");
+    }
+
+    private async Task<Message> EventuallyRowAsync(string type, Func<Message, bool> match)
+    {
+        var deadline = DateTime.UtcNow + Patience;
+        while (DateTime.UtcNow < deadline)
+        {
+            if ((await RowsAsync(type)).FirstOrDefault(match) is { } row) return row;
+            await Task.Delay(100, Ct);
+        }
+
+        throw new TimeoutException($"No {type} row arrived.");
     }
 
     private async Task<IReadOnlyList<Message>> RowsAsync(string type) =>

@@ -719,6 +719,35 @@ public sealed class GitRunner
             : null;
     }
 
+    /// <summary>
+    /// Whether local <paramref name="branch"/> is ahead of origin's copy, or origin has none: what a
+    /// fast-forward push would publish. False when origin has it, or holds commits the clone lacks.
+    /// Asked of the remote-tracking ref, so it is as fresh as the last fetch or push.
+    ///
+    /// <para>
+    /// NOT THE SAME QUESTION AS <see cref="CountCommitsNotOnAnyRemoteAsync"/>. A branch moved to a
+    /// commit origin already holds under another name - a Manager fast-forwarding the team branch
+    /// to a member's pushed tip - has no commit missing from every remote, yet origin's own branch
+    /// of that name is still where it was.
+    /// </para>
+    /// </summary>
+    public async Task<bool> BranchAheadOfOriginAsync(string clonePath, string branch, CancellationToken ct = default)
+    {
+        var local = $"refs/heads/{branch}";
+        var remote = $"refs/remotes/origin/{branch}";
+        if ((await RunGitAsync(clonePath, ["rev-parse", "--verify", "--quiet", remote], ct)).ExitCode != 0)
+        {
+            return true;
+        }
+
+        if ((await RunGitAsync(clonePath, ["merge-base", "--is-ancestor", local, remote], ct)).ExitCode == 0)
+        {
+            return false;
+        }
+
+        return (await RunGitAsync(clonePath, ["merge-base", "--is-ancestor", remote, local], ct)).ExitCode == 0;
+    }
+
     // Private helpers
 
     private async Task<string?> RevParseAsync(string clonePath, string @ref, CancellationToken ct)
