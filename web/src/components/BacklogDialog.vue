@@ -1089,7 +1089,7 @@ function down(index: number) {
                   :title="strandedTitle(row.stranded)"
                   :aria-label="strandedTitle(row.stranded)"
                 >
-                  <q-icon name="call_split" size="12px" />
+                  <q-icon name="warning" size="12px" />
                   {{ row.stranded.notice }}
                   <q-btn
                     flat
