@@ -536,7 +536,7 @@ public sealed class GitRunner
 
     /// <summary>
     /// A local repository's branches, by short name, and how many commits its branches hold
-    /// together - what deleting it would lose, as a team's delete dialog says it (B0020). Empty and
+    /// together - what deleting it would lose, as a team's delete dialog says it. Empty and
     /// null when git cannot read them.
     /// </summary>
     public async Task<(IReadOnlyList<string> Branches, int? CommitCount)> ReadLocalRepositoryContentsAsync(

@@ -47,7 +47,7 @@ public sealed record TeamDeleted(
     public IReadOnlyList<string> LocalRepositoriesKept { get; init; } = [];
 
     /// <summary>
-    /// THE LOCAL REPOSITORIES DELETED WITH THE TEAM (B0020): the <c>local:&lt;name&gt;</c> references a
+    /// THE LOCAL REPOSITORIES DELETED WITH THE TEAM: the <c>local:&lt;name&gt;</c> references a
     /// person ticked, each deleted after the team through <see cref="LocalRepoDeletion"/>, the code
     /// Admin -> Repositories' delete uses. Filled in by the route.
     /// </summary>
@@ -62,7 +62,7 @@ public sealed record TeamDeleted(
 
     /// <summary>
     /// How many agent CLI session folders keyed to the team's own workspaces went from the shared
-    /// agent home (B0020): Claude's <c>projects</c> and <c>.cache</c> folders, and each other
+    /// agent home: Claude's <c>projects</c> and <c>.cache</c> folders, and each other
     /// built-in preset's <see cref="AgentDefinition.SessionFolders"/>.
     /// </summary>
     public int SessionFolders { get; init; }

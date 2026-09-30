@@ -5,7 +5,7 @@ namespace Harness.Host;
 /// <c>~/.claude/projects/&lt;workspace, dashed&gt;</c> and <c>~/.cache/claude-cli-nodejs/&lt;workspace, dashed&gt;</c>,
 /// grok's <c>~/.grok/sessions/&lt;workspace, encoded&gt;</c> - as each built-in preset names them in
 /// <see cref="AgentDefinition.SessionFolders"/>. A team deletion removes the ones keyed to the
-/// deleted team's own workspaces (B0020) and nothing else in the home.
+/// deleted team's own workspaces and nothing else in the home.
 /// </summary>
 public static class AgentSessionFolders
 {

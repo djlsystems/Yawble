@@ -27,7 +27,7 @@ public sealed record LocalRepoDeleteResult(
 /// <summary>
 /// THE ONE WAY A LOCAL REPOSITORY IS DELETED: Admin -> Repositories' delete
 /// (<c>DELETE /api/local-repos/{name}</c>) and a team deletion that was asked to take its local
-/// repository with it (B0020) both come here, so neither can skip the refusal while a team uses it
+/// repository with it both come here, so neither can skip the refusal while a team uses it
 /// or the <c>local-repo.deleted</c> row that comes first.
 /// </summary>
 public sealed class LocalRepoDeletion(LocalRepos repos, TeamRegistry teams, ITenantLog log)

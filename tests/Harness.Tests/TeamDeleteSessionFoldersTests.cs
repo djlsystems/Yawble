@@ -7,7 +7,7 @@ using Harness.Messaging;
 namespace Harness.Tests;
 
 /// <summary>
-/// A DELETED TEAM'S AGENT SESSION FOLDERS GO WITH IT (B0020). The agent CLIs keep a folder per
+/// A DELETED TEAM'S AGENT SESSION FOLDERS GO WITH IT. The agent CLIs keep a folder per
 /// working directory in the shared agent home - Claude's <c>~/.claude/projects/&lt;dashed&gt;</c> and
 /// <c>~/.cache/claude-cli-nodejs/&lt;dashed&gt;</c>, grok's <c>~/.grok/sessions/&lt;encoded&gt;</c>, as each
 /// built-in preset names them - and a team deletion removes the ones keyed to that team's own

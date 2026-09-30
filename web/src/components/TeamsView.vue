@@ -216,7 +216,7 @@ async function retryUnfinished() {
 const doomedLocalRepos = computed(() => (doomed.value?.repos ?? []).filter(isLocalRepoReference));
 
 /**
- * "ALSO DELETE ITS LOCAL REPOSITORY" (B0020), off by default, one per `local:<name>` the team uses,
+ * "ALSO DELETE ITS LOCAL REPOSITORY", off by default, one per `local:<name>` the team uses,
  * with what is lost read from `GET /api/local-repos`. Offered only for one NO OTHER team uses: one
  * another team uses is named with that team and gets no box. A URL never gets one - it is not the
  * platform's to delete - and neither does one the list could not describe. Ticked, the Host deletes
@@ -666,7 +666,7 @@ async function setPaused(team: Team | null, paused: boolean) {
             <li>its documents, its members' working folders, and its transcripts</li>
             <li>every account's access to it</li>
           </ul>
-          <!-- B0020: off by default, and only for a local repository no other team uses. -->
+          <!-- Off by default, and only for a local repository no other team uses. -->
           <div v-for="row in offeredLocalRepos" :key="row.reference" class="q-mb-sm" :data-delete-local-repo="row.reference">
             <q-checkbox
               v-model="deleteLocalRepos"

@@ -30,7 +30,7 @@ public static class LocalRepoEndpoints
             : null,
         teams = info.Teams,
 
-        // What deleting it loses (B0020): the team delete dialog shows both beside its checkbox.
+        // What deleting it loses: the team delete dialog shows both beside its checkbox.
         branches = info.Branches,
         commitCount = info.CommitCount,
 
@@ -97,7 +97,7 @@ public static class LocalRepoEndpoints
             [Description("The local repository's name, as `GET /api/local-repos` lists it")] string name,
             LocalRepoDeletion deletion, HttpContext context, CancellationToken ct) =>
         {
-            // The same code a team deletion takes its ticked local repositories through (B0020).
+            // The same code a team deletion takes its ticked local repositories through.
             var result = await deletion.DeleteAsync(name, context.User, ct);
 
             return result.Outcome switch

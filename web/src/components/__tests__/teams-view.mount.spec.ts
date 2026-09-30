@@ -227,7 +227,7 @@ describe('the team delete dialog', () => {
 });
 
 /**
- * B0020: "ALSO DELETE ITS LOCAL REPOSITORY", off by default, offered for a `local:<name>` the team
+ * "ALSO DELETE ITS LOCAL REPOSITORY", off by default, offered for a `local:<name>` the team
  * uses that no other team does, saying what is lost. One another team uses is named with that team
  * and has no box; a URL never gets one.
  */

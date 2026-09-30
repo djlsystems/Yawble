@@ -11,7 +11,7 @@ public sealed record LocalRepoInfo(
     LocalRepoCommit? LastCommit,
     IReadOnlyList<string> Teams)
 {
-    /// <summary>Its branches, by short name (B0020: what deleting it would lose).</summary>
+    /// <summary>Its branches, by short name (what deleting it would lose).</summary>
     public IReadOnlyList<string> Branches { get; init; } = [];
 
     /// <summary>How many commits its branches hold together; null when git could not count them.</summary>

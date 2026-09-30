@@ -295,7 +295,7 @@ public static class AgentCatalogFile
             Update: ["grok", "update"]);
 
         // THE FOLDERS EACH CLI KEEPS PER WORKING DIRECTORY in the shared agent home, which a team
-        // deletion removes for the deleted team's own workspaces (B0020). Claude keeps its session
+        // deletion removes for the deleted team's own workspaces. Claude keeps its session
         // transcripts under `projects` and a cache under `~/.cache/claude-cli-nodejs`, both named
         // like its live view's folder; grok keeps its sessions under the encoded working directory.
         // codex (dated folders) and copilot (one folder per session id) key nothing by workspace,

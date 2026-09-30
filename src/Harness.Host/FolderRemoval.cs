@@ -164,7 +164,7 @@ public sealed class FolderRemoval(
 
     /// <summary>
     /// Removes one agent CLI's session folder for a deleted team's workspace from the shared agent
-    /// home (B0020): everything in it, then the folder, the Host first and then the agent, links
+    /// home: everything in it, then the folder, the Host first and then the agent, links
     /// removed and never followed. REFUSED when the folder is not strictly inside
     /// <paramref name="home"/> with no symbolic link on the way, so a link planted at
     /// <c>~/.claude</c> cannot point the removal elsewhere. NOT RECORDED as a removal unfinished: the

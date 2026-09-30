@@ -928,7 +928,7 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
 // agent. A team names one as `local:<name>`; see LocalRepos.
 builder.Services.AddSingleton(sp => new LocalRepos(dataRoot, sp.GetRequiredService<GitRunner>()));
 
-// The one delete of a local repository: Admin -> Repositories' and a team deletion's (B0020).
+// The one delete of a local repository: Admin -> Repositories' and a team deletion's.
 builder.Services.AddSingleton(sp => new LocalRepoDeletion(
     sp.GetRequiredService<LocalRepos>(), sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<ITenantLog>()));
 
@@ -2792,7 +2792,7 @@ app.MapDelete("/api/teams/{team}", async (
         ? teams.ReposFor(named).Where(LocalRepos.IsLocal).Select(r => r.Trim()).ToArray()
         : [];
 
-    // DELETED WITH THE TEAM ONLY WHEN TICKED (B0020): each a `local:<name>` this team uses. Anything
+    // DELETED WITH THE TEAM ONLY WHEN TICKED: each a `local:<name>` this team uses. Anything
     // else - a URL, another team's repository - is refused before a single thing is deleted.
     var ticked = new List<string>();
     foreach (var asked in deleteLocalRepository ?? [])
@@ -2874,7 +2874,7 @@ app.MapDelete("/api/teams/{team}", async (
             localRepositoryFailures = localRepositoryFailures
                 .Select(f => new { reference = f.Reference, reason = f.Reason }).ToArray(),
 
-            // The agent CLIs' session folders for its workspaces (B0020), and any still there.
+            // The agent CLIs' session folders for its workspaces, and any still there.
             sessionFolders = removed.SessionFolders,
             sessionFoldersRemaining = removed.SessionFoldersRemaining,
         },

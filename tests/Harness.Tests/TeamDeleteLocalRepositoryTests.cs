@@ -14,7 +14,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Harness.Tests;
 
 /// <summary>
-/// A TEAM DELETE CAN TAKE ITS LOCAL REPOSITORY WITH IT, WHEN A PERSON TICKS IT (B0020). Only a
+/// A TEAM DELETE CAN TAKE ITS LOCAL REPOSITORY WITH IT, WHEN A PERSON TICKS IT. Only a
 /// <c>local:&lt;name&gt;</c> the team uses; deleted after the team through the delete Admin ->
 /// Repositories uses (<see cref="LocalRepoDeletion"/>: its <c>local-repo.deleted</c> row first, the
 /// same refusal while another team uses it); one that cannot go leaves the team deleted and is named
