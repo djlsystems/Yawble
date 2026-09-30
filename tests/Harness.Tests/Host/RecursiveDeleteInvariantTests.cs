@@ -32,8 +32,7 @@ public sealed class RecursiveDeleteInvariantTests
         new("src/Harness.Host/PluginRemover.cs",
             "A removed plugin set aside inside the plugins folder, which is the Host's (harness:agent, directories 0750, no group write) by prepare-volume.sh."),
         new("src/Harness.Host/LocalRepos.cs",
-            "A bare local repository inside the repos folder, which is the Host's (harness:agent, directories 2750, no group write) by prepare-volume.sh; agents never push, the Host publishes as itself.",
-            CommentPending: true),
+            "A failed create's .creating- folder: the Host makes it as itself under the repos folder, which agents only read (harness:agent, directories 2750, no group write, by prepare-volume.sh), and it has never been a repository a team could clone."),
     ];
 
     [Fact]
@@ -74,8 +73,6 @@ public sealed class RecursiveDeleteInvariantTests
 
             foreach (var line in calls.Take(entries.Count))
             {
-                if (entries.All(e => e.CommentPending)) continue;
-
                 var from = Math.Max(0, line - 1 - MarkerReach);
                 var said = source[from..line].Any(l => l.Contains(Marker, StringComparison.Ordinal));
 
@@ -212,7 +209,5 @@ public sealed class RecursiveDeleteInvariantTests
 
     /// <param name="File">The file, from the repository root, with forward slashes.</param>
     /// <param name="Reason">Why agents cannot write inside the folder that call deletes.</param>
-    /// <param name="CommentPending">The call's file is not this list's to edit yet, so its comment
-    /// is not required; drop the flag once the file carries the comment.</param>
-    private sealed record ReviewedCall(string File, string Reason, bool CommentPending = false);
+    private sealed record ReviewedCall(string File, string Reason);
 }

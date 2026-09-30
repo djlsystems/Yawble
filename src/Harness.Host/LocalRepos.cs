@@ -244,15 +244,17 @@ public sealed partial class LocalRepos(string dataRoot, GitRunner git, FolderRem
     }
 
     /// <summary>
-    /// Clears away a <c>.creating-</c> folder a create that failed left. A RECURSIVE DELETE, REVIEWED
-    /// (B0027): not <see cref="FolderRemoval"/>, because agents cannot write here - the folder is made
-    /// by the Host as itself under <see cref="Root"/>, which agents only read, and it has never been
-    /// a repository a team could clone. Quiet, because the create it follows is already refused.
+    /// Clears away a <c>.creating-</c> folder a create that failed left. A recursive delete, not
+    /// <see cref="FolderRemoval"/>, because agents cannot write here (the comment at the call says why).
+    /// Quiet, because the create it follows is already refused.
     /// </summary>
     private static void RemoveQuietly(string path)
     {
         try
         {
+            // RECURSIVE DELETE REVIEWED: agents cannot write here. The Host makes the .creating- folder
+            // as itself under Root, which agents only read (harness:agent 2750, no group write), and it
+            // has never been a repository a team could clone.
             if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
