@@ -110,6 +110,10 @@ public static class TenantActions
     /// command, the versions before and after, and whether it succeeded.</summary>
     public const string AgentUpdated = "agent.updated";
 
+    /// <summary>A person cancelled an agent CLI update while it waited for runs in flight. Subject is
+    /// the preset; detail names the command and how many launches it released.</summary>
+    public const string AgentUpdateCancelled = "agent.update-cancelled";
+
     /// <summary>A person re-read the installed plugins, so a plugin installed or upgraded on disk is
     /// registered without a restart.</summary>
     public const string PluginsRescanned = "plugins.rescanned";

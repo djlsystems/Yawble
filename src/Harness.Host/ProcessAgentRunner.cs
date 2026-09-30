@@ -58,6 +58,10 @@ public sealed partial class ProcessAgentRunner(
         + ", so this member was not started. It may be being installed or updated; re-sending the "
         + "instruction will try again.";
 
+    /// <summary>What a launch held behind an update says, once, on its card: held, never failed.</summary>
+    public static string HeldText(string command) =>
+        $"Waiting for the {command} update: the platform is updating `{command}`, and this run starts when it is done.";
+
     /// <summary>
     /// The run, holding a share of its CLI's install for as long as the child runs. While the
     /// platform updates that CLI the run WAITS - it is not failed - and says so once, the way a
@@ -80,9 +84,10 @@ public sealed partial class ProcessAgentRunner(
                     ? null
                     : () => reports.ProgressAsync(
                         invocation.Container,
-                        $"Waiting: the platform is updating `{launching.FileName}`, and this run starts when it is done.",
+                        HeldText(launching.FileName),
                         CancellationToken.None),
-                ct);
+                ct,
+                new AgentRunHolder(invocation.Container.Team, invocation.Container.Name));
         }
         catch (OperationCanceledException)
         {

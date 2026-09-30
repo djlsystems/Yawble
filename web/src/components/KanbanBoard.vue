@@ -3,6 +3,7 @@ import { computed, onBeforeUpdate, onMounted, onUnmounted, onUpdated, ref, watch
 import type { KanbanLane } from '../api/kanban';
 import { useKanbanStore, type KanbanView } from '../stores/kanban';
 import { inProgressHeader, useWipStore } from '../stores/wip';
+import { useAgentUpdatesStore } from '../stores/agentUpdates';
 import { cardShowsWaiting, laneOverLimit } from '../lib/kanban';
 import { isRunningLane } from '../lib/tenantSettings';
 import KanbanCard from './KanbanCard.vue';
@@ -26,6 +27,7 @@ import { FlipDurationMs, flipShifts, flipTransform, type CardBox } from '../lib/
  */
 const kanban = useKanbanStore();
 const wip = useWipStore();
+const agentUpdates = useAgentUpdatesStore();
 
 const viewOptions: { label: string; value: KanbanView; icon: string }[] = [
   { label: 'Board', value: 'board', icon: 'view_kanban' },
@@ -141,10 +143,14 @@ watchPostEffect(revealRow);
 onMounted(() => {
   previous = measure();
   wip.watch();
+  agentUpdates.watch();
   revealRow();
 });
 
-onUnmounted(() => wip.unwatch());
+onUnmounted(() => {
+  wip.unwatch();
+  agentUpdates.unwatch();
+});
 
 onBeforeUpdate(() => {
   previous = measure();
@@ -284,6 +290,7 @@ const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
             :key="card.id"
             :card="card"
             :waiting="cardShowsWaiting(card, kanban.memberHeld(card))"
+            :update-wait="card.member ? agentUpdates.heldBy(card.team, card.member) : null"
             @open="kanban.select"
           />
         </TransitionGroup>
@@ -317,6 +324,7 @@ const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
             :key="card.id"
             :card="card"
             :waiting="cardShowsWaiting(card, kanban.memberHeld(card))"
+            :update-wait="card.member ? agentUpdates.heldBy(card.team, card.member) : null"
             @open="kanban.select"
           />
         </TransitionGroup>

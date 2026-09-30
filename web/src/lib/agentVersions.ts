@@ -1,4 +1,4 @@
-import type { AgentUpdateResult, CliVersion } from '../api/types'
+import type { AgentRunHolder, AgentUpdateResult, AgentUpdateState, CliVersion } from '../api/types'
 
 /**
  * What an Agents row says about its CLI's version, from `cliVersions` on `GET /api/agents` - the
@@ -90,4 +90,54 @@ export function updateOutcome(result: AgentUpdateResult, format: (iso: string) =
   }
 
   return `Updated at ${at}: ${result.versionBefore ?? 'version not known'} → ${result.versionAfter}.`
+}
+
+/** `team / member`, as the Admission tab names who holds a WIP slot. */
+export function holderText(holder: AgentRunHolder): string {
+  return `${holder.team} / ${holder.member}`
+}
+
+/** Whether the update is still in the Host's gate, so the row polls it. */
+export function updateInGate(state: AgentUpdateState | undefined): boolean {
+  return state?.phase === 'waiting' || state?.phase === 'updating'
+}
+
+/**
+ * What the row says about its CLI's update, FROM THE GATE'S STATE AND NOTHING ELSE: who it waits for
+ * by team and member, that it is updating, or what it came to. Null when there is nothing to say.
+ */
+export function updateStateLine(state: AgentUpdateState | undefined, format: (iso: string) => string = stamp): string | null {
+  if (!state) return null
+
+  switch (state.phase) {
+    case 'waiting': {
+      if (state.running === 0) return `Waiting to start the ${state.command} update.`
+      const runs = state.running === 1 ? `1 ${state.command} run` : `${state.running} ${state.command} runs`
+      const names = state.inFlight.map(holderText).join(', ')
+
+      return `Waiting for ${runs} to finish${names ? `: ${names}` : ''}.`
+    }
+    case 'updating':
+      return 'Updating…'
+    case 'done':
+      return state.result ? updateOutcome(state.result, format) : null
+    case 'cancelled': {
+      const at = state.finishedAt ? ` at ${format(state.finishedAt)}` : ''
+      const by = state.cancelledBy ? ` by ${state.cancelledBy}` : ''
+
+      return `The update was cancelled${at}${by} while it waited; nothing was run.`
+    }
+    case 'failed':
+      return state.error ?? 'The update did not finish.'
+    default:
+      return null
+  }
+}
+
+/** `2 launches held`, or null when the update holds none. */
+export function heldLine(state: AgentUpdateState | undefined): string | null {
+  const count = updateInGate(state) ? (state?.held.length ?? 0) : 0
+  if (count === 0) return null
+
+  return count === 1 ? `1 launch held until it is done: ${holderText(state!.held[0]!)}` : `${count} launches held until it is done: ${state!.held.map(holderText).join(', ')}`
 }

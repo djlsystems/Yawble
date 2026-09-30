@@ -262,6 +262,130 @@ public sealed class AgentUpdatesTests : IDisposable
     }
 
     [Fact]
+    public async Task A_persons_update_asked_while_a_run_is_in_flight_answers_at_once_names_that_run_then_updates_then_says_its_outcome()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var log = Path.Combine(_root, "order.log");
+        var release = Path.Combine(_root, "release");
+        var go = Path.Combine(_root, "go");
+
+        // `update` itself waits until told, so "updating" is a state the test can see, not a race.
+        var cli = Path.Combine(_root, "stub-cli");
+        await TestExecutable.WriteAsync(cli, $$"""
+            #!/bin/sh
+            if [ "$1" = "--version" ]; then echo "stub 1.0"; exit 0; fi
+            if [ "$1" = "update" ]; then while [ ! -f '{{go}}' ]; do sleep 0.05; done; echo "update" >> '{{log}}'; exit 0; fi
+            cat >/dev/null
+            echo "start $1" >> '{{log}}'
+            if [ "$1" = "first" ]; then while [ ! -f '{{release}}' ]; do sleep 0.05; done; fi
+            echo "end $1" >> '{{log}}'
+            """);
+
+        var updates = new AgentUpdates(new Dictionary<string, string> { ["STUB_AUTOUPDATE"] = "off" }, Update: [cli, "update"]);
+        var catalog = new AgentCatalog(
+        [
+            new AgentDefinition("first", AgentMode.Headless, new AgentLaunch(cli, ["first"], LanguageModel: false), Updates: updates),
+            new AgentDefinition("second", AgentMode.Headless, new AgentLaunch(cli, ["second"], LanguageModel: false), Updates: updates),
+        ]);
+
+        var gate = new AgentUpdateGate();
+        var reports = new RecordedReports();
+        var runner = new ProcessAgentRunner(catalog, new RunHeartbeat(), reports: reports, updates: gate);
+        var updater = new AgentCliUpdater(catalog, gate, dataRoot: _root);
+
+        // alpha/worker's run is in flight.
+        var first = runner.RunAsync(Invocation("first"), ct);
+        await WaitUntilAsync(() => Lines(log).Contains("start first"), ct);
+
+        // ASKED, NOT AWAITED: the answer is already there, and it is the gate's: waiting for that run.
+        var finals = new List<AgentUpdateState>();
+        var (asked, started) = updater.Request("first", "person@example.test", s => { lock (finals) finals.Add(s); return Task.CompletedTask; })!.Value;
+        Assert.True(started);
+        Assert.Equal(AgentUpdatePhases.Waiting, asked.Phase);
+        Assert.Equal(1, asked.Running);
+        Assert.Equal([new AgentRunHolder("alpha", "worker")], asked.InFlight);
+        Assert.Equal("person@example.test", asked.RequestedBy);
+
+        // A launch now is held, and the state names it; its card is told what it waits for.
+        var second = runner.RunAsync(Invocation("second", container: new ContainerId("beta", "builder")), ct);
+        await WaitUntilAsync(() => gate.StateOf(cli).Held.Count == 1, ct);
+        Assert.Equal([new AgentRunHolder("beta", "builder")], gate.StateOf(cli).Held);
+        await WaitUntilAsync(() => !reports.Progress.IsEmpty, ct);
+        Assert.StartsWith($"Waiting for the {cli} update", Assert.Single(reports.Progress));
+
+        // Asked again while it waits: the same update, not a second.
+        var (again, startedAgain) = updater.Request("second", "other@example.test")!.Value;
+        Assert.False(startedAgain);
+        Assert.Equal(AgentUpdatePhases.Waiting, again.Phase);
+        Assert.Equal("person@example.test", again.RequestedBy);
+
+        // The run ends: the update runs, and cannot be cancelled now.
+        await File.WriteAllTextAsync(release, string.Empty, ct);
+        await first;
+        await WaitUntilAsync(() => gate.StateOf(cli).Phase == AgentUpdatePhases.Updating, ct);
+        var updating = gate.StateOf(cli);
+        Assert.Equal(0, updating.Running);
+        Assert.Empty(updating.InFlight);
+        Assert.NotNull(updating.StartedAt);
+        Assert.Equal((null, true), gate.Cancel(cli, "person@example.test"));
+
+        // It finishes: the outcome is what was measured, and the held launch starts.
+        await File.WriteAllTextAsync(go, string.Empty, ct);
+        await WaitUntilAsync(() => gate.StateOf(cli).Phase == AgentUpdatePhases.Done, ct);
+        var done = gate.StateOf(cli);
+        Assert.True(done.Result!.Updated, done.Result.Detail);
+        Assert.Equal("stub 1.0", done.Result.VersionBefore);
+        Assert.Equal("stub 1.0", done.Result.VersionAfter);
+        Assert.NotNull(done.FinishedAt);
+
+        Assert.Equal(0, (await second).ExitCode);
+        Assert.Equal(["start first", "end first", "update", "start second", "end second"], Lines(log));
+        await WaitUntilAsync(() => { lock (finals) return finals.Count == 1; }, ct);
+        Assert.Equal(AgentUpdatePhases.Done, finals[0].Phase);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_waiting_update_removes_it_and_releases_the_launches_it_held()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var gate = new AgentUpdateGate();
+        var ran = false;
+
+        var inFlight = await gate.EnterRunAsync("stub", null, ct, new AgentRunHolder("alpha", "worker"));
+        var (asked, _) = gate.Request("stub", "stub-headless", "person@example.test", _ =>
+        {
+            ran = true;
+            return Task.FromResult<AgentUpdateResult>(null!);
+        });
+        Assert.Equal(AgentUpdatePhases.Waiting, asked.Phase);
+
+        var held = gate.EnterRunAsync("stub", null, ct, new AgentRunHolder("beta", "builder"));
+        await WaitUntilAsync(() => gate.StateOf("stub").Held.Count == 1, ct);
+        Assert.False(held.IsCompleted);
+
+        var (cancelled, running) = gate.Cancel("stub", "person@example.test");
+        Assert.False(running);
+        Assert.Equal(AgentUpdatePhases.Cancelled, cancelled!.Phase);
+        Assert.Equal("person@example.test", cancelled.CancelledBy);
+
+        // The held launch goes ahead; the update is gone and nothing ran, even once the run ends.
+        using (await held.WaitAsync(TimeSpan.FromSeconds(5), ct)) { }
+        Assert.False(gate.Updating("stub"));
+        inFlight.Dispose();
+        await Task.Delay(100, ct);
+        Assert.False(ran);
+        Assert.Equal(AgentUpdatePhases.Cancelled, gate.StateOf("stub").Phase);
+        Assert.Empty(gate.StateOf("stub").Held);
+        Assert.Equal((null, false), gate.Cancel("stub", "person@example.test"));
+
+        // And a new update can be asked for.
+        var (next, started) = gate.Request("stub", "stub-headless", null, _ => Task.FromResult(
+            new AgentUpdateResult("stub-headless", "stub", true, 0, "1", "2", DateTimeOffset.UtcNow, "ok")));
+        Assert.True(started);
+        await WaitUntilAsync(() => gate.StateOf("stub").Phase == AgentUpdatePhases.Done, ct);
+    }
+
+    [Fact]
     public async Task A_launch_stopped_while_held_by_an_update_is_an_interruption_and_releases_nothing()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -317,13 +441,14 @@ public sealed class AgentUpdatesTests : IDisposable
         Assert.Equal(DateTimeOffset.Parse("2026-09-25T15:22:00Z"), steady.Since);
     }
 
-    private AgentInvocation Invocation(string agent, IReadOnlyDictionary<string, string>? environment = null)
+    private AgentInvocation Invocation(
+        string agent, IReadOnlyDictionary<string, string>? environment = null, ContainerId? container = null)
     {
         var work = Path.Combine(_root, "work");
         Directory.CreateDirectory(work);
 
         return new AgentInvocation(
-            new ContainerId("alpha", "worker"), "You are a probe.", "hello", work,
+            container ?? new ContainerId("alpha", "worker"), "You are a probe.", "hello", work,
             environment ?? new Dictionary<string, string>(), Agent: agent);
     }
 

@@ -8,8 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 
-const { listCatalog, getAgentAuth, getAgentTools, getTenantSettings, updateAgentCli, notify } = vi.hoisted(() => ({
+const { listCatalog, getAgentAuth, getAgentTools, getTenantSettings, updateAgentCli, listAgentUpdates, notify } = vi.hoisted(() => ({
   notify: vi.fn(),
+  listAgentUpdates: vi.fn(),
   listCatalog: vi.fn(),
   getAgentAuth: vi.fn(),
   getAgentTools: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getAgentTools,
   getTenantSettings,
   updateAgentCli,
+  listAgentUpdates,
 }));
 
 vi.mock('quasar', async (importOriginal) => ({
@@ -32,7 +34,7 @@ vi.mock('quasar', async (importOriginal) => ({
 }));
 
 import AgentsDialog from '../AgentsDialog.vue';
-import type { Agent, AgentUpdateResult, CliVersion } from '../../api/types';
+import type { Agent, AgentUpdateResult, AgentUpdateState, CliVersion } from '../../api/types';
 import { mountDialog, resetBody } from '../../test/mountQuasar';
 import { stamp } from '../../lib/agentVersions';
 
@@ -95,6 +97,8 @@ beforeEach(() => {
   getTenantSettings.mockReset();
   getTenantSettings.mockResolvedValue({ settings: [], roots: [] });
   updateAgentCli.mockReset();
+  listAgentUpdates.mockReset();
+  listAgentUpdates.mockResolvedValue([]);
   notify.mockReset();
 });
 
@@ -106,6 +110,24 @@ function row(name: string): HTMLElement {
   if (!found) throw new Error(`no row for ${name}`);
   return found;
 }
+
+/** The route answers at once; a preset that declares no update, or an update with nothing in
+ *  flight that finished before the answer, is already `done`. */
+const doneState = (result: AgentUpdateResult): AgentUpdateState => ({
+  command: result.command,
+  phase: 'done',
+  agent: result.agent,
+  requestedBy: 'quinn@example.test',
+  requestedAt: result.at,
+  running: 0,
+  inFlight: [],
+  held: [],
+  startedAt: result.at,
+  finishedAt: result.at,
+  result,
+  error: null,
+  cancelledBy: null,
+});
 
 const versionLine = (name: string) => row(name).querySelector<HTMLElement>('.agent-version-line');
 
@@ -171,7 +193,7 @@ describe('AgentsDialog, the version line', () => {
         person: 'quinn@example.test',
       },
     };
-    updateAgentCli.mockResolvedValue(result);
+    updateAgentCli.mockResolvedValue(doneState(result));
 
     const wrapper = await mountDialog(AgentsDialog);
     const loads = listCatalog.mock.calls.length;
@@ -200,7 +222,7 @@ describe('AgentsDialog, the version line', () => {
   });
 
   it('says so in the row when the update left the version unchanged', async () => {
-    updateAgentCli.mockResolvedValue({
+    updateAgentCli.mockResolvedValue(doneState({
       agent: 'grok-headless',
       command: 'grok',
       updated: true,
@@ -217,7 +239,7 @@ describe('AgentsDialog, the version line', () => {
         updatedBy: 'start',
         person: null,
       },
-    } satisfies AgentUpdateResult);
+    } satisfies AgentUpdateResult));
 
     const wrapper = await mountDialog(AgentsDialog);
 
@@ -236,7 +258,7 @@ describe('AgentsDialog, the version line', () => {
   });
   it('says a failed update that still moved the version failed AND moved it', async () => {
     // npm installed the new version, then its postinstall exited 1.
-    updateAgentCli.mockResolvedValue({
+    updateAgentCli.mockResolvedValue(doneState({
       agent: 'claude-headless',
       command: 'claude',
       updated: false,
@@ -253,7 +275,7 @@ describe('AgentsDialog, the version line', () => {
         updatedBy: 'person',
         person: 'quinn@example.test',
       },
-    } satisfies AgentUpdateResult);
+    } satisfies AgentUpdateResult));
 
     const wrapper = await mountDialog(AgentsDialog);
 
@@ -273,7 +295,7 @@ describe('AgentsDialog, the version line', () => {
   });
 
   it('says a failed update that did not move the version failed and left it where it was', async () => {
-    updateAgentCli.mockResolvedValue({
+    updateAgentCli.mockResolvedValue(doneState({
       agent: 'grok-headless',
       command: 'grok',
       updated: false,
@@ -290,7 +312,7 @@ describe('AgentsDialog, the version line', () => {
         updatedBy: 'start',
         person: null,
       },
-    } satisfies AgentUpdateResult);
+    } satisfies AgentUpdateResult));
 
     const wrapper = await mountDialog(AgentsDialog);
 
@@ -310,7 +332,7 @@ describe('AgentsDialog, the version line', () => {
   it('says nothing was run for a preset that declares no update command', async () => {
     // The screen's catalog still listed an update command when it loaded; the Host's no longer
     // does, so the route answers that it ran nothing - no exit code, no versions read.
-    updateAgentCli.mockResolvedValue({
+    updateAgentCli.mockResolvedValue(doneState({
       agent: 'codex-headless',
       command: 'codex',
       updated: false,
@@ -320,7 +342,7 @@ describe('AgentsDialog, the version line', () => {
       at: '2026-09-30T05:50:00Z',
       detail: "'codex-headless' declares no update command, so the platform cannot update it.",
       cliVersion: null,
-    } satisfies AgentUpdateResult);
+    } satisfies AgentUpdateResult));
 
     const wrapper = await mountDialog(AgentsDialog);
 

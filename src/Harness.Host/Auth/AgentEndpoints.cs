@@ -223,30 +223,111 @@ public static class AgentEndpoints
         // THE PLATFORM UPDATES AN AGENT CLI ONLY HERE AND AT THE CONTAINER'S START. Every launch
         // carries what turns the CLI's own updater off, so this is how a person brings one current
         // without restarting: it waits for the runs of that CLI in flight, holds new ones (they
-        // wait, never fail), runs the preset's declared update and lets them go.
-        app.MapPost("/api/agents/{name}/update", async (
+        // wait, never fail), runs the preset's declared update and lets them go. ASKED, NOT AWAITED:
+        // the route answers at once and the gate keeps the update, so the row reads it back with GET.
+        app.MapPost("/api/agents/{name}/update", (
             [System.ComponentModel.Description("The preset whose CLI to update. Presets that launch "
                 + "the same command share one install, so updating one updates them all.")]
             string name,
-            AgentCliUpdater updater, ITenantLog tenantLog, HttpContext context, CancellationToken ct) =>
+            AgentCliUpdater updater, ITenantLog tenantLog, HttpContext context) =>
         {
             var person = context.User.FindFirstValue(ClaimTypes.Email);
+            var actorId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            if (await updater.UpdateAsync(name, ct, person) is not { } result)
+            // The row is written when the update has run, as the person who asked; the request has
+            // long been answered by then.
+            async Task RecordAsync(AgentUpdateState final)
+            {
+                if (final.Result is not { } result) return;
+
+                try
+                {
+                    await tenantLog.WriteAsync(
+                        actorId, person, TenantActions.AgentUpdated, result.Agent, result.Agent,
+                        System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            command = result.Command,
+                            updated = result.Updated,
+                            exitCode = result.ExitCode,
+                            versionBefore = result.VersionBefore,
+                            versionAfter = result.VersionAfter,
+                        }),
+                        CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    // The update happened; only its row is missing, and the state still says what it came to.
+                }
+            }
+
+            if (updater.Request(name, person, RecordAsync) is not { } asked)
             {
                 return Results.NotFound(new { error = $"No Agent '{name}'." });
             }
 
-            var row = TenantLogging.Row(
-                context, TenantActions.AgentUpdated, result.Agent, result.Agent,
-                new
+            return Results.Accepted($"/api/agents/{Uri.EscapeDataString(name)}/update", asked.State);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Ask for an update of an Agent's CLI")
+            .WithDescription(
+                "Asks for the preset's declared `updates.update` command, run as the user agents run as, "
+                + "and ANSWERS AT ONCE, 202 with the update's state as `GET` gives it. The update WAITS "
+                + "in the gate until no run of that command is in flight, and from the moment it is "
+                + "asked new launches of that command wait for it - held, never failed - so no run "
+                + "finds its program half-replaced. Closing the screen does not cancel it.\n\n"
+                + "`phase` is `waiting` (with `running`, and `inFlight` naming each run's team and "
+                + "member), `updating`, then `done` with `result`: the versions before and after, also "
+                + "recorded in the CLI version history with the person who asked, and `cliVersion`, the "
+                + "CLI's entry as `GET /api/agents` gives it once that line is written. Asked again "
+                + "while one waits or runs, it answers that one. A preset that declares no update "
+                + "command answers `done` at once with `updated` false and a sentence. 404 for an "
+                + "unknown preset."
+                + PeopleOnly);
+
+        app.MapGet("/api/agents/{name}/update", (string name, AgentCliUpdater updater, AgentUpdateGate gate) =>
+            updater.CommandOf(name) is { } command
+                ? Results.Ok(gate.StateOf(command))
+                : Results.NotFound(new { error = $"No Agent '{name}'." }))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Read the state of an Agent's CLI update")
+            .WithDescription(
+                "What the gate says about the update of this preset's command, read from it and never "
+                + "estimated: `none`, `waiting` (with the runs in flight it waits for by team and "
+                + "member, and the launches it holds in `held`), `updating`, or the last one's outcome "
+                + "(`done`, `cancelled` or `failed`). Kept until the Host restarts, so a screen closed "
+                + "and opened again reads the same. 404 for an unknown preset."
+                + PeopleOnly);
+
+        app.MapDelete("/api/agents/{name}/update", async (
+            string name, AgentCliUpdater updater, AgentUpdateGate gate, ITenantLog tenantLog,
+            HttpContext context, CancellationToken ct) =>
+        {
+            if (updater.CommandOf(name) is not { } command)
+            {
+                return Results.NotFound(new { error = $"No Agent '{name}'." });
+            }
+
+            var person = context.User.FindFirstValue(ClaimTypes.Email);
+            var (cancelled, running) = gate.Cancel(command, person);
+
+            if (running)
+            {
+                return Results.Conflict(new
                 {
-                    command = result.Command,
-                    updated = result.Updated,
-                    exitCode = result.ExitCode,
-                    versionBefore = result.VersionBefore,
-                    versionAfter = result.VersionAfter,
+                    error = $"The {command} update is already running, so it cannot be cancelled; it finishes on its own.",
                 });
+            }
+
+            if (cancelled is null)
+            {
+                return Results.NotFound(new { error = $"No {command} update is waiting." });
+            }
+
+            var row = TenantLogging.Row(
+                context, TenantActions.AgentUpdateCancelled, cancelled.Agent, cancelled.Agent,
+                new { command, held = cancelled.Held.Count });
 
             try
             {
@@ -255,24 +336,29 @@ public static class AgentEndpoints
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // The update happened; only its row is missing, and saying so beats hiding the result.
+                // The update is cancelled and its launches released; only its row is missing.
             }
 
-            return Results.Ok(result);
+            return Results.Ok(cancelled);
         })
             .WithTags(Area)
             .HumansOnly()
-            .WithSummary("Update an Agent's CLI now")
+            .WithSummary("Cancel a waiting update of an Agent's CLI")
             .WithDescription(
-                "Runs the preset's declared `updates.update` command as the user agents run as. It "
-                + "WAITS until no run of that command is in flight, and from the moment it is asked "
-                + "new launches of that command wait for it - they are held, never failed - so no "
-                + "run finds its program half-replaced. Answers with the versions before and after, "
-                + "which are also recorded in the CLI version history with the person who asked, and "
-                + "`cliVersion`: the CLI's entry as `GET /api/agents` gives it in `cliVersions` once "
-                + "that line is written (null when the Host keeps no record).\n\n"
-                + "`updated` is false, with a sentence, when the preset declares no update command "
-                + "or the command failed. 404 for an unknown preset."
+                "Cancels this preset's command's update while it still WAITS for runs in flight: nothing "
+                + "is run, and the launches it held go ahead. Answers the `cancelled` state. 409 with a "
+                + "sentence once its command is running - a running update cannot be cancelled - and "
+                + "404 when no update of it waits."
+                + PeopleOnly);
+
+        app.MapGet("/api/agents/updates", (AgentUpdateGate gate) => Results.Ok(gate.States()))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Every Agent CLI update the gate holds")
+            .WithDescription(
+                "One state per command with an update asked for, an outcome kept, or a launch held, as "
+                + "`GET /api/agents/{name}/update` gives it. The board reads `held` to mark a card whose "
+                + "launch waits for an update."
                 + PeopleOnly);
     }
 
