@@ -9,7 +9,7 @@ namespace Harness.Tests.Host;
 
 /// <summary>
 /// The Agents screen's version line comes from the route, and the route reads it from the one CLI
-/// version record the doctor and `yawble agents` read. `GET /api/agents` gives a person each preset's
+/// version record the operator CLI's `doctor` and `agents` read. `GET /api/agents` gives a person each preset's
 /// `cliVersions` entry - version, when it last changed, and who brought it - and a machine principal
 /// none; `POST /api/agents/{name}/update` answers with the entry as it stands after its own line.
 /// </summary>

@@ -60,7 +60,7 @@ public static class AgentEndpoints
                     .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
                     .Value.SerializerOptions;
 
-                // EACH PRESET'S CLI VERSION, from the one record the doctor and `yawble agents` read
+                // EACH PRESET'S CLI VERSION, from the one record the doctor and the operator CLI's `agents` read
                 // (`cli-versions.jsonl`): what the newest line says and when it last changed. Beside
                 // the catalog for the reason `installations` is. People only, as the Diagnostics
                 // route's history is: it names the tooling every member runs on.
@@ -145,8 +145,8 @@ public static class AgentEndpoints
                 + "(when that version first appeared after a different one; null when the kept record "
                 + "never saw it change, and `since` is then how far back the record reaches), "
                 + "`updatedBy` (`start` or `person`) and `person` (that person's email when recorded). "
-                + "Read from the Host's CLI version record, `cli-versions.jsonl`, which `yawble doctor` "
-                + "and `yawble agents` read too.");
+                + "Read from the Host's CLI version record, `cli-versions.jsonl`, which the operator CLI's `doctor` "
+                + "and `agents` read too.");
 
         app.MapPut("/api/agents", async (
             CatalogSubmission submitted, AgentCatalog catalog, ITeamStore teams,

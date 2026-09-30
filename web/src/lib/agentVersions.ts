@@ -2,7 +2,7 @@ import type { AgentUpdateResult, CliVersion } from '../api/types'
 
 /**
  * What an Agents row says about its CLI's version, from `cliVersions` on `GET /api/agents` - the
- * Host's CLI version record, which `yawble doctor` and `yawble agents` read too.
+ * Host's CLI version record, which the operator CLI's `doctor` and `agents` read too.
  *
  * NOTHING IS ESTIMATED. A version the record does not have reads "version not known"; a record that
  * never saw the version change says how far back it looked rather than inventing an update time.

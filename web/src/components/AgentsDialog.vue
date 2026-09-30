@@ -145,7 +145,7 @@ const agentEditOpen = ref(false);
 
 /**
  * Each preset's CLI version, from `cliVersions` on `GET /api/agents` - the Host's CLI version record,
- * the one `yawble doctor` and `yawble agents` read. Beside the catalog for `installations`' reason.
+ * the one the operator CLI's `doctor` and `agents` read. Beside the catalog for `installations`' reason.
  */
 const cliVersions = ref<(CliVersion & { agent: string })[]>([]);
 const versionOf = (agent: Agent) => versionLine(cliVersionFor(cliVersions.value, agent.name));

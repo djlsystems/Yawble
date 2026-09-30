@@ -1569,7 +1569,7 @@ export interface AgentUpdateResult {
 
 /**
  * One CLI's installed version and when it last changed, from the Host's CLI version record
- * (`cli-versions.jsonl`) - the record `yawble doctor` and `yawble agents` read. `version` is null
+ * (`cli-versions.jsonl`) - the record the operator CLI's `doctor` and `agents` read. `version` is null
  * when the record has none, which is shown as not known and never guessed.
  */
 export interface CliVersion {

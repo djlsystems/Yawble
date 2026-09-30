@@ -2,7 +2,7 @@
 //
 // ADMIN → AGENTS, THE VERSION LINE. Each built-in row shows its CLI's version, when it last changed
 // and who brought it (a start or a person), from `cliVersions` on `GET /api/agents` - the Host's CLI
-// version record, the one `yawble doctor` reads. A version the record lacks reads "version not
+// version record, the one the operator CLI's `doctor` reads. A version the record lacks reads "version not
 // known", never a guess. After the row's update button the line changes in place, from the update's
 // own answer, and says so when the version did not change.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
