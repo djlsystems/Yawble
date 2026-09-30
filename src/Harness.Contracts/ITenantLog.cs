@@ -170,6 +170,10 @@ public static class TenantActions
     /// Written BEFORE the delete, which does not happen when this row cannot be.</summary>
     public const string DocumentsDeleted = "documents.deleted";
 
+    /// <summary>A documents delete that left something: written after it, naming each path left
+    /// and why, so the log never claims a deletion that did not happen.</summary>
+    public const string DocumentsDeleteIncomplete = "documents.delete-incomplete";
+
     /// <summary>A person uploaded a document into a team's documents. Detail carries the team, the
     /// path and the size - never the file's contents.</summary>
     public const string DocumentUploaded = "document.uploaded";

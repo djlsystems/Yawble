@@ -278,6 +278,7 @@ builder.Services.AddSingleton(new KanbanStore(store));
 // stopping between the two would drop the work with no redelivery to fall back on and nothing to
 // say it had happened.
 builder.Services.AddSingleton<IPendingDeliveries>(new SqlitePendingDeliveries(database));
+builder.Services.AddSingleton<PendingDeliveriesAtStart>();
 
 // Order carries no schema obligation - SchemaMigrator above has already applied every step
 // and set journal_mode on the file. These are readers and writers over a database that exists.
@@ -1675,6 +1676,9 @@ if (firehoseHolders.Count > 0)
 // nothing to hand work to before that. Says so when it did anything: work resumed silently is work
 // nobody knows was ever at risk, and an interrupted run is reported as a failure somebody has to
 // read to understand why their instruction came back unfinished.
+// FIRST, what deleted teams left queued: removed and logged, a live team's never touched.
+await app.Services.GetRequiredService<PendingDeliveriesAtStart>().SweepAsync();
+
 var resumed = await app.Services.GetRequiredService<ContainerHost>().ResumePendingAsync();
 
 // BOTH numbers, and a line whenever either is non-zero. An interrupted run is reported to the log
@@ -5413,7 +5417,7 @@ documents.MapDelete("", async (
         "Delete a folder and everything in it. Without it a folder that still has something in it "
         + "is refused with 409.")]
     bool? recursive,
-    TeamRegistry teams, TeamDocuments docs, FolderWatch folders, ITenantLog tenantLog,
+    TeamRegistry teams, TeamDocuments docs, FolderWatch folders, FolderRemoval removal, ITenantLog tenantLog,
     HttpContext context, CancellationToken ct) =>
 {
     // RESOLVED LIKE THE READ ROUTES: a gone team's folder and a retired one can be cleared
@@ -5459,22 +5463,73 @@ documents.MapDelete("", async (
                 statusCode: StatusCodes.Status500InternalServerError);
         }
 
-        docs.Remove(plan);
+        // THROUGH FolderRemoval, never a recursive delete: an agent's owner-only folder is removed
+        // as the agent where the Host switches users, links are never followed, and what cannot go
+        // is named with why instead of escaping as an unhandled exception after the row above.
+        var root = docs.RootFor(stored);
+        var report = await removal.RemoveDocumentsAsync(root, plan.Absolute, TeamPaths.TeamOfDocumentsFolder(stored), ct);
+        var removed = plan.Files.Where(file => !TeamDocuments.StillThere(Path.Combine(root, file))).ToList();
 
-        // Announced after the delete succeeded, ONE ANNOUNCEMENT PER FOLDER a removed file
-        // was in, exactly as a single-file delete is announced. A gone team has no triggers.
+        // Announced after the delete, ONE ANNOUNCEMENT PER FOLDER a removed file was in, exactly
+        // as a single-file delete is announced - and only the files that went. A gone team has no
+        // triggers.
         if (live)
         {
             var actor = context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown";
 
-            foreach (var group in plan.Files.GroupBy(
+            foreach (var group in removed.GroupBy(
                 file => Path.GetDirectoryName(file)?.Replace('\\', '/') ?? "", StringComparer.Ordinal))
             {
                 await folders.AnnounceAsync(stored, group.Key, [.. group], actor, ct);
             }
         }
 
-        return Results.NoContent();
+        if (report.Complete) return Results.NoContent();
+
+        // WHAT WAS LEFT, AND WHY, as a row after the `documents.deleted` above - so the log never
+        // claims a deletion that did not happen - and as the answer's sentence.
+        var left = report.Refused is { } refused
+            ? [new DocumentLeft(plan.Path.Length == 0 ? "" : plan.Path, refused)]
+            : report.Remaining
+                .Select(path => new DocumentLeft(
+                    docs.Relative(root, path) is var relative && relative == "." ? "" : relative,
+                    report.Reasons?.GetValueOrDefault(path) ?? "still there after the delete"))
+                .ToList();
+        var nothing = removed.Count == 0 && TeamDocuments.StillThere(plan.Absolute);
+        var sentence =
+            (nothing
+                ? "Nothing was removed. "
+                : $"The delete did not finish: {removed.Count} of {plan.Files.Count} file(s) were removed. ")
+            + "Still there: "
+            + string.Join("; ", left.Select(l => $"{(l.Path.Length == 0 ? $"the folder {stored}" : l.Path)} ({l.Reason})"))
+            + ". Delete it again once that is fixed.";
+
+        try
+        {
+            await tenantLog.WriteAsync(
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+                context.User.FindFirstValue(ClaimTypes.Email),
+                TenantActions.DocumentsDeleteIncomplete,
+                stored,
+                plan.Path.Length == 0 ? stored : plan.Path,
+                JsonSerializer.Serialize(new
+                {
+                    folder = stored,
+                    path = plan.Path,
+                    files = plan.Files.Count,
+                    removed = removed.Count,
+                    remaining = left.Select(l => new { path = l.Path, reason = l.Reason }),
+                }),
+                ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            sentence += " The record of what was left could not be written.";
+        }
+
+        return Results.Json(
+            new { error = sentence, removed = removed.Count, remaining = left },
+            statusCode: StatusCodes.Status409Conflict);
     });
 })
     .HumansOnly()
@@ -5482,6 +5537,11 @@ documents.MapDelete("", async (
     .WithDescription(
         "204 on success. A folder that still has something in it is refused with 409 unless "
         + "`recursive=true` - the one refusal here a person is expected to meet and act on.\n\n"
+        + "A delete the Host cannot complete answers 409 with a sentence in `error` naming each path "
+        + "left and why (permission denied, in use), `remaining` listing them and `removed` counting "
+        + "the files that went; one that removed nothing says so. It is followed by a "
+        + "`documents.delete-incomplete` tenant event naming the paths left, and deleting again once "
+        + "they are removable finishes it.\n\n"
         + "Works for a team that no longer exists and for a retired folder, as the read routes do. "
         + "For those, and only those, omitting `path` deletes the whole documents folder, and only "
         + "when its marker says the platform created it. A live team's documents folder itself "
@@ -8573,3 +8633,6 @@ internal sealed class PumpService(
         }
     }
 }
+
+/// <summary>A path a documents delete left, relative to the documents folder, and why.</summary>
+internal sealed record DocumentLeft(string Path, string Reason);

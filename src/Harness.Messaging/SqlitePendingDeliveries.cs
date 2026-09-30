@@ -165,6 +165,28 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
         return rows;
     }
 
+    public async Task<IReadOnlyList<TeamPendingDelivery>> AllAsync(CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            "SELECT subscriber, seq, started, deferred_from_run FROM pending_deliveries ORDER BY subscriber, seq";
+
+        var rows = new List<TeamPendingDelivery>();
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new TeamPendingDelivery(
+                reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2) != 0,
+                reader.IsDBNull(3) ? null : reader.GetInt64(3)));
+        }
+
+        return rows;
+    }
+
     private async Task ExecuteAsync(string sql, ContainerId subscriber, long seq, CancellationToken ct)
     {
         await using var connection = Open();

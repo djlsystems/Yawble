@@ -8,7 +8,11 @@ namespace Harness.Host;
 /// What a removal left: every path still on disk, or why it was refused outright. Complete only
 /// when both are empty.
 /// </summary>
-public sealed record FolderRemovalReport(IReadOnlyList<string> Remaining, string? Refused = null)
+/// <param name="Reasons">Why each remaining path is still there, where the Host's own delete said
+/// ("permission denied", "in use"); a path it names no reason for was left by the agent's pass or
+/// arrived during the removal.</param>
+public sealed record FolderRemovalReport(
+    IReadOnlyList<string> Remaining, string? Refused = null, IReadOnlyDictionary<string, string>? Reasons = null)
 {
     public static FolderRemovalReport Done { get; } = new([]);
 
@@ -79,22 +83,77 @@ public sealed class FolderRemoval(
     {
         root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
 
-        if (!Exists(root))
+        var (remaining, refused) = await RemoveMarkedAsync(root, team, ct);
+
+        if (refused is not null) return new FolderRemovalReport([], refused);
+
+        return await SettleAsync(root, RemovalKinds.TeamRoot, team, null, remaining, ct);
+    }
+
+    /// <summary>
+    /// Removes a file or folder inside a documents folder, or (<paramref name="target"/> the folder
+    /// itself) the whole documents folder, marker last, as a team root is. What the Host cannot
+    /// remove is removed as the agent where the Host switches users, and links are never followed.
+    ///
+    /// NOTHING IS RECORDED in <see cref="IUnfinishedRemovals"/>: a documents delete is a person's
+    /// act on a record, not a removal the platform owes. What remains is named, with why, and the
+    /// caller records it; the person's own retry is the retry.
+    /// </summary>
+    public async Task<FolderRemovalReport> RemoveDocumentsAsync(
+        string folder, string target, string team, CancellationToken ct = default)
+    {
+        folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target));
+
+        List<string> remaining;
+
+        if (string.Equals(folder, target, StringComparison.Ordinal))
         {
-            await ForgetAsync(root, ct);
-            return FolderRemovalReport.Done;
+            (remaining, var refused) = await RemoveMarkedAsync(folder, team, ct);
+
+            if (refused is not null) return new FolderRemovalReport([], refused);
         }
+        else
+        {
+            if (!Exists(target)) return FolderRemovalReport.Done;
+
+            if (!Confined(folder, target))
+            {
+                return new FolderRemovalReport([],
+                    $"{target} was left alone: a symbolic link lies between it and {folder}, and a link is never followed.");
+            }
+
+            // The agent's pass is handed the target itself: every leftover is inside it, so the
+            // entry of its parent that holds it is the target, and nothing beside it.
+            remaining = await PassesAsync(Path.GetDirectoryName(target)!, left => RemoveAsHost(target, left), ct);
+        }
+
+        var sorted = remaining.Distinct(StringComparer.Ordinal).OrderBy(p => p, StringComparer.Ordinal).ToList();
+        var why = (remaining as Leftovers)?.Reasons ?? new Dictionary<string, string>(StringComparer.Ordinal);
+
+        return new FolderRemovalReport(
+            sorted,
+            Reasons: sorted.ToDictionary(p => p, p => why.GetValueOrDefault(p, "still there after the delete"), StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Empties a root around its marker, then removes the marker, then the root. Refused when the
+    /// root is a link or carries no marker. What remains keeps the marker.
+    /// </summary>
+    private async Task<(List<string> Remaining, string? Refused)> RemoveMarkedAsync(string root, string team, CancellationToken ct)
+    {
+        if (!Exists(root)) return ([], null);
 
         if (IsLink(root))
         {
-            return new FolderRemovalReport([], $"{root} was left alone: it is a symbolic link, not a folder this platform created.");
+            return ([], $"{root} was left alone: it is a symbolic link, not a folder this platform created.");
         }
 
         var marker = TeamPaths.MarkerIn(root);
 
         if (!File.Exists(marker) || IsLink(marker))
         {
-            return new FolderRemovalReport([],
+            return ([],
                 $"{root} was left alone: it carries no {TeamPaths.MarkerFileName} marker, so it is not a "
                 + "directory this platform created. Remove it by hand if it is yours.");
         }
@@ -113,7 +172,7 @@ public sealed class FolderRemoval(
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                remaining.Add(marker);
+                Leave(remaining, marker, ex);
             }
 
             if (remaining.Count == 0)
@@ -131,7 +190,7 @@ public sealed class FolderRemoval(
             }
         }
 
-        return await SettleAsync(root, RemovalKinds.TeamRoot, team, null, remaining, ct);
+        return (remaining, null);
     }
 
     /// <summary>Removes a member's workspace: everything in it, then the folder.</summary>
@@ -484,7 +543,7 @@ public sealed class FolderRemoval(
     private async Task<List<string>> PassesAsync(
         string boundary, Action<List<string>> hostPass, CancellationToken ct, string? keep = null)
     {
-        var remaining = new List<string>();
+        List<string> remaining = new Leftovers();
         hostPass(remaining);
 
         if (remaining.Count == 0 || runAs is not { Switches: true } agent) return remaining;
@@ -496,7 +555,7 @@ public sealed class FolderRemoval(
         await RemoveAsAgentAsync(
             agent, boundary, [.. targets.Where(path => !string.Equals(path, keep, StringComparison.Ordinal))], ct);
 
-        remaining = [];
+        remaining = new Leftovers();
         hostPass(remaining);
         return remaining;
     }
@@ -523,7 +582,7 @@ public sealed class FolderRemoval(
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Cannot even be listed: the directory is what remains.
-            remaining.Add(directory);
+            Leave(remaining, directory, ex);
             return;
         }
 
@@ -545,7 +604,7 @@ public sealed class FolderRemoval(
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            remaining.Add(path);
+            Leave(remaining, path, ex);
             return;
         }
 
@@ -558,7 +617,7 @@ public sealed class FolderRemoval(
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                remaining.Add(path);
+                Leave(remaining, path, ex);
             }
 
             return;
@@ -575,9 +634,31 @@ public sealed class FolderRemoval(
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            remaining.Add(path);
+            Leave(remaining, path, ex);
         }
     }
+
+    /// <summary>What a pass left, with why the Host's own delete of each refused.</summary>
+    private sealed class Leftovers : List<string>
+    {
+        public Dictionary<string, string> Reasons { get; } = new(StringComparer.Ordinal);
+    }
+
+    private static void Leave(List<string> remaining, string path, Exception ex)
+    {
+        remaining.Add(path);
+
+        if (remaining is Leftovers leftovers) leftovers.Reasons[path] = Why(ex);
+    }
+
+    /// <summary>A person's words for why a delete refused: permission, in use, or the system's own.</summary>
+    private static string Why(Exception ex) => ex switch
+    {
+        UnauthorizedAccessException => "permission denied",
+        IOException io when io.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021)
+            || io.Message.Contains("busy", StringComparison.OrdinalIgnoreCase) => "in use",
+        _ => ex.Message.TrimEnd('.'),
+    };
 
     /// <summary>
     /// <c>rm -rf --one-file-system -- &lt;paths&gt;</c> as the agent, through the launch prefix.
