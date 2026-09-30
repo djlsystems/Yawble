@@ -279,7 +279,9 @@ try
             $"Usage ledger started: {recovered} run(s) and {ledger.BackfilledWorkflows} workflow close(s) recovered from the log.");
     }
 }
-catch (Microsoft.Data.Sqlite.SqliteException exception)
+// ANY FAILURE, not only SQLite's: a backfill that met a stamp it could not parse must not stop the
+// Host from starting any more than a locked database does. Rows are keyed, so the retry counts none twice.
+catch (Exception exception) when (exception is not OperationCanceledException)
 {
     Console.Error.WriteLine($"The usage ledger's start did not finish and is tried again at the next start: {exception.Message}");
 }
