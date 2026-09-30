@@ -1,6 +1,4 @@
 using System.ComponentModel;
-using System.Security.Claims;
-using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host.Auth;
 
@@ -32,6 +30,10 @@ public static class LocalRepoEndpoints
             : null,
         teams = info.Teams,
 
+        // What deleting it loses: the team delete dialog shows both beside its checkbox.
+        branches = info.Branches,
+        commitCount = info.CommitCount,
+
         // No team names it: kept when its team was deleted (B001F), and a person's to delete.
         unused = info.Teams.Count == 0,
     };
@@ -54,7 +56,7 @@ public static class LocalRepoEndpoints
             .WithDescription(
                 "Every bare repository under `<dataRoot>/repos`, with its `reference` (`local:<name>`, what a "
                 + "team's repository list names), size on disk in bytes, default branch (its HEAD), last "
-                + "commit on that branch, the teams whose repositories name it, and `unused` - no team names it, as "
+                + "commit on that branch, its `branches` and `commitCount` (the commits they hold together), the teams whose repositories name it, and `unused` - no team names it, as "
                 + "after its team was deleted, which keeps it.\n\n**A person's view.**");
 
         app.MapPost("/api/local-repos", async (
@@ -93,49 +95,19 @@ public static class LocalRepoEndpoints
 
         app.MapDelete("/api/local-repos/{name}", async (
             [Description("The local repository's name, as `GET /api/local-repos` lists it")] string name,
-            LocalRepos repos, TeamRegistry teams, ITenantLog log, HttpContext context, CancellationToken ct) =>
+            LocalRepoDeletion deletion, HttpContext context, CancellationToken ct) =>
         {
-            if (!LocalRepos.IsLegalName(name))
-            {
-                return Results.BadRequest(new { error = LocalRepos.IllegalName(name) });
-            }
+            // The same code a team deletion takes its ticked local repositories through.
+            var result = await deletion.DeleteAsync(name, context.User, ct);
 
-            if (!repos.Exists(name))
+            return result.Outcome switch
             {
-                return Results.NotFound(new { error = $"No local repository '{name}'." });
-            }
-
-            var teamsUsing = teams.TeamsUsingLocalRepo(name);
-            if (teamsUsing.Count > 0)
-            {
-                return Results.Conflict(new
-                {
-                    error = $"'{name}' is used by {string.Join(", ", teamsUsing)}, so it was not deleted. Remove "
-                        + $"{LocalRepos.ReferenceFor(name)} from {(teamsUsing.Count == 1 ? "that team's" : "those teams'")} "
-                        + "repositories first.",
-                    teams = teamsUsing,
-                });
-            }
-
-            // THE ROW FIRST: a repository removed with no record of who removed it is the one
-            // outcome this refuses, so a row that cannot be written stops the delete.
-            try
-            {
-                await log.WriteAsync(
-                    context.User.FindFirstValue(ClaimTypes.NameIdentifier),
-                    context.User.FindFirstValue(ClaimTypes.Email),
-                    TenantActions.LocalRepoDeleted, name, name,
-                    JsonSerializer.Serialize(new { reference = LocalRepos.ReferenceFor(name) }), ct);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                return Results.Json(
-                    new { error = $"'{name}' was not deleted: its tenant log row could not be written ({exception.Message})." },
-                    statusCode: StatusCodes.Status500InternalServerError);
-            }
-
-            await repos.DeleteAsync(name, ct);
-            return Results.NoContent();
+                LocalRepoDeleteOutcome.Deleted => Results.NoContent(),
+                LocalRepoDeleteOutcome.IllegalName => Results.BadRequest(new { error = result.Error }),
+                LocalRepoDeleteOutcome.NotFound => Results.NotFound(new { error = result.Error }),
+                LocalRepoDeleteOutcome.InUse => Results.Conflict(new { error = result.Error, teams = result.Teams }),
+                _ => Results.Json(new { error = result.Error }, statusCode: StatusCodes.Status500InternalServerError),
+            };
         })
             .WithTags("Repos")
             .HumansOnly()

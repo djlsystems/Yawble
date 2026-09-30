@@ -222,6 +222,43 @@ public sealed class FolderRemoval(
     }
 
     /// <summary>
+    /// Removes one agent CLI's session folder for a deleted team's workspace from the shared agent
+    /// home: everything in it, then the folder, the Host first and then the agent, links
+    /// removed and never followed. REFUSED when the folder is not strictly inside
+    /// <paramref name="home"/> with no symbolic link on the way, so a link planted at
+    /// <c>~/.claude</c> cannot point the removal elsewhere. NOT RECORDED as a removal unfinished: the
+    /// same workspace path can belong to a team created later under the same name, whose session
+    /// folder a retry would then take. What remains is named, and the caller says it.
+    /// </summary>
+    public async Task<FolderRemovalReport> RemoveSessionFolderAsync(string home, string folder, CancellationToken ct = default)
+    {
+        home = Path.TrimEndingDirectorySeparator(Path.GetFullPath(home));
+        folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+
+        if (!Exists(folder)) return FolderRemovalReport.Done;
+
+        if (!Confined(home, folder))
+        {
+            return new FolderRemovalReport([], $"{folder} was left alone: it is not inside {home} with no symbolic link on the way.");
+        }
+
+        var remaining = new List<string>();
+
+        if (IsLink(folder))
+        {
+            // The link, never what it points at.
+            RemoveAsHost(folder, remaining);
+        }
+        else
+        {
+            // Bounded by the folder's parent, so the agent's pass is handed the folder itself.
+            remaining = await PassesAsync(Path.GetDirectoryName(folder)!, left => RemoveAsHost(folder, left), ct);
+        }
+
+        return new FolderRemovalReport([.. remaining.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)]);
+    }
+
+    /// <summary>
     /// Empties a folder and keeps it - what a reset does to a workspace, a transcripts folder or
     /// the documents. What remains is recorded by path, and a retry removes only those paths.
     /// </summary>

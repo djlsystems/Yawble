@@ -345,6 +345,21 @@ export interface TeamDeleted {
 
   /** The `local:<name>` repositories the team had, which were KEPT; delete them in Admin -> Repositories. */
   localRepositoriesKept?: string[]
+
+  /** The `local:<name>` repositories the person ticked, deleted after the team. */
+  localRepositoriesDeleted?: string[]
+
+  /**
+   * A ticked local repository that could not be deleted, and why. The team is deleted either way;
+   * the repository is also in `localRepositoriesKept`, and is finished in Admin -> Repositories.
+   */
+  localRepositoryFailures?: { reference: string; reason: string }[]
+
+  /** How many agent CLI session folders keyed to the team's workspaces were removed. */
+  sessionFolders?: number
+
+  /** Every path of those session folders still on disk; each is also in `failures`. */
+  sessionFoldersRemaining?: string[]
 }
 
 /**
@@ -2766,6 +2781,10 @@ export interface LocalRepo {
    * deleted, so this is how one left behind is found and deleted. Optional only for an older Host.
    */
   unused?: boolean
+  /** Its branches, by short name: what deleting it loses. Optional only for an older Host. */
+  branches?: string[]
+  /** How many commits its branches hold together; null when the Host could not count them. */
+  commitCount?: number | null
 }
 
 /**

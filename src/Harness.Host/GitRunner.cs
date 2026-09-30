@@ -576,6 +576,29 @@ public sealed class GitRunner
                 System.Globalization.DateTimeStyles.None, out var at) ? at : null);
     }
 
+    /// <summary>
+    /// A local repository's branches, by short name, and how many commits its branches hold
+    /// together - what deleting it would lose, as a team's delete dialog says it. Empty and
+    /// null when git cannot read them.
+    /// </summary>
+    public async Task<(IReadOnlyList<string> Branches, int? CommitCount)> ReadLocalRepositoryContentsAsync(
+        string path, CancellationToken ct = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
+
+        var refs = await ExecuteGitAsync(
+            path, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"], cts.Token, asHost: true);
+        IReadOnlyList<string> branches = refs.ExitCode != 0
+            ? []
+            : refs.Stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (branches.Count == 0) return (branches, refs.ExitCode == 0 ? 0 : null);
+
+        var count = await ExecuteGitAsync(path, ["rev-list", "--count", "--branches"], cts.Token, asHost: true);
+        return (branches, count.ExitCode == 0 && int.TryParse(count.Stdout.Trim(), out var n) ? n : null);
+    }
+
     private const string EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
     private const string PlatformIdentity = "Platform";
     private const string PlatformEmail = "platform@localhost";

@@ -4,6 +4,7 @@ import { useQuasar } from 'quasar';
 import {
   cloneTeam,
   deleteTeam,
+  listLocalRepos,
   retryRemoval,
   pauseTeam,
   resumeTeam,
@@ -25,7 +26,7 @@ import {
   type TeamRow,
   type TeamSort,
 } from '../lib/teamsTable';
-import type { Team, TeamDeleted, TeamId } from '../api/types';
+import type { LocalRepo, Team, TeamDeleted, TeamId } from '../api/types';
 import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
@@ -212,7 +213,64 @@ async function retryUnfinished() {
  * and show as unused in Admin -> Repositories, where a person may delete them. Said in the dialog,
  * because "permanently removes" above would otherwise read as including them.
  */
-const keptLocalRepos = computed(() => (doomed.value?.repos ?? []).filter(isLocalRepoReference));
+const doomedLocalRepos = computed(() => (doomed.value?.repos ?? []).filter(isLocalRepoReference));
+
+/**
+ * "ALSO DELETE ITS LOCAL REPOSITORY", off by default, one per `local:<name>` the team uses,
+ * with what is lost read from `GET /api/local-repos`. Offered only for one NO OTHER team uses: one
+ * another team uses is named with that team and gets no box. A URL never gets one - it is not the
+ * platform's to delete - and neither does one the list could not describe. Ticked, the Host deletes
+ * it after the team, through Admin -> Repositories' own delete.
+ */
+const localRepoList = ref<LocalRepo[] | null>(null);
+const deleteLocalRepos = ref<string[]>([]);
+
+interface DoomedLocalRepo {
+  reference: string
+  repo: LocalRepo | null
+  /** The other teams using it, by name: non-empty means kept, with no box. */
+  others: string[]
+}
+
+const doomedLocalRepoRows = computed<DoomedLocalRepo[]>(() => doomedLocalRepos.value.map((reference) => {
+  const repo = localRepoList.value?.find((r) => r.reference === reference.trim()) ?? null;
+  const others = (repo?.teams ?? [])
+    .filter((id) => id !== doomed.value?.id)
+    .map((id) => board.teams.find((team) => team.id === id)?.name ?? id);
+  return { reference, repo, others };
+}));
+
+const offeredLocalRepos = computed(() => doomedLocalRepoRows.value.filter((row) => row.repo !== null && row.others.length === 0));
+const sharedLocalRepos = computed(() => doomedLocalRepoRows.value.filter((row) => row.others.length > 0));
+
+/** The team's local repositories this deletion keeps and a person may delete later: every one not
+ *  ticked, except one another team uses, which is named with that team instead. */
+const keptLocalRepos = computed(() => doomedLocalRepos.value.filter((reference) =>
+  !deleteLocalRepos.value.includes(reference) && !sharedLocalRepos.value.some((row) => row.reference === reference)));
+
+/** What deleting one loses, in one line: its commits, its branches and its last commit's date. */
+function losesLine(repo: LocalRepo): string {
+  const commits = repo.commitCount == null
+    ? 'commits not counted'
+    : `${repo.commitCount} commit${repo.commitCount === 1 ? '' : 's'}`;
+  const branches = (repo.branches ?? []).length > 0
+    ? `on ${repo.branches!.length === 1 ? 'branch' : 'branches'} ${repo.branches!.join(', ')}`
+    : 'on no branch';
+  const last = repo.lastCommit?.committedAt ? `, last commit ${repo.lastCommit.committedAt.slice(0, 10)}` : '';
+  return `${commits} ${branches}${last}`;
+}
+
+async function loadLocalRepos() {
+  localRepoList.value = null;
+  if (doomedLocalRepos.value.length === 0) return;
+
+  try {
+    localRepoList.value = await listLocalRepos();
+  } catch {
+    // Nothing is offered: a box whose loss cannot be said is not one to tick.
+    localRepoList.value = null;
+  }
+}
 
 const confirmed = computed(() =>
   doomed.value !== null
@@ -223,6 +281,8 @@ function ask(team: Team | null) {
   typed.value = '';
   deleteLosses.value = [];
   deletionConfirmation.value = null;
+  deleteLocalRepos.value = [];
+  if (team) void loadLocalRepos();
 }
 
 /** A row carries only what the table renders (`TeamRow`); deletion needs the full `Team` that
@@ -239,7 +299,12 @@ async function remove() {
   busy.value = true;
 
   try {
-    const removed: TeamDeleted = await deleteTeam(team.id, deletionConfirmation.value ?? undefined);
+    // Only boxes still offered: a repository another team took up since is not sent.
+    const ticked = deleteLocalRepos.value.filter((reference) => offeredLocalRepos.value.some((row) => row.reference === reference));
+    const removed: TeamDeleted = ticked.length > 0
+      ? await deleteTeam(team.id, deletionConfirmation.value ?? undefined, ticked)
+      : await deleteTeam(team.id, deletionConfirmation.value ?? undefined);
+    const repoFailures = removed.localRepositoryFailures ?? [];
 
     // The team is gone whether or not every directory went with it, so this is positive either way
     // — but a failure has to be SAID, because the alternative is files left on disk that nobody is
@@ -252,20 +317,27 @@ async function remove() {
         note: null,
       };
       void removalsList.value?.load();
-    } else if (removed.failures.length > 0) {
+    } else if (removed.failures.length > 0 || repoFailures.length > 0) {
       $q.notify({
         type: 'warning',
         timeout: 12000,
         multiLine: true,
         message:
           `${team.name} was deleted, but some of it could not be removed: `
-          + `${removed.failures.join('; ')}`,
+          + [
+            ...removed.failures,
+            // The repository and why, with the Repositories dialog as the way to finish it.
+            ...repoFailures.map((failure) => `${failure.reference} was not deleted: ${failure.reason}`),
+          ].join('; '),
       });
     } else {
       $q.notify({
         type: 'positive',
         timeout: 5000,
         message: `${team.name} and its ${removed.containers} Agent Container(s) were deleted.`
+          + ((removed.localRepositoriesDeleted?.length ?? 0) > 0
+            ? ` Deleted: ${removed.localRepositoriesDeleted!.join(', ')}.`
+            : '')
           + ((removed.localRepositoriesKept?.length ?? 0) > 0
             ? ` Kept: ${removed.localRepositoriesKept!.join(', ')} - delete it from Admin → Repositories.`
             : ''),
@@ -594,6 +666,23 @@ async function setPaused(team: Team | null, paused: boolean) {
             <li>its documents, its members' working folders, and its transcripts</li>
             <li>every account's access to it</li>
           </ul>
+          <!-- Off by default, and only for a local repository no other team uses. -->
+          <div v-for="row in offeredLocalRepos" :key="row.reference" class="q-mb-sm" :data-delete-local-repo="row.reference">
+            <q-checkbox
+              v-model="deleteLocalRepos"
+              :val="row.reference"
+              dense
+              :disable="busy"
+              :label="`Also delete its local repository ${row.reference}`"
+            />
+            <div class="text-caption os-text-muted q-ml-lg" data-delete-local-repo-loses>
+              Loses {{ losesLine(row.repo!) }}.
+            </div>
+          </div>
+          <p v-for="row in sharedLocalRepos" :key="row.reference" class="os-body" :data-local-repo-shared="row.reference">
+            <span class="mono">{{ row.reference }}</span> is kept: {{ row.others.join(', ') }}
+            {{ row.others.length === 1 ? 'uses' : 'use' }} it.
+          </p>
           <p v-if="keptLocalRepos.length > 0" class="os-body" data-local-repos-kept>
             {{ keptLocalRepos.length === 1 ? 'Its local repository' : 'Its local repositories' }}
             <span class="mono">{{ keptLocalRepos.join(', ') }}</span>
