@@ -257,6 +257,46 @@ public sealed class FreshVolumeTests : IDisposable
     /// A trigger made before `auth-010` keeps `always` - today's behaviour - and no cap, so nothing
     /// changes under anyone until a person chooses otherwise. A new row round-trips both.
     /// </summary>
+    /// <summary>
+    /// `outcome-002`, `auth-017` and `backlog-002` apply to a volume from before them: a trigger and a
+    /// backlog item from before serve no outcome until a person names one, and the new tables work.
+    /// </summary>
+    [Fact]
+    public async Task A_trigger_and_an_item_from_before_the_outcome_steps_serve_no_outcome_until_one_is_named()
+    {
+        var migrator = new SchemaMigrator(Database);
+        var outcomeSteps = new[] { "outcome-002", "auth-017", "backlog-002" };
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => !outcomeSteps.Contains(s.Id))], ct: Ct);
+
+        await ExecuteAsync(
+            """
+            INSERT INTO teams (id, created_utc) VALUES ('old-team', '2026-09-01T00:00:00Z');
+            INSERT INTO triggers
+                (id, team, container, name, instruction, kind, interval_seconds, idle_only, enabled,
+                 missed_count, created_at, created_by)
+            VALUES
+                ('t1', 'old-team', 'Manager', 'Poll', 'look', 'every', 300, 1, 1, 0,
+                 '2026-09-01T00:00:00Z', 'person');
+            """);
+        var item = await new Harness.Backlog.SqliteBacklogStore(Database).CreateAsync(null, "Old item", "spec", "person", Ct);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        var triggers = new SqliteTriggerStore(Database);
+        var backlog = new Harness.Backlog.SqliteBacklogStore(Database);
+        Assert.Null((await triggers.FindAsync("t1", Ct))!.OutcomeId);
+        Assert.Null((await backlog.GetAsync(item.Id, Ct))!.OutcomeId);
+
+        var outcomes = new SqliteOutcomeStore(Database, TenantAuditRow.AppendAsync);
+        var outcome = (await outcomes.CreateAsync("Old work's result", new OutcomeEdit(), new OutcomeActor("person", OutcomeActorKind.Person),
+            new TriggerAudit(null, "person", TenantActions.OutcomeCreated, null, null, null), Ct)).Outcome!;
+
+        await triggers.SaveAsync((await triggers.FindAsync("t1", Ct))! with { OutcomeId = outcome.Id }, Ct);
+        await backlog.SetOutcomeAsync(item.Id, outcome.Id, Ct);
+        Assert.Equal(outcome.Id, (await triggers.FindAsync("t1", Ct))!.OutcomeId);
+        Assert.Equal(outcome.Id, (await backlog.GetAsync(item.Id, Ct))!.OutcomeId);
+    }
+
     [Fact]
     public async Task A_trigger_from_before_the_wake_choice_step_keeps_always_and_no_cap()
     {
