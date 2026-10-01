@@ -14,6 +14,13 @@ namespace Harness.Tests.Host;
 /// A BOARD READ ASKS FOR ITS CARDS' OUTCOMES ONCE, however many cards it has: the Host's own
 /// <see cref="IOutcomeStore"/> wrapped in one that records every call, and a board of several cards
 /// read through both board routes. N cards asking N times fails here.
+///
+/// <para>
+/// Only the board read's own calls count: the recorder lives in an <see cref="AsyncLocal{T}"/> set around
+/// the request, and the test server runs the request in the caller's execution context. The Manager runs
+/// the <c>tell</c>s start in the background (whose <see cref="OutcomeNudge"/> asks for the same workflows'
+/// links) began before it was set, so they never see it.
+/// </para>
 /// </summary>
 public sealed class BoardOutcomeQueryTests : IAsyncLifetime
 {
@@ -21,7 +28,7 @@ public sealed class BoardOutcomeQueryTests : IAsyncLifetime
     private const string Password = "correct horse battery";
 
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-board-outcome-query-{Guid.NewGuid():N}");
-    private readonly ConcurrentQueue<(string Method, object?[] Args)> _calls = new();
+    private readonly AsyncLocal<ConcurrentQueue<(string Method, object?[] Args)>?> _recording = new();
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _person = null!;
     private string _team = "";
@@ -41,13 +48,15 @@ public sealed class BoardOutcomeQueryTests : IAsyncLifetime
 
                 // The Host registers its store as an instance; the board reads this one around it.
                 var real = (IOutcomeStore)services.Last(d => d.ServiceType == typeof(IOutcomeStore)).ImplementationInstance!;
-                services.AddSingleton(CountingOutcomeStore.Around(real, _calls));
+                services.AddSingleton(CountingOutcomeStore.Around(real, _recording));
             }));
 
         _team = (await _factory.Services.GetRequiredService<TeamRegistry>()
             .CreateAsync("Counted", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
 
         await _factory.Services.GetRequiredService<IUserStore>().CreateAsync(Email, Password);
+        // The board request runs in the test's execution context, so it sees the recorder set around it.
+        _factory.Server.PreserveExecutionContext = true;
         _person = _factory.CreateClient();
         (await _person.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct)).EnsureSuccessStatusCode();
     }
@@ -72,8 +81,10 @@ public sealed class BoardOutcomeQueryTests : IAsyncLifetime
 
         foreach (var route in new[] { $"/api/teams/{_team}/kanban/board", $"/api/kanban/board?team={_team}" })
         {
-            _calls.Clear();
+            var calls = new ConcurrentQueue<(string Method, object?[] Args)>();
+            _recording.Value = calls;
             var board = JsonDocument.Parse(await _person.GetStringAsync(route, Ct)).RootElement;
+            _recording.Value = null;
 
             var cards = board.GetProperty("cards").EnumerateArray()
                 .Where(c => workflows.Contains(c.GetProperty("workflowSeq").GetInt64()))
@@ -84,15 +95,16 @@ public sealed class BoardOutcomeQueryTests : IAsyncLifetime
                 workflows.Select(w => cards[w].ValueKind == JsonValueKind.Null ? null : cards[w].GetProperty("id").GetString()).ToArray());
 
             // ONE query, naming every card's workflow; never one per card, nor the whole link table.
-            var asked = _calls
+            Assert.NotEmpty(calls);
+            var asked = calls
                 .Where(c => c.Method == nameof(IOutcomeStore.CurrentOutcomesAsync))
                 .Select(c => ((IReadOnlyCollection<long>)c.Args[0]!).ToHashSet())
                 .Where(set => set.Overlaps(workflows))
                 .ToList();
             Assert.Single(asked);
             Assert.Superset(workflows.ToHashSet(), asked[0]);
-            Assert.DoesNotContain(_calls, c => c.Method == nameof(IOutcomeStore.ReadLinksAsync));
-            Assert.DoesNotContain(_calls, c => c.Method == nameof(IOutcomeStore.CurrentLinkAsync) && workflows.Contains((long)c.Args[0]!));
+            Assert.DoesNotContain(calls, c => c.Method == nameof(IOutcomeStore.ReadLinksAsync));
+            Assert.DoesNotContain(calls, c => c.Method == nameof(IOutcomeStore.CurrentLinkAsync) && workflows.Contains((long)c.Args[0]!));
         }
     }
 
@@ -112,24 +124,26 @@ public sealed class BoardOutcomeQueryTests : IAsyncLifetime
         return JsonDocument.Parse(await told.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("correlationId").GetInt64();
     }
 
-    /// <summary>The real store, with every call recorded by name and arguments before it runs.</summary>
+    /// <summary>The real store, with every call recorded by name and arguments before it runs, into the
+    /// recorder of the async flow that makes it, if that flow has one.</summary>
     public class CountingOutcomeStore : DispatchProxy
     {
         private IOutcomeStore _real = null!;
-        private ConcurrentQueue<(string, object?[])> _calls = null!;
+        private AsyncLocal<ConcurrentQueue<(string, object?[])>?> _recording = null!;
 
-        public static IOutcomeStore Around(IOutcomeStore real, ConcurrentQueue<(string, object?[])> calls)
+        public static IOutcomeStore Around(IOutcomeStore real, AsyncLocal<ConcurrentQueue<(string, object?[])>?> recording)
         {
             var proxy = Create<IOutcomeStore, CountingOutcomeStore>();
             var counting = (CountingOutcomeStore)(object)proxy;
             counting._real = real;
-            counting._calls = calls;
+            counting._recording = recording;
             return proxy;
         }
 
         protected override object? Invoke(MethodInfo? method, object?[]? args)
         {
-            _calls.Enqueue((method!.Name, args ?? []));
+            ArgumentNullException.ThrowIfNull(method);
+            _recording.Value?.Enqueue((method.Name, args ?? []));
             try { return method.Invoke(_real, args); }
             catch (TargetInvocationException thrown) when (thrown.InnerException is not null)
             {
