@@ -79,7 +79,7 @@ public sealed class RunMemoryReportTests
     }
 
     [Fact]
-    public async Task Api_wip_states_cgroup_rlimit_and_not_enforced_from_the_hosts_own_decision()
+    public async Task Api_wip_and_the_doctor_state_cgroup_rlimit_and_not_enforced_from_the_hosts_own_decision()
     {
         var ct = TestContext.Current.CancellationToken;
 
@@ -131,6 +131,13 @@ public sealed class RunMemoryReportTests
             Assert.Equal(own.Mechanism, runMemory.GetProperty("mechanism").GetString());
             Assert.Equal(own.Detail, runMemory.GetProperty("detail").GetString());
             Assert.True(view.RootElement.TryGetProperty("limit", out _));
+
+            // --doctor, another process, reads the same two objects as the Host recorded them -
+            // after the setting changed, without working either out itself.
+            using var doctor = JsonDocument.Parse(HostDoctor.ToJson(await HostDoctor.ReportAsync(dataRoot, ct)));
+            var wip = doctor.RootElement.GetProperty("wip");
+            Assert.Equal(view.RootElement.GetProperty("limit").GetRawText(), wip.GetProperty("limit").GetRawText());
+            Assert.Equal(runMemory.GetRawText(), wip.GetProperty("runMemory").GetRawText());
             return runMemory;
         }
         finally

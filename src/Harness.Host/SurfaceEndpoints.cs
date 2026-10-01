@@ -12,7 +12,8 @@ public static class SurfaceEndpoints
         app.MapGet("/api/wip", (WipLedger wip, TenantSettings settings, RunMemoryLimits memory) =>
             {
                 var view = wip.View();
-                return Results.Ok(new { view.Max, view.Running, view.Waiting, Limit = settings.RunLimit(), RunMemory = memory.Report() });
+                var figures = WipRecord.Of(settings, memory);
+                return Results.Ok(new { view.Max, view.Running, view.Waiting, figures.Limit, figures.RunMemory });
             })
             .RequirePermit(Permits.Read)
             .WithTags("Admission")

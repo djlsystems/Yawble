@@ -29,7 +29,11 @@ public sealed record DoctorAgent(
     // through the platform - that had it after a different one. Null when the kept history never
     // saw it change; `VersionsSince` is then how far back that history reaches.
     DateTimeOffset? UpdatedAt = null,
-    DateTimeOffset? VersionsSince = null);
+    DateTimeOffset? VersionsSince = null,
+    // WHETHER IT STARTS THE WAY A MEMBER RUN STARTS IT: the Host's last launch check
+    // (AgentLaunchChecksRecord.ForCommand), the values GET /api/agents/auth carries. Null when the
+    // Host has recorded none - not known, never ok.
+    AgentLaunchReport? Launch = null);
 
 public sealed record DoctorReport(
     DateTimeOffset At,
@@ -39,7 +43,14 @@ public sealed record DoctorReport(
     DateTimeOffset? VersionsRecordedAt,
     IReadOnlyList<DoctorAgent> Agents,
     AgentLaunchRecord? AgentLaunch = null,
-    AgentToolsRecord? AgentTools = null);
+    AgentToolsRecord? AgentTools = null,
+    DoctorWip? Wip = null);
+
+/// <summary>
+/// The doctor's <c>wip</c>: <c>GET /api/wip</c>'s <c>limit</c> and <c>runMemory</c>, as the running Host
+/// last recorded them (<see cref="WipRecord"/>), and when.
+/// </summary>
+public sealed record DoctorWip(DateTimeOffset At, WipRunLimit Limit, RunMemoryReport RunMemory);
 
 /// <summary>
 /// What `--doctor` reports: the state of one data root, read and never changed. The operator CLI
@@ -70,6 +81,7 @@ public static class HostDoctor
         var database = Path.Combine(dataRoot, "messages.db");
         var (recordedAt, versions) = await NewestVersionsAsync(dataRoot, ct);
         var history = await CliVersionHistory.In(dataRoot).ReadAsync(CliVersionHistory.MaxTake, ct);
+        var launches = AgentLaunchChecksRecord.Read(dataRoot);
 
         return new DoctorReport(
             DateTimeOffset.UtcNow,
@@ -77,11 +89,12 @@ public static class HostDoctor
             await DatabaseAsync(database, ct),
             Backups(database, Path.Combine(dataRoot, "backups")),
             recordedAt,
-            await AgentsAsync(versions, history, ct),
+            await AgentsAsync(versions, history, launches, ct),
             // Who the Host said, at its last start, agent children run as - and, when it
             // refuses them, why. Recorded by the Host, because the doctor is a different process.
             AgentLaunchRecord.Read(dataRoot),
-            AgentToolsSection(dataRoot));
+            AgentToolsSection(dataRoot),
+            WipSection(dataRoot));
     }
 
     /// <summary>
@@ -92,6 +105,14 @@ public static class HostDoctor
     /// Null when the Host has not recorded one - not measured, never clean.
     /// </summary>
     public static AgentToolsRecord? AgentToolsSection(string dataRoot) => AgentToolsRecord.Read(dataRoot);
+
+    /// <summary>
+    /// THE WIP SECTION: the running limit and what each run's memory is held to, as the Host last
+    /// recorded them (<see cref="WipRecord"/>) from the code that decides them. Never worked out here: this
+    /// process has neither the Host's cgroup nor its settings. Null when the Host has recorded none.
+    /// </summary>
+    public static DoctorWip? WipSection(string dataRoot) =>
+        WipRecord.Read(dataRoot) is { } wip ? new DoctorWip(wip.At, wip.Limit, wip.RunMemory) : null;
 
     /// <summary>
     /// The newest start's versions, as `scripts/ensure-agent-clis.sh` recorded them. Reading the
@@ -119,7 +140,8 @@ public static class HostDoctor
     /// PATH now").
     /// </summary>
     private static async Task<IReadOnlyList<DoctorAgent>> AgentsAsync(
-        IReadOnlyDictionary<string, string?> versions, IReadOnlyList<CliVersionsAtStart> history, CancellationToken ct)
+        IReadOnlyDictionary<string, string?> versions, IReadOnlyList<CliVersionsAtStart> history,
+        AgentLaunchChecksRecord? launches, CancellationToken ct)
     {
         var specs = AgentAuthProbe.LoadSpecs();
         var agents = new List<DoctorAgent>(specs.Count);
@@ -136,7 +158,7 @@ public static class HostDoctor
 
             agents.Add(new DoctorAgent(
                 command, installed, version, authenticated, detail, specs[command].CredentialVariable,
-                now.UpdatedAt, now.Since));
+                now.UpdatedAt, now.Since, launches?.ForCommand(command)));
         }
 
         return agents;

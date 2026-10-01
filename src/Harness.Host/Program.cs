@@ -1552,7 +1552,10 @@ builder.Services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(opt
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<AgentAuthProbe>();
 // THE LAUNCH CHECK: each preset's free invocation through the member runner's own launch (AgentLaunchChecks).
-builder.Services.AddSingleton<AgentLaunchChecks>();
+builder.Services.AddSingleton(sp => new AgentLaunchChecks(
+    sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<ProcessAgentRunner>(), dataRoot,
+    sp.GetRequiredService<ILogger<AgentLaunchChecks>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentLaunchChecks>());
 
 // THE PRE-FLIGHT: what each preset's CLI would load, listed by the CLI itself as the agent user,
 // once the Host is serving and again after every catalog save. Never on the start path.
@@ -1597,6 +1600,9 @@ app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
             runLimit.Mb is { } mb ? $"{mb} MB, as {runLimit.Source}" : $"no limit, as {runLimit.Source}",
             heavyNow.Mb is { } heavyMb ? $"{heavyMb} MB, as {heavyNow.Source}" : $"no limit, as {heavyNow.Source}");
     }
+
+    // For --doctor, which reads the Host's own figures rather than working them out as itself.
+    WipRecord.Keep(dataRoot, tenantSettings, memoryLimits, app.Logger);
 
     var memberTemp = app.Services.GetRequiredService<MemberTempRoot>();
     app.Logger.LogInformation("Member temporary folders: {Path} - {Reason}", memberTemp.Path, memberTemp.Reason);

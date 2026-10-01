@@ -177,4 +177,36 @@ public sealed class AgentLaunchCheckRouteTests(HostFixture host) : IClassFixture
             }
         }
     }
+
+    [Fact]
+    public async Task The_doctor_reads_the_launch_check_the_host_recorded_per_command()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = await host.PersonAsync();
+
+        using var reports = JsonDocument.Parse(await client.GetStringAsync("/api/agents/auth", ct));
+        var record = AgentLaunchChecksRecord.Read(host.DataRoot);
+        Assert.NotNull(record);
+
+        // The Host's record is the check the route serves, preset by preset.
+        foreach (var report in reports.RootElement.EnumerateArray())
+        {
+            var preset = Assert.Single(record.Presets, p => p.Preset == report.GetProperty("agent").GetString());
+            Assert.Equal(report.GetProperty("launch").GetProperty("result").GetString(), preset.Launch.Result);
+        }
+
+        // And the doctor, another process, states it per command from that record, never by running one.
+        var doctor = await HostDoctor.ReportAsync(host.DataRoot, ct);
+        Assert.All(doctor.Agents, agent =>
+        {
+            Assert.NotNull(agent.Launch);
+            Assert.Equal(record.ForCommand(agent.Agent), agent.Launch);
+            var mine = record.Presets.Where(p => p.Command is { } c && Path.GetFileName(c) == agent.Agent).ToArray();
+            if (mine.Length == 0 || mine.All(p => p.Launch.Result == AgentLaunchReport.NotChecked))
+            {
+                Assert.Equal(AgentLaunchReport.NotChecked, agent.Launch.Result);
+            }
+        });
+    }
 }
+
