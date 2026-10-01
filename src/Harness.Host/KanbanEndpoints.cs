@@ -43,8 +43,8 @@ public static class KanbanEndpoints
                 + "reach contributes no cards and is not refused - the filter bounds what they may "
                 + "already see, and a refusal would say which teams exist.\n\n"
                 + "FOUR QUERY PARAMETERS. What narrows a board "
-                + "here is `team`, `member` and `status` (see `KanbanFilter`), and `outcome` - an "
-                + "outcome's id, or `none` - applied over the projected cards; searching a card's "
+                + "here is `team`, `member`, `status` and `outcome` (see `KanbanFilter`) - the last "
+                + "an outcome's id, or `none`, matched against the `outcome` each card carries; searching a card's "
                 + "CONTENTS is free text over the fetched board and reaches no route.\n\n"
                 + "The per-team route `/api/teams/{team}/kanban/board` is what the CLI and a "
                 + "container use; this is what the console's board reads.");
@@ -73,7 +73,8 @@ public static class KanbanEndpoints
             .WithSummary("Get the team kanban board")
             .WithDescription(
                 "Returns this team's board, with optional filtering by member, status or outcome (an "
-                + "outcome's id, or `none` for cards whose workflows have no outcome).\n\n"
+                + "outcome's id, or `none` for cards with no outcome). Each card carries its `outcome`: "
+                + "its open workflow's, else its latest workflow's, or null.\n\n"
                 + "Searching a card's CONTENTS is done over the fetched board, not here.");
 
         // THE ONE ROUTE THAT ANSWERS WITH A TRAIL, and the only place a note or a comment is read
@@ -136,7 +137,7 @@ public static class KanbanEndpoints
     /// already see, never a widening of it, so it does not exist here.
     /// </summary>
     private static async Task<KanbanBoard> BoardAsync(
-        IMessageLog log, TeamRegistry teams, string team, KanbanFilter? filter = null,
+        IMessageLog log, TeamRegistry teams, IOutcomeStore outcomes, string team, KanbanFilter? filter = null,
         CancellationToken ct = default)
     {
         // FROM THIS TEAM'S FLOOR, NOT FROM ZERO. See `AboveTheirFloors` - a board that reads the
@@ -151,8 +152,12 @@ public static class KanbanEndpoints
 
         var board = KanbanProjector.Project(messages, scoped);
 
-        // EACH CARD NAMES ITS OPEN WORKFLOW, so a Concierge resuming it joins that workflow.
-        return board with { Cards = await CardOpenWorkflows.AttachAsync(board.Cards, messages, log, ct) };
+        // EACH CARD NAMES ITS OPEN WORKFLOW, so a Concierge resuming it joins that workflow, and
+        // then the outcome that workflow serves - which is what the Outcome filter reads.
+        var cards = await CardOutcomes.AttachAsync(
+            await CardOpenWorkflows.AttachAsync(board.Cards, messages, log, ct), outcomes, ct);
+
+        return board with { Cards = await CardOutcomes.MatchingAsync(cards, scoped.Outcome, outcomes, ct) };
     }
 
     /// <summary>
@@ -168,7 +173,8 @@ public static class KanbanEndpoints
     /// carry none.
     /// </summary>
     private static async Task<KanbanCardDetail?> CardAsync(
-        IMessageLog log, TeamRegistry teams, string team, string id, CancellationToken ct = default)
+        IMessageLog log, TeamRegistry teams, string team, string id, CancellationToken ct = default,
+        IOutcomeStore? outcomes = null)
     {
         var messages = AboveTheirFloors(
             await log.ReadRangeAsync(0, int.MaxValue),
@@ -177,8 +183,9 @@ public static class KanbanEndpoints
         if (KanbanProjector.ProjectCard(messages, id, new KanbanFilter(Team: team)) is not { } card)
             return null;
 
-        // THE OPEN WORKFLOW, as the board's cards carry it.
-        return (await CardOpenWorkflows.AttachAsync([card], messages, log, ct))[0];
+        // THE OPEN WORKFLOW, as the board's cards carry it, and its outcome when asked.
+        var attached = await CardOpenWorkflows.AttachAsync([card], messages, log, ct);
+        return (outcomes is null ? attached : await CardOutcomes.AttachAsync(attached, outcomes, ct))[0];
     }
 
     /// <summary>
@@ -224,44 +231,16 @@ public static class KanbanEndpoints
             .ToList();
     }
 
+    private const string OutcomeFilterDescription =
+        "Only cards whose outcome is this one (its id; a merged outcome's work is its target's), "
+        + "or `none` for cards with no outcome. A card's outcome is its open workflow's, else its "
+        + "latest workflow's, and each card carries it as `outcome` (id, name, status).";
+
     /// <summary>
     /// Stamps each lane's <see cref="Lane.WipLimit"/> from the tenant settings, read at this fetch.
     /// The lane that holds RUNNING work shows `wip.maxRunning`; the rest show
     /// `kanban.wipLimits`.
     /// </summary>
-    private const string OutcomeFilterDescription =
-        "Only cards whose workflow serves this outcome (its id; a merged outcome's work is its "
-        + "target's), or `none` for cards whose workflows have no outcome.";
-
-    /// <summary>
-    /// THE OUTCOME FILTER: a card is kept when one of its workflows' newest link names the outcome,
-    /// followed through <c>merged_into</c>; <c>none</c> keeps the cards none of whose workflows has
-    /// one. Applied after the projection, over the cards already in the caller's scope, so it
-    /// narrows and never widens.
-    /// </summary>
-    private static async Task<IReadOnlyList<KanbanCard>> ByOutcomeAsync(
-        IReadOnlyList<KanbanCard> cards, string? outcome, IOutcomeStore outcomes, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(outcome)) return cards;
-
-        var all = await outcomes.ListAsync(ct);
-        var resolution = OutcomeFigures.Resolution(all);
-        var current = (await outcomes.ReadLinksAsync(ct))
-            .GroupBy(l => l.Correlation)
-            .ToDictionary(g => g.Key, g => g.Last().OutcomeId is var id ? resolution.GetValueOrDefault(id, id) : null);
-
-        var wanted = outcome.Trim();
-        var none = string.Equals(wanted, "none", StringComparison.OrdinalIgnoreCase);
-        if (!none) wanted = resolution.GetValueOrDefault(wanted, wanted);
-
-        IEnumerable<long> WorkflowsOf(KanbanCard card) => [card.WorkflowSeq, .. card.Workflows ?? []];
-
-        return cards
-            .Where(card => none
-                ? WorkflowsOf(card).All(c => !current.ContainsKey(c))
-                : WorkflowsOf(card).Any(c => current.GetValueOrDefault(c) == wanted))
-            .ToList();
-    }
 
     private static KanbanBoard WithLaneLimits(KanbanBoard board, TenantSettings settings) =>
         board with
@@ -283,11 +262,9 @@ public static class KanbanEndpoints
     {
         try
         {
-            var filter = new KanbanFilter(Member: member, Status: status);
-            var board = await BoardAsync(log, teams, team, filter, ct);
+            var filter = new KanbanFilter(Member: member, Status: status, Outcome: outcome);
 
-            return Results.Ok(WithLaneLimits(
-                board with { Cards = await ByOutcomeAsync(board.Cards, outcome, outcomes, ct) }, settings));
+            return Results.Ok(WithLaneLimits(await BoardAsync(log, teams, outcomes, team, filter, ct), settings));
         }
         catch (Exception ex)
         {
@@ -363,7 +340,7 @@ public static class KanbanEndpoints
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
             }
 
-            var filter = new KanbanFilter(Member: member, Status: status);
+            var filter = new KanbanFilter(Member: member, Status: status, Outcome: outcome);
 
             // PER-TEAM FLOORS HERE, because this projection spans every team the caller reaches and
             // each one's history starts in a different place.
@@ -372,18 +349,21 @@ public static class KanbanEndpoints
 
             // ONE PROJECTION, THEN THE SCOPE. The filter carries no team - every other narrowing
             // the caller asked for still runs inside the projection, exactly where it did.
-            var cards = await CardOpenWorkflows.AttachAsync(
-                KanbanProjector.Project(messages, filter).Cards
-                    .Where(card => scope.Contains(card.Team))
-                    .ToList(),
-                messages,
-                log,
+            var cards = await CardOutcomes.AttachAsync(
+                await CardOpenWorkflows.AttachAsync(
+                    KanbanProjector.Project(messages, filter).Cards
+                        .Where(card => scope.Contains(card.Team))
+                        .ToList(),
+                    messages,
+                    log,
+                    ct),
+                outcomes,
                 ct);
 
             // The filter is echoed back as the caller ASKED it, `team` included - which is how the
             // console can show what the board is actually narrowed to. It is not the resolved
             // scope: naming every team a caller reaches back at them is a different fact.
-            cards = await ByOutcomeAsync(cards, outcome, outcomes, ct);
+            cards = await CardOutcomes.MatchingAsync(cards, filter.Outcome, outcomes, ct);
 
             return Results.Ok(WithLaneLimits(
                 new KanbanBoard(KanbanLanes.All, cards, filter with { Team = team }), settings));
@@ -399,11 +379,12 @@ public static class KanbanEndpoints
         string id,
         IMessageLog log,
         TeamRegistry teams,
+        IOutcomeStore outcomes,
         CancellationToken ct = default)
     {
         try
         {
-            var card = await CardAsync(log, teams, team, id, ct);
+            var card = await CardAsync(log, teams, team, id, ct, outcomes);
 
             if (card is null)
             {

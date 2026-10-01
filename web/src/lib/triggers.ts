@@ -119,6 +119,9 @@ export interface TriggerDraft {
 
   /** The most billable tokens this trigger may spend in a day; null is no cap. */
   dailyTokenCap: number | null
+
+  /** The outcome this trigger's fires serve, by id; '' (or absent) for none. */
+  outcomeId?: string
 }
 
 /** A new trigger wakes the Manager only when its run hands back or fails. */
@@ -1028,6 +1031,7 @@ export function draftForCreate(defaultContainer = 'Manager'): TriggerDraft {
     minIntervalSeconds: DefaultMinIntervalSeconds,
     wakeManager: DefaultWakeManager,
     dailyTokenCap: null,
+    outcomeId: '',
   }
 }
 
@@ -1058,6 +1062,7 @@ export function draftFromTrigger(row: TeamTrigger): TriggerDraft {
     minIntervalSeconds: row.minIntervalSeconds ?? DefaultMinIntervalSeconds,
     wakeManager: wakeManagerOf(row),
     dailyTokenCap: row.dailyTokenCap ?? null,
+    outcomeId: row.outcomeId ?? '',
   }
 }
 
@@ -1108,6 +1113,7 @@ function wireShapeFromDraft(draft: TriggerDraft) {
     minIntervalSeconds,
     wakeManager: draft.wakeManager,
     dailyTokenCap: draft.dailyTokenCap,
+    outcomeId: draft.outcomeId?.trim() ?? '',
   }
 }
 
@@ -1140,6 +1146,8 @@ export function createTriggerRequestFromDraft(draft: TriggerDraft): CreateTrigge
       : {}),
     wakeManager: wire.wakeManager,
     dailyTokenCap: wire.dailyTokenCap,
+    // Only when one is chosen, so a trigger with none sends what it always sent.
+    ...(wire.outcomeId ? { outcomeId: wire.outcomeId } : {}),
   }
 }
 
@@ -1188,6 +1196,8 @@ export function updateTriggerPatchFromDraft(
   // unchanged sends nothing - and choosing `always` for it is not a change either.
   if (next.wakeManager !== wakeManagerOf(existing)) patch.wakeManager = next.wakeManager
   if (next.dailyTokenCap !== (existing.dailyTokenCap ?? null)) patch.dailyTokenCap = next.dailyTokenCap
+  // '' clears it, which is the route's own word for none.
+  if (next.outcomeId !== (existing.outcomeId ?? '')) patch.outcomeId = next.outcomeId
 
   return patch
 }

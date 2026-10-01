@@ -34,6 +34,13 @@ public sealed record Outcome(
     public bool IsLive => OutcomeStatus.IsLive(Status);
 }
 
+/// <summary>
+/// A workflow's outcome NOW, as a card carries it: its newest link's outcome, followed through
+/// <c>merged_into</c>. The name is the outcome's current name, not the link's snapshot, and it is
+/// text: a client renders it as text, never HTML.
+/// </summary>
+public sealed record WorkflowOutcome(string Id, string Name, string Status);
+
 /// <summary>An outcome's four states, as data.</summary>
 public static class OutcomeStatus
 {
@@ -211,6 +218,13 @@ public interface IOutcomeStore
 
     /// <summary>The newest link of <paramref name="correlation"/>, or null.</summary>
     Task<OutcomeLink?> CurrentLinkAsync(long correlation, CancellationToken ct = default);
+
+    /// <summary>
+    /// Each of <paramref name="correlations"/> that has a link, with its outcome now (newest link,
+    /// followed through <c>merged_into</c>), in ONE query. What the board attaches to its cards.
+    /// </summary>
+    Task<IReadOnlyDictionary<long, WorkflowOutcome>> CurrentOutcomesAsync(
+        IReadOnlyCollection<long> correlations, CancellationToken ct = default);
 
     /// <summary>Every link, oldest first.</summary>
     Task<IReadOnlyList<OutcomeLink>> ReadLinksAsync(CancellationToken ct = default);

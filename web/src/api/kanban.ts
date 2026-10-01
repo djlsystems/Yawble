@@ -1,5 +1,6 @@
 import { json, send } from './client'
 import type { TeamId } from './types'
+import type { OutcomeRef } from './outcomes'
 
 /**
  * The Kanban module's half of the API contract, as the browser sees it.
@@ -155,13 +156,26 @@ export interface KanbanCard {
    * The strongest mark so far; the server only ever raises it. Absent from an older server.
    */
   foreignTools?: 'called' | 'offered' | 'notMeasured' | 'notVerified' | null
+
+  /**
+   * The outcome this card's work serves: its open workflow's, else its latest workflow's, or null
+   * for none. Set by the server at the fetch; the tag under the title draws it. `name` is text.
+   * Absent from an older server.
+   */
+  outcome?: OutcomeRef | null
+
+  /** Every workflow this card was planned, claimed or told in, oldest first. Absent from an older server. */
+  workflows?: number[] | null
+
+  /** The open workflow this card belongs to and its latest row, or null when all have ended. */
+  openWorkflow?: { workflow: number; latestSeq: number } | null
 }
 
 /**
  * The filter set. Every field is optional and an empty string means "not filtered" - the query
  * builder drops both, so there is one answer to "unset" rather than two that differ by endpoint.
  *
- * THREE FIELDS, AND NO `workflow`, `from` OR `to`. `/api/kanban/board` does not
+ * FOUR FIELDS, AND NO `workflow`, `from` OR `to`. `/api/kanban/board` does not
  * bind them, so a client that sent them would be narrowing nothing while looking like it narrowed
  * something. The UI and the route agree on this list; keeping them in step is what stops a filter
  * from failing silently.
@@ -174,7 +188,13 @@ export interface KanbanFilters {
   team?: string
   member?: string
   status?: string
+
+  /** An outcome's id, or `none` for the cards with no outcome. Server-side, like the other three. */
+  outcome?: string
 }
+
+/** The `outcome` filter's value for the cards with no outcome - the route's own word. */
+export const NoOutcome = 'none'
 
 export interface KanbanBoard {
   lanes: KanbanLane[]
@@ -262,7 +282,7 @@ export function kanbanQuery(filters: KanbanFilters): string {
   // THE ORDER IS ALSO THE WHOLE LIST, which is what stops a removed parameter riding along: a key
   // that is not named here is not written, so a stray `workflow` or `from` left on an object by
   // some caller reaches no URL even though `encodeURIComponent` would happily have sent it.
-  const order: (keyof KanbanFilters)[] = ['team', 'member', 'status']
+  const order: (keyof KanbanFilters)[] = ['team', 'member', 'status', 'outcome']
 
   const parts = order
     .map((key) => [key, filters[key]] as const)

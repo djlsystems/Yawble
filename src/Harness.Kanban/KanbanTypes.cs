@@ -115,7 +115,15 @@ public record KanbanCard(
     /// <c>notVerified</c> (a run's preset declares no allowed tools, so it was not verified), or null when
     /// every run checked clean or none has been checked. A FLAG, like <see cref="Paused"/>, not a status.
     /// </summary>
-    string? ForeignTools = null)
+    string? ForeignTools = null,
+
+    /// <summary>
+    /// The outcome this card's work serves, or null for none: the outcome of the workflow the card
+    /// is open in (<see cref="OpenWorkflow"/>), else of its latest workflow in
+    /// <see cref="Workflows"/>. SET BY THE HOST AT THE FETCH, beside <see cref="OpenWorkflow"/>, in
+    /// one query per board read (<c>CardOutcomes</c>); a pure walk of rows cannot see a link.
+    /// </summary>
+    Harness.Contracts.WorkflowOutcome? Outcome = null)
 {
     /// <summary>Whether this card is work of the workflow <paramref name="correlation"/>: born in it,
     /// or claimed or told in it since. See <see cref="Workflows"/>.</summary>
@@ -202,7 +210,14 @@ public sealed record KanbanBoard(
     KanbanFilter Filters);
 
 /// <summary>
-/// Query filters for the board: TEAM, MEMBER, STATUS, and deliberately nothing else.
+/// Query filters for the board: TEAM, MEMBER, STATUS, OUTCOME, and deliberately nothing else.
+///
+/// <para>
+/// <c>Outcome</c> is an outcome's id, or <c>none</c>, and it is the one filter the projector does
+/// NOT apply: a pure walk of rows cannot see a workflow's link. The Host applies it after it has
+/// attached each card's outcome (<c>CardOutcomes</c>), so a card is kept exactly when its tag names
+/// that outcome, and <c>none</c> keeps the cards with no tag.
+/// </para>
 ///
 /// <para>
 /// No <c>From</c>, <c>To</c> or <c>Workflow</c>: three more controls on a bar that is
@@ -226,4 +241,9 @@ public sealed record KanbanBoard(
 public sealed record KanbanFilter(
     string? Team = null,
     string? Member = null,
-    string? Status = null);
+    string? Status = null,
+    string? Outcome = null)
+{
+    /// <summary>The value of <see cref="Outcome"/> that keeps the cards with no outcome.</summary>
+    public const string NoOutcome = "none";
+}

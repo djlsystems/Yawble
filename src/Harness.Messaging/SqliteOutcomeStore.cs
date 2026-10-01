@@ -389,6 +389,61 @@ public sealed class SqliteOutcomeStore(
         return await OutcomeLinks.CurrentAsync(connection, null, correlation, ct);
     }
 
+    /// <summary>
+    /// ONE STATEMENT, whatever the board's size: the newest link of each correlation asked about,
+    /// then its <c>merged_into</c> chain walked in a recursive CTE (at most 64 hops, as
+    /// <c>OutcomeFigures.Resolution</c> walks it), and the last outcome that exists on the chain is
+    /// the answer. A correlation with no link is absent.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<long, WorkflowOutcome>> CurrentOutcomesAsync(
+        IReadOnlyCollection<long> correlations, CancellationToken ct = default)
+    {
+        var found = new Dictionary<long, WorkflowOutcome>();
+
+        var asked = correlations.Distinct().ToList();
+        if (asked.Count == 0) return found;
+
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        var names = new List<string>(asked.Count);
+        for (var i = 0; i < asked.Count; i++)
+        {
+            var name = $"$c{i}";
+            names.Add(name);
+            command.Parameters.AddWithValue(name, asked[i]);
+        }
+
+        command.CommandText =
+            $"""
+             WITH RECURSIVE
+             current(correlation, outcome_id) AS (
+                 SELECT l.correlation, l.outcome_id FROM workflow_outcome_links l
+                 WHERE l.correlation IN ({string.Join(", ", names)})
+                   AND l.id = (SELECT MAX(n.id) FROM workflow_outcome_links n WHERE n.correlation = l.correlation)
+             ),
+             chain(correlation, id, hop) AS (
+                 SELECT correlation, outcome_id, 0 FROM current
+                 UNION ALL
+                 SELECT c.correlation, o.merged_into, c.hop + 1
+                 FROM chain c JOIN outcomes o ON o.id = c.id
+                 WHERE o.status = '{OutcomeStatus.Merged}' AND o.merged_into IS NOT NULL AND c.hop < 64
+             )
+             SELECT c.correlation, o.id, o.name, o.status
+             FROM chain c JOIN outcomes o ON o.id = c.id
+             ORDER BY c.correlation, c.hop
+             """;
+
+        // Ordered by hop, so the last row read for a correlation is the end of its chain.
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            found[reader.GetInt64(0)] = new WorkflowOutcome(reader.GetString(1), reader.GetString(2), reader.GetString(3));
+        }
+
+        return found;
+    }
+
     public async Task<IReadOnlyList<OutcomeLink>> ReadLinksAsync(CancellationToken ct = default)
     {
         await using var connection = Open();

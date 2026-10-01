@@ -33,6 +33,7 @@ import {
   type RepoChoice,
 } from '../api/types';
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
+import OutcomePicker from './OutcomePicker.vue';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
 import { applyDefaults, readRemembered, remember } from '../lib/newTeamDefaults';
 import {
@@ -612,6 +613,25 @@ async function uploadDocument(event: Event) {
   draftTitle.value = draft.title;
   draftBody.value = draft.body;
   adding.value = true;
+}
+
+/**
+ * THE OUTCOME THE ITEM SERVES, saved when it is picked: a dispatch links its workflow to it. ''
+ * clears it. Only the outcome is taken from the answer, as `setState` takes only the state.
+ */
+async function setOutcome(item: BacklogItemView, outcomeId: string) {
+  busy.value = true;
+
+  try {
+    const updated = await updateBacklogItem(item.id, { outcomeId });
+    if (selected.value?.item.id === item.id) selected.value.item.outcomeId = updated.outcomeId ?? null;
+
+    await load();
+  } catch (cause) {
+    errorText.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function saveBody() {
@@ -1305,6 +1325,13 @@ function down(index: number) {
 
         <div class="text-caption os-text-muted">{{ reviewCaption(selected.item) }}</div>
 
+        <OutcomePicker
+          :model-value="selected.item.outcomeId"
+          :disable="busy"
+          class="q-mt-sm backlog-outcome"
+          @update:model-value="(value: string) => setOutcome(selected!.item, value)"
+        />
+
         <q-input
           v-model="selected.item.body"
           type="textarea"
@@ -1857,6 +1884,11 @@ function down(index: number) {
 }
 
 /* The review toggle sits in a row of dense controls and must not grow it. */
+/* The item's outcome picker: as wide as a name needs, not the whole panel. */
+.backlog-outcome {
+  max-width: 24rem;
+}
+
 .backlog-review {
   font-size: 12px;
 }

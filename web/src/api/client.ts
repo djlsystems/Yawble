@@ -797,7 +797,8 @@ export const createBacklogItem = (body: { title: string; body?: string; team?: s
 
 export const updateBacklogItem = (
   id: number,
-  body: { title?: string; body?: string; state?: string },
+  /** `outcomeId`: an active or proposed outcome's id, or '' to clear it. */
+  body: { title?: string; body?: string; state?: string; outcomeId?: string },
 ) =>
   json<BacklogItemView>(`/api/backlog/${id}`, {
     method: 'PATCH',

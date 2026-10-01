@@ -32,6 +32,7 @@ import {
 } from '../lib/triggers'
 import { positiveInt, timezone, type Rule } from '../lib/rules'
 import TokenPicker from './TokenPicker.vue'
+import OutcomePicker from './OutcomePicker.vue'
 import CronBuilderDialog from './CronBuilderDialog.vue'
 
 /**
@@ -836,6 +837,10 @@ function insertToken(token: string) {
           :rules="dailyCapRules"
           @update:model-value="(value) => (draft.dailyTokenCap = asCap(value))"
         />
+
+        <!-- THE OUTCOME ITS FIRES SERVE: each fire's workflow is linked to it, as this trigger's
+             configurer. None leaves fires unlinked. -->
+        <OutcomePicker v-model="draft.outcomeId" hint="Each fire's workflow serves this outcome." />
 
         <!-- A column, because a checkbox is inline-flex and two of them on one row put the second
              one's label a long way from the box it belongs to on a narrow dialog. -->
