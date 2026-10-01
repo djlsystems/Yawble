@@ -4,6 +4,8 @@ package instance
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/djlsystems/yawble/cli/internal/config"
 )
@@ -81,8 +83,52 @@ func Defaults(c config.Config, m Machine, pinned string) (Settings, []string) {
 			notes = append(notes, fmt.Sprintf("cpus: this machine's CPU count could not be measured; using %d (yawble config set cpus <n> to choose)", unmeasuredCPUs))
 		}
 	}
-	if s.MaxRunning == 0 {
-		s.MaxRunning = s.CPUs
-	}
+	// maxRunning 0 stays 0: the Host's own default applies (RunLimit, with the tenant's per-run
+	// allowance), and `up` passes no Wip__MaxRunning, so that default is the Host's to name.
 	return s, notes
+}
+
+// MemoryPerRunMB is the Host's built-in wip.memoryPerRunMb: the memory one agent run is counted at.
+const MemoryPerRunMB = 2048
+
+// RunLimit is the Host's default running limit for a container with cpus CPUs and a memoryMB
+// limit (0 = none): the smaller of max(1, cpus - 1) and memoryMB / MemoryPerRunMB, at least 1.
+// Bound says which one decided: "cpu" or "memory".
+func RunLimit(cpus, memoryMB int) (limit int, bound string) {
+	limit, bound = cpus-1, "cpu"
+	if limit < 1 {
+		limit = 1
+	}
+	if memoryMB > 0 {
+		byMemory := memoryMB / MemoryPerRunMB
+		if byMemory < 1 {
+			byMemory = 1
+		}
+		if byMemory < limit {
+			limit, bound = byMemory, "memory"
+		}
+	}
+	return limit, bound
+}
+
+// MemoryMB reads a --memory size (12288m, 6g, 512M) as megabytes; 0 when unset or unreadable.
+func MemoryMB(size string) int {
+	size = strings.TrimSpace(size)
+	if size == "" {
+		return 0
+	}
+	unit := size[len(size)-1]
+	n, err := strconv.Atoi(size[:len(size)-1])
+	if err != nil || n < 0 {
+		return 0
+	}
+	switch unit {
+	case 'm', 'M':
+		return n
+	case 'g', 'G':
+		return n * 1024
+	case 'k', 'K':
+		return n / 1024
+	}
+	return 0
 }

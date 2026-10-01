@@ -34,7 +34,8 @@ The product name, Yawble, lives in the web app's presentation layer
   agent-facing CLI and no HTTP fallback.
 - **Workflows.** An instruction roots a workflow; `HARNESS_CAUSATION` carries it into each run so
   follow-up instructions join it. The Manager that owns a workflow declares it complete.
-- **Admission.** `wip.maxRunning` bounds how many agents run at once across the instance. Work
+- **Admission.** `wip.maxRunning` bounds how many agents run at once across the instance (default
+  the smaller of CPUs - 1 and the memory limit / `wip.memoryPerRunMb`; `GET /api/wip` names which). Work
   that cannot start waits in FIFO order and is shown as waiting, never failed. A Manager has one
   reserved slot so a pool full of members cannot starve it.
 - **Repositories.** Each team clones its repositories under `repos/<Repo>/main` and every card gets

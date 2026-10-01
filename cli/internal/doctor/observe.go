@@ -54,7 +54,7 @@ func Observe(ctx context.Context, e engine.Engine, s instance.Settings, p Probes
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	o := Observed{EngineName: e.Name(), Image: s.Image, Port: s.Port, URL: instance.URL(s.Port), ExeDir: exeDir, GOOS: goos, ContainerMemoryMB: ContainerMemoryMB(s.Memory)}
+	o := Observed{EngineName: e.Name(), Image: s.Image, Port: s.Port, URL: instance.URL(s.Port), ExeDir: exeDir, GOOS: goos, ContainerMemoryMB: ContainerMemoryMB(s.Memory), CPUs: s.CPUs, MaxRunning: s.MaxRunning}
 	if exeDir != "" {
 		on := OnPath(resolved(exeDir), pathEnv, goos) || OnPath(exeDir, pathEnv, goos)
 		o.OnPath = &on
