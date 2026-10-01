@@ -46,6 +46,11 @@ public enum RunMemoryMechanism
 /// HOW MUCH is <see cref="TenantSettings.RunMemoryLimit"/>, read through a delegate at every launch
 /// so a change applies to the next run without a restart.
 /// </para>
+/// <para>
+/// A RUN HOLDING THE HEAVY LEASE GETS MORE (<see cref="RunAllowances"/>): its cgroup's
+/// <c>memory.max</c> is raised in place, or under rlimit its processes' soft limit is raised up to
+/// the hard limit every run is launched with, <see cref="Ceiling"/>.
+/// </para>
 /// </summary>
 public sealed partial class RunMemoryLimits
 {
@@ -59,14 +64,18 @@ public sealed partial class RunMemoryLimits
     public const string RunPrefix = "run-";
 
     private readonly Func<RunMemoryLimit> _limit;
+    private readonly Func<RunMemoryLimit> _ceiling;
 
+    /// <param name="ceiling">The most a run holding the heavy lease can be raised to
+    /// (<see cref="TenantSettings.RunMemoryCeiling"/>); the run's own limit when not given.</param>
     public RunMemoryLimits(
         RunMemoryMechanism mechanism, string reason, Func<RunMemoryLimit> limit,
-        string? prlimitPath = null, string? cgroupDirectory = null)
+        string? prlimitPath = null, string? cgroupDirectory = null, Func<RunMemoryLimit>? ceiling = null)
     {
         Mechanism = mechanism;
         Reason = reason;
         _limit = limit;
+        _ceiling = ceiling ?? limit;
         PrlimitPath = prlimitPath;
         CgroupDirectory = cgroupDirectory;
     }
@@ -85,13 +94,23 @@ public sealed partial class RunMemoryLimits
     /// <summary>What the Host logs at start, and what doctor reports.</summary>
     public string LogLine => Mechanism switch
     {
-        RunMemoryMechanism.Cgroup => $"{LogPrefix}: cgroup - {Reason}",
-        RunMemoryMechanism.Rlimit => $"{LogPrefix}: rlimit - {Reason}",
+        RunMemoryMechanism.Cgroup => $"{LogPrefix}: cgroup - {Reason}; {HeavyWords}, its memory.max raised in place",
+        RunMemoryMechanism.Rlimit => $"{LogPrefix}: rlimit - {Reason}; {HeavyWords}, its processes' soft limit "
+            + "raised in place up to the hard limit every run starts with (container limit - Host reserve), "
+            + "which the agent cannot raise",
         _ => $"{LogPrefix}: not available — {Reason}",
     };
 
+    /// <summary>What a heavy run gets, in the log line's words.</summary>
+    public const string HeavyWords =
+        "a run holding the heavy lease gets the container's limit - the Host reserve - what the other running runs "
+        + "are measured to use, never less than its own limit";
+
     /// <summary>The limit in force for the next run.</summary>
     public RunMemoryLimit Limit() => _limit();
+
+    /// <summary>The most a run can be raised to while it holds the heavy lease; under rlimit, each process's hard limit.</summary>
+    public RunMemoryLimit Ceiling() => _ceiling();
 
     /// <summary>Nothing is applied: what a runner without this service, and the suite, gets.</summary>
     public static RunMemoryLimits NotAvailable(string reason) =>
@@ -103,13 +122,14 @@ public sealed partial class RunMemoryLimits
     /// </summary>
     /// <param name="cgroup">What the Host's own cgroup offers (see <see cref="ProbeCgroup"/>).</param>
     /// <param name="prlimit"><c>prlimit</c> in a system directory, or null.</param>
-    public static RunMemoryLimits Decide(CgroupFacts cgroup, string? prlimit, Func<RunMemoryLimit> limit)
+    public static RunMemoryLimits Decide(
+        CgroupFacts cgroup, string? prlimit, Func<RunMemoryLimit> limit, Func<RunMemoryLimit>? ceiling = null)
     {
         if (cgroup.Usable is { } directory)
         {
             return new RunMemoryLimits(RunMemoryMechanism.Cgroup,
                 $"the Host's cgroup {directory} is delegated and writable, so each run gets a child cgroup with memory.max",
-                limit, cgroupDirectory: directory);
+                limit, cgroupDirectory: directory, ceiling: ceiling);
         }
 
         if (prlimit is not null)
@@ -117,22 +137,23 @@ public sealed partial class RunMemoryLimits
             return new RunMemoryLimits(RunMemoryMechanism.Rlimit,
                 $"{cgroup.Why}, so each of a run's processes gets RLIMIT_DATA through {prlimit}: the limit "
                 + "is per process, not the run's total",
-                limit, prlimitPath: prlimit);
+                limit, prlimitPath: prlimit, ceiling: ceiling);
         }
 
         return new RunMemoryLimits(RunMemoryMechanism.None,
             $"{cgroup.Why}, and prlimit is not in a root-owned system directory "
             + $"({string.Join(", ", SystemCommand.Directories)}); the Host keeps its headroom by admission alone",
-            limit);
+            limit, ceiling: ceiling);
     }
 
     /// <summary>Reads this machine and decides. Never throws: a fact it cannot read counts against its mechanism.</summary>
     public static RunMemoryLimits Resolve(
-        Func<RunMemoryLimit> limit, string cgroupRoot = "/sys/fs/cgroup", string procSelfCgroup = "/proc/self/cgroup")
+        Func<RunMemoryLimit> limit, string cgroupRoot = "/sys/fs/cgroup", string procSelfCgroup = "/proc/self/cgroup",
+        Func<RunMemoryLimit>? ceiling = null)
     {
         if (!OperatingSystem.IsLinux())
         {
-            return new RunMemoryLimits(RunMemoryMechanism.None, "the Host is not running on Linux", limit);
+            return new RunMemoryLimits(RunMemoryMechanism.None, "the Host is not running on Linux", limit, ceiling: ceiling);
         }
 
         var cgroup = ProbeCgroup(cgroupRoot, procSelfCgroup);
@@ -141,7 +162,7 @@ public sealed partial class RunMemoryLimits
             cgroup = cgroup with { Usable = null, Why = failed };
         }
 
-        return Decide(cgroup, SystemCommand.Find("prlimit"), limit);
+        return Decide(cgroup, SystemCommand.Find("prlimit"), limit, ceiling);
     }
 
     /// <summary>
@@ -229,12 +250,21 @@ public sealed partial class RunMemoryLimits
 
     /// <summary>
     /// What goes in front of the agent's command for <paramref name="limit"/>: <c>prlimit --data</c>
-    /// when the mechanism is rlimit and there is a limit, nothing otherwise.
+    /// when the mechanism is rlimit and there is a limit, nothing otherwise. The soft limit is
+    /// <paramref name="limit"/>; the hard limit is <paramref name="ceiling"/> when it is higher, so
+    /// the Host can raise the soft limit in place for a run that takes the heavy lease. Raising a
+    /// hard limit needs CAP_SYS_RESOURCE in the machine's first user namespace, which no rootless
+    /// engine gives and the Host does not hold; the agent, which holds no capability, cannot raise
+    /// the hard limit either. It can raise its own soft limit up to that hard limit - that is the
+    /// price of an in-place raise without a capability, and the hard limit still bounds it.
     /// </summary>
-    public IReadOnlyList<string> Prefix(RunMemoryLimit limit) =>
-        Mechanism == RunMemoryMechanism.Rlimit && PrlimitPath is { } prlimit && limit.Mb is { } mb
-            ? [prlimit, $"--data={Bytes(mb)}:{Bytes(mb)}", "--"]
-            : [];
+    public IReadOnlyList<string> Prefix(RunMemoryLimit limit, RunMemoryLimit? ceiling = null)
+    {
+        if (Mechanism != RunMemoryMechanism.Rlimit || PrlimitPath is not { } prlimit || limit.Mb is not { } mb) return [];
+
+        var hard = ceiling?.Mb is { } top && top > mb ? top : mb;
+        return [prlimit, $"--data={Bytes(mb)}:{Bytes(hard)}", "--"];
+    }
 
     /// <summary>
     /// A cgroup for one run, made before it starts, when the mechanism is cgroup and there is a limit.
@@ -270,7 +300,50 @@ public sealed partial class RunMemoryLimits
         + $"). Raise {TenantSettings.RunsMemoryLimitMbName} in the Tenant Settings, or make the work use less. "
         + "This is not an agent fault.";
 
-    private static long Bytes(long mb) => mb * 1024 * 1024;
+    /// <summary>
+    /// The progress line for a process in the run that the limit stopped while the agent carried on:
+    /// which process signature was seen, the limit in force, where it came from, and the setting.
+    /// </summary>
+    public string ChildSentence(RunMemoryLimit limit, string seen) =>
+        $"A process in this run was stopped by the run's memory limit ({seen}): the limit is {limit.Mb} MB "
+        + (Mechanism == RunMemoryMechanism.Cgroup ? "for the whole run" : "for each of its processes")
+        + $" ({limit.Source}). The agent carried on, but that process's work did not finish. Raise "
+        + $"{TenantSettings.RunsMemoryLimitMbName} in the Tenant Settings, or take the heavy lease before heavy work: "
+        + "a run holding it gets the container's memory less the Host's reserve and what the other runs use. "
+        + "This is not an agent fault.";
+
+    /// <summary>
+    /// The text a process refused memory under an rlimit leaves in the run's transcript, or null.
+    /// Strict, because the transcript also holds every file the agent read: only a line that IS the
+    /// message counts - the runtime's own "Out of memory.", or the operating system's ENOMEM words
+    /// after a program's name - never a line that merely mentions it. JSON escapes are undone and
+    /// both a newline and a string's quotes end a line, so a tool result's text is read as printed.
+    /// </summary>
+    public static string? ChildOutOfMemory(string transcriptLine)
+    {
+        if (!transcriptLine.Contains("memory", StringComparison.OrdinalIgnoreCase)) return null;
+
+        var text = transcriptLine
+            .Replace("\\\\", "\u0001", StringComparison.Ordinal)
+            .Replace("\\\"", "'", StringComparison.Ordinal)
+            .Replace("\\r", "\n", StringComparison.Ordinal)
+            .Replace("\\n", "\n", StringComparison.Ordinal)
+            .Replace("\\t", " ", StringComparison.Ordinal);
+
+        foreach (var segment in text.Split('\n', '"', '\r'))
+        {
+            var line = segment.Trim();
+            if (line.Length is > 0 and < 160 && ChildOutOfMemoryLine().IsMatch(line)) return line;
+        }
+
+        return null;
+    }
+
+    internal static long Bytes(long mb) => mb * 1024 * 1024;
+
+    /// <summary>A whole line that is a refusal of memory: "Out of memory.", or "prog: fork: Cannot allocate memory".</summary>
+    [GeneratedRegex(@"^(?:[^\s:'][^:']{0,80}: ){0,3}(?:out of memory|cannot allocate memory|memory exhausted)\.?$", RegexOptions.IgnoreCase)]
+    private static partial Regex ChildOutOfMemoryLine();
 
     /// <summary>
     /// What a program refused memory says. The operating system's own words for ENOMEM and the
@@ -321,21 +394,63 @@ public sealed class RunCgroup : IDisposable
     public bool Add(int pid) => TryWrite(Path.Combine(Directory, "cgroup.procs"), pid.ToString(CultureInfo.InvariantCulture));
 
     /// <summary>Whether the kernel OOM-killed anything in this cgroup (<c>memory.events</c> <c>oom_kill</c> above 0).</summary>
-    public bool OomKilled()
+    public bool OomKilled() => OomKills() > 0;
+
+    /// <summary>
+    /// Sets this run's <c>memory.max</c> in place: how a run that takes the heavy lease is raised and
+    /// lowered again. The kernel applies it to the processes already in the group.
+    /// </summary>
+    public bool SetMax(long bytes) => TryWrite(Path.Combine(Directory, "memory.max"), bytes.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// What the run uses that the kernel cannot give back by dropping file cache: <c>memory.current</c>
+    /// less <c>memory.stat</c>'s <c>file</c>. Lowering <c>memory.max</c> below this would OOM-kill the
+    /// run, so it is lowered only when this fits. Null when it cannot be read.
+    /// </summary>
+    public long? Unreclaimable()
+    {
+        try
+        {
+            if (!long.TryParse(File.ReadAllText(Path.Combine(Directory, "memory.current")).Trim(), CultureInfo.InvariantCulture, out var current))
+            {
+                return null;
+            }
+
+            long file = 0;
+            var stat = Path.Combine(Directory, "memory.stat");
+            if (File.Exists(stat))
+            {
+                foreach (var line in File.ReadLines(stat))
+                {
+                    var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts is ["file", var bytes] && long.TryParse(bytes, CultureInfo.InvariantCulture, out var n)) file = n;
+                }
+            }
+
+            return Math.Max(0, current - file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>How many processes the kernel has OOM-killed in this cgroup (<c>memory.events</c> <c>oom_kill</c>).</summary>
+    public long OomKills()
     {
         try
         {
             foreach (var line in File.ReadLines(Path.Combine(Directory, "memory.events")))
             {
                 var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts is ["oom_kill", var count] && long.TryParse(count, CultureInfo.InvariantCulture, out var n)) return n > 0;
+                if (parts is ["oom_kill", var count] && long.TryParse(count, CultureInfo.InvariantCulture, out var n)) return n;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
         }
 
-        return false;
+        return 0;
     }
 
     /// <summary>Removes the cgroup; its processes are gone by now (the run's group is killed when it ends).</summary>

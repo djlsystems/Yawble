@@ -413,6 +413,37 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
         Assert.Equal("runs.memoryLimitMb is set to 3000 MB", configured.Source);
     }
 
+    [Fact]
+    public void A_heavy_run_gets_the_container_limit_less_the_host_reserve_less_what_the_other_runs_are_measured_to_use()
+    {
+        // 8 CPUs and 12 GB: 6 runs of 1877 MB. Four others measured at 2000 MB: 12288 - 1024 - 2000.
+        var settings = Bare(cpuCount: 8, memoryLimitMb: 12288);
+        var heavy = settings.HeavyRunMemoryLimit(2000, 4);
+        Assert.Equal(9264, heavy.Mb);
+        Assert.Contains("holds the heavy lease", heavy.Source);
+        Assert.Contains("12288 MB container limit - 1024 MB for the Host - 2000 MB measured in use by 4 other running runs", heavy.Source);
+
+        // Never below the run's own limit: the others leave too little, so it keeps 1877 MB.
+        var crowded = settings.HeavyRunMemoryLimit(10000, 5);
+        Assert.Equal(1877, crowded.Mb);
+        Assert.Contains("keeps 1877 MB", crowded.Source);
+
+        // Nothing to measure against without a container limit: the run keeps its own (here none).
+        var unbounded = Bare(cpuCount: 8, memoryLimitMb: 0).HeavyRunMemoryLimit(0, 0);
+        Assert.Null(unbounded.Mb);
+        Assert.Contains("no memory limit to measure headroom against", unbounded.Source);
+
+        // The ceiling every run's hard limit is under rlimit: what a heavy run with nobody else could get.
+        Assert.Equal(11264, settings.RunMemoryCeiling().Mb);
+        Assert.Null(Bare(cpuCount: 8, memoryLimitMb: 0).RunMemoryCeiling().Mb);
+        Assert.Equal(TenantSettings.MinRunMemoryLimitMb, Bare(cpuCount: 8, memoryLimitMb: 1024).RunMemoryCeiling().Mb);
+
+        // The Settings description says what a heavy run gets.
+        var described = Assert.Single(settings.Definitions, d => d.Name == TenantSettings.RunsMemoryLimitMbName).Description;
+        Assert.Contains("A run holding the heavy lease gets more", described);
+        Assert.Contains("what the other running runs are measured to use", described);
+    }
+
     private static TenantSettings Bare(int cpuCount, long memoryLimitMb) => new(
         new SqliteTenantSettingsStore(Path.Combine(Path.GetTempPath(), $"harness-unused-{Guid.NewGuid():N}.db")),
         new ConfigurationBuilder().Build(), cpuCount, memoryLimitMb);
