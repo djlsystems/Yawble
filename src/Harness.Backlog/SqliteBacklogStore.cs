@@ -19,6 +19,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
 {
     private readonly string _connectionString;
     private readonly SqliteDurability _durability;
+    private readonly Func<SqliteConnection, SqliteTransaction, TriggerAudit, CancellationToken, Task>? _audit;
 
     /// <summary>
     /// The gap a fresh item is appended with. Integers by default, so the common case - append,
@@ -26,8 +27,13 @@ public sealed class SqliteBacklogStore : IBacklogStore
     /// </summary>
     private const double AppendGap = 1024d;
 
+    /// <param name="audit">Appends one tenant row inside a transaction of this store's, for
+    /// <see cref="EditAsync"/>; the tenant log is in the same file. Without it, an edit that carries
+    /// rows is refused.</param>
     public SqliteBacklogStore(
-        string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
+        string databasePath,
+        SqliteDurability durability = SqliteDurability.SurvivesPowerLoss,
+        Func<SqliteConnection, SqliteTransaction, TriggerAudit, CancellationToken, Task>? audit = null)
     {
         _connectionString = new SqliteConnectionStringBuilder
         {
@@ -36,6 +42,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         }.ToString();
 
         _durability = durability;
+        _audit = audit;
     }
 
     public async Task<IReadOnlyList<BacklogItem>> ListAsync(
@@ -204,6 +211,54 @@ public sealed class SqliteBacklogStore : IBacklogStore
         if (state is not null) command.Parameters.AddWithValue("$state", state);
 
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task EditAsync(
+        long id,
+        string? title,
+        string? body,
+        string? state,
+        bool setOutcome,
+        string? outcomeId,
+        IReadOnlyList<TriggerAudit> audit,
+        CancellationToken ct = default)
+    {
+        if (audit.Count > 0 && _audit is null)
+        {
+            throw new InvalidOperationException("This backlog store was made without a tenant row writer.");
+        }
+
+        var sets = new List<string>();
+
+        if (title is not null) sets.Add("title = $title");
+        if (body is not null) sets.Add("body = $body");
+        if (state is not null) sets.Add("state = $state");
+        if (setOutcome) sets.Add("outcome_id = $outcome");
+
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        if (sets.Count > 0)
+        {
+            sets.Add("updated_at = $now");
+
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = $"UPDATE backlog_items SET {string.Join(", ", sets)} WHERE id = $id";
+            command.Parameters.AddWithValue("$id", Key(id));
+            command.Parameters.AddWithValue("$now", Now());
+
+            if (title is not null) command.Parameters.AddWithValue("$title", title);
+            if (body is not null) command.Parameters.AddWithValue("$body", body);
+            if (state is not null) command.Parameters.AddWithValue("$state", state);
+            if (setOutcome) command.Parameters.AddWithValue("$outcome", (object?)outcomeId ?? DBNull.Value);
+
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var row in audit) await _audit!(connection, transaction, row, ct);
+
+        await transaction.CommitAsync(ct);
     }
 
     public async Task SetTeamAsync(long id, string? team, CancellationToken ct = default)
