@@ -712,7 +712,19 @@ builder.Services.AddSingleton(sp => new AgentCliUpdater(
 // HOW MUCH MEMORY ONE RUN MAY USE, AND HOW: a cgroup per run, an rlimit per process, or nothing,
 // decided once here from the container's own cgroup and logged at start (RunMemoryLimits). The
 // figure is a setting, read through a delegate at every launch.
-builder.Services.AddSingleton(_ => RunMemoryLimits.Resolve(tenantSettings.RunMemoryLimit));
+builder.Services.AddSingleton(_ => RunMemoryLimits.Resolve(tenantSettings.RunMemoryLimit, ceiling: tenantSettings.RunMemoryCeiling));
+// THE HEAVY ALLOWANCE: the run holding the `heavy` lease is raised to the container's limit less the
+// Host reserve less what the other runs are measured to use, and lowered when it lets go. Moved by
+// LeaseActions on every acquire, release and run end. See RunAllowances.
+builder.Services.AddSingleton(sp => new RunAllowances(
+    sp.GetRequiredService<RunMemoryLimits>(),
+    tenantSettings.HeavyRunMemoryLimit,
+    () => sp.GetRequiredService<InstanceLeases>().Holders(InstanceLeases.Heavy).Select(o => o.Key).ToList(),
+    new ProcessGroupReader(builder.Configuration["Capacity:ProcRoot"] ?? "/proc"),
+    RunProcessGroups.Shared,
+    procRoot: builder.Configuration["Capacity:ProcRoot"] ?? "/proc",
+    runAs: sp.GetRequiredService<AgentLaunchUser>(),
+    log: sp.GetRequiredService<ILogger<RunAllowances>>()));
 // Member TMPDIRs on the data volume, never a /tmp the engine may hold in memory (MemberTemp).
 builder.Services.AddSingleton(_ => MemberTemp.RootUnder(dataRoot));
 builder.Services.AddSingleton<ProcessAgentRunner>();
@@ -1576,8 +1588,10 @@ app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
 
     var memoryLimits = app.Services.GetRequiredService<RunMemoryLimits>();
     var runLimit = memoryLimits.Limit();
-    app.Logger.LogInformation("{RunMemoryLimits} (each run now: {Limit})", memoryLimits.LogLine,
-        runLimit.Mb is { } mb ? $"{mb} MB, as {runLimit.Source}" : $"no limit, as {runLimit.Source}");
+    var heavyNow = tenantSettings.HeavyRunMemoryLimit(0, 0);
+    app.Logger.LogInformation("{RunMemoryLimits} (each run now: {Limit}; a heavy run with no other running: {Heavy})", memoryLimits.LogLine,
+        runLimit.Mb is { } mb ? $"{mb} MB, as {runLimit.Source}" : $"no limit, as {runLimit.Source}",
+        heavyNow.Mb is { } heavyMb ? $"{heavyMb} MB, as {heavyNow.Source}" : $"no limit, as {heavyNow.Source}");
 
     var memberTemp = app.Services.GetRequiredService<MemberTempRoot>();
     app.Logger.LogInformation("Member temporary folders: {Path} - {Reason}", memberTemp.Path, memberTemp.Reason);

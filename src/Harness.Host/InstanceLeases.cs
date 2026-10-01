@@ -172,6 +172,17 @@ public sealed class InstanceLeases(Func<int> heavyHolders, TimeProvider? clock =
         }
     }
 
+    /// <summary>Who holds <paramref name="name"/> now, by owner: what a run's memory allowance follows.</summary>
+    public IReadOnlyList<LeaseOwner> Holders(string name)
+    {
+        if (UnknownName(name) is not null) return [];
+
+        lock (_gate)
+        {
+            return [.. _holders.Select(h => h.Owner)];
+        }
+    }
+
     public IReadOnlyList<LeaseState> Leases()
     {
         lock (_gate)

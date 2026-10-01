@@ -149,7 +149,10 @@ public sealed class TenantSettings
                 + "no limit when the container has none. How it is applied depends on the engine, "
                 + "decided at start and logged as \"Run memory limits\": a cgroup per run where one is "
                 + "delegated, otherwise a per-process limit on each of the run's processes, otherwise "
-                + "nothing. Applies to the next run.",
+                + "nothing. A run holding the heavy lease gets more while it holds it: the container's "
+                + $"memory limit - {HostReserveMb} MB for the Host - what the other running runs are measured "
+                + "to use at that moment, never less than this limit; it goes back to this limit when the "
+                + "lease is released, once the run is back inside it. Applies to the next run.",
                 Min: 0, Max: 1_048_576),
             new(WorkflowSpendLimitName, TenantSettingKind.Integer, "100000000", "WorkflowSpendLimit",
                 "The instance's per-workflow token ceiling, the backstop under every team's own "
@@ -359,6 +362,56 @@ public sealed class TenantSettings
             $"{RunsMemoryLimitMbName} is 0, so ({containerMb} MB container limit - {HostReserveMb} MB for the Host) / "
             + (runs > 0 ? $"{runs} (wip.maxRunning)" : "1 (wip.maxRunning is unlimited)")
             + (mb != share ? $", raised to the {MinRunMemoryLimitMb} MB floor" : string.Empty));
+    }
+
+    /// <summary>
+    /// THE HEAVY ALLOWANCE: what a run holding the <c>heavy</c> lease may use. The container's limit
+    /// less <see cref="HostReserveMb"/> less what the other running runs are MEASURED to use now
+    /// (<paramref name="othersMb"/>, their resident memory), and never below the run's own limit.
+    /// Measured rather than a second setting: the memory a heavy run needs is the memory nobody else
+    /// is using, which only a reading knows; a fixed figure is either too low to help or a promise
+    /// the others may already have spent. Nothing is estimated: with no container limit there is
+    /// nothing to measure against, and a heavy run keeps its own limit.
+    /// </summary>
+    /// <param name="othersMb">Resident memory of every other running run, summed, in MB.</param>
+    /// <param name="others">How many other runs that sum covers, for the sentence.</param>
+    public RunMemoryLimit HeavyRunMemoryLimit(long othersMb, int others)
+    {
+        var normal = RunMemoryLimit();
+        if (_memoryLimitMb is not { } containerMb)
+        {
+            return normal with
+            {
+                Source = $"the container has no memory limit to measure headroom against, so a run holding the heavy lease keeps its own limit ({normal.Source})",
+            };
+        }
+
+        var headroom = containerMb - HostReserveMb - othersMb;
+        var said = $"the run holds the heavy lease, so {containerMb} MB container limit - {HostReserveMb} MB for the Host - "
+            + $"{othersMb} MB measured in use by {others} other running run{(others == 1 ? "" : "s")}";
+
+        return normal.Mb is { } own && headroom <= own
+            ? new RunMemoryLimit(own, $"{said} leaves no more than its own limit, so it keeps {own} MB ({normal.Source})")
+            : new RunMemoryLimit(headroom, said);
+    }
+
+    /// <summary>
+    /// The most any run could be raised to: the container's limit less <see cref="HostReserveMb"/>,
+    /// never below the run's own limit. Under rlimit this is each process's HARD limit from launch,
+    /// so the Host can raise its soft limit in place when it takes the heavy lease (raising a hard
+    /// limit needs a capability the Host does not hold). Equal to the run's own limit when the
+    /// container has none.
+    /// </summary>
+    public RunMemoryLimit RunMemoryCeiling()
+    {
+        var normal = RunMemoryLimit();
+        if (_memoryLimitMb is not { } containerMb || normal.Mb is not { } own || containerMb - HostReserveMb <= own)
+        {
+            return normal;
+        }
+
+        return new RunMemoryLimit(containerMb - HostReserveMb,
+            $"{containerMb} MB container limit - {HostReserveMb} MB for the Host, the most a run holding the heavy lease can be given");
     }
 
     /// <summary><c>workflow.spendLimit</c> in tokens. 0 is none.</summary>

@@ -39,8 +39,13 @@ public sealed partial class ProcessAgentRunner(
     LaunchLookup? lookup = null,
     AgentUpdateGate? updates = null,
     RunMemoryLimits? memory = null,
-    MemberTempRoot? temp = null) : IAgentRunner
+    MemberTempRoot? temp = null,
+    RunAllowances? allowances = null,
+    TimeSpan? oomPoll = null) : IAgentRunner
 {
+    /// <summary>How often a run's cgroup is read for a process the kernel OOM-killed.</summary>
+    private readonly TimeSpan _oomPoll = oomPoll ?? TimeSpan.FromSeconds(2);
+
     /// <summary>How long a launch looks for a program missing from PATH; the Host's is ~30s.</summary>
     private readonly LaunchLookup _lookup = lookup ?? LaunchLookup.Default;
 
@@ -249,8 +254,10 @@ public sealed partial class ProcessAgentRunner(
         // it still holds the Host's capabilities. Built by the launcher every member shares.
         // THE RUN'S OWN MEMORY LIMIT, read now so a changed setting applies to this run. With an
         // rlimit it is a prefix; with a cgroup the run is put in its own once it exists.
+        // Under rlimit the hard limit is the ceiling a heavy-lease holder can be raised to (RunAllowances).
         var memoryLimit = memory?.Limit();
-        var limits = memory is not null && memoryLimit is not null ? memory.Prefix(memoryLimit) : [];
+        var memoryCeiling = memory?.Ceiling();
+        var limits = memory is not null && memoryLimit is not null ? memory.Prefix(memoryLimit, memoryCeiling) : [];
 
         if (ChildProcess.StartInfo(resolvedFileName, invocation.WorkingDirectory, runAs, limits) is not { } start)
         {
@@ -587,6 +594,13 @@ public sealed partial class ProcessAgentRunner(
 
             using var cgroup = memory is not null && memoryLimit is not null ? memory.BeginRun(memoryLimit) : null;
 
+            // THE HEAVY ALLOWANCE AND THE CHILD THE LIMIT STOPPED: the run is registered so the lease
+            // can raise and lower its limit, and watched for a process the limit stopped while the
+            // agent carried on. Both end with the run.
+            RunAllowance? allowance = null;
+            using var memoryWatchEnded = new CancellationTokenSource();
+            Task memoryWatch = Task.CompletedTask;
+
             // Launched, pumped, fed and waited on by the launcher every member shares: its own
             // session, the agent user, both pipes read before the wait, stdin written and CLOSED
             // (a CLI that reads it waits forever on a pipe nobody closed), the process group killed
@@ -606,8 +620,27 @@ public sealed partial class ProcessAgentRunner(
                 {
                     cgroup?.Add(process.Id);
                     watchable = BeginLive(invocation, start, sessionId, launchedAt);
+
+                    if (memory is null || memoryLimit?.Mb is null) return;
+
+                    allowance = allowances?.Begin(invocation.Container, process.Id, memoryLimit, memoryCeiling ?? memoryLimit, cgroup);
+                    if (reports is null) return;
+
+                    var live = watchable.Run;
+                    memoryWatch = RunAllowances.WatchAsync(
+                        memory,
+                        () => allowance?.Current ?? memoryLimit,
+                        cgroup,
+                        () => Follow(live, memoryWatchEnded.Token),
+                        () => { try { return !process.HasExited; } catch (InvalidOperationException) { return false; } },
+                        sentence => reports.ProgressAsync(invocation.Container, sentence, CancellationToken.None),
+                        _oomPoll,
+                        memoryWatchEnded.Token);
                 },
                 run: invocation.Container);
+
+            allowance?.Dispose();
+            await memoryWatchEnded.CancelAsync();
 
             if (outcome.Killed)
             {
@@ -915,9 +948,35 @@ public sealed partial class ProcessAgentRunner(
         }
     }
 
+    /// <summary>
+    /// The run's transcript lines as the agent writes them, once it is located; empty when it never is.
+    /// What the memory watch reads under rlimit for a process that ran out of memory.
+    /// </summary>
+    private async IAsyncEnumerable<string> Follow(LiveRun run, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ended)
+    {
+        string? path;
+        try
+        {
+            path = await run.Located.WaitAsync(ended);
+        }
+        catch (OperationCanceledException)
+        {
+            yield break;
+        }
+
+        if (path is null || LiveTranscriptReader.Refusal(runAs) is not null) yield break;
+
+        await foreach (var line in LiveTranscriptReader.LinesAsync(path, runAs, ended, CancellationToken.None))
+        {
+            yield return line;
+        }
+    }
+
     /// <summary>One run's <see cref="LiveRun"/>, and the search for its transcript when there is one.</summary>
     private sealed class Watch(LiveRun run, CancellationTokenSource? stopLooking, AgentLaunchUser? runAs) : IDisposable
     {
+        public LiveRun Run => run;
+
         /// <summary>How long the run's end waits for the last look to finish.</summary>
         private static readonly TimeSpan LastLook = TimeSpan.FromSeconds(10);
 
