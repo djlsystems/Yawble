@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 //
-// A member whose claim on a WIP slot is waiting says so on its card - "waiting for
-// a slot" - rather than reading idle. Either the snapshot's `held` or the ledger naming it is enough.
+// A member whose claim on a WIP slot is waiting says so on its card - in the ledger's own words,
+// "waiting for a slot" or "waiting for memory: ..." - rather than reading idle. Either the
+// snapshot's `held` or the ledger naming it is enough. A running member queued for the heavy lease
+// reads "waiting for a heavy-work slot".
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -15,6 +17,8 @@ vi.mock('../../api/client', async (importOriginal) => ({
 
 import ContainerCard from '../ContainerCard.vue';
 import { useWipStore } from '../../stores/wip';
+import { useCapacityStore } from '../../stores/capacity';
+import { sample } from '../../test/capacityFixtures';
 import { asMemberId, asTeamId, type ContainerSnapshot } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -67,6 +71,44 @@ describe('the member card while held', () => {
     const wrapper = await mountCard(snapshot());
 
     expect(wrapper.text()).toContain('waiting for a slot');
+  });
+
+  it('reads the ledger\'s own reason when memory holds it, not only that it is held', async () => {
+    const wip = useWipStore();
+    wip.view = {
+      max: 2,
+      running: [],
+      waiting: [{ team: 'alpha', member: 'Manager', since: '', reason: 'waiting for memory: 11.2 of 12.9 GB in use' }],
+    };
+
+    const wrapper = await mountCard(snapshot({ held: true }));
+
+    expect(wrapper.get('[data-test="waiting-reason"]').text()).toBe('waiting for memory: 11.2 of 12.9 GB in use');
+    expect(wrapper.text()).not.toContain('waiting for a slot');
+  });
+
+  it('reads waiting for a heavy-work slot while its run is queued for the heavy lease', async () => {
+    useCapacityStore().latest = sample({
+      heavyLease: {
+        holders: 1,
+        holding: [{ team: 'beta', member: 'DeveloperB', since: '' }],
+        queued: [{ team: 'alpha', member: 'Manager', since: '' }],
+      },
+    });
+
+    const wrapper = await mountCard(snapshot({ state: 'Running' }));
+
+    expect(wrapper.get('[data-test="heavy-queued"]').text()).toBe('waiting for a heavy-work slot');
+  });
+
+  it('does not read waiting for a heavy-work slot when another member is queued', async () => {
+    useCapacityStore().latest = sample({
+      heavyLease: { holders: 1, holding: [], queued: [{ team: 'alpha', member: 'DeveloperA', since: '' }] },
+    });
+
+    const wrapper = await mountCard(snapshot({ state: 'Running' }));
+
+    expect(wrapper.find('[data-test="heavy-queued"]').exists()).toBe(false);
   });
 
   it('reads idle when nothing holds it', async () => {

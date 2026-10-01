@@ -794,9 +794,9 @@ var headroom = new HeadroomGate(
 var wip = new WipLedger(tenantSettings.WipMaxRunning, headroom.Reason);
 builder.Services.AddSingleton(headroom);
 
-// THE SEAM FOR THE `heavy` LEASE: the lease registers its own view of holders and queue in place
-// of this one, and the capacity sample carries it.
-builder.Services.AddSingleton<IHeavyLeaseView, NoHeavyLease>();
+// The `heavy` lease's holders and queue, read from the instance's leases on every sample; the
+// capacity sample and its push carry them.
+builder.Services.AddSingleton<IHeavyLeaseView>(sp => new HeavyLeaseFromLeases(sp.GetRequiredService<ILeaseState>()));
 builder.Services.AddSingleton(sp => new CapacitySampler(
     new CgroupReader(builder.Configuration["Capacity:CgroupRoot"] ?? CgroupReader.DefaultRoot),
     new ProcessGroupReader(builder.Configuration["Capacity:ProcRoot"] ?? "/proc"),

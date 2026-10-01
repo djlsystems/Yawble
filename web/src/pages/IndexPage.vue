@@ -16,6 +16,7 @@ import SolutionBlockedBanner from '../components/SolutionBlockedBanner.vue';
 import { panelPath } from '../lib/solutionPanel';
 import { useDisplayStore } from '../stores/display';
 import { useKanbanStore } from '../stores/kanban';
+import { useCapacityStore } from '../stores/capacity';
 import type { Team, TeamId } from '../api/types';
 import {
   StalledBadgeGrace,
@@ -44,6 +45,7 @@ const display = useDisplayStore();
  * "back to the team" a single click and what the default team filter is taken from.
  */
 const kanban = useKanbanStore();
+const capacity = useCapacityStore();
 const { hasTeams, error, signedOut, activeTeam, openTeams, connected, connectionEstablished } =
   storeToRefs(board);
 
@@ -330,6 +332,9 @@ onMounted(async () => {
       // derived read model and the server owns the derivation.
       onKanbanChanged: () => kanban.refreshIfActive(),
 
+      // The activity monitor's figures: each sample appended to the one copy the app bar reads.
+      onCapacityChanged: (sample) => capacity.apply(sample),
+
       onTeamChanged: () => {
         void board.refresh();
         board.refreshRollupIfShowing();
@@ -342,6 +347,9 @@ onMounted(async () => {
       onReconnected: async () => {
         joinedTeams.clear();
         await board.refresh();
+
+        // Samples pushed while the connection was down are missed; the route's history fills them.
+        void capacity.load();
 
         // THE SAME REASON THE RELOAD CASE ABOVE HAS IT. `refresh()` fetches the overview, and the
         // rollup is a separate read - so a drop and reconnect while the table is showing left the

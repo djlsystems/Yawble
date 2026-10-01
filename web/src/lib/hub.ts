@@ -1,5 +1,5 @@
 import * as signalR from '@microsoft/signalr';
-import type { ContainerSnapshot, Team } from '../api/types';
+import type { CapacitySample, ContainerSnapshot, Team } from '../api/types';
 
 const DefaultReconnectDelaysMs = [0, 2000, 10000, 30000] as const;
 const PostBudgetReconnectDelayMs = 5000;
@@ -56,6 +56,12 @@ export interface HubHandlers {
    * than a second delivery of the state.
    */
   onKanbanChanged?: (change: { team: string | null }) => void;
+
+  /**
+   * One capacity sample, every few seconds, to people only (the Host pushes it to its people group,
+   * which a machine principal never joins). OPTIONAL by the same seam as `onKanbanChanged`.
+   */
+  onCapacityChanged?: (sample: CapacitySample) => void;
 }
 
 /**
@@ -109,6 +115,7 @@ export async function connectHub(
   // Registered only when the caller wants it, so a build without the kanban module subscribes to
   // nothing extra and a Host without the event raises nothing this listens for.
   if (handlers.onKanbanChanged) connection.on('kanbanChanged', handlers.onKanbanChanged);
+  if (handlers.onCapacityChanged) connection.on('capacityChanged', handlers.onCapacityChanged);
 
   connection.onreconnecting(() => handlers.onConnectedChanged(false));
 

@@ -84,6 +84,7 @@ import type {
   UpdateTriggerRequest,
   TenantSettings,
   WipView,
+  CapacityView,
 } from './types'
 
 export type { BacklogDispatchView, BacklogExecutionStats, BacklogItemView } from './types'
@@ -931,6 +932,12 @@ export function cursorQuery(before: number | undefined, take: number): string {
  * nothing else, so the header strip, the board and the Teams table show one copy.
  */
 export const getWip = () => json<WipView>('/api/wip')
+
+/**
+ * The instance's measured capacity: the latest sample and about ten minutes of history. People only
+ * (`HumansOnly`); after this one read, each new sample arrives as the hub's `capacityChanged`.
+ */
+export const getCapacity = () => json<CapacityView>('/api/capacity')
 
 /** Every instance-wide setting, with where each value came from, and the file-browser roots. */
 export const getTenantSettings = async (): Promise<TenantSettings> =>

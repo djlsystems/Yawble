@@ -18,6 +18,8 @@ vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   concierge,
   listCatalog,
+  // The app bar's activity monitor reads its route on mount; nothing here is about its figures.
+  getCapacity: vi.fn(() => new Promise(() => {})),
 }));
 
 const { connectConcierge } = vi.hoisted(() => ({

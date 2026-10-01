@@ -4,6 +4,7 @@ import type { ContainerSnapshot, Message } from '../api/types';
 import { listContainerTriggers, stopRun } from '../api/client';
 import { containerMark } from '../lib/teamKpis';
 import { useWipStore } from '../stores/wip';
+import { useCapacityStore } from '../stores/capacity';
 import { failureClassLabel, failureClassWords, resumeTimeText } from '../lib/failureClass';
 import ActivityFeed from './ActivityFeed.vue';
 import LiveViewDialog from './LiveViewDialog.vue';
@@ -83,8 +84,26 @@ const watchOpen = ref(false);
  * `held`, or the ledger naming it waiting - the ledger's poll often lands before the next push.
  */
 const wip = useWipStore();
+const capacity = useCapacityStore();
 const waiting = computed(
   () => !running.value && (props.snapshot.held === true || wip.isWaiting(props.snapshot.team, props.snapshot.id)),
+);
+
+/**
+ * WHAT IT WAITS FOR, IN THE LEDGER'S OWN WORDS: "waiting for a slot", or the headroom gate's
+ * "waiting for memory: 11.2 of 12.9 GB in use" (`WipHold.reason`). A snapshot that says held before
+ * the ledger names the member reads the slot sentence until it does.
+ */
+const waitingWords = computed(
+  () => wip.reasonFor(props.snapshot.team, props.snapshot.id) ?? 'waiting for a slot',
+);
+
+/**
+ * A RUNNING member queued for the `heavy` lease: its run has started, and the work it was about to
+ * do waits for the instance's heavy-work slot. Read from the capacity sample's lease queue.
+ */
+const heavyQueued = computed(
+  () => running.value && capacity.isQueuedForHeavy(props.snapshot.team, props.snapshot.id),
 );
 
 /**
@@ -195,10 +214,13 @@ async function stop() {
           <span class="container-running-dot" aria-hidden="true"></span>
           running
         </q-badge>
-        <q-badge v-else-if="waiting" color="warning" text-color="dark" label="waiting for a slot">
-          <q-tooltip>Every running slot is taken. This member starts when one is released; nothing was refused.</q-tooltip>
+        <q-badge v-else-if="waiting" color="warning" text-color="dark" :label="waitingWords" data-test="waiting-reason">
+          <q-tooltip>This member starts when that clears; nothing was refused.</q-tooltip>
         </q-badge>
         <q-badge v-else color="grey-6" label="idle" />
+        <q-badge v-if="heavyQueued" color="warning" text-color="dark" label="waiting for a heavy-work slot" data-test="heavy-queued">
+          <q-tooltip>Its heavy work waits for the instance's heavy-work lease; its silence clock is paused.</q-tooltip>
+        </q-badge>
 
         <!-- Only while something is RUNNING. A Stop on an idle card is a control with nothing to
              act on, and the server says so politely rather than failing - but offering it at all

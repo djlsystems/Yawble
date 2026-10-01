@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Harness.Host;
 using Harness.Host.Auth;
 using Harness.Host.Capacity;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,7 +49,43 @@ public sealed class CapacityRouteTests(HostFixture host) : IClassFixture<HostFix
         Assert.Equal(10, latest.GetProperty("admission").GetProperty("memoryPressurePercent").GetInt32());
         Assert.Equal(JsonValueKind.Array, latest.GetProperty("topByMemory").ValueKind);
         Assert.Equal(JsonValueKind.Array, latest.GetProperty("topByCpu").ValueKind);
-        Assert.Equal(JsonValueKind.Null, latest.GetProperty("heavyLease").ValueKind);
+        Assert.Equal(JsonValueKind.Object, latest.GetProperty("heavyLease").ValueKind);
+    }
+
+    [Fact]
+    public async Task The_sample_carries_the_heavy_leases_holders_and_queue_from_the_instances_leases()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = await host.PersonAsync();
+        var leases = host.Services.GetRequiredService<InstanceLeases>();
+        var holder = new LeaseOwner("capacity-route-holder", "alpha", "DeveloperA");
+        var waiter = LeaseOwner.ForConcierge("capacity-route-concierge");
+
+        try
+        {
+            leases.Acquire(InstanceLeases.Heavy, holder);
+            leases.Acquire(InstanceLeases.Heavy, waiter);
+            host.Services.GetRequiredService<CapacitySampler>().Sample();
+
+            var response = await client.GetAsync("/api/capacity", ct);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            var lease = body.RootElement.GetProperty("latest").GetProperty("heavyLease");
+
+            Assert.Equal(1, lease.GetProperty("holders").GetInt32());
+            var holding = Assert.Single(lease.GetProperty("holding").EnumerateArray());
+            Assert.Equal("alpha", holding.GetProperty("team").GetString());
+            Assert.Equal("DeveloperA", holding.GetProperty("member").GetString());
+            Assert.True(holding.TryGetProperty("since", out _));
+            var queued = Assert.Single(lease.GetProperty("queued").EnumerateArray());
+            Assert.Equal(JsonValueKind.Null, queued.GetProperty("team").ValueKind);
+            Assert.Equal("Concierge", queued.GetProperty("member").GetString());
+        }
+        finally
+        {
+            leases.Release(InstanceLeases.Heavy, waiter);
+            leases.Release(InstanceLeases.Heavy, holder);
+        }
     }
 
     [Fact]
