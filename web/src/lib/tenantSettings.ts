@@ -235,6 +235,7 @@ function settingFrom(entry: Record<string, unknown>, name: string): TenantSettin
     name,
     value: entry.value ?? null,
     default: entry.default ?? null,
+    defaultSource: entry.defaultSource === 'appsettings' || entry.defaultSource === 'builtIn' ? entry.defaultSource : null,
     source: entry.source === 'row' ? 'row' : 'appsettings',
     updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : null,
     updatedBy: typeof entry.updatedBy === 'string' ? entry.updatedBy : null,
@@ -270,6 +271,41 @@ export function sourceLine(setting: TenantSetting | undefined, format: (iso: str
   // Not "appsettings.json": any configuration source can set it, and the container sets the WIP
   // limit from an environment variable.
   return `From the host configuration${fallback}`
+}
+
+/**
+ * True when "Reset to default" is offered: only for a value a person set (`source: row`). A value
+ * already from appsettings or the built-in default has nothing to reset.
+ */
+export const canReset = (setting: TenantSetting | undefined): boolean => setting?.source === 'row'
+
+/** A default as a person reads it. Empty is "nothing"; a lane map is its lanes, by title when known. */
+export function defaultText(value: unknown, laneTitle: (id: string) => string = (id) => id): string {
+  if (value === null || value === undefined || value === '') return 'nothing'
+  if (Array.isArray(value)) return value.length === 0 ? 'nothing' : value.map(String).join(', ')
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+    if (entries.length === 0) return 'nothing'
+
+    return entries.map(([key, entry]) => `${laneTitle(key)}: ${draftOf(entry)}`).join(', ')
+  }
+
+  return String(value)
+}
+
+/**
+ * What a reset would leave, said before the person confirms: the value and where it comes from.
+ * The value is the server's `default` - never worked out here - and when the server does not say
+ * where it comes from, neither does this.
+ */
+export function resetLine(setting: TenantSetting, laneTitle?: (id: string) => string): string {
+  const value = defaultText(setting.default, laneTitle)
+
+  if (setting.defaultSource === 'appsettings') return `It will then be ${value}, from the host configuration (appsettings).`
+  if (setting.defaultSource === 'builtIn') return `It will then be ${value}, the built-in default.`
+
+  return `It will then be ${value}. This server does not say whether that is from appsettings or the built-in default.`
 }
 
 function defaultStamp(iso: string): string {

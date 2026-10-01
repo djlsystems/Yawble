@@ -39,6 +39,7 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
 
             Assert.True(entry.TryGetProperty("value", out _), name);
             Assert.True(entry.TryGetProperty("default", out _), name);
+            Assert.Contains(entry.GetProperty("defaultSource").GetString(), new[] { "appsettings", "builtIn" });
             Assert.Contains(entry.GetProperty("source").GetString(), new[] { "row", "appsettings" });
             Assert.True(entry.TryGetProperty("updatedAt", out _), name);
             Assert.True(entry.TryGetProperty("updatedBy", out _), name);
@@ -217,11 +218,14 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
             await restarted.LoadAsync(ct);
             Assert.Equal(9, restarted.WipMaxRunning);
             Assert.Equal("7", restarted.Fallback("wip.maxRunning"));
+            Assert.Equal("appsettings", restarted.FallbackSource("wip.maxRunning"));
+            Assert.Equal("builtIn", restarted.FallbackSource("causation.depthLimit"));
 
             // No appsettings and one CPU: max(1, cpus - 1).
             var bare = new TenantSettings(
                 new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 1, memoryLimitMb: 0);
             Assert.Equal("1", bare.Fallback("wip.maxRunning"));
+            Assert.Equal("builtIn", bare.FallbackSource("wip.maxRunning"));
         }
         finally
         {

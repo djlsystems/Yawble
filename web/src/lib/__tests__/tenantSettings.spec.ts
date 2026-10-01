@@ -19,6 +19,9 @@ import {
   wireValue,
   tagMapOf,
   validateTags,
+  canReset,
+  defaultText,
+  resetLine,
 } from '../tenantSettings';
 import type { TenantSetting } from '../../api/types';
 
@@ -26,6 +29,7 @@ const setting = (name: string, value: unknown, extra: Partial<TenantSetting> = {
   name,
   value,
   default: value,
+  defaultSource: 'appsettings',
   source: 'appsettings',
   updatedAt: null,
   updatedBy: null,
@@ -74,7 +78,7 @@ describe('normaliseTenantSettings', () => {
     });
 
     expect(read.settings).toEqual([
-      { name: 'wip.maxRunning', value: 4, default: 8, source: 'row', updatedAt: 'T', updatedBy: 'a@b', description: 'd' },
+      { name: 'wip.maxRunning', value: 4, default: 8, defaultSource: null, source: 'row', updatedAt: 'T', updatedBy: 'a@b', description: 'd' },
     ]);
     expect(read.roots).toEqual([{ name: '', path: '/data', note: '' }]);
   });
@@ -271,5 +275,41 @@ describe('agents.tags', () => {
     expect(validateTags([])).toBeNull();
     expect(validateTags([''])).not.toBeNull();
     expect(validateTags(['x'.repeat(65)])).not.toBeNull();
+  });
+});
+
+describe('a reset', () => {
+  it('is offered only for a row', () => {
+    expect(canReset(setting('x', 1, { source: 'row' }))).toBe(true);
+    expect(canReset(setting('x', 1))).toBe(false);
+    expect(canReset(undefined)).toBe(false);
+  });
+
+  it('reads where the default comes from, and nothing it does not know', () => {
+    const read = normaliseTenantSettings({
+      settings: [
+        { name: 'a', value: 1, default: 2, defaultSource: 'builtIn', source: 'row' },
+        { name: 'b', value: 1, default: 2, defaultSource: 'appsettings', source: 'row' },
+        { name: 'c', value: 1, default: 2, defaultSource: 'somewhere', source: 'row' },
+      ],
+    });
+
+    expect(read.settings.map((entry) => entry.defaultSource)).toEqual(['builtIn', 'appsettings', null]);
+  });
+
+  it('names the value it would take and where it comes from', () => {
+    expect(resetLine(setting('x', 5, { default: 8, defaultSource: 'builtIn' }))).toBe('It will then be 8, the built-in default.');
+    expect(resetLine(setting('x', 5, { default: '08:00:00', defaultSource: 'appsettings' })))
+      .toBe('It will then be 08:00:00, from the host configuration (appsettings).');
+    expect(resetLine(setting('x', 5, { default: 8, defaultSource: null })))
+      .toBe('It will then be 8. This server does not say whether that is from appsettings or the built-in default.');
+  });
+
+  it('reads an empty default as nothing and a map as its entries', () => {
+    expect(defaultText([])).toBe('nothing');
+    expect(defaultText({})).toBe('nothing');
+    expect(defaultText(['htop', 'jq'])).toBe('htop, jq');
+    expect(defaultText({ blocked: 3 }, (id) => (id === 'blocked' ? 'Needs You' : id))).toBe('Needs You: 3');
+    expect(defaultText(0)).toBe('0');
   });
 });

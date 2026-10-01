@@ -53,6 +53,7 @@ const setting = (name: string, value: unknown, extra: Partial<TenantSetting> = {
   name,
   value,
   default: value,
+  defaultSource: 'appsettings',
   source: 'appsettings',
   updatedAt: null,
   updatedBy: null,
@@ -66,6 +67,7 @@ function settings() {
       setting('wip.maxRunning', 4, {
         source: 'row',
         default: 8,
+        defaultSource: 'builtIn',
         updatedAt: '2026-09-23T10:00:00Z',
         updatedBy: 'ops@example.com',
         description: 'The ledger reads this on every claim.',
@@ -543,5 +545,103 @@ describe('every tab', () => {
 
     await type(wrapper, 'Agents running at once', '4');
     expect(saveButton().disabled).toBe(true);
+  });
+});
+
+describe('Reset to default', () => {
+  const resetButtons = () => [...document.body.querySelectorAll('[data-tenant-settings] [data-reset]')];
+  const confirmButton = () => document.body.querySelector('[data-reset-confirm-button]') as HTMLButtonElement | null;
+  const confirmLine = () => document.body.querySelector('[data-reset-line]')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+
+  async function askReset(selector: string) {
+    (document.body.querySelector(`${selector} [data-reset]`) as HTMLButtonElement).click();
+    await flushPromises();
+  }
+
+  it('is offered only for a value a person set', async () => {
+    const wrapper = await openDialog();
+
+    expect(document.body.querySelector('[data-setting="wip.maxRunning"] [data-reset]')).not.toBeNull();
+    expect(resetButtons()).toHaveLength(1);
+
+    for (const name of ['spend', 'sweeps', 'kanban', 'system']) {
+      await showTab(wrapper, name);
+      expect(resetButtons(), name).toHaveLength(0);
+    }
+  });
+
+  it('names the value it would take and that it is the built-in default, sending nothing yet', async () => {
+    await openDialog();
+
+    await askReset('[data-setting="wip.maxRunning"]');
+
+    expect(confirmLine()).toContain('It will then be 8, the built-in default.');
+    expect(document.body.textContent).toContain('Reset Agents running at once to its default?');
+    expect(document.body.textContent).not.toContain('wip.maxRunning');
+    expect(api.saveTenantSettings).not.toHaveBeenCalled();
+  });
+
+  it('names appsettings when that is where the value comes from', async () => {
+    const body = settings();
+    body.settings[0] = { ...body.settings[0]!, default: 6, defaultSource: 'appsettings' };
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(body));
+    await openDialog();
+
+    await askReset('[data-setting="wip.maxRunning"]');
+
+    expect(confirmLine()).toContain('It will then be 6, from the host configuration (appsettings).');
+  });
+
+  it('sends null for that setting alone on confirm, and shows the value it now has', async () => {
+    const wrapper = await openDialog();
+    await type(wrapper, 'Agents running at once', '9');
+
+    const after = settings();
+    after.settings[0] = setting('wip.maxRunning', 8, { defaultSource: 'builtIn' });
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(after));
+
+    await askReset('[data-setting="wip.maxRunning"]');
+    confirmButton()!.click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledTimes(1);
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'wip.maxRunning': null });
+    expect(input(wrapper, 'Agents running at once')!.props('modelValue')).toBe('8');
+    expect(resetButtons()).toHaveLength(0);
+  });
+
+  it('sends nothing when the person cancels', async () => {
+    await openDialog();
+
+    await askReset('[data-setting="wip.maxRunning"]');
+    const cancel = [...document.body.querySelectorAll('[data-reset-confirm] button')].find(
+      (b) => b.textContent?.trim() === 'Cancel',
+    ) as HTMLButtonElement;
+    cancel.click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).not.toHaveBeenCalled();
+  });
+
+  it('names a lane map\'s default by the board\'s lane titles', async () => {
+    const body = settings();
+    const lanes = body.settings.findIndex((entry) => entry.name === 'kanban.wipLimits');
+    body.settings[lanes] = setting('kanban.wipLimits', { blocked: 1 }, {
+      source: 'row',
+      default: { blocked: 3 },
+      defaultSource: 'appsettings',
+      updatedBy: 'ops@example.com',
+    });
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(body));
+    const wrapper = await openDialog();
+
+    await showTab(wrapper, 'kanban');
+    (document.body.querySelector('[data-tenant-settings] [data-reset]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(confirmLine()).toContain('It will then be Needs You: 3, from the host configuration (appsettings).');
+
+    confirmButton()!.click();
+    await flushPromises();
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'kanban.wipLimits': null });
   });
 });

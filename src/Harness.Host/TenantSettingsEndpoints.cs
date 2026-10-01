@@ -28,7 +28,8 @@ public static class TenantSettingsEndpoints
             .WithSummary("Every instance-wide setting, its source and its last change")
             .WithDescription(
                 "`settings` lists every setting with `name`, `value`, `default` (what applies with "
-                + "no row: appsettings.json, else the built-in default), `source` (`row` when a "
+                + "no row: appsettings.json, else the built-in default), `defaultSource` (`appsettings` or "
+                + "`builtIn`: which of the two `default` is), `source` (`row` when a "
                 + "person has set it, else `appsettings`), `updatedAt` and `updatedBy` (null "
                 + "unless `row`), `description`, and `readOnly`. The FileBrowser roots follow as "
                 + "read-only entries named `fileBrowser.roots.<name>` with a `note`: they are a "
@@ -90,6 +91,7 @@ public static class TenantSettingsEndpoints
                 ["name"] = definition.Name,
                 ["value"] = settings.ToJson(definition.Name, settings.Current(definition.Name)),
                 ["default"] = settings.ToJson(definition.Name, settings.Fallback(definition.Name)),
+                ["defaultSource"] = settings.FallbackSource(definition.Name),
                 ["source"] = row is null ? "appsettings" : "row",
                 ["updatedAt"] = row?.UpdatedAt,
                 ["updatedBy"] = row?.UpdatedBy,
@@ -105,6 +107,7 @@ public static class TenantSettingsEndpoints
                 ["name"] = $"fileBrowser.roots.{root.Name}",
                 ["value"] = root.Path,
                 ["default"] = root.Path,
+                ["defaultSource"] = "appsettings",
                 ["source"] = "appsettings",
                 ["updatedAt"] = null,
                 ["updatedBy"] = null,

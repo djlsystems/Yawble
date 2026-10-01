@@ -425,6 +425,10 @@ public sealed class TenantSettings
             ? Bounds(WipMemoryPerRunMb).Limit.ToString(CultureInfo.InvariantCulture)
             : _fallbacks[name];
 
+    /// <summary>Where <see cref="Fallback"/> comes from: <c>appsettings</c> when the Host's
+    /// configuration sets it, else <c>builtIn</c>. What a reset would fall back to, named.</summary>
+    public string FallbackSource(string name) => _configured.Contains(name) ? "appsettings" : "builtIn";
+
     /// <summary>A setting's description as the dialog shows it. The running limit's says which
     /// bound applies now, and why.</summary>
     public string DescriptionOf(string name)

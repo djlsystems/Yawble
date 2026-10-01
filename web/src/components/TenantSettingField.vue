@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { TenantSetting } from '../api/types';
-import { packageNames, sourceLine, ThemeChoices, validateDraft, type TenantSettingField } from '../lib/tenantSettings';
+import { canReset, packageNames, sourceLine, ThemeChoices, validateDraft, type TenantSettingField } from '../lib/tenantSettings';
 import ChipListInput from './ChipListInput.vue';
 
 /**
@@ -18,6 +18,9 @@ defineProps<{
 }>();
 
 const draft = defineModel<string>({ required: true });
+
+/** "Reset to default", asked for. The dialog says what it would take and sends it. */
+const emit = defineEmits<{ reset: [] }>();
 
 /** One package name's refusal before it joins the list, by the rule the whole box is held to. */
 const packageRefusal = (value: string) => validateDraft('packages', value);
@@ -67,7 +70,23 @@ const packageRefusal = (value: string) => validateDraft('packages', value);
     <div class="text-caption os-text-muted tenant-setting-hint">{{ field.hint }}</div>
     <!-- Not when it names the key: the key stays off screen. -->
     <div v-if="!field.hint && setting?.description && !setting.description.includes(field.name)" class="text-caption os-text-muted">{{ setting.description }}</div>
-    <div class="text-caption tenant-setting-source">{{ sourceLine(setting) }}</div>
+    <div class="row items-center no-wrap">
+      <div class="text-caption tenant-setting-source">{{ sourceLine(setting) }}</div>
+      <!-- ONLY FOR A VALUE A PERSON SET: anything else is already its default. -->
+      <q-btn
+        v-if="canReset(setting)"
+        flat
+        dense
+        no-caps
+        size="sm"
+        color="primary"
+        class="q-ml-sm"
+        label="Reset to default"
+        data-reset
+        :disable="disable"
+        @click="emit('reset')"
+      />
+    </div>
   </div>
 </template>
 

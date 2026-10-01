@@ -8,19 +8,21 @@ import {
   saveTenantSettings,
 } from '../api/client';
 import { getKanbanBoard, type KanbanLane } from '../api/kanban';
-import type { AgentAuthReport, TenantSettings } from '../api/types';
+import type { AgentAuthReport, TenantSetting, TenantSettings } from '../api/types';
 import { isNotInstalled } from '../lib/agentInstall';
 import { useAgentInstallations } from '../lib/useAgentInstallations';
 import {
   KanbanWipLimits,
   TenantSettingFields,
   WipMaxRunning,
+  canReset,
   catalogHealth,
   changedSettings,
   draftErrors,
   draftOf,
   isRunningLane,
   laneLimitsOf,
+  resetLine,
   settingErrorText,
   sourceLine,
   type TenantSettingTab,
@@ -241,6 +243,72 @@ async function save() {
   }
 }
 
+/** The setting "Reset to default" was asked for, while its confirmation is showing. */
+const resetting = ref<TenantSetting | null>(null);
+
+const resetLabel = computed(() =>
+  resetting.value ? (TenantSettingFields.find((field) => field.name === resetting.value!.name)?.label ?? '') : '',
+);
+
+/** The lane titles the board holds, so a lane map's default reads as the board does. */
+const laneTitle = (id: string) => lanes.value.find((lane) => lane.id === id)?.title ?? id;
+
+const resetText = computed(() => (resetting.value ? resetLine(resetting.value, laneTitle) : ''));
+
+function askReset(name: string) {
+  const setting = settingFor(name);
+  if (canReset(setting)) resetting.value = setting!;
+}
+
+/**
+ * A RESET IS `null` FOR THAT ONE SETTING through the same PUT: the server removes its row, so the
+ * value falls back to appsettings, then the built-in default. Other unsaved edits are kept.
+ */
+async function confirmReset() {
+  const setting = resetting.value;
+  if (!setting || busy.value) return;
+
+  busy.value = true;
+
+  try {
+    await saveTenantSettings({ [setting.name]: null });
+    resetting.value = null;
+
+    const read = await getTenantSettings();
+    loaded.value = read;
+
+    const after = read.settings.find((entry) => entry.name === setting.name);
+    if (setting.name === KanbanWipLimits) {
+      const limits = laneLimitsOf(after?.value);
+      const laneText: Record<string, string> = {};
+      for (const lane of lanes.value) laneText[lane.id] = limits[lane.id] ? String(limits[lane.id]) : '';
+      laneDrafts.value = laneText;
+    } else {
+      drafts.value = { ...drafts.value, [setting.name]: draftOf(after?.value) };
+    }
+
+    if (serverErrors.value[setting.name]) {
+      const { [setting.name]: _dropped, ...rest } = serverErrors.value;
+      serverErrors.value = rest;
+    }
+
+    $q.notify({ type: 'positive', message: 'Reset to its default. The tenant log records the change.', timeout: 4000 });
+
+    void wip.refresh();
+    void kanban.refreshIfActive();
+  } catch (cause) {
+    resetting.value = null;
+    if (cause instanceof TenantSettingRejected && cause.field) {
+      serverErrors.value = { ...serverErrors.value, [cause.field]: settingErrorText(cause.field, cause.message) };
+      tab.value = tabOf(cause.field);
+    } else {
+      $q.notify({ type: 'negative', message: cause instanceof Error ? cause.message : String(cause) });
+    }
+  } finally {
+    busy.value = false;
+  }
+}
+
 function openAgents() {
   emit('open-agents');
 }
@@ -292,6 +360,7 @@ function holdText(hold: { team: string; member: string }) {
                 :disable="busy"
                 :model-value="drafts[field.name] ?? ''"
                 @update:model-value="(value: string) => setDraft(field.name, value)"
+                @reset="askReset(field.name)"
               />
             </div>
 
@@ -321,6 +390,7 @@ function holdText(hold: { team: string; member: string }) {
             :disable="busy"
             :model-value="drafts[field.name] ?? ''"
             @update:model-value="(value: string) => setDraft(field.name, value)"
+            @reset="askReset(field.name)"
           />
           <div class="text-caption os-text-muted q-mt-md">
             How spend is counted, and not settable: uncached input and output at full weight, cache
@@ -342,6 +412,7 @@ function holdText(hold: { team: string; member: string }) {
             :disable="busy"
             :model-value="drafts[field.name] ?? ''"
             @update:model-value="(value: string) => setDraft(field.name, value)"
+            @reset="askReset(field.name)"
           />
         </q-tab-panel>
 
@@ -356,6 +427,7 @@ function holdText(hold: { team: string; member: string }) {
               :disable="busy"
               :model-value="drafts[field.name] ?? ''"
               @update:model-value="(value: string) => setDraft(field.name, value)"
+              @reset="askReset(field.name)"
             />
           </div>
         </q-tab-panel>
@@ -391,7 +463,22 @@ function holdText(hold: { team: string; member: string }) {
           <div v-if="lanes.length === 0" class="os-text-muted">The board has not answered, so there are no lanes to set.</div>
 
           <div v-if="errorFor(KanbanWipLimits)" class="text-negative text-caption">{{ errorFor(KanbanWipLimits) }}</div>
-          <div class="text-caption tenant-setting-source q-mt-sm">{{ sourceLine(settingFor(KanbanWipLimits)) }}</div>
+          <div class="row items-center no-wrap q-mt-sm">
+            <div class="text-caption tenant-setting-source">{{ sourceLine(settingFor(KanbanWipLimits)) }}</div>
+            <q-btn
+              v-if="canReset(settingFor(KanbanWipLimits))"
+              flat
+              dense
+              no-caps
+              size="sm"
+              color="primary"
+              class="q-ml-sm"
+              label="Reset to default"
+              data-reset
+              :disable="busy"
+              @click="askReset(KanbanWipLimits)"
+            />
+          </div>
         </q-tab-panel>
 
         <q-tab-panel name="system">
@@ -404,6 +491,7 @@ function holdText(hold: { team: string; member: string }) {
             :disable="busy"
             :model-value="drafts[field.name] ?? ''"
             @update:model-value="(value: string) => setDraft(field.name, value)"
+            @reset="askReset(field.name)"
           />
         </q-tab-panel>
 
@@ -452,6 +540,26 @@ function holdText(hold: { team: string; member: string }) {
         <span v-if="!unchanged && invalid" class="text-caption text-negative q-mr-md">Fix the marked fields to save.</span>
         <q-btn v-close-popup flat label="Cancel" :disable="busy" />
         <q-btn color="primary" label="Save" :loading="busy" :disable="!canSave" @click="save" />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
+
+  <!-- THE VALUE IT WOULD TAKE, AND FROM WHERE, BEFORE THE PERSON CONFIRMS. Lifted with this dialog. -->
+  <q-dialog
+    :model-value="resetting !== null"
+    class="concierge-settings"
+    data-reset-confirm
+    @update:model-value="(showing: boolean) => { if (!showing && !busy) resetting = null }"
+  >
+    <q-card class="os-dialog-sm">
+      <q-card-section class="os-dialog-title">Reset {{ resetLabel || 'this setting' }} to its default?</q-card-section>
+      <q-card-section class="q-pt-none" data-reset-line>
+        {{ resetText }} The value set by {{ resetting?.updatedBy ?? 'someone' }} is removed, and the tenant log
+        records the reset.
+      </q-card-section>
+      <q-card-actions align="right">
+        <q-btn flat label="Cancel" :disable="busy" @click="resetting = null" />
+        <q-btn color="primary" label="Reset to default" data-reset-confirm-button :loading="busy" @click="confirmReset" />
       </q-card-actions>
     </q-card>
   </q-dialog>
