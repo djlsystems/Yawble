@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host;
@@ -316,6 +317,45 @@ public sealed class ConciergeAttachmentTests : IAsyncLifetime
         // Refused, so not kept in the folder the Host opened either, and no row.
         Assert.Empty(Directory.GetFileSystemEntries(aside));
         Assert.Empty(await RowsAsync());
+    }
+
+    [Fact]
+    public async Task An_attachments_folder_moved_away_and_replaced_mid_write_is_refused_and_nothing_is_kept()
+    {
+        // Only the held-folder path tells two real folders apart; the path fallback cannot.
+        if (!OperatingSystem.IsLinux() || ConciergeAttachments.LinuxOpenFlagsFor(RuntimeInformation.ProcessArchitecture) is null) return;
+
+        await StartAsync();
+        using var client = await PersonAsync();
+        var aside = Attachments + ".aside";
+
+        // A real folder, not a link, put back at the name: the link check alone would pass it.
+        _factory.Services.GetRequiredService<ConciergeAttachments>().BeforeCreate = folder =>
+        {
+            Directory.Move(folder, aside);
+            Directory.CreateDirectory(folder);
+        };
+
+        using var answer = await client.PostAsync("/api/concierge/attachments", Form(Png), Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, answer.StatusCode);
+        Assert.Contains("was replaced", (await answer.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+        Assert.Empty(Directory.GetFileSystemEntries(Attachments));
+        Assert.Empty(Directory.GetFileSystemEntries(aside));
+        Assert.Empty(await RowsAsync());
+    }
+
+    [Fact]
+    public void Each_architecture_gets_its_own_open_flags_and_any_other_takes_the_fallback()
+    {
+        var x64 = ConciergeAttachments.LinuxOpenFlagsFor(Architecture.X64);
+        var arm64 = ConciergeAttachments.LinuxOpenFlagsFor(Architecture.Arm64);
+
+        Assert.Equal(new LinuxOpenFlags(Wronly: 0x1, Creat: 0x40, Excl: 0x80, Directory: 0x10000, Nofollow: 0x20000, Cloexec: 0x80000), x64);
+        // On arm64 0x10000 is O_DIRECT and 0x20000 O_LARGEFILE.
+        Assert.Equal(new LinuxOpenFlags(Wronly: 0x1, Creat: 0x40, Excl: 0x80, Directory: 0x4000, Nofollow: 0x8000, Cloexec: 0x80000), arm64);
+        Assert.Null(ConciergeAttachments.LinuxOpenFlagsFor(Architecture.X86));
+        Assert.Null(ConciergeAttachments.LinuxOpenFlagsFor(Architecture.Arm));
     }
 
     [Fact]
