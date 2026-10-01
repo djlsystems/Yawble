@@ -8,7 +8,8 @@ namespace Harness.Host;
 /// queue, or leaving it, has its clock running again from a full window. The route and the run's
 /// end both come through here, so the clock and the card follow the lease whichever moved it.
 ///
-/// The Concierge has no card and no silence clock, so for it only the lease moves.
+/// The Concierge has no card and no silence clock, so for it only the lease moves; its session's
+/// end comes through here too (<see cref="Releasing"/>), so a member it hands the lease to is told.
 ///
 /// THE MEMORY FOLLOWS THE LEASE TOO: after every call, <see cref="RunAllowances.ReconcileAsync"/>
 /// raises the run that now holds <c>heavy</c> and lowers the one that no longer does, so any path
@@ -35,8 +36,8 @@ public sealed class LeaseActions(
             await CardAsync(member, WaitingWords, ct);
         }
 
-        // GRANTED IS NEVER PAUSED: a member the queue handed the lease to where nothing could run
-        // this class (a Concierge's session ending) has its clock back at its next call.
+        // GRANTED IS NEVER PAUSED: every release comes through here and un-pauses the member it
+        // promotes, and this keeps a granted call from leaving a clock paused all the same.
         if (answer.Outcome == LeaseOutcome.Granted && Member(owner) is { } holder)
         {
             heartbeat.Hold(holder, paused: false);
@@ -60,6 +61,24 @@ public sealed class LeaseActions(
         await MovedAsync(answer, ct);
         return answer;
     }
+
+    /// <summary>
+    /// A Concierge's revoke that first ends the session's lease through <see cref="EndedAsync"/>,
+    /// then runs <paramref name="then"/> however the release went. A Concierge's run is its
+    /// session, so its end is the session's end; the token is not passed to the release, because
+    /// the revoke also runs during shutdown with that token already cancelled.
+    /// </summary>
+    public ConciergeRevoke Releasing(ConciergeRevoke then) => async (key, ct) =>
+    {
+        try
+        {
+            await EndedAsync(LeaseOwner.ForConcierge(ConciergeLaunchFactory.PrincipalId(key.User)), CancellationToken.None);
+        }
+        finally
+        {
+            await then(key, ct);
+        }
+    };
 
     private async Task MovedAsync(LeaseAnswer answer, CancellationToken ct)
     {

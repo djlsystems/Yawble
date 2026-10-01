@@ -87,6 +87,14 @@ public sealed class ConciergeSessionStore(
             var console = new ConciergeSession(
                 key, spec, session, record, new PtyAttachment(session, record, spec.Cols, spec.Rows));
             _sessions[key] = console;
+
+            // A CLI THAT EXITS BY ITSELF ENDS ITS SESSION, viewer or not: otherwise what it held
+            // (the heavy lease, its credential) stays held until someone ends it or the idle window
+            // passes. Subscribed after the session is stored, so an exit that has already latched
+            // still finds it. Off this thread, because Exited is raised from the session's own pump,
+            // which disposal waits for. Ends only THIS console, never a newer one under the key.
+            session.Exited += code => Task.Run(() => EndAsync(console));
+
             return console;
         }
         finally
@@ -101,21 +109,37 @@ public sealed class ConciergeSessionStore(
     /// </summary>
     public async Task EndAsync(ConciergeSessionKey key)
     {
-        if (!_sessions.TryRemove(key, out var console)) return;
+        if (!_sessions.TryGetValue(key, out var console)) return;
 
-        await console.Session.DisposeAsync();
+        await EndAsync(console);
+    }
 
-        foreach (var file in console.Spec.TempFiles ?? [])
+    private async Task EndAsync(ConciergeSession console)
+    {
+        // Removed only if it is still the one stored, so a late exit of an ended session cannot
+        // end the session that replaced it, and a second end of one session does nothing.
+        if (!_sessions.TryRemove(new KeyValuePair<ConciergeSessionKey, ConciergeSession>(console.Key, console))) return;
+
+        try
         {
-            // Best effort, and after disposal: the child is gone, so nothing can still be reading
-            // it. A file that will not delete must not stop the session from ending.
-            try { File.Delete(file); } catch (IOException) { }
-        }
+            await console.Session.DisposeAsync();
 
-        // The credential dies with the session it belonged to. Not passed the caller's token:
-        // this also runs from DisposeAsync during shutdown, where that token is already cancelled
-        // and a skipped revoke would leave a live key behind for a terminal that no longer exists.
-        await revoke(key, CancellationToken.None);
+            foreach (var file in console.Spec.TempFiles ?? [])
+            {
+                // Best effort, and after disposal: the child is gone, so nothing can still be reading
+                // it. A file that will not delete must not stop the session from ending.
+                try { File.Delete(file); } catch (IOException) { }
+            }
+        }
+        finally
+        {
+            // The credential and the lease die with the session they belonged to, WHATEVER disposal
+            // did: a dispose that throws must not leave the heavy lease held. Not passed the
+            // caller's token: this also runs from DisposeAsync during shutdown, where that token is
+            // already cancelled and a skipped revoke would leave a live key behind for a terminal
+            // that no longer exists.
+            await revoke(console.Key, CancellationToken.None);
+        }
     }
 
     /// <summary>

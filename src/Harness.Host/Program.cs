@@ -1258,7 +1258,7 @@ builder.Services.AddSingleton(sp =>
     // ObjectDisposedException out of disposal and takes every live session's cleanup with it.
     var launcher = sp.GetRequiredService<ConciergeLaunchFactory>();
     var teams = sp.GetRequiredService<TeamRegistry>();
-    var leases = sp.GetRequiredService<InstanceLeases>();
+    var leaseActions = sp.GetRequiredService<LeaseActions>();
 
     // The LOGIN, for the workspace's directory name. Resolved here rather than inside the
     // factory for teamLabel's stated reason - the factory has no store of its own - and captured
@@ -1308,14 +1308,9 @@ builder.Services.AddSingleton(sp =>
                 publicUrl,
                 ct);
         },
-        async (key, ct) =>
-        {
-            // A Concierge's run is its session: a lease it took ends with it. It has no card and
-            // no silence clock, so only the lease moves; a member the queue hands it to has its
-            // clock resumed at its next acquire, which answers granted.
-            leases.Ended(LeaseOwner.ForConcierge(ConciergeLaunchFactory.PrincipalId(key.User)));
-            await launcher.RevokeAsync(key.User, ct);
-        });
+        // A Concierge's run is its session: a lease it took ends with it, through the same path
+        // as a run's end, so a member the queue hands it to is un-paused and its card told.
+        leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct)));
 });
 
 // HOW DEEP ONE CHAIN OF CAUSATION MAY GO before the platform stops it.
