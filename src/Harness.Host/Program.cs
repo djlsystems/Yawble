@@ -7606,14 +7606,24 @@ app.MapGet("/api/concierge/ws", async (
 // path into the prompt. A person's only: a machine principal is refused by the marker, and no member
 // has a route, tool or folder for this. See ConciergeAttachments for the rules it keeps.
 app.MapPost("/api/concierge/attachments", async (
-    HttpRequest request, HttpContext context, ConciergeAttachments attachments, ITenantLog log,
-    CancellationToken ct) =>
+    HttpRequest request, HttpContext context, ConciergeAttachments attachments, ConciergeSessionStore consoles,
+    ITenantLog log, CancellationToken ct) =>
 {
     if (PrincipalClaims.From(context.User) is not { } caller) return Results.Unauthorized();
 
     if (caller.Kind != PrincipalKind.User)
     {
         return Results.Content(PermitGate.HumansOnlyBody, "application/json", statusCode: 403);
+    }
+
+    // NO CLI, NO FILE. Nothing would read the path, and the file would wait for the next clean-up.
+    // Before the form is read, so nothing of the image is kept. The panel shows this sentence as it
+    // stands (B002R-409-contract.md); a CLI that exited has ended its session, so it counts too.
+    if (!consoles.Has(new ConciergeSessionKey(caller.Id)))
+    {
+        return Results.Json(
+            new { error = "The image was not attached: the Concierge is not running. Start it, then attach the image again." },
+            statusCode: StatusCodes.Status409Conflict);
     }
 
     if (!request.HasFormContentType)
@@ -7677,7 +7687,7 @@ app.MapPost("/api/concierge/attachments", async (
         + "used. Answers `path` (absolute), `size` and `type`.\n\n"
         + "Only PNG, JPEG, GIF and WebP, told by their content and never by name or Content-Type: 415 "
         + "for anything else. 413 over the size cap (10 MB unless `ConciergeAttachmentMaxBytes` says "
-        + "otherwise). 409 when the person has no Concierge folder yet. Recorded as "
+        + "otherwise). 409 when the person has no Concierge running, or no Concierge folder yet. Recorded as "
         + "`concierge.attachment-added` with the size and type, never the image; a file whose row "
         + "cannot be written is removed. Attachments are removed when the session ends, and those older "
         + "than the retention (7 days unless `ConciergeAttachmentRetention` says otherwise) at start.\n\n"
