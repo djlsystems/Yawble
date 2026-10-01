@@ -22,7 +22,7 @@ namespace Harness.Host;
 /// A START THAT COULD NOT BE READ IS RETRIED, and only while it is still true: on each backlog read
 /// of the item and as the team's publish begins, before its tip is recorded, for as long as the team branch is unchanged since the
 /// dispatch. Once the team has committed, its start can no longer be told apart from its work, and
-/// the retry stops for good (B0028).
+/// the retry stops for good.
 /// </para>
 /// </summary>
 /// <param name="fetchBudget">

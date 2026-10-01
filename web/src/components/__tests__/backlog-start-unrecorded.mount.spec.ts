@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// WHERE A DISPATCH STARTED WAS NOT RECORDED (B0028).
+// WHERE A DISPATCH STARTED WAS NOT RECORDED.
 //
 // Only a dispatch with a recorded start has `landed` kept after its team is gone, so an item whose
 // start was not recorded says so in its detail, in the server's sentence, and offers a person

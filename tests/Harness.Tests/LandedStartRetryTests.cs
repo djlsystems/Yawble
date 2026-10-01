@@ -15,7 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// B0028. A dispatch whose start could not be recorded - here, origin unreachable at the moment of
+/// A dispatch whose start could not be recorded - here, origin unreachable at the moment of
 /// dispatch - tries again on each read of the item and on the team's publish, and records it only
 /// while the team branch is unchanged since the dispatch; once the team has committed, never. The
 /// start's budget counts the fetch alone. An unrecorded start says so on the item, in the
@@ -58,7 +58,7 @@ public sealed class LandedStartRetryTests : IAsyncDisposable
             .UseSetting(InstanceGitIdentity.EmailVariable, "pat@example.test")
             .ConfigureTestServices(services =>
             {
-                services.AddSingleton<IAgentRunner>(new FakeAgent());
+                services.AddSingleton<IAgentRunner>(new HeldAgent());
                 services.AddSingleton<IRepoClone>(new LocalOriginClone(_origin));
             }));
     }
@@ -491,6 +491,21 @@ public sealed class LandedStartRetryTests : IAsyncDisposable
         process.StandardError.ReadToEnd();
         process.WaitForExit();
         return (process.ExitCode, stdout);
+    }
+
+    /// <summary>
+    /// AN AGENT WHOSE RUNS NEVER END on their own. A run's end publishes, and that publish retries the
+    /// team's latest dispatch's start: the Manager's first run, ending whenever a loaded host gets to
+    /// it, would otherwise retry in the middle of a test - with origin away, or holding back the read
+    /// the test makes next. Here the only publishes are the ones a test makes itself.
+    /// </summary>
+    private sealed class HeldAgent : IAgentRunner
+    {
+        public async Task<AgentResult> RunAsync(AgentInvocation invocation, CancellationToken ct = default)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            return new AgentResult(0, "done");
+        }
     }
 
     /// <summary>The product's own <see cref="RepoClone"/>, pointed at the local origin.</summary>
