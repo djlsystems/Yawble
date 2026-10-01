@@ -36,6 +36,38 @@ func healthyObserved() doctor.Observed {
 		Port:   8080,
 		ExeDir: "/home/d/.local/bin", OnPath: boolp(true),
 		CPUs: 8, ContainerMemoryMB: 12288,
+		Stats: &engine.Stats{Command: "podman stats", CPUPercent: float64p(12.3), MemoryUsage: "1.2GB", MemoryLimit: "12.88GB", MemoryPercent: float64p(9.4), PIDs: intp(412)},
+	}
+}
+
+func float64p(f float64) *float64 { return &f }
+func intp(n int) *int             { return &n }
+
+// The engine's own stats are a row of their own: informational, warn near the memory limit,
+// and never a failure, whatever went wrong asking.
+func TestTheStatsRowSaysWhatTheEngineMeasuredAndNeverFails(t *testing.T) {
+	o := healthyObserved()
+	row := find(t, doctor.HostChecks(o), "stats")
+	if row.Verdict != doctor.OK || row.Detail != "cpu 12.3%  memory 1.2GB / 12.88GB (9%)  pids 412  (podman stats)" {
+		t.Errorf("healthy: %+v", row)
+	}
+
+	o.Stats = &engine.Stats{Command: "docker stats", CPUPercent: float64p(250), MemoryUsage: "7.5GiB", MemoryLimit: "8GiB", MemoryPercent: float64p(93.75)}
+	row = find(t, doctor.HostChecks(o), "stats")
+	if row.Verdict != doctor.Warn || !strings.Contains(row.Detail, "pids not measured  (docker stats)") || !strings.Contains(row.Fix, "94% of its memory limit") {
+		t.Errorf("near the limit: %+v", row)
+	}
+
+	o.Stats, o.StatsErr = nil, errors.New("podman stats yawble: cgroups v1 is not supported (exit 125)")
+	row = find(t, doctor.HostChecks(o), "stats")
+	if row.Verdict != doctor.Skip || row.Detail != "not measured: podman stats yawble: cgroups v1 is not supported (exit 125)" {
+		t.Errorf("error: %+v", row)
+	}
+
+	o.StatsErr = nil
+	o.Container = engine.StateStopped
+	if row := find(t, doctor.HostChecks(o), "stats"); row.Verdict != doctor.Skip || row.Detail != "the container is not running" {
+		t.Errorf("stopped: %+v", row)
 	}
 }
 

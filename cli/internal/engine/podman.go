@@ -191,6 +191,11 @@ func parseInspect(stdout string) ContainerInfo {
 	return info
 }
 
+// Stats is `podman stats --no-stream --format json <name>`.
+func (p podman) Stats(ctx context.Context, name string) (Stats, error) {
+	return stats(ctx, p.r, "podman", name)
+}
+
 func (p podman) Remove(ctx context.Context, name string) error {
 	_, err := p.run(ctx, "rm", "-f", name)
 	return err
