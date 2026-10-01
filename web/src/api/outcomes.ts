@@ -82,7 +82,9 @@ export interface OutcomeWorkflowLine {
   startedAt: string | null
   elapsedSeconds: number | null
   agentSeconds: number
+  /** Billable over the measured runs: with `measuredRuns` 0 there is no figure, never a 0. */
   billableTokens: number
+  measuredRuns: number
   unmeasuredRuns: number
   how: string | null
   setBy: string | null
@@ -90,14 +92,18 @@ export interface OutcomeWorkflowLine {
   setAt: string | null
 }
 
-/** One row of `workflow_outcome_links`, with the names it was made under. */
+/**
+ * One row of `workflow_outcome_links`, with the names it was made under. An unlink (a person's
+ * "None") names no outcome: `outcomeId` and `outcomeNameAtLink` are null and `isUnlink` is true.
+ */
 export interface OutcomeLinkRow {
   id: number
   correlation: number
-  outcomeId: string
+  outcomeId: string | null
+  isUnlink?: boolean
   teamId: string | null
   teamNameAtLink: string | null
-  outcomeNameAtLink: string
+  outcomeNameAtLink: string | null
   setBy: string
   setByKind: string
   setAt: string
@@ -198,6 +204,13 @@ export const linkWorkflowOutcome = (team: string, correlation: number, outcome: 
   json<OutcomeLinkRow>(
     `/api/teams/${encodeURIComponent(team)}/workflows/${correlation}/outcome`,
     { method: 'PUT', ...body({ outcome }) },
+  )
+
+/** A person's "None": the workflow serves no outcome, as a new link row (history kept). */
+export const unlinkWorkflowOutcome = (team: string, correlation: number) =>
+  json<OutcomeLinkRow>(
+    `/api/teams/${encodeURIComponent(team)}/workflows/${correlation}/outcome`,
+    { method: 'DELETE' },
   )
 
 /**

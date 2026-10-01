@@ -109,6 +109,7 @@ function detailOf(o: Outcome, links = 1): OutcomeDetail {
             elapsedSeconds: 3600,
             agentSeconds: 5400,
             billableTokens: 20_000,
+            measuredRuns: 3,
             unmeasuredRuns: 1,
             how: 'dispatch',
             setBy: 'ada@example.com',
@@ -292,6 +293,38 @@ describe('Manage Outcomes: an outcome opened', () => {
     expect(bodyFind('[data-outcome-workflow="4100"]')?.textContent).toContain('Alpha');
     expect(bodyFind('[data-outcome-workflow="4100"]')?.textContent).toContain('+ 1 unmeasured run');
     expect(bodyFind('[data-outcome-history]')?.textContent).toContain('Workflow 4100 (Alpha) linked');
+  });
+
+  it('reads a workflow\'s tokens from the route\'s counts: a measured 0 with one unmeasured run is "0 + 1 unmeasured run"', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => {
+      const detail = detailOf(listing().outcomes.find((o) => o.id === id)!);
+      detail.workflows = [
+        { ...detail.workflows[0]!, correlation: 4100, billableTokens: 0, measuredRuns: 1, unmeasuredRuns: 1 },
+        { ...detail.workflows[0]!, correlation: 4200, billableTokens: 0, measuredRuns: 0, unmeasuredRuns: 2 },
+      ];
+      return detail;
+    });
+    await open({ outcome: 'o-1' });
+
+    const tokens = (correlation: number) =>
+      (bodyFind(`[data-outcome-workflow="${correlation}"] [data-outcome-tokens]`)?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    expect(tokens(4100)).toBe('0 + 1 unmeasured run');
+    expect(tokens(4200)).toBe('not measured + 2 unmeasured runs');
+  });
+
+  it('shows a person\'s None in the history as the workflow set to no outcome', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => {
+      const detail = detailOf(listing().outcomes.find((o) => o.id === id)!);
+      detail.history.push({
+        ...detail.history[0]!, id: 2, outcomeId: null, isUnlink: true, outcomeNameAtLink: null,
+        how: 'person', setBy: 'grace@example.com', setAt: '2026-09-21T09:00:00Z',
+      });
+      return detail;
+    });
+    await open({ outcome: 'o-1' });
+
+    const lines = [...document.body.querySelectorAll('[data-outcome-history] li')].map((li) => li.textContent ?? '');
+    expect(lines.find((l) => l.includes('Workflow 4100 (Alpha) set to no outcome'))).toContain('by grace@example.com');
   });
 
   it('lists renames and status changes from the route, each with who and when', async () => {

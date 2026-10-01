@@ -194,5 +194,48 @@ public static class OutcomeSchema
             CREATE TRIGGER nudge_ledger_no_delete BEFORE DELETE ON nudge_ledger
             BEGIN SELECT RAISE(ABORT, 'nudge_ledger is append-only'); END;
             """),
+
+        // AN UNLINK IS A ROW TOO. A person's "None" in Change outcome… appends a link that names no
+        // outcome, so the workflow counts under No outcome and its history keeps what it served:
+        // `outcome_id` and `outcome_name_at_link` become nullable, which SQLite does only by building
+        // the table again. Every row is copied with its id, so `AUTOINCREMENT` carries on after the
+        // last one; the indexes and the append-only triggers are made again on the new table. A
+        // DROP TABLE fires no DELETE trigger, so the old table goes without passing through them.
+        new MigrationStep(
+            "outcome-004",
+            """
+            CREATE TABLE workflow_outcome_links_new (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                correlation          INTEGER NOT NULL,
+                outcome_id           TEXT    NULL,
+                team_id              TEXT    NULL COLLATE NOCASE,
+                team_name_at_link    TEXT    NULL,
+                outcome_name_at_link TEXT    NULL,
+                set_by               TEXT    NOT NULL,
+                set_by_kind          TEXT    NOT NULL,
+                set_at               TEXT    NOT NULL,
+                how                  TEXT    NOT NULL
+            );
+
+            INSERT INTO workflow_outcome_links_new (
+                id, correlation, outcome_id, team_id, team_name_at_link, outcome_name_at_link,
+                set_by, set_by_kind, set_at, how)
+            SELECT id, correlation, outcome_id, team_id, team_name_at_link, outcome_name_at_link,
+                set_by, set_by_kind, set_at, how
+            FROM workflow_outcome_links;
+
+            DROP TABLE workflow_outcome_links;
+
+            ALTER TABLE workflow_outcome_links_new RENAME TO workflow_outcome_links;
+
+            CREATE INDEX ix_workflow_outcome_links_correlation ON workflow_outcome_links(correlation, id);
+            CREATE INDEX ix_workflow_outcome_links_outcome ON workflow_outcome_links(outcome_id);
+
+            CREATE TRIGGER workflow_outcome_links_no_update BEFORE UPDATE ON workflow_outcome_links
+            BEGIN SELECT RAISE(ABORT, 'workflow_outcome_links is append-only'); END;
+
+            CREATE TRIGGER workflow_outcome_links_no_delete BEFORE DELETE ON workflow_outcome_links
+            BEGIN SELECT RAISE(ABORT, 'workflow_outcome_links is append-only'); END;
+            """),
     ];
 }

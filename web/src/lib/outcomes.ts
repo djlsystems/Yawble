@@ -1,4 +1,4 @@
-import type { Outcome, OutcomeFigures, OutcomeStatus } from '../api/outcomes'
+import type { Outcome, OutcomeFigures, OutcomeStatus, OutcomeWorkflowLine } from '../api/outcomes'
 
 /**
  * THE MANAGE OUTCOMES DIALOG'S WORDING, kept out of the component so each rule is one function.
@@ -43,6 +43,16 @@ export function unmeasuredText(unmeasuredRuns: number): string {
 export function tokensFigure(tokens: OutcomeFigures['tokens']): string {
   if (tokens.measuredRuns === 0) return tokens.unmeasuredRuns > 0 ? 'not measured' : '—'
   return compactTokens(tokens.billable)
+}
+
+/**
+ * A workflow line's Tokens figure, from the route's own counts: with no measured run there is no
+ * number ("not measured"), and a measured 0 is a 0 however many runs went unmeasured beside it.
+ * The unmeasured count follows it as `unmeasuredText`.
+ */
+export function lineTokensFigure(line: Pick<OutcomeWorkflowLine, 'billableTokens' | 'measuredRuns' | 'unmeasuredRuns'>): string {
+  if (line.measuredRuns === 0) return line.unmeasuredRuns > 0 ? 'not measured' : '—'
+  return line.billableTokens.toLocaleString()
 }
 
 /** `2 open · 5/9`: open, then completed of total, all the route's counts. */

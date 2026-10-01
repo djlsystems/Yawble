@@ -43,12 +43,13 @@ public static class OutcomeFigures
         return resolved;
     }
 
-    /// <summary>Each workflow's outcome now: its newest link's outcome, resolved.</summary>
+    /// <summary>Each workflow's outcome now: its newest link's outcome, resolved. A workflow whose
+    /// newest link is an unlink is absent: it counts under No outcome.</summary>
     public static IReadOnlyDictionary<long, string> CurrentOutcomes(
         IReadOnlyList<OutcomeLink> currentLinks, IReadOnlyDictionary<string, string> resolution) =>
-        currentLinks.ToDictionary(
+        currentLinks.Where(l => l.OutcomeId is not null).ToDictionary(
             l => l.Correlation,
-            l => resolution.GetValueOrDefault(l.OutcomeId, l.OutcomeId));
+            l => resolution.GetValueOrDefault(l.OutcomeId!, l.OutcomeId!));
 
     /// <summary>One outcome's (or the unlinked workflows') figures.</summary>
     public sealed record Figures(
@@ -71,7 +72,9 @@ public static class OutcomeFigures
 
     public sealed record TeamName(string Id, string Name, bool Deleted);
 
-    /// <summary>One workflow's row on an outcome's detail.</summary>
+    /// <summary>One workflow's row on an outcome's detail. Its tokens are the route's as the list's
+    /// are: <see cref="BillableTokens"/> over <see cref="MeasuredRuns"/>, and the runs that reported
+    /// none counted beside them, so a client never decides "not measured" from a zero.</summary>
     public sealed record WorkflowLine(
         long Correlation,
         TeamName? Team,
@@ -80,6 +83,7 @@ public static class OutcomeFigures
         double? ElapsedSeconds,
         double AgentSeconds,
         long BillableTokens,
+        int MeasuredRuns,
         int UnmeasuredRuns,
         string? How,
         string? SetBy,
@@ -178,6 +182,7 @@ public static class OutcomeFigures
             isOpen ? null : close?.ElapsedSeconds,
             runs.Sum(AgentSeconds),
             runs.Where(r => r.Measured).Sum(r => r.Billable ?? 0),
+            runs.Count(r => r.Measured),
             runs.Count(r => !r.Measured),
             link?.How,
             link?.SetBy,

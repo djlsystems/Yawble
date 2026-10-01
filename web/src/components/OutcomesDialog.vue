@@ -29,6 +29,7 @@ import {
   duration,
   elapsedText,
   firstLine,
+  lineTokensFigure,
   matchesFilter,
   mergePreviewText,
   periodRange,
@@ -376,10 +377,11 @@ const history = computed<HistoryLine[]>(() => {
   }
   for (const link of d.history) {
     const team = link.teamNameAtLink ?? link.teamId ?? 'no team';
+    const what = link.outcomeId === null ? 'set to no outcome' : `linked to "${link.outcomeNameAtLink}"`;
     lines.push({
       key: `link-${link.id}`,
       at: link.setAt,
-      text: `Workflow ${link.correlation} (${team}) linked to "${link.outcomeNameAtLink}" by ${link.setBy} (${LinkHowLabel[link.how] ?? link.how})`,
+      text: `Workflow ${link.correlation} (${team}) ${what} by ${link.setBy} (${LinkHowLabel[link.how] ?? link.how})`,
     });
   }
   return lines.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
@@ -495,8 +497,8 @@ function tokensCell(figures: OutcomeFigures) {
               <td class="text-left">{{ when(line.startedAt) }}</td>
               <td class="text-right">{{ line.elapsedSeconds === null ? '—' : duration(line.elapsedSeconds) }}</td>
               <td class="text-right">{{ duration(line.agentSeconds) }}</td>
-              <td class="text-right">
-                {{ line.billableTokens === 0 && line.unmeasuredRuns > 0 ? 'not measured' : line.billableTokens.toLocaleString() }}
+              <td class="text-right" data-outcome-tokens>
+                {{ lineTokensFigure(line) }}
                 <div v-if="line.unmeasuredRuns > 0" class="text-caption os-text-muted">{{ unmeasuredText(line.unmeasuredRuns) }}</div>
               </td>
               <td class="text-left">
