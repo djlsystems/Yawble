@@ -9,8 +9,8 @@ namespace Harness.Messaging;
 /// sets neither <c>Pooling</c> nor any pragma, and opens with <c>Cache=Shared</c>. This class is
 /// mechanically closer to the Identity stores (<c>SqliteTeamStore</c>, <c>SqliteUserStore</c>,
 /// <c>SqlitePrincipalStore</c>): same connection string shape, same <c>Pooling=false</c>, same
-/// reliance on <c>MessageSchema</c>'s steps having been applied by <c>SchemaMigrator</c> before this
-/// is constructed.
+/// reliance on <c>MessageSchema</c>'s steps (and <c>OutcomeSchema</c>'s, for
+/// <c>delivery_ledger</c>) having been applied by <c>SchemaMigrator</c> before this is constructed.
 /// </summary>
 public sealed class SqlitePendingDeliveries : IPendingDeliveries
 {
@@ -34,16 +34,38 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
     /// DO NOTHING on conflict rather than upserting `started = 0`. A re-offer of a delivery that is
     /// already in flight must not look un-started, or a restart would resume work an agent was
     /// half-way through - the exact outcome the started flag exists to prevent.
+    ///
+    /// <para>
+    /// THE DELIVERY'S ATTRIBUTION IS RECORDED HERE, in the same transaction (<c>delivery_ledger</c>,
+    /// <see cref="LedgerRows.WriteDeliveryAsync"/>): when it was queued and the trigger fire it
+    /// answers, while the rows that say so are still on the log. A Reset before the run ends then
+    /// cannot take them from its ledger row. The pending row goes first, so the transaction holds
+    /// the write lock before it reads.
+    /// </para>
     /// </summary>
     public async Task AddAsync(ContainerId subscriber, long seq, CancellationToken ct = default)
     {
-        await ExecuteAsync(
-            """
-            INSERT INTO pending_deliveries (subscriber, seq, started)
-            VALUES ($subscriber, $seq, 0)
-            ON CONFLICT(subscriber, seq) DO NOTHING
-            """,
-            subscriber, seq, ct);
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                INSERT INTO pending_deliveries (subscriber, seq, started)
+                VALUES ($subscriber, $seq, 0)
+                ON CONFLICT(subscriber, seq) DO NOTHING
+                """;
+            command.Parameters.AddWithValue("$subscriber", subscriber.ToString());
+            command.Parameters.AddWithValue("$seq", seq);
+
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await LedgerRows.WriteDeliveryAsync(connection, transaction, seq, ct);
+
+        await transaction.CommitAsync(ct);
     }
 
     public async Task StartAsync(ContainerId subscriber, long seq, CancellationToken ct = default)

@@ -16,8 +16,8 @@ namespace Harness.Messaging;
 ///
 /// <para>
 /// A MODULE OF ITS OWN, in the same database file as <c>messages</c> because its rows are written
-/// inside the append's transaction. Registered in <c>SchemaModules</c>. ONE STEP; a change is a NEW
-/// step after this one, and this id is permanent.
+/// inside the append's transaction. Registered in <c>SchemaModules</c>. A shipped step is never
+/// edited; a change is a NEW step after the last one, and every id is permanent.
 /// </para>
 ///
 /// <para>
@@ -29,8 +29,10 @@ namespace Harness.Messaging;
 /// <para>
 /// <c>trigger_source</c> and <c>trigger_fired_at</c> name the trigger fire a run answered, directly
 /// or as a Manager run woken by such a run's <c>completed</c>, <c>failed</c> or <c>handback</c> row.
-/// They are resolved from the log when the row is written, because the instruction rows that link a
-/// run to its trigger are exactly what a Reset deletes. <c>close_seq</c> is the
+/// They, and <c>queued_at</c>, are read from <c>delivery_ledger</c> (<c>outcome-003</c>), recorded
+/// when the delivery was accepted, because the instruction rows that link a run to its trigger are
+/// exactly what a Reset deletes; a run whose delivery was accepted before that step falls back to
+/// the log, and keeps NULL when the log no longer holds them. <c>close_seq</c> is the
 /// <c>workflow.completed</c> or <c>workflow.closed</c> row's seq, so each appears once.
 /// </para>
 /// </summary>
@@ -154,6 +156,43 @@ public static class OutcomeSchema
 
             CREATE TRIGGER workflow_outcome_links_no_delete BEFORE DELETE ON workflow_outcome_links
             BEGIN SELECT RAISE(ABORT, 'workflow_outcome_links is append-only'); END;
+            """),
+
+        // WHAT A RUN ANSWERED AND WHERE A BUDGET'S WINDOW STARTS, recorded when they happen rather
+        // than looked up on the log when the run ends: a Reset in between deletes the rows the
+        // lookup follows. `delivery_ledger` is written with the `pending_deliveries` row that
+        // accepts a delivery (`SqlitePendingDeliveries.AddAsync`), `nudge_ledger` with the nudge's
+        // own log row (`LedgerRows.WriteAsync`). Both are append-only, as the two tables above.
+        new MigrationStep(
+            "outcome-003",
+            """
+            CREATE TABLE delivery_ledger (
+                delivery_seq     INTEGER PRIMARY KEY,
+                correlation      INTEGER NOT NULL,
+                queued_at        TEXT    NOT NULL,
+                trigger_source   TEXT    NULL,
+                trigger_fired_at TEXT    NULL
+            );
+
+            CREATE TABLE nudge_ledger (
+                nudge_seq   INTEGER PRIMARY KEY,
+                correlation INTEGER NOT NULL,
+                nudged_at   TEXT    NOT NULL
+            );
+
+            CREATE INDEX ix_nudge_ledger_correlation ON nudge_ledger(correlation, nudge_seq);
+
+            CREATE TRIGGER delivery_ledger_no_update BEFORE UPDATE ON delivery_ledger
+            BEGIN SELECT RAISE(ABORT, 'delivery_ledger is append-only'); END;
+
+            CREATE TRIGGER delivery_ledger_no_delete BEFORE DELETE ON delivery_ledger
+            BEGIN SELECT RAISE(ABORT, 'delivery_ledger is append-only'); END;
+
+            CREATE TRIGGER nudge_ledger_no_update BEFORE UPDATE ON nudge_ledger
+            BEGIN SELECT RAISE(ABORT, 'nudge_ledger is append-only'); END;
+
+            CREATE TRIGGER nudge_ledger_no_delete BEFORE DELETE ON nudge_ledger
+            BEGIN SELECT RAISE(ABORT, 'nudge_ledger is append-only'); END;
             """),
     ];
 }

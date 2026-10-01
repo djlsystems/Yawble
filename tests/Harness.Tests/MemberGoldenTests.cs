@@ -322,33 +322,56 @@ public sealed class MemberGoldenTests
             await registry.AddContainerAsync(team, "Worker", "claude-headless", "", [], ct: ct);
 
             var log = services.GetRequiredService<IMessageLog>();
-            await log.AppendAsync(new NewMessage(
-                MessageTypes.InstructionFor(member), """{"instruction":"go"}""", "console"), ct);
-
-            var deadline = DateTime.UtcNow.AddSeconds(60);
-            while (fake.RunsFor(member) == 0 && DateTime.UtcNow < deadline) await Task.Delay(50, ct);
-
-            var run = Assert.Single(fake.Invocations, i => i.Container == member);
             var host = services.GetRequiredService<ContainerHost>();
 
-            // The snapshot AFTER the run: its row written and the member idle again. A deadline of
-            // its own, and a failure that says so when it passes: under a full suite's load the
-            // start alone can use most of the first, and a snapshot taken mid-run then fails as a
-            // golden mismatch that reads like a change to what the member is.
-            var idleBy = DateTime.UtcNow.AddSeconds(60);
-            while ((host.Find(member)!.Snapshot().State != ContainerState.Idle
-                    || (await log.ReadAfterAsync(0, [MessageTypes.Completed], 10, ct)).Count == 0)
-                   && DateTime.UtcNow < idleBy)
+            // The snapshot AFTER the run is the one the runtime PUBLISHES as it goes Idle, never a
+            // second read. The run's end is not the member's last wake: the workflow is left open,
+            // so the idle-workflow offer delivers it one more instruction, and a check that saw it
+            // Idle followed by a read of its own could land on that second run (seen: Running,
+            // queue 1). Idle is published after the terminal row is written and with every run
+            // field cleared, so this snapshot is Idle with its `completed` row by construction.
+            // Only one published after a Running one counts, and only with nothing queued: an
+            // Idle publish from before the run, or one with the offer already waiting, is not it.
+            var settled = new TaskCompletionSource<ContainerSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var gate = new Lock();
+            var sawRunning = false;
+            void OnChanged(ContainerSnapshot s)
             {
-                await Task.Delay(50, ct);
+                if (s.Team != member.Team || s.Id != member.Name) return;
+
+                lock (gate)
+                {
+                    if (s.State == ContainerState.Running) sawRunning = true;
+                    else if (sawRunning && s.State == ContainerState.Idle && s.QueueDepth == 0) settled.TrySetResult(s);
+                }
             }
 
-            Assert.True(host.Find(member)!.Snapshot().State == ContainerState.Idle,
-                "The member did not return to Idle after its run within 60 seconds.");
+            host.Changed += OnChanged;
+
+            ContainerSnapshot snapshot;
+            try
+            {
+                await log.AppendAsync(new NewMessage(
+                    MessageTypes.InstructionFor(member), """{"instruction":"go"}""", "console"), ct);
+
+                // A deadline of its own, and a failure that says so when it passes: under a full
+                // suite's load the start alone can use most of a shorter one.
+                var idle = await Task.WhenAny(settled.Task, Task.Delay(TimeSpan.FromSeconds(60), ct));
+                Assert.True(idle == settled.Task, "The member did not return to Idle after its run within 60 seconds.");
+                snapshot = await settled.Task;
+            }
+            finally
+            {
+                host.Changed -= OnChanged;
+            }
+
+            Assert.NotEmpty(await log.ReadAfterAsync(0, [MessageTypes.Completed], 10, ct));
+
+            // The FIRST run is the one pinned; the offer's run, when it has started, is a second.
+            var run = fake.Invocations.First(i => i.Container == member);
 
             var row = (await services.GetRequiredService<ITeamStore>().MembersAsync(ct))
                 .Single(m => m.Team == team && m.Name == "Worker");
-            var snapshot = host.Find(member)!.Snapshot();
 
             var text = new StringBuilder();
             text.Append("--- row\n");

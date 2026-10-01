@@ -188,6 +188,70 @@ public sealed class UsageLedgerTests : IDisposable
         Assert.Equal(new WorkflowSpend(10, 1, 0), await _store.GetWorkflowSpendAsync(delivery.CorrelationId, Ct));
     }
 
+    [Fact]
+    public async Task A_delivery_is_attributed_when_it_is_accepted_and_the_run_reads_that_record()
+    {
+        var pending = new SqlitePendingDeliveries(Database);
+        var manager = new ContainerId("Alpha", "Manager");
+
+        // A schedule's fire to Dev, and the hand-back Dev's run writes, which wakes the Manager: the
+        // ledger's two hops, each resolved when its delivery is accepted.
+        var fire = await _store.AppendAsync(new NewMessage(
+            MessageTypes.InstructionFor(Dev), JsonSerializer.Serialize(new { instruction = "poll" }), "schedule:s1"), Ct);
+        await pending.AddAsync(Dev, fire.Seq, Ct);
+        var handback = await _store.AppendAsync(new NewMessage(MessageTypes.Handback, "{}", Dev.ToString(), fire.Seq), Ct);
+        await pending.AddAsync(manager, handback.Seq, Ct);
+        await pending.AddAsync(manager, handback.Seq, Ct);
+
+        var fired = fire.OccurredAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(
+            [$"{fire.Seq}|{fired}|schedule:s1|{fired}",
+             $"{handback.Seq}|{handback.OccurredAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)}|schedule:s1|{fired}"],
+            await DeliveryRecordsAsync());
+
+        // THE RUN READS THE RECORD, not the log: a record that says otherwise than the log wins.
+        var tell = await _store.AppendAsync(Instruction("look"), Ct);
+        await ExecuteAsync(
+            $"INSERT INTO delivery_ledger VALUES ({tell.Seq}, {tell.CorrelationId}, '2026-01-01T00:00:00.0000000+00:00', 'trigger:t9', '2026-01-01T00:00:00.0000000+00:00')");
+        await pending.AddAsync(Dev, tell.Seq, Ct);
+        await _store.AppendAsync(Terminal(tell.Seq, new { tokensIn = 5, tokensOut = 5, tokensSource = "claude" }), Ct);
+
+        var run = Assert.Single(await _ledger.ReadRecentRunsAsync(Dev, 10, Ct));
+        Assert.Equal("trigger:t9", run.TriggerSource);
+        Assert.Equal(DateTimeOffset.Parse("2026-01-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture), run.QueuedAt);
+
+        await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync("UPDATE delivery_ledger SET trigger_source = NULL"));
+        await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync("DELETE FROM delivery_ledger"));
+    }
+
+    [Fact]
+    public async Task A_nudge_writes_its_row_with_its_log_row_and_nothing_updates_or_deletes_it()
+    {
+        var root = await _store.AppendAsync(Instruction("look"), Ct);
+        var nudge = await _store.AppendAsync(Instruction("nudged", root.Seq), Ct);
+        await _store.AppendAsync(Instruction("not a nudge", nudge.Seq), Ct);
+
+        Assert.Equal(1, await CountAsync("SELECT COUNT(*) FROM nudge_ledger"));
+        Assert.Equal(nudge.Seq, await CountAsync($"SELECT nudge_seq FROM nudge_ledger WHERE correlation = {root.Seq}"));
+
+        await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync("UPDATE nudge_ledger SET correlation = 0"));
+        await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync("DELETE FROM nudge_ledger"));
+    }
+
+    private async Task<List<string>> DeliveryRecordsAsync()
+    {
+        await using var connection = new SqliteConnection($"Data Source={Database};Pooling=False");
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT delivery_seq || '|' || queued_at || '|' || trigger_source || '|' || trigger_fired_at FROM delivery_ledger ORDER BY delivery_seq";
+
+        var rows = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct)) rows.Add(reader.GetString(0));
+        return rows;
+    }
+
     private static NewMessage Instruction(string text, long? causation = null) =>
         new(MessageTypes.InstructionFor(Dev), JsonSerializer.Serialize(new { instruction = text }), "console", causation);
 

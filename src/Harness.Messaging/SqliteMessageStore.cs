@@ -1852,9 +1852,10 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
     /// <summary>
     /// ON THE LEDGER, so Reset's "Delete memory" no longer lowers a workflow's spend: the member's
-    /// log rows go, its ledger rows stay. The NUDGE WINDOW is still the log's - a nudge is an
-    /// instruction row, not a run - so a Reset that deletes the nudge itself widens the window back
-    /// to the whole workflow: the budget reads more, never less.
+    /// log rows go, its ledger rows stay. The NUDGE WINDOW is the ledger's too: each nudge writes a
+    /// <c>nudge_ledger</c> row with its log row (<see cref="LedgerRows"/>), so a Reset that deletes
+    /// the nudge leaves the window where it was. A nudge from before <c>outcome-003</c> has no
+    /// ledger row and is still read from the log while the log holds it.
     /// </summary>
     private async Task<WorkflowSpend> SpendAsync(
         long correlationId, bool sinceLastNudge, CancellationToken ct)
@@ -1873,6 +1874,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // THE WINDOW. Zero for the whole-workflow figure, so the clause costs nothing there;
         // for the budget it is the last instruction caused by the correlation itself - a nudge, by
         // construction - and 0 again when there has been none, which reads the whole workflow.
+        // The ledger's record first; the log only for a nudge from before the ledger kept them.
         long since = 0;
 
         if (sinceLastNudge)
@@ -1880,10 +1882,12 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             await using var window = connection.CreateCommand();
             window.CommandText =
                 """
-                SELECT COALESCE(MAX(seq), 0) FROM messages
-                WHERE correlation_id = $id
-                  AND causation_seq = $id
-                  AND type LIKE 'agentContainer.instruction.%'
+                SELECT MAX(
+                    (SELECT COALESCE(MAX(nudge_seq), 0) FROM nudge_ledger WHERE correlation = $id),
+                    (SELECT COALESCE(MAX(seq), 0) FROM messages
+                     WHERE correlation_id = $id
+                       AND causation_seq = $id
+                       AND type LIKE 'agentContainer.instruction.%'))
                 """;
             window.Parameters.AddWithValue("$id", correlationId);
 
@@ -1985,6 +1989,10 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // something strictly shrinks the table - the bound is the depth of the longest causation
         // chain, which is small.
         //
+        // A DELIVERY STILL QUEUED FOR A RUN IS CITED TOO (`pending_deliveries`): its run will write
+        // `started` and its terminal row caused by it, and the log refuses a row whose cause is gone,
+        // so deleting it would let the run spend and leave no row - and no ledger row - behind.
+        //
         // The obvious alternative - delete in descending seq order and catch the constraint
         // violation - is wrong twice over: it relies on foreign keys being ENFORCED, which this
         // store's Open() does not arrange, and it uses an exception for an ordinary outcome that has
@@ -2000,6 +2008,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                  WHERE seq IN ({ids})
                    AND seq NOT IN (
                        SELECT causation_seq FROM messages WHERE causation_seq IS NOT NULL)
+                   AND seq NOT IN (SELECT seq FROM pending_deliveries)
                  """;
 
             var removed = await command.ExecuteNonQueryAsync(ct);

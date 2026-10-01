@@ -393,7 +393,8 @@ public interface IMessageLog
         long afterSeq, int max, CancellationToken ct = default);
 
     /// <summary>
-    /// Removes these messages, EXCEPT any still cited by a message that is not going.
+    /// Removes these messages, EXCEPT any still cited by a message that is not going, or still
+    /// queued for a member's run (<c>pending_deliveries</c>): that run's own rows will cite it.
     ///
     /// The one mutation on an otherwise append-only log, and it exists for one caller: an opt-in,
     /// irreversible purge, for content that should be GONE rather than merely unreachable -

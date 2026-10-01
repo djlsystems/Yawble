@@ -97,7 +97,10 @@ interface TableState {
 const states = new WeakMap<HTMLElement, TableState>();
 
 function tableOf(el: HTMLElement): HTMLTableElement | null {
-  return el instanceof HTMLTableElement ? el : el.querySelector('table');
+  // BY TAG, NOT `instanceof HTMLTableElement`: a directive hook can run after a test's DOM
+  // environment is torn down, where that global no longer exists and the check itself throws.
+  if (el.tagName === 'TABLE') return el as HTMLTableElement;
+  return typeof el.querySelector === 'function' ? el.querySelector('table') : null;
 }
 
 function headerCells(table: HTMLTableElement): HTMLTableCellElement[] {

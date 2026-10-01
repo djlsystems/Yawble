@@ -6,7 +6,8 @@ using Microsoft.Data.Sqlite;
 namespace Harness.Messaging;
 
 /// <summary>
-/// THE ONE WRITER OF <c>usage_ledger</c> AND <c>workflow_ledger</c> (see <see cref="OutcomeSchema"/>).
+/// THE ONE WRITER OF <c>usage_ledger</c>, <c>workflow_ledger</c>, <c>delivery_ledger</c> AND
+/// <c>nudge_ledger</c> (see <see cref="OutcomeSchema"/>).
 ///
 /// <para>
 /// CALLED FROM <c>SqliteMessageStore.InsertAsync</c>, inside the append's own transaction, which is
@@ -42,7 +43,49 @@ public static class LedgerRows
             return await WriteWorkflowAsync(connection, transaction, stored, backfilled, ct);
         }
 
+        if (IsNudge(stored)) return await WriteNudgeAsync(connection, transaction, stored, ct);
+
         return false;
+    }
+
+    /// <summary>
+    /// A NUDGE: an instruction caused by the workflow's root itself - the rows the budget's window
+    /// starts at (<c>GetSpendSinceNudgeAsync</c>). By construction, as the nudge route writes it.
+    /// </summary>
+    public static bool IsNudge(Message row) =>
+        row.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)
+        && row.CausationSeq is { } cause && cause == row.CorrelationId;
+
+    /// <summary>
+    /// Records what the delivery <paramref name="deliverySeq"/> will be charged to when its run
+    /// ends - when it was queued and the trigger fire it answers - at the moment it is accepted, in
+    /// the caller's transaction (<c>SqlitePendingDeliveries.AddAsync</c>). Resolved from the log now,
+    /// while the rows it follows are still there. A delivery offered again (a re-offer, a restart,
+    /// a second subscriber of the same row) resolves the same answer and adds nothing. Answers
+    /// whether a row was written.
+    /// </summary>
+    public static async Task<bool> WriteDeliveryAsync(
+        SqliteConnection connection, SqliteTransaction transaction, long deliverySeq, CancellationToken ct)
+    {
+        if (await RowAsync(connection, transaction, deliverySeq, ct) is not { } delivery) return false;
+
+        var (triggerSource, triggerFiredAt) = await TriggerOfAsync(connection, transaction, delivery, ct);
+
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText =
+            """
+            INSERT OR IGNORE INTO delivery_ledger (delivery_seq, correlation, queued_at, trigger_source, trigger_fired_at)
+            VALUES ($seq, $correlation, $queued, $trigger, $firedAt)
+            """;
+
+        insert.Parameters.AddWithValue("$seq", delivery.Seq);
+        insert.Parameters.AddWithValue("$correlation", delivery.CorrelationId);
+        insert.Parameters.AddWithValue("$queued", delivery.OccurredAt);
+        insert.Parameters.AddWithValue("$trigger", (object?)triggerSource ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$firedAt", (object?)triggerFiredAt ?? DBNull.Value);
+
+        return await insert.ExecuteNonQueryAsync(ct) > 0;
     }
 
     /// <summary>A `completed` or `failed` row that carries its run: not a batched run's extra row.</summary>
@@ -56,26 +99,17 @@ public static class LedgerRows
     {
         var (teamId, member) = Split(terminal.Source);
 
-        // THE DELIVERY THIS ROW CLOSED, and - for a Manager woken by another run - the row that woke
-        // it and that row's own delivery: how a trigger's fire is traced to the runs it paid for.
-        var cause = terminal.CausationSeq is { } causeSeq ? await RowAsync(connection, transaction, causeSeq, ct) : null;
-        var causeOfCause = cause?.CausationSeq is { } upstream ? await RowAsync(connection, transaction, upstream, ct) : null;
+        // THE DELIVERY THIS ROW CLOSED: when it was queued and the trigger fire it answered, as
+        // recorded when it was accepted. Only a delivery accepted before `outcome-003` has no record,
+        // and is resolved from the log as it was then - NULL when a Reset has since taken the rows.
+        var attribution = terminal.CausationSeq is { } causeSeq
+            ? await RecordedDeliveryAsync(connection, transaction, causeSeq, ct)
+                ?? await LoggedDeliveryAsync(connection, transaction, causeSeq, ct)
+            : null;
 
-        string? triggerSource = null;
-        string? triggerFiredAt = null;
-
-        if (cause is not null && IsTriggerFire(cause))
-        {
-            triggerSource = cause.Source;
-            triggerFiredAt = cause.OccurredAt;
-        }
-        else if (cause is not null
-            && cause.Type is MessageTypes.Completed or MessageTypes.Failed or MessageTypes.Handback
-            && causeOfCause is not null && IsTriggerFire(causeOfCause))
-        {
-            triggerSource = causeOfCause.Source;
-            triggerFiredAt = causeOfCause.OccurredAt;
-        }
+        var queuedAt = attribution?.QueuedAt;
+        var triggerSource = attribution?.TriggerSource;
+        var triggerFiredAt = attribution?.TriggerFiredAt;
 
         // THE RUN'S `started` row: this member's latest one before the terminal and after the
         // delivery, so another run's start can never be taken for this one's. None is NULL.
@@ -122,7 +156,7 @@ public static class LedgerRows
         insert.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
         insert.Parameters.AddWithValue("$agent", (object?)agent ?? DBNull.Value);
         insert.Parameters.AddWithValue("$outcome", outcome);
-        insert.Parameters.AddWithValue("$queued", (object?)cause?.OccurredAt ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$queued", (object?)queuedAt ?? DBNull.Value);
         insert.Parameters.AddWithValue("$started", (object?)started?.OccurredAt ?? DBNull.Value);
         insert.Parameters.AddWithValue("$ended", Stamp(terminal.OccurredAt));
         insert.Parameters.AddWithValue("$measured", usage.Measured ? 1 : 0);
@@ -182,19 +216,90 @@ public static class LedgerRows
     /// </summary>
     private const string TeamNameSql = "COALESCE((SELECT t.name FROM teams t WHERE t.id = $team), $team)";
 
+    private static async Task<bool> WriteNudgeAsync(
+        SqliteConnection connection, SqliteTransaction transaction, Message nudge, CancellationToken ct)
+    {
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText =
+            """
+            INSERT OR IGNORE INTO nudge_ledger (nudge_seq, correlation, nudged_at)
+            VALUES ($seq, $correlation, $at)
+            """;
+
+        insert.Parameters.AddWithValue("$seq", nudge.Seq);
+        insert.Parameters.AddWithValue("$correlation", nudge.CorrelationId);
+        insert.Parameters.AddWithValue("$at", Stamp(nudge.OccurredAt));
+
+        return await insert.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    private sealed record Attribution(string? QueuedAt, string? TriggerSource, string? TriggerFiredAt);
+
+    private static async Task<Attribution?> RecordedDeliveryAsync(
+        SqliteConnection connection, SqliteTransaction transaction, long deliverySeq, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "SELECT queued_at, trigger_source, trigger_fired_at FROM delivery_ledger WHERE delivery_seq = $seq";
+        command.Parameters.AddWithValue("$seq", deliverySeq);
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+
+        return new Attribution(
+            reader.GetString(0),
+            reader.IsDBNull(1) ? null : reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2));
+    }
+
+    /// <summary>The fallback for a delivery accepted before <c>outcome-003</c>: the log, as it is now.</summary>
+    private static async Task<Attribution?> LoggedDeliveryAsync(
+        SqliteConnection connection, SqliteTransaction transaction, long deliverySeq, CancellationToken ct)
+    {
+        if (await RowAsync(connection, transaction, deliverySeq, ct) is not { } delivery) return null;
+
+        var (triggerSource, triggerFiredAt) = await TriggerOfAsync(connection, transaction, delivery, ct);
+        return new Attribution(delivery.OccurredAt, triggerSource, triggerFiredAt);
+    }
+
+    /// <summary>
+    /// The trigger fire a delivery answers, in the ledger's two hops: the delivery itself is the fire,
+    /// or - for a Manager woken by another run - it is that run's `completed`, `failed` or `handback`
+    /// row and the fire is that row's own delivery. How a trigger's fire is traced to the runs it paid for.
+    /// </summary>
+    private static async Task<(string? Source, string? FiredAt)> TriggerOfAsync(
+        SqliteConnection connection, SqliteTransaction transaction, LinkedRow delivery, CancellationToken ct)
+    {
+        if (IsTriggerFire(delivery)) return (delivery.Source, delivery.OccurredAt);
+
+        if (delivery.Type is MessageTypes.Completed or MessageTypes.Failed or MessageTypes.Handback
+            && delivery.CausationSeq is { } upstream
+            && await RowAsync(connection, transaction, upstream, ct) is { } fire
+            && IsTriggerFire(fire))
+        {
+            return (fire.Source, fire.OccurredAt);
+        }
+
+        return (null, null);
+    }
+
     private static bool IsTriggerFire(LinkedRow row) =>
         row.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)
         && (row.Source.StartsWith("schedule:", StringComparison.Ordinal)
             || row.Source.StartsWith("trigger:", StringComparison.Ordinal));
 
-    private sealed record LinkedRow(long Seq, string Type, string Source, string OccurredAt, long? CausationSeq);
+    private sealed record LinkedRow(
+        long Seq, string Type, string Source, string OccurredAt, long? CausationSeq, long CorrelationId = 0);
 
     private static async Task<LinkedRow?> RowAsync(
         SqliteConnection connection, SqliteTransaction transaction, long seq, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT seq, type, source, occurred_at, causation_seq FROM messages WHERE seq = $seq";
+        command.CommandText =
+            "SELECT seq, type, source, occurred_at, causation_seq, correlation_id FROM messages WHERE seq = $seq";
         command.Parameters.AddWithValue("$seq", seq);
 
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -202,7 +307,7 @@ public static class LedgerRows
 
         return new LinkedRow(
             reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-            reader.IsDBNull(4) ? null : reader.GetInt64(4));
+            reader.IsDBNull(4) ? null : reader.GetInt64(4), reader.GetInt64(5));
     }
 
     private static async Task<LinkedRow?> StartedAsync(
