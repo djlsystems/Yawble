@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { nextTick, ref } from 'vue';
+import type { QInput } from 'quasar';
 import { composedLine } from '../lib/keys';
+import { dragCarriesFiles, droppedImages, pastedImage } from '../lib/conciergeAttachment';
 
-const emit = defineEmits<{ send: [sequence: string] }>();
+const emit = defineEmits<{ send: [sequence: string]; images: [files: File[]] }>();
 
 /**
  * A real text field, which is the entire point.
@@ -25,6 +27,54 @@ const text = ref('');
  * quietly done nothing — leaving a field that looks right and helps with nothing.
  */
 
+const field = ref<QInput>();
+
+/**
+ * AN IMAGE PASTED OR DROPPED HERE IS HANDED TO THE PANEL, which uploads it and calls `insert` with
+ * the path. A text paste is left to the field, so it behaves as it does everywhere else.
+ */
+function onPaste(event: ClipboardEvent) {
+  const image = pastedImage(event.clipboardData);
+  if (!image) return;
+
+  event.preventDefault();
+  emit('images', [image]);
+}
+
+function onDragOver(event: DragEvent) {
+  if (dragCarriesFiles(event.dataTransfer)) event.preventDefault();
+}
+
+function onDrop(event: DragEvent) {
+  if (!dragCarriesFiles(event.dataTransfer)) return;
+
+  // Cancelled even when nothing in it is an image: a file the browser is left to handle is one it
+  // navigates to, taking the panel with it.
+  event.preventDefault();
+  event.stopPropagation();
+
+  const images = droppedImages(event.dataTransfer);
+  if (images.length > 0) emit('images', images);
+}
+
+/**
+ * Puts text at the caret, replacing any selection, as a paste would, and leaves the caret after it.
+ * At the end when the field has never been focused.
+ */
+async function insert(inserted: string) {
+  const input = field.value?.getNativeElement() as HTMLInputElement | undefined;
+  const start = input?.selectionStart ?? text.value.length;
+  const end = input?.selectionEnd ?? start;
+
+  text.value = text.value.slice(0, start) + inserted + text.value.slice(end);
+
+  await nextTick();
+  const caret = start + inserted.length;
+  input?.setSelectionRange(caret, caret);
+}
+
+defineExpose({ insert });
+
 function send() {
   const sequence = composedLine(text.value);
 
@@ -37,30 +87,38 @@ function send() {
 </script>
 
 <template>
-  <q-input
-    v-model="text"
-    dense
-    outlined
-    dark
-    class="concierge-compose bg-grey-10 q-px-xs q-py-xs"
-    placeholder="Type or dictate, then send"
-    aria-label="Compose a line for the console"
-    enterkeyhint="send"
-    autocorrect="on"
-    autocapitalize="sentences"
-    spellcheck="true"
-    @keyup.enter="send"
-  >
-    <template #append>
-      <q-btn dense flat round icon="send" aria-label="Send" :disable="!text.trim()" @click="send" />
-    </template>
-  </q-input>
+  <!-- The paste and drop listeners sit on a wrapper because the events bubble here from the native
+       input, and QInput claims a paste listener of its own for its mask. -->
+  <div class="concierge-compose-wrap" @paste="onPaste" @dragover="onDragOver" @drop="onDrop">
+    <q-input
+      ref="field"
+      v-model="text"
+      dense
+      outlined
+      dark
+      class="concierge-compose bg-grey-10 q-px-xs q-py-xs"
+      placeholder="Type or dictate, then send"
+      aria-label="Compose a line for the console"
+      enterkeyhint="send"
+      autocorrect="on"
+      autocapitalize="sentences"
+      spellcheck="true"
+      @keyup.enter="send"
+    >
+      <template #append>
+        <q-btn dense flat round icon="send" aria-label="Send" :disable="!text.trim()" @click="send" />
+      </template>
+    </q-input>
+  </div>
 </template>
 
 <style scoped>
+.concierge-compose-wrap {
+  flex: 0 0 auto;
+}
+
 .concierge-compose {
   /* A touch target, not a mouse target — the same floor the key bar holds. */
   min-height: 44px;
-  flex: 0 0 auto;
 }
 </style>
