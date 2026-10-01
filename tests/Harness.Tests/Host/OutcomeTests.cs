@@ -55,7 +55,7 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
     }
 
     /// <summary>The tools as <paramref name="id"/> holding <paramref name="permits"/> calls them.</summary>
-    private PlatformMcpTools Tools(string id, PrincipalKind kind, string team, IReadOnlySet<string> permits, string? owner = null)
+    private PlatformMcpTools Tools(string id, PrincipalKind kind, string? team, IReadOnlySet<string> permits, string? owner = null)
     {
         var key = host.Services.GetRequiredService<IPrincipalStore>()
             .MintAsync(id, kind, team, permits, ownerUserId: owner, ct: Ct).GetAwaiter().GetResult();
@@ -834,6 +834,49 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         var unlinked = await WorkflowAsync(person, host.Alpha);
         var found = await Outcomes.CurrentOutcomesAsync([older, newer, unlinked], Ct);
         Assert.Equal((first.Id, second.Id, false), (found[older].Id, found[newer].Id, found.ContainsKey(unlinked)));
+    }
+
+    [Fact]
+    public async Task The_kanban_tools_outcome_argument_narrows_a_teams_and_the_tenants_board_and_its_filter_text_names_it()
+    {
+        var person = await host.PersonAsync();
+        var outcome = await CreateAsync(person, Unique("Kanban tool"));
+        var linked = await WorkflowAsync(person, host.Alpha, outcome.Id);
+        var unlinked = await WorkflowAsync(person, host.Alpha);
+
+        static List<JsonElement> Cards(string answer)
+        {
+            Assert.StartsWith("HTTP 200", answer, StringComparison.Ordinal);
+            return JsonDocument.Parse(answer.Split(Environment.NewLine, 2)[1]).RootElement
+                .GetProperty("cards").EnumerateArray().Select(c => c.Clone()).ToList();
+        }
+
+        static List<long> Workflows(List<JsonElement> cards) =>
+            cards.Select(c => c.GetProperty("workflowSeq").GetInt64()).ToList();
+
+        // A TEAM-BOUND caller reads its team's board: an id keeps that outcome's cards, none the cards with none.
+        var manager = ManagerTools(host.Alpha);
+        Assert.Equal([linked], Workflows(Cards(await manager.Kanban("board", outcome: outcome.Id, cancellationToken: Ct))));
+        var none = Cards(await manager.Kanban("board", outcome: "none", cancellationToken: Ct));
+        Assert.Contains(unlinked, Workflows(none));
+        Assert.DoesNotContain(linked, Workflows(none));
+        Assert.All(none, c => Assert.Equal(JsonValueKind.Null, c.GetProperty("outcome").ValueKind));
+
+        // A TENANT-WIDE Concierge reads the tenant board, narrowed the same way.
+        var user = (await host.Services.GetRequiredService<IUserStore>().FindAsync(Email, Ct))!;
+        var concierge = Tools(
+            ConciergeLaunchFactory.PrincipalId(user.Id) + Guid.NewGuid().ToString("N"), PrincipalKind.TenantConcierge, null,
+            ConciergeLaunchFactory.ConciergePermits, owner: user.Id);
+        Assert.Equal([linked], Workflows(Cards(await concierge.Kanban("board", team: host.Alpha, outcome: outcome.Id, cancellationToken: Ct))));
+        var tenantNone = Workflows(Cards(await concierge.Kanban("board", team: host.Alpha, outcome: "none", cancellationToken: Ct)));
+        Assert.Contains(unlinked, tenantNone);
+        Assert.DoesNotContain(linked, tenantNone);
+
+        // THE FILTER TEXT names Outcome among the four, with an id or none, and no URL.
+        var filter = await manager.Kanban("filter", cancellationToken: Ct);
+        Assert.Contains("four filters: team, member, status, and outcome", filter, StringComparison.Ordinal);
+        Assert.Contains("an outcome's id from the outcome tool's list, or none for cards with no outcome", filter, StringComparison.Ordinal);
+        Assert.DoesNotContain("/api/", filter, StringComparison.Ordinal);
     }
 
     [Fact]

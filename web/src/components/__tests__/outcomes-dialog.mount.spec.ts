@@ -75,6 +75,8 @@ const proposal = outcome('o-2', '<b>Faster</b> triage', 'proposed', {
 });
 const retired = outcome('o-3', 'Old goal', 'retired');
 const merged = outcome('o-4', 'Duplicate goal', 'merged', { mergedInto: 'o-1' });
+/** A second live merge target, so a pick can change while the first pick's preview is in flight. */
+const secondTarget = outcome('o-5', 'Second target', 'active');
 
 function listing(over: Partial<OutcomeList> = {}): OutcomeList {
   return {
@@ -398,6 +400,42 @@ describe('Manage Outcomes: an outcome opened', () => {
 
     await click('[data-outcome-merge-confirm]');
     expect(api.mergeOutcome).toHaveBeenCalledWith('o-2', 'o-1');
+  });
+
+  it('shows and merges into the newer pick when the earlier pick\'s preview answers last', async () => {
+    api.listOutcomes.mockResolvedValue(listing({ outcomes: [pipeline, proposal, retired, merged, secondTarget] }));
+    const previewOf = (into: Outcome, links: number) => ({
+      preview: true,
+      from: { id: 'o-2', name: proposal.name, status: 'proposed' },
+      into: { id: into.id, name: into.name, status: into.status },
+      refusal: null,
+      moves: { links, figures: figures({ workflows: { open: 0, completed: links, closed: 0, total: links } }) },
+    });
+    // X's preview is held until the test releases it; Y's answers at once.
+    let releaseX!: (answer: unknown) => void;
+    api.previewMerge.mockImplementation((_from: string, into: string) =>
+      into === 'o-1' ? new Promise((resolve) => (releaseX = resolve)) : Promise.resolve(previewOf(secondTarget, 2)),
+    );
+    const wrapper = await open({ outcome: 'o-2' });
+    await click('[data-outcome-action="merge"]');
+
+    await choose(wrapper, 'Outcome', 'Current job pipeline');
+    expect(bodyFind('[data-outcome-merge-preview]')).toBeNull();
+    await choose(wrapper, 'Outcome', 'Second target');
+    expect(bodyFind('[data-outcome-merge-preview]')?.textContent).toContain('move to Second target.');
+
+    releaseX(previewOf(pipeline, 7));
+    await settle();
+
+    expect(api.previewMerge.mock.calls).toEqual([['o-2', 'o-1'], ['o-2', 'o-5']]);
+    const shown = bodyFind('[data-outcome-merge-preview]')?.textContent ?? '';
+    expect(shown).toContain('2 workflows');
+    expect(shown).toContain('move to Second target.');
+    expect(shown).not.toContain('Current job pipeline');
+
+    await click('[data-outcome-merge-confirm]');
+    expect(api.mergeOutcome).toHaveBeenCalledTimes(1);
+    expect(api.mergeOutcome).toHaveBeenCalledWith('o-2', 'o-5');
   });
 
   it('moves a workflow to another outcome through the link route', async () => {

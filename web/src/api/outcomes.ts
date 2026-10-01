@@ -222,3 +222,22 @@ export async function listLiveOutcomes(): Promise<OutcomeRef[]> {
 export function outcomeLabel(outcome: Pick<OutcomeRef, 'name' | 'status'>): string {
   return outcome.status === 'proposed' ? `${outcome.name} (proposed)` : outcome.name
 }
+
+/**
+ * A CURRENT VALUE NO PICKER OFFERS - a retired or merged outcome - by name, or null when the id
+ * names no outcome or the read fails. The pickers list only live outcomes, so without this a
+ * person would see the bare id.
+ */
+export async function findOutcomeRef(id: string): Promise<OutcomeRef | null> {
+  try {
+    const { outcome } = await getOutcome(id)
+    return outcome ? { id: outcome.id, name: outcome.name, status: outcome.status } : null
+  } catch {
+    return null
+  }
+}
+
+/** How a current value that is no longer on offer reads: `Old goal (retired)`, `Duplicate goal (merged)`. */
+export function endedOutcomeLabel(outcome: Pick<OutcomeRef, 'name' | 'status'>): string {
+  return `${outcome.name} (${outcome.status})`
+}
