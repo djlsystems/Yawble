@@ -240,7 +240,7 @@ public sealed class TenantSettings
 
     public IReadOnlyList<TenantSettingDefinition> Definitions { get; }
 
-    /// <summary>Raised after a write, once per changed setting, with the setting's name.</summary>
+    /// <summary>Raised after a write or a reset, once per changed setting, with the setting's name.</summary>
     public event Action<string>? Changed;
 
     public async Task LoadAsync(CancellationToken ct = default)
@@ -448,14 +448,15 @@ public sealed class TenantSettings
 
     /// <summary>
     /// Validates every entry of a partial map, then writes the ones that change - all or none - and
-    /// applies them. Throws <see cref="TenantSettingRejected"/> naming the first field that fails.
-    /// Returns the names written.
+    /// applies them. A JSON <c>null</c> resets the setting: its row is removed, so appsettings.json,
+    /// then the built-in default, applies; a reset of a setting with no row changes nothing. Throws
+    /// <see cref="TenantSettingRejected"/> naming the first field that fails. Returns the names written.
     /// </summary>
     public async Task<IReadOnlyList<string>> WriteAsync(
         IReadOnlyDictionary<string, JsonElement> changes, string? actorId, string actorEmail,
         CancellationToken ct = default)
     {
-        var parsed = new List<(string Name, string Value)>();
+        var parsed = new List<(string Name, string? Value)>();
 
         foreach (var (name, element) in changes)
         {
@@ -464,7 +465,7 @@ public sealed class TenantSettings
                 throw new TenantSettingRejected(name, $"'{name}' is not a setting that can be changed here.");
             }
 
-            parsed.Add((name, Validate(definition, element)));
+            parsed.Add((name, element.ValueKind == JsonValueKind.Null ? null : Validate(definition, element)));
         }
 
         await _writes.WaitAsync(ct);
@@ -472,7 +473,9 @@ public sealed class TenantSettings
         try
         {
             var pending = parsed
-                .Where(p => !(_rows.TryGetValue(p.Name, out var row) && row.Value == p.Value))
+                .Where(p => p.Value is null
+                    ? _rows.ContainsKey(p.Name)
+                    : !(_rows.TryGetValue(p.Name, out var row) && row.Value == p.Value))
                 .Select(p => new TenantSettingChange(p.Name, Current(p.Name), p.Value))
                 .ToList();
 
@@ -481,12 +484,17 @@ public sealed class TenantSettings
             var written = await _store.WriteAsync(pending, actorId, actorEmail, ct);
 
             var rows = new Dictionary<string, TenantSettingRow>(_rows, StringComparer.Ordinal);
-            foreach (var row in written) rows[row.Name] = row;
+            foreach (var change in written)
+            {
+                if (change.Row is { } row) rows[change.Name] = row;
+                else rows.Remove(change.Name);
+            }
+
             _rows = rows;
 
-            foreach (var row in written) Changed?.Invoke(row.Name);
+            foreach (var change in written) Changed?.Invoke(change.Name);
 
-            return written.Select(row => row.Name).ToList();
+            return written.Select(change => change.Name).ToList();
         }
         finally
         {

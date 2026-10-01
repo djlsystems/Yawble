@@ -119,6 +119,11 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
     [InlineData("kanban.wipLimits", "{\"review\":3}")]
     [InlineData("theme.default", "\"purple\"")]
     [InlineData("no.such.setting", "1")]
+    [InlineData("no.such.setting", "null")]
+    [InlineData("fileBrowser.roots.data", "null")]
+    [InlineData("kanban.wipLimits", "{\"todo\":null}")]
+    [InlineData("system.packages", "[null]")]
+    [InlineData("agents.tags", "{\"claude\":null}")]
     public async Task An_invalid_value_is_refused_naming_the_field_and_nothing_is_written(string name, string json)
     {
         var ct = TestContext.Current.CancellationToken;
@@ -261,6 +266,190 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
                 count.CommandText = "SELECT COUNT(*) FROM tenant_settings";
                 Assert.Equal(0L, (long)(await count.ExecuteScalarAsync(ct))!);
             }
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(directory, recursive: true); }
+            catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task A_reset_removes_the_row_and_appends_its_tenant_row()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = await host.PersonAsync();
+        var settings = host.Services.GetRequiredService<TenantSettings>();
+        var fallback = int.Parse(settings.Fallback("resume.maxAutomatic"));
+        var target = fallback + 3;
+
+        var set = await client.PutAsJsonAsync(
+            "/api/tenant/settings", new Dictionary<string, object> { ["resume.maxAutomatic"] = target }, ct);
+        Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+        Assert.Equal(target, settings.ResumeMaxAutomatic);
+
+        // What the Settings dialog's "Reset to default" sends: the setting, as JSON null.
+        using var content = new StringContent(
+            """{"resume.maxAutomatic": null}""", System.Text.Encoding.UTF8, "application/json");
+        var reset = await client.PutAsync("/api/tenant/settings", content, ct);
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+
+        // The row is gone, from the store and from memory: the fallback applies with no restart.
+        Assert.Null(settings.Row("resume.maxAutomatic"));
+        Assert.Equal(fallback, settings.ResumeMaxAutomatic);
+        var stored = await new SqliteTenantSettingsStore(Path.Combine(host.DataRoot, "messages.db")).ReadAllAsync(ct);
+        Assert.DoesNotContain(stored, row => row.Name == "resume.maxAutomatic");
+
+        using var answer = JsonDocument.Parse(await reset.Content.ReadAsStringAsync(ct));
+        var entry = answer.RootElement.GetProperty("settings").EnumerateArray()
+            .Single(s => s.GetProperty("name").GetString() == "resume.maxAutomatic");
+        Assert.Equal("appsettings", entry.GetProperty("source").GetString());
+        Assert.Equal(fallback, entry.GetProperty("value").GetInt32());
+        Assert.Equal(JsonValueKind.Null, entry.GetProperty("updatedBy").ValueKind);
+
+        var audit = await host.Services.GetRequiredService<ITenantLog>()
+            .FindLatestAsync(TenantActions.TenantSettingReset, "resume.maxAutomatic", ct);
+        Assert.NotNull(audit);
+        Assert.Equal("person@example.test", audit!.ActorEmail);
+        using var detail = JsonDocument.Parse(audit.Detail!);
+        Assert.Equal("resume.maxAutomatic", detail.RootElement.GetProperty("setting").GetString());
+        Assert.Equal(target.ToString(), detail.RootElement.GetProperty("old").GetString());
+        Assert.Equal(JsonValueKind.Null, detail.RootElement.GetProperty("new").ValueKind);
+        Assert.Equal("reset to default", detail.RootElement.GetProperty("change").GetString());
+    }
+
+    [Fact]
+    public async Task A_reset_removes_nothing_when_its_tenant_row_cannot_be_written()
+    {
+        // One transaction: an audit insert that fails keeps the row, in the file and in memory.
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"harness-settings-reset-tx-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var database = Path.Combine(directory, "messages.db");
+
+        try
+        {
+            await new SchemaMigrator(database).ApplyAsync(SchemaModules.All, ct);
+            var settings = new TenantSettings(
+                new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 8, memoryLimitMb: 12288);
+            await settings.LoadAsync(ct);
+
+            using var value = JsonDocument.Parse("9");
+            await settings.WriteAsync(
+                new Dictionary<string, JsonElement> { ["wip.maxRunning"] = value.RootElement.Clone() },
+                null, "someone@example.test", ct);
+
+            await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={database}"))
+            {
+                await connection.OpenAsync(ct);
+                await using var drop = connection.CreateCommand();
+                drop.CommandText = "DROP TABLE tenant_events";
+                await drop.ExecuteNonQueryAsync(ct);
+            }
+
+            var changed = new List<string>();
+            settings.Changed += changed.Add;
+            using var reset = JsonDocument.Parse("null");
+            await Assert.ThrowsAnyAsync<Exception>(() => settings.WriteAsync(
+                new Dictionary<string, JsonElement> { ["wip.maxRunning"] = reset.RootElement.Clone() },
+                null, "someone@example.test", ct));
+
+            Assert.Empty(changed);
+            Assert.Equal(9, settings.WipMaxRunning);
+            Assert.NotNull(settings.Row("wip.maxRunning"));
+            var stored = await new SqliteTenantSettingsStore(database).ReadAllAsync(ct);
+            Assert.Equal("9", Assert.Single(stored, row => row.Name == "wip.maxRunning").Value);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(directory, recursive: true); }
+            catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task A_reset_of_a_setting_with_no_row_writes_nothing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"harness-settings-reset-none-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var database = Path.Combine(directory, "messages.db");
+
+        try
+        {
+            await new SchemaMigrator(database).ApplyAsync(SchemaModules.All, ct);
+            var settings = new TenantSettings(
+                new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 8, memoryLimitMb: 12288);
+            await settings.LoadAsync(ct);
+            var changed = new List<string>();
+            settings.Changed += changed.Add;
+
+            using var reset = JsonDocument.Parse("null");
+            var written = await settings.WriteAsync(
+                new Dictionary<string, JsonElement> { ["quiet.window"] = reset.RootElement.Clone() },
+                null, "someone@example.test", ct);
+
+            Assert.Empty(written);
+            Assert.Empty(changed);
+
+            // The store alone holds the same line, should memory and the file ever disagree.
+            Assert.Empty(await new SqliteTenantSettingsStore(database).WriteAsync(
+                [new TenantSettingChange("quiet.window", null, null)], null, "someone@example.test", ct));
+
+            await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={database}");
+            await connection.OpenAsync(ct);
+            await using var count = connection.CreateCommand();
+            count.CommandText = "SELECT (SELECT COUNT(*) FROM tenant_settings) + (SELECT COUNT(*) FROM tenant_events)";
+            Assert.Equal(0L, (long)(await count.ExecuteScalarAsync(ct))!);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(directory, recursive: true); }
+            catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task A_reset_of_the_running_limit_applies_the_computed_bound_and_raises_changed()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"harness-settings-reset-wip-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var database = Path.Combine(directory, "messages.db");
+
+        try
+        {
+            await new SchemaMigrator(database).ApplyAsync(SchemaModules.All, ct);
+            var settings = new TenantSettings(
+                new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 8, memoryLimitMb: 12288);
+            await settings.LoadAsync(ct);
+
+            using var value = JsonDocument.Parse("5");
+            await settings.WriteAsync(
+                new Dictionary<string, JsonElement> { ["wip.maxRunning"] = value.RootElement.Clone() },
+                null, "someone@example.test", ct);
+            Assert.Equal("setting", settings.RunLimit().Bound);
+
+            // Program.cs re-applies the ledger's limit on this event, for a reset as for a write.
+            var changed = new List<string>();
+            settings.Changed += changed.Add;
+            using var reset = JsonDocument.Parse("null");
+            await settings.WriteAsync(
+                new Dictionary<string, JsonElement> { ["wip.maxRunning"] = reset.RootElement.Clone() },
+                null, "someone@example.test", ct);
+
+            Assert.Equal(["wip.maxRunning"], changed);
+            Assert.Equal(6, settings.WipMaxRunning);
+            Assert.Equal("memory", settings.RunLimit().Bound);
+
+            // A fresh start agrees: there is no row.
+            var restarted = new TenantSettings(
+                new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 8, memoryLimitMb: 12288);
+            await restarted.LoadAsync(ct);
+            Assert.Null(restarted.Row("wip.maxRunning"));
         }
         finally
         {
@@ -503,6 +692,41 @@ public sealed class WipLimitBoundTests(HostFixture host) : IClassFixture<HostFix
         var entry = settings.RootElement.GetProperty("settings").EnumerateArray()
             .Single(s => s.GetProperty("name").GetString() == "wip.maxRunning");
         Assert.Contains("Now 5: wip.maxRunning is set to 5", entry.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task Resetting_the_running_limit_names_the_cpu_or_memory_bound_without_a_restart()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = await host.PersonAsync();
+        var wip = host.Services.GetRequiredService<WipLedger>();
+        var configured = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("Wip__MaxRunning"));
+
+        var set = await client.PutAsJsonAsync(
+            "/api/tenant/settings", new Dictionary<string, object> { ["wip.maxRunning"] = 5 }, ct);
+        Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+        Assert.Equal("setting", (await LimitAsync(client, ct)).GetProperty("bound").GetString());
+
+        using var content = new StringContent(
+            """{"wip.maxRunning": null}""", System.Text.Encoding.UTF8, "application/json");
+        var reset = await client.PutAsync("/api/tenant/settings", content, ct);
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+
+        // The ledger follows the computed default at once, and /api/wip says which bound it is.
+        var limit = await LimitAsync(client, ct);
+        Assert.Equal(wip.Max, limit.GetProperty("limit").GetInt32());
+
+        if (configured)
+        {
+            Assert.Equal("configuration", limit.GetProperty("bound").GetString());
+        }
+        else
+        {
+            Assert.Contains(limit.GetProperty("bound").GetString(), new[] { "cpu", "memory" });
+            Assert.Contains("bound applies", limit.GetProperty("reason").GetString());
+        }
+
+        Assert.DoesNotContain("set to 5", limit.GetProperty("reason").GetString());
     }
 
     private static async Task<JsonElement> LimitAsync(HttpClient client, CancellationToken ct)

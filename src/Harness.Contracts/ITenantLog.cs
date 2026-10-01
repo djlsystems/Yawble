@@ -34,6 +34,12 @@ public static class TenantActions
     /// detail carries <c>setting</c>, <c>old</c> and <c>new</c>.</summary>
     public const string TenantSettingChanged = "tenant.settingChanged";
 
+    /// <summary>A person reset an instance-wide setting to its default: its row was removed, so
+    /// appsettings.json, then the built-in default, applies. Subject is the setting's name; detail
+    /// carries <c>setting</c>, <c>old</c>, <c>new</c> (null) and <c>change</c> ("reset to default").
+    /// Written in the same transaction as the delete; a reset of a setting with no row writes none.</summary>
+    public const string TenantSettingReset = "tenant.setting-reset";
+
     public const string TeamCreated = "team.created";
     public const string TeamRelabelled = "team.renamed";
     public const string TeamDeleted = "team.deleted";
