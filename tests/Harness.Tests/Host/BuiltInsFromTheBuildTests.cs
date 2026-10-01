@@ -148,6 +148,25 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.DoesNotContain("wrap-up", names);
     }
 
+    /// <summary>
+    /// The Member and Manager skills an agent loads say to take the `heavy` lease with `lease`
+    /// before heavy work and release it after, word for word.
+    /// </summary>
+    [Fact]
+    public async Task The_member_and_manager_skills_served_to_agents_name_the_heavy_lease()
+    {
+        using var member = host.Container(host.AlphaContainerKey);
+        var memberSkill = await member.GetStringAsync("/api/me/skills/member", Ct);
+        Assert.Contains(McpContractTests.HeavyLeaseRule, McpContractTests.Flat(memberSkill), StringComparison.Ordinal);
+
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+        using var manager = host.Container(key);
+        var managerSkill = await manager.GetStringAsync("/api/me/skills/manager", Ct);
+        Assert.Contains(McpContractTests.HeavyLeaseRule, McpContractTests.Flat(managerSkill), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_managers_list_has_no_worktrees_and_it_is_refused_the_member_skill()
     {
