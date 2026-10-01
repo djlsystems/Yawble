@@ -441,7 +441,7 @@ func withWip(runMemory string) string {
 	return strings.TrimSuffix(doctorStdout, "}\n") + wip
 }
 
-// B002N: doctor's running-limit and run-memory lines are the Host's answers, each mechanism
+// Doctor's running-limit and run-memory lines are the Host's answers, each mechanism
 // said in the Host's words, "not enforced" included.
 func TestDoctorShowsTheHostsRunningLimitAndRunMemory(t *testing.T) {
 	for _, c := range []struct{ runMemory, want string }{

@@ -96,7 +96,7 @@ func TestAgentsListsAgentsOnly(t *testing.T) {
 	}
 }
 
-// B002N: each agent's launch check is shown beside "signed in": ok, failed with its exit code and
+// Each agent's launch check is shown beside "signed in": ok, failed with its exit code and
 // stderr tail, not checked as such, and absent (an older Host) as not known, never ok.
 func TestAgentsShowsEachLaunchBesideTheSignIn(t *testing.T) {
 	launches := strings.NewReplacer(

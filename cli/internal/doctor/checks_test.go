@@ -645,7 +645,7 @@ func TestNoAgentVersionsRowWithoutVersions(t *testing.T) {
 	}
 }
 
-// B002N: the running limit is the Host's; a limit a person set above the Host's own bounds warns,
+// The running limit is the Host's; a limit a person set above the Host's own bounds warns,
 // and the comparison uses only the Host's figures.
 func TestTheRunningLimitIsTheHostsAnswerAndWarnsAboveItsOwnBounds(t *testing.T) {
 	r := sampleReport()

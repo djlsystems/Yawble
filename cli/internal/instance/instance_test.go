@@ -504,7 +504,7 @@ func TestAQuickStartShowsNoProgress(t *testing.T) {
 }
 
 // `up` states a configured limit as itself, and the Host's default as the Host's to name: the
-// CLI computes no figure of its own (B002N).
+// CLI computes no figure of its own.
 func TestUpStatesTheHostsDefaultWithoutComputingIt(t *testing.T) {
 	if got := instance.RunLimitText(instance.Settings{CPUs: 8, Memory: "12g"}); got != "the Host's default (yawble doctor names it)" {
 		t.Errorf("RunLimitText = %q", got)
