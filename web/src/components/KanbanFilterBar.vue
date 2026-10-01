@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useConsoleStore } from '../stores/console';
 import { useKanbanStore } from '../stores/kanban';
 import { KanbanStatusLabel, SwimlanesTeamCaption } from '../lib/kanban';
-import { KanbanStatuses, type KanbanFilters } from '../api/kanban';
+import { KanbanStatuses, NoOutcome, type KanbanFilters } from '../api/kanban';
+import { outcomeLabel } from '../api/outcomes';
 import { activeFilterCount } from '../lib/kanban';
 
 /**
- * The filter bar: three filters the SERVER resolves, and one box this browser resolves.
+ * The filter bar: four filters the SERVER resolves, and one box this browser resolves.
  *
  * Each of the three writes through `setFilters`, which drops anything that became empty and
  * refetches - so "cleared" has ONE spelling and the query string, the store and this bar always
@@ -25,8 +26,14 @@ import { activeFilterCount } from '../lib/kanban';
  * so a control here would write a filter the server ignores - a date picker that visibly does
  * nothing.
  */
+defineEmits<{ 'manage-outcomes': [] }>();
+
 const kanban = useKanbanStore();
 const board = useConsoleStore();
+
+onMounted(() => {
+  void kanban.loadOutcomes();
+});
 
 /**
  * The teams offered.
@@ -51,6 +58,16 @@ const memberOptions = computed(() =>
 const statusOptions = computed(() =>
   KanbanStatuses.map((status) => ({ label: KanbanStatusLabel[status], value: status })),
 );
+
+/**
+ * The Outcome filter: All (nothing sent), No outcome (`none`), then each active and proposed
+ * outcome by id. The names are the q-select's labels, rendered as text.
+ */
+const outcomeOptions = computed(() => [
+  { label: 'All', value: '' },
+  { label: 'No outcome', value: NoOutcome },
+  ...kanban.outcomes.map((outcome) => ({ label: outcomeLabel(outcome), value: outcome.id })),
+]);
 
 /** One writer for every control. `null` from a cleared q-select becomes an absent key. */
 function set(patch: KanbanFilters) {
@@ -115,6 +132,19 @@ const teamLocked = computed(() => kanban.view === 'swimlanes');
       @update:model-value="(value) => set({ status: value ?? '' })"
     />
 
+    <q-select
+      :model-value="kanban.filters.outcome ?? ''"
+      :options="outcomeOptions"
+      dense
+      outlined
+      emit-value
+      map-options
+      label="Outcome"
+      class="k-filter k-filter--wide"
+      data-filter="outcome"
+      @update:model-value="(value) => set({ outcome: value ?? '' })"
+    />
+
     <!-- NOT DEBOUNCED, because it fetches nothing. The three above are debounced where they are
          typed rather than chosen, since a board fetch per character is wasted projections; this one
          narrows the cards already on screen, so per-keystroke IS the feature.
@@ -143,6 +173,9 @@ const teamLocked = computed(() => kanban.view === 'swimlanes');
       :label="`Clear (${filterCount})`"
       @click="kanban.clearFilters()"
     />
+
+    <!-- Manage Outcomes; the board hosts the dialog, which a card's outcome tag also opens. -->
+    <q-btn flat dense no-caps icon="flag" label="Manage outcomes" data-manage-outcomes @click="$emit('manage-outcomes')" />
   </div>
 </template>
 

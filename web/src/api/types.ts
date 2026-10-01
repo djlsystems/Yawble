@@ -598,6 +598,9 @@ export interface TeamTrigger {
    *  day, in the trigger's timezone. Null is no cap. */
   dailyTokenCap?: number | null
 
+  /** The outcome this trigger's fires serve, by id, or null. Absent from an older server. */
+  outcomeId?: string | null
+
   /** What this trigger's runs spent today, measured only. Read-only. */
   spentToday?: TriggerSpentToday | null
 
@@ -663,6 +666,8 @@ export interface CreateTriggerRequest {
   minIntervalSeconds?: number | null
   wakeManager?: TriggerWakeManager | null
   dailyTokenCap?: number | null
+  /** The outcome its fires serve: an active or proposed outcome's id or exact name. */
+  outcomeId?: string | null
 }
 
 export interface UpdateTriggerRequest {
@@ -687,6 +692,8 @@ export interface UpdateTriggerRequest {
   minIntervalSeconds?: number | null
   wakeManager?: TriggerWakeManager | null
   dailyTokenCap?: number | null
+  /** The outcome its fires serve: an active or proposed outcome's id, or '' to clear it. */
+  outcomeId?: string | null
 }
 
 /**
@@ -1340,6 +1347,12 @@ export interface TeamWorkflowTiming {
    * and disappear together. **Absent is a different thing again**: the Host said nothing, and `spendAgainstBudget` falls back to `spend` so it goes on drawing a bar.
    */
   spendSinceNudge?: WorkflowSpend | null
+
+  /**
+   * The outcome this workflow serves now: its newest link, followed through `mergedInto`, or null
+   * for none. `name` is text. Absent from an older server.
+   */
+  outcome?: { id: string; name: string; status: 'proposed' | 'active' | 'retired' | 'merged' } | null
 }
 
 export interface MemberExecution {
@@ -2187,6 +2200,9 @@ export interface BacklogItemView {
 
   /** The SECOND axis, independent of state. Null means it is in the backlog. */
   archivedAt: string | null
+
+  /** The outcome this item serves, by id, or null; a dispatch links its workflow to it. Absent from an older server. */
+  outcomeId?: string | null
 
   createdAt: string
   updatedAt: string

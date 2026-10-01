@@ -440,6 +440,44 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
     }
 
     [Fact]
+    public async Task The_detail_lists_its_renames_status_changes_and_merges_with_who_and_when()
+    {
+        var person = await host.PersonAsync();
+        var first = Unique("Hire engineers");
+        var outcome = await CreateAsync(person, first);
+        var second = Unique("Fill open engineering roles");
+        var since = DateTimeOffset.UtcNow.AddSeconds(-5);
+        Assert.Equal(HttpStatusCode.OK, (await person.PatchAsJsonAsync($"/api/outcomes/{outcome.Id}", new { name = second }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await person.PostAsync($"/api/outcomes/{outcome.Id}/retire", null, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await person.PostAsync($"/api/outcomes/{outcome.Id}/reactivate", null, Ct)).StatusCode);
+
+        var absorbed = await CreateAsync(person, Unique("Recruit developers"));
+        Assert.Equal(HttpStatusCode.OK,
+            (await person.PostAsJsonAsync($"/api/outcomes/{absorbed.Id}/merge", new { into = outcome.Id }, Ct)).StatusCode);
+
+        var events = (await JsonAsync(await person.GetAsync($"/api/outcomes/{outcome.Id}", Ct)))
+            .GetProperty("events").EnumerateArray().ToList();
+        Assert.Equal(
+            [TenantActions.OutcomeCreated, TenantActions.OutcomeRenamed, TenantActions.OutcomeRetired,
+             TenantActions.OutcomeReactivated, TenantActions.OutcomeCreated, TenantActions.OutcomeMerged],
+            events.Select(e => e.GetProperty("action").GetString()));
+        Assert.All(events, e =>
+        {
+            Assert.Equal(Email, e.GetProperty("by").GetString());
+            Assert.True(e.GetProperty("at").GetDateTimeOffset() >= since);
+        });
+
+        var renamed = events[1];
+        Assert.Equal((first, second), (renamed.GetProperty("from").GetString(), renamed.GetProperty("name").GetString()));
+        Assert.Equal(outcome.Id, events[2].GetProperty("outcomeId").GetString());
+        Assert.Equal(absorbed.Id, events[5].GetProperty("outcomeId").GetString());
+        Assert.Equal(outcome.Id, events[5].GetProperty("detail").GetProperty("into").GetString());
+
+        // Another outcome's acts are not in this one's history.
+        Assert.DoesNotContain(events, e => e.GetProperty("outcomeId").GetString() is var id && id != outcome.Id && id != absorbed.Id);
+    }
+
+    [Fact]
     public async Task A_merge_moves_the_figures_without_rewriting_a_link_and_its_preview_changes_nothing()
     {
         var person = await host.PersonAsync();
@@ -707,6 +745,95 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         var noneWorkflows = none.GetProperty("cards").EnumerateArray().Select(c => c.GetProperty("workflowSeq").GetInt64()).ToList();
         Assert.Contains(unlinked, noneWorkflows);
         Assert.DoesNotContain(linked, noneWorkflows);
+    }
+
+    [Fact]
+    public async Task Every_card_carries_its_outcome_a_proposed_one_with_its_status_a_merged_one_as_its_target_and_none_as_null()
+    {
+        var person = await host.PersonAsync();
+        var active = await CreateAsync(person, Unique("Card active"));
+        var target = await CreateAsync(person, Unique("Card merge target"));
+        var merged = await CreateAsync(person, Unique("Card merged"));
+
+        var linked = await WorkflowAsync(person, host.Alpha, active.Id);
+        var viaMerge = await WorkflowAsync(person, host.Alpha, merged.Id);
+        var unlinked = await WorkflowAsync(person, host.Alpha);
+        var byManager = await WorkflowAsync(person, host.Alpha);
+
+        var proposedName = Unique("Card proposed");
+        Assert.StartsWith("HTTP 2", await ManagerTools(host.Alpha).Outcome("propose", name: proposedName, causation: byManager.ToString(), cancellationToken: Ct), StringComparison.Ordinal);
+        var proposed = (await Outcomes.FindLiveByNameAsync(proposedName, Ct))!;
+
+        var merge = await person.PostAsJsonAsync($"/api/outcomes/{merged.Id}/merge", new { into = target.Id }, Ct);
+        Assert.True(merge.IsSuccessStatusCode, await merge.Content.ReadAsStringAsync(Ct));
+
+        var board = await JsonAsync(await person.GetAsync($"/api/teams/{host.Alpha}/kanban/board", Ct));
+        JsonElement OutcomeOf(long workflow) => board.GetProperty("cards").EnumerateArray()
+            .Single(c => c.GetProperty("workflowSeq").GetInt64() == workflow).GetProperty("outcome");
+
+        Assert.Equal((active.Id, active.Name, OutcomeStatus.Active),
+            (OutcomeOf(linked).GetProperty("id").GetString(), OutcomeOf(linked).GetProperty("name").GetString(), OutcomeOf(linked).GetProperty("status").GetString()));
+        Assert.Equal((proposed.Id, OutcomeStatus.Proposed),
+            (OutcomeOf(byManager).GetProperty("id").GetString(), OutcomeOf(byManager).GetProperty("status").GetString()));
+        Assert.Equal(target.Id, OutcomeOf(viaMerge).GetProperty("id").GetString());
+        Assert.Equal(JsonValueKind.Null, OutcomeOf(unlinked).ValueKind);
+
+        // The tenant board and one card carry the same.
+        var tenant = await JsonAsync(await person.GetAsync($"/api/kanban/board?team={host.Alpha}", Ct));
+        var card = tenant.GetProperty("cards").EnumerateArray().Single(c => c.GetProperty("workflowSeq").GetInt64() == linked);
+        Assert.Equal(active.Id, card.GetProperty("outcome").GetProperty("id").GetString());
+        var one = await JsonAsync(await person.GetAsync($"/api/teams/{host.Alpha}/kanban/cards/{card.GetProperty("id").GetString()}", Ct));
+        Assert.Equal(active.Id, one.GetProperty("outcome").GetProperty("id").GetString());
+
+        // The team workflows view's rows carry the same outcome. The view lists a workflow once the
+        // team's own member has written in it, so the Manager reports progress in each.
+        var manager = new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString();
+        foreach (var workflow in new[] { linked, byManager, unlinked })
+        {
+            await Log.AppendAsync(new NewMessage(MessageTypes.Progress, """{"text":"working"}""", manager, workflow), Ct);
+        }
+
+        var listed = await JsonAsync(await person.GetAsync($"/api/teams/{host.Alpha}/workflows", Ct));
+        JsonElement RowOutcome(long workflow) => listed.GetProperty("workflows").EnumerateArray()
+            .Single(w => w.GetProperty("correlation").GetInt64() == workflow).GetProperty("outcome");
+        Assert.Equal(active.Id, RowOutcome(linked).GetProperty("id").GetString());
+        Assert.Equal(OutcomeStatus.Proposed, RowOutcome(byManager).GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, RowOutcome(unlinked).ValueKind);
+
+        // FILTERS: a merged outcome's id finds its target's cards; the tag and the filter agree.
+        var byMerged = await JsonAsync(await person.GetAsync($"/api/teams/{host.Alpha}/kanban/board?outcome={merged.Id}", Ct));
+        Assert.Equal([viaMerge], byMerged.GetProperty("cards").EnumerateArray().Select(c => c.GetProperty("workflowSeq").GetInt64()).ToList());
+        var byProposed = await JsonAsync(await person.GetAsync($"/api/kanban/board?outcome={proposed.Id}", Ct));
+        Assert.Equal([byManager], byProposed.GetProperty("cards").EnumerateArray().Select(c => c.GetProperty("workflowSeq").GetInt64()).ToList());
+        var none = await JsonAsync(await person.GetAsync($"/api/teams/{host.Alpha}/kanban/board?outcome=none", Ct));
+        Assert.All(none.GetProperty("cards").EnumerateArray(), c => Assert.Equal(JsonValueKind.Null, c.GetProperty("outcome").ValueKind));
+        Assert.Contains(unlinked, none.GetProperty("cards").EnumerateArray().Select(c => c.GetProperty("workflowSeq").GetInt64()));
+        Assert.Equal("none", none.GetProperty("filters").GetProperty("outcome").GetString());
+    }
+
+    [Fact]
+    public async Task A_cards_outcome_is_its_open_workflows_else_its_latest_workflows_read_in_one_query()
+    {
+        var person = await host.PersonAsync();
+        var first = await CreateAsync(person, Unique("Older workflow"));
+        var second = await CreateAsync(person, Unique("Newer workflow"));
+        var older = await WorkflowAsync(person, host.Alpha, first.Id);
+        var newer = await WorkflowAsync(person, host.Alpha, second.Id);
+
+        var card = new Harness.Kanban.KanbanCard(
+            "c", older, host.Alpha, null, null, "t", "", "running", "todo", "grey", [], DateTime.UtcNow, DateTime.UtcNow, false,
+            Workflows: [older, newer]);
+
+        var open = await CardOutcomes.AttachAsync([card with { OpenWorkflow = new Harness.Kanban.CardWorkflow(older, older) }], Outcomes, Ct);
+        Assert.Equal(first.Id, open[0].Outcome!.Id);
+
+        var closed = await CardOutcomes.AttachAsync([card], Outcomes, Ct);
+        Assert.Equal(second.Id, closed[0].Outcome!.Id);
+
+        // ONE query answers every workflow asked about, and a workflow with no link is absent.
+        var unlinked = await WorkflowAsync(person, host.Alpha);
+        var found = await Outcomes.CurrentOutcomesAsync([older, newer, unlinked], Ct);
+        Assert.Equal((first.Id, second.Id, false), (found[older].Id, found[newer].Id, found.ContainsKey(unlinked)));
     }
 
     [Fact]

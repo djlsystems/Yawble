@@ -4969,7 +4969,7 @@ app.MapGet("/api/teams/{team}/workflow", async (
 // per correlation instead of once for the newest - see TeamWorkflows.
 app.MapGet("/api/teams/{team}/workflows", async (
     [Description(Describe.Team)] string team,
-    TeamRegistry teams, IMessageLog log, ContainerHost host, CancellationToken ct) =>
+    TeamRegistry teams, IMessageLog log, ContainerHost host, IOutcomeStore outcomes, CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
@@ -4987,7 +4987,18 @@ app.MapGet("/api/teams/{team}/workflows", async (
         .DefaultIfEmpty(0)
         .Min();
 
-    return Results.Ok(await log.WorkflowsForTeamAsync(stored, floor, ct));
+    var listed = await log.WorkflowsForTeamAsync(stored, floor, ct);
+
+    // EACH ROW'S OUTCOME, in one query for the whole list: the workflows view's Outcome column.
+    var served = await outcomes.CurrentOutcomesAsync(
+        listed.Workflows.Where(w => w.Correlation is not null).Select(w => w.Correlation!.Value).ToList(), ct);
+
+    return Results.Ok(listed with
+    {
+        Workflows = listed.Workflows
+            .Select(w => w.Correlation is { } c && served.TryGetValue(c, out var outcome) ? w with { Outcome = outcome } : w)
+            .ToList(),
+    });
 })
     .WithTags("Activity")
     .RequirePermit(Permits.Read)

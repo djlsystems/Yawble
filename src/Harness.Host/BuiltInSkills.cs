@@ -1004,7 +1004,7 @@ public static class BuiltInSkills
             `kanban  action: filter` - the filters the board takes
             `kanban  action: board` - all cards
             `kanban  action: board  team: <team>` / `member: <member>` / `status: <status>` - filtered
-            `kanban  action: board  outcome: <outcomeId>` - the Outcome filter: cards whose workflow serves that outcome; `outcome: none` for cards with none
+            `kanban  action: board  outcome: <outcomeId>` - the Outcome filter: cards whose outcome (the one their open, else latest, workflow serves; each card carries it as `outcome`) is that one; `outcome: none` for cards with none
             `kanban  action: show  card: <cardId>` - one card with its full trail
 
             Team, member, status and outcome are the whole list; any other filter is refused. An

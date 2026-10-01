@@ -24,7 +24,15 @@ const props = defineProps<{
   updateWait?: string | null;
 }>();
 
-defineEmits<{ open: [id: string] }>();
+/**
+ * `open-outcome` is the tag clicked, with the outcome's id: the board passes it up to whatever
+ * shows outcomes. `change-outcome` is the card menu's "Change outcome…", with the card's id.
+ */
+const emit = defineEmits<{ open: [id: string]; 'open-outcome': [outcomeId: string]; 'change-outcome': [id: string] }>();
+
+function openOutcome() {
+  if (props.card.outcome) emit('open-outcome', props.card.outcome.id);
+}
 
 const colour = computed(() => colourFor(props.card));
 
@@ -54,6 +62,26 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
 
     <div class="k-card-title">{{ card.title }}</div>
 
+    <!-- THE OUTCOME THIS CARD'S WORK SERVES, under the title: the open workflow's, else the latest
+         one's. No outcome, no tag. A proposed one is dashed and says so, because only a person
+         confirms it. A span with a button's role rather than a button: this whole card is a
+         button, and one may not hold another. The name is text, never HTML. -->
+    <span
+      v-if="card.outcome"
+      role="button"
+      tabindex="0"
+      class="k-card-outcome"
+      :class="{ 'k-card-outcome--proposed': card.outcome.status === 'proposed' }"
+      :data-outcome-id="card.outcome.id"
+      :title="`Outcome: ${card.outcome.name}`"
+      @click.stop="openOutcome"
+      @keydown.enter.stop.prevent="openOutcome"
+      @keydown.space.stop.prevent="openOutcome"
+    >
+      <span class="k-card-outcome-name">{{ card.outcome.name }}</span>
+      <span v-if="card.outcome.status === 'proposed'" class="k-card-outcome-proposed">proposed</span>
+    </span>
+
     <div class="k-card-meta">
       <!-- NULL IS ITS OWN WORD, not an empty span. A card nobody has been assigned yet is the whole
            reason the Todo lane can be filled before anybody is told, and a blank where a name goes
@@ -72,6 +100,26 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
            back at a manager and the one `--workflow` filters on. A card without it could
            not be found among its siblings. -->
       <span class="k-card-workflow" :title="`Workflow #${card.workflowSeq}`">#{{ card.workflowSeq }}</span>
+
+      <!-- THE CARD MENU. A span for the reason the tag is one; the click stops here so it does not
+           open the panel as well. -->
+      <span
+        role="button"
+        tabindex="0"
+        class="k-card-menu"
+        aria-label="Card menu"
+        @click.stop
+        @keydown.enter.stop
+      >
+        <q-icon name="more_horiz" size="16px" />
+        <q-menu>
+          <q-list dense>
+            <q-item v-close-popup clickable data-action="change-outcome" @click="emit('change-outcome', card.id)">
+              <q-item-section>Change outcome…</q-item-section>
+            </q-item>
+          </q-list>
+        </q-menu>
+      </span>
     </div>
 
     <div class="k-card-foot">
@@ -195,6 +243,50 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
+  color: var(--os-ink-muted);
+}
+
+/* THE OUTCOME TAG: a small outlined pill under the title. Dashed for a proposed outcome. */
+.k-card-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--os-rule-strong);
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--os-ink-muted);
+  cursor: pointer;
+}
+
+.k-card-outcome:hover,
+.k-card-outcome:focus-visible {
+  color: var(--os-ink);
+  border-color: var(--q-primary);
+}
+
+.k-card-outcome--proposed {
+  border-style: dashed;
+}
+
+.k-card-outcome-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.k-card-outcome-proposed {
+  font-style: italic;
+}
+
+.k-card-menu {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
   color: var(--os-ink-muted);
 }
 

@@ -9,6 +9,8 @@ import { isRunningLane } from '../lib/tenantSettings';
 import KanbanCard from './KanbanCard.vue';
 import KanbanFilterBar from './KanbanFilterBar.vue';
 import KanbanCardPanel from './KanbanCardPanel.vue';
+import KanbanChangeOutcome from './KanbanChangeOutcome.vue';
+import OutcomesDialog from './OutcomesDialog.vue';
 import { FlipDurationMs, flipShifts, flipTransform, type CardBox } from '../lib/flip';
 
 /**
@@ -27,6 +29,15 @@ import { FlipDurationMs, flipShifts, flipTransform, type CardBox } from '../lib/
  */
 const kanban = useKanbanStore();
 const wip = useWipStore();
+
+/**
+ * OUTCOMES ARE SHOWN ELSEWHERE, so the board passes both of its outcome events up: a card's tag
+ * (`open-outcome`, with the outcome's id) and the filter bar's Manage outcomes button.
+ */
+defineEmits<{ 'open-outcome': [outcomeId: string]; 'manage-outcomes': [] }>();
+
+/** The card whose "Change outcome…" is open, or ''. */
+const changingOutcome = ref('');
 const agentUpdates = useAgentUpdatesStore();
 
 const viewOptions: { label: string; value: KanbanView; icon: string }[] = [
@@ -198,6 +209,18 @@ onUpdated(() => {
 });
 
 const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
+
+/**
+ * MANAGE OUTCOMES, opened from the filter bar's button at the list, and from a card's outcome tag
+ * (`open-outcome`, the outcome's id) at that outcome.
+ */
+const outcomesOpen = ref(false);
+const outcomeAt = ref<string | null>(null);
+
+function openOutcomes(id: string | null = null) {
+  outcomeAt.value = id;
+  outcomesOpen.value = true;
+}
 </script>
 
 <template>
@@ -230,7 +253,7 @@ const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
       {{ kanban.error }}
     </q-banner>
 
-    <KanbanFilterBar class="q-mb-md" />
+    <KanbanFilterBar class="q-mb-md" @manage-outcomes="openOutcomes(); $emit('manage-outcomes')" />
 
     <div v-if="!kanban.hasBoard && !kanban.loading" class="column items-center q-pa-xl text-center">
       <div class="text-subtitle1 q-mb-sm">No board yet</div>
@@ -292,6 +315,8 @@ const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
             :waiting="cardShowsWaiting(card, kanban.memberHeld(card))"
             :update-wait="card.member ? agentUpdates.heldBy(card.team, card.member) : null"
             @open="kanban.select"
+            @open-outcome="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
+            @change-outcome="(id: string) => (changingOutcome = id)"
           />
         </TransitionGroup>
       </template>
@@ -326,12 +351,16 @@ const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
             :waiting="cardShowsWaiting(card, kanban.memberHeld(card))"
             :update-wait="card.member ? agentUpdates.heldBy(card.team, card.member) : null"
             @open="kanban.select"
+            @open-outcome="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
+            @change-outcome="(id: string) => (changingOutcome = id)"
           />
         </TransitionGroup>
       </section>
     </div>
 
     <KanbanCardPanel />
+    <KanbanChangeOutcome :card-id="changingOutcome" @close="changingOutcome = ''" />
+    <OutcomesDialog v-model="outcomesOpen" :outcome="outcomeAt" />
   </div>
 </template>
 

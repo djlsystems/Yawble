@@ -13,6 +13,7 @@ import {
   type KanbanLane,
 } from '../api/kanban'
 import { Unauthorized } from '../api/client'
+import { linkWorkflowOutcome, listLiveOutcomes, type OutcomeRef } from '../api/outcomes'
 import {
   cardsInLane,
   cardsMatchingText,
@@ -114,6 +115,12 @@ export const useKanbanStore = defineStore('kanban', {
      * otherwise overwrite the fast one that answered the newer filter.
      */
     fetchSeq: 0,
+
+    /**
+     * The active and proposed outcomes the Outcome filter offers, read by `loadOutcomes`. Empty
+     * until then, and after a failed read - the filter still offers All and No outcome.
+     */
+    outcomes: [] as OutcomeRef[],
   }),
 
   getters: {
@@ -426,6 +433,32 @@ export const useKanbanStore = defineStore('kanban', {
     },
 
     /**
+     * CHANGE OUTCOME…, a person's action: a new link on the workflow the card's tag is read from -
+     * its open workflow, else its latest - addressed under the card's own team, then the refetch
+     * every write does.
+     */
+    async changeOutcome(id: string, outcome: string) {
+      const found = this.board?.cards.find((entry) => entry.id === id)
+      if (!found) throw new Error(UnknownCard)
+
+      await this.write(async () => {
+        await linkWorkflowOutcome(found.team, outcomeWorkflowOf(found), outcome)
+      })
+    },
+
+    /**
+     * The Outcome filter's options. A failure leaves the list as it was: All and No outcome are
+     * still offered, and the board itself says nothing about a list it does not need.
+     */
+    async loadOutcomes() {
+      try {
+        this.outcomes = await listLiveOutcomes()
+      } catch {
+        // Kept as it was.
+      }
+    },
+
+    /**
      * One shape for every human edit: append, refetch the board, refetch the open card.
      *
      * NO OPTIMISTIC LOCAL EDIT. The change becomes a message on the log and the projection decides
@@ -491,6 +524,16 @@ export const useKanbanStore = defineStore('kanban', {
     },
   },
 })
+
+/**
+ * The workflow a card's outcome is read from, as the server picks it: the open one, else the latest
+ * the card belongs to.
+ */
+export function outcomeWorkflowOf(card: KanbanCard): number {
+  if (card.openWorkflow) return card.openWorkflow.workflow
+
+  return card.workflows && card.workflows.length > 0 ? Math.max(...card.workflows) : card.workflowSeq
+}
 
 /** A thrown value as a line a person can read. `Unauthorized` is a state, not a stack trace. */
 function describe(cause: unknown): string {

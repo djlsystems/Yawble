@@ -740,6 +740,15 @@ function showThread(row: WorkflowRow) {
               started {{ row.started }} · ended {{ row.ended }}
             </div>
 
+            <!-- THE OUTCOME COLUMN: what this workflow serves, or No outcome. Text, never HTML. -->
+            <div
+              class="workflow-row-outcome text-caption"
+              :class="{ 'workflow-row-outcome--proposed': row.outcomeProposed }"
+              data-workflow-outcome
+            >
+              Outcome: {{ row.outcome }}
+            </div>
+
             <!-- WHO RAN IN IT, AND WHAT THE ROW IS WAITING FOR. NOT `ellipsis`, which is on the
                  subject line above by design: on an AWAITING row this line is the half that says
                  who is waiting and on what, and clipping it to one line hides exactly the sentence
@@ -1137,6 +1146,11 @@ function showThread(row: WorkflowRow) {
 </template>
 
 <style scoped>
+/* The workflow row's outcome: a proposed one is italic, as the board's tag says it in words. */
+.workflow-row-outcome--proposed {
+  font-style: italic;
+}
+
 /* THE STRIP SIZES ITSELF. This component has two root nodes (the strip and the
    dialog), so a class from IndexPage would silently never land — same trap as
    ContainerCard. The rule lives here. */

@@ -281,7 +281,12 @@ public sealed record TeamWorkflowTiming(
         + "is what the backlog execution record reports, and it must not become a window. Two "
         + "questions, two fields, each named for what it answers.\n\n"
         + "Null under exactly the same condition `spend` is null: no completed or failed runs.")]
-    WorkflowSpend? SpendSinceNudge = null);
+    WorkflowSpend? SpendSinceNudge = null,
+
+    [property: Description(
+        "The outcome this workflow serves now: its newest link, followed through `mergedInto` "
+        + "(id, name, status). Null for none. Set by the team workflows route, not the projection.")]
+    WorkflowOutcome? Outcome = null);
 
 /// <summary>
 /// One member's run time inside a workflow.
