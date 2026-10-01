@@ -255,11 +255,9 @@ public sealed partial class ProcessAgentRunner(
         // THE RUN'S OWN MEMORY LIMIT, read now so a changed setting applies to this run. With an
         // rlimit it is a prefix; with a cgroup the run is put in its own once it exists.
         // Under rlimit the hard limit is the ceiling a heavy-lease holder can be raised to (RunAllowances).
-        var memoryLimit = memory?.Limit();
-        var memoryCeiling = memory?.Ceiling();
-        var limits = memory is not null && memoryLimit is not null ? memory.Prefix(memoryLimit, memoryCeiling) : [];
+        var (launched, memoryLimit, memoryCeiling) = MemberStart(resolvedFileName, invocation.WorkingDirectory);
 
-        if (ChildProcess.StartInfo(resolvedFileName, invocation.WorkingDirectory, runAs, limits) is not { } start)
+        if (launched is not { } start)
         {
             return new AgentResult(
                 -1,
@@ -448,44 +446,13 @@ public sealed partial class ProcessAgentRunner(
             start.ArgumentList.Add(substituted);
         }
 
-        foreach (var (name, value) in invocation.Environment) start.Environment[name] = value;
-
-        // The preset's isolation, AFTER the invocation's environment (the preset's env and the
-        // team's), so neither can switch a connector or the home's configuration back on.
-        if (command.IsolationEnvironment is { } isolation)
-        {
-            foreach (var (name, value) in isolation) start.Environment[name] = value;
-        }
-
-        // And the CLI's own updater off, for the same reason and in the same place.
-        if (command.UpdateEnvironment is { } updateOff)
-        {
-            foreach (var (name, value) in updateOff) start.Environment[name] = value;
-        }
+        MemberEnvironment(start, command, invocation.Environment);
 
         if (mcp is not null)
         {
             start.Environment["HARNESS_MCP_CONFIG"] = mcp.JsonPath;
             start.Environment["HARNESS_MCP_CONFIG_TOML"] = mcp.TomlPath;
         }
-
-        // REMOVED, NOT CLEARED, AND THE ORDER MATTERS: after the merge above, so a caller
-        // cannot reintroduce one of these by handing it in.
-        //
-        // `start.Environment` is a real dictionary pre-populated from the PARENT, which is what
-        // makes `Remove` work here where `AgentEnvironment.Cleared` could not - that one is a
-        // dictionary of strings, and no string means absent. Setting FORCE_COLOR empty is the
-        // defect, not the fix: node reads a SET value of any kind as "force colour on".
-        //
-        // Defence in depth rather than the mechanism. `Program.cs` removes these from the Host's
-        // own process at startup, which is the only thing that reaches the PTY path - Porta.Pty
-        // merges and cannot express removal - so by the time we get here there is usually nothing
-        // to remove. This covers a Host started some way that skips that.
-        foreach (var name in AgentEnvironment.MustBeAbsent) start.Environment.Remove(name);
-
-        // Only this command's own provider key, and any the caller handed in deliberately. The
-        // Host holds every provider's key and `start.Environment` inherited all of them.
-        AgentEnvironment.ScopeProviderKeys(start.Environment, command.FileName, invocation.Environment);
 
         // After the merge, so neither the catalog nor a team's env can point it elsewhere.
         if (memberTemp is not null) start.Environment[MemberTemp.Variable] = memberTemp;
@@ -1390,6 +1357,160 @@ public sealed partial class ProcessAgentRunner(
         if (!parent.TryGetProperty(propertyName, out var value)) return null;
 
         return value.ValueKind == JsonValueKind.Number ? value.GetInt32() : null;
+    }
+
+    /// <summary>
+    /// THE STEPS OF A MEMBER'S LAUNCH THAT DECIDE WHETHER ITS CLI CAN START, shared by a member run
+    /// and the launch check (<see cref="CheckLaunchAsync"/>) so the check is that launch and not a
+    /// copy of it: setsid, the agent user's prefix, and the run's own memory limit - read now, so a
+    /// changed setting applies - with an rlimit as a prefix whose hard limit is the ceiling a
+    /// heavy-lease holder can be raised to (RunAllowances). With a cgroup the caller puts the
+    /// process in its own once it exists. Null start when setsid is not in a system directory.
+    /// </summary>
+    private (ProcessStartInfo? Start, RunMemoryLimit? Limit, RunMemoryLimit? Ceiling) MemberStart(
+        string resolvedFileName, string workingDirectory)
+    {
+        var memoryLimit = memory?.Limit();
+        var memoryCeiling = memory?.Ceiling();
+        var limits = memory is not null && memoryLimit is not null ? memory.Prefix(memoryLimit, memoryCeiling) : [];
+        return (ChildProcess.StartInfo(resolvedFileName, workingDirectory, runAs, limits), memoryLimit, memoryCeiling);
+    }
+
+    /// <summary>
+    /// A member launch's environment, in its order: <paramref name="environment"/> (the preset's env
+    /// and the team's), then the preset's isolation and the CLI's update-off, then the names that must
+    /// be absent removed and provider keys scoped to this command. Shared with the launch check.
+    /// </summary>
+    private static void MemberEnvironment(
+        ProcessStartInfo start, AgentCommand command, IReadOnlyDictionary<string, string> environment)
+    {
+        foreach (var (name, value) in environment) start.Environment[name] = value;
+
+        // The preset's isolation, AFTER the invocation's environment (the preset's env and the
+        // team's), so neither can switch a connector or the home's configuration back on.
+        if (command.IsolationEnvironment is { } isolation)
+        {
+            foreach (var (name, value) in isolation) start.Environment[name] = value;
+        }
+
+        // And the CLI's own updater off, for the same reason and in the same place.
+        if (command.UpdateEnvironment is { } updateOff)
+        {
+            foreach (var (name, value) in updateOff) start.Environment[name] = value;
+        }
+
+        // REMOVED, NOT CLEARED, AND THE ORDER MATTERS: after the merge above, so a caller
+        // cannot reintroduce one of these by handing it in.
+        //
+        // `start.Environment` is a real dictionary pre-populated from the PARENT, which is what
+        // makes `Remove` work here where `AgentEnvironment.Cleared` could not - that one is a
+        // dictionary of strings, and no string means absent. Setting FORCE_COLOR empty is the
+        // defect, not the fix: node reads a SET value of any kind as "force colour on".
+        //
+        // Defence in depth rather than the mechanism. `Program.cs` removes these from the Host's
+        // own process at startup, which is the only thing that reaches the PTY path - Porta.Pty
+        // merges and cannot express removal - so by the time we get here there is usually nothing
+        // to remove. This covers a Host started some way that skips that.
+        foreach (var name in AgentEnvironment.MustBeAbsent) start.Environment.Remove(name);
+
+        // Only this command's own provider key, and any the caller handed in deliberately. The
+        // Host holds every provider's key and `start.Environment` inherited all of them.
+        AgentEnvironment.ScopeProviderKeys(start.Environment, command.FileName, environment);
+    }
+
+    /// <summary>How long the launch check waits for a free invocation before it is killed and read as failed.</summary>
+    public static readonly TimeSpan LaunchCheckTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// THE LAUNCH CHECK FOR ONE PRESET: its declared free invocation (<see cref="AgentDefinition.LaunchCheck"/>)
+    /// started the way a member run starts the CLI - the same refusal when the agent user cannot be
+    /// reached, the same share of the CLI's install, <see cref="MemberStart"/> (setsid, the agent user,
+    /// the run's memory limit as a prefix or a cgroup) and <see cref="MemberEnvironment"/> (the preset's
+    /// env, its isolation and update-off), and the same launcher, <see cref="ChildProcess.RunAsync"/>.
+    /// The arguments are the update-off's and then the declared ones, as the sign-in probe orders them;
+    /// the member's prompt arguments and isolation switches are not, as they belong to a prompt this
+    /// never sends. Nothing is written to stdin. No free invocation reads not checked, never ok.
+    /// </summary>
+    public async Task<AgentLaunchReport> CheckLaunchAsync(string agent, CancellationToken ct, TimeSpan? timeout = null)
+    {
+        if (catalog.Definition(agent) is not { } definition)
+        {
+            return AgentLaunchReport.Unchecked($"'{agent}' is not an Agent this tenant has.");
+        }
+
+        if (catalog.For(agent) is not { } command)
+        {
+            return AgentLaunchReport.Unchecked("An interactive preset: no member run launches it.");
+        }
+
+        if (definition.LaunchCheck is not { Count: > 0 } check)
+        {
+            return AgentLaunchReport.Unchecked(
+                "This preset declares no free invocation (launchCheck), so nothing was started: a launch that "
+                + "might send a prompt or spend is never run to check it.");
+        }
+
+        if (runAs is { Refuses: true })
+        {
+            return new AgentLaunchReport(AgentLaunchReport.Failed, null, null, runAs.Refusal("A member run of this preset"));
+        }
+
+        if (updates?.Updating(command.FileName) == true)
+        {
+            return AgentLaunchReport.Unchecked($"The platform is updating `{command.FileName}`; a member run would wait for it.");
+        }
+
+        if (await ChildProcess.FindAsync(command.FileName, LaunchLookup.Once, null, ct) is not { } resolved)
+        {
+            return AgentLaunchReport.Unchecked($"`{command.FileName}` is not an executable file on PATH, so nothing was started.");
+        }
+
+        using var share = updates is null ? null : await updates.EnterRunAsync(command.FileName, null, ct);
+
+        var (launched, memoryLimit, _) = MemberStart(resolved, Path.GetTempPath());
+        if (launched is not { } start)
+        {
+            return new AgentLaunchReport(AgentLaunchReport.Failed, null, null,
+                $"setsid is not in a root-owned system directory ({string.Join(", ", SystemCommand.Directories)}), so no member can be started.");
+        }
+
+        foreach (var argument in definition.Updates?.Arguments ?? []) start.ArgumentList.Add(argument);
+        foreach (var argument in check) start.ArgumentList.Add(argument);
+        MemberEnvironment(start, command, AgentToolPreflight.LaunchShape(definition).Environment);
+
+        var invocation = string.Join(' ', [command.FileName, .. check]);
+        var applied = memoryLimit?.Mb is { } mb && memory is { Mechanism: not RunMemoryMechanism.None }
+            ? $" under the run memory limit of {mb} MB ({(memory.Mechanism == RunMemoryMechanism.Cgroup ? "cgroup" : "rlimit")})"
+            : string.Empty;
+
+        using var cgroup = memory is not null && memoryLimit is not null ? memory.BeginRun(memoryLimit) : null;
+        using var clock = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        clock.CancelAfter(timeout ?? LaunchCheckTimeout);
+
+        ChildOutcome outcome;
+        try
+        {
+            outcome = await ChildProcess.RunAsync(start, null, clock.Token, onStarted: process => cgroup?.Add(process.Id));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return new AgentLaunchReport(AgentLaunchReport.Failed, null, null,
+                $"`{invocation}` could not be started through a member's launch{applied}: {exception.Message}");
+        }
+
+        ct.ThrowIfCancellationRequested();
+
+        var tail = AgentCrash.StderrTail(outcome.Stderr);
+        if (outcome.Killed)
+        {
+            return new AgentLaunchReport(AgentLaunchReport.Failed, null, tail.Length == 0 ? null : tail,
+                $"`{invocation}` did not exit within {(int)(timeout ?? LaunchCheckTimeout).TotalSeconds}s through a member's launch{applied}, and was stopped.");
+        }
+
+        return outcome.ExitCode == 0
+            ? new AgentLaunchReport(AgentLaunchReport.Ok, 0, null, $"`{invocation}` started and exited 0 through a member's launch{applied}.")
+            : new AgentLaunchReport(AgentLaunchReport.Failed, outcome.ExitCode, tail.Length == 0 ? null : tail,
+                $"`{invocation}` exited {outcome.ExitCode} through a member's launch{applied}, so a member run of this preset cannot start.");
     }
 
     /// <summary>What a pump has written so far, read under the lock it appends under.</summary>

@@ -534,11 +534,10 @@ func Uninstall(ctx context.Context, e engine.Engine, image string, data bool, ou
 }
 
 // RunLimitText is the running limit as `up` states it: the configured number, or the Host's
-// default and the bound that decides it.
+// default, which only the Host names (`yawble doctor` reads it). Nothing is estimated here.
 func RunLimitText(s Settings) string {
 	if s.MaxRunning > 0 {
 		return fmt.Sprint(s.MaxRunning)
 	}
-	limit, bound := RunLimit(s.CPUs, MemoryMB(s.Memory))
-	return fmt.Sprintf("the Host's default, %d by %s", limit, bound)
+	return "the Host's default (yawble doctor names it)"
 }

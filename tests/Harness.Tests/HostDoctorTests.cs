@@ -2,6 +2,7 @@ using System.Text.Json;
 using Harness.Host;
 using Harness.Messaging;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 
 namespace Harness.Tests;
 
@@ -195,5 +196,84 @@ public sealed class HostDoctorTests : IDisposable
         Assert.True(document.RootElement.TryGetProperty("dataRoot", out var dataRoot));
         Assert.Equal(_root, dataRoot.GetProperty("path").GetString());
         Assert.False(document.RootElement.GetProperty("database").GetProperty("exists").GetBoolean());
+    }
+
+    [Fact]
+    public async Task With_nothing_recorded_launch_and_wip_are_null_never_ok()
+    {
+        var report = await HostDoctor.ReportAsync(_root, TestContext.Current.CancellationToken);
+
+        Assert.All(report.Agents, a => Assert.Null(a.Launch));
+        Assert.Null(report.Wip);
+
+        using var document = JsonDocument.Parse(HostDoctor.ToJson(report));
+        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("wip").ValueKind);
+        Assert.All(document.RootElement.GetProperty("agents").EnumerateArray(),
+            a => Assert.Equal(JsonValueKind.Null, a.GetProperty("launch").ValueKind));
+    }
+
+    [Fact]
+    public async Task Each_agent_carries_the_hosts_recorded_launch_check_and_a_failed_preset_is_its_answer()
+    {
+        var commands = AgentAuthProbe.LoadSpecs().Keys.ToArray();
+        var (checkedCommand, unstarted) = (commands[0], commands[1]);
+
+        // Two presets start the same command: one starts, one aborts under the run memory limit.
+        new AgentLaunchChecksRecord(DateTimeOffset.UtcNow,
+        [
+            new PresetLaunchCheck("starts", "/usr/local/bin/" + checkedCommand,
+                new AgentLaunchReport(AgentLaunchReport.Ok, 0, null, "ran --version")),
+            new PresetLaunchCheck("aborts", checkedCommand,
+                new AgentLaunchReport(AgentLaunchReport.Failed, 134, "fatal: cannot reserve the heap", "exited 134 under 64 MB")),
+            new PresetLaunchCheck("terminal", null, AgentLaunchReport.Unchecked("An interactive preset")),
+        ]).Write(_root);
+
+        var report = await HostDoctor.ReportAsync(_root, TestContext.Current.CancellationToken);
+
+        var launch = Assert.Single(report.Agents, a => a.Agent == checkedCommand).Launch!;
+        Assert.Equal(AgentLaunchReport.Failed, launch.Result);
+        Assert.Equal(134, launch.ExitCode);
+        Assert.Equal("fatal: cannot reserve the heap", launch.StderrTail);
+        Assert.Equal("aborts: exited 134 under 64 MB", launch.Detail);
+
+        // A command no preset starts was never started: not checked, never ok.
+        var none = Assert.Single(report.Agents, a => a.Agent == unstarted).Launch!;
+        Assert.Equal(AgentLaunchReport.NotChecked, none.Result);
+        Assert.Null(none.ExitCode);
+
+        // The contract the operator CLI reads.
+        using var document = JsonDocument.Parse(HostDoctor.ToJson(report));
+        var json = document.RootElement.GetProperty("agents").EnumerateArray()
+            .Single(a => a.GetProperty("agent").GetString() == checkedCommand).GetProperty("launch");
+        Assert.Equal(["result", "exitCode", "stderrTail", "detail"], json.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("failed", json.GetProperty("result").GetString());
+        Assert.Equal(134, json.GetProperty("exitCode").GetInt32());
+    }
+
+    [Fact]
+    public async Task Wip_is_the_limit_and_run_memory_the_host_recorded_from_its_own_decision()
+    {
+        var settings = new TenantSettings(null!, new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Wip:MaxRunning"] = "4",
+        }).Build(), cpuCount: 8, memoryLimitMb: 8192);
+        var memory = RunMemoryLimits.Decide(new CgroupFacts("/sys/fs/cgroup/app", "writable"), null, settings.RunMemoryLimit);
+
+        WipRecord.Keep(_root, settings, memory);
+        var report = await HostDoctor.ReportAsync(_root, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(report.Wip);
+        Assert.Equal(settings.RunLimit(), report.Wip.Limit);
+        Assert.Equal(memory.Report(), report.Wip.RunMemory);
+        Assert.Equal(new RunMemoryReport(RunMemoryReport.Cgroup, (8192 - 1024) / 4, memory.Report().Detail), report.Wip.RunMemory);
+
+        using var document = JsonDocument.Parse(HostDoctor.ToJson(report));
+        var wip = document.RootElement.GetProperty("wip");
+        Assert.Equal(
+            ["limit", "bound", "cpuBound", "cpus", "memoryBound", "memoryLimitMb", "memoryPerRunMb", "reason"],
+            wip.GetProperty("limit").EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["mechanism", "perRunMb", "detail"], wip.GetProperty("runMemory").EnumerateObject().Select(p => p.Name));
+        Assert.Equal("cgroup", wip.GetProperty("runMemory").GetProperty("mechanism").GetString());
+        Assert.Equal(1792, wip.GetProperty("runMemory").GetProperty("perRunMb").GetInt32());
     }
 }

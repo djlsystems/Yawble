@@ -415,7 +415,7 @@ func TestDoctorDoesNotReportAPluginOrANonModelPresetAsNotSignedIn(t *testing.T) 
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
-	if !strings.Contains(out, "claude signed in · codex NOT signed in") {
+	if !strings.Contains(out, "claude signed in, launch not known · codex NOT signed in, launch not known") {
 		t.Errorf("the agents row is not the two model agents:\n%s", out)
 	}
 	for _, unwanted := range []string{"sample-echo", "echo NOT", "echo not"} {
@@ -430,5 +430,68 @@ func TestDoctorDoesNotReportAPluginOrANonModelPresetAsNotSignedIn(t *testing.T) 
 	_, out, _ = run(t, stubbed(s2), "doctor")
 	if strings.Contains(out, "warn  agents") || strings.Contains(out, "NOT signed in") {
 		t.Errorf("a plugin or a non-model preset made the agents row warn:\n%s", out)
+	}
+}
+
+// withWip is doctorStdout from a Host that reports its own running limit and per-run memory.
+func withWip(runMemory string) string {
+	wip := `,"wip":{"limit":{"limit":4,"bound":"memory","cpuBound":7,"cpus":8,"memoryBound":4,"memoryLimitMb":8192,"memoryPerRunMb":1792,` +
+		`"reason":"8192 MB less 1024 MB for the Host, at 1792 MB a run, allows 4, below the CPU bound of 7: the memory bound applies"},` +
+		`"runMemory":` + runMemory + `}}` + "\n"
+	return strings.TrimSuffix(doctorStdout, "}\n") + wip
+}
+
+// Doctor's running-limit and run-memory lines are the Host's answers, each mechanism
+// said in the Host's words, "not enforced" included.
+func TestDoctorShowsTheHostsRunningLimitAndRunMemory(t *testing.T) {
+	for _, c := range []struct{ runMemory, want string }{
+		{`{"mechanism":"cgroup","perRunMb":null,"detail":"each run in its own cgroup"}`, "info  run memory     cgroup: each run in its own cgroup"},
+		{`{"mechanism":"rlimit","perRunMb":1792,"detail":"runs.memoryLimitMb, prlimit --data"}`, "info  run memory     rlimit, 1792 MB per run: runs.memoryLimitMb, prlimit --data"},
+		{`{"mechanism":"none","perRunMb":null,"detail":"runs.memoryLimitMb is not set"}`, "info  run memory     not enforced: runs.memoryLimitMb is not set"},
+	} {
+		s := runningScript()
+		s.On(doctorExec, engine.Result{Stdout: withWip(c.runMemory)})
+		code, out, errOut := run(t, stubbed(s), "doctor")
+		if code != 0 {
+			t.Fatalf("exit %d: %s %s", code, out, errOut)
+		}
+		for _, want := range []string{c.want, "ok    running limit  4, from the memory bound (the Host's answer: 8192 MB less 1024 MB for the Host"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output lacks %q:\n%s", want, out)
+			}
+		}
+	}
+}
+
+// When the Host cannot be asked - the container stopped, the Host's doctor crashing, or an older
+// Host that does not send the figures - both lines say not known. Nothing is estimated instead.
+func TestDoctorWhenTheHostCannotBeAskedSaysTheFiguresAreNotKnown(t *testing.T) {
+	crashed := runningScript()
+	crashed.On(doctorExec, engine.Result{Stderr: "Unhandled exception.", ExitCode: 134})
+	older := runningScript()
+	older.On(doctorExec, engine.Result{Stdout: doctorStdout})
+	for name, script := range map[string]*engine.Scripted{"stopped": stoppedScript(), "crashed": crashed, "older Host": older} {
+		_, out, _ := run(t, stubbed(script), "doctor", "--json")
+		got := parseDoctor(t, out)
+		for _, row := range []string{"running limit", "run memory"} {
+			if v, detail, _ := verdict(t, got, row); v != "skip" || !strings.HasPrefix(detail, "not known: ") {
+				t.Errorf("%s: %s should be skip, not known; got %s %q", name, row, v, detail)
+			}
+		}
+	}
+}
+
+// The CLI's own formula is gone: whatever the container's size, no figure doctor or up prints is
+// derived from it. The only figures are the Host's.
+func TestDoctorPrintsNoFormulaDerivedFigure(t *testing.T) {
+	for _, stdout := range []string{doctorStdout, withWip(`{"mechanism":"none","perRunMb":null,"detail":"not set"}`)} {
+		s := runningScript()
+		s.On(doctorExec, engine.Result{Stdout: stdout})
+		_, out, _ := run(t, stubbed(s), "doctor")
+		for _, formula := range []string{"MB per run allows", "MB at 2048", "2048 MB per run", "CPUs allow", "the container allows", "by memory", "by cpu"} {
+			if strings.Contains(out, formula) {
+				t.Errorf("doctor printed a CLI-computed figure (%q):\n%s", formula, out)
+			}
+		}
 	}
 }
