@@ -5,6 +5,7 @@ import { useKanbanStore } from '../stores/kanban';
 import { KanbanStatusLabel, SwimlanesTeamCaption } from '../lib/kanban';
 import { KanbanStatuses, NoOutcome, type KanbanFilters } from '../api/kanban';
 import { outcomeLabel } from '../api/outcomes';
+import { useEndedOutcomeOption } from '../lib/currentOutcome';
 import { activeFilterCount } from '../lib/kanban';
 
 /**
@@ -61,12 +62,20 @@ const statusOptions = computed(() =>
 
 /**
  * The Outcome filter: All (nothing sent), No outcome (`none`), then each active and proposed
- * outcome by id. The names are the q-select's labels, rendered as text.
+ * outcome by id. A retired or merged outcome filtered on is shown by name with its status, and is
+ * not offered. The names are the q-select's labels, rendered as text.
  */
+const endedOutcome = useEndedOutcomeOption(
+  () => kanban.filters.outcome,
+  () => kanban.outcomes,
+  { known: () => kanban.board?.cards.find((card) => card.outcome?.id === kanban.filters.outcome)?.outcome },
+);
+
 const outcomeOptions = computed(() => [
   { label: 'All', value: '' },
   { label: 'No outcome', value: NoOutcome },
   ...kanban.outcomes.map((outcome) => ({ label: outcomeLabel(outcome), value: outcome.id })),
+  ...endedOutcome.value,
 ]);
 
 /** One writer for every control. `null` from a cleared q-select becomes an absent key. */
