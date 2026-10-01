@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace Harness.Host;
 
@@ -129,6 +130,28 @@ public sealed record AgentLaunchUser(
             }
 
             LetThrough(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Share(string)"/> for one file the Host holds open: given to the agent's group and
+    /// made group-readable through the handle, so no path is resolved and a link swapped in along
+    /// the way cannot point the change at another file. Never throws, for the same reason.
+    /// </summary>
+    public void Share(SafeFileHandle file)
+    {
+        if (!Switches || OperatingSystem.IsWindows()) return;
+
+        try
+        {
+            _ = fchown((int)file.DangerousGetHandle(), -1, Gid);
+            File.SetUnixFileMode(file, File.GetUnixFileMode(file) | UnixFileMode.GroupRead);
         }
         catch (IOException)
         {
@@ -306,4 +329,7 @@ public sealed record AgentLaunchUser(
 
     [DllImport("libc", SetLastError = true)]
     private static extern int lchown(string path, int owner, int group);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int fchown(int fd, int owner, int group);
 }
