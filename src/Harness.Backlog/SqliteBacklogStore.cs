@@ -384,6 +384,15 @@ public sealed class SqliteBacklogStore : IBacklogStore
             await bases.ExecuteNonQueryAsync(ct);
         }
 
+        await using (var missed = connection.CreateCommand())
+        {
+            missed.Transaction = transaction;
+            missed.CommandText =
+                "DELETE FROM backlog_dispatch_missed_starts WHERE dispatch IN (SELECT id FROM backlog_dispatches WHERE item = $id)";
+            missed.Parameters.AddWithValue("$id", Key(id));
+            await missed.ExecuteNonQueryAsync(ct);
+        }
+
         await using (var dispatches = connection.CreateCommand())
         {
             dispatches.Transaction = transaction;
@@ -598,6 +607,112 @@ public sealed class SqliteBacklogStore : IBacklogStore
             rows.Add(new BacklogDispatchBase(
                 reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
                 reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4)));
+        }
+
+        return rows;
+    }
+
+    public async Task RecordMissedStartAsync(
+        long dispatchId, string repo, string reason, string? teamSha, string? defaultSha, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        // THE SHAS ARE THE DISPATCH'S MOMENT AND ARE KEPT; only the reason moves, and a stopped
+        // retry stays stopped with the reason it stopped for.
+        command.CommandText =
+            """
+            INSERT INTO backlog_dispatch_missed_starts (dispatch, repo, reason, team_sha, default_sha, stopped_at, recorded_at)
+            VALUES ($dispatch, $repo, $reason, $team, $default, NULL, $now)
+            ON CONFLICT (dispatch, repo) DO UPDATE SET reason = excluded.reason
+            WHERE backlog_dispatch_missed_starts.stopped_at IS NULL;
+            """;
+        command.Parameters.AddWithValue("$dispatch", dispatchId);
+        command.Parameters.AddWithValue("$repo", repo);
+        command.Parameters.AddWithValue("$reason", reason);
+        command.Parameters.AddWithValue("$team", (object?)teamSha ?? DBNull.Value);
+        command.Parameters.AddWithValue("$default", (object?)defaultSha ?? DBNull.Value);
+        command.Parameters.AddWithValue("$now", Now());
+
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task StopStartRetryAsync(long dispatchId, string repo, string reason, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            "UPDATE backlog_dispatch_missed_starts SET stopped_at = $now, reason = $reason"
+            + " WHERE dispatch = $dispatch AND repo = $repo AND stopped_at IS NULL";
+        command.Parameters.AddWithValue("$dispatch", dispatchId);
+        command.Parameters.AddWithValue("$repo", repo);
+        command.Parameters.AddWithValue("$reason", reason);
+        command.Parameters.AddWithValue("$now", Now());
+
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<BacklogDispatchMissedStart>> MissedStartsAsync(
+        long dispatchId, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            "SELECT dispatch, repo, reason, team_sha, default_sha, stopped_at, recorded_at"
+            + " FROM backlog_dispatch_missed_starts WHERE dispatch = $dispatch ORDER BY repo";
+        command.Parameters.AddWithValue("$dispatch", dispatchId);
+
+        return await ReadMissedAsync(command, ct);
+    }
+
+    public async Task<IReadOnlyList<BacklogDispatchMissedStart>> UnrecordedStartsAsync(CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            """
+            SELECT m.dispatch, m.repo, m.reason, m.team_sha, m.default_sha, m.stopped_at, m.recorded_at
+            FROM backlog_dispatch_missed_starts m
+            WHERE NOT EXISTS (
+                SELECT 1 FROM backlog_dispatch_bases b WHERE b.dispatch = m.dispatch AND b.repo = m.repo)
+            ORDER BY m.dispatch, m.repo
+            """;
+
+        return await ReadMissedAsync(command, ct);
+    }
+
+    public async Task<IReadOnlySet<long>> DispatchesWithStartsAsync(CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText = "SELECT DISTINCT dispatch FROM backlog_dispatch_bases";
+
+        var ids = new HashSet<long>();
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) ids.Add(reader.GetInt64(0));
+
+        return ids;
+    }
+
+    private static async Task<IReadOnlyList<BacklogDispatchMissedStart>> ReadMissedAsync(
+        SqliteCommand command, CancellationToken ct)
+    {
+        var rows = new List<BacklogDispatchMissedStart>();
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new BacklogDispatchMissedStart(
+                reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5),
+                reader.GetString(6)));
         }
 
         return rows;

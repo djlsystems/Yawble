@@ -1013,14 +1013,20 @@ builder.Services.AddSingleton<ITeamPublisher>(sp => new TeamPublisher(
     (team, repo) => sp.GetRequiredService<TeamRegistry>().DefaultBranchFor(team, repo).Branch,
     // THE TIP A DISPATCH RECORDS, so `landed` outlives the branch and the team.
     (team, repo, sha, causation, ct) =>
-        sp.GetRequiredService<BacklogTipRecorder>().RecordTipAsync(team, repo, sha, causation, ct)));
+        sp.GetRequiredService<BacklogTipRecorder>().RecordTipAsync(team, repo, sha, causation, ct),
+    // A DISPATCH'S START NOT RECORDED AT DISPATCH, tried again before the push and its tip.
+    (team, causation, ct) => sp.GetRequiredService<BacklogTipRecorder>().RetryForPublishAsync(team, causation, ct)));
 
 builder.Services.AddSingleton(sp => new BacklogTipRecorder(
     sp.GetRequiredService<IBacklogStore>(),
     sp.GetRequiredService<IMessageLog>(),
     sp.GetRequiredService<TeamRegistry>(),
     sp.GetRequiredService<TeamPaths>(),
-    sp.GetRequiredService<GitRunner>()));
+    sp.GetRequiredService<GitRunner>(),
+    // READ ON EVERY RECORDING, so a changed appsettings value applies to the next dispatch.
+    () => builder.Configuration.GetValue<TimeSpan?>(BacklogTipRecorder.FetchBudgetKey) is { } budget && budget > TimeSpan.Zero
+        ? budget
+        : BacklogTipRecorder.DefaultFetchBudget));
 
 builder.Services.AddSingleton(sp => new TeamAccess(
     sp.GetRequiredService<IUserStore>(),

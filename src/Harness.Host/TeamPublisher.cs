@@ -158,12 +158,19 @@ public interface ITeamPublisher
 /// (<see cref="BacklogTipRecorder"/>). Null records nothing. It cannot fail a publish: anything it
 /// throws, other than the caller's own cancellation, is swallowed.
 /// </param>
+/// <param name="publishing">
+/// Told (team, causation) as each publish begins, before anything is pushed or any tip recorded -
+/// where a dispatch's start not recorded at dispatch is tried again (<see cref="BacklogTipRecorder"/>).
+/// Null does nothing. It cannot fail a publish, for the reason <paramref name="teamBranchPublished"/>
+/// cannot.
+/// </param>
 public sealed class TeamPublisher(
     TeamPaths paths,
     GitRunner git,
     IMessageLog log,
     Func<string, string, string?>? defaultBranchOf = null,
-    Func<string, string, string, long?, CancellationToken, Task>? teamBranchPublished = null) : ITeamPublisher
+    Func<string, string, string, long?, CancellationToken, Task>? teamBranchPublished = null,
+    Func<string, long?, CancellationToken, Task>? publishing = null) : ITeamPublisher
 {
     /// <summary>
     /// THE BRANCHES THAT ARE NEVER A DESTINATION HERE, AND THIS IS THE ENFORCEMENT RATHER THAN THE
@@ -195,6 +202,22 @@ public sealed class TeamPublisher(
         CancellationToken ct)
     {
         if (repoUrls.Count == 0) return TeamPublishReport.Nothing;
+
+        if (publishing is not null)
+        {
+            try
+            {
+                await publishing(team, causation, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // A START STILL NOT RECORDED is tried again on the next read; the push is owed now.
+            }
+        }
 
         var outcomes = new List<RepoPublishOutcome>(repoUrls.Count);
 

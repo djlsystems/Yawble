@@ -218,6 +218,25 @@ public sealed record BacklogDispatchTip(long Dispatch, string Repo, string Sha, 
 public sealed record BacklogDispatchBase(long Dispatch, string Repo, string DefaultSha, string? TeamSha, string RecordedAt);
 
 /// <summary>
+/// A START THAT COULD NOT BE READ WHEN THE DISPATCH WAS MADE, in one repository: the clone was
+/// missing, the default branch was not known, or the fetch failed or ran over its budget. It is
+/// retried on each backlog read of the item and on the team's publish, and succeeds only while the
+/// team branch is unchanged since the dispatch - which is what the two shas taken then, without a
+/// fetch, are for. Once the team has committed the start can no longer be told apart from its work,
+/// and <paramref name="StoppedAt"/> ends the retry for good.
+/// </summary>
+/// <param name="Repo">The folder name derived from the URL, as on <see cref="BacklogDispatchTip"/>.</param>
+/// <param name="Reason">Why it is not recorded, as a clause a person reads: the last failure, or why
+/// the retry stopped.</param>
+/// <param name="TeamSha">The team branch's tip in the clone when the dispatch was made; null when it
+/// had none.</param>
+/// <param name="DefaultSha">origin's default branch as the clone last knew it then, unfetched; null
+/// when it could not be read. A team branch that was absent then and is cut here since has no
+/// commits of its own.</param>
+public sealed record BacklogDispatchMissedStart(
+    long Dispatch, string Repo, string Reason, string? TeamSha, string? DefaultSha, string? StoppedAt, string RecordedAt);
+
+/// <summary>
 /// The backlog's store. Its own module for the reason <see cref="BacklogItem"/>'s schema records.
 /// </summary>
 public interface IBacklogStore
@@ -380,6 +399,30 @@ public interface IBacklogStore
 
     /// <summary>The dispatch's recorded starting points, one per repository, by repository name.</summary>
     Task<IReadOnlyList<BacklogDispatchBase>> BasesAsync(long dispatchId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Notes that the dispatch's start in <paramref name="repo"/> could not be read. The first call
+    /// keeps the team branch and default branch as they stood; a later one only replaces the
+    /// reason, and never reopens a stopped retry. See <see cref="BacklogDispatchMissedStart"/>.
+    /// </summary>
+    Task RecordMissedStartAsync(
+        long dispatchId, string repo, string reason, string? teamSha, string? defaultSha, CancellationToken ct = default);
+
+    /// <summary>Ends the retry of the dispatch's start in <paramref name="repo"/> for good, saying why.</summary>
+    Task StopStartRetryAsync(long dispatchId, string repo, string reason, CancellationToken ct = default);
+
+    /// <summary>The dispatch's starts that could not be read, one per repository, by repository name.</summary>
+    Task<IReadOnlyList<BacklogDispatchMissedStart>> MissedStartsAsync(long dispatchId, CancellationToken ct = default);
+
+    /// <summary>
+    /// EVERY START STILL NOT RECORDED, across all dispatches, in one read: the missed starts whose
+    /// repository has no recorded start since. Stopped ones included. For the backlog list, which says
+    /// of every row whether its start was recorded.
+    /// </summary>
+    Task<IReadOnlyList<BacklogDispatchMissedStart>> UnrecordedStartsAsync(CancellationToken ct = default);
+
+    /// <summary>Every dispatch with at least one recorded start, in one read.</summary>
+    Task<IReadOnlySet<long>> DispatchesWithStartsAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Stores landed on the dispatch, ONLY when it has none yet: a stored landed is never

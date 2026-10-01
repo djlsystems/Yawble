@@ -2270,6 +2270,22 @@ export interface BacklogItemView {
    * person presses it. Null or absent otherwise.
    */
   stranded?: BacklogStranded | null
+
+  /**
+   * WHETHER WHERE THE CURRENT DISPATCH STARTED WAS RECORDED. Only a dispatch with a recorded start
+   * has `landed` kept after its team is gone. `false` carries `startDetail`, the sentence a person
+   * reads; null or absent for an item never dispatched, or a dispatch where nothing was tried.
+   */
+  startRecorded?: boolean | null
+
+  /** The sentence saying why the start was not recorded and what that costs. Null when it was. */
+  startDetail?: string | null
+
+  /**
+   * A person may still press Record where it started now: the team is here and has not committed
+   * on its branch since the dispatch.
+   */
+  startRecordable?: boolean
 }
 
 /** See `BacklogItemView.stranded`. Derived by `BacklogStrandedState` on the server. */
