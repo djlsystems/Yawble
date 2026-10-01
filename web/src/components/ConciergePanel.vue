@@ -13,13 +13,15 @@ import { assignmentMoved } from '../lib/concierge-assignment';
 import { conciergePreflight, type ConciergePreflight } from '../lib/conciergePreflight';
 import {
   AttachableImageTypes,
-  bracketedPaste,
   clipboardImage,
   dragCarriesFiles,
   droppedImages,
   imagePasteChordBytes,
+  xtermSeesMac,
   isImagePasteChord,
+  NotAnImage,
   pastedImage,
+  refusedUploadSentence,
   type ImageClipboard,
 } from '../lib/conciergeAttachment';
 import ConciergeComposeBar from './ConciergeComposeBar.vue';
@@ -369,12 +371,15 @@ function sendKey(sequence: string) {
  * `lib/conciergeAttachment.ts` for why the page does this rather than any CLI's own image key, and
  * which browsers reach which of the four ways in.
  *
- * `terminal` pastes the path into the PTY, bracketed, as if the person had pasted it as text;
+ * `terminal` pastes the path through xterm's own `paste`, exactly as if the person had pasted it as
+ * text: bracketed when the CLI turned bracketed-paste mode on, bare when it did not. Wrapping it here
+ * regardless sent a CLI that never asked for the markers a literal `ESC[200~` as keystrokes;
  * `compose` puts it in the compose bar at its caret. Paste and Alt+V happen IN the terminal, so they
  * answer there; the button and a drop go to the compose bar where there is one, because on a
  * phone that is where a line is written.
  *
- * A FAILED UPLOAD INSERTS NOTHING and says why in the panel, in the server's own sentence. Several
+ * A FAILED UPLOAD INSERTS NOTHING and says why in the panel, in the server's own sentence - a 409
+ * for no CLI running included (see `refusedUploadSentence`). Several
  * files go in order and stop at the first refusal, so what was inserted is what the line says
  * succeeded.
  */
@@ -402,7 +407,7 @@ async function attachImages(files: File[], target: AttachTarget = defaultAttachT
       try {
         path = (await uploadConciergeAttachment(file)).path;
       } catch (cause) {
-        attachError.value = cause instanceof Error ? cause.message : String(cause);
+        attachError.value = refusedUploadSentence(cause);
         return;
       }
 
@@ -411,9 +416,9 @@ async function attachImages(files: File[], target: AttachTarget = defaultAttachT
 
       if (target === 'compose' && composeBar.value) {
         await composeBar.value.insert(inserted);
-      } else if (socket) {
-        socket.sendInput(bracketedPaste(inserted));
-        terminal?.focus();
+      } else if (socket && terminal) {
+        terminal.paste(inserted);
+        terminal.focus();
       } else {
         attachError.value = 'The image was stored, but no Concierge is running to receive its path.';
         return;
@@ -442,7 +447,7 @@ function onTerminalPaste(event: ClipboardEvent) {
  * uploaded, and anything else - text, nothing, no API, a refused permission - sends the key on
  * exactly as xterm would have, so a CLI that binds Alt+V itself still gets it.
  */
-async function onImagePasteChord(key: string) {
+async function onImagePasteChord(chord: { key: string; shiftKey: boolean }) {
   const image = await clipboardImage(navigator.clipboard as ImageClipboard | undefined);
 
   if (image) {
@@ -450,7 +455,8 @@ async function onImagePasteChord(key: string) {
     return;
   }
 
-  socket?.sendInput(imagePasteChordBytes({ key }));
+  const bytes = imagePasteChordBytes(chord, xtermSeesMac(navigator.platform));
+  if (bytes) socket?.sendInput(bytes);
 }
 
 function onShellDragOver(event: DragEvent) {
@@ -465,7 +471,7 @@ function onShellDrop(event: DragEvent) {
   const images = droppedImages(event.dataTransfer);
 
   if (images.length === 0) {
-    attachError.value = 'Only an image can be attached: PNG, JPEG, GIF or WebP.';
+    attachError.value = NotAnImage;
     return;
   }
 
@@ -832,7 +838,7 @@ async function attach() {
     // `onImagePasteChord` when the clipboard turns out to hold no image.
     if (isImagePasteChord(event)) {
       event.preventDefault();
-      void onImagePasteChord(event.key);
+      void onImagePasteChord({ key: event.key, shiftKey: event.shiftKey });
       return false;
     }
 
@@ -1245,7 +1251,7 @@ onBeforeUnmount(() => {
            Compose ABOVE the keys. It is where a line is written, so it belongs next to the terminal
            it will appear in, and the key bar stays closest to the thumb that reaches for ^C. -->
       <template v-if="$q.platform.has.touch">
-        <ConciergeComposeBar ref="composeBar" @send="sendKey" @images="attachImages" />
+        <ConciergeComposeBar ref="composeBar" @send="sendKey" @images="attachImages" @refused="attachError = $event" />
         <ConciergeKeyBar @key="sendKey" />
       </template>
     </div>
