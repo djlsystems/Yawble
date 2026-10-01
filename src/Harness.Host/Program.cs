@@ -1584,9 +1584,17 @@ app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
     var memoryLimits = app.Services.GetRequiredService<RunMemoryLimits>();
     var runLimit = memoryLimits.Limit();
     var heavyNow = tenantSettings.HeavyRunMemoryLimit(0, 0);
-    app.Logger.LogInformation("{RunMemoryLimits} (each run now: {Limit}; a heavy run with no other running: {Heavy})", memoryLimits.LogLine,
-        runLimit.Mb is { } mb ? $"{mb} MB, as {runLimit.Source}" : $"no limit, as {runLimit.Source}",
-        heavyNow.Mb is { } heavyMb ? $"{heavyMb} MB, as {heavyNow.Source}" : $"no limit, as {heavyNow.Source}");
+    if (memoryLimits.NotEnforced)
+    {
+        // Under rlimit with nothing set, runs get no limit and no heavy raise: the line says so and nothing more.
+        app.Logger.LogInformation("{RunMemoryLimits}", memoryLimits.LogLine);
+    }
+    else
+    {
+        app.Logger.LogInformation("{RunMemoryLimits} (each run now: {Limit}; a heavy run with no other running: {Heavy})", memoryLimits.LogLine,
+            runLimit.Mb is { } mb ? $"{mb} MB, as {runLimit.Source}" : $"no limit, as {runLimit.Source}",
+            heavyNow.Mb is { } heavyMb ? $"{heavyMb} MB, as {heavyNow.Source}" : $"no limit, as {heavyNow.Source}");
+    }
 
     var memberTemp = app.Services.GetRequiredService<MemberTempRoot>();
     app.Logger.LogInformation("Member temporary folders: {Path} - {Reason}", memberTemp.Path, memberTemp.Reason);

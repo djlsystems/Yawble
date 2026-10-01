@@ -746,6 +746,12 @@ public sealed partial class ProcessAgentRunner(
                     new[] { output, errors, envelopeError }.Where(part => !string.IsNullOrWhiteSpace(part))),
                 DateTimeOffset.UtcNow);
 
+            // CRASHED: ended by a signal, or exited non-zero with nothing on stdout, and nothing above
+            // classed it. Its error carries the last of its own stderr (AgentCrash), so a program that
+            // said why it aborted is not filed as a failure nobody could explain.
+            var crashed = !outOfMemory && finding is null && envelopeError is null
+                && AgentCrash.Crashed(outcome.ExitCode, output);
+
             if (usage is not null && TryUnwrapOutput(command.UsageFormat, output) is { } unwrapped)
             {
                 output = unwrapped;
@@ -796,7 +802,9 @@ public sealed partial class ProcessAgentRunner(
 
                 // The usage is kept even when the envelope failed: it was still spent, and a
                 // refused run that cost 43k tokens must not be filed as costing nothing.
-                outOfMemory ? memory!.Sentence(memoryLimit!) : envelopeError,
+                outOfMemory ? memory!.Sentence(memoryLimit!)
+                : crashed ? AgentCrash.Sentence(outcome.ExitCode, errors, memoryLimit, memory?.Mechanism ?? RunMemoryMechanism.None)
+                : envelopeError,
                 Usage: usage,
                 ProcessId: outcome.ProcessId,
 
@@ -804,7 +812,9 @@ public sealed partial class ProcessAgentRunner(
                 // this design wants: a preset with no entry in the evidence table is honestly
                 // silent, exactly as a preset with no usage format is today, and the container
                 // files that as `unknown`.
-                FailureClass: outOfMemory ? FailureClasses.OutOfMemory : finding?.FailureClass,
+                FailureClass: outOfMemory ? FailureClasses.OutOfMemory
+                    : crashed ? FailureClasses.Crashed
+                    : finding?.FailureClass,
                 RetryAfter: outOfMemory ? null : finding?.RetryAfter,
 
                 // Recorded on the run's terminal row; read by nothing above, so usage and

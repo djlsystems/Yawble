@@ -30,9 +30,14 @@ public enum RunMemoryMechanism
 /// writable (measured by making and removing a child). The engine delegated a cgroup, so each run
 /// gets a child with <c>memory.max</c>, <c>memory.oom.group</c> and no swap; a run the kernel
 /// OOM-kills there is read back from <c>memory.events</c>.</item>
-/// <item><b>rlimit</b>: otherwise, when <c>prlimit</c> is in a root-owned system directory. The
-/// launch prefix gives the agent <c>RLIMIT_DATA</c> (soft and hard), which every process it starts
-/// inherits. No capability is needed to lower one's own limit, and it runs AFTER the
+/// <item><b>rlimit</b>: otherwise, when <c>prlimit</c> is in a root-owned system directory, and
+/// ONLY WHEN A PERSON SET <c>runs.memoryLimitMb</c> (<see cref="RunMemoryLimit.Set"/>). With the
+/// setting at 0 a run gets no data limit and no hard ceiling at all, and the start log says
+/// <see cref="NotEnforcedLine"/>: <c>RLIMIT_DATA</c> counts a runtime's virtual reservations, not the
+/// memory it uses, and the figure below which a runtime refuses to start depends on the runtime and
+/// the CPU architecture, so no computed figure is safe. Admission by measured memory guards the
+/// container instead. With a figure set, the launch prefix gives the agent <c>RLIMIT_DATA</c> (soft
+/// and hard), which every process it starts inherits. No capability is needed to lower one's own limit, and it runs AFTER the
 /// <see cref="AgentLaunchUser"/> prefix, so the agent - which holds no capability - cannot raise
 /// it again. It bounds EACH PROCESS, not the run's sum: a run with three processes may use three
 /// times it. <c>RLIMIT_DATA</c> rather than <c>RLIMIT_AS</c>: the address space counts reservations
@@ -56,6 +61,12 @@ public sealed partial class RunMemoryLimits
 {
     /// <summary>The start of the Host log line, and of what doctor reports.</summary>
     public const string LogPrefix = "Run memory limits";
+
+    /// <summary>
+    /// The start log line under rlimit with no figure set: nothing is enforced per run, and why.
+    /// </summary>
+    public const string NotEnforcedLine =
+        LogPrefix + ": not enforced per run - the cgroup is not writable; admission by measured memory guards the container";
 
     /// <summary>The name of the leaf the Host's own processes move to when it enables the memory controller.</summary>
     public const string HostLeaf = "host";
@@ -92,7 +103,7 @@ public sealed partial class RunMemoryLimits
     public string? CgroupDirectory { get; }
 
     /// <summary>What the Host logs at start, and what doctor reports.</summary>
-    public string LogLine => Mechanism switch
+    public string LogLine => NotEnforced ? NotEnforcedLine : Mechanism switch
     {
         RunMemoryMechanism.Cgroup => $"{LogPrefix}: cgroup - {Reason}; {HeavyWords}, its memory.max raised in place",
         RunMemoryMechanism.Rlimit => $"{LogPrefix}: rlimit - {Reason}; {HeavyWords}, its processes' soft limit "
@@ -106,11 +117,35 @@ public sealed partial class RunMemoryLimits
         "a run holding the heavy lease gets the container's limit - the Host reserve - what the other running runs "
         + "are measured to use, never less than its own limit";
 
-    /// <summary>The limit in force for the next run.</summary>
-    public RunMemoryLimit Limit() => _limit();
+    /// <summary>
+    /// Whether runs go without a limit of their own because the mechanism is rlimit and nobody set
+    /// <c>runs.memoryLimitMb</c>. Read through the setting's delegate, so setting it applies to the next run.
+    /// </summary>
+    public bool NotEnforced => Mechanism == RunMemoryMechanism.Rlimit && !_limit().Set;
 
-    /// <summary>The most a run can be raised to while it holds the heavy lease; under rlimit, each process's hard limit.</summary>
-    public RunMemoryLimit Ceiling() => _ceiling();
+    /// <summary>
+    /// The limit in force for the next run. Under rlimit only a figure a person set: a computed one
+    /// is never applied, and the run gets none.
+    /// </summary>
+    public RunMemoryLimit Limit()
+    {
+        var limit = _limit();
+        return Mechanism == RunMemoryMechanism.Rlimit && !limit.Set ? Unset() : limit;
+    }
+
+    /// <summary>
+    /// The most a run can be raised to while it holds the heavy lease; under rlimit, each process's
+    /// hard limit, and none when no figure is set - no voluntary ceiling either.
+    /// </summary>
+    public RunMemoryLimit Ceiling()
+    {
+        var limit = _limit();
+        return Mechanism == RunMemoryMechanism.Rlimit && !limit.Set ? Unset() : _ceiling();
+    }
+
+    private static RunMemoryLimit Unset() => new(null,
+        $"{TenantSettings.RunsMemoryLimitMbName} is not set and the cgroup is not writable, so no per-run limit is "
+        + "applied; admission by measured memory guards the container");
 
     /// <summary>Nothing is applied: what a runner without this service, and the suite, gets.</summary>
     public static RunMemoryLimits NotAvailable(string reason) =>

@@ -98,6 +98,15 @@ public static class FailureClasses
     public const string OutOfMemory = "out-of-memory";
 
     /// <summary>
+    /// The agent's program CRASHED: it ended by a signal, or exited non-zero with no usable output,
+    /// and nothing else classed it. The run's error carries the last lines it wrote to stderr
+    /// (bounded and redacted), because the program's own words are the best account of why - which
+    /// is what separates it from <see cref="Unknown"/>. Never resumed automatically: the same launch
+    /// would likely crash the same way.
+    /// </summary>
+    public const string Crashed = "crashed";
+
+    /// <summary>
     /// NOBODY COULD CLASSIFY IT - the default, and a real class rather than an absence. Treated
     /// exactly as <see cref="AgentFault"/>: never resumed.
     /// </summary>
@@ -106,7 +115,7 @@ public static class FailureClasses
     /// <summary>Every class, for a test or a renderer that wants to enumerate them.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        Quota, Rate, Transport, AgentFault, LaunchMissing, OutOfMemory, Timeout, Interrupted, Unknown,
+        Quota, Rate, Transport, AgentFault, LaunchMissing, OutOfMemory, Crashed, Timeout, Interrupted, Unknown,
     ];
 
     /// <summary>
@@ -149,6 +158,8 @@ public static class FailureClasses
             + "or updated, so nothing ran and nothing was spent; re-sending the instruction will try again.",
         OutOfMemory => "The run used more memory than its limit, the setting runs.memoryLimitMb, so it was "
             + "stopped. This is not an agent fault; the run's own error says what the limit was.",
+        Crashed => "The agent's program crashed - it ended by a signal, or exited without an answer - and "
+            + "its own last words on stderr are in the run's error. It is not resumed automatically.",
         Timeout => "The idle clock fired.",
         Interrupted => "The run was cut off before it finished.",
         Unknown => "Nothing here could say why, so this is treated exactly as an agent fault and "
