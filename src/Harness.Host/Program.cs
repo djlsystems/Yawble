@@ -681,6 +681,13 @@ builder.Services.AddSingleton(new AgentInstallProbe());
 // The one path from the progress ROUTE to whatever is currently running that member. Singleton
 // because both ends have to be looking at the same object for a heartbeat to mean anything.
 builder.Services.AddSingleton<RunHeartbeat>();
+// THE INSTANCE-WIDE LEASES (`heavy`), across every team. The holder count is read through a
+// delegate on every call, so a settings write applies at the next acquire or release. ILeaseState
+// is the read-only view the activity monitor reads. See InstanceLeases and LeaseActions.
+builder.Services.AddSingleton(sp =>
+    new InstanceLeases(() => sp.GetRequiredService<TenantSettings>().LeasesHeavyHolders));
+builder.Services.AddSingleton<ILeaseState>(sp => sp.GetRequiredService<InstanceLeases>());
+builder.Services.AddSingleton<LeaseActions>();
 // WRAPPED, AND THE WRAPPING IS LOAD-BEARING. `ProcessAgentRunner` spawns the process and reads what
 // it wrote; `CredentialUseRunner` answers what the SERVER saw while it ran, which is how a run that
 // did nothing is told from one that decided there was nothing to do. Unwrap this and every result
@@ -857,6 +864,12 @@ builder.Services.AddSingleton(sp => new ContainerHost(
 
     onRunEnding: async (member, causation, succeeded, ct) =>
     {
+        // NO LEASE OUTLIVES ITS RUN. First, because it cannot fail and everything below can, and
+        // because a run waiting on a push should not keep another team's heavy work waiting too.
+        // Every way a run ends reaches this hook - completed, failed, stopped, a runner that
+        // threw - and a Host that goes down holds no lease when it comes back: they live in memory.
+        await sp.GetRequiredService<LeaseActions>().EndedAsync(LeaseOwner.For(member), ct);
+
         // THE PUBLISH IGNORES `succeeded` AND THAT IS THE WHOLE POINT: a run killed between
         // doing the work and finishing its turn is the case this exists for, so its branch
         // matters MORE than a clean run's, not less.
@@ -1201,6 +1214,7 @@ builder.Services.AddSingleton(sp =>
     // ObjectDisposedException out of disposal and takes every live session's cleanup with it.
     var launcher = sp.GetRequiredService<ConciergeLaunchFactory>();
     var teams = sp.GetRequiredService<TeamRegistry>();
+    var leases = sp.GetRequiredService<InstanceLeases>();
 
     // The LOGIN, for the workspace's directory name. Resolved here rather than inside the
     // factory for teamLabel's stated reason - the factory has no store of its own - and captured
@@ -1250,7 +1264,14 @@ builder.Services.AddSingleton(sp =>
                 publicUrl,
                 ct);
         },
-        (key, ct) => launcher.RevokeAsync(key.User, ct));
+        async (key, ct) =>
+        {
+            // A Concierge's run is its session: a lease it took ends with it. It has no card and
+            // no silence clock, so only the lease moves; a member the queue hands it to has its
+            // clock resumed at its next acquire, which answers granted.
+            leases.Ended(LeaseOwner.ForConcierge(ConciergeLaunchFactory.PrincipalId(key.User)));
+            await launcher.RevokeAsync(key.User, ct);
+        });
 });
 
 // HOW DEEP ONE CHAIN OF CAUSATION MAY GO before the platform stops it.
@@ -2099,6 +2120,7 @@ RepoEndpoints.Map(app);
 KeyEndpoints.Map(app);
 FileSystemEndpoints.Map(app);
 SkillsEndpoints.Map(app);
+LeaseEndpoints.Map(app);
 KanbanEndpoints.Map(app);
 BacklogEndpoints.Map(app);
 BacklogEndpoints.MapTeamScoped(app);

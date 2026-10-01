@@ -22,7 +22,7 @@ namespace Harness.Host;
 /// </summary>
 public sealed class RunHeartbeat
 {
-    private readonly ConcurrentDictionary<ContainerId, Action> _waiting = new();
+    private readonly ConcurrentDictionary<ContainerId, (Action Alive, Action<bool>? Hold)> _waiting = new();
 
     /// <summary>
     /// Registers <paramref name="alive"/> to be called whenever this container reports progress,
@@ -32,9 +32,16 @@ public sealed class RunHeartbeat
     /// registration replaces the first rather than stacking - if that ever happens the old run is
     /// already over, and leaving its callback behind would reset a clock nobody is watching.
     /// </summary>
-    public IDisposable WhileRunning(ContainerId container, Action alive)
+    public IDisposable WhileRunning(ContainerId container, Action alive) => WhileRunning(container, alive, null);
+
+    /// <summary>
+    /// As above, with <paramref name="hold"/> called with true when the run's clock is to be
+    /// PAUSED - the member is queued for a lease and waiting is not silence - and with false when
+    /// it is to run again. See <see cref="Hold"/>.
+    /// </summary>
+    public IDisposable WhileRunning(ContainerId container, Action alive, Action<bool>? hold)
     {
-        _waiting[container] = alive;
+        _waiting[container] = (alive, hold);
 
         return new Registration(this, container);
     }
@@ -49,16 +56,37 @@ public sealed class RunHeartbeat
     /// </summary>
     public void Touch(ContainerId container)
     {
-        if (!_waiting.TryGetValue(container, out var alive)) return;
+        if (!_waiting.TryGetValue(container, out var registered)) return;
 
         try
         {
-            alive();
+            registered.Alive();
         }
         catch (ObjectDisposedException)
         {
             // The run ended between the lookup and the call. Its clock is gone and does not need
             // resetting.
+        }
+    }
+
+    /// <summary>
+    /// PAUSES this container's clock (<paramref name="paused"/> true) or starts it again from a full
+    /// window (false). Called by <see cref="LeaseActions"/> while the member waits in a lease's
+    /// queue: it was told to call again to wait, and a run stopped for waiting its turn would be the
+    /// platform timing out its own queue. A progress report while paused does not restart the clock.
+    ///
+    /// Never throws, for the reason <see cref="Touch"/> does not.
+    /// </summary>
+    public void Hold(ContainerId container, bool paused)
+    {
+        if (!_waiting.TryGetValue(container, out var registered) || registered.Hold is not { } hold) return;
+
+        try
+        {
+            hold(paused);
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 

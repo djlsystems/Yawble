@@ -42,7 +42,7 @@ Follow it. If it does not load, call the MCP tool blocked with the reason
 
 Platform tools are MCP tools on the server named harness: skills_get, skills_search, tell,
 progress, blocked, handback, needs_decision, workflow_complete, workflow_show, team_list,
-team_current, wip, status, hiring, member, kanban, backlog, repo, and site. There is no shell
+team_current, wip, lease, status, hiring, member, kanban, backlog, repo, and site. There is no shell
 command and no HTTP fallback. Call progress while you work. Pass HARNESS_CAUSATION as
 causation on every tell.
 

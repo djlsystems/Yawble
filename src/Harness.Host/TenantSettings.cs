@@ -77,6 +77,7 @@ public sealed class TenantSettings
     public const string SystemPackagesName = "system.packages";
     public const string AgentTagsName = "agents.tags";
     public const string OutcomesRequireForCompletionName = "outcomes.requireForCompletion";
+    public const string LeasesHeavyHoldersName = "leases.heavy.holders";
 
     private readonly SqliteTenantSettingsStore _store;
     private readonly IConfiguration _configuration;
@@ -180,6 +181,12 @@ public sealed class TenantSettings
                 + "A person's close and the platform's own declarations are never refused. Applies to the "
                 + "next declaration.",
                 Choices: ["off", "on"]),
+            new(LeasesHeavyHoldersName, TenantSettingKind.Integer, "1", "Leases:Heavy:Holders",
+                "How many runs may hold the `heavy` lease at once, across all teams. An agent takes it "
+                + "before anything it knows to be heavy - the repository's full test command, a full "
+                + "build, an image build - and the rest wait their turn in order. Applies at the next "
+                + "acquire or release.",
+                Min: 1, Max: 1000),
         ];
 
         _definitions = Definitions.ToDictionary(d => d.Name, StringComparer.Ordinal);
@@ -297,6 +304,9 @@ public sealed class TenantSettings
 
     /// <summary><c>causation.depthLimit</c>. 0 is no limit.</summary>
     public int CausationDepthLimit => (int)Integer(CausationDepthLimitName);
+
+    /// <summary><c>leases.heavy.holders</c>: runs that may hold the heavy lease at once.</summary>
+    public int LeasesHeavyHolders => (int)Integer(LeasesHeavyHoldersName);
 
     /// <summary>Whether a chain at <paramref name="depth"/> is past the causation limit.</summary>
     public bool CausationTooDeep(int depth) => CausationDepthLimit > 0 && depth > CausationDepthLimit;
