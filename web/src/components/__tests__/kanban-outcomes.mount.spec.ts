@@ -25,7 +25,7 @@ import { useKanbanStore } from '../../stores/kanban';
 import type { KanbanCard as Card } from '../../api/kanban';
 import { resetBody } from '../../test/mountQuasar';
 
-const shipping = { id: '11111111-1111-1111-1111-111111111111', name: 'Ship <b>B0023</b>', status: 'active' as const };
+const shipping = { id: '11111111-1111-1111-1111-111111111111', name: 'Ship <b>the release</b>', status: 'active' as const };
 const faster = { id: '22222222-2222-2222-2222-222222222222', name: 'Faster onboarding', status: 'proposed' as const };
 
 function card(over: Partial<Card> & { id: string }): Card {
@@ -108,7 +108,7 @@ describe('the Outcome filter', () => {
     expect(options).toEqual([
       { label: 'All', value: '' },
       { label: 'No outcome', value: 'none' },
-      { label: 'Ship <b>B0023</b>', value: shipping.id },
+      { label: 'Ship <b>the release</b>', value: shipping.id },
       { label: 'Faster onboarding (proposed)', value: faster.id },
     ]);
     expect(requests.some((r) => r.url === '/api/outcomes?status=active,proposed')).toBe(true);
@@ -157,7 +157,7 @@ describe('the card tag', () => {
 
     expect(tag.exists()).toBe(true);
     expect(tag.classes()).not.toContain('k-card-outcome--proposed');
-    expect(tag.text()).toBe('Ship <b>B0023</b>');
+    expect(tag.text()).toBe('Ship <b>the release</b>');
     expect(tag.find('b').exists()).toBe(false);
     expect(mounted.find('.k-card-title + .k-card-outcome').exists()).toBe(true);
   });

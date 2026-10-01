@@ -45,7 +45,7 @@ import { createTriggerRequestFromDraft, updateTriggerPatchFromDraft, type Trigge
 import { mountDialog, resetBody } from '../../test/mountQuasar';
 import * as probe from '../../test/formProbe';
 
-const shipping = { id: '11111111-1111-1111-1111-111111111111', name: 'Ship B0023', status: 'active' as const };
+const shipping = { id: '11111111-1111-1111-1111-111111111111', name: 'Ship the release', status: 'active' as const };
 const faster = { id: '22222222-2222-2222-2222-222222222222', name: 'Faster onboarding', status: 'proposed' as const };
 
 function item(over: Record<string, unknown> & { id: number }) {
@@ -108,7 +108,7 @@ describe('the backlog item editor', () => {
     const picker = wrapper.findComponent(OutcomePicker).findComponent({ name: 'QSelect' });
     expect(optionsOf(picker)).toEqual([
       { label: 'None', value: '' },
-      { label: 'Ship B0023', value: shipping.id },
+      { label: 'Ship the release', value: shipping.id },
       { label: 'Faster onboarding (proposed)', value: faster.id },
     ]);
 
