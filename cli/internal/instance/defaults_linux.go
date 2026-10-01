@@ -26,7 +26,7 @@ func Measure() Machine {
 			if err != nil {
 				return Machine{}
 			}
-			return Machine{MemoryBytes: kb * 1024, CPUs: runtime.NumCPU(), Measured: true}
+			return Machine{MemoryBytes: kb * 1024, CPUs: runtime.NumCPU(), Measured: true, Source: "this computer", Kind: KindLinux}
 		}
 	}
 	return Machine{}

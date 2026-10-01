@@ -32,7 +32,7 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 		Example: "  yawble doctor\n  yawble doctor --fix\n  yawble doctor --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			e, s, _, err := prepare(deps)
+			e, s, _, capacity, err := prepareMeasured(deps)
 			if err != nil {
 				return err
 			}
@@ -69,6 +69,7 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 				report, reportErr = doctor.FetchHostReport(cmd.Context(), e, observed.ContainerKnown && observed.Container == engine.StateRunning)
 			}
 			checks = append(checks, doctor.InstanceChecks(report, reportErr, deps.Now())...)
+			checks = append(checks, doctor.CapacityCheck(capacity, s, report))
 			checks = append(checks, doctor.AgentToolsCheck(report, reportErr))
 			checks = append(checks, doctor.BackupCheck(deps.ConfigDir, deps.Now()))
 			if other := otherEngine(deps, e.Name()); other != nil {
