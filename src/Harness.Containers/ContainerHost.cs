@@ -12,8 +12,13 @@ namespace Harness.Containers;
 /// <paramref name="Interrupted"/> is work that HAD started, cannot be re-run, and has been reported
 /// as `container.failed` instead. Returning only the first made the second silent - a restart that
 /// cut five runs short answered 0 and printed nothing.
+///
+/// <para>
+/// <paramref name="ManagersWoken"/> is how many workflows had their Manager told to carry on because
+/// the newest thing in them was that Manager's own run cut off by a restart.
+/// </para>
 /// </summary>
-public readonly record struct ResumeReport(int Reoffered, int Interrupted);
+public readonly record struct ResumeReport(int Reoffered, int Interrupted, int ManagersWoken = 0);
 
 /// <summary>
 /// Owns the containers and feeds them from the log.
@@ -533,7 +538,169 @@ public sealed class ContainerHost : IAsyncDisposable
             await _cursors.AdvanceAsync(container.Id, rows[^1].Seq, ct);
         }
 
-        return new ResumeReport(resumed, interrupted);
+        // IN THE SAME PASS, after every cut-off run has its failed row and every unstarted one is
+        // queued again - so "nothing queued for the Manager" is read off the queue as it now is.
+        var woken = await WakeCutOffManagersAsync(ct);
+
+        return new ResumeReport(resumed, interrupted, woken);
+    }
+
+    /// <summary>How many recent `agentContainer.failed` rows the restart wake looks at. A window,
+    /// for <see cref="IMessageLog.ReadLatestAsync"/>'s own reason: the log only grows.</summary>
+    private const int RestartWakeWindow = 400;
+
+    /// <summary>The source of the restart wake: the platform's, never a person's or a member's.</summary>
+    public const string RestartWakeSource = "platform";
+
+    /// <summary>
+    /// What the Manager is told when its own run was the one a restart cut off.
+    /// </summary>
+    public const string RestartWakeText =
+        "Your last run in this workflow was cut off by a host restart before it finished. "
+        + "Nothing else is queued for you here, so nothing would wake you again. Look at "
+        + "everything under this thread and carry on from where it stopped.";
+
+    /// <summary>
+    /// A MANAGER CUT OFF BY A RESTART IS WOKEN. Every other run a restart cuts off wakes its
+    /// Manager through the `agentContainer.failed` row above - but a Manager never reacts to its
+    /// own publications, so when the run cut off was the Manager's own nothing woke it and the
+    /// workflow sat open with nothing queued until a person said carry on.
+    ///
+    /// <para>
+    /// For each workflow whose newest terminal row is a Manager's run failed because the Host
+    /// restarted, with no workflow declaration or close after it and nothing queued for that
+    /// Manager in it, one instruction is appended to the Manager: source
+    /// <see cref="RestartWakeSource"/>, causation the failed row, so it joins that workflow and
+    /// never roots a new one. Read from the log, not from this pass's rows, so a restart between
+    /// the failure and the wake still wakes it - and never twice for one failed row, because the
+    /// wake itself is an instruction to the Manager after the failure, which is "something queued".
+    /// </para>
+    /// </summary>
+    private async Task<int> WakeCutOffManagersAsync(CancellationToken ct)
+    {
+        // ALSO RETURNS ADDRESSED INSTRUCTIONS whatever the filter says, so it is applied again.
+        var rows = await _log.ReadLatestAsync(0, [MessageTypes.Failed], RestartWakeWindow, ct);
+
+        // The newest restart failure per workflow; an older one in the same workflow has been
+        // overtaken by whatever came after it, which the thread check below would see anyway.
+        var newest = new Dictionary<long, Message>();
+
+        foreach (var row in rows)
+        {
+            if (!string.Equals(row.Type, MessageTypes.Failed, StringComparison.Ordinal)) continue;
+            if (!IsRestartFailure(row)) continue;
+            if (!ContainerId.TryParse(row.Source, out var source) || !WipLedger.IsManager(source)) continue;
+
+            if (!newest.TryGetValue(row.CorrelationId, out var seen) || row.Seq > seen.Seq)
+            {
+                newest[row.CorrelationId] = row;
+            }
+        }
+
+        var woken = 0;
+
+        foreach (var failure in newest.Values.OrderBy(f => f.Seq))
+        {
+            var manager = ContainerId.Parse(failure.Source);
+
+            // A MANAGER THIS HOST NO LONGER HAS is not told anything: an instruction addressed to
+            // a container that does not exist is a row nothing will ever read.
+            if (!_containers.TryGetValue(manager, out var container)) continue;
+
+            // Under the container's floor it belongs to a predecessor of the same name.
+            if (failure.Seq <= container.Snapshot().SinceSeq) continue;
+
+            if (!await NothingAfterAsync(failure, manager, ct)) continue;
+            if (await QueuedInAsync(manager, failure.CorrelationId, ct)) continue;
+
+            var parts = InstructionText.Split(RestartWakeText);
+
+            await _log.AppendAsync(
+                new NewMessage(
+                    MessageTypes.InstructionFor(manager),
+                    JsonSerializer.Serialize(new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        [PayloadFields.Instruction] = RestartWakeText,
+                        ["subject"] = parts.Subject,
+                        [PayloadFields.Body] = parts.Body,
+                        [RestartWakeOfField] = failure.Seq,
+                    }),
+                    RestartWakeSource,
+                    failure.Seq),
+                ct);
+
+            woken++;
+        }
+
+        return woken;
+    }
+
+    /// <summary>Which failed row a restart wake answers.</summary>
+    public const string RestartWakeOfField = "restartWakeOf";
+
+    /// <summary>
+    /// Whether the failure is still the newest word in its workflow: no run of anyone ended after
+    /// it, nobody declared or closed the workflow, and nothing was addressed to the Manager since
+    /// (a person's or member's instruction, or an earlier restart wake for this same row).
+    /// </summary>
+    private async Task<bool> NothingAfterAsync(Message failure, ContainerId manager, CancellationToken ct)
+    {
+        var instructionType = MessageTypes.InstructionFor(manager);
+
+        foreach (var row in await _log.ReadCorrelationAsync(failure.CorrelationId, ct))
+        {
+            if (row.Seq <= failure.Seq) continue;
+
+            if (row.Type is MessageTypes.Completed or MessageTypes.Failed
+                or MessageTypes.WorkflowCompleted or MessageTypes.WorkflowClosed
+                or MessageTypes.Handback)
+            {
+                return false;
+            }
+
+            if (string.Equals(row.Type, instructionType, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Whether the Manager still holds a delivery from this workflow: one the pass above
+    /// queued again, or one queued behind the run that was cut off.</summary>
+    private async Task<bool> QueuedInAsync(ContainerId manager, long correlation, CancellationToken ct)
+    {
+        if (_pending is null) return false;
+
+        foreach (var row in await _pending.ForAsync(manager, ct))
+        {
+            if (await _log.FindAsync(row.Seq, ct) is { } queued && queued.CorrelationId == correlation)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>A failed row this class wrote for a run a restart cut off - not a person's Stop,
+    /// which is `interrupted` too.</summary>
+    private static bool IsRestartFailure(Message row)
+    {
+        try
+        {
+            var payload = JsonDocument.Parse(row.Payload).RootElement;
+
+            return payload.ValueKind == JsonValueKind.Object
+                && payload.TryGetProperty("output", out var output)
+                && output.ValueKind == JsonValueKind.String
+                && output.GetString() == InterruptedByRestart
+                && payload.TryGetProperty(PayloadFields.FailureClass, out var failureClass)
+                && failureClass.ValueKind == JsonValueKind.String
+                && failureClass.GetString() == FailureClasses.Interrupted;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private void OnChanged(ContainerSnapshot snapshot)

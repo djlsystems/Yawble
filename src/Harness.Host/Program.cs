@@ -1479,6 +1479,10 @@ builder.Services.AddSignalR()
 // these options.
 builder.Services.ConfigureHttpJsonOptions(options => ConfigureHostJson(options.SerializerOptions));
 
+// A BODY THAT DOES NOT BIND THROWS, in every environment rather than Development alone, so
+// `JsonBodyErrors` can answer it with a sentence naming the field instead of an empty 400.
+builder.Services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
+
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<AgentAuthProbe>();
 
@@ -1754,11 +1758,12 @@ var resumed = await app.Services.GetRequiredService<ContainerHost>().ResumePendi
 // BOTH numbers, and a line whenever either is non-zero. An interrupted run is reported to the log
 // and is exactly the thing whoever dispatched it needs told about, so a restart that cut runs short
 // must say so even when none of them could be re-offered.
-if (resumed.Reoffered > 0 || resumed.Interrupted > 0)
+if (resumed.Reoffered > 0 || resumed.Interrupted > 0 || resumed.ManagersWoken > 0)
 {
     Console.WriteLine(
         $"Resumed {resumed.Reoffered} queued item(s) and reported {resumed.Interrupted} "
-        + "interrupted run(s) from the last stop.");
+        + $"interrupted run(s) from the last stop; told {resumed.ManagersWoken} Manager(s) cut off "
+        + "by the restart to carry on.");
 }
 
 // THE STARTUP AND LIFECYCLE FACTS, IN ONE PASS.
@@ -2000,6 +2005,10 @@ app.UseForwardedHeaders(forwarded);
 // would be no page left on which to log in. The bundle is not the secret; the API is.
 app.UseAuthentication();
 app.UseAuthorization();
+
+// EVERY ROUTE THAT BINDS A JSON BODY, in one place: a wrong type or malformed JSON is answered 400
+// with a sentence naming the field and the type expected, never an empty body.
+JsonBodyErrors.Use(app);
 
 // AFTER UseAuthorization, which is what populates context.User for a key-authenticated request.
 PrincipalLogScope.Use(app);
