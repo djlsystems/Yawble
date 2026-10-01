@@ -34,7 +34,28 @@ Each script places the binary (`~/.local/bin`, or `%LOCALAPPDATA%\Programs\yawbl
 yawble up
 ```
 
-`up` installs no container engine. It uses what is installed: Podman or Docker, asking which when both are (Podman is recommended; the answer is saved as `engine` in yawble's config, and `yawble config set engine` changes it; `--yes` takes Podman). Before it creates anything it checks the port: when another program holds it (8080 by default), `up` offers the next free one and saves your answer as `port`. With neither, it stops and says where to get one: Podman Desktop (recommended, free for everyone) or Docker Desktop on macOS and Windows, Podman or Docker Engine on Linux, then run `yawble up` again; the install scripts end with the same advice. Podman on Windows needs WSL, and `up` says how to install it (at the computer, then restart) before creating the machine. macOS is Apple silicon only for now (Intel Macs are not tested yet); on a Mac, `install.sh` adds `~/.local/bin` to `~/.zprofile`. With Docker, the limits come from `docker info`. On macOS and Windows it creates the Podman machine (rootless) if there is none, starts it if it is stopped, and offers to make a rootful one rootless, because a rootful machine on Windows never answers on localhost: on Windows a no stops `up` before anything is created, on macOS it carries on with a note. `--yes` answers every question; without a terminal and without `--yes`, a question is a refusal that names the flag. On Windows, if the WSL virtual machine has less memory than the container limit, `up` says what to put in `.wslconfig` and continues. First installs have been run end to end on Linux (Ubuntu 24.04), on Windows 11 with Podman, and on macOS with both Podman and Docker. On macOS and Windows the container's default memory is half the Podman machine's, capped at 12 GB, and its CPUs the machine's, capped at 8; a new Mac machine is created with half the Mac's RAM, capped at 12 GB.
+`up` installs no container engine. It uses what is installed: Podman or Docker, asking which when both are (Podman is recommended; the answer is saved as `engine` in yawble's config, and `yawble config set engine` changes it; `--yes` takes Podman). Before it creates anything it checks the port: when another program holds it (8080 by default), `up` offers the next free one and saves your answer as `port`. With neither, it stops and says where to get one: Podman Desktop (recommended, free for everyone) or Docker Desktop on macOS and Windows, Podman or Docker Engine on Linux, then run `yawble up` again; the install scripts end with the same advice. Podman on Windows needs WSL, and `up` says how to install it (at the computer, then restart) before creating the machine. macOS is Apple silicon only for now (Intel Macs are not tested yet); on a Mac, `install.sh` adds `~/.local/bin` to `~/.zprofile`. On macOS and Windows it creates the Podman machine (rootless) if there is none, starts it if it is stopped, and offers to make a rootful one rootless, because a rootful machine on Windows never answers on localhost: on Windows a no stops `up` before anything is created, on macOS it carries on with a note. `--yes` answers every question; without a terminal and without `--yes`, a question is a refusal that names the flag. On Windows, if the WSL virtual machine has less memory than the container limit, `up` says what to put in `.wslconfig` and continues. First installs have been run end to end on Linux (Ubuntu 24.04), on Windows 11 with Podman, and on macOS with both Podman and Docker. A new Mac machine is created with half the Mac's RAM, capped at 12 GB.
+
+### What the first `up` asks: the container's memory and CPUs
+
+The container's size comes from what the engine has, asked of the engine itself: `docker info` (`MemTotal`, `NCPU`) under Docker on every OS, which is Docker Desktop's VM on macOS and Windows; the Podman machine on macOS and Windows; this computer under Podman on Linux. One rule everywhere: memory is half of the engine's, capped at 12 GB, and CPUs are the engine's, capped at 8. When the engine cannot answer, nothing is estimated: `up` says the memory and CPUs were not measured and uses 8192m and 4 CPUs until you choose (`yawble config set memory|cpus`), and saves nothing.
+
+When yawble's config holds neither `memory` nor `cpus`, the first `up` at a terminal shows one short screen and asks for each, Enter accepting the proposal:
+
+```
+How much of the engine should Yawble's container get? (asked once)
+  the engine has   12288 MB memory, 10 CPUs (docker info)
+  proposed         6144 MB memory, 8 CPUs (half the engine's memory up to 12 GB; its CPUs up to 8)
+  running limit    3 at once, derived from the Host's rule: the smaller of CPUs - 1 and memory / wip.memoryPerRunMb (the Host's default, 2048 MB). Not asked; yawble config set maxRunning overrides it
+Press Enter to accept a value, or type another.
+Memory in MB (4096 to 12288) [6144]:
+CPUs (1 to 10) [8]:
+saved memory 6144m and cpus 8 in yawble's config; the Host's rule derives a running limit of 3 from them (yawble config set memory <size> and yawble config set cpus <n> change them, then yawble up)
+```
+
+Memory takes megabytes (`8192`) or a size (`8g`). A value above what the engine has is refused with the maximum named, and so is memory below the 4 GB floor (the Host's own share beside one run) and fewer than 1 CPU; then it asks again. The running limit on this screen is the only figure yawble derives itself, and it says so: it is the Host's default rule with the Host's default `wip.memoryPerRunMb`. It is not asked; `yawble config set maxRunning` overrides it, and `yawble doctor` reports the limit the Host actually applies.
+
+With `--yes`, or without a terminal, `up` takes the proposal without asking and prints what it chose and how to change it. Either way the answer is saved, so later `up`s do not ask; `yawble config set memory <size>` and `yawble config set cpus <n>`, then `yawble up`, change it. A saved value above what the engine now has (a smaller Docker Desktop VM, say) is warned about on every `up`, with the largest value that fits. `yawble restore` does not ask; it uses what is saved, or the proposal.
 
 To build from source instead:
 
@@ -217,12 +238,13 @@ ok    database       schema accepted (9 steps)
 warn  backups        no daily backup yet (the Host writes one a day into /data/backups)
 warn  agents         claude signed in, launch ok · codex NOT signed in, launch ok · copilot not measured, launch not checked · grok signed in, launch FAILED, exit 134 · agy not installed
                      fix: yawble agents
+info  capacity       engine has 15688 MB, 10 CPUs (podman machine); the container got 8192 MB, 8 CPUs (the Host's cgroup reading)
 ok    running limit  4, from the memory bound (the Host's answer: ...)
 info  run memory     rlimit, 1792 MB per run: runs.memoryLimitMb is set
 info  backup         newest C:\Users\me\yawble-backup-20260927-181200.tar.gz, 17 hours old
 ```
 
-The running limit and run memory are the Host's own answers; when the Host cannot be asked they read "not known", never an estimate. The first four rows appear only with Podman on macOS and Windows, where it runs in a machine; on Linux, and with Docker, the list starts at `engine`.
+`capacity` puts what the engine has (asked of it, as `up` does) beside what the container got, as the Host inside reads its cgroup; it warns when yawble's config asks for more than the engine has. The running limit and run memory are the Host's own answers; when the Host cannot be asked they read "not known", never an estimate. The first four rows appear only with Podman on macOS and Windows, where it runs in a machine; on Linux, and with Docker, the list starts at `engine`.
 
 ## Where things live
 

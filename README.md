@@ -96,7 +96,11 @@ yawble up
 ### Then, on either
 
 `yawble up` finds your container engine (and asks which one if you have both), pulls the image,
-starts the container and opens the board at <http://localhost:8080>. The first start installs the
+starts the container and opens the board at <http://localhost:8080>. The first `up` shows what
+the engine has (memory and CPUs), proposes the container's share (half the memory up to 12 GB,
+the CPUs up to 8) with the running limit the Host's rule derives from it, and asks for each value,
+Enter accepting; `--yes` takes the proposal. The answer is saved; `yawble config set memory|cpus`
+changes it later. The first start installs the
 agent CLIs, which takes a few minutes. If something is not right, `yawble doctor` checks the setup
 and `yawble doctor --fix` repairs what it can.
 

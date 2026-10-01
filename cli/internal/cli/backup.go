@@ -238,7 +238,7 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 		return err
 	}
 
-	e, s, err := upReady(cmd, deps, yes)
+	e, s, err := upReady(cmd, deps, yes, false)
 	if err != nil {
 		return err
 	}

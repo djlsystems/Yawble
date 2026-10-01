@@ -184,7 +184,7 @@ func dockerMachine(ctx context.Context, r engine.Runner) instance.Machine {
 	if errMemory != nil || errCPUs != nil || memory <= 0 || cpus <= 0 {
 		return instance.Machine{}
 	}
-	return instance.Machine{MemoryBytes: memory, CPUs: cpus, Measured: true}
+	return instance.Machine{MemoryBytes: memory, CPUs: cpus, Measured: true, Source: "docker info"}
 }
 
 // noteRestart says what `up` is about to stop when it replaces a RUNNING container whose settings

@@ -31,13 +31,19 @@ type Settings struct {
 	EnvFileHash string
 }
 
-// Machine is what could be measured about this computer. Measured=false means nothing could,
-// and Defaults then says which constants it used instead.
+// Machine is what the engine the container runs in has: Docker's VM or host, the Podman
+// machine, or this computer under Podman on Linux. Measured=false means the engine could not
+// say, and Defaults then says which constants it used instead. Source names where the figures
+// came from ("docker info", "podman machine", "this computer").
 type Machine struct {
 	MemoryBytes int64
 	CPUs        int
 	Measured    bool
+	Source      string
 }
+
+// MemoryMB is the machine's memory in megabytes.
+func (m Machine) MemoryMB() int { return int(m.MemoryBytes >> 20) }
 
 // Memory is expressed in MEGABYTES so a small board is not rounded to "0g" (Important 9 of
 // the first review). The cap is 12 GB; a machine below 2 GB gets half of what it has.
@@ -60,32 +66,43 @@ func Defaults(c config.Config, m Machine, pinned string) (Settings, []string) {
 	if s.Image == "" {
 		s.Image = pinned
 	}
+	memoryMB, cpus := Proposed(m)
 	if s.Memory == "" {
 		if m.Measured {
-			half := m.MemoryBytes / 2
-			if half > memoryCapBytes {
-				half = memoryCapBytes
-			}
-			s.Memory = fmt.Sprintf("%dm", half>>20)
+			s.Memory = fmt.Sprintf("%dm", memoryMB)
 		} else {
 			s.Memory = unmeasuredMemory
-			notes = append(notes, "memory: this machine's RAM could not be measured; using "+unmeasuredMemory+" (yawble config set memory <size> to choose)")
+			notes = append(notes, "memory: not measured - the engine could not say how much it has; using "+unmeasuredMemory+" (yawble config set memory <size> to choose)")
 		}
 	}
 	if s.CPUs == 0 {
 		if m.Measured {
-			s.CPUs = m.CPUs
-			if s.CPUs > cpuCap {
-				s.CPUs = cpuCap
-			}
+			s.CPUs = cpus
 		} else {
 			s.CPUs = unmeasuredCPUs
-			notes = append(notes, fmt.Sprintf("cpus: this machine's CPU count could not be measured; using %d (yawble config set cpus <n> to choose)", unmeasuredCPUs))
+			notes = append(notes, fmt.Sprintf("cpus: not measured - the engine could not say how many it has; using %d (yawble config set cpus <n> to choose)", unmeasuredCPUs))
 		}
 	}
 	// maxRunning 0 stays 0: the Host's own default applies, and `up` passes no Wip__MaxRunning,
 	// so that default is the Host's to name (`yawble doctor` reads it; nothing here computes it).
 	return s, notes
+}
+
+// Proposed is the one rule for every engine: half the engine's memory, capped at 12 GB, and
+// the engine's CPUs, capped at 8. Zero for a machine that was not measured.
+func Proposed(m Machine) (memoryMB, cpus int) {
+	if !m.Measured {
+		return 0, 0
+	}
+	half := m.MemoryBytes / 2
+	if half > memoryCapBytes {
+		half = memoryCapBytes
+	}
+	cpus = m.CPUs
+	if cpus > cpuCap {
+		cpus = cpuCap
+	}
+	return int(half >> 20), cpus
 }
 
 // MemoryMB reads a --memory size (12288m, 6g, 512M) as megabytes; 0 when unset or unreadable.

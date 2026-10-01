@@ -61,6 +61,13 @@ the `--prerelease` form. The script downloads the matching archive and
 same list the same way (`yawble update --prerelease` for pre-releases), and never moves to a
 version older than the one running.
 
+The scripts only install; they never start the instance, so they run unattended. The first
+`yawble up` afterwards, at a terminal, shows what the container engine has (memory and CPUs,
+from `docker info` or the Podman machine), proposes the container's memory and CPUs, and asks for
+each (Enter accepts, a value above the engine's or below the floor is refused naming the bound);
+`yawble up --yes`, or `up` without a terminal, takes the proposal without asking and says what it
+chose. See [cli/README.md](../../cli/README.md#what-the-first-up-asks-the-containers-memory-and-cpus).
+
 ### A private fork or package
 
 When the repository or its image package is private, set `GH_TOKEN` (or `GITHUB_TOKEN`) to a token with the `repo`
