@@ -3,12 +3,12 @@ package doctor
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/github"
+	"github.com/djlsystems/yawble/cli/internal/instance"
 	"github.com/djlsystems/yawble/cli/internal/machine"
 )
 
@@ -54,6 +54,10 @@ type Observed struct {
 	Machine           machine.Info
 	MachineErr        error
 	ContainerMemoryMB int
+	// CPUs and MaxRunning are what `up` gives the container: its CPUs and the configured running
+	// limit, 0 when the Host's own default applies.
+	CPUs       int
+	MaxRunning int
 	// HostMemoryMB is the computer's own RAM (not the machine's), 0 when not measured; the
 	// memory fix never asks the machine for more than the computer has.
 	HostMemoryMB int
@@ -72,26 +76,7 @@ type RemoteObserved struct {
 
 // ContainerMemoryMB reads a podman --memory size (12288m, 6g, 512M) as megabytes; 0 when unset
 // or unreadable.
-func ContainerMemoryMB(size string) int {
-	size = strings.TrimSpace(size)
-	if size == "" {
-		return 0
-	}
-	unit := size[len(size)-1]
-	n, err := strconv.Atoi(size[:len(size)-1])
-	if err != nil || n < 0 {
-		return 0
-	}
-	switch unit {
-	case 'm', 'M':
-		return n
-	case 'g', 'G':
-		return n * 1024
-	case 'k', 'K':
-		return n / 1024
-	}
-	return 0
-}
+func ContainerMemoryMB(size string) int { return instance.MemoryMB(size) }
 
 // The machine needs the container's limit plus room for its own system, and the computer keeps
 // some for itself: a machine sized to the whole of it would starve Windows or macOS.
@@ -337,8 +322,35 @@ func HostChecks(o Observed) []Check {
 		checks = append(checks, Check{"path", OK, o.ExeDir + " is on PATH", ""})
 	}
 
+	if row, ok := runLimitRow(o); ok {
+		checks = append(checks, row)
+	}
+
 	checks = append(checks, Check{"release", Skip, "newer yawble releases are not checked in this build", ""})
 	return checks
+}
+
+// runLimitRow compares the configured running limit with what the container's CPUs and memory
+// allow (instance.RunLimit, at the Host's default allowance per run). Over it, runs contend for
+// CPU and memory until the Host stops answering; that is a warning, never a failure.
+func runLimitRow(o Observed) (Check, bool) {
+	if o.CPUs <= 0 {
+		return Check{}, false
+	}
+	allowed, bound := instance.RunLimit(o.CPUs, o.ContainerMemoryMB)
+	why := fmt.Sprintf("%d CPUs allow %d", o.CPUs, max(1, o.CPUs-1))
+	if o.ContainerMemoryMB > 0 {
+		why += fmt.Sprintf(", %d MB at %d MB per run allows %d", o.ContainerMemoryMB, instance.MemoryPerRunMB, max(1, o.ContainerMemoryMB/instance.MemoryPerRunMB))
+	}
+	switch {
+	case o.MaxRunning == 0:
+		return Check{"running limit", OK, fmt.Sprintf("the Host's default, %d (%s; the %s bound applies)", allowed, why, bound), ""}, true
+	case o.MaxRunning > allowed:
+		return Check{"running limit", Warn, fmt.Sprintf("maxRunning is %d, above the %d the container allows (%s)", o.MaxRunning, allowed, why),
+			fmt.Sprintf("yawble config set maxRunning 0 (the Host's default, %d), then yawble up", allowed)}, true
+	default:
+		return Check{"running limit", OK, fmt.Sprintf("maxRunning %d, within the %d the container allows (%s)", o.MaxRunning, allowed, why), ""}, true
+	}
 }
 
 // InstanceChecks is the table over the Host's own report. With no report, the reason decides:

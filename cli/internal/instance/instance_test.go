@@ -403,12 +403,13 @@ func TestStatusReportsTheRunningImageAndPortNotTheConfigs(t *testing.T) {
 func TestDefaultsDeriveFromTheMachineAndCap(t *testing.T) {
 	m := instance.Machine{MemoryBytes: 64 << 30, CPUs: 20, Measured: true}
 	got, notes := instance.Defaults(config.Config{}, m, img)
-	if got.Memory != "12288m" || got.CPUs != 8 || got.MaxRunning != 8 || got.Port != 8080 || got.Image != img || len(notes) != 0 {
+	// maxRunning unset stays 0: the Host's own default applies.
+	if got.Memory != "12288m" || got.CPUs != 8 || got.MaxRunning != 0 || got.Port != 8080 || got.Image != img || len(notes) != 0 {
 		t.Errorf("got %+v notes %v", got, notes)
 	}
 	small := instance.Machine{MemoryBytes: 8 << 30, CPUs: 4, Measured: true}
 	got, _ = instance.Defaults(config.Config{CPUs: 2}, small, img)
-	if got.Memory != "4096m" || got.CPUs != 2 || got.MaxRunning != 2 {
+	if got.Memory != "4096m" || got.CPUs != 2 || got.MaxRunning != 0 {
 		t.Errorf("got %+v", got)
 	}
 	// Important 9 from the review: a 1 GB board must not get "0g".
@@ -499,5 +500,45 @@ func TestAQuickStartShowsNoProgress(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "agent cli") || strings.Contains(out.String(), "volume:") {
 		t.Errorf("a quick start printed progress:\n%s", out.String())
+	}
+}
+
+func TestTheRunLimitIsOneBelowTheCPUsBoundedByMemory(t *testing.T) {
+	for _, c := range []struct {
+		cpus, memoryMB, want int
+		bound                string
+	}{
+		{8, 12288, 6, "memory"}, // CPU bound 7, memory bound 6
+		{4, 12288, 3, "cpu"},    // CPU bound 3, memory bound 6
+		{8, 0, 7, "cpu"},        // no memory limit
+		{1, 0, 1, "cpu"},        // never below 1
+		{8, 1024, 1, "memory"},  // a limit below one allowance still runs one
+	} {
+		got, bound := instance.RunLimit(c.cpus, c.memoryMB)
+		if got != c.want || bound != c.bound {
+			t.Errorf("RunLimit(%d, %d) = %d %s, want %d %s", c.cpus, c.memoryMB, got, bound, c.want, c.bound)
+		}
+	}
+	if got := instance.RunLimitText(instance.Settings{CPUs: 8, Memory: "12g"}); got != "the Host's default, 6 by memory" {
+		t.Errorf("RunLimitText = %q", got)
+	}
+}
+
+func TestUpPassesNoRunningLimitWhenNoneIsConfigured(t *testing.T) {
+	s := engine.NewScripted()
+	s.On("podman container inspect", engine.Result{Stderr: "no such container", ExitCode: 125})
+	unset := settings()
+	unset.MaxRunning = 0
+	var out bytes.Buffer
+
+	if err := instance.Up(context.Background(), engine.NewPodman(s), unset, healthy, &out); err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Join(s.Calls, "\n")
+	if !strings.Contains(calls, "podman run -d") || strings.Contains(calls, "Wip__MaxRunning") {
+		t.Errorf("the Host's default should apply, with no Wip__MaxRunning:\n%s", calls)
+	}
+	if !strings.Contains(out.String(), "running limit the Host's default, 6 by memory") {
+		t.Errorf("output %q does not state the Host's default", out.String())
 	}
 }

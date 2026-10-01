@@ -163,7 +163,7 @@ func (c *Config) Set(key, value string) error {
 	case "maxRunning":
 		n, err := strconv.Atoi(value)
 		if err != nil || n < 0 {
-			return fmt.Errorf("maxRunning must be a whole number (0 = same as cpus), not %q", value)
+			return fmt.Errorf("maxRunning must be a whole number (0 = the Host's default: CPUs - 1, bounded by memory), not %q", value)
 		}
 		c.MaxRunning = n
 	case "image":

@@ -197,10 +197,16 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 				return fmt.Errorf("the pull of %s failed (%w); podman's own message is above. Is the image name right, and can this machine reach the registry?", s.Image, err)
 			}
 		}
+		// No Wip__MaxRunning unless one was configured: the Host's default then applies and
+		// GET /api/wip names its bound.
+		env := map[string]string{}
+		if s.MaxRunning > 0 {
+			env["Wip__MaxRunning"] = fmt.Sprint(s.MaxRunning)
+		}
 		if err := e.Run(ctx, engine.RunSpec{
 			Name: ContainerName, Pod: PodName, Image: s.Image,
 			Volumes: []string{VolumeName + ":/data"},
-			Env:     map[string]string{"Wip__MaxRunning": fmt.Sprint(s.MaxRunning)},
+			Env:     env,
 			Labels:  map[string]string{engine.SettingsLabel: SettingsLabel(s)},
 			EnvFile: s.EnvFile, Memory: s.Memory, CPUs: s.CPUs,
 			HostPort: s.Port, ContainerPort: ContainerPort,
@@ -213,7 +219,7 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 			}
 			return portError(err, s.Port)
 		}
-		fmt.Fprintf(out, "started %s from %s (memory %s, cpus %d, running limit %d)\n", ContainerName, s.Image, s.Memory, s.CPUs, s.MaxRunning)
+		fmt.Fprintf(out, "started %s from %s (memory %s, cpus %d, running limit %s)\n", ContainerName, s.Image, s.Memory, s.CPUs, RunLimitText(s))
 	}
 	if err := WaitHealthy(ctx, e, URL(s.Port), health, out); err != nil {
 		return err
@@ -502,4 +508,14 @@ func Uninstall(ctx context.Context, e engine.Engine, image string, data bool, ou
 		return fmt.Errorf("some things could not be removed:\n  %s", strings.Join(failed, "\n  "))
 	}
 	return nil
+}
+
+// RunLimitText is the running limit as `up` states it: the configured number, or the Host's
+// default and the bound that decides it.
+func RunLimitText(s Settings) string {
+	if s.MaxRunning > 0 {
+		return fmt.Sprint(s.MaxRunning)
+	}
+	limit, bound := RunLimit(s.CPUs, MemoryMB(s.Memory))
+	return fmt.Sprintf("the Host's default, %d by %s", limit, bound)
 }
