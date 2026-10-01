@@ -73,20 +73,22 @@ public sealed class SolutionFirstRunTests(HostFixture host) : IClassFixture<Host
         Assert.Equal(scan.At!.Value.AddSeconds(3600), row.NextDueAt!.Value);
         Assert.Equal(row.NextDueAt, scan.Next);
 
-        var sweep = Get<TriggerSweep>();
-        await sweep.FireDueAsync(row.NextDueAt.Value.AddSeconds(-1), Ct);
-        Assert.Single(await FiresAsync(team, id));
-
-        await sweep.FireDueAsync(row.NextDueAt.Value, Ct);
-        Assert.Equal(2, (await FiresAsync(team, id)).Count);
-
-        // The other schedule has no runAtInstall: it first runs when it comes due.
+        // The other schedule has no runAtInstall: it first runs when it comes due. Read BEFORE the
+        // sweep below, which moves the clock an hour on and fires it too when its time falls inside
+        // that hour.
         var morning = Assert.Single(done.FirstRuns, r => r.Trigger == "Morning summary");
         Assert.False(morning.RanNow);
         Assert.Equal(SolutionFirstRun.Scheduled, morning.Outcome);
         var morningRow = (await Get<ITriggerStore>().ListForTeamAsync(team, Ct)).Single(t => t.Name == "Morning summary");
         Assert.Equal(morningRow.NextDueAt, morning.At);
         Assert.Null(morningRow.LastFiredAt);
+
+        var sweep = Get<TriggerSweep>();
+        await sweep.FireDueAsync(row.NextDueAt.Value.AddSeconds(-1), Ct);
+        Assert.Single(await FiresAsync(team, id));
+
+        await sweep.FireDueAsync(row.NextDueAt.Value, Ct);
+        Assert.Equal(2, (await FiresAsync(team, id)).Count);
 
         // Only schedules have a first run to name.
         Assert.Equal(["Scan for postings", "Morning summary"], done.FirstRuns.Select(r => r.Trigger));
