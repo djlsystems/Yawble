@@ -276,3 +276,76 @@ func TestDoctorShowsTheEnginesCapacityBesideTheContainers(t *testing.T) {
 		}
 	}
 }
+
+// smallDocker is a fresh Docker instance whose engine has memoryMB of memory and the given CPUs.
+func smallDocker(memoryMB, cpus int) (*engine.Scripted, cli.Deps) {
+	s := engine.NewScripted()
+	s.On("docker info", engine.Result{Stdout: strconv.Itoa(memoryMB<<20) + "|" + strconv.Itoa(cpus) + "|Docker Desktop\n"})
+	s.On("docker container inspect", engine.Result{Stderr: "Error: No such container: yawble", ExitCode: 1})
+	s.On("docker image inspect", engine.Result{})
+	deps := stubbed(s)
+	deps.GOOS, deps.LookPath = "darwin", lookPath("docker")
+	return s, deps
+}
+
+func TestAnEngineUnderEightGBHasItsProposalAcceptedOnThePromptAndWithYes(t *testing.T) {
+	for _, c := range []struct {
+		engineMB, cpus, proposedMB int
+		prompt, cpuPrompt          string
+	}{
+		{4096, 2, 2048, "Memory in MB (2048 to 4096) [2048]: ", "CPUs (1 to 2) [2]: "},
+		{6144, 1, 3072, "Memory in MB (3072 to 6144) [3072]: ", "CPUs (1 to 1) [1]: "},
+	} {
+		want := strconv.Itoa(c.proposedMB) + "m"
+		for name, stdin := range map[string]string{
+			"Enter":         "\n\n",
+			"typed default": strconv.Itoa(c.proposedMB) + "\n" + strconv.Itoa(c.cpus) + "\n",
+		} {
+			s, deps := smallDocker(c.engineMB, c.cpus)
+			deps.ConfigDir = t.TempDir()
+			deps.Interactive, deps.Stdin = true, strings.NewReader(stdin)
+			code, out, errOut := run(t, deps, "up", "--no-browser")
+			if code != 0 {
+				t.Fatalf("%d MB, %s: exit %d: %s %s", c.engineMB, name, code, out, errOut)
+			}
+			if !strings.Contains(out, c.prompt) || !strings.Contains(out, c.cpuPrompt) {
+				t.Errorf("%d MB, %s: the prompt does not state a range holding the proposal:\n%s", c.engineMB, name, out)
+			}
+			if strings.Contains(out, "refused") {
+				t.Errorf("%d MB, %s: the proposal was refused:\n%s", c.engineMB, name, out)
+			}
+			if saved := savedConfig(t, deps.ConfigDir); saved.Memory != want || saved.CPUs != c.cpus {
+				t.Errorf("%d MB, %s: saved %+v, want %s and %d", c.engineMB, name, saved, want, c.cpus)
+			}
+			if !strings.Contains(calls(s), "--memory "+want+" --cpus "+strconv.Itoa(c.cpus)) {
+				t.Errorf("%d MB, %s: calls:\n%s", c.engineMB, name, calls(s))
+			}
+		}
+
+		s, deps := smallDocker(c.engineMB, c.cpus)
+		deps.ConfigDir = t.TempDir()
+		code, out, errOut := run(t, deps, "up", "--yes", "--no-browser")
+		if code != 0 {
+			t.Fatalf("%d MB, --yes: exit %d: %s %s", c.engineMB, code, out, errOut)
+		}
+		if saved := savedConfig(t, deps.ConfigDir); saved.Memory != want || saved.CPUs != c.cpus {
+			t.Errorf("%d MB, --yes: saved %+v, want %s and %d", c.engineMB, saved, want, c.cpus)
+		}
+		if !strings.Contains(calls(s), "--memory "+want+" --cpus "+strconv.Itoa(c.cpus)) {
+			t.Errorf("%d MB, --yes: calls:\n%s", c.engineMB, calls(s))
+		}
+	}
+}
+
+func TestBelowTheLoweredFloorIsRefusedNamingIt(t *testing.T) {
+	_, deps := smallDocker(6144, 4)
+	deps.ConfigDir = t.TempDir()
+	deps.Interactive, deps.Stdin = true, strings.NewReader("2048\n\n\n")
+	code, out, errOut := run(t, deps, "up", "--no-browser")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if !strings.Contains(out, "refused: 2048 MB is below the floor of 3072 MB, the proposal for an engine under 8 GB; the least is 3072 MB") {
+		t.Errorf("did not refuse naming the lowered floor:\n%s", out)
+	}
+}

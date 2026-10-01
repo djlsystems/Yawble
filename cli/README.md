@@ -53,7 +53,7 @@ CPUs (1 to 10) [8]:
 saved memory 6144m and cpus 8 in yawble's config; the Host's rule derives a running limit of 3 from them (yawble config set memory <size> and yawble config set cpus <n> change them, then yawble up)
 ```
 
-Memory takes megabytes (`8192`) or a size (`8g`). A value above what the engine has is refused with the maximum named, and so is memory below the 4 GB floor (the Host's own share beside one run) and fewer than 1 CPU; then it asks again. A refusal for being above the engine's figure also says how to give that engine more:
+Memory takes megabytes (`8192`) or a size (`8g`). A value above what the engine has is refused with the maximum named, and so is memory below the 4 GB floor (the Host's own share beside one run) and fewer than 1 CPU. An engine under 8 GB proposes less than 4 GB, and then the floor is that proposal, so the default in brackets is always inside the range the prompt states; then it asks again. A refusal for being above the engine's figure also says how to give that engine more:
 
 - Podman machine (macOS, Windows): `To give the Podman machine more: podman machine stop, then podman machine set --memory <MB> --cpus <n>, then podman machine start`
 - Docker Desktop: `To give Docker Desktop more: Docker Desktop's Settings > Resources`

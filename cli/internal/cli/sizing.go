@@ -14,8 +14,19 @@ import (
 
 // memoryFloorMB is the least memory the first-up screen accepts: the Host's own share
 // (TenantSettings.HostReserveMb, 1024 MB) beside one run at its default allowance (2048 MB),
-// rounded up to 4 GB. An engine with less than that is held to the proposal instead.
+// rounded up to 4 GB. A proposal below it (an engine under 8 GB) lowers the floor to the
+// proposal, so the default the prompt offers is always one it accepts.
 const memoryFloorMB = 4096
+
+// cpuFloor is the fewest CPUs the first-up screen accepts.
+const cpuFloor = 1
+
+// floors is the least memory and CPUs the first-up prompt accepts for this proposal: the fixed
+// floors, lowered to the proposal where it is below them, so Enter never saves a value the same
+// prompt would refuse if typed.
+func floors(memoryMB, cpus int) (int, int) {
+	return min(memoryFloorMB, memoryMB), min(cpuFloor, cpus)
+}
 
 // engineCapacity is what the engine the container runs in has, asked of that engine: `docker
 // info` under Docker on every OS (Docker Desktop's VM, or the Linux host), the Podman machine on
@@ -57,10 +68,7 @@ func sizeFirstUp(deps Deps, c config.Config, m instance.Machine, yes bool, out i
 		return c, nil
 	}
 
-	floor := memoryFloorMB
-	if m.MemoryMB() < floor {
-		floor = memoryMB
-	}
+	floor, leastCPUs := floors(memoryMB, cpus)
 	fmt.Fprint(out, firstUpScreen(m, memoryMB, cpus, c.MaxRunning))
 	more := capitalize(instance.MoreForEngine(m.Kind))
 	memoryMB = askNumber(deps, out, fmt.Sprintf("Memory in MB (%d to %d) [%d]: ", floor, m.MemoryMB(), memoryMB), memoryMB,
@@ -68,18 +76,20 @@ func sizeFirstUp(deps Deps, c config.Config, m instance.Machine, yes bool, out i
 			switch {
 			case v > m.MemoryMB():
 				return fmt.Sprintf("%d MB is more than the engine has; the most is %d MB. %s", v, m.MemoryMB(), more)
+			case v < floor && floor < memoryFloorMB:
+				return fmt.Sprintf("%d MB is below the floor of %d MB, the proposal for an engine under 8 GB; the least is %d MB", v, floor, floor)
 			case v < floor:
 				return fmt.Sprintf("%d MB is below the floor of %d MB that leaves the Host a usable share; the least is %d MB", v, floor, floor)
 			}
 			return ""
 		})
-	cpus = askNumber(deps, out, fmt.Sprintf("CPUs (1 to %d) [%d]: ", m.CPUs, cpus), cpus,
+	cpus = askNumber(deps, out, fmt.Sprintf("CPUs (%d to %d) [%d]: ", leastCPUs, m.CPUs, cpus), cpus,
 		parseCount, func(v int) string {
 			switch {
 			case v > m.CPUs:
 				return fmt.Sprintf("%d CPUs is more than the engine has; the most is %d. %s", v, m.CPUs, more)
-			case v < 1:
-				return "the least is 1 CPU"
+			case v < leastCPUs:
+				return fmt.Sprintf("the least is %d CPU", leastCPUs)
 			}
 			return ""
 		})
