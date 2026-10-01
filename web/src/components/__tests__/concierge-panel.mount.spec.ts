@@ -25,6 +25,8 @@ const fake = vi.hoisted(() => {
     dispose = vi.fn();
     scrollLines = vi.fn();
     focus = vi.fn();
+    modes = { bracketedPasteMode: false };
+    dataHandler: ((data: string) => void) | null = null;
 
     constructor(options: Record<string, unknown>) {
       this.options = { ...options };
@@ -41,7 +43,18 @@ const fake = vi.hoisted(() => {
       host.appendChild(element);
     }
 
-    onData() {}
+    onData(handler: (data: string) => void) {
+      this.dataHandler = handler;
+    }
+
+    /**
+     * xterm's own rule, and the only part of its paste this file depends on: wrapped only in
+     * bracketed-paste mode, then out through onData. `concierge-panel.xterm.mount.spec.ts` holds the
+     * real terminal to it.
+     */
+    paste(text: string) {
+      this.dataHandler?.(this.modes.bracketedPasteMode ? `\x1b[200~${text}\x1b[201~` : text);
+    }
 
     attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
       this.keyHandler = handler;
@@ -121,6 +134,8 @@ import { conciergeNewline } from '../../lib/conciergeNewline';
 import { useQuasar } from 'quasar';
 import type { TeamId } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
+import { ActionRefused } from '../../api/client';
+import { NoConciergeToReceive, NotAnImage } from '../../lib/conciergeAttachment';
 
 /** happy-dom has no layout engine; the panel will not build a terminal onto a zero-sized box. */
 function giveTheDomALayout(width = 800, height = 600): void {
@@ -722,7 +737,8 @@ describe('dragging the window', () => {
 
 describe('attaching an image', () => {
   const Stored = '/data/concierge/attachments/20261001T120000Z-1.png';
-  const pastedPath = `\x1b[200~${Stored}\x1b[201~`;
+  // Bare: the fake terminal starts, as a real one does, with bracketed-paste mode off.
+  const pastedPath = Stored;
   const png = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
 
   /** Only what the panel reads off a DataTransfer, so the case states exactly what the browser had. */
@@ -756,8 +772,8 @@ describe('attaching an image', () => {
     return read;
   }
 
-  function altV(): { event: KeyboardEvent; passOn: boolean } {
-    const event = new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', altKey: true, cancelable: true });
+  function altV(key = 'v', code = 'KeyV'): { event: KeyboardEvent; passOn: boolean } {
+    const event = new KeyboardEvent('keydown', { key, code, altKey: true, cancelable: true });
     return { event, passOn: terminal().keyHandler!(event) };
   }
 
@@ -834,6 +850,39 @@ describe('attaching an image', () => {
     expect(sent()).toEqual(['\x1bv', '\x1bv']);
   });
 
+  it('leaves Alt+K on a Dvorak layout to xterm, though it is the key where QWERTY has V', async () => {
+    await openPanel();
+    const read = clipboardHolding({ 'image/png': new Blob([new Uint8Array([1])], { type: 'image/png' }) });
+
+    const { event, passOn } = altV('k', 'KeyV');
+    await flushPromises();
+
+    // Passed on and not cancelled, so xterm sends its own ESC k (the real-terminal spec shows it).
+    expect([passOn, event.defaultPrevented]).toEqual([true, false]);
+    expect(read).not.toHaveBeenCalled();
+    expect(uploadConciergeAttachment).not.toHaveBeenCalled();
+    expect(sent()).toEqual([]);
+  });
+
+  it('still takes a Mac Option+V, which types √, and forwards the √ when there is no image', async () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    await openPanel();
+    clipboardHolding({ 'image/png': new Blob([new Uint8Array([1])], { type: 'image/png' }) });
+
+    const taken = altV('√', 'KeyV');
+    await flushPromises();
+
+    expect([taken.passOn, taken.event.defaultPrevented]).toEqual([false, true]);
+    expect(uploadConciergeAttachment).toHaveBeenCalledOnce();
+
+    clipboardHolding({ 'text/plain': new Blob(['hello'], { type: 'text/plain' }) });
+    altV('√', 'KeyV');
+    await flushPromises();
+
+    expect(sent()).toEqual([pastedPath, '√']);
+    platform.mockRestore();
+  });
+
   it('uploads dropped images and pastes their paths', async () => {
     await openPanel();
     const image = png();
@@ -873,6 +922,54 @@ describe('attaching an image', () => {
 
     expect(alert()).toContain('That file is not a PNG, JPEG, GIF or WebP image.');
     expect(sent()).toEqual([]);
+  });
+
+  it('shows the 409 sentence when no CLI is running to receive the image, and inserts nothing', async () => {
+    await openPanel();
+    // The route's own body, verbatim from B002R-409-contract.md.
+    const sentence = 'The image was not attached: the Concierge is not running. Start it, then attach the image again.';
+    uploadConciergeAttachment.mockRejectedValue(
+      Object.assign(new ActionRefused(sentence, { error: sentence }), { status: 409 }),
+    );
+
+    drop(shell().querySelector('.concierge-host')!, transfer([png()]));
+    await flushPromises();
+
+    expect(alert()).toContain(sentence);
+    expect(sent()).toEqual([]);
+  });
+
+  it('gives a 409 that carried no sentence one of its own, and inserts nothing into the compose bar', async () => {
+    platform.has.touch = true;
+    await openPanel();
+    const field = shell().querySelector('input[aria-label="Compose a line for the console"]') as HTMLInputElement;
+    uploadConciergeAttachment.mockRejectedValue(Object.assign(new Error('409 Conflict'), { status: 409 }));
+
+    drop(shell().querySelector('.concierge-host')!, transfer([png()]));
+    await flushPromises();
+
+    expect(alert()).toContain(NoConciergeToReceive);
+    expect(field.value).toBe('');
+    expect(sent()).toEqual([]);
+  });
+
+  it('says the same sentence for a drop with no image on the compose bar as on the shell', async () => {
+    platform.has.touch = true;
+    await openPanel();
+    const notes = new File(['hi'], 'notes.txt', { type: 'text/plain' });
+
+    const onBar = drop(shell().querySelector('.concierge-compose-wrap')!, transfer([notes]));
+    await flushPromises();
+    const fromBar = alert();
+    await click('Dismiss');
+
+    drop(shell().querySelector('.concierge-host')!, transfer([notes]));
+    await flushPromises();
+
+    expect(onBar.defaultPrevented).toBe(true);
+    expect(fromBar).toContain(NotAnImage);
+    expect(alert()).toBe(fromBar);
+    expect(uploadConciergeAttachment).not.toHaveBeenCalled();
   });
 
   it('on a touch device puts the path into the compose bar at the caret, not into the terminal', async () => {
