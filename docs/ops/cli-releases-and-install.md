@@ -64,7 +64,9 @@ version older than the one running.
 The scripts only install; they never start the instance, so they run unattended. The first
 `yawble up` afterwards, at a terminal, shows what the container engine has (memory and CPUs,
 from `docker info` or the Podman machine), proposes the container's memory and CPUs, and asks for
-each (Enter accepts, a value above the engine's or below the floor is refused naming the bound);
+each (Enter accepts, a value above the engine's or below the floor is refused naming the bound, and one above the engine's
+says how to give that engine more: the Podman machine's `podman machine set`, Docker Desktop's
+Settings > Resources, or on Linux that there is nothing to enlarge);
 `yawble up --yes`, or `up` without a terminal, takes the proposal without asking and says what it
 chose. See [cli/README.md](../../cli/README.md#what-the-first-up-asks-the-containers-memory-and-cpus).
 

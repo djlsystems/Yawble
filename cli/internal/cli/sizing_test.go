@@ -17,7 +17,7 @@ import (
 // The first `up` shows what the engine has, proposes the container's memory and CPUs from it, and
 // lets the person change them up to what the engine has; the answer is saved and later ups keep it.
 
-const dockerInfo = "docker info --format {{.MemTotal}}|{{.NCPU}}"
+const dockerInfo = "docker info --format {{.MemTotal}}|{{.NCPU}}|{{.OperatingSystem}}"
 
 // dockerUp is a fresh Docker instance whose engine has 12 GB and 10 CPUs.
 func dockerUp(goos string) (*engine.Scripted, cli.Deps) {

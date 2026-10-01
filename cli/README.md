@@ -53,9 +53,15 @@ CPUs (1 to 10) [8]:
 saved memory 6144m and cpus 8 in yawble's config; the Host's rule derives a running limit of 3 from them (yawble config set memory <size> and yawble config set cpus <n> change them, then yawble up)
 ```
 
-Memory takes megabytes (`8192`) or a size (`8g`). A value above what the engine has is refused with the maximum named, and so is memory below the 4 GB floor (the Host's own share beside one run) and fewer than 1 CPU; then it asks again. The running limit on this screen is the only figure yawble derives itself, and it says so: it is the Host's default rule with the Host's default `wip.memoryPerRunMb`. It is not asked; `yawble config set maxRunning` overrides it, and `yawble doctor` reports the limit the Host actually applies.
+Memory takes megabytes (`8192`) or a size (`8g`). A value above what the engine has is refused with the maximum named, and so is memory below the 4 GB floor (the Host's own share beside one run) and fewer than 1 CPU; then it asks again. A refusal for being above the engine's figure also says how to give that engine more:
 
-With `--yes`, or without a terminal, `up` takes the proposal without asking and prints what it chose and how to change it. Either way the answer is saved, so later `up`s do not ask; `yawble config set memory <size>` and `yawble config set cpus <n>`, then `yawble up`, change it. A saved value above what the engine now has (a smaller Docker Desktop VM, say) is warned about on every `up`, with the largest value that fits. `yawble restore` does not ask; it uses what is saved, or the proposal.
+- Podman machine (macOS, Windows): `To give the Podman machine more: podman machine stop, then podman machine set --memory <MB> --cpus <n>, then podman machine start`
+- Docker Desktop: `To give Docker Desktop more: Docker Desktop's Settings > Resources`
+- Linux, no VM (Docker or Podman): `On Linux there is no VM: this computer's own RAM and CPUs are the limit, and there is nothing to enlarge`
+
+(Docker in some other VM, such as Colima, is told to change it in the tool that runs that VM.) `yawble doctor`'s `capacity` warning and a later `up`'s warning give the same hint when a saved value is more than the engine has. The running limit on this screen is the only figure yawble derives itself, and it says so: it is the Host's default rule with the Host's default `wip.memoryPerRunMb`. It is not asked; `yawble config set maxRunning` overrides it, and `yawble doctor` reports the limit the Host actually applies.
+
+With `--yes`, or without a terminal, `up` takes the proposal without asking and prints what it chose and how to change it. Either way the answer is saved, so later `up`s do not ask; `yawble config set memory <size>` and `yawble config set cpus <n>`, then `yawble up`, change it. A saved value above what the engine now has (a smaller Docker Desktop VM, say) is warned about on every `up`, with the largest value that fits and how to give the engine more. `yawble restore` does not ask; it uses what is saved, or the proposal.
 
 To build from source instead:
 

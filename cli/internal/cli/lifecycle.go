@@ -72,7 +72,7 @@ func machineOf(info machine.Info) instance.Machine {
 	if !info.Running || info.MemoryMB == 0 {
 		return instance.Machine{}
 	}
-	return instance.Machine{MemoryBytes: int64(info.MemoryMB) << 20, CPUs: info.CPUs, Measured: true, Source: "podman machine"}
+	return instance.Machine{MemoryBytes: int64(info.MemoryMB) << 20, CPUs: info.CPUs, Measured: true, Source: "podman machine", Kind: instance.KindPodmanMachine}
 }
 
 // prepare loads config, derives settings and picks the engine. Every lifecycle verb but `up`

@@ -34,12 +34,13 @@ type Settings struct {
 // Machine is what the engine the container runs in has: Docker's VM or host, the Podman
 // machine, or this computer under Podman on Linux. Measured=false means the engine could not
 // say, and Defaults then says which constants it used instead. Source names where the figures
-// came from ("docker info", "podman machine", "this computer").
+// came from ("docker info", "podman machine", "this computer"); Kind says how to give it more.
 type Machine struct {
 	MemoryBytes int64
 	CPUs        int
 	Measured    bool
 	Source      string
+	Kind        EngineKind
 }
 
 // MemoryMB is the machine's memory in megabytes.

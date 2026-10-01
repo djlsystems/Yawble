@@ -31,7 +31,7 @@ func CapacityCheck(m instance.Machine, s instance.Settings, r *HostReport) Check
 		}
 		if len(over) > 0 {
 			return Check{name, Warn, detail + "; yawble's config asks for " + strings.Join(over, " and ") + ", more than the engine has",
-				strings.Join(fixes, "; ") + " (or less), then yawble up"}
+				strings.Join(fixes, "; ") + " (or less), then yawble up; or " + instance.MoreForEngine(m.Kind)}
 		}
 	}
 	return Check{name, Info, detail, ""}
