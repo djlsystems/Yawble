@@ -430,7 +430,7 @@ public sealed class WipLimitBoundTests(HostFixture host) : IClassFixture<HostFix
         using var client = await host.PersonAsync();
         var wip = host.Services.GetRequiredService<WipLedger>();
 
-        // Inside a Yawble container the CLI's Wip__MaxRunning reaches this host as configuration;
+        // Inside an instance container the operator CLI's Wip__MaxRunning reaches this host as configuration;
         // anywhere else nothing configures it and the default's own bound is named.
         var configured = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("Wip__MaxRunning"));
         var limit = await LimitAsync(client, ct);
