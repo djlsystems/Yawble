@@ -207,6 +207,11 @@ public static class TenantActions
     /// path and the size - never the file's contents.</summary>
     public const string DocumentUploaded = "document.uploaded";
 
+    /// <summary>A person attached an image to their Concierge. Detail carries the size and the
+    /// detected type - never the image, and never its uploaded name. Written in the same unit as
+    /// the file: a file whose row cannot land is removed.</summary>
+    public const string ConciergeAttachmentAdded = "concierge.attachment-added";
+
     /// <summary>A team's additional instructions changed.</summary>
     public const string TeamInstructionsChanged = "team.instructions-changed";
 

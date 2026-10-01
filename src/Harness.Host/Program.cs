@@ -1103,6 +1103,21 @@ builder.Services.AddSingleton(sp => new FolderRemoval(
     sp.GetRequiredService<AgentLaunchUser>(),
     sp.GetRequiredService<IUnfinishedRemovals>()));
 
+// IMAGES A PERSON GIVES THEIR CONCIERGE. The cap and the retention are configuration rather than
+// tenant settings: they bound one route and one sweep, and nothing reads them while running.
+builder.Services.AddSingleton(sp => new ConciergeAttachments(
+    sp.GetRequiredService<TeamPaths>(),
+    sp.GetRequiredService<AgentLaunchUser>(),
+    sp.GetRequiredService<FolderRemoval>(),
+    long.TryParse(builder.Configuration["ConciergeAttachmentMaxBytes"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var attachmentMax)
+        && attachmentMax > 0
+        ? attachmentMax
+        : ConciergeAttachments.DefaultMaxBytes,
+    TimeSpan.TryParse(builder.Configuration["ConciergeAttachmentRetention"], CultureInfo.InvariantCulture, out var attachmentRetention)
+        && attachmentRetention > TimeSpan.Zero
+        ? attachmentRetention
+        : ConciergeAttachments.DefaultRetention));
+
 builder.Services.AddSingleton(sp => new UnfinishedRemovalRetry(
     sp.GetRequiredService<FolderRemoval>(),
     sp.GetRequiredService<IUnfinishedRemovals>(),
@@ -1310,7 +1325,9 @@ builder.Services.AddSingleton(sp =>
         },
         // A Concierge's run is its session: a lease it took ends with it, through the same path
         // as a run's end, so a member the queue hands it to is un-paused and its card told.
-        leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct)));
+        // And the images the person attached go with it, however it ended.
+        sp.GetRequiredService<ConciergeAttachments>().RemovingOnEnd(
+            leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct))));
 });
 
 // HOW DEEP ONE CHAIN OF CAUSATION MAY GO before the platform stops it.
@@ -1735,6 +1752,20 @@ try
 catch (Exception exception) when (exception is not OperationCanceledException)
 {
     Console.WriteLine($"WARNING: unfinished removals could not be retried at start: {exception.Message}");
+}
+
+// CONCIERGE ATTACHMENTS PAST THEIR RETENTION, which a Host stopped rather than its sessions ended
+// would otherwise keep for good. Before any Concierge starts. Never fatal.
+try
+{
+    foreach (var left in await app.Services.GetRequiredService<ConciergeAttachments>().RemoveExpiredAsync(DateTimeOffset.UtcNow))
+    {
+        Console.WriteLine($"WARNING: an expired Concierge attachment could not be removed at start: {left}");
+    }
+}
+catch (Exception exception) when (exception is not OperationCanceledException)
+{
+    Console.WriteLine($"WARNING: expired Concierge attachments could not be removed at start: {exception.Message}");
 }
 
 // Any per-team skill folders still on disk, now that the teams are registered and their
@@ -7570,6 +7601,87 @@ app.MapGet("/api/concierge/ws", async (
     // rendered there with a Send button that can only ever fail.
     .ExcludeFromDescription()
     .HumansOnly();
+
+// AN IMAGE FOR THE PERSON'S OWN CONCIERGE, saved into its working folder so the page can paste the
+// path into the prompt. A person's only: a machine principal is refused by the marker, and no member
+// has a route, tool or folder for this. See ConciergeAttachments for the rules it keeps.
+app.MapPost("/api/concierge/attachments", async (
+    HttpRequest request, HttpContext context, ConciergeAttachments attachments, ITenantLog log,
+    CancellationToken ct) =>
+{
+    if (PrincipalClaims.From(context.User) is not { } caller) return Results.Unauthorized();
+
+    if (caller.Kind != PrincipalKind.User)
+    {
+        return Results.Content(PermitGate.HumansOnlyBody, "application/json", statusCode: 403);
+    }
+
+    if (!request.HasFormContentType)
+    {
+        return Results.BadRequest(new { error = "Send the image as a form, in the field \"file\"." });
+    }
+
+    IFormCollection form;
+
+    try
+    {
+        form = await request.ReadFormAsync(ct);
+    }
+    catch (BadHttpRequestException exception) when (exception.StatusCode == StatusCodes.Status413PayloadTooLarge)
+    {
+        return Results.Json(
+            new { error = $"That image is larger than {attachments.MaxBytes / (1024 * 1024)} MB, so it was not attached." },
+            statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+
+    if (form.Files.GetFile("file") is not { } file)
+    {
+        return Results.BadRequest(new { error = "Send the image as a form, in the field \"file\"." });
+    }
+
+    try
+    {
+        await using var content = file.OpenReadStream();
+
+        var saved = await attachments.SaveAsync(
+            caller.Id, content, file.Length,
+            // NOT TenantLogging.WriteAsync, which swallows: this row is the condition of the file.
+            // Size and type only - never the image, never the name it was uploaded under.
+            (saved, token) => log.WriteAsync(
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+                context.User.FindFirstValue(ClaimTypes.Email),
+                TenantActions.ConciergeAttachmentAdded, null, null,
+                JsonSerializer.Serialize(new { size = saved.Size, type = saved.Type }),
+                token),
+            DateTimeOffset.UtcNow, ct);
+
+        return Results.Ok(new { path = saved.Path, size = saved.Size, type = saved.Type });
+    }
+    catch (ConciergeAttachmentRefused refused)
+    {
+        return Results.Json(new { error = refused.Message }, statusCode: refused.Status);
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        return Results.Json(
+            new { error = "The image was not attached: it could not be saved and recorded, so nothing was kept." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+})
+    .WithTags("Concierge")
+    .HumansOnly()
+    .WithSummary("Attach an image to this person's Concierge")
+    .WithDescription(
+        "A multipart form with the image in `file`. Saved as `attachments/<utc-timestamp>-<n>.<ext>` in "
+        + "the person's own Concierge working folder, readable by the agent; the uploaded name is never "
+        + "used. Answers `path` (absolute), `size` and `type`.\n\n"
+        + "Only PNG, JPEG, GIF and WebP, told by their content and never by name or Content-Type: 415 "
+        + "for anything else. 413 over the size cap (10 MB unless `ConciergeAttachmentMaxBytes` says "
+        + "otherwise). 409 when the person has no Concierge folder yet. Recorded as "
+        + "`concierge.attachment-added` with the size and type, never the image; a file whose row "
+        + "cannot be written is removed. Attachments are removed when the session ends, and those older "
+        + "than the retention (7 days unless `ConciergeAttachmentRetention` says otherwise) at start.\n\n"
+        + "**A person's action.**");
 
 // Ending a session is explicit, and separate from closing the panel. There is no close-that-kills on
 // the panel chrome at all - this is what a confirmed action in settings calls.
