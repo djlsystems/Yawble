@@ -589,6 +589,9 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
         Assert.Contains("12288 MB container limit - 1024 MB for the Host", computed.Source);
         Assert.Contains("6 (wip.maxRunning)", computed.Source);
 
+        // Computed, not set: under rlimit it is never applied (RunMemoryLimitsTests).
+        Assert.False(computed.Set);
+
         // No container limit and nothing set: no limit, said.
         var none = Bare(cpuCount: 8, memoryLimitMb: 0).RunMemoryLimit();
         Assert.Null(none.Mb);
@@ -604,6 +607,7 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
             8, 12288).RunMemoryLimit();
         Assert.Equal(3000, configured.Mb);
         Assert.Equal("runs.memoryLimitMb is set to 3000 MB", configured.Source);
+        Assert.True(configured.Set);
     }
 
     [Fact]
@@ -637,7 +641,7 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
         Assert.Contains("what the other running runs are measured to use", described);
     }
 
-    private static TenantSettings Bare(int cpuCount, long memoryLimitMb) => new(
+    internal static TenantSettings Bare(int cpuCount, long memoryLimitMb) => new(
         new SqliteTenantSettingsStore(Path.Combine(Path.GetTempPath(), $"harness-unused-{Guid.NewGuid():N}.db")),
         new ConfigurationBuilder().Build(), cpuCount, memoryLimitMb);
 

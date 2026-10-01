@@ -47,7 +47,7 @@ describe('resumesAutomatically', () => {
     expect(resumesAutomatically('quota')).toBe(true)
     expect(resumesAutomatically('rate')).toBe(true)
 
-    for (const never of ['transport', 'timeout', 'agent-fault', 'launch-missing', 'out-of-memory', 'interrupted', 'unknown']) {
+    for (const never of ['transport', 'timeout', 'agent-fault', 'launch-missing', 'out-of-memory', 'crashed', 'interrupted', 'unknown']) {
       expect(resumesAutomatically(never)).toBe(false)
     }
   })
@@ -70,6 +70,7 @@ describe('failureClassWords', () => {
       'agent-fault',
       'launch-missing',
       'out-of-memory',
+      'crashed',
       'timeout',
       'interrupted',
       'unknown',
@@ -107,6 +108,16 @@ describe('failureClassWords', () => {
     expect(words).toContain('not an agent fault')
     expect(failureClassWords('out-of-memory', 'plugin')).toContain('runs.memoryLimitMb')
     expect(failureClassLabel('out-of-memory')).toBe('out-of-memory')
+  })
+
+  /** A crashed run points at its own stderr and is neither unexplained nor the agent's fault. */
+  it('says a crashed run carries its stderr and is not an unexplained agent fault', () => {
+    const words = failureClassWords('crashed')!
+    expect(words).toContain('stderr')
+    expect(words).not.toContain('nothing could say why')
+    expect(words).not.toContain('agent fault')
+    expect(failureClassWords('crashed', 'plugin')).toContain('stderr')
+    expect(failureClassLabel('crashed')).toBe('crashed')
   })
 
   /** `unknown` is a real class with something to say, not an absence dressed up as one. */

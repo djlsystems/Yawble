@@ -25,6 +25,7 @@ export const FailureClasses = {
   AgentFault: 'agent-fault',
   LaunchMissing: 'launch-missing',
   OutOfMemory: 'out-of-memory',
+  Crashed: 'crashed',
   Timeout: 'timeout',
   Interrupted: 'interrupted',
   Unknown: 'unknown',
@@ -68,6 +69,8 @@ export function failureClassWords(
       return 'the program was not found when the run started; it may be being installed or updated, so re-sending the instruction will try again'
     case FailureClasses.OutOfMemory:
       return 'the run used more memory than its limit, the setting runs.memoryLimitMb, so it was stopped; this is not an agent fault'
+    case FailureClasses.Crashed:
+      return "the agent's program crashed - it ended by a signal, or exited without an answer - and its last words on stderr are in the run's error; it is not resumed"
     case FailureClasses.Timeout:
       return 'the idle clock fired'
     case FailureClasses.Interrupted:
@@ -98,6 +101,8 @@ function pluginFailureWords(failureClass: string | null | undefined): string | n
       return 'the program was not found when the run started; re-sending the instruction will try again'
     case FailureClasses.OutOfMemory:
       return 'the run used more memory than its limit, the setting runs.memoryLimitMb, so it was stopped'
+    case FailureClasses.Crashed:
+      return "the plugin's program crashed - it ended by a signal, or exited without an answer - and its last words on stderr are in the run's error"
     case FailureClasses.Timeout:
       return 'the idle clock fired'
     case FailureClasses.Interrupted:
