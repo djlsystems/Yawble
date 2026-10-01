@@ -83,32 +83,9 @@ func Defaults(c config.Config, m Machine, pinned string) (Settings, []string) {
 			notes = append(notes, fmt.Sprintf("cpus: this machine's CPU count could not be measured; using %d (yawble config set cpus <n> to choose)", unmeasuredCPUs))
 		}
 	}
-	// maxRunning 0 stays 0: the Host's own default applies (RunLimit, with the tenant's per-run
-	// allowance), and `up` passes no Wip__MaxRunning, so that default is the Host's to name.
+	// maxRunning 0 stays 0: the Host's own default applies, and `up` passes no Wip__MaxRunning,
+	// so that default is the Host's to name (`yawble doctor` reads it; nothing here computes it).
 	return s, notes
-}
-
-// MemoryPerRunMB is the Host's built-in wip.memoryPerRunMb: the memory one agent run is counted at.
-const MemoryPerRunMB = 2048
-
-// RunLimit is the Host's default running limit for a container with cpus CPUs and a memoryMB
-// limit (0 = none): the smaller of max(1, cpus - 1) and memoryMB / MemoryPerRunMB, at least 1.
-// Bound says which one decided: "cpu" or "memory".
-func RunLimit(cpus, memoryMB int) (limit int, bound string) {
-	limit, bound = cpus-1, "cpu"
-	if limit < 1 {
-		limit = 1
-	}
-	if memoryMB > 0 {
-		byMemory := memoryMB / MemoryPerRunMB
-		if byMemory < 1 {
-			byMemory = 1
-		}
-		if byMemory < limit {
-			limit, bound = byMemory, "memory"
-		}
-	}
-	return limit, bound
 }
 
 // MemoryMB reads a --memory size (12288m, 6g, 512M) as megabytes; 0 when unset or unreadable.

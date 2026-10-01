@@ -36,6 +36,9 @@ type HostReport struct {
 	Agents             []Agent `json:"agents"`
 	// The Host's last pre-flight of its agent CLIs (agenttools.go). Nil: not recorded, not measured.
 	AgentTools *AgentTools `json:"agentTools"`
+	// Wip is the Host's own running limit and per-run memory (hostfigures.go). Nil: an older Host,
+	// and the doctor says the figures are not known.
+	Wip *HostWip `json:"wip"`
 }
 
 type Schema struct {
@@ -64,6 +67,37 @@ type Agent struct {
 	// one. Nil when the kept history never saw it change; VersionsSince is how far back that reaches.
 	UpdatedAt     *string `json:"updatedAt,omitempty"`
 	VersionsSince *string `json:"versionsSince,omitempty"`
+	// Launch is the Host's check that the CLI starts the way a member run launches it. Nil: an
+	// older Host that does not check, which reads "not known" and never ok.
+	Launch *Launch `json:"launch"`
+}
+
+// Launch is one CLI's launch check. Result is the Host's word: "ok", "failed" or "not checked".
+type Launch struct {
+	Result     string  `json:"result"`
+	ExitCode   *int    `json:"exitCode"`
+	StderrTail *string `json:"stderrTail"`
+	Detail     *string `json:"detail"`
+}
+
+// LaunchText is the launch result in one phrase: "ok", "FAILED, exit 137", "not checked" or
+// "not known". Only the Host's "ok" reads ok.
+func (a Agent) LaunchText() string {
+	l := a.Launch
+	switch {
+	case l == nil:
+		return "not known"
+	case l.Result == "ok":
+		return "ok"
+	case l.Result == "failed" && l.ExitCode != nil:
+		return fmt.Sprintf("FAILED, exit %d", *l.ExitCode)
+	case l.Result == "failed":
+		return "FAILED"
+	case l.Result == "not checked":
+		return "not checked"
+	default:
+		return fmt.Sprintf("not known (the Host said %q)", l.Result)
+	}
 }
 
 // UpdatedText says which version is installed and when it last changed, in one phrase, or "" when

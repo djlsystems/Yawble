@@ -55,7 +55,7 @@ yawble update             a newer yawble when there is one, then the instance on
 yawble logs [-f]          the container log
 yawble backup [--output <file>] [--full] [--yes]   the instance's data in one .tar.gz on this computer, to restore here or elsewhere
 yawble restore <file> [--replace] [--yes]         a backup into this computer's instance, on either engine, then start it
-yawble agents             per agent: installed, signed in, and how to sign in if not
+yawble agents             per agent: installed, signed in, launches, and how to sign in if not
 yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
 yawble config get|set     port, engine, memory, cpus, running limit, image
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
@@ -215,12 +215,14 @@ skip  release        newer yawble releases are not checked in this build
 ok    data root      /data, 915 GB free, writable
 ok    database       schema accepted (9 steps)
 warn  backups        no daily backup yet (the Host writes one a day into /data/backups)
-warn  agents         claude signed in · codex NOT signed in · copilot not measured · grok signed in · agy not installed
+warn  agents         claude signed in, launch ok · codex NOT signed in, launch ok · copilot not measured, launch not checked · grok signed in, launch FAILED, exit 134 · agy not installed
                      fix: yawble agents
+ok    running limit  4, from the memory bound (the Host's answer: ...)
+info  run memory     rlimit, 1792 MB per run: runs.memoryLimitMb is set
 info  backup         newest C:\Users\me\yawble-backup-20260927-181200.tar.gz, 17 hours old
 ```
 
-The first four rows appear only with Podman on macOS and Windows, where it runs in a machine; on Linux, and with Docker, the list starts at `engine`.
+The running limit and run memory are the Host's own answers; when the Host cannot be asked they read "not known", never an estimate. The first four rows appear only with Podman on macOS and Windows, where it runs in a machine; on Linux, and with Docker, the list starts at `engine`.
 
 ## Where things live
 
