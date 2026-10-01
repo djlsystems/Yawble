@@ -13,13 +13,16 @@ public sealed record AgentAuthProbeSpec(
 /// a seeded <c>codex</c> nobody runs, never signed in, would otherwise light a red banner for every
 /// person on every page. Set by the route, never by the probe, which caches per machine and knows nothing
 /// of teams.</param>
+/// <param name="Launch">Whether the preset's CLI starts through a member's launch (<see cref="AgentLaunchChecks"/>).
+/// Set by the route, never by this probe: the probe runs the CLI directly and answers only "signed in".</param>
 public sealed record AgentAuthReport(
     string Agent,
     string Command,
     bool Installed,
     bool? Authenticated,
     string Detail,
-    bool Referenced = false)
+    bool Referenced = false,
+    AgentLaunchReport? Launch = null)
 {
     /// <summary>The reports, each marked with whether <paramref name="referenced"/> names it.</summary>
     public static IReadOnlyList<AgentAuthReport> MarkReferenced(

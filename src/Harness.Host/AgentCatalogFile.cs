@@ -304,6 +304,12 @@ public static class AgentCatalogFile
             ["~/.claude/projects/{workspaceDashed}", "~/.cache/claude-cli-nodejs/{workspaceDashed}"];
         IReadOnlyList<string> grokSessionFolders = ["~/.grok/sessions/{workspaceEncoded}"];
 
+        // THE FREE INVOCATION THE LAUNCH CHECK RUNS through a member's launch: each CLI's version
+        // flag, which starts the program, sends no prompt and spends nothing (AgentUpdates reads
+        // the same flag before and after an update). Only the headless presets carry it - a member
+        // never launches an interactive one.
+        IReadOnlyList<string> versionCheck = ["--version"];
+
         return
         [
             new AgentDefinition(
@@ -365,7 +371,8 @@ public static class AgentCatalogFile
                     "~/.claude/projects/{workspaceDashed}/{sessionId}.jsonl", LiveView.ClaudeJsonl),
                 Isolation: claudeIsolation,
                 Updates: claudeUpdates,
-                SessionFolders: claudeSessionFolders),
+                SessionFolders: claudeSessionFolders,
+                LaunchCheck: versionCheck),
 
             // The three other coding CLIs, verified against their own --help rather than from
             // documentation, which disagreed with the binaries in several places.
@@ -432,7 +439,8 @@ public static class AgentCatalogFile
                     null, LiveView.CodexRollout,
                     new AgentLiveViewFind("~/.codex/sessions", "*/*/*/rollout-*.jsonl", LiveView.CwdFromFirstLine)),
                 Isolation: codexIsolation,
-                Updates: codexUpdates),
+                Updates: codexUpdates,
+                LaunchCheck: versionCheck),
 
             new AgentDefinition(
                 "copilot",
@@ -574,7 +582,8 @@ public static class AgentCatalogFile
                 LiveView: new AgentLiveView(
                     "~/.copilot/session-state/{sessionId}/events.jsonl", LiveView.CopilotEvents),
                 Isolation: copilotIsolation,
-                Updates: copilotUpdates),
+                Updates: copilotUpdates,
+                LaunchCheck: versionCheck),
 
             new AgentDefinition(
                 "grok",
@@ -637,7 +646,8 @@ public static class AgentCatalogFile
                     "~/.grok/sessions/{workspaceEncoded}/{sessionId}/updates.jsonl", LiveView.GrokUpdates),
                 Isolation: grokIsolation,
                 Updates: grokUpdates,
-                SessionFolders: grokSessionFolders),
+                SessionFolders: grokSessionFolders,
+                LaunchCheck: versionCheck),
 
             new AgentDefinition(
                 "echo",
