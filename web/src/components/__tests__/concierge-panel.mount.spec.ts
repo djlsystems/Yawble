@@ -24,6 +24,7 @@ const fake = vi.hoisted(() => {
     clear = vi.fn();
     dispose = vi.fn();
     scrollLines = vi.fn();
+    focus = vi.fn();
 
     constructor(options: Record<string, unknown>) {
       this.options = { ...options };
@@ -66,7 +67,7 @@ const fake = vi.hoisted(() => {
   return { FakeTerminal, FakeFitAddon, nextSize, fits };
 });
 
-const { concierge, endConcierge, listCatalog, setConcierge, connectConcierge, sockets, notify, screen } =
+const { concierge, endConcierge, listCatalog, setConcierge, uploadConciergeAttachment, connectConcierge, sockets, notify, screen, platform } =
   vi.hoisted(() => {
     const sockets: { sendInput: ReturnType<typeof vi.fn>; sendResize: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> }[] = [];
     return {
@@ -74,6 +75,7 @@ const { concierge, endConcierge, listCatalog, setConcierge, connectConcierge, so
       endConcierge: vi.fn(),
       listCatalog: vi.fn(),
       setConcierge: vi.fn(),
+      uploadConciergeAttachment: vi.fn(),
       sockets,
       connectConcierge: vi.fn(() => {
         const socket = { sendInput: vi.fn(), sendResize: vi.fn(), dispose: vi.fn() };
@@ -82,6 +84,7 @@ const { concierge, endConcierge, listCatalog, setConcierge, connectConcierge, so
       }),
       notify: vi.fn(),
       screen: { lt: { sm: false } },
+      platform: { has: { touch: false } },
     };
   });
 
@@ -93,7 +96,7 @@ vi.mock('quasar', async (importOriginal) => {
   const reactiveScreen = makeReactive(screen);
   return {
     ...(await importOriginal<Record<string, unknown>>()),
-    useQuasar: () => ({ notify, screen: reactiveScreen, platform: { has: { touch: false } }, dark: { isActive: false } }),
+    useQuasar: () => ({ notify, screen: reactiveScreen, platform, dark: { isActive: false } }),
   };
 });
 
@@ -103,6 +106,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   endConcierge,
   listCatalog,
   setConcierge,
+  uploadConciergeAttachment,
 }));
 
 vi.mock('../../lib/concierge-socket', async (importOriginal) => ({
@@ -138,6 +142,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   useQuasar().screen.lt.sm = false;
+  platform.has.touch = false;
 
   concierge.mockResolvedValue({ agent: 'claude-interactive' });
   endConcierge.mockResolvedValue(undefined);
@@ -160,6 +165,7 @@ afterEach(() => {
   resetBody();
   document.body.style.overflow = '';
   delete (document as { fonts?: unknown }).fonts;
+  delete (navigator as { clipboard?: unknown }).clipboard;
 });
 
 async function openPanel(props: Record<string, unknown> = {}, before: () => void = () => {}) {
@@ -711,5 +717,191 @@ describe('dragging the window', () => {
     pointer('pointermove', shell(), 540, 430);
 
     expect([display.width, display.height]).toEqual([540, 430]);
+  });
+});
+
+describe('attaching an image', () => {
+  const Stored = '/data/concierge/attachments/20261001T120000Z-1.png';
+  const pastedPath = `\x1b[200~${Stored}\x1b[201~`;
+  const png = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
+
+  /** Only what the panel reads off a DataTransfer, so the case states exactly what the browser had. */
+  function transfer(files: File[], text?: string): DataTransfer {
+    return {
+      types: [...(text === undefined ? [] : ['text/plain']), ...(files.length ? ['Files'] : [])],
+      files,
+      items: files.map((file) => ({ kind: 'file', type: file.type, getAsFile: () => file })),
+      getData: (type: string) => (type === 'text/plain' ? text ?? '' : ''),
+    } as unknown as DataTransfer;
+  }
+
+  function paste(data: DataTransfer): ClipboardEvent {
+    const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: data });
+    // Onto xterm's own element, as a real paste lands - the host listens in the capture phase.
+    shell().querySelector('.concierge-host .xterm')!.dispatchEvent(event);
+    return event;
+  }
+
+  function drop(target: Element, data: DataTransfer): DragEvent {
+    const event = new DragEvent('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: data });
+    target.dispatchEvent(event);
+    return event;
+  }
+
+  function clipboardHolding(types: Record<string, Blob>) {
+    const read = vi.fn(async () => [{ types: Object.keys(types), getType: async (type: string) => types[type]! }]);
+    Object.defineProperty(navigator, 'clipboard', { value: { read }, configurable: true });
+    return read;
+  }
+
+  function altV(): { event: KeyboardEvent; passOn: boolean } {
+    const event = new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', altKey: true, cancelable: true });
+    return { event, passOn: terminal().keyHandler!(event) };
+  }
+
+  const sent = () => sockets.at(-1)!.sendInput.mock.calls.map(([data]) => data as string);
+  const alert = () => shell().querySelector('[role="alert"]')?.textContent?.trim() ?? '';
+
+  beforeEach(() => {
+    uploadConciergeAttachment.mockResolvedValue({ path: Stored, size: 4, type: 'image/png' });
+  });
+
+  it('uploads an image paste and pastes the path it was stored at', async () => {
+    await openPanel();
+    const image = png();
+
+    const event = paste(transfer([image]));
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(uploadConciergeAttachment).toHaveBeenCalledWith(image);
+    expect(sent()).toEqual([pastedPath]);
+  });
+
+  it('leaves a paste carrying text to the terminal, even with a picture beside it', async () => {
+    await openPanel();
+
+    const event = paste(transfer([png()], 'A1\tB1'));
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(uploadConciergeAttachment).not.toHaveBeenCalled();
+  });
+
+  it('uploads the clipboard image on Alt+V and sends no key', async () => {
+    await openPanel();
+    const read = clipboardHolding({ 'image/png': new Blob([new Uint8Array([1])], { type: 'image/png' }) });
+
+    const { event, passOn } = altV();
+    await flushPromises();
+
+    expect([passOn, event.defaultPrevented]).toEqual([false, true]);
+    expect(read).toHaveBeenCalledOnce();
+    expect((uploadConciergeAttachment.mock.calls[0]![0] as File).type).toBe('image/png');
+    expect(sent()).toEqual([pastedPath]);
+  });
+
+  it('sends Alt+V on unchanged when the clipboard holds text', async () => {
+    await openPanel();
+    clipboardHolding({ 'text/plain': new Blob(['hello'], { type: 'text/plain' }) });
+
+    altV();
+    await flushPromises();
+
+    expect(uploadConciergeAttachment).not.toHaveBeenCalled();
+    // ESC v: what xterm sends for Alt+V with Alt as Meta.
+    expect(sent()).toEqual(['\x1bv']);
+  });
+
+  it('sends Alt+V on unchanged where the browser has no clipboard.read, or refuses it', async () => {
+    await openPanel();
+    Object.defineProperty(navigator, 'clipboard', { value: {}, configurable: true });
+
+    altV();
+    await flushPromises();
+
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { read: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) },
+      configurable: true,
+    });
+
+    altV();
+    await flushPromises();
+
+    expect(uploadConciergeAttachment).not.toHaveBeenCalled();
+    expect(sent()).toEqual(['\x1bv', '\x1bv']);
+  });
+
+  it('uploads dropped images and pastes their paths', async () => {
+    await openPanel();
+    const image = png();
+
+    const event = drop(shell().querySelector('.concierge-host')!, transfer([image]));
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(uploadConciergeAttachment).toHaveBeenCalledWith(image);
+    expect(sent()).toEqual([pastedPath]);
+  });
+
+  it('opens a picker from the Attach image button and uploads what is picked', async () => {
+    await openPanel();
+    const picker = shell().querySelector('input[type="file"]') as HTMLInputElement;
+    const opened = vi.spyOn(picker, 'click').mockImplementation(() => {});
+
+    await click('Attach image');
+    expect(opened).toHaveBeenCalledOnce();
+    expect(picker.accept).toBe('image/png,image/jpeg,image/gif,image/webp');
+
+    const image = png();
+    Object.defineProperty(picker, 'files', { value: [image], configurable: true });
+    picker.dispatchEvent(new Event('change'));
+    await flushPromises();
+
+    expect(uploadConciergeAttachment).toHaveBeenCalledWith(image);
+    expect(sent()).toEqual([pastedPath]);
+  });
+
+  it('says why a refused upload failed, in the server\'s words, and inserts nothing', async () => {
+    await openPanel();
+    uploadConciergeAttachment.mockRejectedValue(new Error('That file is not a PNG, JPEG, GIF or WebP image.'));
+
+    paste(transfer([png()]));
+    await flushPromises();
+
+    expect(alert()).toContain('That file is not a PNG, JPEG, GIF or WebP image.');
+    expect(sent()).toEqual([]);
+  });
+
+  it('on a touch device puts the path into the compose bar at the caret, not into the terminal', async () => {
+    platform.has.touch = true;
+    await openPanel();
+    const field = shell().querySelector('input[aria-label="Compose a line for the console"]') as HTMLInputElement;
+    field.value = 'look at  please';
+    field.dispatchEvent(new Event('input'));
+    await flushPromises();
+    field.setSelectionRange(8, 8);
+
+    drop(shell().querySelector('.concierge-host')!, transfer([png()]));
+    await flushPromises();
+
+    expect(field.value).toBe(`look at ${Stored} please`);
+    expect(sent()).toEqual([]);
+  });
+
+  it('uploads an image pasted into the compose bar', async () => {
+    platform.has.touch = true;
+    await openPanel();
+    const field = shell().querySelector('input[aria-label="Compose a line for the console"]') as HTMLInputElement;
+
+    const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: transfer([png()]) });
+    field.dispatchEvent(event);
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(field.value).toBe(Stored);
   });
 });
