@@ -770,8 +770,8 @@ builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
 // reason are recorded in the setting's own description in `TenantSettings`.
 var workflowSpendLimit = tenantSettings.WorkflowSpendLimit;
 
-// Instance-wide, shared across users. 0 is unlimited. Absent means 4, which is a desktop-sized
-// default rather than a guess at a server. The container's cgroup is a blast radius; this is
+// Instance-wide, shared across users. 0 is unlimited. Absent means the smaller of max(1, CPUs - 1)
+// and, under a container memory limit, limit / wip.memoryPerRunMb (`TenantSettings.RunLimit`). The container's cgroup is a blast radius; this is
 // the scheduler. Held work is listed by GET /api/wip.
 //
 // `wip.maxRunning`: settable at runtime. One place reads it - here, at start, and on every
@@ -779,7 +779,11 @@ var workflowSpendLimit = tenantSettings.WorkflowSpendLimit;
 var wip = new WipLedger(tenantSettings.WipMaxRunning);
 tenantSettings.Changed += name =>
 {
-    if (name == TenantSettings.WipMaxRunningName) wip.SetMax(tenantSettings.WipMaxRunning);
+    // The per-run allowance moves the default, so a change to it re-reads the limit too.
+    if (name is TenantSettings.WipMaxRunningName or TenantSettings.WipMemoryPerRunMbName)
+    {
+        wip.SetMax(tenantSettings.WipMaxRunning);
+    }
 };
 builder.Services.AddSingleton(wip);
 
