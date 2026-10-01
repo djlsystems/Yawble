@@ -2460,6 +2460,12 @@ export interface WipView {
 export type TenantSettingSource = 'row' | 'appsettings'
 
 /**
+ * Where a setting's `default` comes from - what it would take with no row: the deployment's file
+ * (`appsettings`) or the platform's own built-in default (`builtIn`).
+ */
+export type TenantSettingDefaultSource = 'appsettings' | 'builtIn'
+
+/**
  * One instance-wide setting, `GET /api/tenant/settings`.
  *
  * `value` and `default` are whatever the setting holds - a number, a duration string, a lane map -
@@ -2469,6 +2475,8 @@ export interface TenantSetting {
   name: string
   value: unknown
   default: unknown
+  /** Which of the two `default` is. Null when the server does not say. */
+  defaultSource: TenantSettingDefaultSource | null
   source: TenantSettingSource
   /** Null for a value read from appsettings: nobody changed it. */
   updatedAt: string | null

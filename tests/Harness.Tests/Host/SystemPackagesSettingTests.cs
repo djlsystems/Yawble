@@ -56,6 +56,33 @@ public sealed class SystemPackagesSettingTests(HostFixture host) : IClassFixture
         }
     }
 
+    [Fact]
+    public async Task A_reset_rewrites_the_packages_file()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = await host.PersonAsync();
+        var path = Path.Combine(host.DataRoot, SystemPackages.FileName);
+
+        var set = await client.PutAsJsonAsync("/api/tenant/settings", new Dictionary<string, object>
+        {
+            ["system.packages"] = new[] { "ripgrep" },
+        }, ct);
+        Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+        Assert.Contains("ripgrep", File.ReadAllLines(path));
+
+        using var content = new StringContent(
+            """{"system.packages": null}""", System.Text.Encoding.UTF8, "application/json");
+        var reset = await client.PutAsync("/api/tenant/settings", content, ct);
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+
+        // The file follows the fallback now in force, with no restart.
+        var entry = (await ReadAsync(client, ct)).Single(s => s.GetProperty("name").GetString() == "system.packages");
+        Assert.Equal("appsettings", entry.GetProperty("source").GetString());
+        var fallback = entry.GetProperty("value").EnumerateArray().Select(e => e.GetString()).ToArray();
+        Assert.Equal(fallback, File.ReadAllLines(path).Where(line => !line.StartsWith('#')).ToArray());
+        Assert.DoesNotContain("ripgrep", File.ReadAllLines(path));
+    }
+
     [Theory]
     [InlineData("vim; rm -rf /")]
     [InlineData("$(touch /tmp/pwned)")]

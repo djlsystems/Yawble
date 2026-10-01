@@ -28,7 +28,8 @@ public static class TenantSettingsEndpoints
             .WithSummary("Every instance-wide setting, its source and its last change")
             .WithDescription(
                 "`settings` lists every setting with `name`, `value`, `default` (what applies with "
-                + "no row: appsettings.json, else the built-in default), `source` (`row` when a "
+                + "no row: appsettings.json, else the built-in default), `defaultSource` (`appsettings` or "
+                + "`builtIn`: which of the two `default` is), `source` (`row` when a "
                 + "person has set it, else `appsettings`), `updatedAt` and `updatedBy` (null "
                 + "unless `row`), `description`, and `readOnly`. The FileBrowser roots follow as "
                 + "read-only entries named `fileBrowser.roots.<name>` with a `note`: they are a "
@@ -73,8 +74,11 @@ public static class TenantSettingsEndpoints
                 + "setting's bound, durations as `hh:mm:ss` within a bounded range - and a failure "
                 + "answers 400 with `error` and `field` naming the setting, writing nothing. Each "
                 + "setting that changes is written with a `tenant_events` row naming the setting, the "
-                + "old value, the new value and the person. Takes effect without a restart. Answers "
-                + "the same shape as the GET.");
+                + "old value, the new value and the person. A value of `null` resets the setting to its "
+                + "default: its row is removed, so appsettings.json, then the built-in default, applies, "
+                + "with a `tenant.setting-reset` row naming the setting and the old value in the same "
+                + "transaction; resetting a setting with no row changes nothing and writes no row. Takes "
+                + "effect without a restart. Answers the same shape as the GET.");
     }
 
     private static JsonObject Describe(TenantSettings settings, FileBrowserPolicy fileBrowser)
@@ -90,6 +94,7 @@ public static class TenantSettingsEndpoints
                 ["name"] = definition.Name,
                 ["value"] = settings.ToJson(definition.Name, settings.Current(definition.Name)),
                 ["default"] = settings.ToJson(definition.Name, settings.Fallback(definition.Name)),
+                ["defaultSource"] = settings.FallbackSource(definition.Name),
                 ["source"] = row is null ? "appsettings" : "row",
                 ["updatedAt"] = row?.UpdatedAt,
                 ["updatedBy"] = row?.UpdatedBy,
@@ -105,6 +110,7 @@ public static class TenantSettingsEndpoints
                 ["name"] = $"fileBrowser.roots.{root.Name}",
                 ["value"] = root.Path,
                 ["default"] = root.Path,
+                ["defaultSource"] = "appsettings",
                 ["source"] = "appsettings",
                 ["updatedAt"] = null,
                 ["updatedBy"] = null,
