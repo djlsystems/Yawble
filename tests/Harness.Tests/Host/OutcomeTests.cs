@@ -393,6 +393,57 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Equal(2, rows.Count(e => e.Action == TenantActions.WorkflowOutcomeChanged && e.ActorId == $"{host.Alpha}/Manager"));
     }
 
+    [Fact]
+    public async Task The_proposed_list_names_each_proposal_its_proposer_when_and_its_linked_workflows_until_a_person_settles_it()
+    {
+        // What the board's Needs You reads: GET /api/outcomes?status=proposed.
+        var person = await host.PersonAsync();
+        var tools = ManagerTools(host.Alpha);
+        var name = Unique("Needs you proposal");
+
+        var first = await WorkflowAsync(person, host.Alpha);
+        var second = await WorkflowAsync(person, host.Alpha);
+        Assert.StartsWith("HTTP 200", await tools.Outcome("propose", name: name, causation: first.ToString(), cancellationToken: Ct), StringComparison.Ordinal);
+        Assert.StartsWith("HTTP 200", await tools.Outcome("propose", name: name, causation: second.ToString(), cancellationToken: Ct), StringComparison.Ordinal);
+        var made = (await Outcomes.FindLiveByNameAsync(name, Ct))!;
+
+        async Task<string> BareAsync(string stem) => (await Outcomes.ProposeAsync(
+            Unique(stem), null, new OutcomeActor($"{host.Alpha}/Manager", OutcomeActorKind.Member), null, null,
+            new TriggerAudit($"{host.Alpha}/Manager", null, TenantActions.OutcomeCreated, null, null, null), Ct)).Outcome!.Id;
+        var mergeId = await BareAsync("Needs you merge");
+        var rejectId = await BareAsync("Needs you reject");
+        var active = await CreateAsync(person, Unique("Needs you active"));
+
+        async Task<JsonElement[]> ProposedAsync()
+        {
+            var response = await person.GetAsync("/api/outcomes?status=proposed", Ct);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return [.. (await JsonAsync(response)).GetProperty("outcomes").EnumerateArray()];
+        }
+
+        var listed = await ProposedAsync();
+        Assert.All(listed, o => Assert.Equal(OutcomeStatus.Proposed, o.GetProperty("status").GetString()));
+        Assert.DoesNotContain(listed, o => o.GetProperty("id").GetString() == active.Id);
+
+        var entry = Assert.Single(listed, o => o.GetProperty("id").GetString() == made.Id);
+        Assert.Equal(name, entry.GetProperty("name").GetString());
+        Assert.Equal($"{host.Alpha}/Manager", entry.GetProperty("createdBy").GetString());
+        Assert.Equal(made.CreatedAt, entry.GetProperty("createdAt").GetDateTimeOffset());
+        Assert.Equal(2, entry.GetProperty("figures").GetProperty("workflows").GetProperty("total").GetInt32());
+        Assert.Contains(listed, o => o.GetProperty("id").GetString() == mergeId);
+        Assert.Contains(listed, o => o.GetProperty("id").GetString() == rejectId);
+
+        // Confirmed, merged or rejected, it is no longer listed.
+        Assert.Equal(HttpStatusCode.OK, (await person.PostAsync($"/api/outcomes/{made.Id}/confirm", null, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await person.PostAsJsonAsync($"/api/outcomes/{mergeId}/merge", new { into = active.Id }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await person.DeleteAsync($"/api/outcomes/{rejectId}", Ct)).StatusCode);
+
+        var after = (await ProposedAsync()).Select(o => o.GetProperty("id").GetString()).ToList();
+        Assert.DoesNotContain(made.Id, after);
+        Assert.DoesNotContain(mergeId, after);
+        Assert.DoesNotContain(rejectId, after);
+    }
+
     // ---- the name rule, rename, merge, reject ----
 
     [Fact]

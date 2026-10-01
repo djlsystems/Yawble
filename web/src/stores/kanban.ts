@@ -13,7 +13,14 @@ import {
   type KanbanLane,
 } from '../api/kanban'
 import { Unauthorized } from '../api/client'
-import { linkWorkflowOutcome, listLiveOutcomes, unlinkWorkflowOutcome, type OutcomeRef } from '../api/outcomes'
+import {
+  linkWorkflowOutcome,
+  listLiveOutcomes,
+  listOutcomes,
+  unlinkWorkflowOutcome,
+  type Outcome,
+  type OutcomeRef,
+} from '../api/outcomes'
 import {
   cardsInLane,
   cardsMatchingText,
@@ -121,6 +128,13 @@ export const useKanbanStore = defineStore('kanban', {
      * until then, and after a failed read - the filter still offers All and No outcome.
      */
     outcomes: [] as OutcomeRef[],
+
+    /**
+     * THE PROPOSED OUTCOMES A PERSON HAS STILL TO CONFIRM, MERGE OR REJECT, read by `loadProposed`
+     * from `GET /api/outcomes?status=proposed`. Needs You lists each one and counts them: a Manager's
+     * proposal waits on a person exactly as a blocked card does.
+     */
+    proposed: [] as Outcome[],
   }),
 
   getters: {
@@ -455,6 +469,20 @@ export const useKanbanStore = defineStore('kanban', {
     async loadOutcomes() {
       try {
         this.outcomes = await listLiveOutcomes()
+      } catch {
+        // Kept as it was.
+      }
+    },
+
+    /**
+     * Needs You's proposed outcomes. Kept to `proposed` here as well as in the query, so an entry
+     * goes the moment its outcome is confirmed, merged, retired or rejected. A failure leaves the
+     * list as it was: the board's cards do not depend on it.
+     */
+    async loadProposed() {
+      try {
+        const answer = await listOutcomes({ status: ['proposed'] })
+        this.proposed = (answer?.outcomes ?? []).filter((outcome) => outcome.status === 'proposed')
       } catch {
         // Kept as it was.
       }

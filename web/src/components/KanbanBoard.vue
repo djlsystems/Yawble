@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUpdate, onMounted, onUnmounted, onUpdated, ref, watchPostEffect } from 'vue';
+import { computed, onBeforeUpdate, onMounted, onUnmounted, onUpdated, ref, watch, watchPostEffect } from 'vue';
 import type { KanbanLane } from '../api/kanban';
 import { useKanbanStore, type KanbanView } from '../stores/kanban';
 import { inProgressHeader, useWipStore } from '../stores/wip';
 import { useAgentUpdatesStore } from '../stores/agentUpdates';
-import { cardShowsWaiting, laneOverLimit } from '../lib/kanban';
+import { cardShowsWaiting, laneOverLimit, NeedsYouLaneId } from '../lib/kanban';
 import { isRunningLane } from '../lib/tenantSettings';
 import KanbanCard from './KanbanCard.vue';
 import KanbanFilterBar from './KanbanFilterBar.vue';
 import KanbanCardPanel from './KanbanCardPanel.vue';
 import KanbanChangeOutcome from './KanbanChangeOutcome.vue';
+import KanbanProposedOutcomes from './KanbanProposedOutcomes.vue';
 import OutcomesDialog from './OutcomesDialog.vue';
 import { FlipDurationMs, flipShifts, flipTransform, type CardBox } from '../lib/flip';
 
@@ -73,9 +74,19 @@ function runningFigure(lane: KanbanLane): { running: number; max: number | null 
   return { running, max: lane.wipLimit };
 }
 
+/**
+ * WHAT A LANE HOLDS: its cards, and in Needs You the proposed outcomes waiting on a person too -
+ * one count for the header and its amber.
+ */
+function laneCount(lane: KanbanLane): number {
+  const cards = kanban.laneCards(lane.id).length;
+
+  return lane.id === NeedsYouLaneId ? cards + kanban.proposed.length : cards;
+}
+
 /** Every other lane with a limit: `count / limit`, amber once over it. Advisory, never a block. */
 function laneCountText(lane: KanbanLane): string {
-  const count = kanban.laneCards(lane.id).length;
+  const count = laneCount(lane);
 
   return typeof lane.wipLimit === 'number' && lane.wipLimit > 0 ? `${count} / ${lane.wipLimit}` : `${count}`;
 }
@@ -90,7 +101,7 @@ function laneOver(lane: KanbanLane): boolean {
     if (figure) return laneOverLimit(figure.running, figure.max);
   }
 
-  return laneOverLimit(kanban.laneCards(lane.id).length, lane.wipLimit);
+  return laneOverLimit(laneCount(lane), lane.wipLimit);
 }
 
 /** The swimlane grid: a team column, then one track per lane at the `.k-lane` width. */
@@ -151,7 +162,15 @@ function revealRow() {
 
 watchPostEffect(revealRow);
 
+/**
+ * NEEDS YOU'S PROPOSED OUTCOMES are reread on arrival and with every board the store lands - a hub
+ * push or a person's move - and after a write in Manage outcomes, so a confirmed, merged, retired or
+ * rejected outcome leaves the lane.
+ */
+watch(() => kanban.board, () => void kanban.loadProposed());
+
 onMounted(() => {
+  void kanban.loadProposed();
   previous = measure();
   wip.watch();
   agentUpdates.watch();
@@ -208,7 +227,8 @@ onUpdated(() => {
   });
 });
 
-const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
+// A proposed outcome keeps the lanes up: Needs You has something to show with no card on the board.
+const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0 && kanban.proposed.length === 0);
 
 /**
  * MANAGE OUTCOMES, opened from the filter bar's button at the list, and from a card's outcome tag
@@ -296,6 +316,19 @@ function openOutcomes(id: string | null = null) {
         <span class="k-lane-count">{{ isRunningLane(lane.id) ? inProgressText(lane) : laneCountText(lane) }}</span>
       </header>
 
+      <!-- PROPOSED OUTCOMES BELONG TO NO TEAM: an outcome is instance-wide, so they have a row of
+           their own, with entries in Needs You's column only. -->
+      <template v-if="kanban.proposed.length">
+        <div class="k-swim-team k-swim-sticky-left">Outcomes</div>
+        <div v-for="lane in kanban.lanes" :key="`outcomes-${lane.id}`" class="k-lane-cards k-swim-cell">
+          <KanbanProposedOutcomes
+            v-if="lane.id === NeedsYouLaneId"
+            :outcomes="kanban.proposed"
+            @open="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
+          />
+        </div>
+      </template>
+
       <template v-for="team in kanban.swimlanes" :key="team.id">
         <div class="k-swim-team k-swim-sticky-left" :data-team-row="team.id">{{ team.name }}</div>
         <TransitionGroup
@@ -329,6 +362,12 @@ function openOutcomes(id: string | null = null) {
           <span class="k-lane-count">{{ isRunningLane(lane.id) ? inProgressText(lane) : laneCountText(lane) }}</span>
         </header>
 
+        <KanbanProposedOutcomes
+          v-if="lane.id === NeedsYouLaneId"
+          :outcomes="kanban.proposed"
+          @open="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
+        />
+
         <!-- TransitionGroup handles the card ENTERING and LEAVING a lane; the FLIP above handles
              the journey between the two, which no transition can express on its own. -->
         <!-- The four classes are NAMED here rather than derived from a `name` prop. Vue would
@@ -360,7 +399,7 @@ function openOutcomes(id: string | null = null) {
 
     <KanbanCardPanel />
     <KanbanChangeOutcome :card-id="changingOutcome" @close="changingOutcome = ''" />
-    <OutcomesDialog v-model="outcomesOpen" :outcome="outcomeAt" />
+    <OutcomesDialog v-model="outcomesOpen" :outcome="outcomeAt" @changed="kanban.loadProposed()" />
   </div>
 </template>
 

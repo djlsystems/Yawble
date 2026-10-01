@@ -18,6 +18,13 @@ import type {
  */
 
 /**
+ * THE LANE FOR WORK WAITING ON A PERSON, which the board labels Needs You. Its id is `blocked`
+ * because a lane id is a durable reference in the log (`KanbanLanes.HumanActionLaneLabel`); the
+ * proposed outcomes a person has to settle are listed and counted in it too.
+ */
+export const NeedsYouLaneId = 'blocked'
+
+/**
  * THE LOCKED PALETTE, as words. The design brief fixes these and a template may override the
  * per-status choice later - which is why the card carries a `color` and this is the fallback,
  * rather than the UI deriving colour from status and ignoring what the server said.

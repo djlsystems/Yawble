@@ -86,6 +86,9 @@ afterEach(() => {
   resetBody();
 });
 
+/** The newest board read. The board also reads Needs You's proposed outcomes after each one lands. */
+const lastBoardRequest = () => requests.filter((r) => r.url.startsWith('/api/kanban/board')).at(-1)!.url;
+
 async function mountBoard(cards: Card[]) {
   setActivePinia(createPinia());
   boardCards = cards;
@@ -126,13 +129,13 @@ describe('the Outcome filter', () => {
     outcomeFilter(board).vm.$emit('update:modelValue', shipping.id);
     await flushPromises();
 
-    expect(requests.at(-1)!.url).toBe(`/api/kanban/board?outcome=${shipping.id}`);
+    expect(lastBoardRequest()).toBe(`/api/kanban/board?outcome=${shipping.id}`);
     expect(clearLabel()).toBe('Clear (1)');
 
     outcomeFilter(board).vm.$emit('update:modelValue', 'none');
     await flushPromises();
 
-    expect(requests.at(-1)!.url).toBe('/api/kanban/board?outcome=none');
+    expect(lastBoardRequest()).toBe('/api/kanban/board?outcome=none');
     expect(clearLabel()).toBe('Clear (1)');
   });
 
@@ -143,7 +146,7 @@ describe('the Outcome filter', () => {
     outcomeFilter(board).vm.$emit('update:modelValue', '');
     await flushPromises();
 
-    expect(requests.at(-1)!.url).toBe('/api/kanban/board');
+    expect(lastBoardRequest()).toBe('/api/kanban/board');
     expect(clearLabel()).toBeUndefined();
   });
 });

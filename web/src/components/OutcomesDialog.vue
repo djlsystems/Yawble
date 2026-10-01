@@ -67,6 +67,12 @@ const props = defineProps<{
   outcome?: string | null;
 }>();
 
+/**
+ * `changed` after a person's write succeeds - a confirm, merge, retire, reject, edit or move - so
+ * the board's Needs You can reread the proposed outcomes it lists.
+ */
+const emit = defineEmits<{ changed: [] }>();
+
 type Tab = 'active' | 'proposed' | 'ended';
 
 const tab = ref<Tab>('active');
@@ -208,6 +214,7 @@ async function act(work: () => Promise<unknown>) {
 
   try {
     await work();
+    emit('changed');
     await Promise.all([load(), select(o.id)]);
   } catch (cause) {
     actionProblem.value = cause instanceof Error ? cause.message : String(cause);
@@ -229,6 +236,7 @@ async function reject() {
 
   try {
     await rejectOutcome(o.id);
+    emit('changed');
     closeDetail();
     await load();
   } catch (cause) {
@@ -319,6 +327,7 @@ async function confirmCreate() {
   try {
     const made = await createOutcome({ name: newName.value.trim(), description: newDescription.value.trim() });
     creating.value = false;
+    emit('changed');
     tab.value = 'active';
     await load();
     await select(made.id);

@@ -93,6 +93,11 @@ export function firstLine(text: string | null | undefined): string {
   return (text ?? '').split(/\r?\n/, 1)[0]?.trim() ?? ''
 }
 
+/** How many workflows a proposed outcome's links name, as Needs You reads it: the route's total. */
+export function linkedWorkflowsText(total: number): string {
+  return `${total} workflow${total === 1 ? '' : 's'} linked`
+}
+
 export function when(at: string | null | undefined): string {
   return at ? new Date(at).toLocaleString() : '—'
 }
