@@ -108,13 +108,19 @@ func TestTheArchiveIsReadableWithTar(t *testing.T) {
 	// remote host.
 	list := exec.Command(tarPath, "-tzf", filepath.Base(path))
 	list.Dir = filepath.Dir(path)
-	out, err := list.CombinedOutput()
+	// The listing and tar's warnings kept apart, and both named in every failure with which tar
+	// answered: on Windows it is System32's bsdtar or Git's GNU tar, whichever PATH finds first.
+	var stderr bytes.Buffer
+	list.Stderr = &stderr
+	out, err := list.Output()
 	if err != nil {
-		t.Fatalf("%v: %s", err, out)
+		t.Fatalf("%s -tzf: %v\nstdout:\n%s\nstderr:\n%s", tarPath, err, out, stderr.Bytes())
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if lines[0] != "manifest.json" || lines[1] != "data/" || !strings.Contains(string(out), "data/teams/alpha/doc.md") {
-		t.Errorf("tar -tzf:\n%s", out)
+	// Windows' bsdtar ends each listed line with CRLF, so without this the first line is
+	// "manifest.json\r"; Git's GNU tar ends them with LF.
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(string(out)), "\r\n", "\n"), "\n")
+	if len(lines) < 2 || lines[0] != "manifest.json" || lines[1] != "data/" || !strings.Contains(string(out), "data/teams/alpha/doc.md") {
+		t.Errorf("%s -tzf:\nstdout:\n%s\nstderr:\n%s", tarPath, out, stderr.Bytes())
 	}
 }
 

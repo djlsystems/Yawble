@@ -392,6 +392,10 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         {
             m["description"] = "<script>alert(1)</script> & <b>jobs</b>";
             m["panel"]!["status"] = "<img src=x onerror=alert(1)> {data.jobs.count status=<i>new</i>} & {lastRun.outcome}";
+
+            // NO RUN AT INSTALL: Scout's first run would finish whenever it finishes, and
+            // `{lastRun.outcome}` would read `none` on one route and `completed` on the other.
+            m["triggers"]![0]!.AsObject().Remove("runAtInstall");
         });
         var team = await InstallAsync(folder, "Markup");
         await Get<SiteService>().PutDocumentAsync(team, "tracker", "jobs", "a", "{\"status\":\"<i>new</i>\"}",
@@ -401,7 +405,7 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         var panel = await JsonAsync(await person.GetAsync($"/api/teams/{team}/solution/panel", Ct));
 
         Assert.Equal("<script>alert(1)</script> & <b>jobs</b>", panel.GetProperty("description").GetString());
-        Assert.StartsWith("<img src=x onerror=alert(1)> 1 & ", panel.GetProperty("status").GetString());
+        Assert.Equal("<img src=x onerror=alert(1)> 1 & none", panel.GetProperty("status").GetString());
         Assert.Equal(panel.GetProperty("status").GetString(),
             Tile(await JsonAsync(await person.GetAsync("/api/solutions/installed", Ct)), team).GetProperty("status").GetString());
     }
@@ -428,6 +432,12 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         var team = await InstallAsync(Package(), "Measured");
         using var person = await host.PersonAsync();
 
+        // THE INSTALL'S RUN FINISHED FIRST: "Scan for postings" runs Scout at install, and its
+        // terminal row lands whenever the run ends. Under load it landed between the panel's read and
+        // the triggers route's, and `measuredRuns` read 0 on one and 1 on the other.
+        var scan = (await Get<ITeamSolutionStore>().FindAsync(team, Ct))!.Triggers["Scan for postings"];
+        await RunCountedAsync(scan);
+
         var raw = await (await person.GetAsync($"/api/teams/{team}/solution/panel", Ct)).Content.ReadAsStringAsync(Ct);
         Assert.DoesNotContain("estimat", raw, StringComparison.OrdinalIgnoreCase);
 
@@ -442,6 +452,23 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
             Assert.Equal(theirs.GetProperty("spentToday").GetRawText(), trigger.GetProperty("spentToday").GetRawText());
             Assert.Equal(theirs.GetProperty("capReachedToday").GetBoolean(), trigger.GetProperty("capReachedToday").GetBoolean());
             Assert.Equal(theirs.GetProperty("dailyTokenCap").GetRawText(), trigger.GetProperty("dailyTokenCap").GetRawText());
+        }
+
+        // What was compared holds the run: measured or not, it is counted, never estimated.
+        var spent = panel.Single(t => t.GetProperty("id").GetString() == scan).GetProperty("spentToday");
+        Assert.Equal(1, spent.GetProperty("measuredRuns").GetInt32() + spent.GetProperty("unmeasuredRuns").GetInt32());
+    }
+
+    /// <summary>Until trigger <paramref name="id"/>'s spend today counts a finished run: its terminal row.</summary>
+    private async Task RunCountedAsync(string id)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+
+        while (await Get<IMessageLog>().GetTriggerSpendAsync(TriggerCost.SourcesOf(id), DateTimeOffset.UtcNow.AddDays(-1), Ct)
+            is { RunsWithMeasuredUsage: 0, RunsWithoutUsage: 0 })
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException($"Trigger {id}'s run at install never finished.");
+            await Task.Delay(20, Ct);
         }
     }
 }

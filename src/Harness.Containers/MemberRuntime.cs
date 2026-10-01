@@ -1719,17 +1719,19 @@ public sealed class MemberRuntime : IAsyncDisposable
                         + $",\"{PayloadFields.WakeManager}\":{JsonSerializer.Serialize(wakeManager)}}}";
                 }
 
+                // Set BESIDE the publication rather than instead of it, and only on the arm that
+                // chose Failed. Idempotent, so a batch of several messages marks the container once
+                // and pushes one frame. BEFORE THE APPEND, not after it and not after the terminal
+                // hook: whoever sees the Failed row may read the reason at once. Marked after the
+                // append, a reader that polled the row in the moment before this continuation ran -
+                // only ever under load - read the row and a null `failed`.
+                if (!result.Succeeded) MarkFailed(failure, failureClass);
+
                 var terminal = await SafeAppendAsync(new NewMessage(
                     result.Succeeded ? MessageTypes.Completed : MessageTypes.Failed,
                     payload,
                     Id.ToString(),
                     message.Seq));
-
-                // Set BESIDE the publication rather than instead of it, and only on the arm that
-                // chose Failed. Idempotent, so a batch of several messages marks the container once
-                // and pushes one frame. BEFORE the terminal hook: whoever sees the Failed row may
-                // read the reason at once, and must not wait on a reader of the run to find it.
-                if (!result.Succeeded) MarkFailed(failure, failureClass);
 
                 if (usageCountedOn is null && terminal is not null && _onTerminal is not null)
                 {
