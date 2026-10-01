@@ -8,8 +8,12 @@ namespace Harness.Identity;
 /// <summary>One stored instance-wide setting: a <c>tenant_settings</c> row.</summary>
 public sealed record TenantSettingRow(string Name, string Value, DateTimeOffset UpdatedAt, string UpdatedBy);
 
-/// <summary>One change to write: the setting, the value it had before, and the value it gets.</summary>
-public sealed record TenantSettingChange(string Name, string? OldValue, string NewValue);
+/// <summary>One change to write: the setting, the value it had before, and the value it gets.
+/// A null <paramref name="NewValue"/> is a reset: the row is removed.</summary>
+public sealed record TenantSettingChange(string Name, string? OldValue, string? NewValue);
+
+/// <summary>One change as stored: the row now in force, or null when the row was removed.</summary>
+public sealed record TenantSettingWritten(string Name, TenantSettingRow? Row);
 
 /// <summary>
 /// <c>tenant_settings</c> over the same SQLite file the accounts and the tenant log use.
@@ -49,10 +53,12 @@ public sealed class SqliteTenantSettingsStore(string databasePath)
     }
 
     /// <summary>
-    /// Writes every change and one <c>tenant_events</c> row per change, atomically. Returns the
-    /// rows as stored.
+    /// Writes every change and one <c>tenant_events</c> row per change, atomically. A change with a
+    /// null new value removes the row, with a <see cref="TenantActions.TenantSettingReset"/> row; a
+    /// reset of a setting with no row changes nothing, writes no audit row and is not returned.
+    /// Returns the changes as stored.
     /// </summary>
-    public async Task<IReadOnlyList<TenantSettingRow>> WriteAsync(
+    public async Task<IReadOnlyList<TenantSettingWritten>> WriteAsync(
         IReadOnlyList<TenantSettingChange> changes,
         string? actorId,
         string actorEmail,
@@ -60,13 +66,36 @@ public sealed class SqliteTenantSettingsStore(string databasePath)
     {
         var at = DateTimeOffset.UtcNow;
         var stamp = at.ToString("O");
-        var written = new List<TenantSettingRow>(changes.Count);
+        var written = new List<TenantSettingWritten>(changes.Count);
 
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
         foreach (var change in changes)
         {
+            if (change.NewValue is null)
+            {
+                await using (var delete = connection.CreateCommand())
+                {
+                    delete.Transaction = transaction;
+                    delete.CommandText = "DELETE FROM tenant_settings WHERE name = $name";
+                    delete.Parameters.AddWithValue("$name", change.Name);
+                    if (await delete.ExecuteNonQueryAsync(ct) == 0) continue;
+                }
+
+                await AppendAuditAsync(connection, transaction, stamp, actorId, actorEmail,
+                    TenantActions.TenantSettingReset, change.Name, JsonSerializer.Serialize(new
+                    {
+                        setting = change.Name,
+                        old = change.OldValue,
+                        @new = (string?)null,
+                        change = "reset to default",
+                    }), ct);
+
+                written.Add(new TenantSettingWritten(change.Name, null));
+                continue;
+            }
+
             await using (var upsert = connection.CreateCommand())
             {
                 upsert.Transaction = transaction;
@@ -84,34 +113,41 @@ public sealed class SqliteTenantSettingsStore(string databasePath)
                 await upsert.ExecuteNonQueryAsync(ct);
             }
 
-            await using (var audit = connection.CreateCommand())
-            {
-                audit.Transaction = transaction;
-                audit.CommandText =
-                    """
-                    INSERT INTO tenant_events
-                        (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
-                    VALUES ($at, $actorId, $actorEmail, $action, $subject, $subject, $detail)
-                    """;
-                audit.Parameters.AddWithValue("$at", stamp);
-                audit.Parameters.AddWithValue("$actorId", (object?)actorId ?? DBNull.Value);
-                audit.Parameters.AddWithValue("$actorEmail", actorEmail);
-                audit.Parameters.AddWithValue("$action", TenantActions.TenantSettingChanged);
-                audit.Parameters.AddWithValue("$subject", change.Name);
-                audit.Parameters.AddWithValue("$detail", JsonSerializer.Serialize(new
+            await AppendAuditAsync(connection, transaction, stamp, actorId, actorEmail,
+                TenantActions.TenantSettingChanged, change.Name, JsonSerializer.Serialize(new
                 {
                     setting = change.Name,
                     old = change.OldValue,
                     @new = change.NewValue,
-                }));
-                await audit.ExecuteNonQueryAsync(ct);
-            }
+                }), ct);
 
-            written.Add(new TenantSettingRow(change.Name, change.NewValue, at, actorEmail));
+            written.Add(new TenantSettingWritten(
+                change.Name, new TenantSettingRow(change.Name, change.NewValue, at, actorEmail)));
         }
 
         await transaction.CommitAsync(ct);
         return written;
+    }
+
+    private static async Task AppendAuditAsync(
+        SqliteConnection connection, SqliteTransaction transaction, string stamp, string? actorId,
+        string actorEmail, string action, string setting, string detail, CancellationToken ct)
+    {
+        await using var audit = connection.CreateCommand();
+        audit.Transaction = transaction;
+        audit.CommandText =
+            """
+            INSERT INTO tenant_events
+                (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
+            VALUES ($at, $actorId, $actorEmail, $action, $subject, $subject, $detail)
+            """;
+        audit.Parameters.AddWithValue("$at", stamp);
+        audit.Parameters.AddWithValue("$actorId", (object?)actorId ?? DBNull.Value);
+        audit.Parameters.AddWithValue("$actorEmail", actorEmail);
+        audit.Parameters.AddWithValue("$action", action);
+        audit.Parameters.AddWithValue("$subject", setting);
+        audit.Parameters.AddWithValue("$detail", detail);
+        await audit.ExecuteNonQueryAsync(ct);
     }
 
     private SqliteConnection Open()
