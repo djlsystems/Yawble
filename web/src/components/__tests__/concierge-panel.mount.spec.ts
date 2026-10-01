@@ -926,7 +926,7 @@ describe('attaching an image', () => {
 
   it('shows the 409 sentence when no CLI is running to receive the image, and inserts nothing', async () => {
     await openPanel();
-    // The route's own body, verbatim from B002R-409-contract.md.
+    // The route's own body for no CLI running, verbatim.
     const sentence = 'The image was not attached: the Concierge is not running. Start it, then attach the image again.';
     uploadConciergeAttachment.mockRejectedValue(
       Object.assign(new ActionRefused(sentence, { error: sentence }), { status: 409 }),
