@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { TenantSetting } from '../api/types';
-import { canReset, packageNames, sourceLine, ThemeChoices, validateDraft, type TenantSettingField } from '../lib/tenantSettings';
+import { canReset, descriptionText, packageNames, sourceLine, ThemeChoices, validateDraft, type TenantSettingField } from '../lib/tenantSettings';
 import ChipListInput from './ChipListInput.vue';
 
 /**
@@ -67,9 +67,9 @@ const packageRefusal = (value: string) => validateDraft('packages', value);
       :error-message="error ?? undefined"
       no-error-icon
     />
-    <div class="text-caption os-text-muted tenant-setting-hint">{{ field.hint }}</div>
-    <!-- Not when it names the key: the key stays off screen. -->
-    <div v-if="!field.hint && setting?.description && !setting.description.includes(field.name)" class="text-caption os-text-muted">{{ setting.description }}</div>
+    <div v-if="field.hint" class="text-caption os-text-muted tenant-setting-hint">{{ field.hint }}</div>
+    <!-- A field with no hint of its own shows the server's description, every key in it read as its label. -->
+    <div v-if="!field.hint && setting?.description" class="text-caption os-text-muted" data-description>{{ descriptionText(setting.description) }}</div>
     <div class="row items-center no-wrap">
       <div class="text-caption tenant-setting-source">{{ sourceLine(setting) }}</div>
       <!-- ONLY FOR A VALUE A PERSON SET: anything else is already its default. -->

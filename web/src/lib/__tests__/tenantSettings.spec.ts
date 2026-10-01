@@ -10,6 +10,7 @@ import {
   normaliseTenantSettings,
   rejectedField,
   settingErrorText,
+  descriptionText,
   sourceLine,
   validateDraft,
   timeSpanOf,
@@ -55,9 +56,11 @@ describe('the Admission field', () => {
       'kanban.wipLimits',
       'quiet.window',
       'resume.maxAutomatic',
+      'runs.memoryLimitMb',
       'system.packages',
       'theme.default',
       'wip.maxRunning',
+      'wip.memoryPerRunMb',
       'workflow.spendLimit',
     ]);
 
@@ -194,6 +197,15 @@ describe('rejectedField', () => {
     expect(rejectedField('quiet.window', 'x')).toBe('quiet.window');
     expect(rejectedField(null, 'causation.depthLimit must be at least 0')).toBe('causation.depthLimit');
     expect(rejectedField(null, 'something else')).toBeNull();
+  });
+});
+
+describe('descriptionText', () => {
+  it('reads every setting key in a server description as its label', () => {
+    expect(descriptionText('The default for wip.maxRunning is at most the limit divided by this.')).toBe(
+      'The default for Agents running at once is at most the limit divided by this.',
+    );
+    expect(descriptionText('Nothing to replace.')).toBe('Nothing to replace.');
   });
 });
 

@@ -72,6 +72,12 @@ function settings() {
         updatedBy: 'ops@example.com',
         description: 'The ledger reads this on every claim.',
       }),
+      setting('wip.memoryPerRunMb', 2048, {
+        description: 'Megabytes counted for each agent run. The default for wip.maxRunning is at most the limit divided by this.',
+      }),
+      setting('runs.memoryLimitMb', 0, {
+        description: 'Megabytes of a per-process data limit. 0 (the default) sets no per-run cap there.',
+      }),
       setting('workflow.spendLimit', 100000000),
       setting('concierge.idleTimeout', '08:00:00'),
       setting('quiet.window', '00:30:00'),
@@ -197,6 +203,82 @@ describe('Admission', () => {
 
     const source = document.body.querySelector('[data-setting="wip.maxRunning"] .tenant-setting-source')?.textContent ?? '';
     expect(source).toContain('Set by ops@example.com');
+  });
+});
+
+/** The two memory settings: listed on Admission, each with the server's description and Reset to default. */
+describe('the memory settings', () => {
+  const field = (name: string) => document.body.querySelector(`[data-setting="${name}"]`)!;
+  const description = (name: string) => field(name).querySelector('[data-description]')?.textContent?.trim() ?? '';
+
+  /** A person set the per-process limit to 4096; the allowance is the built-in default. */
+  function withSetLimit() {
+    const body = settings();
+    const perRun = body.settings.findIndex((entry) => entry.name === 'wip.memoryPerRunMb');
+    body.settings[perRun] = { ...body.settings[perRun]!, defaultSource: 'builtIn' };
+    const limit = body.settings.findIndex((entry) => entry.name === 'runs.memoryLimitMb');
+    body.settings[limit] = {
+      ...body.settings[limit]!,
+      value: 4096,
+      source: 'row',
+      defaultSource: 'builtIn',
+      updatedAt: '2026-09-30T08:00:00Z',
+      updatedBy: 'ops@example.com',
+    };
+    return body;
+  }
+
+  it('lists both with their labels, values and descriptions, every key read as its label', async () => {
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(withSetLimit()));
+    const wrapper = await openDialog();
+
+    expect(input(wrapper, 'Memory counted per run (MB)')!.props('modelValue')).toBe('2048');
+    expect(input(wrapper, 'Per-process memory limit (MB)')!.props('modelValue')).toBe('4096');
+    expect(description('wip.memoryPerRunMb')).toBe(
+      'Megabytes counted for each agent run. The default for Agents running at once is at most the limit divided by this.',
+    );
+    expect(description('runs.memoryLimitMb')).toBe(
+      'Megabytes of a per-process data limit. 0 (the default) sets no per-run cap there.',
+    );
+    for (const key of ['wip.memoryPerRunMb', 'runs.memoryLimitMb', 'wip.maxRunning']) {
+      expect(bodyText()).not.toContain(key);
+    }
+  });
+
+  it('offers Reset to default on a value a person set, and sends null for it alone', async () => {
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(withSetLimit()));
+    const wrapper = await openDialog();
+
+    expect(field('wip.memoryPerRunMb').querySelector('[data-reset]')).toBeNull();
+    expect(field('wip.memoryPerRunMb').querySelector('.tenant-setting-source')?.textContent?.trim()).toBe(
+      'The built-in default (2048)',
+    );
+    expect(field('runs.memoryLimitMb').querySelector('.tenant-setting-source')?.textContent).toContain('Set by ops@example.com');
+
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(settings()));
+
+    (field('runs.memoryLimitMb').querySelector('[data-reset]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(document.body.textContent).toContain('Reset Per-process memory limit (MB) to its default?');
+    expect(document.body.querySelector('[data-reset-line]')?.textContent).toContain('It will then be 0, the built-in default.');
+
+    (document.body.querySelector('[data-reset-confirm-button]') as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledTimes(1);
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'runs.memoryLimitMb': null });
+    expect(input(wrapper, 'Per-process memory limit (MB)')!.props('modelValue')).toBe('0');
+    expect(field('runs.memoryLimitMb').querySelector('[data-reset]')).toBeNull();
+  });
+
+  it('saves a changed figure as a number', async () => {
+    const wrapper = await openDialog();
+
+    await type(wrapper, 'Per-process memory limit (MB)', '6144');
+    saveButton().click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'runs.memoryLimitMb': 6144 });
   });
 });
 
@@ -517,7 +599,10 @@ describe('every tab', () => {
       .map((line) => line.textContent?.trim() ?? '');
 
     expect([...seen.keys()].sort()).toEqual(
-      ['causation.depthLimit', 'concierge.idleTimeout', 'quiet.window', 'resume.maxAutomatic', 'theme.default', 'wip.maxRunning', 'workflow.spendLimit'],
+      [
+        'causation.depthLimit', 'concierge.idleTimeout', 'quiet.window', 'resume.maxAutomatic', 'runs.memoryLimitMb',
+        'theme.default', 'wip.maxRunning', 'wip.memoryPerRunMb', 'workflow.spendLimit',
+      ],
     );
     for (const [name, source] of seen) {
       expect(source, name).toMatch(/^(Set by \S+@\S+|From the host configuration)/);
