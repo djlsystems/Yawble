@@ -9,6 +9,7 @@ import { isRunningLane } from '../lib/tenantSettings';
 import KanbanCard from './KanbanCard.vue';
 import KanbanFilterBar from './KanbanFilterBar.vue';
 import KanbanCardPanel from './KanbanCardPanel.vue';
+import OutcomesDialog from './OutcomesDialog.vue';
 import { FlipDurationMs, flipShifts, flipTransform, type CardBox } from '../lib/flip';
 
 /**
@@ -198,6 +199,18 @@ onUpdated(() => {
 });
 
 const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
+
+/**
+ * MANAGE OUTCOMES, opened from the filter bar's button at the list, and from a card's outcome tag
+ * (`open-outcome`, the outcome's id) at that outcome.
+ */
+const outcomesOpen = ref(false);
+const outcomeAt = ref<string | null>(null);
+
+function openOutcomes(id: string | null = null) {
+  outcomeAt.value = id;
+  outcomesOpen.value = true;
+}
 </script>
 
 <template>
@@ -230,7 +243,7 @@ const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
       {{ kanban.error }}
     </q-banner>
 
-    <KanbanFilterBar class="q-mb-md" />
+    <KanbanFilterBar class="q-mb-md" @manage-outcomes="openOutcomes()" />
 
     <div v-if="!kanban.hasBoard && !kanban.loading" class="column items-center q-pa-xl text-center">
       <div class="text-subtitle1 q-mb-sm">No board yet</div>
@@ -292,6 +305,7 @@ const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
             :waiting="cardShowsWaiting(card, kanban.memberHeld(card))"
             :update-wait="card.member ? agentUpdates.heldBy(card.team, card.member) : null"
             @open="kanban.select"
+            @open-outcome="openOutcomes"
           />
         </TransitionGroup>
       </template>
@@ -326,12 +340,14 @@ const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0);
             :waiting="cardShowsWaiting(card, kanban.memberHeld(card))"
             :update-wait="card.member ? agentUpdates.heldBy(card.team, card.member) : null"
             @open="kanban.select"
+            @open-outcome="openOutcomes"
           />
         </TransitionGroup>
       </section>
     </div>
 
     <KanbanCardPanel />
+    <OutcomesDialog v-model="outcomesOpen" :outcome="outcomeAt" />
   </div>
 </template>
 

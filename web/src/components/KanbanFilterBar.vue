@@ -25,6 +25,8 @@ import { activeFilterCount } from '../lib/kanban';
  * so a control here would write a filter the server ignores - a date picker that visibly does
  * nothing.
  */
+defineEmits<{ 'manage-outcomes': [] }>();
+
 const kanban = useKanbanStore();
 const board = useConsoleStore();
 
@@ -143,6 +145,9 @@ const teamLocked = computed(() => kanban.view === 'swimlanes');
       :label="`Clear (${filterCount})`"
       @click="kanban.clearFilters()"
     />
+
+    <!-- Manage Outcomes; the board hosts the dialog, which a card's outcome tag also opens. -->
+    <q-btn flat dense no-caps icon="flag" label="Manage outcomes" data-manage-outcomes @click="$emit('manage-outcomes')" />
   </div>
 </template>
 

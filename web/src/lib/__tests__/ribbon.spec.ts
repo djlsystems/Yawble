@@ -3,6 +3,7 @@ import * as ribbonModule from '../ribbon'
 import {
   ConnectionsAction,
   DocumentsAction,
+  OutcomesAction,
   PluginsAction,
   RepositoriesAction,
   Ribbon,
@@ -146,6 +147,16 @@ describe('the ribbon', () => {
     expect(actions.indexOf(RepositoriesAction)).toBe(actions.indexOf('admin-diagnostics') + 1)
     expect(actions.indexOf(RepositoriesAction)).toBeLessThan(actions.indexOf(PluginsAction))
     expect(needsActiveWorkTeam(RepositoriesAction, undefined)).toBe(false)
+  })
+
+  /** Admin › Outcomes, the Manage Outcomes dialog: beside Teams, needing no active team. */
+  it('puts Outcomes in the Admin group directly after Teams, needing no active team', () => {
+    const admin = Ribbon.tabs.find((tab) => tab.id === 'admin')
+    const actions = admin?.items.map((item) => item.action) ?? []
+
+    expect(actions.indexOf(OutcomesAction)).toBe(actions.indexOf('admin-teams') + 1)
+    expect(admin?.items.find((item) => item.action === OutcomesAction)?.label).toBe('Outcomes')
+    expect(needsActiveWorkTeam(OutcomesAction, undefined)).toBe(false)
   })
 
   /** Admin › Connections: directly after Plugins, Settings after it, needing no active team. */
