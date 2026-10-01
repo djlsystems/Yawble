@@ -332,6 +332,17 @@ public sealed class MemberGoldenTests
             // field cleared, so this snapshot is Idle with its `completed` row by construction.
             // Only one published after a Running one counts, and only with nothing queued: an
             // Idle publish from before the run, or one with the offer already waiting, is not it.
+            //
+            // AND ONLY ONE WITH NO RUN IN IT. Not every frame is the consumer's: `OfferAsync`
+            // publishes from the pump's thread, and `Snapshot()` reads `_state` before
+            // `QueueDepth` and `_currentCorrelation`. A pump thread preempted between those reads
+            // while the consumer starts the run publishes Idle (read before), queue 0 and the run's
+            // correlation (read after) - seen as a settled snapshot taken mid-run, with no
+            // `completed` row yet. The correlation is read last, so null there means the run had
+            // not been taken (queue still counted it) or had already ended.
+            //
+            // `currentCorrelation` is also pinned null in the golden, so filtering on it hides
+            // nothing: an Idle member that kept a correlation still fails here, as the timeout below.
             var settled = new TaskCompletionSource<ContainerSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
             var gate = new Lock();
             var sawRunning = false;
@@ -342,7 +353,7 @@ public sealed class MemberGoldenTests
                 lock (gate)
                 {
                     if (s.State == ContainerState.Running) sawRunning = true;
-                    else if (sawRunning && s.State == ContainerState.Idle && s.QueueDepth == 0) settled.TrySetResult(s);
+                    else if (sawRunning && s.State == ContainerState.Idle && s.QueueDepth == 0 && s.CurrentCorrelation is null) settled.TrySetResult(s);
                 }
             }
 
