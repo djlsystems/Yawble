@@ -452,6 +452,37 @@ public sealed class SqliteOutcomeStore(
         return await ReadLinksAsync(command, ct);
     }
 
+    public async Task<IReadOnlyList<TenantEvent>> ReadEventsAsync(IReadOnlyCollection<string> ids, CancellationToken ct = default)
+    {
+        if (ids.Count == 0) return [];
+
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        var parameters = ids.Select((id, i) =>
+        {
+            command.Parameters.AddWithValue($"$id{i}", id);
+            return $"$id{i}";
+        }).ToList();
+        command.CommandText =
+            $"""
+            SELECT seq, occurred_at, actor_id, actor_email, action, subject, subject_name, detail
+            FROM tenant_events
+            WHERE action LIKE 'outcome.%' AND subject IN ({string.Join(", ", parameters)})
+            ORDER BY seq
+            """;
+
+        var rows = new List<TenantEvent>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new TenantEvent(
+                reader.GetInt64(0), MessageRows.ReadStamp(reader.GetString(1)), Text(reader, 2), Text(reader, 3),
+                reader.GetString(4), Text(reader, 5), Text(reader, 6), Text(reader, 7)));
+        }
+
+        return rows;
+    }
+
     public async Task<OutcomeLedgerRows> ReadLedgerAsync(
         DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default)
     {

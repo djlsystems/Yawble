@@ -68,6 +68,12 @@ export const ConnectionsAction = 'admin-connections';
 /** Admin > Repositories, the instance's local repositories: listed, and deleted after asking. */
 export const RepositoriesAction = 'admin-repositories';
 
+/**
+ * Admin > Outcomes, the Manage Outcomes dialog: every outcome with the figures of the work that
+ * served it. The Kanban filter bar and a card's outcome tag open the same dialog.
+ */
+export const OutcomesAction = 'admin-outcomes';
+
 /** Admin > Sites, every team's published sites: opened, rolled back, unpublished, deleted. */
 export const SitesAction = 'admin-sites';
 
@@ -146,6 +152,8 @@ export const Ribbon: RibbonSpec = {
       label: 'Admin',
       items: [
         { kind: 'button', action: 'admin-teams', label: 'Teams', icon: 'groups', size: 'large' },
+        // What the work is for, beside the teams that do it.
+        { kind: 'button', action: OutcomesAction, label: 'Outcomes', icon: 'flag', size: 'large' },
         { kind: 'button', action: 'admin-users', label: 'Users', icon: 'manage_accounts', size: 'large' },
         { kind: 'button', action: 'admin-agents', label: 'Agents', icon: 'smart_toy', size: 'large' },
         { kind: 'button', action: 'admin-skills', label: 'Skills', icon: 'psychology', size: 'large' },

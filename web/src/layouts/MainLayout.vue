@@ -31,6 +31,7 @@ import SkillsDialog from '../components/SkillsDialog.vue';
 import PluginsDialog from '../components/PluginsDialog.vue';
 import LocalReposDialog from '../components/LocalReposDialog.vue';
 import SitesDialog from '../components/SitesDialog.vue';
+import OutcomesDialog from '../components/OutcomesDialog.vue';
 import ConciergePanel from '../components/ConciergePanel.vue';
 import StatusStrip from '../components/StatusStrip.vue';
 import VersionTag from '../components/VersionTag.vue';
@@ -39,6 +40,7 @@ import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
 import {
   ConnectionsAction,
   DocumentsAction,
+  OutcomesAction,
   PluginsAction,
   RepositoriesAction,
   SitesAction,
@@ -147,6 +149,7 @@ onMounted(() => {
   void router.replace({ query: {} });
 });
 const repositoriesOpen = ref(false);
+const outcomesOpen = ref(false);
 /** Admin > Sites, and Active Team > Sites, which is the same screen with `sitesTeam` set. */
 const sitesOpen = ref(false);
 const sitesTeam = ref<TeamId | null>(null);
@@ -271,6 +274,7 @@ function onRibbonAction(action: string) {
     connectionsOpen.value = true;
   }
   else if (action === RepositoriesAction) repositoriesOpen.value = true;
+  else if (action === OutcomesAction) outcomesOpen.value = true;
   else if (action === SitesAction) openSites(null);
   else if (action === TenantSettingsAction) tenantSettingsOpen.value = true;
   // NOT A DIALOG: an address, `#/solutions`, so a tile's Manage, the board header and the
@@ -533,6 +537,7 @@ async function signOut() {
     <PluginsDialog v-model="pluginsOpen" />
     <ConnectionsDialog v-model="connectionsOpen" :notice="connectionNotice" />
     <LocalReposDialog v-model="repositoriesOpen" />
+    <OutcomesDialog v-model="outcomesOpen" />
     <SitesDialog v-model="sitesOpen" :team="sitesTeam" />
     <!-- Guarded on there BEING an active team, because the dialog reads that team's members and
          addresses it by id. The ribbon disables a `team-` action without one, so this is a

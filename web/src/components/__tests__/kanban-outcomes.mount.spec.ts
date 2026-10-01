@@ -111,7 +111,7 @@ describe('the Outcome filter', () => {
       { label: 'Ship <b>the release</b>', value: shipping.id },
       { label: 'Faster onboarding (proposed)', value: faster.id },
     ]);
-    expect(requests.some((r) => r.url === '/api/outcomes?status=active,proposed')).toBe(true);
+    expect(requests.some((r) => decodeURIComponent(r.url) === '/api/outcomes?status=active,proposed')).toBe(true);
   });
 
   it('sends the chosen outcome as the board query, and Clear counts it', async () => {

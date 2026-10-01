@@ -13,7 +13,7 @@ import {
   type KanbanLane,
 } from '../api/kanban'
 import { Unauthorized } from '../api/client'
-import { listLiveOutcomes, setWorkflowOutcome, type OutcomeRef } from '../api/outcomes'
+import { linkWorkflowOutcome, listLiveOutcomes, type OutcomeRef } from '../api/outcomes'
 import {
   cardsInLane,
   cardsMatchingText,
@@ -441,7 +441,9 @@ export const useKanbanStore = defineStore('kanban', {
       const found = this.board?.cards.find((entry) => entry.id === id)
       if (!found) throw new Error(UnknownCard)
 
-      await this.write(() => setWorkflowOutcome(found.team, outcomeWorkflowOf(found), outcome))
+      await this.write(async () => {
+        await linkWorkflowOutcome(found.team, outcomeWorkflowOf(found), outcome)
+      })
     },
 
     /**
