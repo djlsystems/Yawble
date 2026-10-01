@@ -129,13 +129,19 @@ public static class BacklogEndpoints
             // AND WHETHER THE WORK ACTUALLY LANDED. Off the SAME one store read, so this
             // adds no query; what it adds is git, which is why it is bounded per TEAM and cached
             // rather than asked per row. See BacklogLandedState for what it costs and what caps it.
+            //
+            // A START NOT RECORDED AT DISPATCH IS TRIED AGAIN FIRST, so a landed this read proves can
+            // be kept. Only dispatches with one open, all at once, each fetch inside its own budget.
+            var starts = await StartsAsync(latest.Values, backlog, teams, context, ct);
+
             var landed = await BacklogLandedState.ForAsync(
                 latest.Values, teams, paths, git, landedCache, ct, pullRequests, backlog);
 
             return Results.Ok(items
                 .Select(item => Render(
                     item, teams, inFlight.GetValueOrDefault(item.Id), latest.GetValueOrDefault(item.Id),
-                    landed.GetValueOrDefault(item.Id), stranded.GetValueOrDefault(item.Id)))
+                    landed.GetValueOrDefault(item.Id), stranded.GetValueOrDefault(item.Id),
+                    starts.GetValueOrDefault(item.Id)))
                 .ToList());
         })
             .RequirePermit(Permits.Read)
@@ -193,7 +199,8 @@ public static class BacklogEndpoints
                 + "recorded pull request was merged, asked of GitHub at most once a minute per pull "
                 + "request: `in-review` (open), `declined` (closed without merging, never landed) and "
                 + "`landed` (merged). GitHub unreachable or the token refused is `unknown`. `readAt` "
-                + "is when GitHub last answered; null for an answer read from the clone.");
+                + "is when GitHub last answered; null for an answer read from the clone.\n\n"
+                + StartDescription);
 
         app.MapGet("/api/backlog/{id:long}", async (
             long id, HttpContext context, IBacklogStore backlog, TeamRegistry teams,
@@ -236,6 +243,10 @@ public static class BacklogEndpoints
             // THE SAME ANSWER THE LIST GAVE, for the same reason `inFlight` is recomputed here: a
             // person who opened the row must not read a different verdict than the row showed. The
             // team's measurement is cached, so opening a row the list has just rendered is free.
+            var start = current is null
+                ? null
+                : (await StartsAsync([current], backlog, teams, context, ct)).GetValueOrDefault(id);
+
             var landed = current is null
                 ? null
                 : (await BacklogLandedState.ForAsync([current], teams, paths, git, landedCache, ct, pullRequests, backlog))
@@ -249,7 +260,7 @@ public static class BacklogEndpoints
 
             return Results.Ok(new
             {
-                item = Render(item, teams, inFlight, current, landed, stranded),
+                item = Render(item, teams, inFlight, current, landed, stranded, start),
                 implementedBy = implemented is null
                     ? null
                     : new
@@ -285,7 +296,86 @@ public static class BacklogEndpoints
                 + "- so a person who opened a row reads the same team the row showed.\n\n"
                 + "`implementedBy` says who marked the item implemented - `by` (their email), `at`, "
                 + "and `viaConcierge` when a Concierge wrote it on the person's word - while it is "
-                + "implemented; null otherwise, or for an item marked before it was recorded.");
+                + "implemented; null otherwise, or for an item marked before it was recorded.\n\n"
+                + StartDescription);
+
+        app.MapPost("/api/backlog/{id:long}/record-start", async (
+            long id, HttpContext context, IBacklogStore backlog, TeamRegistry teams, TeamAccess access,
+            IUserStore users, TenantLogging audit, BacklogTipRecorder recorder, CancellationToken ct) =>
+        {
+            if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
+            if (principal.Kind != PrincipalKind.User) return RefuseKind();
+
+            var view = await ViewFor(principal, access, ct);
+
+            if (await backlog.GetAsync(id, ct) is not { } item || !Visible(item, view))
+            {
+                return Results.NotFound(new { error = $"No backlog item {PlatformBacklogId.Format(id)}." });
+            }
+
+            var dispatches = await backlog.DispatchesAsync(id, ct);
+            if (dispatches.Count == 0)
+            {
+                return Results.Conflict(new { error = $"{PlatformBacklogId.Format(id)} has not been dispatched." });
+            }
+
+            var current = dispatches[^1];
+            if (teams.ExistingName(current.TeamId) is null)
+            {
+                return Results.Conflict(new
+                {
+                    error = $"{current.TeamName} no longer exists, so where this dispatch started can no longer be read.",
+                });
+            }
+
+            var before = await StartOfAsync(current, backlog, teams, ct);
+            if (before.Recorded != false)
+            {
+                return Results.Conflict(new
+                {
+                    error = before.Recorded == true
+                        ? "Where this dispatch started is already recorded."
+                        : "Nothing was kept about this dispatch's team branch when it was dispatched, so "
+                            + "whether the team has committed since cannot be told and the start is not recorded.",
+                });
+            }
+
+            // A START IS NEVER RECORDED AFTER THE TEAM HAS COMMITTED, and a person's press is no
+            // exception: it runs the same recording the retry does, with the same check.
+            if (before.Recordable) await recorder.RetryStartAsync(current, fromRead: false, ct);
+
+            var after = await StartOfAsync(current, backlog, teams, ct);
+            if (after.Recorded != true)
+            {
+                return Results.Conflict(new
+                {
+                    error = after.Recordable
+                        ? $"Not recorded yet: {after.Detail}"
+                        : $"Refused: team/{current.TeamId} has commits of its own, so where this dispatch started "
+                            + "can no longer be told apart from its work. " + after.Detail,
+                    startRecorded = after.Recorded,
+                    startDetail = after.Detail,
+                });
+            }
+
+            await WriteAuditAsync(
+                context, principal, users, audit, TenantActions.BacklogItemStartRecorded, PlatformBacklogId.Format(id),
+                item.Title, new { id, dispatch = current.Id, team = current.TeamId }, ct);
+
+            return Results.Ok(new { startRecorded = true });
+        })
+            .HumansOnly()
+            .WithTags("Backlog")
+            .WithSummary("Record where the current dispatch started, now")
+            .WithDescription(
+                "A PERSON'S ACTION: Record where it started now. For a dispatch whose start was not "
+                + "recorded (`startRecorded: false`), runs the same recording the retry runs - a fetch, "
+                + "then origin's default branch and the team branch - and writes a "
+                + "`backlog.item-start-recorded` tenant row naming who pressed it.\n\n"
+                + "REFUSED, 409, once the team branch has commits of its own since the dispatch: the "
+                + "start can no longer be told apart from the work, and a start recorded then would "
+                + "claim the team's work was already there. Also 409 when the fetch fails again (the "
+                + "sentence says why), when the start is already recorded, and when the team is gone.");
 
         app.MapPost("/api/backlog", async (
             CreateBacklogItem request, HttpContext context, IBacklogStore backlog,
@@ -868,6 +958,7 @@ public static class BacklogEndpoints
         app.MapGet("/api/teams/{team}/backlog/{id:long}", async (
             [Description(Describe.Team)] string team,
             long id,
+            HttpContext context,
             IBacklogStore backlog,
             TeamRegistry teams,
             ContainerHost host,
@@ -900,6 +991,7 @@ public static class BacklogEndpoints
             var ours = dispatches.Last(d => string.Equals(d.TeamId, stored, StringComparison.OrdinalIgnoreCase));
             var inFlight = await BacklogInFlightState.ForAsync([ours], teams, host, log, ct);
             var stranded = await BacklogStrandedState.ForAsync(inFlight, teams, log, kanban, ct);
+            var start = (await StartsAsync([ours], backlog, teams, context, ct)).GetValueOrDefault(id) ?? BacklogStart.None;
 
             return Results.Ok(new
             {
@@ -909,6 +1001,8 @@ public static class BacklogEndpoints
                 item.State,
                 workflow = inFlight.GetValueOrDefault(id)?.Correlation,
                 stranded = stranded.GetValueOrDefault(id),
+                startRecorded = start.Recorded,
+                startDetail = start.Detail,
             });
         })
             .RequirePermit(Permits.Read)
@@ -922,7 +1016,9 @@ public static class BacklogEndpoints
                 + "the whole access-control argument. An item not dispatched to this team is a 404.\n\n"
                 + "`workflow` is the open workflow of this team's latest dispatch of the item, null "
                 + "once it has ended. `stranded` is as on `GET /api/backlog`: the workflow is Blocked "
-                + "or Failed and its work continued in a later one, and only a person may close it.");
+                + "or Failed and its work continued in a later one, and only a person may close it.\n\n"
+                + "`startRecorded` and `startDetail` are as on `GET /api/backlog/{id}`, for this team's "
+                + "latest dispatch of the item.");
 
         app.MapPost("/api/teams/{team}/kanban/plan", async (
             [Description(Describe.Team)] string team,
@@ -1265,6 +1361,62 @@ public static class BacklogEndpoints
         return (dispatched.Seq, record.Id);
     }
 
+    private const string StartDescription =
+        "`startRecorded` says whether where the CURRENT dispatch started was recorded - origin's "
+        + "default branch and the team branch as they stood when it was dispatched. Only a dispatch "
+        + "with a recorded start has `landed` kept after its team is gone. `false` carries "
+        + "`startDetail`, the sentence \"Where this dispatch started was not recorded (<reason>); its "
+        + "landed state is read live and is not kept after its team is gone.\" A start not recorded "
+        + "at dispatch is tried again on each read of the item and on the team's publish, only while "
+        + "the team branch is unchanged since the dispatch; once the team has committed it stops for "
+        + "good. `startRecordable` says a person may still press Record where it started now "
+        + "(`POST /api/backlog/{id}/record-start`). `startRecorded` is null for an item never "
+        + "dispatched, and for a dispatch where nothing was tried (no repository, contributor mode, "
+        + "or dispatched before starts were recorded).";
+
+    /// <summary>
+    /// THE START OF EVERY DISPATCH IN <paramref name="dispatches"/>, keyed by item, after trying
+    /// again each one that was not recorded. Two store reads for the whole set, and a retry only for
+    /// a dispatch with an open unrecorded start - all at once, each fetch inside its own budget.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<long, BacklogStart>> StartsAsync(
+        IEnumerable<BacklogDispatch> dispatches,
+        IBacklogStore backlog,
+        TeamRegistry teams,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var list = dispatches.ToList();
+        var ids = list.Select(d => d.Id).ToHashSet();
+
+        var open = (await backlog.UnrecordedStartsAsync(ct))
+            .Where(m => m.StoppedAt is null && ids.Contains(m.Dispatch))
+            .Select(m => m.Dispatch)
+            .ToHashSet();
+
+        if (open.Count > 0 && context.RequestServices.GetService<BacklogTipRecorder>() is { } recorder)
+        {
+            await Task.WhenAll(list
+                .Where(d => open.Contains(d.Id))
+                .Select(d => recorder.RetryStartAsync(d, fromRead: true, ct)));
+        }
+
+        var unrecorded = (await backlog.UnrecordedStartsAsync(ct)).ToLookup(m => m.Dispatch);
+        var withStarts = await backlog.DispatchesWithStartsAsync(ct);
+
+        return list.ToDictionary(
+            d => d.Item,
+            d => BacklogStart.For(d, unrecorded[d.Id].ToList(), withStarts.Contains(d.Id), teams));
+    }
+
+    private static async Task<BacklogStart> StartOfAsync(
+        BacklogDispatch dispatch, IBacklogStore backlog, TeamRegistry teams, CancellationToken ct) =>
+        BacklogStart.For(
+            dispatch,
+            (await backlog.UnrecordedStartsAsync(ct)).Where(m => m.Dispatch == dispatch.Id).ToList(),
+            (await backlog.BasesAsync(dispatch.Id, ct)).Count > 0,
+            teams);
+
     /// <summary>
     /// What one item looks like on the wire.
     ///
@@ -1322,7 +1474,8 @@ public static class BacklogEndpoints
         BacklogInFlight? inFlight = null,
         BacklogDispatch? dispatched = null,
         BacklogLanded? landed = null,
-        BacklogStranded? stranded = null) => new
+        BacklogStranded? stranded = null,
+        BacklogStart? start = null) => new
     {
         item.Id,
         item.Team,
@@ -1348,6 +1501,12 @@ public static class BacklogEndpoints
         // finished and landed, finished and sitting unpushed on one disk - which is the state the
         // Backlog once rendered as `implemented` - or in flight with nothing on a remote yet.
         landed,
+
+        // WHETHER THAT LANDED CAN BE KEPT: only a dispatch whose start was recorded has it kept
+        // after its team is gone. See BacklogStart.
+        startRecorded = start?.Recorded,
+        startDetail = start?.Detail,
+        startRecordable = start?.Recordable ?? false,
 
         dispatchedTeam = dispatched?.TeamId,
 

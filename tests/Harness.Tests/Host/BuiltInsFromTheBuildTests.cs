@@ -472,6 +472,26 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         }
     }
 
+    [Fact]
+    public void The_backlog_running_skill_asks_the_person_to_confirm_the_merge_before_team_deletion_when_the_start_was_not_recorded()
+    {
+        var body = Flat(BuiltInSkills.Find("running-the-backlog")!.Body);
+
+        var start = body.IndexOf("Read `startRecorded` on the same `show`.", StringComparison.Ordinal);
+        var ask = body.IndexOf("Ask the person to delete the finished team;", StringComparison.Ordinal);
+        Assert.True(start >= 0, "the skill does not read startRecorded before team deletion");
+        Assert.True(start < ask, "the skill asks to delete the team before it reads startRecorded");
+
+        foreach (var line in new[]
+        {
+            "its landed is read live and is not kept after the team is gone: give the person the item's `startDetail` sentence, and ask them to confirm the work is merged before they delete the team.",
+            "they can press Record where it started now on the item in the Backlog dialog; it is a person's button, not yours.",
+        })
+        {
+            Assert.Contains(Flat(line), body, StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>Whitespace-insensitive text, so a pinned sentence survives re-wrapping.</summary>
     private static string Flat(string text) =>
         System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");

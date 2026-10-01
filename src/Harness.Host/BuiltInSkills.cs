@@ -1335,7 +1335,8 @@ public static class BuiltInSkills
             - Check every Done-when line of the item against the verification document.
             - Check the repository state with `repo`: the team branch is pushed, and how far it is
               from the default branch.
-            - Check the item's landed and stranded state with `backlog  action: show`.
+            - Check the item's landed and stranded state with `backlog  action: show`, and whether
+              its start was recorded (`startRecorded`).
             - The assessment names each Done-when line as met, not met or unverified, and says what
               the team reported about its test runs, in the team's own figures, marked as the
               team's. A line you could not check is unverified, never met.
@@ -1372,6 +1373,12 @@ public static class BuiltInSkills
             - Read `landed` (`backlog  action: show`) before asking the person to delete the
               finished team: the team's branch is what `landed` is read from until it is proven.
               When it does not read landed, say so and what it reads, and let the person decide.
+            - Read `startRecorded` on the same `show`. When it is `false`, where the dispatch
+              started was not recorded, so its landed is read live and is not kept after the team
+              is gone: give the person the item's `startDetail` sentence, and ask them to confirm
+              the work is merged before they delete the team. While `startRecordable` is true, tell
+              them they can press Record where it started now on the item in the Backlog dialog;
+              it is a person's button, not yours.
             - Ask the person to delete the finished team; team deletion is the person's action. Say
               what deletion keeps: its documents, and a local repository unless the person ticks it.
             - Say which documents the team left, and ask whether to keep them.

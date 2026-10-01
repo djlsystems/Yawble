@@ -825,6 +825,13 @@ export const archiveBacklogItem = (id: number) =>
 export const restoreBacklogItem = (id: number) =>
   send(`/api/backlog/${id}/restore`, { method: 'POST' })
 
+/**
+ * Record where it started now: a person's action, for a dispatch whose start was not recorded. The
+ * server refuses it once the team branch has commits of its own.
+ */
+export const recordBacklogItemStart = (id: number) =>
+  send(`/api/backlog/${id}/record-start`, { method: 'POST' })
+
 /** Permanent, and the server refuses it for an item that is not archived. */
 export const deleteBacklogItem = (id: number) =>
   send(`/api/backlog/${id}`, { method: 'DELETE' })

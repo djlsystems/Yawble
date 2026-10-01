@@ -17,6 +17,7 @@ import {
   fileSystemRoots,
   listCatalog,
   moveBacklogItem,
+  recordBacklogItemStart,
   repoCheckRefusal,
   restoreBacklogItem,
   setMemberAgents,
@@ -650,6 +651,30 @@ async function setState(item: BacklogItemView, state: string) {
     if (selected.value?.item.id === item.id) selected.value.item.state = updated.state;
 
     await load();
+  } catch (cause) {
+    errorText.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/**
+ * RECORD WHERE IT STARTED NOW. A dispatch whose start could not be read at dispatch has its landed
+ * read live only, and lost with its team; this runs the same recording the retry runs. The server
+ * refuses it once the team has committed on its branch, and its sentence is shown as it is.
+ */
+async function recordStart() {
+  if (selected.value === null) return;
+
+  const id = selected.value.item.id;
+  busy.value = true;
+  errorText.value = '';
+
+  try {
+    await recordBacklogItemStart(id);
+    selected.value = await backlogItem(id);
+    await load();
+    $q.notify({ type: 'positive', message: `Where ${itemLabel(id)} started is recorded.`, timeout: 2000 });
   } catch (cause) {
     errorText.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
@@ -1318,6 +1343,25 @@ function down(index: number) {
         <div class="row q-mt-sm">
           <q-space />
           <q-btn dense no-caps color="primary" label="Save" :disable="busy" @click="saveBody" />
+        </div>
+
+        <!-- WHERE THIS DISPATCH STARTED WAS NOT RECORDED, so its landed is not kept after its team is
+             gone. Said beside the spec, where a person deciding whether to delete the team reads,
+             with the one thing they can still do about it while the team has not committed. -->
+        <div
+          v-if="selected.item.startRecorded === false"
+          class="q-mt-md row items-center q-gutter-sm backlog-start-unrecorded"
+        >
+          <q-icon name="warning" size="16px" class="text-warning" />
+          <span class="text-caption">{{ selected.item.startDetail }}</span>
+          <q-btn
+            v-if="selected.item.startRecordable"
+            flat dense no-caps size="sm"
+            class="backlog-record-start"
+            label="Record where it started now"
+            :disable="busy"
+            @click="recordStart"
+          />
         </div>
 
         <div v-if="selected.implementedBy" class="q-mt-md text-caption os-text-muted backlog-implemented-by">

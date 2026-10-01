@@ -108,6 +108,11 @@ public static class TenantActions
     /// lives on the other log entirely.</summary>
     public const string BacklogItemDispatched = "backlog.item-dispatched";
 
+    /// <summary>A person pressed Record where it started now: the current dispatch's start, not
+    /// recorded when it was dispatched, was recorded by hand while its team branch had no commits of
+    /// its own. Subject is the citation; detail names the dispatch and the team.</summary>
+    public const string BacklogItemStartRecorded = "backlog.item-start-recorded";
+
     public const string MemberAdded = "member.added";
     public const string MemberChanged = "member.changed";
     public const string MemberDeleted = "member.deleted";
