@@ -269,7 +269,7 @@ public sealed class ConciergeAttachmentTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.Conflict, answer.StatusCode);
         Assert.Equal("application/json", answer.Content.Headers.ContentType?.MediaType);
-        // The panel shows this sentence as it stands: B002R-409-contract.md.
+        // The panel shows this sentence as it stands, so it must not drift.
         Assert.Equal(
             "The image was not attached: the Concierge is not running. Start it, then attach the image again.",
             (await answer.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());

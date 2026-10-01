@@ -7618,7 +7618,7 @@ app.MapPost("/api/concierge/attachments", async (
 
     // NO CLI, NO FILE. Nothing would read the path, and the file would wait for the next clean-up.
     // Before the form is read, so nothing of the image is kept. The panel shows this sentence as it
-    // stands (B002R-409-contract.md); a CLI that exited has ended its session, so it counts too.
+    // stands, word for word; a CLI that exited has ended its session, so it counts too.
     if (!consoles.Has(new ConciergeSessionKey(caller.Id)))
     {
         return Results.Json(
