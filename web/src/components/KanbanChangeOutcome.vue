@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useKanbanStore } from '../stores/kanban';
 import { outcomeLabel } from '../api/outcomes';
+import { useEndedOutcomeOption } from '../lib/currentOutcome';
 
 /**
  * THE CARD MENU'S "CHANGE OUTCOME…": a person picks an active or proposed outcome and the
@@ -36,9 +37,13 @@ const card = computed(() => kanban.board?.cards.find((entry) => entry.id === pro
 
 const current = computed(() => card.value?.outcome?.id ?? NONE);
 
+// A retired current outcome is shown by name with its status, and is not offered.
+const ended = useEndedOutcomeOption(() => card.value?.outcome?.id, () => kanban.outcomes, { known: () => card.value?.outcome });
+
 const options = computed(() => [
   { label: 'None', value: NONE },
   ...kanban.outcomes.map((outcome) => ({ label: outcomeLabel(outcome), value: outcome.id })),
+  ...ended.value,
 ]);
 
 watch(
