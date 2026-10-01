@@ -1883,12 +1883,12 @@ function down(index: number) {
   line-height: 14px;
 }
 
-/* The review toggle sits in a row of dense controls and must not grow it. */
 /* The item's outcome picker: as wide as a name needs, not the whole panel. */
 .backlog-outcome {
   max-width: 24rem;
 }
 
+/* The review toggle sits in a row of dense controls and must not grow it. */
 .backlog-review {
   font-size: 12px;
 }

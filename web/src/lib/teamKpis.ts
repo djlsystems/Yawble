@@ -1,3 +1,4 @@
+import { outcomeLabel } from '../api/outcomes';
 import type {
   ContainerSnapshot,
   Message,
@@ -1192,6 +1193,13 @@ export interface WorkflowRow {
    * exactly the row that is about to need it.
    */
   paused: boolean;
+
+  /**
+   * THE OUTCOME THIS WORKFLOW SERVES, the workflows view's Outcome column: its name, with
+   * `(proposed)` while only a Manager has named it, or `No outcome`. Text, never HTML.
+   */
+  outcome: string;
+  outcomeProposed: boolean;
 }
 
 /**
@@ -1538,6 +1546,10 @@ export function workflowsTile(
       // THE PAUSE FACT ITSELF, not the word the ladder chose - see `WorkflowRow.paused`. `?? null`
       // because a Host may send no such field, and absent is NOT paused.
       paused: (entry.pausedAt ?? null) !== null,
+
+      // An older Host sends no such field, and absent reads as none.
+      outcome: entry.outcome ? outcomeLabel(entry.outcome) : 'No outcome',
+      outcomeProposed: entry.outcome?.status === 'proposed',
     };
   });
 

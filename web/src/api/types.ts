@@ -1347,6 +1347,12 @@ export interface TeamWorkflowTiming {
    * and disappear together. **Absent is a different thing again**: the Host said nothing, and `spendAgainstBudget` falls back to `spend` so it goes on drawing a bar.
    */
   spendSinceNudge?: WorkflowSpend | null
+
+  /**
+   * The outcome this workflow serves now: its newest link, followed through `mergedInto`, or null
+   * for none. `name` is text. Absent from an older server.
+   */
+  outcome?: { id: string; name: string; status: 'proposed' | 'active' | 'retired' | 'merged' } | null
 }
 
 export interface MemberExecution {
