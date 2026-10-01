@@ -253,7 +253,7 @@ export function draftOf(value: unknown): string {
 }
 
 /**
- * "Set by a@b.com, 23 Sep 14:02" or "From the host configuration (default 4)". The line under every
+ * "Set by a@b.com, 23 Sep 14:02", "From the host configuration (default 4)" or "The built-in default (25)". The line under every
  * field, so a person can see whether the number in front of them was a choice or a default.
  */
 export function sourceLine(setting: TenantSetting | undefined, format: (iso: string) => string = defaultStamp): string {
@@ -266,7 +266,12 @@ export function sourceLine(setting: TenantSetting | undefined, format: (iso: str
     return `Set by ${who}${when}`
   }
 
-  const fallback = setting.default === null || typeof setting.default === 'object' ? '' : ` (default ${draftOf(setting.default)})`
+  const shown = setting.default === null || typeof setting.default === 'object' ? null : draftOf(setting.default)
+
+  // Says what the reset confirmation said: a built-in default is not the host configuration.
+  if (setting.defaultSource === 'builtIn') return shown === null ? 'The built-in default' : `The built-in default (${shown})`
+
+  const fallback = shown === null ? '' : ` (default ${shown})`
 
   // Not "appsettings.json": any configuration source can set it, and the container sets the WIP
   // limit from an environment variable.

@@ -106,6 +106,10 @@ describe('sourceLine', () => {
   it('names the file and the default for an appsettings value', () => {
     expect(sourceLine(setting('x', 4, { default: 4 }))).toBe('From the host configuration (default 4)');
   });
+
+  it('says a value with no row and a built-in default is the built-in default, as the reset said', () => {
+    expect(sourceLine(setting('x', 25, { defaultSource: 'builtIn' }))).toBe('The built-in default (25)');
+  });
 });
 
 describe('validation', () => {
