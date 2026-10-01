@@ -35,6 +35,36 @@ func healthyObserved() doctor.Observed {
 		URL: "http://127.0.0.1:8080", Healthy: boolp(true),
 		Port:   8080,
 		ExeDir: "/home/d/.local/bin", OnPath: boolp(true),
+		CPUs: 8, ContainerMemoryMB: 12288,
+	}
+}
+
+func TestARunningLimitAboveWhatTheCPUsAndMemoryAllowWarns(t *testing.T) {
+	o := healthyObserved()
+
+	// 8 CPUs allow 7, 12 GB at 2048 MB a run allows 6: a configured 8 is over.
+	o.MaxRunning = 8
+	row := find(t, doctor.HostChecks(o), "running limit")
+	if row.Verdict != doctor.Warn || !strings.Contains(row.Detail, "maxRunning is 8, above the 6") || !strings.Contains(row.Fix, "maxRunning 0") {
+		t.Errorf("over the limit: %+v", row)
+	}
+
+	o.MaxRunning = 6
+	if row := find(t, doctor.HostChecks(o), "running limit"); row.Verdict != doctor.OK {
+		t.Errorf("at the limit: %+v", row)
+	}
+
+	// Unset: the Host's default, which is the computed one, and the bound that decides it.
+	o.MaxRunning = 0
+	row = find(t, doctor.HostChecks(o), "running limit")
+	if row.Verdict != doctor.OK || !strings.Contains(row.Detail, "the Host's default, 6") || !strings.Contains(row.Detail, "memory bound applies") {
+		t.Errorf("unset: %+v", row)
+	}
+
+	// With no memory limit only the CPUs bound it.
+	o.ContainerMemoryMB, o.MaxRunning = 0, 8
+	if row := find(t, doctor.HostChecks(o), "running limit"); row.Verdict != doctor.Warn || !strings.Contains(row.Detail, "above the 7") {
+		t.Errorf("no memory limit: %+v", row)
 	}
 }
 

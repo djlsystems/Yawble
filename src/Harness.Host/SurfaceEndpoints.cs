@@ -9,10 +9,19 @@ public static class SurfaceEndpoints
 {
     public static void Map(WebApplication app, string dataRoot)
     {
-        app.MapGet("/api/wip", (WipLedger wip) => Results.Ok(wip.View()))
+        app.MapGet("/api/wip", (WipLedger wip, TenantSettings settings) =>
+            {
+                var view = wip.View();
+                return Results.Ok(new { view.Max, view.Running, view.Waiting, Limit = settings.RunLimit() });
+            })
             .RequirePermit(Permits.Read)
             .WithTags("Admission")
-            .WithSummary("Who holds the instance-wide run slots, and who is waiting");
+            .WithSummary("Who holds the instance-wide run slots, and who is waiting")
+            .WithDescription(
+                "`limit` says where `max` comes from: `bound` is `setting` (a Tenant Settings row), "
+                + "`configuration` (appsettings), or the default's `cpu` or `memory` bound - the smaller "
+                + "of max(1, CPUs - 1) and the container's memory limit / `wip.memoryPerRunMb` - with "
+                + "both bounds and a `reason` sentence.");
 
         app.MapGet("/api/agents/auth", async (
                 AgentAuthProbe probe, ITeamStore teams, CancellationToken ct) =>

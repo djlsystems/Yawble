@@ -66,6 +66,7 @@ public sealed class TenantSettingRejected(string field, string message) : Except
 public sealed class TenantSettings
 {
     public const string WipMaxRunningName = "wip.maxRunning";
+    public const string WipMemoryPerRunMbName = "wip.memoryPerRunMb";
     public const string WorkflowSpendLimitName = "workflow.spendLimit";
     public const string ConciergeIdleTimeoutName = "concierge.idleTimeout";
     public const string QuietWindowName = "quiet.window";
@@ -82,15 +83,26 @@ public sealed class TenantSettings
     private readonly SemaphoreSlim _writes = new(1, 1);
     private readonly Dictionary<string, TenantSettingDefinition> _definitions;
     private readonly Dictionary<string, string> _fallbacks = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _configured = new(StringComparer.Ordinal);
+    private readonly int? _cpus;
+    private readonly long? _memoryLimitMb;
     private volatile IReadOnlyDictionary<string, TenantSettingRow> _rows =
         new Dictionary<string, TenantSettingRow>(StringComparer.Ordinal);
 
-    public TenantSettings(SqliteTenantSettingsStore store, IConfiguration configuration, int? cpuCount = null)
+    /// <param name="cpuCount">CPUs the container may use; null reads the cgroup, 0 is not known.</param>
+    /// <param name="memoryLimitMb">The container's memory limit in MB; null reads the cgroup, 0 is
+    /// no limit.</param>
+    public TenantSettings(
+        SqliteTenantSettingsStore store, IConfiguration configuration, int? cpuCount = null, long? memoryLimitMb = null)
     {
         _store = store;
         _configuration = configuration;
+        _cpus = (cpuCount ?? CgroupCpus()) is > 0 and var cpus ? cpus : null;
+        _memoryLimitMb = (memoryLimitMb ?? CgroupMemoryMb()) is > 0 and var mb ? mb : null;
 
-        var wipDefault = (cpuCount ?? CgroupCpus()) is { } cpus ? Math.Max(2, cpus) : 4;
+        // The running limit's built-in default depends on wip.memoryPerRunMb, which can change at
+        // runtime, so it is computed on read (RunLimit); this figure is only the definition's.
+        var wipDefault = Bounds(DefaultMemoryPerRunMb).Limit;
 
         Definitions =
         [
@@ -100,8 +112,17 @@ public sealed class TenantSettings
                 + "waits its turn; nothing is refused. A Manager may use one slot above it, so a pool "
                 + "full of members never starves the Manager that would free them. 0 means no limit. "
                 + "Takes effect immediately: raising it starts waiting work, lowering it stops nothing "
-                + "that is running. Default max(2, CPUs in the container's cgroup), else 4.",
+                + "that is running. Default: the smaller of a CPU bound, max(1, CPUs in the container's "
+                + "cgroup - 1) or 3 when the CPUs are not known, and, when the container has a memory "
+                + "limit, a memory bound, floor(limit / wip.memoryPerRunMb), at least 1.",
                 Min: 0, Max: 1000),
+            new(WipMemoryPerRunMbName, TenantSettingKind.Integer,
+                DefaultMemoryPerRunMb.ToString(CultureInfo.InvariantCulture), "Wip:MemoryPerRunMb",
+                "Megabytes of the container's memory limit allowed for each agent run - the CLI, its "
+                + "builds and its test hosts. When the container has a memory limit, the default for "
+                + "wip.maxRunning is at most the limit divided by this. It changes only that default: "
+                + "a value set for wip.maxRunning wins. Takes effect immediately.",
+                Min: 1, Max: 1_048_576),
             new(WorkflowSpendLimitName, TenantSettingKind.Integer, "100000000", "WorkflowSpendLimit",
                 "The instance's per-workflow token ceiling, the backstop under every team's own "
                 + "budget. 0 means none. Settable from the product: there is no admin tier "
@@ -165,9 +186,17 @@ public sealed class TenantSettings
 
         foreach (var definition in Definitions)
         {
-            _fallbacks[definition.Name] = FromConfiguration(definition) ?? definition.BuiltInDefault;
+            var configured = FromConfiguration(definition);
+            if (configured is not null) _configured.Add(definition.Name);
+            _fallbacks[definition.Name] = configured ?? definition.BuiltInDefault;
         }
     }
+
+    /// <summary>The built-in per-run memory allowance, in MB.</summary>
+    public const int DefaultMemoryPerRunMb = 2048;
+
+    /// <summary>The CPU bound when the cgroup does not say how many CPUs there are.</summary>
+    public const int UnknownCpuBound = 3;
 
     public IReadOnlyList<TenantSettingDefinition> Definitions { get; }
 
@@ -194,6 +223,68 @@ public sealed class TenantSettings
 
     /// <summary><c>wip.maxRunning</c>. 0 is unlimited.</summary>
     public int WipMaxRunning => (int)Integer(WipMaxRunningName);
+
+    /// <summary><c>wip.memoryPerRunMb</c>: the memory allowance one run is counted at.</summary>
+    public int WipMemoryPerRunMb => (int)Integer(WipMemoryPerRunMbName);
+
+    /// <summary>
+    /// The running limit in force and which bound decided it: a <c>tenant_settings</c> row
+    /// (<c>setting</c>), an appsettings value (<c>configuration</c>), or the built-in default's
+    /// <c>cpu</c> or <c>memory</c> bound, whichever is smaller. Read on use, like every setting.
+    /// </summary>
+    public WipRunLimit RunLimit()
+    {
+        var computed = Bounds(WipMemoryPerRunMb);
+
+        if (_rows.TryGetValue(WipMaxRunningName, out var row))
+        {
+            var value = int.Parse(row.Value, CultureInfo.InvariantCulture);
+            return computed with
+            {
+                Limit = value,
+                Bound = "setting",
+                Reason = $"wip.maxRunning is set to {value} in the Tenant Settings; without it the "
+                    + $"default would be {computed.Limit} ({computed.Reason})",
+            };
+        }
+
+        if (_configured.Contains(WipMaxRunningName))
+        {
+            var value = int.Parse(_fallbacks[WipMaxRunningName], CultureInfo.InvariantCulture);
+            return computed with
+            {
+                Limit = value,
+                Bound = "configuration",
+                Reason = $"Wip:MaxRunning is {value} in the Host's configuration; without it the "
+                    + $"default would be {computed.Limit} ({computed.Reason})",
+            };
+        }
+
+        return computed;
+    }
+
+    private WipRunLimit Bounds(int memoryPerRunMb)
+    {
+        var cpuBound = _cpus is { } cpus ? Math.Max(1, cpus - 1) : UnknownCpuBound;
+        var cpuText = _cpus is { } c
+            ? $"CPU bound {cpuBound} = {c} CPUs - 1"
+            : $"CPU bound {cpuBound}, as the container's CPUs are not known";
+
+        if (_memoryLimitMb is not { } limitMb)
+        {
+            return new WipRunLimit(cpuBound, "cpu", cpuBound, _cpus, null, null, memoryPerRunMb,
+                $"{cpuText}; the container has no memory limit");
+        }
+
+        var memoryBound = (int)Math.Max(1, Math.Min(int.MaxValue, limitMb / Math.Max(1, memoryPerRunMb)));
+        var memoryText = $"memory bound {memoryBound} = {limitMb} MB / {memoryPerRunMb} MB per run";
+
+        return memoryBound < cpuBound
+            ? new WipRunLimit(memoryBound, "memory", cpuBound, _cpus, memoryBound, limitMb, memoryPerRunMb,
+                $"{memoryText}, below the {cpuText}: the memory bound applies")
+            : new WipRunLimit(cpuBound, "cpu", cpuBound, _cpus, memoryBound, limitMb, memoryPerRunMb,
+                $"{cpuText}, not above the {memoryText}: the CPU bound applies");
+    }
 
     /// <summary><c>workflow.spendLimit</c> in tokens. 0 is none.</summary>
     public long WorkflowSpendLimit => Integer(WorkflowSpendLimitName);
@@ -245,11 +336,26 @@ public sealed class TenantSettings
 
     /// <summary>The stored (canonical) value in force for <paramref name="name"/>.</summary>
     public string Current(string name) =>
-        _rows.TryGetValue(name, out var row) ? row.Value : _fallbacks[name];
+        _rows.TryGetValue(name, out var row) ? row.Value : Fallback(name);
 
     public TenantSettingRow? Row(string name) => _rows.GetValueOrDefault(name);
 
-    public string Fallback(string name) => _fallbacks[name];
+    /// <summary>The value without a row: appsettings, else the built-in default. The running
+    /// limit's built-in default is computed now, from the current <c>wip.memoryPerRunMb</c>.</summary>
+    public string Fallback(string name) =>
+        name == WipMaxRunningName && !_configured.Contains(name)
+            ? Bounds(WipMemoryPerRunMb).Limit.ToString(CultureInfo.InvariantCulture)
+            : _fallbacks[name];
+
+    /// <summary>A setting's description as the dialog shows it. The running limit's says which
+    /// bound applies now, and why.</summary>
+    public string DescriptionOf(string name)
+    {
+        if (name != WipMaxRunningName) return _definitions[name].Description;
+
+        var limit = RunLimit();
+        return $"{_definitions[name].Description} Now {limit.Limit}: {limit.Reason}.";
+    }
 
     public TenantSettingDefinition? Definition(string name) => _definitions.GetValueOrDefault(name);
 
@@ -556,6 +662,26 @@ public sealed class TenantSettings
         return TryCanonical(definition, raw.Trim(), out var canonical) ? canonical : null;
     }
 
+    /// <summary>The container's memory limit in MB, from <c>/sys/fs/cgroup/memory.max</c> (bytes, or
+    /// <c>max</c> for none). Null when unbounded or unreadable.</summary>
+    public static long? CgroupMemoryMb(string path = "/sys/fs/cgroup/memory.max")
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+
+            var text = File.ReadAllText(path).Trim();
+
+            return long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var bytes) && bytes > 0
+                ? bytes / (1024 * 1024)
+                : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>CPUs the container's cgroup allows, from <c>/sys/fs/cgroup/cpu.max</c>
     /// (<c>quota period</c>, or <c>max</c> for none), rounded up. Null when unbounded or unreadable.</summary>
     public static int? CgroupCpus(string path = "/sys/fs/cgroup/cpu.max")
@@ -582,3 +708,13 @@ public sealed class TenantSettings
         }
     }
 }
+
+/// <summary>
+/// The running limit in force and why: <c>Bound</c> is <c>setting</c> (a tenant row),
+/// <c>configuration</c> (appsettings), <c>cpu</c> or <c>memory</c>. <c>CpuBound</c> and
+/// <c>MemoryBound</c> are what the built-in default would allow; <c>MemoryBound</c> is null when the
+/// container has no memory limit, and <c>Cpus</c> when its CPU count is not known.
+/// </summary>
+public sealed record WipRunLimit(
+    int Limit, string Bound, int CpuBound, int? Cpus, int? MemoryBound, long? MemoryLimitMb,
+    int MemoryPerRunMb, string Reason);

@@ -115,7 +115,8 @@ Other everyday commands: `yawble status`, `yawble doctor`, `yawble agents`, `yaw
 ## Configure
 
 - **Instance limits:** `yawble config set memory 12g`, `yawble config set cpus 8`,
-  `yawble config set maxRunning 8`.
+  `yawble config set maxRunning 6`. Unset, the running limit is the Host's default: CPUs - 1,
+  bounded by the memory limit at 2 GB a run; `yawble doctor` warns when a set one is above that.
 - **Instance settings** (running limit, budgets, system packages, agent tags) are edited by an
   admin in the web app and apply without a restart.
 - **Host settings** are standard ASP.NET configuration (`src/Harness.Host/appsettings.json`,

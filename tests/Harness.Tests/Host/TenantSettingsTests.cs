@@ -21,7 +21,7 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
 {
     private static readonly string[] EightSettings =
     [
-        "wip.maxRunning", "workflow.spendLimit", "concierge.idleTimeout", "quiet.window",
+        "wip.maxRunning", "wip.memoryPerRunMb", "workflow.spendLimit", "concierge.idleTimeout", "quiet.window",
         "resume.maxAutomatic", "causation.depthLimit", "kanban.wipLimits", "theme.default",
     ];
 
@@ -108,6 +108,7 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
     [Theory]
     [InlineData("wip.maxRunning", "-1")]
     [InlineData("wip.maxRunning", "\"four\"")]
+    [InlineData("wip.memoryPerRunMb", "0")]
     [InlineData("workflow.spendLimit", "1.5")]
     [InlineData("resume.maxAutomatic", "-3")]
     [InlineData("concierge.idleTimeout", "\"00:00:10\"")]
@@ -217,10 +218,10 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
             Assert.Equal(9, restarted.WipMaxRunning);
             Assert.Equal("7", restarted.Fallback("wip.maxRunning"));
 
-            // No appsettings and one CPU: max(2, cpus).
+            // No appsettings and one CPU: max(1, cpus - 1).
             var bare = new TenantSettings(
-                new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 1);
-            Assert.Equal("2", bare.Fallback("wip.maxRunning"));
+                new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 1, memoryLimitMb: 0);
+            Assert.Equal("1", bare.Fallback("wip.maxRunning"));
         }
         finally
         {
@@ -270,15 +271,124 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
     }
 
     [Fact]
-    public void The_default_running_limit_is_the_cpu_count_when_that_is_above_two()
+    public void The_default_running_limit_is_one_below_the_cpu_count_or_3_when_that_is_not_known()
     {
-        // max(2, cgroup CPUs): the one-CPU case is above; this is the other arm of the max.
-        var settings = new TenantSettings(
-            new SqliteTenantSettingsStore(Path.Combine(Path.GetTempPath(), $"harness-unused-{Guid.NewGuid():N}.db")),
-            new ConfigurationBuilder().Build(), cpuCount: 6);
+        // max(1, cgroup CPUs - 1) with no memory limit: the one-CPU case is above.
+        Assert.Equal("5", Bare(cpuCount: 6, memoryLimitMb: 0).Fallback("wip.maxRunning"));
 
-        Assert.Equal("6", settings.Fallback("wip.maxRunning"));
+        var unknown = Bare(cpuCount: 0, memoryLimitMb: 0).RunLimit();
+        Assert.Equal(3, unknown.Limit);
+        Assert.Equal("cpu", unknown.Bound);
+        Assert.Null(unknown.Cpus);
+        Assert.Contains("not known", unknown.Reason);
     }
+
+    [Fact]
+    public void The_memory_bound_lowers_the_default_when_it_is_the_smaller()
+    {
+        // 8 CPUs and 12 GB: CPU bound 7, memory bound 12288 / 2048 = 6.
+        var memory = Bare(cpuCount: 8, memoryLimitMb: 12288).RunLimit();
+        Assert.Equal(6, memory.Limit);
+        Assert.Equal("memory", memory.Bound);
+        Assert.Equal(7, memory.CpuBound);
+        Assert.Equal(6, memory.MemoryBound);
+        Assert.Contains("memory bound 6", memory.Reason);
+        Assert.Contains("CPU bound 7", memory.Reason);
+
+        // 4 CPUs and 12 GB: CPU bound 3 is the smaller.
+        var cpu = Bare(cpuCount: 4, memoryLimitMb: 12288).RunLimit();
+        Assert.Equal(3, cpu.Limit);
+        Assert.Equal("cpu", cpu.Bound);
+        Assert.Equal(6, cpu.MemoryBound);
+
+        // A limit below one allowance still runs one.
+        Assert.Equal(1, Bare(cpuCount: 8, memoryLimitMb: 1024).RunLimit().Limit);
+    }
+
+    [Fact]
+    public async Task The_per_run_allowance_moves_the_default_without_a_restart_and_a_configured_value_wins()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"harness-settings-mem-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var database = Path.Combine(directory, "messages.db");
+
+        try
+        {
+            await new SchemaMigrator(database).ApplyAsync(SchemaModules.All, ct);
+            var settings = new TenantSettings(
+                new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 8, memoryLimitMb: 12288);
+            await settings.LoadAsync(ct);
+            Assert.Equal(2048, settings.WipMemoryPerRunMb);
+            Assert.Equal(6, settings.WipMaxRunning);
+
+            using var allowance = JsonDocument.Parse("4096");
+            await settings.WriteAsync(
+                new Dictionary<string, JsonElement> { ["wip.memoryPerRunMb"] = allowance.RootElement.Clone() },
+                null, "someone@example.test", ct);
+
+            Assert.Equal(3, settings.WipMaxRunning);
+            Assert.Equal("3", settings.Fallback("wip.maxRunning"));
+            Assert.Equal("memory", settings.RunLimit().Bound);
+            Assert.Contains("Now 3:", settings.DescriptionOf("wip.maxRunning"));
+            Assert.Contains("memory bound applies", settings.DescriptionOf("wip.maxRunning"));
+
+            // A row wins over both bounds, and the reason still says what the default would be.
+            using var row = JsonDocument.Parse("9");
+            await settings.WriteAsync(
+                new Dictionary<string, JsonElement> { ["wip.maxRunning"] = row.RootElement.Clone() },
+                null, "someone@example.test", ct);
+
+            var set = settings.RunLimit();
+            Assert.Equal(9, settings.WipMaxRunning);
+            Assert.Equal(9, set.Limit);
+            Assert.Equal("setting", set.Bound);
+            Assert.Contains("default would be 3", set.Reason);
+
+            // An appsettings value wins over both bounds too.
+            var configured = new TenantSettings(
+                new SqliteTenantSettingsStore(database),
+                new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Wip:MaxRunning"] = "7",
+                }).Build(),
+                cpuCount: 8, memoryLimitMb: 12288);
+
+            Assert.Equal(7, configured.WipMaxRunning);
+            Assert.Equal("7", configured.Fallback("wip.maxRunning"));
+            Assert.Equal("configuration", configured.RunLimit().Bound);
+            Assert.Contains("default would be 6", configured.RunLimit().Reason);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(directory, recursive: true); }
+            catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void The_cgroup_memory_limit_is_read_from_memory_max()
+    {
+        var file = Path.GetTempFileName();
+
+        try
+        {
+            File.WriteAllText(file, "12884901888\n");
+            Assert.Equal(12288, TenantSettings.CgroupMemoryMb(file));
+
+            File.WriteAllText(file, "max\n");
+            Assert.Null(TenantSettings.CgroupMemoryMb(file));
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    private static TenantSettings Bare(int cpuCount, long memoryLimitMb) => new(
+        new SqliteTenantSettingsStore(Path.Combine(Path.GetTempPath(), $"harness-unused-{Guid.NewGuid():N}.db")),
+        new ConfigurationBuilder().Build(), cpuCount, memoryLimitMb);
 
     [Fact]
     public void The_cgroup_cpu_limit_is_read_from_cpu_max()
@@ -303,6 +413,76 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
     {
         using var document = JsonDocument.Parse(await client.GetStringAsync("/api/tenant/settings", ct));
         return document.RootElement.GetProperty("settings").EnumerateArray().Select(e => e.Clone()).ToList();
+    }
+}
+
+/// <summary>
+/// <c>GET /api/wip</c> names the bound the running limit comes from: the default's CPU or memory
+/// bound on a host nobody has configured, and the setting once a person sets one. Its own host, so
+/// no other test's row is in force.
+/// </summary>
+public sealed class WipLimitBoundTests(HostFixture host) : IClassFixture<HostFixture>
+{
+    [Fact]
+    public async Task Api_wip_names_the_bound_and_a_setting_wins_over_it()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = await host.PersonAsync();
+        var wip = host.Services.GetRequiredService<WipLedger>();
+
+        // Inside an instance container the operator CLI's Wip__MaxRunning reaches this host as configuration;
+        // anywhere else nothing configures it and the default's own bound is named.
+        var configured = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("Wip__MaxRunning"));
+        var limit = await LimitAsync(client, ct);
+        Assert.Equal(wip.Max, limit.GetProperty("limit").GetInt32());
+
+        if (configured)
+        {
+            Assert.Equal("configuration", limit.GetProperty("bound").GetString());
+            Assert.Contains("default would be", limit.GetProperty("reason").GetString());
+        }
+        else
+        {
+            Assert.Contains(limit.GetProperty("bound").GetString(), new[] { "cpu", "memory" });
+            Assert.Contains("bound applies", limit.GetProperty("reason").GetString());
+
+            // The largest allowance: under a memory limit the memory bound (1) applies, and the
+            // ledger follows it with no restart; with none (or one CPU, an equal bound), the CPU
+            // bound stays.
+            var allowance = await client.PutAsJsonAsync(
+                "/api/tenant/settings", new Dictionary<string, object> { ["wip.memoryPerRunMb"] = 1_048_576 }, ct);
+            Assert.Equal(HttpStatusCode.OK, allowance.StatusCode);
+
+            limit = await LimitAsync(client, ct);
+            var memoryApplies = limit.GetProperty("memoryLimitMb").ValueKind == JsonValueKind.Number
+                && limit.GetProperty("cpuBound").GetInt32() > 1;
+            Assert.Equal(memoryApplies ? "memory" : "cpu", limit.GetProperty("bound").GetString());
+            if (memoryApplies) Assert.Equal(1, limit.GetProperty("limit").GetInt32());
+            Assert.Equal(wip.Max, limit.GetProperty("limit").GetInt32());
+        }
+
+        var set = await client.PutAsJsonAsync(
+            "/api/tenant/settings", new Dictionary<string, object> { ["wip.maxRunning"] = 5 }, ct);
+        Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+
+        limit = await LimitAsync(client, ct);
+        Assert.Equal("setting", limit.GetProperty("bound").GetString());
+        Assert.Equal(5, limit.GetProperty("limit").GetInt32());
+        Assert.Equal(5, wip.Max);
+        Assert.Contains("set to 5", limit.GetProperty("reason").GetString());
+
+        // The Settings description says the same.
+        using var settings = JsonDocument.Parse(await client.GetStringAsync("/api/tenant/settings", ct));
+        var entry = settings.RootElement.GetProperty("settings").EnumerateArray()
+            .Single(s => s.GetProperty("name").GetString() == "wip.maxRunning");
+        Assert.Contains("Now 5: wip.maxRunning is set to 5", entry.GetProperty("description").GetString());
+    }
+
+    private static async Task<JsonElement> LimitAsync(HttpClient client, CancellationToken ct)
+    {
+        using var view = JsonDocument.Parse(await client.GetStringAsync("/api/wip", ct));
+        Assert.Equal(view.RootElement.GetProperty("max").GetInt32(), view.RootElement.GetProperty("limit").GetProperty("limit").GetInt32());
+        return view.RootElement.GetProperty("limit").Clone();
     }
 }
 

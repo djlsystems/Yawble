@@ -93,7 +93,7 @@ public static class TenantSettingsEndpoints
                 ["source"] = row is null ? "appsettings" : "row",
                 ["updatedAt"] = row?.UpdatedAt,
                 ["updatedBy"] = row?.UpdatedBy,
-                ["description"] = definition.Description,
+                ["description"] = settings.DescriptionOf(definition.Name),
                 ["readOnly"] = false,
             });
         }
