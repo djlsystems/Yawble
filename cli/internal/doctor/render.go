@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Render prints one line per check, verdict first in a fixed column, and the fix on its own line
@@ -39,6 +40,19 @@ func RenderAgents(w io.Writer, agents []Agent) {
 			fmt.Fprintln(w, "  signed in   yes")
 		default:
 			fmt.Fprintln(w, "  signed in   NO")
+		}
+		if a.Installed {
+			fmt.Fprintf(w, "  launch      %s\n", a.LaunchText())
+			if l := a.Launch; l != nil {
+				if l.Detail != nil && *l.Detail != "" {
+					fmt.Fprintf(w, "  launch why  %s\n", *l.Detail)
+				}
+				if l.StderrTail != nil && *l.StderrTail != "" {
+					for _, line := range strings.Split(strings.TrimRight(*l.StderrTail, "\n"), "\n") {
+						fmt.Fprintf(w, "  stderr      %s\n", line)
+					}
+				}
+			}
 		}
 		if a.Detail != "" {
 			fmt.Fprintf(w, "  detail      %s\n", a.Detail)

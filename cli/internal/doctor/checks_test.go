@@ -35,7 +35,7 @@ func healthyObserved() doctor.Observed {
 		URL: "http://127.0.0.1:8080", Healthy: boolp(true),
 		Port:   8080,
 		ExeDir: "/home/d/.local/bin", OnPath: boolp(true),
-		CPUs: 8, ContainerMemoryMB: 12288,
+		ContainerMemoryMB: 12288,
 		Stats: &engine.Stats{Command: "podman stats", CPUPercent: float64p(12.3), MemoryUsage: "1.2GB", MemoryLimit: "12.88GB", MemoryPercent: float64p(9.4), PIDs: intp(412)},
 	}
 }
@@ -68,35 +68,6 @@ func TestTheStatsRowSaysWhatTheEngineMeasuredAndNeverFails(t *testing.T) {
 	o.Container = engine.StateStopped
 	if row := find(t, doctor.HostChecks(o), "stats"); row.Verdict != doctor.Skip || row.Detail != "the container is not running" {
 		t.Errorf("stopped: %+v", row)
-	}
-}
-
-func TestARunningLimitAboveWhatTheCPUsAndMemoryAllowWarns(t *testing.T) {
-	o := healthyObserved()
-
-	// 8 CPUs allow 7, 12 GB at 2048 MB a run allows 6: a configured 8 is over.
-	o.MaxRunning = 8
-	row := find(t, doctor.HostChecks(o), "running limit")
-	if row.Verdict != doctor.Warn || !strings.Contains(row.Detail, "maxRunning is 8, above the 6") || !strings.Contains(row.Fix, "maxRunning 0") {
-		t.Errorf("over the limit: %+v", row)
-	}
-
-	o.MaxRunning = 6
-	if row := find(t, doctor.HostChecks(o), "running limit"); row.Verdict != doctor.OK {
-		t.Errorf("at the limit: %+v", row)
-	}
-
-	// Unset: the Host's default, which is the computed one, and the bound that decides it.
-	o.MaxRunning = 0
-	row = find(t, doctor.HostChecks(o), "running limit")
-	if row.Verdict != doctor.OK || !strings.Contains(row.Detail, "the Host's default, 6") || !strings.Contains(row.Detail, "memory bound applies") {
-		t.Errorf("unset: %+v", row)
-	}
-
-	// With no memory limit only the CPUs bound it.
-	o.ContainerMemoryMB, o.MaxRunning = 0, 8
-	if row := find(t, doctor.HostChecks(o), "running limit"); row.Verdict != doctor.Warn || !strings.Contains(row.Detail, "above the 7") {
-		t.Errorf("no memory limit: %+v", row)
 	}
 }
 
@@ -671,5 +642,66 @@ func TestNoAgentVersionsRowWithoutVersions(t *testing.T) {
 		if c.Name == "agent versions" {
 			t.Errorf("no versions, no row: %+v", c)
 		}
+	}
+}
+
+// B002N: the running limit is the Host's; a limit a person set above the Host's own bounds warns,
+// and the comparison uses only the Host's figures.
+func TestTheRunningLimitIsTheHostsAnswerAndWarnsAboveItsOwnBounds(t *testing.T) {
+	r := sampleReport()
+	r.Wip = &doctor.HostWip{Limit: &doctor.WipLimit{Limit: 4, Bound: "memory", CPUBound: 7, MemoryBound: intp(4), Reason: "the memory bound applies"}}
+	if c := find(t, doctor.InstanceChecks(r, nil, now), "running limit"); c.Verdict != doctor.OK || c.Detail != "4, from the memory bound (the Host's answer: the memory bound applies)" {
+		t.Errorf("default: %+v", c)
+	}
+	r.Wip.Limit = &doctor.WipLimit{Limit: 8, Bound: "configuration", CPUBound: 7, MemoryBound: intp(4), Reason: "Wip:MaxRunning is 8"}
+	if c := find(t, doctor.InstanceChecks(r, nil, now), "running limit"); c.Verdict != doctor.Warn || !strings.Contains(c.Detail, "the Host's own bounds allow 4") || !strings.Contains(c.Fix, "maxRunning 0") {
+		t.Errorf("configured above: %+v", c)
+	}
+	r.Wip.Limit = &doctor.WipLimit{Limit: 3, Bound: "setting", CPUBound: 7, Reason: "a tenant setting"}
+	if c := find(t, doctor.InstanceChecks(r, nil, now), "running limit"); c.Verdict != doctor.OK {
+		t.Errorf("setting within: %+v", c)
+	}
+	r.Wip = nil
+	if c := find(t, doctor.InstanceChecks(r, nil, now), "running limit"); c.Verdict != doctor.Skip || !strings.HasPrefix(c.Detail, "not known: ") {
+		t.Errorf("older Host: %+v", c)
+	}
+}
+
+// Each mechanism in the Host's words; one the CLI does not know is not known, never enforced.
+func TestRunMemorySaysTheHostsMechanism(t *testing.T) {
+	r := sampleReport()
+	for _, c := range []struct {
+		m    doctor.RunMemory
+		want string
+	}{
+		{doctor.RunMemory{Mechanism: "cgroup", PerRunMb: intp(2048), Detail: "per-run cgroup"}, "cgroup, 2048 MB per run: per-run cgroup"},
+		{doctor.RunMemory{Mechanism: "rlimit", PerRunMb: intp(1792), Detail: "set"}, "rlimit, 1792 MB per run: set"},
+		{doctor.RunMemory{Mechanism: "none", Detail: "nothing set"}, "not enforced: nothing set"},
+		{doctor.RunMemory{Mechanism: "quota"}, `not known (the Host said "quota")`},
+	} {
+		m := c.m
+		r.Wip = &doctor.HostWip{RunMemory: &m}
+		if row := find(t, doctor.InstanceChecks(r, nil, now), "run memory"); row.Verdict != doctor.Info || row.Detail != c.want {
+			t.Errorf("%s: %+v, want %q", c.m.Mechanism, row, c.want)
+		}
+	}
+}
+
+// The agents row puts each launch beside the sign-in; only the Host's "ok" reads ok.
+func TestTheAgentsRowSaysEachLaunchAndOnlyOkIsOk(t *testing.T) {
+	r := sampleReport()
+	r.Agents[0].Launch = &doctor.Launch{Result: "failed", ExitCode: intp(137), StderrTail: strp("Killed")}
+	r.Agents[1].Launch = &doctor.Launch{Result: "not checked"}
+	a := find(t, doctor.InstanceChecks(r, nil, now), "agents")
+	for _, want := range []string{"claude signed in, launch FAILED, exit 137", "codex NOT signed in, launch not checked", "copilot not measured, launch not known", "agy not installed"} {
+		if !strings.Contains(a.Detail, want) {
+			t.Errorf("agents row lacks %q: %+v", want, a)
+		}
+	}
+	if a.Verdict != doctor.Warn {
+		t.Errorf("a failed launch warns: %+v", a)
+	}
+	if got := (doctor.Agent{Launch: &doctor.Launch{Result: "maybe"}}).LaunchText(); got != `not known (the Host said "maybe")` {
+		t.Errorf("unknown result read as %q", got)
 	}
 }
