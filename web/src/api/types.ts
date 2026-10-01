@@ -2116,6 +2116,16 @@ export interface RepoActionResult {
 }
 
 /**
+ * An image stored in the Concierge's own folder. `path` is absolute on the Host, and is what the
+ * panel types into the prompt; `type` is what the Host found in the content, not the upload's name.
+ */
+export interface ConciergeAttachment {
+  path: string
+  size: number
+  type: string
+}
+
+/**
  * The tenant-wide Concierge: which Agent runs it. What it is told is the built-in Concierge prompt,
  * chosen by role and never by a person.
  */

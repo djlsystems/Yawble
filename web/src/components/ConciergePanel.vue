@@ -11,10 +11,27 @@ import { connectConcierge, EvictedReason, type ConciergeSocket } from '../lib/co
 import { firstPaintNudge } from '../lib/concierge-first-paint';
 import { assignmentMoved } from '../lib/concierge-assignment';
 import { conciergePreflight, type ConciergePreflight } from '../lib/conciergePreflight';
+import {
+  AttachableImageTypes,
+  bracketedPaste,
+  clipboardImage,
+  dragCarriesFiles,
+  droppedImages,
+  imagePasteChordBytes,
+  isImagePasteChord,
+  pastedImage,
+  type ImageClipboard,
+} from '../lib/conciergeAttachment';
 import ConciergeComposeBar from './ConciergeComposeBar.vue';
 import ConciergeKeyBar from './ConciergeKeyBar.vue';
 import TenantSettingsDialog from './TenantSettingsDialog.vue';
-import { concierge as readConcierge, endConcierge, listCatalog, setConcierge } from '../api/client';
+import {
+  concierge as readConcierge,
+  endConcierge,
+  listCatalog,
+  setConcierge,
+  uploadConciergeAttachment,
+} from '../api/client';
 import { useConsoleStore } from '../stores/console';
 import { useTerminalDisplayStore } from '../stores/terminalDisplay';
 import { agentsForMode, type ConciergeSettings, type TeamId } from '../api/types';
@@ -345,6 +362,123 @@ function onTouchMove(event: TouchEvent) {
  */
 function sendKey(sequence: string) {
   socket?.sendInput(sequence);
+}
+
+/**
+ * AN IMAGE FOR THE CONCIERGE: UPLOADED, THEN ITS PATH TYPED AT THE PROMPT. See
+ * `lib/conciergeAttachment.ts` for why the page does this rather than any CLI's own image key, and
+ * which browsers reach which of the four ways in.
+ *
+ * `terminal` pastes the path into the PTY, bracketed, as if the person had pasted it as text;
+ * `compose` puts it in the compose bar at its caret. Paste and Alt+V happen IN the terminal, so they
+ * answer there; the button and a drop go to the compose bar where there is one, because on a
+ * phone that is where a line is written.
+ *
+ * A FAILED UPLOAD INSERTS NOTHING and says why in the panel, in the server's own sentence. Several
+ * files go in order and stop at the first refusal, so what was inserted is what the line says
+ * succeeded.
+ */
+const attaching = ref(false);
+const attachError = ref<string | null>(null);
+const composeBar = ref<InstanceType<typeof ConciergeComposeBar>>();
+const picker = ref<HTMLInputElement>();
+
+type AttachTarget = 'terminal' | 'compose';
+
+function defaultAttachTarget(): AttachTarget {
+  return composeBar.value ? 'compose' : 'terminal';
+}
+
+async function attachImages(files: File[], target: AttachTarget = defaultAttachTarget()) {
+  if (files.length === 0) return;
+
+  attaching.value = true;
+  attachError.value = null;
+
+  try {
+    for (const [index, file] of files.entries()) {
+      let path: string;
+
+      try {
+        path = (await uploadConciergeAttachment(file)).path;
+      } catch (cause) {
+        attachError.value = cause instanceof Error ? cause.message : String(cause);
+        return;
+      }
+
+      // A space between paths, so two files are two words at the prompt and not one.
+      const inserted = index > 0 ? ` ${path}` : path;
+
+      if (target === 'compose' && composeBar.value) {
+        await composeBar.value.insert(inserted);
+      } else if (socket) {
+        socket.sendInput(bracketedPaste(inserted));
+        terminal?.focus();
+      } else {
+        attachError.value = 'The image was stored, but no Concierge is running to receive its path.';
+        return;
+      }
+    }
+  } finally {
+    attaching.value = false;
+  }
+}
+
+/**
+ * A paste into the terminal. CAPTURE PHASE on the host, so it runs before xterm's own listener on
+ * its textarea - which would forward the text half and drop the image. A text paste is left alone.
+ */
+function onTerminalPaste(event: ClipboardEvent) {
+  const image = pastedImage(event.clipboardData);
+  if (!image) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  void attachImages([image], 'terminal');
+}
+
+/**
+ * Alt+V, after the key handler has already swallowed it. The clipboard is read once: an image is
+ * uploaded, and anything else - text, nothing, no API, a refused permission - sends the key on
+ * exactly as xterm would have, so a CLI that binds Alt+V itself still gets it.
+ */
+async function onImagePasteChord(key: string) {
+  const image = await clipboardImage(navigator.clipboard as ImageClipboard | undefined);
+
+  if (image) {
+    await attachImages([image], 'terminal');
+    return;
+  }
+
+  socket?.sendInput(imagePasteChordBytes({ key }));
+}
+
+function onShellDragOver(event: DragEvent) {
+  // Without this the browser refuses the drop - and opens the file in place of the app.
+  if (dragCarriesFiles(event.dataTransfer)) event.preventDefault();
+}
+
+function onShellDrop(event: DragEvent) {
+  if (!dragCarriesFiles(event.dataTransfer)) return;
+  event.preventDefault();
+
+  const images = droppedImages(event.dataTransfer);
+
+  if (images.length === 0) {
+    attachError.value = 'Only an image can be attached: PNG, JPEG, GIF or WebP.';
+    return;
+  }
+
+  void attachImages(images);
+}
+
+function onPicked(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+
+  // Cleared so picking the same file again is still a change.
+  input.value = '';
+  void attachImages(files);
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -694,6 +828,14 @@ async function attach() {
   const attached = terminal;
 
   attached.attachCustomKeyEventHandler((event) => {
+    // Alt+V is the page's, never xterm's: cancelled and swallowed here, and sent on later by
+    // `onImagePasteChord` when the clipboard turns out to hold no image.
+    if (isImagePasteChord(event)) {
+      event.preventDefault();
+      void onImagePasteChord(event.key);
+      return false;
+    }
+
     const action = conciergeKeyAction(event, conciergeNewline());
 
     // BEFORE the send and before the return, because it is the only one of the three that has a
@@ -718,6 +860,7 @@ async function attach() {
   boxObserver.observe(host.value);
 
   host.value.addEventListener('touchstart', onTouchStart, { passive: true });
+  host.value.addEventListener('paste', onTerminalPaste, true);
 
   // passive: false, or preventDefault is ignored and the page scrolls instead of the scrollback.
   host.value.addEventListener('touchmove', onTouchMove, { passive: false });
@@ -772,6 +915,7 @@ function detach() {
 
   host.value?.removeEventListener('touchstart', onTouchStart);
   host.value?.removeEventListener('touchmove', onTouchMove);
+  host.value?.removeEventListener('paste', onTerminalPaste, true);
 
   socket?.dispose();
   socket = null;
@@ -842,6 +986,8 @@ onBeforeUnmount(() => {
       v-if="open"
       class="concierge-shell column no-wrap bg-dark text-white"
       :class="{ 'is-windowed': isWindowed }"
+      @dragover="onShellDragOver"
+      @drop="onShellDrop"
       :style="
         isWindowed
           ? {
@@ -927,6 +1073,30 @@ onBeforeUnmount(() => {
             what it was launched with until it is reloaded.
           </q-tooltip>
         </q-badge>
+
+        <!-- A file picker, because it is the one way in every browser and every phone has. The
+             input is never shown; what it picks goes to the upload and is never rendered. -->
+        <q-btn
+          flat
+          dense
+          round
+          icon="add_photo_alternate"
+          aria-label="Attach image"
+          :loading="attaching"
+          @click="picker?.click()"
+        >
+          <q-tooltip>Attach image — its path is pasted at the prompt</q-tooltip>
+        </q-btn>
+        <input
+          ref="picker"
+          type="file"
+          :accept="AttachableImageTypes"
+          multiple
+          hidden
+          aria-hidden="true"
+          tabindex="-1"
+          @change="onPicked"
+        />
 
         <!-- Refresh: paint then detach+attach without DELETE, does not restart the agent. -->
         <q-btn
@@ -1035,6 +1205,17 @@ onBeforeUnmount(() => {
           <q-tooltip v-if="preflight.detail">{{ preflight.detail }}</q-tooltip>
         </span>
       </div>
+      <!-- Why an image did not go in, in the server's own words. Text only: the image itself is
+           never shown anywhere in the app. -->
+      <div
+        v-if="attachError"
+        class="concierge-attach-error row no-wrap items-start q-px-md q-py-xs"
+        role="alert"
+      >
+        <q-icon name="error" size="16px" class="q-mr-sm q-mt-xs" aria-hidden="true" />
+        <span class="col">{{ attachError }}</span>
+        <q-btn flat dense round size="sm" icon="close" aria-label="Dismiss" @click="attachError = null" />
+      </div>
       <div ref="host" class="col concierge-host" />
 
       <!-- Resize handles: only when windowed. Edges and corner grips. -->
@@ -1064,7 +1245,7 @@ onBeforeUnmount(() => {
            Compose ABOVE the keys. It is where a line is written, so it belongs next to the terminal
            it will appear in, and the key bar stays closest to the thumb that reaches for ^C. -->
       <template v-if="$q.platform.has.touch">
-        <ConciergeComposeBar @send="sendKey" />
+        <ConciergeComposeBar ref="composeBar" @send="sendKey" @images="attachImages" />
         <ConciergeKeyBar @key="sendKey" />
       </template>
     </div>
@@ -1157,6 +1338,13 @@ onBeforeUnmount(() => {
 
 .concierge-preflight-blocked {
   background: rgba(255, 170, 0, 0.16);
+}
+
+.concierge-attach-error {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.87);
+  background: rgba(255, 80, 80, 0.18);
 }
 
 .concierge-preflight-link {

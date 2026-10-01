@@ -20,6 +20,7 @@ import type {
   BacklogDispatchView,
   BacklogExecutionStats,
   BacklogItemView,
+  ConciergeAttachment,
   ConciergeSettings,
   ApiKey,
   Catalog,
@@ -1195,6 +1196,19 @@ export const listWatchRoots = (team: TeamId) =>
  * which would report every SUCCESSFUL end as a failure.
  */
 export const endConcierge = () => send('/api/concierge', { method: 'DELETE' })
+
+/**
+ * Stores one image in your Concierge's folder and answers where. A refusal - not an image, too
+ * large - throws the server's own sentence, which the panel shows as it is.
+ *
+ * No content-type header, for the reason `uploadHostFile` gives.
+ */
+export const uploadConciergeAttachment = (file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+
+  return json<ConciergeAttachment>('/api/concierge/attachments', { method: 'POST', body: form })
+}
 
 /**
  * Which team this PERSON is working on - the one fact the Concierge reads per command.
