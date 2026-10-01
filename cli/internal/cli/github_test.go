@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/cli"
 	"github.com/djlsystems/yawble/cli/internal/config"
 	"github.com/djlsystems/yawble/cli/internal/engine"
+	"github.com/djlsystems/yawble/cli/internal/instance"
 )
 
 // The first `yawble up` asks whether teams will use GitHub and, if so, helps
@@ -35,6 +37,12 @@ func gitHubDeps(t *testing.T, s *engine.Scripted, answers string, pasted ...stri
 	t.Helper()
 	deps := stubbed(s)
 	deps.ConfigDir = t.TempDir()
+	// The size is chosen already, as the label in upScript has it, so the first up's size
+	// questions do not take the answers meant for GitHub.
+	if m := instance.Measure(); m.Measured {
+		memoryMB, cpus := instance.Proposed(m)
+		writeConfig(t, deps.ConfigDir, fmt.Sprintf("memory = \"%dm\"\ncpus = %d\n", memoryMB, cpus))
+	}
 	deps.HTTP, deps.ReleaseBaseURL = gitHubAnswers(), "https://api.github.test"
 	deps.Interactive, deps.Stdin = true, strings.NewReader(answers)
 	deps.ReadSecret = func(string) (string, error) {

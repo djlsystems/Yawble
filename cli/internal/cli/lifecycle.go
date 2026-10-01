@@ -61,47 +61,39 @@ func settingsFor(deps Deps, c config.Config, m instance.Machine) (instance.Setti
 	return s, notes, nil
 }
 
-// measure is what the container's default limits come from. On Linux the host is the machine.
-// On macOS and Windows the Podman machine is, and it is asked when it can be; when it is not
-// running yet (before `up`'s preflight) nothing is measured, and Defaults says so.
+// measure is what the container's default limits come from: what the engine has, asked of it
+// (engineCapacity). A Podman machine that is not running yet (before `up`'s preflight) is not
+// measured, and Defaults says so.
 func measure(deps Deps, c config.Config) instance.Machine {
-	goos := deps.GOOS
-	if goos == "" {
-		goos = runtime.GOOS
-	}
-	if goos != "darwin" && goos != "windows" {
-		return instance.Measure()
-	}
-	if engine.Select(c.Engine, deps.LookPath) == "docker" {
-		// Docker Desktop's VM is not asked in this build; the person chooses with config set.
-		return instance.Machine{}
-	}
-	info, err := machine.Inspect(context.Background(), runnerOf(deps), goos)
-	if err != nil || !info.Running || info.MemoryMB == 0 {
-		return instance.Machine{}
-	}
-	return machineOf(info)
+	return engineCapacity(context.Background(), deps, engine.Select(c.Engine, deps.LookPath))
 }
 
 func machineOf(info machine.Info) instance.Machine {
 	if !info.Running || info.MemoryMB == 0 {
 		return instance.Machine{}
 	}
-	return instance.Machine{MemoryBytes: int64(info.MemoryMB) << 20, CPUs: info.CPUs, Measured: true}
+	return instance.Machine{MemoryBytes: int64(info.MemoryMB) << 20, CPUs: info.CPUs, Measured: true, Source: "podman machine", Kind: instance.KindPodmanMachine}
 }
 
 // prepare loads config, derives settings and picks the engine. Every lifecycle verb but `up`
 // starts here; `up` does the same in pieces around its preflight.
 func prepare(deps Deps) (engine.Engine, instance.Settings, []string, error) {
+	e, s, notes, _, err := prepareMeasured(deps)
+	return e, s, notes, err
+}
+
+// prepareMeasured is prepare, also answering what the engine has (for `doctor`).
+func prepareMeasured(deps Deps) (engine.Engine, instance.Settings, []string, instance.Machine, error) {
 	c, err := loadConfig(deps)
 	if err != nil {
-		return nil, instance.Settings{}, nil, err
+		return nil, instance.Settings{}, nil, instance.Machine{}, err
 	}
-	s, notes, err := settingsFor(deps, c, measure(deps, c))
+	m := measure(deps, c)
+	s, notes, err := settingsFor(deps, c, m)
 	if err != nil {
-		return nil, instance.Settings{}, nil, err
+		return nil, instance.Settings{}, nil, instance.Machine{}, err
 	}
-	return engineOf(deps, c), s, notes, nil
+	return engineOf(deps, c), s, notes, m, nil
 }
 
 // runnerOf is the one place the real runner is chosen, so every command and the machine layer
@@ -161,7 +153,7 @@ func newUpCommand(deps Deps) *cobra.Command {
 			showLogo(deps, cmd.OutOrStdout())
 			_, statErr := os.Stat(config.Path(deps.ConfigDir))
 			fresh := os.IsNotExist(statErr)
-			e, s, err := upReady(cmd, deps, yes)
+			e, s, err := upReady(cmd, deps, yes, true)
 			if err != nil {
 				return err
 			}
@@ -340,8 +332,9 @@ func goosOf(deps Deps) string {
 
 // upReady is `up` up to the start: the image pin, the platform, the engine (asked when both are
 // installed), its machine, the port, and the settings measured from the machine the container
-// will run in. `restore` makes the same preparations before it writes into the volume.
-func upReady(cmd *cobra.Command, deps Deps, yes bool) (engine.Engine, instance.Settings, error) {
+// will run in. `restore` makes the same preparations before it writes into the volume, without
+// the first up's size questions (size false): its question is the replace.
+func upReady(cmd *cobra.Command, deps Deps, yes, size bool) (engine.Engine, instance.Settings, error) {
 	c, err := loadConfig(deps)
 	if err != nil {
 		return nil, instance.Settings{}, err
@@ -374,17 +367,21 @@ func upReady(cmd *cobra.Command, deps Deps, yes bool) (engine.Engine, instance.S
 		return nil, instance.Settings{}, err
 	}
 	c.Port = port
-	// Now the machine the container runs in is known: derive the limits from it. On Linux
-	// that is the host; on macOS and Windows the Podman machine that just came up; with
-	// Docker, what Docker says it can give (Docker Desktop's VM, or the host).
-	m := instance.Measure()
-	switch {
-	case name == "docker":
-		if measured := dockerMachine(cmd.Context(), runnerOf(deps)); measured.Measured {
-			m = measured
-		}
-	case info.Applies:
+	// Now the machine the container runs in is known: derive the limits from what its engine
+	// has. The Podman machine that just came up was inspected by the preflight already.
+	m := engineCapacity(cmd.Context(), deps, name)
+	if name != "docker" && info.Applies {
 		m = machineOf(info)
+	}
+	// The first up chooses the container's size; later ups keep what was saved and warn about a
+	// saved value the engine cannot give.
+	if size {
+		if c, err = sizeFirstUp(deps, c, m, yes, cmd.OutOrStdout()); err != nil {
+			return nil, instance.Settings{}, err
+		}
+	}
+	for _, w := range overEngine(c, m) {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning:", w)
 	}
 	// Asked once, before the settings are read, so a token saved now reaches the container
 	// on this same run.

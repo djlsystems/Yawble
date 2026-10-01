@@ -54,10 +54,6 @@ type Observed struct {
 	Machine           machine.Info
 	MachineErr        error
 	ContainerMemoryMB int
-	// CPUs and MaxRunning are what `up` gives the container: its CPUs and the configured running
-	// limit, 0 when the Host's own default applies.
-	CPUs       int
-	MaxRunning int
 	// HostMemoryMB is the computer's own RAM (not the machine's), 0 when not measured; the
 	// memory fix never asks the machine for more than the computer has.
 	HostMemoryMB int
@@ -355,35 +351,8 @@ func HostChecks(o Observed) []Check {
 		checks = append(checks, Check{"path", OK, o.ExeDir + " is on PATH", ""})
 	}
 
-	if row, ok := runLimitRow(o); ok {
-		checks = append(checks, row)
-	}
-
 	checks = append(checks, Check{"release", Skip, "newer yawble releases are not checked in this build", ""})
 	return checks
-}
-
-// runLimitRow compares the configured running limit with what the container's CPUs and memory
-// allow (instance.RunLimit, at the Host's default allowance per run). Over it, runs contend for
-// CPU and memory until the Host stops answering; that is a warning, never a failure.
-func runLimitRow(o Observed) (Check, bool) {
-	if o.CPUs <= 0 {
-		return Check{}, false
-	}
-	allowed, bound := instance.RunLimit(o.CPUs, o.ContainerMemoryMB)
-	why := fmt.Sprintf("%d CPUs allow %d", o.CPUs, max(1, o.CPUs-1))
-	if o.ContainerMemoryMB > 0 {
-		why += fmt.Sprintf(", %d MB at %d MB per run allows %d", o.ContainerMemoryMB, instance.MemoryPerRunMB, max(1, o.ContainerMemoryMB/instance.MemoryPerRunMB))
-	}
-	switch {
-	case o.MaxRunning == 0:
-		return Check{"running limit", OK, fmt.Sprintf("the Host's default, %d (%s; the %s bound applies)", allowed, why, bound), ""}, true
-	case o.MaxRunning > allowed:
-		return Check{"running limit", Warn, fmt.Sprintf("maxRunning is %d, above the %d the container allows (%s)", o.MaxRunning, allowed, why),
-			fmt.Sprintf("yawble config set maxRunning 0 (the Host's default, %d), then yawble up", allowed)}, true
-	default:
-		return Check{"running limit", OK, fmt.Sprintf("maxRunning %d, within the %d the container allows (%s)", o.MaxRunning, allowed, why), ""}, true
-	}
 }
 
 // InstanceChecks is the table over the Host's own report. With no report, the reason decides:
@@ -391,6 +360,8 @@ func runLimitRow(o Observed) (Check, bool) {
 // check is Skip; anything else is the Host's doctor FAILING, said once, then the skips.
 func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 	names := []string{"data root", "database", "backups", "agents"}
+	// The Host's figures, never estimated here: with no report they are not known.
+	figures := []string{"running limit", "run memory"}
 	if err != nil || r == nil {
 		reason := "no report"
 		if err != nil {
@@ -403,6 +374,9 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 		}
 		for _, n := range names {
 			checks = append(checks, Check{n, Skip, reason, ""})
+		}
+		for _, n := range figures {
+			checks = append(checks, Check{n, Skip, "not known: " + reason, ""})
 		}
 		return checks
 	}
@@ -452,17 +426,25 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 	var parts []string
 	verdict := OK
 	for _, a := range r.Agents {
+		var part string
 		switch {
 		case !a.Installed:
 			parts = append(parts, a.Agent+" not installed")
+			continue
 		case a.Authenticated == nil:
-			parts = append(parts, a.Agent+" not measured")
+			part = a.Agent + " not measured"
 		case *a.Authenticated:
-			parts = append(parts, a.Agent+" signed in")
+			part = a.Agent + " signed in"
 		default:
-			parts = append(parts, a.Agent+" NOT signed in")
+			part = a.Agent + " NOT signed in"
 			verdict = Warn
 		}
+		// Beside the sign-in: whether the CLI starts the way a member run launches it.
+		part += ", launch " + a.LaunchText()
+		if a.Launch != nil && a.Launch.Result == "failed" {
+			verdict = Warn
+		}
+		parts = append(parts, part)
 	}
 	fix := ""
 	if verdict == Warn {
@@ -472,6 +454,7 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 	if row, ok := versionsRow(r.Agents); ok {
 		checks = append(checks, row)
 	}
+	checks = append(checks, runLimitRow(r), runMemoryRow(r))
 	return checks
 }
 

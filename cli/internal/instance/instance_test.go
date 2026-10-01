@@ -503,24 +503,14 @@ func TestAQuickStartShowsNoProgress(t *testing.T) {
 	}
 }
 
-func TestTheRunLimitIsOneBelowTheCPUsBoundedByMemory(t *testing.T) {
-	for _, c := range []struct {
-		cpus, memoryMB, want int
-		bound                string
-	}{
-		{8, 12288, 6, "memory"}, // CPU bound 7, memory bound 6
-		{4, 12288, 3, "cpu"},    // CPU bound 3, memory bound 6
-		{8, 0, 7, "cpu"},        // no memory limit
-		{1, 0, 1, "cpu"},        // never below 1
-		{8, 1024, 1, "memory"},  // a limit below one allowance still runs one
-	} {
-		got, bound := instance.RunLimit(c.cpus, c.memoryMB)
-		if got != c.want || bound != c.bound {
-			t.Errorf("RunLimit(%d, %d) = %d %s, want %d %s", c.cpus, c.memoryMB, got, bound, c.want, c.bound)
-		}
-	}
-	if got := instance.RunLimitText(instance.Settings{CPUs: 8, Memory: "12g"}); got != "the Host's default, 6 by memory" {
+// `up` states a configured limit as itself, and the Host's default as the Host's to name: the
+// CLI computes no figure of its own.
+func TestUpStatesTheHostsDefaultWithoutComputingIt(t *testing.T) {
+	if got := instance.RunLimitText(instance.Settings{CPUs: 8, Memory: "12g"}); got != "the Host's default (yawble doctor names it)" {
 		t.Errorf("RunLimitText = %q", got)
+	}
+	if got := instance.RunLimitText(instance.Settings{CPUs: 8, Memory: "12g", MaxRunning: 3}); got != "3" {
+		t.Errorf("RunLimitText configured = %q", got)
 	}
 }
 
@@ -538,7 +528,7 @@ func TestUpPassesNoRunningLimitWhenNoneIsConfigured(t *testing.T) {
 	if !strings.Contains(calls, "podman run -d") || strings.Contains(calls, "Wip__MaxRunning") {
 		t.Errorf("the Host's default should apply, with no Wip__MaxRunning:\n%s", calls)
 	}
-	if !strings.Contains(out.String(), "running limit the Host's default, 6 by memory") {
+	if !strings.Contains(out.String(), "running limit the Host's default (yawble doctor names it)") {
 		t.Errorf("output %q does not state the Host's default", out.String())
 	}
 }

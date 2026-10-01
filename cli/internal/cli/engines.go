@@ -170,13 +170,15 @@ func noEngine(goos string) error {
 
 // dockerMachine is what Docker says it can give a container - Docker Desktop's VM on macOS and
 // Windows, the host on Linux - so the limits come from a measurement, not the unmeasured default.
-func dockerMachine(ctx context.Context, r engine.Runner) instance.Machine {
-	res, err := r.Run(ctx, "docker", "info", "--format", "{{.MemTotal}}|{{.NCPU}}")
+// Its operating system says whether that is Docker Desktop (on any OS), which decides how a
+// person gives it more.
+func dockerMachine(ctx context.Context, r engine.Runner, goos string) instance.Machine {
+	res, err := r.Run(ctx, "docker", "info", "--format", "{{.MemTotal}}|{{.NCPU}}|{{.OperatingSystem}}")
 	if err != nil || res.ExitCode != 0 {
 		return instance.Machine{}
 	}
-	fields := strings.Split(strings.TrimSpace(res.Stdout), "|")
-	if len(fields) != 2 {
+	fields := strings.SplitN(strings.TrimSpace(res.Stdout), "|", 3)
+	if len(fields) < 2 {
 		return instance.Machine{}
 	}
 	memory, errMemory := strconv.ParseInt(fields[0], 10, 64)
@@ -184,7 +186,17 @@ func dockerMachine(ctx context.Context, r engine.Runner) instance.Machine {
 	if errMemory != nil || errCPUs != nil || memory <= 0 || cpus <= 0 {
 		return instance.Machine{}
 	}
-	return instance.Machine{MemoryBytes: memory, CPUs: cpus, Measured: true}
+	kind := instance.KindDockerVM
+	switch {
+	case len(fields) == 3 && strings.Contains(fields[2], "Docker Desktop"):
+		kind = instance.KindDockerDesktop
+	case goos == "linux":
+		kind = instance.KindLinux
+	case len(fields) < 3 || strings.TrimSpace(fields[2]) == "":
+		// No operating system named: Docker on macOS and Windows is Docker Desktop's VM.
+		kind = instance.KindDockerDesktop
+	}
+	return instance.Machine{MemoryBytes: memory, CPUs: cpus, Measured: true, Source: "docker info", Kind: kind}
 }
 
 // noteRestart says what `up` is about to stop when it replaces a RUNNING container whose settings
