@@ -641,6 +641,27 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
         Assert.Contains("what the other running runs are measured to use", described);
     }
 
+    [Fact]
+    public void The_memory_settings_describe_a_per_process_data_limit_that_caps_reservations_and_an_allowance_that_caps_no_run()
+    {
+        var definitions = Bare(cpuCount: 8, memoryLimitMb: 12288).Definitions;
+
+        var runs = Assert.Single(definitions, d => d.Name == TenantSettings.RunsMemoryLimitMbName).Description;
+        Assert.Contains("per-process data limit", runs);
+        Assert.Contains("where the Host cannot write its cgroup", runs);
+        Assert.Contains("caps the memory a process reserves, not the memory it uses", runs);
+        Assert.Contains("below a few GB some refuse to start", runs);
+        Assert.Contains("0 (the default) sets no per-run cap there; admission by measured memory guards the container", runs);
+        // Generic: no runtime or agent CLI is named, and the dialog shows it, so it never names its own key.
+        Assert.DoesNotContain("Bun", runs);
+        Assert.DoesNotContain("Claude", runs);
+        Assert.DoesNotContain(TenantSettings.RunsMemoryLimitMbName, runs);
+
+        var perRun = Assert.Single(definitions, d => d.Name == TenantSettings.WipMemoryPerRunMbName).Description;
+        Assert.Contains("It caps no run", perRun);
+        Assert.DoesNotContain(TenantSettings.WipMemoryPerRunMbName, perRun);
+    }
+
     internal static TenantSettings Bare(int cpuCount, long memoryLimitMb) => new(
         new SqliteTenantSettingsStore(Path.Combine(Path.GetTempPath(), $"harness-unused-{Guid.NewGuid():N}.db")),
         new ConfigurationBuilder().Build(), cpuCount, memoryLimitMb);
