@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Harness.Contracts;
 using Microsoft.Data.Sqlite;
 
@@ -188,6 +189,33 @@ public sealed class SqliteOutcomeStore(
         await transaction.CommitAsync(ct);
 
         return new OutcomeWrite(outcome, link);
+    }
+
+    public async Task<OutcomeWrite> UnlinkAsync(
+        long correlation, string? team, OutcomeActor person, TriggerAudit audit_, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        if (await OutcomeLinks.CurrentAsync(connection, transaction, correlation, ct) is not { IsUnlink: false } current)
+        {
+            return OutcomeWrite.Refused(409, $"Workflow {correlation} serves no outcome; there is nothing to unlink.");
+        }
+
+        var link = await OutcomeLinks.WriteAsync(
+            connection, transaction, correlation, null, team, person.Id, person.Kind, OutcomeLinkHow.Person, ct);
+
+        // THE ROW SAYS WHAT IT LEFT: `from` the outcome the workflow served, `to: null`.
+        var from = await FindAsync(connection, transaction, current.OutcomeId!, ct);
+        await audit(connection, transaction, audit_ with
+        {
+            Subject = current.OutcomeId,
+            SubjectName = from?.Name ?? current.OutcomeNameAtLink,
+            Detail = JsonSerializer.Serialize(new { team, workflow = correlation, from = current.OutcomeId, to = (string?)null }),
+        }, ct);
+        await transaction.CommitAsync(ct);
+
+        return new OutcomeWrite(null, link);
     }
 
     public async Task<OutcomeWrite> EditAsync(
@@ -646,9 +674,12 @@ public sealed class SqliteOutcomeStore(
         $"An {taken.Status} outcome is already named \"{taken.Name}\" ({taken.Id}); names are unique among active and proposed outcomes.";
 
     private static string PersonsLink(long correlation, OutcomeLink current) =>
-        $"Workflow {correlation} is linked to \"{current.OutcomeNameAtLink}\" by a {current.How} "
-        + $"({current.SetBy}), which a person caused; only a person moves it. A Manager may link a workflow "
-        + "with no outcome, or move one an agent linked.";
+        current.IsUnlink
+            ? $"Workflow {correlation} was set to no outcome by a person ({current.SetBy}); only a person "
+              + "links it again. A Manager may link a workflow no one has linked, or move one an agent linked."
+            : $"Workflow {correlation} is linked to \"{current.OutcomeNameAtLink}\" by a {current.How} "
+              + $"({current.SetBy}), which a person caused; only a person moves it. A Manager may link a workflow "
+              + "with no outcome, or move one an agent linked.";
 
     private static OutcomeWrite Missing(string id) => OutcomeWrite.Refused(404, $"No outcome '{id}'.");
 

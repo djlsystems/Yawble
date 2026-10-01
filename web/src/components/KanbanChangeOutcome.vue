@@ -10,12 +10,18 @@ import { outcomeLabel } from '../api/outcomes';
  * person). The board refetches after, so the tag shown is the server's answer.
  *
  * `cardId` is the card, or '' for closed. The names are q-select labels: text, never HTML.
+ *
+ * "None" unlinks: the route appends a link row naming no outcome (`DELETE .../outcome`), so the
+ * workflow counts under No outcome and its history keeps what it served.
  */
 const props = defineProps<{ cardId: string }>();
 const emit = defineEmits<{ close: [] }>();
 
 const kanban = useKanbanStore();
 const $q = useQuasar();
+
+/** The "None" option's value: outcome ids are GUIDs, so it names none of them. */
+const NONE = 'none';
 
 const chosen = ref<string | null>(null);
 
@@ -28,14 +34,17 @@ const open = computed({
 
 const card = computed(() => kanban.board?.cards.find((entry) => entry.id === props.cardId) ?? null);
 
-const options = computed(() =>
-  kanban.outcomes.map((outcome) => ({ label: outcomeLabel(outcome), value: outcome.id })),
-);
+const current = computed(() => card.value?.outcome?.id ?? NONE);
+
+const options = computed(() => [
+  { label: 'None', value: NONE },
+  ...kanban.outcomes.map((outcome) => ({ label: outcomeLabel(outcome), value: outcome.id })),
+]);
 
 watch(
   () => props.cardId,
   (id) => {
-    chosen.value = card.value?.outcome?.id ?? null;
+    chosen.value = current.value;
     if (id) void kanban.loadOutcomes();
   },
   { immediate: true },
@@ -45,7 +54,7 @@ async function save() {
   if (!chosen.value || !props.cardId) return;
 
   try {
-    await kanban.changeOutcome(props.cardId, chosen.value);
+    await kanban.changeOutcome(props.cardId, chosen.value === NONE ? null : chosen.value);
     $q.notify({ type: 'positive', timeout: 3000, message: 'Outcome changed' });
     emit('close');
   } catch (cause) {
@@ -82,7 +91,7 @@ async function save() {
           color="primary"
           label="Change"
           data-action="save-outcome"
-          :disable="!chosen || chosen === card?.outcome?.id || kanban.busy"
+          :disable="!chosen || chosen === current || kanban.busy"
           @click="save"
         />
       </q-card-actions>

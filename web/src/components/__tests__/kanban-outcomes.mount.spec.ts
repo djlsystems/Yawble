@@ -66,7 +66,7 @@ beforeEach(() => {
         ? { lanes, cards: boardCards, filters: {} }
         : null;
 
-    if (init?.method === 'PUT') return new Response(null, { status: 204 });
+    if (init?.method === 'PUT' || init?.method === 'DELETE') return new Response(null, { status: 204 });
     if (answer === null) return new Promise<Response>(() => {});
 
     return new Response(JSON.stringify(answer), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -214,6 +214,41 @@ describe('Change outcome…', () => {
     const put = requests.find((r) => r.method === 'PUT')!;
     expect(put.url).toBe('/api/teams/beta/workflows/4000/outcome');
     expect(put.body).toEqual({ outcome: faster.id });
+  });
+
+  it('offers None, which sends the unlink route for the card\'s open workflow and no link', async () => {
+    const { board } = await mountBoard([
+      card({
+        id: '4045', team: 'beta', workflowSeq: 3900, workflows: [3900, 4000],
+        openWorkflow: { workflow: 4000, latestSeq: 4100 }, outcome: shipping,
+      }),
+    ]);
+
+    board.findComponent(KanbanCard).vm.$emit('change-outcome', '4045');
+    await flushPromises();
+
+    const select = board.findComponent(KanbanChangeOutcome).findComponent(QSelect);
+    const none = (select.props('options') as { label: string; value: string }[]).find((o) => o.label === 'None');
+    expect(none).toBeDefined();
+    select.vm.$emit('update:modelValue', none!.value);
+    await flushPromises();
+
+    ([...document.body.querySelectorAll('[data-action="save-outcome"]')][0] as HTMLButtonElement).click();
+    await flushPromises();
+
+    const writes = requests.filter((r) => r.method !== 'GET');
+    expect(writes).toEqual([{ url: '/api/teams/beta/workflows/4000/outcome', method: 'DELETE', body: null }]);
+  });
+
+  it('starts at None for a card with no outcome, with nothing to change', async () => {
+    const { board } = await mountBoard([card({ id: '4045', team: 'beta', workflowSeq: 3900 })]);
+
+    board.findComponent(KanbanCard).vm.$emit('change-outcome', '4045');
+    await flushPromises();
+
+    const select = board.findComponent(KanbanChangeOutcome).findComponent(QSelect);
+    expect(select.props('modelValue')).toBe('none');
+    expect(([...document.body.querySelectorAll('[data-action="save-outcome"]')][0] as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('is on the card menu', async () => {

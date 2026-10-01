@@ -61,17 +61,23 @@ public static class OutcomeStatus
 /// row, and moving a workflow is a new row. <see cref="OutcomeNameAtLink"/> and
 /// <see cref="TeamNameAtLink"/> are snapshots a rename or a merge never rewrites.
 /// </summary>
+/// <param name="OutcomeId">Null on an UNLINK (<c>outcome-004</c>): a person chose no outcome, and the
+/// workflow counts under No outcome while this is its newest row.</param>
 public sealed record OutcomeLink(
     long Id,
     long Correlation,
-    string OutcomeId,
+    string? OutcomeId,
     string? TeamId,
     string? TeamNameAtLink,
-    string OutcomeNameAtLink,
+    string? OutcomeNameAtLink,
     string SetBy,
     string SetByKind,
     DateTimeOffset SetAt,
-    string How);
+    string How)
+{
+    /// <summary>A person's "None": this row names no outcome.</summary>
+    public bool IsUnlink => OutcomeId is null;
+}
 
 /// <summary>How a link was made. Three are a person's cause; two are an agent's.</summary>
 public static class OutcomeLinkHow
@@ -203,6 +209,14 @@ public interface IOutcomeStore
         long correlation, string outcomeId, string? team, OutcomeActor actor, string how, bool agentRule,
         TriggerAudit audit, CancellationToken ct = default);
 
+    /// <summary>
+    /// A person's "None": appends a link row naming no outcome (an unlink, history kept), with its
+    /// <c>workflow.outcome-changed</c> row (<c>from</c> the outcome it served, <c>to: null</c>) in the
+    /// same transaction. Refused (409), and nothing written, when the workflow serves no outcome.
+    /// </summary>
+    Task<OutcomeWrite> UnlinkAsync(
+        long correlation, string? team, OutcomeActor person, TriggerAudit audit, CancellationToken ct = default);
+
     Task<OutcomeWrite> EditAsync(string id, OutcomeEdit edit, TriggerAudit renamed, TriggerAudit changed, CancellationToken ct = default);
 
     Task<OutcomeWrite> ConfirmAsync(string id, OutcomeActor person, TriggerAudit audit, CancellationToken ct = default);
@@ -216,7 +230,8 @@ public interface IOutcomeStore
     /// <summary>Rejects a proposed outcome that no link names: the row is removed.</summary>
     Task<OutcomeWrite> RejectAsync(string id, TriggerAudit audit, CancellationToken ct = default);
 
-    /// <summary>The newest link of <paramref name="correlation"/>, or null.</summary>
+    /// <summary>The newest link of <paramref name="correlation"/>, or null. An unlink is a link
+    /// (<see cref="OutcomeLink.IsUnlink"/>): the workflow serves no outcome.</summary>
     Task<OutcomeLink?> CurrentLinkAsync(long correlation, CancellationToken ct = default);
 
     /// <summary>
