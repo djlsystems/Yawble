@@ -1551,6 +1551,8 @@ builder.Services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(opt
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<AgentAuthProbe>();
+// THE LAUNCH CHECK: each preset's free invocation through the member runner's own launch (AgentLaunchChecks).
+builder.Services.AddSingleton<AgentLaunchChecks>();
 
 // THE PRE-FLIGHT: what each preset's CLI would load, listed by the CLI itself as the agent user,
 // once the Host is serving and again after every catalog save. Never on the start path.

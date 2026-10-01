@@ -9,10 +9,10 @@ public static class SurfaceEndpoints
 {
     public static void Map(WebApplication app, string dataRoot)
     {
-        app.MapGet("/api/wip", (WipLedger wip, TenantSettings settings) =>
+        app.MapGet("/api/wip", (WipLedger wip, TenantSettings settings, RunMemoryLimits memory) =>
             {
                 var view = wip.View();
-                return Results.Ok(new { view.Max, view.Running, view.Waiting, Limit = settings.RunLimit() });
+                return Results.Ok(new { view.Max, view.Running, view.Waiting, Limit = settings.RunLimit(), RunMemory = memory.Report() });
             })
             .RequirePermit(Permits.Read)
             .WithTags("Admission")
@@ -23,19 +23,30 @@ public static class SurfaceEndpoints
                 + "of max(1, CPUs - 1) and the container's memory limit / `wip.memoryPerRunMb` - with "
                 + "both bounds and a `reason` sentence. Each waiting hold carries the `reason` it waits for: "
                 + "\"waiting for a slot\", or \"waiting for memory: ...\" while measured headroom holds it "
-                + "(`admission.memoryPercent`, `admission.memoryPressurePercent`).");
+                + "(`admission.memoryPercent`, `admission.memoryPressurePercent`).\n\n"
+                + "`runMemory` is what the Host applies to each run's own memory, from the decision it logged at "
+                + "start: `mechanism` `cgroup` (a child cgroup per run), `rlimit` (RLIMIT_DATA on each process) or "
+                + "`none`; `perRunMb` the figure the next run is held to, null when nothing is enforced; `detail` "
+                + "the Host's sentence. Read, never estimated.");
 
         app.MapGet("/api/agents/auth", async (
-                AgentAuthProbe probe, ITeamStore teams, CancellationToken ct) =>
-                Results.Ok(AgentAuthReport.MarkReferenced(
-                    await probe.ReportsAsync(ct), await AgentReferences.OfAsync(teams, ct))))
+                AgentAuthProbe probe, AgentLaunchChecks launches, ITeamStore teams, CancellationToken ct) =>
+                Results.Ok(AgentLaunchChecks.Attach(
+                    AgentAuthReport.MarkReferenced(await probe.ReportsAsync(ct), await AgentReferences.OfAsync(teams, ct)),
+                    await launches.ReportsAsync(ct))))
             .RequirePermit(Permits.Read)
             .WithTags("Agents")
             .WithSummary("Whether each agent CLI is installed and authenticated")
             .WithDescription(
                 "One report per preset. `referenced` is true when a team's member, a team's hiring "
                 + "allowlist or the Concierge uses the preset; a warning about sign-in belongs only "
-                + "on those.");
+                + "on those.\n\n"
+                + "`launch` says whether the preset's CLI STARTS THE WAY A MEMBER RUN STARTS IT: its declared free "
+                + "invocation (`launchCheck`, a version flag) run through a member's own launch - the agent user, "
+                + "the run's memory limit, the preset's isolation environment and update-off. `result` is `ok`, "
+                + "`failed` (with `exitCode` and the redacted `stderrTail`) or `not checked` (no free invocation "
+                + "declared, an interactive preset, a CLI not installed or being updated); `detail` says which. "
+                + "No prompt is sent and nothing is spent. Cached for 30 seconds.");
 
         app.MapGet("/api/agents/tools", (AgentToolPreflight preflight) =>
                 Results.Ok(new

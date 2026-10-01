@@ -143,6 +143,28 @@ public sealed partial class RunMemoryLimits
         return Mechanism == RunMemoryMechanism.Rlimit && !limit.Set ? Unset() : _ceiling();
     }
 
+    /// <summary>
+    /// WHAT THE NEXT RUN GETS, as <c>GET /api/wip</c> states it in <c>runMemory</c>: the mechanism
+    /// and the figure <see cref="Prefix"/> and <see cref="BeginRun"/> apply, read from <see cref="Limit"/>
+    /// as a launch reads it, never worked out again elsewhere. <c>none</c> with no figure whenever
+    /// nothing is applied - no mechanism, or a mechanism with no limit (under rlimit, nobody set one).
+    /// </summary>
+    public RunMemoryReport Report()
+    {
+        var limit = Limit();
+        if (Mechanism == RunMemoryMechanism.None || limit.Mb is not { } mb)
+        {
+            return new RunMemoryReport(RunMemoryReport.None, null,
+                NotEnforced ? NotEnforcedLine
+                : Mechanism == RunMemoryMechanism.None ? LogLine
+                : $"{LogPrefix}: not enforced per run - {limit.Source}");
+        }
+
+        return new RunMemoryReport(
+            Mechanism == RunMemoryMechanism.Cgroup ? RunMemoryReport.Cgroup : RunMemoryReport.Rlimit, mb,
+            $"{LogLine} (each run now: {mb} MB, as {limit.Source})");
+    }
+
     private static RunMemoryLimit Unset() => new(null,
         $"{TenantSettings.RunsMemoryLimitMbName} is not set and the cgroup is not writable, so no per-run limit is "
         + "applied; admission by measured memory guards the container");
@@ -386,6 +408,18 @@ public sealed partial class RunMemoryLimits
     /// </summary>
     [GeneratedRegex(@"cannot allocate memory|out of memory|memory exhausted|allocation failed", RegexOptions.IgnoreCase)]
     private static partial Regex OutOfMemoryWords();
+}
+
+/// <summary>
+/// <c>GET /api/wip</c>'s <c>runMemory</c>: <see cref="Mechanism"/> is <c>cgroup</c>, <c>rlimit</c> or
+/// <c>none</c>; <see cref="PerRunMb"/> the megabytes each run is held to, null when nothing is enforced;
+/// <see cref="Detail"/> the Host's own sentence. See <see cref="RunMemoryLimits.Report"/>.
+/// </summary>
+public sealed record RunMemoryReport(string Mechanism, long? PerRunMb, string Detail)
+{
+    public const string Cgroup = "cgroup";
+    public const string Rlimit = "rlimit";
+    public const string None = "none";
 }
 
 /// <summary>What the Host's own cgroup offers: the directory when runs can get a child there, and why or why not.</summary>

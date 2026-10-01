@@ -175,7 +175,16 @@ public sealed record AgentDefinition(
         + "is exactly `{workspaceDashed}` or `{workspaceEncoded}` (see `liveView`). Read from the "
         + "built-in presets only: a custom preset's are never acted on. Null when the CLI keys "
         + "nothing by workspace.")]
-    IReadOnlyList<string>? SessionFolders = null)
+    IReadOnlyList<string>? SessionFolders = null,
+
+    [property: Description(
+        "The arguments of a FREE invocation of this CLI - its version flag, or anything that starts "
+        + "it, sends no prompt and spends nothing - which the launch check runs through a member's "
+        + "own launch (the agent user, the run's memory limit, the preset's isolation environment and "
+        + "update-off) to show the CLI can start the way a member starts it. Passed exactly as "
+        + "written, with no token substituted. Null means the preset declares none, and its launch "
+        + "reads `not checked`, never `ok`.")]
+    IReadOnlyList<string>? LaunchCheck = null)
 {
     /// <summary>Whether this preset is compiled into the build. Computed from the name, never
     /// stored: a file cannot make a custom preset built-in, or a built-in custom.</summary>
