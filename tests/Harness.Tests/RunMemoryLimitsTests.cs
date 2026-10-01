@@ -188,6 +188,38 @@ public sealed class RunMemoryLimitsTests : IDisposable
     }
 
     /// <summary>
+    /// A crash where no limit was applied names none: neither the computed figure the Host had in
+    /// hand with no prlimit at all, nor anything under rlimit with runs.memoryLimitMb unset.
+    /// </summary>
+    [Fact]
+    public async Task A_crash_with_no_limit_applied_names_no_memory_limit_and_no_setting()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Signals are POSIX.");
+        const string script = "#!/bin/sh\ncat >/dev/null\necho 'runtime refused to start' >&2\nkill -ABRT $$\n";
+
+        var none = RunMemoryLimits.Decide(new CgroupFacts(null, "the test's cgroup is not used"), null, () => Computed);
+        Assert.Equal(RunMemoryMechanism.None, none.Mechanism);
+        var unapplied = await RunAsync(none, script);
+        Assert.Equal(FailureClasses.Crashed, unapplied.FailureClass);
+        Assert.Contains("runtime refused to start", unapplied.LaunchError);
+        Assert.DoesNotContain("memory limit", unapplied.LaunchError);
+        Assert.DoesNotContain("runs.memoryLimitMb", unapplied.LaunchError);
+        Assert.DoesNotContain("1792", unapplied.LaunchError);
+
+        Assert.DoesNotContain("memory limit", AgentCrash.Sentence(134, "x", Computed, RunMemoryMechanism.None));
+
+        if (SystemCommand.Find("prlimit") is { } prlimit && OperatingSystem.IsLinux())
+        {
+            var rlimit = RunMemoryLimits.Decide(new CgroupFacts(null, "the test's cgroup is not used"), prlimit, () => Computed);
+            var unset = await RunAsync(rlimit, script);
+            Assert.Equal(FailureClasses.Crashed, unset.FailureClass);
+            Assert.Contains("runtime refused to start", unset.LaunchError);
+            Assert.DoesNotContain("memory limit", unset.LaunchError);
+            Assert.DoesNotContain("runs.memoryLimitMb", unset.LaunchError);
+        }
+    }
+
+    /// <summary>
     /// A non-zero exit with nothing on stdout is a crash too; one that answered on stdout is left to
     /// the classifier as before.
     /// </summary>

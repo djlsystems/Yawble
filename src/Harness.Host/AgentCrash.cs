@@ -46,7 +46,8 @@ public static class AgentCrash
 
     /// <summary>
     /// The run's error: how it ended, the last lines of its stderr, and - when the run had a memory
-    /// limit - that limit in MB, how it was applied, and the setting that moves it.
+    /// limit - that limit in MB, how it was applied, and the setting that moves it. With
+    /// <see cref="RunMemoryMechanism.None"/> nothing was applied, so a figure in hand is not named.
     /// </summary>
     public static string Sentence(int exitCode, string? stderr, RunMemoryLimit? limit, RunMemoryMechanism mechanism)
     {
@@ -59,7 +60,7 @@ public static class AgentCrash
             ? " It wrote nothing to stderr."
             : $" The last of what it wrote to stderr:\n{tail}\n";
 
-        var memory = limit?.Mb is { } mb
+        var memory = mechanism != RunMemoryMechanism.None && limit?.Mb is { } mb
             ? $" This run had a memory limit of {mb} MB "
               + (mechanism == RunMemoryMechanism.Cgroup ? "for the whole run" : "on each of its processes")
               + $" ({limit.Source}); a program that cannot start or work inside it can end like this. If that is the "
