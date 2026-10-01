@@ -110,14 +110,15 @@ func TestTheArchiveIsReadableWithTar(t *testing.T) {
 	list.Dir = filepath.Dir(path)
 	// The listing and tar's warnings kept apart, and both named in every failure with which tar
 	// answered: on Windows it is System32's bsdtar or Git's GNU tar, whichever PATH finds first.
-	// Once seen failing there 1 in 4 with only the listing's last line (data/bin/tool) recorded.
 	var stderr bytes.Buffer
 	list.Stderr = &stderr
 	out, err := list.Output()
 	if err != nil {
 		t.Fatalf("%s -tzf: %v\nstdout:\n%s\nstderr:\n%s", tarPath, err, out, stderr.Bytes())
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	// Windows' bsdtar ends each listed line with CRLF, so without this the first line is
+	// "manifest.json\r"; Git's GNU tar ends them with LF.
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(string(out)), "\r\n", "\n"), "\n")
 	if len(lines) < 2 || lines[0] != "manifest.json" || lines[1] != "data/" || !strings.Contains(string(out), "data/teams/alpha/doc.md") {
 		t.Errorf("%s -tzf:\nstdout:\n%s\nstderr:\n%s", tarPath, out, stderr.Bytes())
 	}
