@@ -179,7 +179,7 @@ public sealed partial class RunMemoryLimits
                 return new CgroupFacts(null, $"the memory controller is not delegated to the Host's cgroup {directory}");
             }
 
-            var probe = Path.Combine(directory, "yawble-probe-" + Guid.NewGuid().ToString("N")[..8]);
+            var probe = Path.Combine(directory, "run-memory-probe-" + Guid.NewGuid().ToString("N")[..8]);
             try
             {
                 Directory.CreateDirectory(probe);
