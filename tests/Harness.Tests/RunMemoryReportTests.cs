@@ -136,8 +136,8 @@ public sealed class RunMemoryReportTests
             // after the setting changed, without working either out itself.
             using var doctor = JsonDocument.Parse(HostDoctor.ToJson(await HostDoctor.ReportAsync(dataRoot, ct)));
             var wip = doctor.RootElement.GetProperty("wip");
-            Assert.Equal(view.RootElement.GetProperty("limit").GetRawText(), wip.GetProperty("limit").GetRawText());
-            Assert.Equal(runMemory.GetRawText(), wip.GetProperty("runMemory").GetRawText());
+            Assert.True(JsonElement.DeepEquals(view.RootElement.GetProperty("limit"), wip.GetProperty("limit")));
+            Assert.True(JsonElement.DeepEquals(runMemory, wip.GetProperty("runMemory")));
             return runMemory;
         }
         finally
