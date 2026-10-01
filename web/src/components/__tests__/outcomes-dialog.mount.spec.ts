@@ -75,6 +75,8 @@ const proposal = outcome('o-2', '<b>Faster</b> triage', 'proposed', {
 });
 const retired = outcome('o-3', 'Old goal', 'retired');
 const merged = outcome('o-4', 'Duplicate goal', 'merged', { mergedInto: 'o-1' });
+/** A second live merge target, so a pick can change while the first pick's preview is in flight. */
+const secondTarget = outcome('o-5', 'Second target', 'active');
 
 function listing(over: Partial<OutcomeList> = {}): OutcomeList {
   return {
@@ -107,6 +109,7 @@ function detailOf(o: Outcome, links = 1): OutcomeDetail {
             elapsedSeconds: 3600,
             agentSeconds: 5400,
             billableTokens: 20_000,
+            measuredRuns: 3,
             unmeasuredRuns: 1,
             how: 'dispatch',
             setBy: 'ada@example.com',
@@ -265,6 +268,47 @@ describe('Manage Outcomes: tabs and figures', () => {
     expect(rows.at(-1)?.hasAttribute('data-no-outcome-row')).toBe(true);
   });
 
+  it('shows three teams then "+27 more" on one line, with all 30 in the tooltip, deleted ones marked', async () => {
+    const teams = Array.from({ length: 30 }, (_, i) => ({
+      id: `t-${i + 1}`,
+      name: `Team ${i + 1}`,
+      deleted: i % 2 === 1,
+    }));
+    api.listOutcomes.mockResolvedValue(
+      listing({ noOutcome: { name: 'No outcome', figures: figures({ teams }) } }),
+    );
+    await open();
+
+    const cell = bodyFind('[data-no-outcome-row] [data-outcome-teams]') as HTMLElement;
+    expect(cell.textContent?.trim()).toBe('Team 1, Team 2 (deleted), Team 3 +27 more');
+    expect(cell.querySelector('.outcome-teams')).not.toBeNull();
+
+    const tooltip = cell.getAttribute('title')!.split(', ');
+    expect(tooltip).toHaveLength(30);
+    expect(tooltip).toEqual(teams.map((t) => (t.deleted ? `${t.name} (deleted)` : t.name)));
+  });
+
+  it('shows three or fewer teams in full, with no "+N more"', async () => {
+    const three = [
+      { id: 'alpha', name: 'Alpha', deleted: false },
+      { id: 'beta', name: 'Beta', deleted: false },
+      { id: 'gone', name: 'Old crew', deleted: true },
+    ];
+    api.listOutcomes.mockResolvedValue(
+      listing({ outcomes: [outcome('o-1', 'Current job pipeline', 'active', { figures: figures({ teams: three }) })] }),
+    );
+    await open();
+
+    const cell = bodyFind('[data-outcome-row="o-1"] [data-outcome-teams]') as HTMLElement;
+    expect(cell.textContent?.trim()).toBe('Alpha, Beta, Old crew (deleted)');
+    expect(cell.textContent).not.toContain('more');
+    expect(cell.getAttribute('title')).toBe('Alpha, Beta, Old crew (deleted)');
+
+    const none = bodyFind('[data-no-outcome-row] [data-outcome-teams]') as HTMLElement;
+    expect(none.textContent?.trim()).toBe('Beta');
+    expect(none.textContent).not.toContain('more');
+  });
+
   it('says "Accounting since" when the period reaches before the ledger began, and not after it', async () => {
     const wrapper = await open();
     const note = bodyFind('[data-accounting-since]')?.textContent ?? '';
@@ -290,6 +334,38 @@ describe('Manage Outcomes: an outcome opened', () => {
     expect(bodyFind('[data-outcome-workflow="4100"]')?.textContent).toContain('Alpha');
     expect(bodyFind('[data-outcome-workflow="4100"]')?.textContent).toContain('+ 1 unmeasured run');
     expect(bodyFind('[data-outcome-history]')?.textContent).toContain('Workflow 4100 (Alpha) linked');
+  });
+
+  it('reads a workflow\'s tokens from the route\'s counts: a measured 0 with one unmeasured run is "0 + 1 unmeasured run"', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => {
+      const detail = detailOf(listing().outcomes.find((o) => o.id === id)!);
+      detail.workflows = [
+        { ...detail.workflows[0]!, correlation: 4100, billableTokens: 0, measuredRuns: 1, unmeasuredRuns: 1 },
+        { ...detail.workflows[0]!, correlation: 4200, billableTokens: 0, measuredRuns: 0, unmeasuredRuns: 2 },
+      ];
+      return detail;
+    });
+    await open({ outcome: 'o-1' });
+
+    const tokens = (correlation: number) =>
+      (bodyFind(`[data-outcome-workflow="${correlation}"] [data-outcome-tokens]`)?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    expect(tokens(4100)).toBe('0 + 1 unmeasured run');
+    expect(tokens(4200)).toBe('not measured + 2 unmeasured runs');
+  });
+
+  it('shows a person\'s None in the history as the workflow set to no outcome', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => {
+      const detail = detailOf(listing().outcomes.find((o) => o.id === id)!);
+      detail.history.push({
+        ...detail.history[0]!, id: 2, outcomeId: null, isUnlink: true, outcomeNameAtLink: null,
+        how: 'person', setBy: 'grace@example.com', setAt: '2026-09-21T09:00:00Z',
+      });
+      return detail;
+    });
+    await open({ outcome: 'o-1' });
+
+    const lines = [...document.body.querySelectorAll('[data-outcome-history] li')].map((li) => li.textContent ?? '');
+    expect(lines.find((l) => l.includes('Workflow 4100 (Alpha) set to no outcome'))).toContain('by grace@example.com');
   });
 
   it('lists renames and status changes from the route, each with who and when', async () => {
@@ -398,6 +474,42 @@ describe('Manage Outcomes: an outcome opened', () => {
 
     await click('[data-outcome-merge-confirm]');
     expect(api.mergeOutcome).toHaveBeenCalledWith('o-2', 'o-1');
+  });
+
+  it('shows and merges into the newer pick when the earlier pick\'s preview answers last', async () => {
+    api.listOutcomes.mockResolvedValue(listing({ outcomes: [pipeline, proposal, retired, merged, secondTarget] }));
+    const previewOf = (into: Outcome, links: number) => ({
+      preview: true,
+      from: { id: 'o-2', name: proposal.name, status: 'proposed' },
+      into: { id: into.id, name: into.name, status: into.status },
+      refusal: null,
+      moves: { links, figures: figures({ workflows: { open: 0, completed: links, closed: 0, total: links } }) },
+    });
+    // X's preview is held until the test releases it; Y's answers at once.
+    let releaseX!: (answer: unknown) => void;
+    api.previewMerge.mockImplementation((_from: string, into: string) =>
+      into === 'o-1' ? new Promise((resolve) => (releaseX = resolve)) : Promise.resolve(previewOf(secondTarget, 2)),
+    );
+    const wrapper = await open({ outcome: 'o-2' });
+    await click('[data-outcome-action="merge"]');
+
+    await choose(wrapper, 'Outcome', 'Current job pipeline');
+    expect(bodyFind('[data-outcome-merge-preview]')).toBeNull();
+    await choose(wrapper, 'Outcome', 'Second target');
+    expect(bodyFind('[data-outcome-merge-preview]')?.textContent).toContain('move to Second target.');
+
+    releaseX(previewOf(pipeline, 7));
+    await settle();
+
+    expect(api.previewMerge.mock.calls).toEqual([['o-2', 'o-1'], ['o-2', 'o-5']]);
+    const shown = bodyFind('[data-outcome-merge-preview]')?.textContent ?? '';
+    expect(shown).toContain('2 workflows');
+    expect(shown).toContain('move to Second target.');
+    expect(shown).not.toContain('Current job pipeline');
+
+    await click('[data-outcome-merge-confirm]');
+    expect(api.mergeOutcome).toHaveBeenCalledTimes(1);
+    expect(api.mergeOutcome).toHaveBeenCalledWith('o-2', 'o-5');
   });
 
   it('moves a workflow to another outcome through the link route', async () => {

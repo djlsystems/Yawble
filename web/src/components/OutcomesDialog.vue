@@ -29,10 +29,12 @@ import {
   duration,
   elapsedText,
   firstLine,
+  lineTokensFigure,
   matchesFilter,
   mergePreviewText,
   periodRange,
   reachesBeforeLedger,
+  teamsCellText,
   teamsText,
   tokensFigure,
   unmeasuredText,
@@ -376,10 +378,11 @@ const history = computed<HistoryLine[]>(() => {
   }
   for (const link of d.history) {
     const team = link.teamNameAtLink ?? link.teamId ?? 'no team';
+    const what = link.outcomeId === null ? 'set to no outcome' : `linked to "${link.outcomeNameAtLink}"`;
     lines.push({
       key: `link-${link.id}`,
       at: link.setAt,
-      text: `Workflow ${link.correlation} (${team}) linked to "${link.outcomeNameAtLink}" by ${link.setBy} (${LinkHowLabel[link.how] ?? link.how})`,
+      text: `Workflow ${link.correlation} (${team}) ${what} by ${link.setBy} (${LinkHowLabel[link.how] ?? link.how})`,
     });
   }
   return lines.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
@@ -495,8 +498,8 @@ function tokensCell(figures: OutcomeFigures) {
               <td class="text-left">{{ when(line.startedAt) }}</td>
               <td class="text-right">{{ line.elapsedSeconds === null ? '—' : duration(line.elapsedSeconds) }}</td>
               <td class="text-right">{{ duration(line.agentSeconds) }}</td>
-              <td class="text-right">
-                {{ line.billableTokens === 0 && line.unmeasuredRuns > 0 ? 'not measured' : line.billableTokens.toLocaleString() }}
+              <td class="text-right" data-outcome-tokens>
+                {{ lineTokensFigure(line) }}
                 <div v-if="line.unmeasuredRuns > 0" class="text-caption os-text-muted">{{ unmeasuredText(line.unmeasuredRuns) }}</div>
               </td>
               <td class="text-left">
@@ -608,7 +611,9 @@ function tokensCell(figures: OutcomeFigures) {
                   <div class="text-caption os-text-muted">{{ firstLine(o.description) }}</div>
                   <div v-if="o.status === 'merged'" class="text-caption os-text-muted">merged into {{ outcomeName(o.mergedInto) }}</div>
                 </td>
-                <td class="text-left">{{ teamsText(o.figures.teams) }}</td>
+                <td class="text-left" :title="teamsText(o.figures.teams)" data-outcome-teams>
+                  <div class="outcome-teams">{{ teamsCellText(o.figures.teams) }}</div>
+                </td>
                 <td class="text-left">{{ workflowsText(o.figures.workflows) }}</td>
                 <td class="text-right">{{ duration(o.figures.agentSeconds) }}</td>
                 <td class="text-right">{{ duration(o.figures.waitingSeconds) }}</td>
@@ -627,7 +632,9 @@ function tokensCell(figures: OutcomeFigures) {
               <!-- ALWAYS SHOWN, closing Active: the work no outcome names, with the same figures. -->
               <tr v-if="tab === 'active' && list" class="outcome-row--none" data-no-outcome-row>
                 <td class="text-left text-italic">{{ list.noOutcome.name }}</td>
-                <td class="text-left">{{ teamsText(list.noOutcome.figures.teams) }}</td>
+                <td class="text-left" :title="teamsText(list.noOutcome.figures.teams)" data-outcome-teams>
+                  <div class="outcome-teams">{{ teamsCellText(list.noOutcome.figures.teams) }}</div>
+                </td>
                 <td class="text-left">{{ workflowsText(list.noOutcome.figures.workflows) }}</td>
                 <td class="text-right">{{ duration(list.noOutcome.figures.agentSeconds) }}</td>
                 <td class="text-right">{{ duration(list.noOutcome.figures.waitingSeconds) }}</td>
@@ -767,6 +774,14 @@ function tokensCell(figures: OutcomeFigures) {
 /* A proposal is not yet a person's: dashed, as the card tag draws it. */
 .outcome-row--proposed td:first-child {
   border-left: 2px dashed var(--os-rule);
+}
+
+/* ONE LINE, so the figure columns stay on-screen: the full list is the cell's tooltip. */
+.outcome-teams {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .outcome-row--none {

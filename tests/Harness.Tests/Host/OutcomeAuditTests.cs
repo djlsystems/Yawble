@@ -111,6 +111,31 @@ public sealed class OutcomeAuditTests : IAsyncLifetime
         Assert.Equal(0, await RowsSayingAsync("never told"));
     }
 
+    [Fact]
+    public async Task A_persons_none_is_refused_and_unlinks_nothing_when_its_tenant_row_cannot_be_written()
+    {
+        var person = _factory.CreateClient();
+        (await person.PostAsJsonAsync("/api/auth/login", new { email = Email, password = HostFixture.Password }, Ct)).EnsureSuccessStatusCode();
+
+        var outcome = (await (await person.PostAsJsonAsync("/api/outcomes", new { name = "Served" }, Ct))
+            .Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetString()!;
+        var told = await person.PostAsJsonAsync($"/api/teams/{_team}/containers/Manager/tell", new { instruction = "look", outcome }, Ct);
+        var workflow = (await told.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("correlationId").GetInt64();
+        var linked = (await Outcomes.CurrentLinkAsync(workflow, Ct))!;
+
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false"))
+        {
+            await connection.OpenAsync(Ct);
+            await using var drop = connection.CreateCommand();
+            drop.CommandText = "DROP TABLE tenant_events";
+            await drop.ExecuteNonQueryAsync(Ct);
+        }
+
+        var refused = await person.DeleteAsync($"/api/teams/{_team}/workflows/{workflow}/outcome", Ct);
+        Assert.False(refused.IsSuccessStatusCode, "The unlink succeeded without its tenant row.");
+        Assert.Equal(linked, await Outcomes.CurrentLinkAsync(workflow, Ct));
+    }
+
     private async Task<long> RowsSayingAsync(string text)
     {
         await using var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false");

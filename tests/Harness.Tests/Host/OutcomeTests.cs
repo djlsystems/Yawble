@@ -55,7 +55,7 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
     }
 
     /// <summary>The tools as <paramref name="id"/> holding <paramref name="permits"/> calls them.</summary>
-    private PlatformMcpTools Tools(string id, PrincipalKind kind, string team, IReadOnlySet<string> permits, string? owner = null)
+    private PlatformMcpTools Tools(string id, PrincipalKind kind, string? team, IReadOnlySet<string> permits, string? owner = null)
     {
         var key = host.Services.GetRequiredService<IPrincipalStore>()
             .MintAsync(id, kind, team, permits, ownerUserId: owner, ct: Ct).GetAwaiter().GetResult();
@@ -524,7 +524,7 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
 
         var workflow = await WorkflowAsync(person, host.Alpha);
         await tools.Outcome("propose", name: Unique("Linked proposal"), causation: workflow.ToString(), cancellationToken: Ct);
-        var linked = (await Outcomes.CurrentLinkAsync(workflow, Ct))!.OutcomeId;
+        var linked = (await Outcomes.CurrentLinkAsync(workflow, Ct))!.OutcomeId!;
 
         var refused = await person.DeleteAsync($"/api/outcomes/{linked}", Ct);
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
@@ -617,6 +617,140 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Equal(1, none.GetProperty("figures").GetProperty("workflows").GetProperty("total").GetInt32());
         Assert.Equal(3, none.GetProperty("figures").GetProperty("tokens").GetProperty("billable").GetInt64());
         Assert.True(list.TryGetProperty("ledgerStartedAt", out _));
+    }
+
+    [Fact]
+    public async Task A_workflow_line_carries_its_measured_runs_so_a_measured_zero_with_an_unmeasured_run_is_a_zero()
+    {
+        var person = await host.PersonAsync();
+        var outcome = await CreateAsync(person, Unique("Measured lines"));
+
+        // ONE MEASURED RUN THAT BILLED 0 AND ONE UNMEASURED: the line's tokens are a measured 0, not
+        // "not measured" - which the client can tell only from the route's `measuredRuns`.
+        var zero = NextCorrelation();
+        await LinkAsync(zero, outcome.Id, host.Alpha);
+        await RunAsync(zero, host.Alpha, "Alpha", At(0), At(10), billable: 0);
+        await RunAsync(zero, host.Alpha, "Alpha", At(20), At(30), billable: null);
+
+        // ONLY UNMEASURED: no measured run at all.
+        var never = NextCorrelation();
+        await LinkAsync(never, outcome.Id, host.Alpha);
+        await RunAsync(never, host.Alpha, "Alpha", At(0), At(10), billable: null);
+
+        var detail = await JsonAsync(await person.GetAsync($"/api/outcomes/{outcome.Id}", Ct));
+        var lines = detail.GetProperty("workflows").EnumerateArray()
+            .ToDictionary(l => l.GetProperty("correlation").GetInt64());
+
+        Assert.Equal((0L, 1, 1), Tokens(lines[zero]));
+        Assert.Equal((0L, 0, 1), Tokens(lines[never]));
+
+        static (long, int, int) Tokens(JsonElement line) => (
+            line.GetProperty("billableTokens").GetInt64(),
+            line.GetProperty("measuredRuns").GetInt32(),
+            line.GetProperty("unmeasuredRuns").GetInt32());
+    }
+
+    // ---- None: a person's unlink ----
+
+    [Fact]
+    public async Task None_appends_an_unlink_with_its_tenant_row_and_the_workflow_counts_under_no_outcome_with_the_unlink_in_history()
+    {
+        var person = await host.PersonAsync();
+        var outcome = await CreateAsync(person, Unique("Linked by mistake"));
+        var workflow = await WorkflowAsync(person, host.Alpha, outcome.Id);
+
+        var listBefore = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
+        Assert.Equal(1, OutcomeTotal(listBefore, outcome.Id));
+        Assert.DoesNotContain(workflow, await NoOutcomeWorkflowsAsync());
+
+        var unlinked = await person.DeleteAsync($"/api/teams/{host.Alpha}/workflows/{workflow}/outcome", Ct);
+        Assert.Equal(HttpStatusCode.OK, unlinked.StatusCode);
+        var row = await JsonAsync(unlinked);
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("outcomeId").ValueKind);
+        Assert.True(row.GetProperty("isUnlink").GetBoolean());
+        Assert.Equal((OutcomeLinkHow.Person, Email), (row.GetProperty("how").GetString(), row.GetProperty("setBy").GetString()));
+
+        // APPENDED, NOT DELETED: the link it replaces is still there, and the newest names no outcome.
+        var links = (await Outcomes.ReadLinksAsync(Ct)).Where(l => l.Correlation == workflow).ToList();
+        Assert.Equal([outcome.Id, null], links.Select(l => l.OutcomeId));
+        Assert.True((await Outcomes.CurrentLinkAsync(workflow, Ct))!.IsUnlink);
+
+        // ITS TENANT ROW: `workflow.outcome-changed`, from the outcome it served, to null, by the person.
+        var changed = (await host.Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.WorkflowOutcomeChanged, outcome.Id, Ct))!;
+        Assert.Equal(Email, changed.ActorEmail);
+        var detail = JsonDocument.Parse(changed.Detail!).RootElement;
+        Assert.Equal(outcome.Id, detail.GetProperty("from").GetString());
+        Assert.Equal(JsonValueKind.Null, detail.GetProperty("to").ValueKind);
+        Assert.Equal(workflow, detail.GetProperty("workflow").GetInt64());
+
+        // IT COUNTS UNDER NO OUTCOME, not under the outcome it left, and the board's card carries none.
+        // Its own membership, never the tenant's No-outcome total: other tests' workflows land there too.
+        var listAfter = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
+        Assert.Equal(0, OutcomeTotal(listAfter, outcome.Id));
+        Assert.Contains(workflow, await NoOutcomeWorkflowsAsync());
+        var none = await JsonAsync(await person.GetAsync($"/api/kanban/board?team={host.Alpha}&outcome=none", Ct));
+        Assert.Contains(workflow, none.GetProperty("cards").EnumerateArray().Select(c => c.GetProperty("workflowSeq").GetInt64()));
+
+        // ITS HISTORY SHOWS THE UNLINK, after the link it ended; the workflow is no longer listed.
+        var shown = await JsonAsync(await person.GetAsync($"/api/outcomes/{outcome.Id}", Ct));
+        var history = shown.GetProperty("history").EnumerateArray().Where(l => l.GetProperty("correlation").GetInt64() == workflow).ToList();
+        Assert.Equal([false, true], history.Select(l => l.GetProperty("isUnlink").GetBoolean()));
+        Assert.DoesNotContain(workflow, shown.GetProperty("workflows").EnumerateArray().Select(l => l.GetProperty("correlation").GetInt64()));
+
+        // A SECOND NONE has nothing to unlink, and writes nothing.
+        var again = await person.DeleteAsync($"/api/teams/{host.Alpha}/workflows/{workflow}/outcome", Ct);
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal(2, (await Outcomes.ReadLinksAsync(Ct)).Count(l => l.Correlation == workflow));
+
+        // A PERSON'S NONE IS THE PERSON'S: a Manager may not link it again over them, and only a person unlinks.
+        Assert.StartsWith("Refused:", await ManagerTools(host.Alpha).Outcome("set", outcome: outcome.Id, causation: workflow.ToString(), cancellationToken: Ct), StringComparison.Ordinal);
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, "Manager").ToString(), PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+        using var machine = host.Container(key);
+        Assert.Equal(HttpStatusCode.Forbidden, (await machine.DeleteAsync($"/api/teams/{host.Alpha}/workflows/{workflow}/outcome", Ct)).StatusCode);
+
+        // A person links it again as before.
+        var relinked = await person.PutAsJsonAsync($"/api/teams/{host.Alpha}/workflows/{workflow}/outcome", new { outcome = outcome.Id }, Ct);
+        Assert.Equal(HttpStatusCode.OK, relinked.StatusCode);
+        Assert.Equal(outcome.Id, (await Outcomes.CurrentLinkAsync(workflow, Ct))!.OutcomeId);
+
+        static int OutcomeTotal(JsonElement list, string id) => list.GetProperty("outcomes").EnumerateArray()
+            .Single(o => o.GetProperty("id").GetString() == id)
+            .GetProperty("figures").GetProperty("workflows").GetProperty("total").GetInt32();
+
+        // The workflows the list's `noOutcome` figures are computed over.
+        async Task<List<long>> NoOutcomeWorkflowsAsync() =>
+            OutcomeFigures.Open(await Outcomes.ReadLedgerAsync(null, null, Ct), await Outcomes.ListAsync(Ct), null, null)
+                .WorkflowsOf(null).ToList();
+    }
+
+    [Fact]
+    public async Task A_teams_list_after_a_None_answers_and_does_not_count_the_unlinked_workflow_under_the_outcome_it_left()
+    {
+        var person = await host.PersonAsync();
+        var outcome = await CreateAsync(person, Unique("Left by None"));
+        await WorkflowAsync(person, host.Alpha, outcome.Id);
+        var unlinked = await WorkflowAsync(person, host.Alpha, outcome.Id);
+        Assert.Equal(2, TeamWorkflows(await TeamListAsync(), outcome.Id));
+
+        Assert.Equal(HttpStatusCode.OK, (await person.DeleteAsync($"/api/teams/{host.Alpha}/workflows/{unlinked}/outcome", Ct)).StatusCode);
+
+        // THE TEAM'S LIST STILL ANSWERS: the unlinked workflow is counted under no outcome of the team's.
+        var list = await TeamListAsync();
+        Assert.Equal(1, TeamWorkflows(list, outcome.Id));
+        Assert.Equal(1, list.GetProperty("outcomes").EnumerateArray()
+            .Single(o => o.GetProperty("id").GetString() == outcome.Id)
+            .GetProperty("figures").GetProperty("workflows").GetProperty("total").GetInt32());
+
+        async Task<JsonElement> TeamListAsync()
+        {
+            var response = await person.GetAsync($"/api/outcomes?team={host.Alpha}", Ct);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return await JsonAsync(response);
+        }
+
+        static int TeamWorkflows(JsonElement list, string id) => list.GetProperty("outcomes").EnumerateArray()
+            .Single(o => o.GetProperty("id").GetString() == id).GetProperty("teamWorkflows").GetInt32();
     }
 
     // ---- permissions ----
@@ -834,6 +968,49 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         var unlinked = await WorkflowAsync(person, host.Alpha);
         var found = await Outcomes.CurrentOutcomesAsync([older, newer, unlinked], Ct);
         Assert.Equal((first.Id, second.Id, false), (found[older].Id, found[newer].Id, found.ContainsKey(unlinked)));
+    }
+
+    [Fact]
+    public async Task The_kanban_tools_outcome_argument_narrows_a_teams_and_the_tenants_board_and_its_filter_text_names_it()
+    {
+        var person = await host.PersonAsync();
+        var outcome = await CreateAsync(person, Unique("Kanban tool"));
+        var linked = await WorkflowAsync(person, host.Alpha, outcome.Id);
+        var unlinked = await WorkflowAsync(person, host.Alpha);
+
+        static List<JsonElement> Cards(string answer)
+        {
+            Assert.StartsWith("HTTP 200", answer, StringComparison.Ordinal);
+            return JsonDocument.Parse(answer.Split(Environment.NewLine, 2)[1]).RootElement
+                .GetProperty("cards").EnumerateArray().Select(c => c.Clone()).ToList();
+        }
+
+        static List<long> Workflows(List<JsonElement> cards) =>
+            cards.Select(c => c.GetProperty("workflowSeq").GetInt64()).ToList();
+
+        // A TEAM-BOUND caller reads its team's board: an id keeps that outcome's cards, none the cards with none.
+        var manager = ManagerTools(host.Alpha);
+        Assert.Equal([linked], Workflows(Cards(await manager.Kanban("board", outcome: outcome.Id, cancellationToken: Ct))));
+        var none = Cards(await manager.Kanban("board", outcome: "none", cancellationToken: Ct));
+        Assert.Contains(unlinked, Workflows(none));
+        Assert.DoesNotContain(linked, Workflows(none));
+        Assert.All(none, c => Assert.Equal(JsonValueKind.Null, c.GetProperty("outcome").ValueKind));
+
+        // A TENANT-WIDE Concierge reads the tenant board, narrowed the same way.
+        var user = (await host.Services.GetRequiredService<IUserStore>().FindAsync(Email, Ct))!;
+        var concierge = Tools(
+            ConciergeLaunchFactory.PrincipalId(user.Id) + Guid.NewGuid().ToString("N"), PrincipalKind.TenantConcierge, null,
+            ConciergeLaunchFactory.ConciergePermits, owner: user.Id);
+        Assert.Equal([linked], Workflows(Cards(await concierge.Kanban("board", team: host.Alpha, outcome: outcome.Id, cancellationToken: Ct))));
+        var tenantNone = Workflows(Cards(await concierge.Kanban("board", team: host.Alpha, outcome: "none", cancellationToken: Ct)));
+        Assert.Contains(unlinked, tenantNone);
+        Assert.DoesNotContain(linked, tenantNone);
+
+        // THE FILTER TEXT names Outcome among the four, with an id or none, and no URL.
+        var filter = await manager.Kanban("filter", cancellationToken: Ct);
+        Assert.Contains("four filters: team, member, status, and outcome", filter, StringComparison.Ordinal);
+        Assert.Contains("an outcome's id from the outcome tool's list, or none for cards with no outcome", filter, StringComparison.Ordinal);
+        Assert.DoesNotContain("/api/", filter, StringComparison.Ordinal);
     }
 
     [Fact]

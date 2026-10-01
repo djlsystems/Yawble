@@ -5,7 +5,7 @@
 // backlog PATCH, and the trigger's create request and update patch built from the dialog's draft.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { flushPromises } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 
 const { backlogItems, backlogItem, listCatalog, fileSystemRoots, updateBacklogItem, listLiveOutcomes } = vi.hoisted(() => ({
   backlogItems: vi.fn(),
@@ -47,6 +47,20 @@ import * as probe from '../../test/formProbe';
 
 const shipping = { id: '11111111-1111-1111-1111-111111111111', name: 'Ship the release', status: 'active' as const };
 const faster = { id: '22222222-2222-2222-2222-222222222222', name: 'Faster onboarding', status: 'proposed' as const };
+const oldGoal = { id: '33333333-3333-3333-3333-333333333333', name: 'Old goal', status: 'retired' as const };
+const duplicate = { id: '44444444-4444-4444-4444-444444444444', name: 'Duplicate goal', status: 'merged' as const };
+
+/** `GET /api/outcomes/{id}` for an outcome no picker lists, recording each read. */
+function answerEndedOutcomes() {
+  const read: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    read.push(url);
+    const found = [oldGoal, duplicate].find((o) => url === `/api/outcomes/${o.id}`);
+    if (!found) return new Response('{}', { status: 404 });
+    return new Response(JSON.stringify({ outcome: found }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }));
+  return read;
+}
 
 function item(over: Record<string, unknown> & { id: number }) {
   return {
@@ -75,7 +89,10 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-afterEach(resetBody);
+afterEach(() => {
+  vi.unstubAllGlobals();
+  resetBody();
+});
 
 const optionsOf = (picker: { props: (name: string) => unknown }) =>
   picker.props('options') as { label: string; value: string }[];
@@ -131,6 +148,53 @@ describe('the backlog item editor', () => {
     await flushPromises();
 
     expect(updateBacklogItem).toHaveBeenCalledWith(1, { outcomeId: '' });
+
+    wrapper.unmount();
+  });
+
+  it('shows a retired current value by name with its status, and does not offer it', async () => {
+    const read = answerEndedOutcomes();
+    const wrapper = await openTheItem(oldGoal.id);
+
+    const picker = wrapper.findComponent(OutcomePicker).findComponent({ name: 'QSelect' });
+    expect(optionsOf(picker)).toEqual([
+      { label: 'None', value: '' },
+      { label: 'Ship the release', value: shipping.id },
+      { label: 'Faster onboarding (proposed)', value: faster.id },
+      { label: 'Old goal (retired)', value: oldGoal.id, disable: true },
+    ]);
+    expect(picker.text()).toContain('Old goal (retired)');
+    expect(picker.text()).not.toContain(oldGoal.id);
+    expect(read).toEqual([`/api/outcomes/${oldGoal.id}`]);
+
+    wrapper.unmount();
+  });
+});
+
+describe('a retired or merged current value', () => {
+  it('shows a merged one in the picker as "(merged)", and drops it once another is chosen', async () => {
+    answerEndedOutcomes();
+    const wrapper = mount(OutcomePicker, { props: { modelValue: duplicate.id } });
+    await flushPromises();
+
+    const picker = wrapper.findComponent({ name: 'QSelect' });
+    expect(optionsOf(picker).at(-1)).toEqual({ label: 'Duplicate goal (merged)', value: duplicate.id, disable: true });
+    expect(picker.text()).toContain('Duplicate goal (merged)');
+
+    await wrapper.setProps({ modelValue: shipping.id });
+    await flushPromises();
+    expect(optionsOf(picker).map((option) => option.value)).toEqual(['', shipping.id, faster.id]);
+
+    wrapper.unmount();
+  });
+
+  it('reads nothing for a live current value', async () => {
+    const read = answerEndedOutcomes();
+    const wrapper = mount(OutcomePicker, { props: { modelValue: faster.id } });
+    await flushPromises();
+
+    expect(read).toEqual([]);
+    expect(optionsOf(wrapper.findComponent({ name: 'QSelect' })).map((option) => option.value)).toEqual(['', shipping.id, faster.id]);
 
     wrapper.unmount();
   });

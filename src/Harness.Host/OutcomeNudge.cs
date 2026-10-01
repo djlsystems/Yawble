@@ -41,10 +41,10 @@ public sealed class OutcomeNudge(IContextBuilder inner, IOutcomeStore outcomes) 
     /// followed through a merge, or <see cref="NoOutcome"/>.</summary>
     public async Task<string> LineAsync(long correlation, CancellationToken ct = default)
     {
-        if (await outcomes.CurrentLinkAsync(correlation, ct) is not { } link) return NoOutcome;
+        if (await outcomes.CurrentLinkAsync(correlation, ct) is not { OutcomeId: { } linked } link) return NoOutcome;
 
         var all = await outcomes.ListAsync(ct);
-        var holder = OutcomeFigures.Resolution(all).GetValueOrDefault(link.OutcomeId, link.OutcomeId);
+        var holder = OutcomeFigures.Resolution(all).GetValueOrDefault(linked, linked);
         var outcome = all.FirstOrDefault(o => o.Id == holder);
 
         return outcome is null

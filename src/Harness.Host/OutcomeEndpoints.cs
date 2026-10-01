@@ -63,11 +63,15 @@ public static class OutcomeEndpoints
 
                 var shown = all.Where(o => statuses.Length == 0 ? o.Status != OutcomeStatus.Merged : statuses.Contains(o.Status));
 
+                // A workflow whose newest link is an unlink serves no outcome: OutcomeOf leaves it out,
+                // so it is counted under none of the team's outcomes.
                 var teamCounts = team is null
                     ? new Dictionary<string, int>()
                     : book.LinkOf.Values
                         .Where(l => string.Equals(l.TeamId, team.Trim(), StringComparison.OrdinalIgnoreCase))
-                        .GroupBy(l => book.OutcomeOf[l.Correlation])
+                        .Select(l => book.OutcomeOf.GetValueOrDefault(l.Correlation))
+                        .OfType<string>()
+                        .GroupBy(id => id)
                         .ToDictionary(g => g.Key, g => g.Count());
 
                 var list = shown
@@ -129,10 +133,17 @@ public static class OutcomeEndpoints
                 }
 
                 // THE HISTORY: every link that named this outcome or one merged into it, oldest first,
-                // with the name it was made under - a rename or merge never rewrote one.
-                var history = (await outcomes.ReadLinksAsync(ct))
-                    .Where(l => resolution.GetValueOrDefault(l.OutcomeId, l.OutcomeId) == holder)
-                    .ToList();
+                // with the name it was made under - a rename or merge never rewrote one - and every
+                // unlink that left it: a person's "None" names no outcome, so it is shown under the
+                // outcome its workflow served before it.
+                var history = new List<OutcomeLink>();
+                var served = new Dictionary<long, string?>();
+                foreach (var link in await outcomes.ReadLinksAsync(ct))
+                {
+                    var named = link.OutcomeId ?? served.GetValueOrDefault(link.Correlation);
+                    if (named is not null && resolution.GetValueOrDefault(named, named) == holder) history.Add(link);
+                    served[link.Correlation] = link.OutcomeId;
+                }
 
                 // AND WHAT WAS DONE TO IT: the tenant rows naming this outcome or one merged into it -
                 // created, renamed, changed, confirmed, retired, reactivated, merged - with who and when.
@@ -173,7 +184,8 @@ public static class OutcomeEndpoints
             .WithSummary("One outcome, its workflows and its link history")
             .WithDescription(
                 "The outcome with its `figures` (as the list gives them), each workflow it serves now - "
-                + "team, state, when it started, elapsed, agent time, billable tokens, unmeasured runs, "
+                + "team, state, when it started, elapsed, agent time, billable tokens over `measuredRuns`, "
+                + "`unmeasuredRuns`, "
                 + "and how and by whom it was linked - and `history`, every link row that named it or an "
                 + "outcome merged into it, oldest first, each with the outcome name it was made under - and "
                 + "`events`, every `outcome.*` tenant row about it or an outcome merged into it, oldest "
@@ -257,7 +269,7 @@ public static class OutcomeEndpoints
                     var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
                     var resolution = OutcomeFigures.Resolution(all);
                     var links = (await outcomes.ReadLinksAsync(ct))
-                        .Count(l => resolution.GetValueOrDefault(l.OutcomeId, l.OutcomeId) == from.Id);
+                        .Count(l => l.OutcomeId is { } named && resolution.GetValueOrDefault(named, named) == from.Id);
 
                     return Results.Ok(new
                     {
@@ -393,7 +405,38 @@ public static class OutcomeEndpoints
                 + "is refused (409, with a sentence) a link a person caused: `dispatch`, `trigger` or "
                 + "`person`. A member's credential reaches only workflows its own team is in. Appends "
                 + "`workflow.outcome-changed`; nothing is linked when that row cannot be written.");
+
+        MapUnlink(app);
     }
+
+    private static void MapUnlink(WebApplication app) =>
+        app.MapDelete("/api/teams/{team}/workflows/{correlation:long}/outcome", async (
+                [Description(Describe.Team)] string team,
+                [Description("The workflow: its correlation, or the seq of any of its rows.")] long correlation,
+                HttpContext context, IOutcomeStore outcomes, TeamRegistry teams, IMessageLog log, CancellationToken ct) =>
+            {
+                if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
+                if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+
+                var (workflow, refusal) = await WorkflowOfAsync(principal, stored, correlation, log, ct);
+                if (refusal is not null) return refusal;
+
+                var write = await outcomes.UnlinkAsync(
+                    workflow!.Value, stored, PersonOf(context),
+                    TenantLogging.Row(context, TenantActions.WorkflowOutcomeChanged, null, null, null),
+                    ct);
+
+                return write.Ok ? Results.Ok(write.Link) : Refusal(write);
+            })
+            .WithTags("Outcomes")
+            .HumansOnly()
+            .WithSummary("Set a workflow to no outcome")
+            .WithDescription(
+                "A person's \"None\": appends a link row that names no outcome (`outcomeId` null, "
+                + "`how: person`), so the workflow counts under No outcome. Nothing is deleted: the links "
+                + "before it stay, and the outcome it served lists the unlink in its history. 409 when the "
+                + "workflow serves no outcome. Appends `workflow.outcome-changed` with `from` (the outcome "
+                + "it served) and `to: null`; nothing is unlinked when that row cannot be written.");
 
     private static void MapTransition(
         WebApplication app, string verb, string summary, string action, string description,

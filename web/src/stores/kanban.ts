@@ -13,7 +13,7 @@ import {
   type KanbanLane,
 } from '../api/kanban'
 import { Unauthorized } from '../api/client'
-import { linkWorkflowOutcome, listLiveOutcomes, type OutcomeRef } from '../api/outcomes'
+import { linkWorkflowOutcome, listLiveOutcomes, unlinkWorkflowOutcome, type OutcomeRef } from '../api/outcomes'
 import {
   cardsInLane,
   cardsMatchingText,
@@ -437,12 +437,14 @@ export const useKanbanStore = defineStore('kanban', {
      * its open workflow, else its latest - addressed under the card's own team, then the refetch
      * every write does.
      */
-    async changeOutcome(id: string, outcome: string) {
+    /** `outcome` null is a person's "None": an unlink row, not a deleted link. */
+    async changeOutcome(id: string, outcome: string | null) {
       const found = this.board?.cards.find((entry) => entry.id === id)
       if (!found) throw new Error(UnknownCard)
 
       await this.write(async () => {
-        await linkWorkflowOutcome(found.team, outcomeWorkflowOf(found), outcome)
+        if (outcome === null) await unlinkWorkflowOutcome(found.team, outcomeWorkflowOf(found))
+        else await linkWorkflowOutcome(found.team, outcomeWorkflowOf(found), outcome)
       })
     },
 

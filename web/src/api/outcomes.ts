@@ -82,7 +82,9 @@ export interface OutcomeWorkflowLine {
   startedAt: string | null
   elapsedSeconds: number | null
   agentSeconds: number
+  /** Billable over the measured runs: with `measuredRuns` 0 there is no figure, never a 0. */
   billableTokens: number
+  measuredRuns: number
   unmeasuredRuns: number
   how: string | null
   setBy: string | null
@@ -90,14 +92,18 @@ export interface OutcomeWorkflowLine {
   setAt: string | null
 }
 
-/** One row of `workflow_outcome_links`, with the names it was made under. */
+/**
+ * One row of `workflow_outcome_links`, with the names it was made under. An unlink (a person's
+ * "None") names no outcome: `outcomeId` and `outcomeNameAtLink` are null and `isUnlink` is true.
+ */
 export interface OutcomeLinkRow {
   id: number
   correlation: number
-  outcomeId: string
+  outcomeId: string | null
+  isUnlink?: boolean
   teamId: string | null
   teamNameAtLink: string | null
-  outcomeNameAtLink: string
+  outcomeNameAtLink: string | null
   setBy: string
   setByKind: string
   setAt: string
@@ -200,6 +206,13 @@ export const linkWorkflowOutcome = (team: string, correlation: number, outcome: 
     { method: 'PUT', ...body({ outcome }) },
   )
 
+/** A person's "None": the workflow serves no outcome, as a new link row (history kept). */
+export const unlinkWorkflowOutcome = (team: string, correlation: number) =>
+  json<OutcomeLinkRow>(
+    `/api/teams/${encodeURIComponent(team)}/workflows/${correlation}/outcome`,
+    { method: 'DELETE' },
+  )
+
 /**
  * What the board, its filter and the pickers need of an outcome: the result a workflow serves.
  *
@@ -221,4 +234,23 @@ export async function listLiveOutcomes(): Promise<OutcomeRef[]> {
 /** How a picker labels an outcome: a proposed one says so, since only a person confirms it. */
 export function outcomeLabel(outcome: Pick<OutcomeRef, 'name' | 'status'>): string {
   return outcome.status === 'proposed' ? `${outcome.name} (proposed)` : outcome.name
+}
+
+/**
+ * A CURRENT VALUE NO PICKER OFFERS - a retired or merged outcome - by name, or null when the id
+ * names no outcome or the read fails. The pickers list only live outcomes, so without this a
+ * person would see the bare id.
+ */
+export async function findOutcomeRef(id: string): Promise<OutcomeRef | null> {
+  try {
+    const { outcome } = await getOutcome(id)
+    return outcome ? { id: outcome.id, name: outcome.name, status: outcome.status } : null
+  } catch {
+    return null
+  }
+}
+
+/** How a current value that is no longer on offer reads: `Old goal (retired)`, `Duplicate goal (merged)`. */
+export function endedOutcomeLabel(outcome: Pick<OutcomeRef, 'name' | 'status'>): string {
+  return `${outcome.name} (${outcome.status})`
 }

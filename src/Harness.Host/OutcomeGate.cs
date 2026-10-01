@@ -25,6 +25,6 @@ public sealed class OutcomeGate(Func<bool> required, IOutcomeStore outcomes)
     public async Task<string?> RefusalAsync(long correlation, CancellationToken ct = default)
     {
         if (!required()) return null;
-        return await outcomes.CurrentLinkAsync(correlation, ct) is null ? Refusal : null;
+        return await outcomes.CurrentLinkAsync(correlation, ct) is null or { IsUnlink: true } ? Refusal : null;
     }
 }

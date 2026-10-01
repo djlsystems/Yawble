@@ -126,10 +126,10 @@ public static class OutcomeLinks
 
     /// <summary>
     /// Appends one link row: the outcome's name and the team's name as they are now, which nothing
-    /// ever rewrites.
+    /// ever rewrites. A null <paramref name="outcomeId"/> is an unlink: the row names no outcome.
     /// </summary>
     public static async Task<OutcomeLink> WriteAsync(
-        SqliteConnection connection, SqliteTransaction transaction, long correlation, string outcomeId,
+        SqliteConnection connection, SqliteTransaction transaction, long correlation, string? outcomeId,
         string? team, string setBy, string setByKind, string how, CancellationToken ct)
     {
         await using var insert = connection.CreateCommand();
@@ -148,7 +148,7 @@ public static class OutcomeLinks
              RETURNING {LinkColumns}
              """;
         insert.Parameters.AddWithValue("$correlation", correlation);
-        insert.Parameters.AddWithValue("$outcome", outcomeId);
+        insert.Parameters.AddWithValue("$outcome", (object?)outcomeId ?? DBNull.Value);
         insert.Parameters.AddWithValue("$team", (object?)team ?? DBNull.Value);
         insert.Parameters.AddWithValue("$setBy", setBy);
         insert.Parameters.AddWithValue("$kind", setByKind);
@@ -212,10 +212,10 @@ public static class OutcomeLinks
         new(
             reader.GetInt64(0),
             reader.GetInt64(1),
-            reader.GetString(2),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
             reader.IsDBNull(3) ? null : reader.GetString(3),
             reader.IsDBNull(4) ? null : reader.GetString(4),
-            reader.GetString(5),
+            reader.IsDBNull(5) ? null : reader.GetString(5),
             reader.GetString(6),
             reader.GetString(7),
             MessageRows.ReadStamp(reader.GetString(8)),

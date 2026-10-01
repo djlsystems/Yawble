@@ -27,6 +27,8 @@ import { resetBody } from '../../test/mountQuasar';
 
 const shipping = { id: '11111111-1111-1111-1111-111111111111', name: 'Ship <b>the release</b>', status: 'active' as const };
 const faster = { id: '22222222-2222-2222-2222-222222222222', name: 'Faster onboarding', status: 'proposed' as const };
+const oldGoal = { id: '33333333-3333-3333-3333-333333333333', name: 'Old goal', status: 'retired' as const };
+const duplicate = { id: '44444444-4444-4444-4444-444444444444', name: 'Duplicate goal', status: 'merged' as const };
 
 function card(over: Partial<Card> & { id: string }): Card {
   return {
@@ -60,13 +62,16 @@ beforeEach(() => {
     requests.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null });
 
     // Every other read (the WIP view, agent updates) never answers, as in `kanban-board.mount.spec`.
-    const answer = url.startsWith('/api/outcomes')
+    const ended = [oldGoal, duplicate].find((o) => url === `/api/outcomes/${o.id}`);
+    const answer = ended
+      ? { outcome: ended }
+      : url.startsWith('/api/outcomes')
       ? { outcomes: [shipping, faster] }
       : url.startsWith('/api/kanban/board')
         ? { lanes, cards: boardCards, filters: {} }
         : null;
 
-    if (init?.method === 'PUT') return new Response(null, { status: 204 });
+    if (init?.method === 'PUT' || init?.method === 'DELETE') return new Response(null, { status: 204 });
     if (answer === null) return new Promise<Response>(() => {});
 
     return new Response(JSON.stringify(answer), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -143,6 +148,59 @@ describe('the Outcome filter', () => {
   });
 });
 
+describe('a retired or merged outcome as the current value', () => {
+  const optionsOf = (select: { props: (name: string) => unknown }) => select.props('options') as { label: string; value: string; disable?: boolean }[];
+
+  it('shows the filter\'s retired outcome by name with its status, not as a new choice, and drops it for All', async () => {
+    const { board, kanban } = await mountBoard([]);
+    kanban.filters = { outcome: oldGoal.id };
+    await flushPromises();
+
+    const filter = outcomeFilter(board);
+    expect(optionsOf(filter)).toEqual([
+      { label: 'All', value: '' },
+      { label: 'No outcome', value: 'none' },
+      { label: 'Ship <b>the release</b>', value: shipping.id },
+      { label: 'Faster onboarding (proposed)', value: faster.id },
+      { label: 'Old goal (retired)', value: oldGoal.id, disable: true },
+    ]);
+    expect(filter.text()).toContain('Old goal (retired)');
+    expect(filter.text()).not.toContain(oldGoal.id);
+
+    filter.vm.$emit('update:modelValue', '');
+    await flushPromises();
+    expect(optionsOf(filter).map((option) => option.value)).toEqual(['', 'none', shipping.id, faster.id]);
+  });
+
+  it('shows the filter\'s merged outcome as "(merged)"', async () => {
+    const { board, kanban } = await mountBoard([]);
+    kanban.filters = { outcome: duplicate.id };
+    await flushPromises();
+
+    expect(optionsOf(outcomeFilter(board)).at(-1)).toEqual({ label: 'Duplicate goal (merged)', value: duplicate.id, disable: true });
+    expect(outcomeFilter(board).text()).toContain('Duplicate goal (merged)');
+  });
+
+  it('shows a card\'s retired outcome in Change outcome… by name with its status, not as a new choice', async () => {
+    const { board } = await mountBoard([card({ id: '4045', outcome: oldGoal })]);
+
+    board.findComponent(KanbanCard).vm.$emit('change-outcome', '4045');
+    await flushPromises();
+
+    const select = board.findComponent(KanbanChangeOutcome).findComponent(QSelect);
+    expect(optionsOf(select)).toEqual([
+      { label: 'None', value: 'none' },
+      { label: 'Ship <b>the release</b>', value: shipping.id },
+      { label: 'Faster onboarding (proposed)', value: faster.id },
+      { label: 'Old goal (retired)', value: oldGoal.id, disable: true },
+    ]);
+    expect(select.text()).toContain('Old goal (retired)');
+    // The card carries its outcome: nothing is read to name it.
+    expect(requests.some((r) => r.url === `/api/outcomes/${oldGoal.id}`)).toBe(false);
+    expect(([...document.body.querySelectorAll('[data-action="save-outcome"]')][0] as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
 describe('the card tag', () => {
   function render(over: Partial<Card>) {
     const mounted = mount(KanbanCard, { props: { card: card({ id: '4045', ...over }) } });
@@ -214,6 +272,41 @@ describe('Change outcome…', () => {
     const put = requests.find((r) => r.method === 'PUT')!;
     expect(put.url).toBe('/api/teams/beta/workflows/4000/outcome');
     expect(put.body).toEqual({ outcome: faster.id });
+  });
+
+  it('offers None, which sends the unlink route for the card\'s open workflow and no link', async () => {
+    const { board } = await mountBoard([
+      card({
+        id: '4045', team: 'beta', workflowSeq: 3900, workflows: [3900, 4000],
+        openWorkflow: { workflow: 4000, latestSeq: 4100 }, outcome: shipping,
+      }),
+    ]);
+
+    board.findComponent(KanbanCard).vm.$emit('change-outcome', '4045');
+    await flushPromises();
+
+    const select = board.findComponent(KanbanChangeOutcome).findComponent(QSelect);
+    const none = (select.props('options') as { label: string; value: string }[]).find((o) => o.label === 'None');
+    expect(none).toBeDefined();
+    select.vm.$emit('update:modelValue', none!.value);
+    await flushPromises();
+
+    ([...document.body.querySelectorAll('[data-action="save-outcome"]')][0] as HTMLButtonElement).click();
+    await flushPromises();
+
+    const writes = requests.filter((r) => r.method !== 'GET');
+    expect(writes).toEqual([{ url: '/api/teams/beta/workflows/4000/outcome', method: 'DELETE', body: null }]);
+  });
+
+  it('starts at None for a card with no outcome, with nothing to change', async () => {
+    const { board } = await mountBoard([card({ id: '4045', team: 'beta', workflowSeq: 3900 })]);
+
+    board.findComponent(KanbanCard).vm.$emit('change-outcome', '4045');
+    await flushPromises();
+
+    const select = board.findComponent(KanbanChangeOutcome).findComponent(QSelect);
+    expect(select.props('modelValue')).toBe('none');
+    expect(([...document.body.querySelectorAll('[data-action="save-outcome"]')][0] as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('is on the card menu', async () => {
