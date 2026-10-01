@@ -709,6 +709,12 @@ builder.Services.AddSingleton(sp => new AgentCliUpdater(
     sp.GetRequiredService<AgentUpdateGate>(),
     sp.GetRequiredService<AgentLaunchUser>(),
     dataRoot));
+// HOW MUCH MEMORY ONE RUN MAY USE, AND HOW: a cgroup per run, an rlimit per process, or nothing,
+// decided once here from the container's own cgroup and logged at start (RunMemoryLimits). The
+// figure is a setting, read through a delegate at every launch.
+builder.Services.AddSingleton(_ => RunMemoryLimits.Resolve(tenantSettings.RunMemoryLimit));
+// Member TMPDIRs on the data volume, never a /tmp the engine may hold in memory (MemberTemp).
+builder.Services.AddSingleton(_ => MemberTemp.RootUnder(dataRoot));
 builder.Services.AddSingleton<ProcessAgentRunner>();
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
@@ -1567,6 +1573,14 @@ app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
     }
 
     AgentLaunchRecord.Write(dataRoot, runAs, app.Logger);
+
+    var memoryLimits = app.Services.GetRequiredService<RunMemoryLimits>();
+    var runLimit = memoryLimits.Limit();
+    app.Logger.LogInformation("{RunMemoryLimits} (each run now: {Limit})", memoryLimits.LogLine,
+        runLimit.Mb is { } mb ? $"{mb} MB, as {runLimit.Source}" : $"no limit, as {runLimit.Source}");
+
+    var memberTemp = app.Services.GetRequiredService<MemberTempRoot>();
+    app.Logger.LogInformation("Member temporary folders: {Path} - {Reason}", memberTemp.Path, memberTemp.Reason);
 }
 
 // THE ADDRESS EVERY MEMBER IS TOLD TO CALL, printed for the reason the dev server prints its proxy

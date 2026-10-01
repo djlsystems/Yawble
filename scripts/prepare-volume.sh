@@ -30,6 +30,8 @@
 # so a directory git adds later is still the group's), files lose group write, other and
 # setuid/setgid and gain group read; the owner's bits git chose (objects are 0444) are kept. Agents
 # never push: the host publishes into these as itself. It is created when missing.
+# tmp holds each member's TMPDIR (MemberTemp), on the volume so an engine's tmpfs /tmp never holds
+# a member's temporary files in memory. It is created when missing and is agent's like the rest.
 # Every other top-level entry - teams, documents, agent-home, npm-global, bin, the tool caches, the
 # Concierge's workspaces - is agent:agent, with directories group-writable and setgid and files
 # group read-write, so what the host creates there (it runs with umask 0007) stays in group agent
@@ -162,6 +164,7 @@ ownership() {
 
       [ -e "$root/plugins" ] || [ -L "$root/plugins" ] || { mkdir "$root/plugins"; echo "$root/plugins"; }
       [ -e "$root/repos" ] || [ -L "$root/repos" ] || { mkdir "$root/repos"; echo "$root/repos"; }
+      [ -e "$root/tmp" ] || [ -L "$root/tmp" ] || { mkdir "$root/tmp"; echo "$root/tmp"; }
 
       for path in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         [ -e "$path" ] || [ -L "$path" ] || continue

@@ -111,6 +111,11 @@ func (d docker) Inspect(ctx context.Context, name string) (ContainerInfo, error)
 	return parseInspect(res.Stdout), nil
 }
 
+// Stats is `docker stats --no-stream --format {{json .}} <name>`.
+func (d docker) Stats(ctx context.Context, name string) (Stats, error) {
+	return stats(ctx, d.r, "docker", name)
+}
+
 func (d docker) Remove(ctx context.Context, name string) error {
 	_, err := d.run(ctx, "rm", "-f", name)
 	return err

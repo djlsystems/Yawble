@@ -106,6 +106,13 @@ func Observe(ctx context.Context, e engine.Engine, s instance.Settings, p Probes
 	o.Pending = st.Pending
 	o.URL = st.URL
 	o.Healthy = st.Healthy
+	if st.Container == engine.StateRunning {
+		if stats, err := e.Stats(ctx, instance.ContainerName); err != nil {
+			o.StatsErr = err
+		} else {
+			o.Stats = &stats
+		}
+	}
 	if p.ConfigDir != "" {
 		if c, had, err := remote.Load(p.ConfigDir); err == nil && had {
 			if provider, err := remote.ProviderNamed(c.Provider); err == nil {

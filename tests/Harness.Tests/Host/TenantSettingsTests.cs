@@ -386,6 +386,33 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
         }
     }
 
+    [Fact]
+    public void A_runs_memory_limit_defaults_to_the_container_limit_less_the_host_reserve_per_run_and_a_set_value_wins()
+    {
+        // 8 CPUs and 12 GB: 6 runs, so (12288 - 1024) / 6 = 1877 MB each.
+        var computed = Bare(cpuCount: 8, memoryLimitMb: 12288).RunMemoryLimit();
+        Assert.Equal(1877, computed.Mb);
+        Assert.Contains("runs.memoryLimitMb is 0", computed.Source);
+        Assert.Contains("12288 MB container limit - 1024 MB for the Host", computed.Source);
+        Assert.Contains("6 (wip.maxRunning)", computed.Source);
+
+        // No container limit and nothing set: no limit, said.
+        var none = Bare(cpuCount: 8, memoryLimitMb: 0).RunMemoryLimit();
+        Assert.Null(none.Mb);
+        Assert.Contains("no memory limit", none.Source);
+
+        // Never below the floor an agent CLI needs to start.
+        Assert.Equal(TenantSettings.MinRunMemoryLimitMb, Bare(cpuCount: 8, memoryLimitMb: 1024).RunMemoryLimit().Mb);
+
+        var configured = new TenantSettings(
+            new SqliteTenantSettingsStore(Path.Combine(Path.GetTempPath(), $"harness-unused-{Guid.NewGuid():N}.db")),
+            new ConfigurationBuilder().AddInMemoryCollection(
+                new Dictionary<string, string?> { ["Runs:MemoryLimitMb"] = "3000" }).Build(),
+            8, 12288).RunMemoryLimit();
+        Assert.Equal(3000, configured.Mb);
+        Assert.Equal("runs.memoryLimitMb is set to 3000 MB", configured.Source);
+    }
+
     private static TenantSettings Bare(int cpuCount, long memoryLimitMb) => new(
         new SqliteTenantSettingsStore(Path.Combine(Path.GetTempPath(), $"harness-unused-{Guid.NewGuid():N}.db")),
         new ConfigurationBuilder().Build(), cpuCount, memoryLimitMb);

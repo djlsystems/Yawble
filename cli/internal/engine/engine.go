@@ -72,6 +72,9 @@ type Engine interface {
 	PodCurrent(ctx context.Context, name string) (bool, error)
 	ContainerState(ctx context.Context, name string) (State, error)
 	Inspect(ctx context.Context, name string) (ContainerInfo, error)
+	// Stats is the engine's one-shot reading of a container's resource use (`stats --no-stream`).
+	// A container that is not running is Stats.NotRunning, not an error.
+	Stats(ctx context.Context, name string) (Stats, error)
 	Remove(ctx context.Context, name string) error
 	// Exec runs a program inside a running container and answers its output. A non-zero exit
 	// is an error carrying stderr, as for every other verb.

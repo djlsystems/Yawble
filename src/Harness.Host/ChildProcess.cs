@@ -73,7 +73,11 @@ public static class ChildProcess
     /// From a system directory, never PATH: setsid runs before the agent-user prefix, so it still
     /// holds the Host's capabilities. The arguments and environment are the caller's to add.
     /// </summary>
-    public static ProcessStartInfo? StartInfo(string resolvedFileName, string workingDirectory, AgentLaunchUser? runAs)
+    /// <param name="limits">What goes between the agent-user prefix and the program: the run's
+    /// memory limit (<see cref="RunMemoryLimits.Prefix"/>), applied after the switch so the agent,
+    /// which keeps no capability, cannot raise it again.</param>
+    public static ProcessStartInfo? StartInfo(
+        string resolvedFileName, string workingDirectory, AgentLaunchUser? runAs, IReadOnlyList<string>? limits = null)
     {
         if (SystemCommand.Find("setsid") is not { } setsid) return null;
 
@@ -97,6 +101,7 @@ public static class ChildProcess
         // As `agent` when the Host can switch, AFTER setsid so the session is still the
         // child's own: setpriv execs in place, and the group kill below reaches it as before.
         foreach (var part in runAs?.Prefix ?? []) start.ArgumentList.Add(part);
+        foreach (var part in limits ?? []) start.ArgumentList.Add(part);
         start.ArgumentList.Add(resolvedFileName);
 
         return start;

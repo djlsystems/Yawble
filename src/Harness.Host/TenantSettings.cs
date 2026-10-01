@@ -69,6 +69,7 @@ public sealed class TenantSettings
     public const string WipMemoryPerRunMbName = "wip.memoryPerRunMb";
     public const string AdmissionMemoryPercentName = "admission.memoryPercent";
     public const string AdmissionMemoryPressurePercentName = "admission.memoryPressurePercent";
+    public const string RunsMemoryLimitMbName = "runs.memoryLimitMb";
     public const string WorkflowSpendLimitName = "workflow.spendLimit";
     public const string ConciergeIdleTimeoutName = "concierge.idleTimeout";
     public const string QuietWindowName = "quiet.window";
@@ -140,6 +141,16 @@ public sealed class TenantSettings
                 + "refused. When pressure cannot be measured, only wip.maxRunning applies. 0 turns "
                 + "this check off. Takes effect immediately.",
                 Min: 0, Max: 100),
+            new(RunsMemoryLimitMbName, TenantSettingKind.Integer, "0", "Runs:MemoryLimitMb",
+                "Megabytes one agent run may use before it is stopped and failed out-of-memory, so a "
+                + "runaway build or test cannot take the Host and every other team down. 0 (the "
+                + "default) computes it: (the container's memory limit - "
+                + $"{HostReserveMb} MB kept for the Host) / wip.maxRunning, at least {MinRunMemoryLimitMb} MB; "
+                + "no limit when the container has none. How it is applied depends on the engine, "
+                + "decided at start and logged as \"Run memory limits\": a cgroup per run where one is "
+                + "delegated, otherwise a per-process limit on each of the run's processes, otherwise "
+                + "nothing. Applies to the next run.",
+                Min: 0, Max: 1_048_576),
             new(WorkflowSpendLimitName, TenantSettingKind.Integer, "100000000", "WorkflowSpendLimit",
                 "The instance's per-workflow token ceiling, the backstop under every team's own "
                 + "budget. 0 means none. Settable from the product: there is no admin tier "
@@ -217,6 +228,12 @@ public sealed class TenantSettings
 
     /// <summary>The built-in per-run memory allowance, in MB.</summary>
     public const int DefaultMemoryPerRunMb = 2048;
+
+    /// <summary>Megabytes of the container's limit the computed per-run limit leaves to the Host.</summary>
+    public const int HostReserveMb = 1024;
+
+    /// <summary>The floor of the computed per-run limit: below it an agent CLI cannot start.</summary>
+    public const int MinRunMemoryLimitMb = 512;
 
     /// <summary>The CPU bound when the cgroup does not say how many CPUs there are.</summary>
     public const int UnknownCpuBound = 3;
@@ -313,6 +330,35 @@ public sealed class TenantSettings
                 $"{memoryText}, below the {cpuText}: the memory bound applies")
             : new WipRunLimit(cpuBound, "cpu", cpuBound, _cpus, memoryBound, limitMb, memoryPerRunMb,
                 $"{cpuText}, not above the {memoryText}: the CPU bound applies");
+    }
+
+    /// <summary>
+    /// The memory one run may use, and where the figure came from: <c>runs.memoryLimitMb</c> when it
+    /// is set, else (the container's limit - <see cref="HostReserveMb"/>) / the running limit in force,
+    /// at least <see cref="MinRunMemoryLimitMb"/>. Null megabytes when nothing sets one (no setting
+    /// and no container limit). Read on use, like every setting.
+    /// </summary>
+    public RunMemoryLimit RunMemoryLimit()
+    {
+        var set = Integer(RunsMemoryLimitMbName);
+        if (set > 0)
+        {
+            return new RunMemoryLimit(set, $"{RunsMemoryLimitMbName} is set to {set} MB");
+        }
+
+        if (_memoryLimitMb is not { } containerMb)
+        {
+            return new RunMemoryLimit(null,
+                $"{RunsMemoryLimitMbName} is 0 and the container has no memory limit to divide");
+        }
+
+        var runs = RunLimit().Limit;
+        var share = (containerMb - HostReserveMb) / Math.Max(1, runs);
+        var mb = Math.Max(MinRunMemoryLimitMb, share);
+        return new RunMemoryLimit(mb,
+            $"{RunsMemoryLimitMbName} is 0, so ({containerMb} MB container limit - {HostReserveMb} MB for the Host) / "
+            + (runs > 0 ? $"{runs} (wip.maxRunning)" : "1 (wip.maxRunning is unlimited)")
+            + (mb != share ? $", raised to the {MinRunMemoryLimitMb} MB floor" : string.Empty));
     }
 
     /// <summary><c>workflow.spendLimit</c> in tokens. 0 is none.</summary>
@@ -747,6 +793,9 @@ public sealed class TenantSettings
 /// <c>MemoryBound</c> are what the built-in default would allow; <c>MemoryBound</c> is null when the
 /// container has no memory limit, and <c>Cpus</c> when its CPU count is not known.
 /// </summary>
+/// <summary>One run's memory limit in megabytes (null: none), and the sentence saying where it came from.</summary>
+public sealed record RunMemoryLimit(long? Mb, string Source);
+
 public sealed record WipRunLimit(
     int Limit, string Bound, int CpuBound, int? Cpus, int? MemoryBound, long? MemoryLimitMb,
     int MemoryPerRunMb, string Reason);
