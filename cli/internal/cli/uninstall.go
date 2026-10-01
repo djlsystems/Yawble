@@ -13,6 +13,7 @@ import (
 
 	"github.com/djlsystems/yawble/cli/internal/backup"
 	"github.com/djlsystems/yawble/cli/internal/config"
+	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/instance"
 	"github.com/djlsystems/yawble/cli/internal/remote"
 )
@@ -27,7 +28,8 @@ func newUninstallCommand(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Remove the instance and yawble's settings; the data volume only with --data",
-		Long: "uninstall removes what yawble set up: the tunnel sidecar, the container, the pod (or " +
+		Long: "uninstall removes what yawble set up, from every engine installed (Podman and Docker), " +
+			"naming the engine on each line: the tunnel sidecar, the container, the pod (or " +
 			"network), the image, and yawble's settings - the engine and port choices, the API keys and " +
 			"tokens saved with `secret set`, and remote-access credentials. It asks first; --yes answers " +
 			"for you. --keep-settings keeps the settings, for a reinstall or a switch of engine.\n\n" +
@@ -38,13 +40,13 @@ func newUninstallCommand(deps Deps) *cobra.Command {
 		Example: "  yawble uninstall\n  yawble uninstall --keep-settings\n  yawble uninstall --data\n  yawble uninstall --data --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			e, s, _, err := prepare(deps)
+			_, s, _, err := prepare(deps)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 
-			what := "the Yawble container, pod and image"
+			what := "the Yawble container, pod and image from every installed engine"
 			if !keepSettings {
 				what += fmt.Sprintf(", and yawble's settings in %s (engine and port, saved API keys and tokens, remote access)", deps.ConfigDir)
 			}
@@ -78,13 +80,34 @@ func newUninstallCommand(deps Deps) *cobra.Command {
 					fmt.Fprintf(out, "--data needs the word delete typed at a terminal, or --yes together with --data; the volume %s is kept\n", instance.VolumeName)
 				}
 			}
-			// A stopped Podman machine answers nothing, so nothing could be removed. It is
-			// started only now, after the yes, never for a person who declined.
-			if err := startStoppedMachine(cmd, deps); err != nil {
-				return err
+			// Every installed engine is asked: the engine saved in the settings, or the one picked
+			// when none is, need not be the one holding the instance, and once the settings are
+			// gone nothing says which that was.
+			engines := installedEngines(deps)
+			if len(engines) == 0 {
+				fmt.Fprintln(out, "no container engine is installed, so there is no container, image or volume to remove")
 			}
-			if err := instance.Uninstall(cmd.Context(), e, s.Image, removeData, out); err != nil {
-				return err
+			var failures, answered []string
+			volumeFound := false
+			for _, name := range engines {
+				// A stopped Podman machine answers nothing, so nothing could be removed. It is
+				// started only now, after the yes, never for a person who declined.
+				if name == "podman" {
+					if err := startStoppedPodmanMachine(cmd, deps); err != nil {
+						failures = append(failures, "podman: the podman machine could not be started, so nothing was removed from podman: "+err.Error())
+						continue
+					}
+				}
+				r, err := instance.Uninstall(cmd.Context(), engine.NewFor(name, runnerOf(deps), goosOf(deps)), s.Image, removeData, out)
+				volumeFound = volumeFound || r.Volume
+				if err != nil {
+					failures = append(failures, err.Error())
+					continue
+				}
+				answered = append(answered, name)
+			}
+			if removeData && !volumeFound && len(answered) > 0 {
+				fmt.Fprintf(out, "no data volume %s was found on %s\n", instance.VolumeName, strings.Join(answered, " or "))
 			}
 
 			if keepSettings {
@@ -93,6 +116,9 @@ func newUninstallCommand(deps Deps) *cobra.Command {
 				return err
 			}
 			programHint(deps, out)
+			if len(failures) > 0 {
+				return fmt.Errorf("uninstall did not finish on every engine:\n  %s", strings.Join(failures, "\n  "))
+			}
 			return nil
 		},
 	}

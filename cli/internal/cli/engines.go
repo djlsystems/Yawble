@@ -20,13 +20,7 @@ import (
 // recommendation - and the choice is kept in yawble's config for every later command. With
 // neither, it stops with where to get one.
 func chooseEngine(deps Deps, c config.Config, yes bool, out io.Writer) (string, error) {
-	installed := func(name string) bool {
-		if deps.LookPath == nil {
-			return name == "podman"
-		}
-		_, err := deps.LookPath(name)
-		return err == nil
-	}
+	installed := func(name string) bool { return engineInstalled(deps, name) }
 	podman, docker := installed("podman"), installed("docker")
 
 	if c.Engine != "" {
@@ -57,6 +51,49 @@ func chooseEngine(deps Deps, c config.Config, yes bool, out io.Writer) (string, 
 		return "docker", nil
 	}
 	return "", noEngine(goosOf(deps))
+}
+
+// engineInstalled is whether an engine's program is on PATH. With no LookPath, Podman is, as
+// everywhere else that assumes it.
+func engineInstalled(deps Deps, name string) bool {
+	if deps.LookPath == nil {
+		return name == "podman"
+	}
+	_, err := deps.LookPath(name)
+	return err == nil
+}
+
+// installedEngines is every engine installed, Podman first: what `uninstall` asks.
+func installedEngines(deps Deps) []string {
+	var names []string
+	for _, name := range []string{"podman", "docker"} {
+		if engineInstalled(deps, name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// otherEngine is the installed engine that is not name, or nil: where `up` and `doctor` look for
+// a data volume this instance does not use.
+func otherEngine(deps Deps, name string) engine.Engine {
+	other := map[string]string{"podman": "docker", "docker": "podman"}[name]
+	if other == "" || !engineInstalled(deps, other) {
+		return nil
+	}
+	return engine.NewFor(other, runnerOf(deps), goosOf(deps))
+}
+
+// volumeOn is "yawble-data (created 2026-09-30)" when e holds the data volume, "" when it does
+// not or cannot say: a note, never a failure.
+func volumeOn(ctx context.Context, e engine.Engine) string {
+	if ok, err := e.VolumeExists(ctx, instance.VolumeName); err != nil || !ok {
+		return ""
+	}
+	if created, err := e.VolumeCreated(ctx, instance.VolumeName); err == nil && created != "" {
+		return fmt.Sprintf("%s (created %s)", instance.VolumeName, created)
+	}
+	return instance.VolumeName
 }
 
 // supportedPlatform refuses what yawble does not support, before anything else `up` does or says:

@@ -71,6 +71,11 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 			checks = append(checks, doctor.InstanceChecks(report, reportErr, deps.Now())...)
 			checks = append(checks, doctor.AgentToolsCheck(report, reportErr))
 			checks = append(checks, doctor.BackupCheck(deps.ConfigDir, deps.Now()))
+			if other := otherEngine(deps, e.Name()); other != nil {
+				if v := volumeOn(cmd.Context(), other); v != "" {
+					checks = append(checks, doctor.OtherVolumeCheck(e.Name(), other.Name(), v))
+				}
+			}
 
 			if asJSON {
 				enc := json.NewEncoder(out)

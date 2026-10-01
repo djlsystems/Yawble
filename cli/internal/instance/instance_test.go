@@ -331,7 +331,7 @@ func TestUninstallRemovesOnlyWhatExistsAndSaysWhatItRemoved(t *testing.T) {
 	s.On("podman image exists", engine.Result{ExitCode: 1})
 	s.On("podman volume exists", engine.Result{})
 	var out bytes.Buffer
-	if err := instance.Uninstall(context.Background(), engine.NewPodman(s), img, false, &out); err != nil {
+	if _, err := instance.Uninstall(context.Background(), engine.NewPodman(s), img, false, &out); err != nil {
 		t.Fatal(err)
 	}
 	c := strings.Join(s.Calls, "\n")
@@ -350,7 +350,7 @@ func TestUninstallRemovesOnlyWhatExistsAndSaysWhatItRemoved(t *testing.T) {
 func TestUninstallRefusesWhenTheEngineCannotBeAsked(t *testing.T) {
 	s := engine.NewScripted()
 	s.On("podman version", engine.Result{Stderr: "Cannot connect to Podman", ExitCode: 125})
-	err := instance.Uninstall(context.Background(), engine.NewPodman(s), img, true, &bytes.Buffer{})
+	_, err := instance.Uninstall(context.Background(), engine.NewPodman(s), img, true, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "Cannot connect") {
 		t.Errorf("err %v", err)
 	}
