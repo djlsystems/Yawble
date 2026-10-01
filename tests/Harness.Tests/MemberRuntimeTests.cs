@@ -131,6 +131,37 @@ public sealed class MemberRuntimeTests
     }
 
     /// <summary>
+    /// THE MARK IS SET BEFORE THE FAILED ROW IS WRITTEN, not after it. A reader that polls the log
+    /// and then reads the member's snapshot - the browser, PluginMemberEndToEndTests - must find the
+    /// reason the moment the row is there. Marking after the append left a window as long as the
+    /// append's continuation took to be scheduled, and under a loaded thread pool a reader saw the
+    /// Failed row with `failed` still null. The probe reads the snapshot as the row goes in.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_rows_reason_is_already_set_when_the_row_is_appended()
+    {
+        await using var bed = new ContainerTestBed();
+        MemberRuntime member = null!;
+        string? failedAsAppended = "never appended";
+        var log = OrderProbe.Wrap(bed.Store, message =>
+        {
+            if (message.Type == MessageTypes.Failed) failedAsAppended = member.Snapshot().Failed;
+        });
+
+        await using (member = new MemberRuntime(ContainerTestBed.Definition(Plug), new Scripted(_ =>
+            new MemberResult(false, 1, "", FailureReason: "The plugin said no.", FailureClass: FailureClasses.Transport)), log))
+        {
+            var instruction = await bed.Store.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Plug), """{"instruction":"go"}""", "console"), Ct);
+            Assert.True(await member.OfferAsync(instruction, Ct));
+
+            Assert.True(await bed.PumpUntilAsync(async () =>
+                (await bed.Store.ReadAfterAsync(0, [MessageTypes.Failed], 10, Ct)).Count > 0));
+        }
+
+        Assert.Equal("The plugin said no.", failedAsAppended);
+    }
+
+    /// <summary>
     /// THE RUNTIME IS AGENT-FREE, mechanically: none of the agent seam's types, and no prompt
     /// rendering or history building, appear in the member runtime or the pump.
     /// </summary>
