@@ -464,50 +464,73 @@ func Logs(ctx context.Context, e engine.Engine, follow bool, tail int, out io.Wr
 	return e.Logs(ctx, ContainerName, follow, tail, out)
 }
 
-// Uninstall removes the sidecar, the container, the pod and the image, and the data volume only
-// when asked. What exists is asked first, and only what exists is removed and said: an engine
-// that cannot answer is a refusal, never a silent no-op with a clean exit.
-func Uninstall(ctx context.Context, e engine.Engine, image string, data bool, out io.Writer) error {
+// Removal is what Uninstall found on one engine: anything of Yawble's, and the data volume
+// (removed with data, kept without).
+type Removal struct {
+	Found, Volume bool
+}
+
+// Uninstall removes the sidecar, the container, the pod (a network on Docker) and the image from
+// one engine, and the data volume only when asked. What exists is asked first, and only what
+// exists is removed; every line names the engine, and an engine holding nothing says so. An
+// engine that cannot answer is a refusal, never a silent no-op with a clean exit.
+func Uninstall(ctx context.Context, e engine.Engine, image string, data bool, out io.Writer) (Removal, error) {
+	var r Removal
+	name := e.Name()
 	if _, err := e.Version(ctx); err != nil {
-		return fmt.Errorf("the engine cannot be asked, so nothing was removed: %w", err)
+		return r, fmt.Errorf("%s cannot be asked, so nothing was removed from it: %w", name, err)
+	}
+	pod := "pod"
+	if name == "docker" {
+		pod = "network"
 	}
 	var failed []string
-	remove := func(what string, exists func() (bool, error), rm func() error) {
+	// what is the object, rest what follows the engine on the line.
+	remove := func(what, rest string, exists func() (bool, error), rm func() error) bool {
 		ok, err := exists()
 		if err != nil {
 			failed = append(failed, what+": "+err.Error())
-			return
+			return false
 		}
 		if !ok {
-			return
+			return false
 		}
+		r.Found = true
 		if err := rm(); err != nil {
 			failed = append(failed, what+": "+err.Error())
-			return
+			return true
 		}
-		fmt.Fprintln(out, "removed", what)
+		fmt.Fprintf(out, "removed %s (%s)%s\n", what, name, rest)
+		return true
 	}
-	containerExists := func(name string) func() (bool, error) {
+	containerExists := func(c string) func() (bool, error) {
 		return func() (bool, error) {
-			state, err := e.ContainerState(ctx, name)
+			state, err := e.ContainerState(ctx, c)
 			return state != engine.StateAbsent, err
 		}
 	}
-	remove("tunnel sidecar "+TunnelName, containerExists(TunnelName), func() error { return e.Remove(ctx, TunnelName) })
-	remove("container "+ContainerName, containerExists(ContainerName), func() error { return e.Remove(ctx, ContainerName) })
-	remove("pod "+PodName, func() (bool, error) { return e.PodExists(ctx, PodName) }, func() error { return e.RemovePod(ctx, PodName) })
+	remove("tunnel sidecar "+TunnelName, "", containerExists(TunnelName), func() error { return e.Remove(ctx, TunnelName) })
+	remove("container "+ContainerName, "", containerExists(ContainerName), func() error { return e.Remove(ctx, ContainerName) })
+	remove(pod+" "+PodName, "", func() (bool, error) { return e.PodExists(ctx, PodName) }, func() error { return e.RemovePod(ctx, PodName) })
 	if image != "" {
-		remove("image "+image, func() (bool, error) { return e.ImagePresent(ctx, image) }, func() error { return e.RemoveImage(ctx, image) })
+		remove("image "+image, "", func() (bool, error) { return e.ImagePresent(ctx, image) }, func() error { return e.RemoveImage(ctx, image) })
 	}
+	volumeExists := func() (bool, error) { return e.VolumeExists(ctx, VolumeName) }
 	if data {
-		remove("volume "+VolumeName+" and everything on it", func() (bool, error) { return e.VolumeExists(ctx, VolumeName) }, func() error { return e.RemoveVolume(ctx, VolumeName) })
-	} else {
-		fmt.Fprintf(out, "volume %s kept (the instance's data); `yawble uninstall --data` removes it\n", VolumeName)
+		r.Volume = remove("volume "+VolumeName, " and everything on it", volumeExists, func() error { return e.RemoveVolume(ctx, VolumeName) })
+	} else if ok, err := volumeExists(); err != nil {
+		failed = append(failed, "volume "+VolumeName+": "+err.Error())
+	} else if ok {
+		r.Found, r.Volume = true, true
+		fmt.Fprintf(out, "volume %s (%s) kept (the instance's data); `yawble uninstall --data` removes it\n", VolumeName, name)
 	}
 	if len(failed) > 0 {
-		return fmt.Errorf("some things could not be removed:\n  %s", strings.Join(failed, "\n  "))
+		return r, fmt.Errorf("%s: some things could not be removed:\n  %s", name, strings.Join(failed, "\n  "))
 	}
-	return nil
+	if !r.Found {
+		fmt.Fprintf(out, "%s: no Yawble container, %s, image or volume\n", name, pod)
+	}
+	return r, nil
 }
 
 // RunLimitText is the running limit as `up` states it: the configured number, or the Host's

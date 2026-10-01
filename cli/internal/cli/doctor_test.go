@@ -318,7 +318,8 @@ func stoppedMachineScript() *engine.Scripted {
 
 // With Docker as the engine there is no Podman machine to mind, even when Podman is installed
 // beside it: measured on a Mac with both, where `doctor --fix` started the Podman machine and
-// reported on it while the instance ran on Docker.
+// reported on it while the instance ran on Docker. Podman is asked one thing only: whether it
+// holds a data volume this instance does not use, which starts nothing.
 func TestDoctorOnDockerNeverAsksOrStartsThePodmanMachine(t *testing.T) {
 	s := engine.NewScripted()
 	s.On(machineInspect, engine.Result{Stdout: "podman-machine-default|stopped|false|8192|6\n"})
@@ -337,7 +338,7 @@ func TestDoctorOnDockerNeverAsksOrStartsThePodmanMachine(t *testing.T) {
 		}
 		_, out, _ := run(t, deps, args...)
 		for _, c := range s.Calls {
-			if strings.HasPrefix(c, "podman") {
+			if strings.HasPrefix(c, "podman") && !strings.HasPrefix(c, "podman volume ") {
 				t.Errorf("%v asked Podman while the engine is Docker: %q", args, c)
 			}
 		}

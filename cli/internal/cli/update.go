@@ -137,6 +137,12 @@ func startStoppedMachine(cmd *cobra.Command, deps Deps) error {
 	if engineOf(deps, c).Name() != "podman" {
 		return nil
 	}
+	return startStoppedPodmanMachine(cmd, deps)
+}
+
+// startStoppedPodmanMachine is startStoppedMachine for Podman whichever engine is selected:
+// `uninstall` asks every installed engine, Podman among them.
+func startStoppedPodmanMachine(cmd *cobra.Command, deps Deps) error {
 	goos := deps.GOOS
 	if goos == "" {
 		goos = runtime.GOOS

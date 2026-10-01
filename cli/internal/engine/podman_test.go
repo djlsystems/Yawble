@@ -285,3 +285,25 @@ func TestExecToStreamsTheProgramsOutputOnBothEngines(t *testing.T) {
 		t.Errorf("err %v", err)
 	}
 }
+
+// `up` dates a data volume it is about to reuse: the day of each engine's CreatedAt, in either
+// form Podman prints it; an answer that is not a date is no date, not a guess.
+func TestVolumeCreatedIsTheDayOnBothEngines(t *testing.T) {
+	for name, e := range map[string]func(engine.Runner) engine.Engine{"podman": engine.NewPodman, "docker": engine.NewDocker} {
+		for answer, want := range map[string]string{
+			"2026-09-30T08:12:44Z\n":             "2026-09-30",
+			"2026-09-30 10:12:44.5 +0200 CEST\n": "2026-09-30",
+			"<no value>\n":                       "",
+		} {
+			s := engine.NewScripted()
+			s.On(name+" volume inspect", engine.Result{Stdout: answer})
+			got, err := e(s).VolumeCreated(context.Background(), "yawble-data")
+			if err != nil || got != want {
+				t.Errorf("%s %q: %q %v, want %q", name, answer, got, err, want)
+			}
+			if line := name + " volume inspect --format {{.CreatedAt}} yawble-data"; s.Calls[0] != line {
+				t.Errorf("%s: %q, want %q", name, s.Calls[0], line)
+			}
+		}
+	}
+}

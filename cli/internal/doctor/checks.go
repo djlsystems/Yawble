@@ -554,3 +554,14 @@ func contributorRow(g GitHubObserved) (Check, bool) {
 	}
 	return Check{"contributor", Warn, "GH_TOKEN (" + g.Kind + ") has no public_repo or repo scope; " + github.ContributorNeeds, "only teams that contribute to a project they cannot push to need it: yawble github with a classic token, then yawble up"}, true
 }
+
+// OtherVolumeCheck names a data volume on an engine this instance does not run on: data a
+// person may believe gone, which a later `up` on that engine would take over.
+func OtherVolumeCheck(selected, other, volume string) Check {
+	return Check{
+		Name:    "data volume on " + other,
+		Verdict: Warn,
+		Detail:  fmt.Sprintf("%s also holds a data volume %s, which this instance on %s does not use", other, volume, selected),
+		Fix:     fmt.Sprintf("%s volume rm %s removes it and everything on it; yawble config set engine %s uses it instead", other, instance.VolumeName, other),
+	}
+}

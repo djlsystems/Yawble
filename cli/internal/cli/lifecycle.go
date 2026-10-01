@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"runtime"
@@ -158,9 +159,14 @@ func newUpCommand(deps Deps) *cobra.Command {
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			showLogo(deps, cmd.OutOrStdout())
+			_, statErr := os.Stat(config.Path(deps.ConfigDir))
+			fresh := os.IsNotExist(statErr)
 			e, s, err := upReady(cmd, deps, yes)
 			if err != nil {
 				return err
+			}
+			if fresh {
+				noteReusedVolume(cmd.Context(), deps, e, cmd.OutOrStdout())
 			}
 			noteRestart(cmd.Context(), e, s, cmd.OutOrStdout())
 			if err := instance.Up(cmd.Context(), e, s, healthChecker(deps.HTTP), cmd.OutOrStdout()); err != nil {
@@ -177,6 +183,23 @@ func newUpCommand(deps Deps) *cobra.Command {
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "answer yes to every question: Podman when both engines are installed, create or re-root the machine")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "do not open the board in a browser when it is up")
 	return cmd
+}
+
+// noteReusedVolume is what a fresh install (no saved settings, no container) says about data that
+// is already there: the chosen engine's data volume, which the new instance takes over with every
+// team and login on it, and one on the other engine, which it does not use. Neither is touched.
+func noteReusedVolume(ctx context.Context, deps Deps, e engine.Engine, out io.Writer) {
+	if state, err := e.ContainerState(ctx, instance.ContainerName); err != nil || state != engine.StateAbsent {
+		return
+	}
+	if v := volumeOn(ctx, e); v != "" {
+		fmt.Fprintf(out, "using the existing data volume %s: its teams and logins are kept; `yawble uninstall --data` removes it\n", v)
+	}
+	if other := otherEngine(deps, e.Name()); other != nil {
+		if v := volumeOn(ctx, other); v != "" {
+			fmt.Fprintf(out, "%s also holds a data volume %s, which this instance on %s does not use; `%s volume rm %s` removes it\n", other.Name(), v, e.Name(), other.Name(), instance.VolumeName)
+		}
+	}
 }
 
 func newDownCommand(deps Deps) *cobra.Command {

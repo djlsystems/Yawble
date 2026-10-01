@@ -100,6 +100,9 @@ type Engine interface {
 	Login(ctx context.Context, registry, user, password string) error
 	RemoveImage(ctx context.Context, ref string) error
 	RemoveVolume(ctx context.Context, name string) error
+	// VolumeCreated is the day a volume was created, as YYYY-MM-DD ("" when the engine's answer
+	// is not a date): how `up` dates a data volume it is about to reuse.
+	VolumeCreated(ctx context.Context, name string) (string, error)
 	Logs(ctx context.Context, name string, follow bool, tail int, out io.Writer) error
 	// FollowSince follows the log from a moment on, until ctx ends: `up` shows a first start's
 	// progress without replaying an earlier run.
@@ -192,6 +195,19 @@ func execInput(ctx context.Context, r Runner, program, name, stdin string, args 
 		return res, fmt.Errorf("%s exec %s: %s (exit %d)", program, name, strings.TrimSpace(res.Stderr), res.ExitCode)
 	}
 	return res, nil
+}
+
+// createdDate is the day of a CreatedAt answer. Podman says "2026-09-30 10:00:00.1 +0200 CEST" or
+// RFC 3339 by version, Docker RFC 3339: both start with the day, which is all a person needs.
+func createdDate(stdout string) string {
+	s := strings.TrimSpace(stdout)
+	if len(s) < 10 {
+		return ""
+	}
+	if _, err := time.Parse("2006-01-02", s[:10]); err != nil {
+		return ""
+	}
+	return s[:10]
 }
 
 // NotRunnable is the engine's program not starting at all: not on PATH, not executable. It is a

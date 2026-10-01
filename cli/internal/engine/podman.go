@@ -291,6 +291,12 @@ func (p podman) RemoveVolume(ctx context.Context, name string) error {
 	return err
 }
 
+// VolumeCreated is `podman volume inspect --format {{.CreatedAt}} <name>`, as a date.
+func (p podman) VolumeCreated(ctx context.Context, name string) (string, error) {
+	res, err := p.run(ctx, "volume", "inspect", "--format", "{{.CreatedAt}}", name)
+	return createdDate(res.Stdout), err
+}
+
 func (p podman) Logs(ctx context.Context, name string, follow bool, tail int, out io.Writer) error {
 	args := []string{"logs"}
 	if follow {

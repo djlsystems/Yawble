@@ -200,6 +200,12 @@ func (d docker) RemoveVolume(ctx context.Context, name string) error {
 	return err
 }
 
+// VolumeCreated is `docker volume inspect --format {{.CreatedAt}} <name>`, as a date.
+func (d docker) VolumeCreated(ctx context.Context, name string) (string, error) {
+	res, err := d.run(ctx, "volume", "inspect", "--format", "{{.CreatedAt}}", name)
+	return createdDate(res.Stdout), err
+}
+
 func (d docker) FollowSince(ctx context.Context, name string, since time.Time, out io.Writer) error {
 	return d.stream(ctx, out, "logs", "--follow", "--since", since.UTC().Format(time.RFC3339), name)
 }
