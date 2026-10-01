@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE KANBAN OPENS MANAGE OUTCOMES (B0023): a card's outcome tag emits `open-outcome` with the
+// THE KANBAN OPENS MANAGE OUTCOMES: a card's outcome tag emits `open-outcome` with the
 // outcome's id, and the board opens the dialog AT THAT OUTCOME; the filter bar's Manage outcomes
 // button opens it at the list. The tag itself is the card's (KanbanCard); this pins the board's
 // handler, so the event is emitted from the mounted card component.

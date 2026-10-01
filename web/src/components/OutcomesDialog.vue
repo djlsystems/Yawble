@@ -43,7 +43,7 @@ import {
 import { vResizableColumns } from '../lib/resizableColumns';
 
 /**
- * MANAGE OUTCOMES (B0023): every outcome with the figures of the work that served it, and one
+ * MANAGE OUTCOMES: every outcome with the figures of the work that served it, and one
  * outcome opened - its details, its status actions, its workflows and its link history.
  *
  * EVERY FIGURE IS THE ROUTE'S. `GET /api/outcomes` answers the list's figures for the period and

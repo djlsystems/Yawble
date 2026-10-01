@@ -1,7 +1,7 @@
 import { json, send } from './client'
 
 /**
- * EVERY CALL TO THE OUTCOMES SURFACE (B0022's routes): the list with its figures, one outcome with
+ * EVERY CALL TO THE OUTCOMES SURFACE: the list with its figures, one outcome with
  * its workflows and link history, a person's edits and status changes, the merge and its preview,
  * and a workflow's link.
  *

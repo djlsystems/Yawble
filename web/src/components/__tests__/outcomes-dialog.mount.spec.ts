@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// MANAGE OUTCOMES (B0023). The tabs, each outcome's figures exactly as the route answers them with
+// MANAGE OUTCOMES. The tabs, each outcome's figures exactly as the route answers them with
 // "+ N unmeasured runs", the "Accounting since" note, the always-shown No outcome row; and the
 // actions: rename, confirm, retire and reactivate send their routes, Merge into… shows the route's
 // preview before it merges, Reject is offered only with no links, and Move sends the link route.
