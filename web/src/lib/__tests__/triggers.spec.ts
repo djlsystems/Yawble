@@ -579,6 +579,7 @@ describe('trigger draft helpers', () => {
       filter: '',
       ...folderDefaults,
       ...costDefaults,
+      outcomeId: '',
     })
   })
 
