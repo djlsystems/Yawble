@@ -89,6 +89,15 @@ public static class FailureClasses
     public const string LaunchMissing = "launch-missing";
 
     /// <summary>
+    /// The run went over its own memory limit (`runs.memoryLimitMb`, applied by
+    /// `RunMemoryLimits`) and was stopped by it. NOT AN AGENT FAULT: the limit is the platform's,
+    /// set so one runaway run cannot take the Host and every other team down with it. Never resumed
+    /// automatically - the same work would hit the same limit - and the run's own error names the
+    /// limit in force and the setting that raises it.
+    /// </summary>
+    public const string OutOfMemory = "out-of-memory";
+
+    /// <summary>
     /// NOBODY COULD CLASSIFY IT - the default, and a real class rather than an absence. Treated
     /// exactly as <see cref="AgentFault"/>: never resumed.
     /// </summary>
@@ -97,7 +106,7 @@ public static class FailureClasses
     /// <summary>Every class, for a test or a renderer that wants to enumerate them.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        Quota, Rate, Transport, AgentFault, LaunchMissing, Timeout, Interrupted, Unknown,
+        Quota, Rate, Transport, AgentFault, LaunchMissing, OutOfMemory, Timeout, Interrupted, Unknown,
     ];
 
     /// <summary>
@@ -138,6 +147,8 @@ public static class FailureClasses
         AgentFault => "The agent itself failed, so re-running it would spend again to fail the same way.",
         LaunchMissing => "The program was not found when the run started. It may be being installed "
             + "or updated, so nothing ran and nothing was spent; re-sending the instruction will try again.",
+        OutOfMemory => "The run used more memory than its limit, the setting runs.memoryLimitMb, so it was "
+            + "stopped. This is not an agent fault; the run's own error says what the limit was.",
         Timeout => "The idle clock fired.",
         Interrupted => "The run was cut off before it finished.",
         Unknown => "Nothing here could say why, so this is treated exactly as an agent fault and "

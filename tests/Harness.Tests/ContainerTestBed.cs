@@ -42,7 +42,8 @@ public sealed class ContainerTestBed : IAsyncDisposable
         long? workflowSpendLimit = null,
         ITriggerStore? triggers = null,
         bool pending = false,
-        Func<Message, CancellationToken, Task>? onTerminal = null)
+        Func<Message, CancellationToken, Task>? onTerminal = null,
+        Func<ContainerId, long?, bool, CancellationToken, Task<bool>>? onRunEnding = null)
     {
         _directory = Path.Combine(Path.GetTempPath(), $"harness-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_directory);
@@ -66,7 +67,8 @@ public sealed class ContainerTestBed : IAsyncDisposable
             workflowSpendLimit: workflowSpendLimit,
             wip: wip,
             worktrees: worktrees,
-            onTerminal: onTerminal);
+            onTerminal: onTerminal,
+            onRunEnding: onRunEnding);
         Host = host;
     }
 

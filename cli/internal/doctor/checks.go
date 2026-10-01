@@ -65,6 +65,37 @@ type Observed struct {
 	Remote *RemoteObserved
 	// GitHub is what GitHub says about the GH_TOKEN set with `yawble secret`; nil when not asked.
 	GitHub *GitHubObserved
+	// Stats is the engine's own reading of the running container (`podman stats`, `docker
+	// stats`): the view from outside, which answers even when the Host inside cannot. Nil with
+	// StatsErr nil is not asked (the container is not running).
+	Stats    *engine.Stats
+	StatsErr error
+}
+
+// memoryWarnPercent is the container's memory use, of its limit, from which the stats row warns:
+// a run started now may be killed for memory.
+const memoryWarnPercent = 90
+
+// statsRow is the engine's stats of the container, informational: warn only near the memory
+// limit, and a stats command that failed is not measured, never a failure.
+func statsRow(o Observed) Check {
+	switch {
+	case !o.ContainerKnown:
+		return Check{"stats", Skip, "the engine could not be asked", ""}
+	case o.Container != engine.StateRunning:
+		return Check{"stats", Skip, "the container is not running", ""}
+	case o.StatsErr != nil:
+		return Check{"stats", Skip, "not measured: " + o.StatsErr.Error(), ""}
+	case o.Stats == nil:
+		return Check{"stats", Skip, "not measured", ""}
+	case o.Stats.NotRunning:
+		return Check{"stats", Skip, fmt.Sprintf("%s says the container is not running", o.Stats.Command), ""}
+	}
+	detail := fmt.Sprintf("%s  (%s)", o.Stats.Summary(), o.Stats.Command)
+	if p := o.Stats.MemoryPercent; p != nil && *p >= memoryWarnPercent {
+		return Check{"stats", Warn, detail, fmt.Sprintf("the container uses %.0f%% of its memory limit; finish or stop some runs, or yawble config set memory <more>, then yawble up", *p)}
+	}
+	return Check{"stats", OK, detail, ""}
 }
 
 // RemoteObserved is the configured provider, its sidecar's state and the URL it printed.
@@ -279,6 +310,8 @@ func HostChecks(o Observed) []Check {
 	default:
 		checks = append(checks, Check{"health", OK, o.URL + "/healthz answers", ""})
 	}
+
+	checks = append(checks, statsRow(o))
 
 	if o.GitHub != nil {
 		checks = append(checks, gitHubRow(*o.GitHub))

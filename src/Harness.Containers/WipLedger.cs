@@ -2,8 +2,10 @@ using Harness.Contracts;
 
 namespace Harness.Containers;
 
-/// <summary>One run holding or waiting on an instance-wide slot.</summary>
-public sealed record WipHold(string Team, string Member, DateTimeOffset Since);
+/// <summary>One run holding or waiting on an instance-wide slot. A waiter's <c>Reason</c> says what it
+/// waits for - <see cref="WipLedger.SlotReason"/>, or the headroom gate's sentence ("waiting for
+/// memory: 11.2 of 12.9 GB in use"); a running hold has none.</summary>
+public sealed record WipHold(string Team, string Member, DateTimeOffset Since, string? Reason = null);
 
 /// <summary>What <c>GET /api/wip</c> returns. Held work is visible, and attributed to a team and member.
 /// <c>Waiting</c> is in queue order: the head is the next to start.</summary>
@@ -32,6 +34,17 @@ public sealed record WipView(int Max, IReadOnlyList<WipHold> Running, IReadOnlyL
 /// </para>
 ///
 /// <para>
+/// <b>AND MEASURED HEADROOM.</b> A run the limit has room for still waits while the headroom gate
+/// (handed in, read on every claim) answers a reason - memory in use or memory pressure over its
+/// threshold. It waits exactly as for a slot, in the same queue, with that reason on its hold; it is
+/// never refused. A Manager is never held by the gate: when memory is high the Manager is the run that
+/// stops or redirects the work holding it, so it is admitted by the run limit alone, reserved slot
+/// included, exactly as without a gate. Whoever feeds the
+/// gate calls <see cref="HeadroomChanged"/> after each new measurement, so a waiter held for headroom
+/// asks again when it clears.
+/// </para>
+///
+/// <para>
 /// <b>THE LIMIT IS SETTABLE AT RUNTIME</b> (<see cref="SetMax"/>, from <c>wip.maxRunning</c>). Lowering
 /// it below the running count evicts nothing: running work finishes, and the next start waits until
 /// the count is back under the new limit.
@@ -43,14 +56,27 @@ public sealed class WipLedger
     /// the same identifier <c>TeamRegistry.DefaultManagerName</c> is, which nobody can rename.</summary>
     public const string ManagerName = "Manager";
 
+    /// <summary>What a run waiting for the run limit is waiting for.</summary>
+    public const string SlotReason = "waiting for a slot";
+
     private readonly object _gate = new();
     private readonly Dictionary<string, WipHold> _running = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WipHold> _waiting = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _queue = [];
+    private readonly HashSet<string> _heldForHeadroom = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<string?>? _headroom;
     private int _max;
     private TaskCompletionSource _changed = NewSignal();
 
-    public WipLedger(int maxRunning) => _max = maxRunning;
+    /// <param name="maxRunning">The run limit; 0 or less is unlimited.</param>
+    /// <param name="headroom">Null when the instance has room for another run, otherwise the reason
+    /// it waits. Read under the ledger's lock on every claim the limit would admit, so it must answer
+    /// from figures already measured and never do I/O. Absent, only the run limit admits.</param>
+    public WipLedger(int maxRunning, Func<string?>? headroom = null)
+    {
+        _max = maxRunning;
+        _headroom = headroom;
+    }
 
     public int Max
     {
@@ -111,18 +137,45 @@ public sealed class WipLedger
 
             if (!AdmitsLocked(key, IsManager(id)))
             {
-                if (!_waiting.ContainsKey(key))
-                {
-                    _waiting[key] = new WipHold(id.Team, id.Name, DateTimeOffset.UtcNow);
-                    _queue.Add(key);
-                }
+                WaitLocked(id, key, SlotReason, headroom: false);
+                return null;
+            }
 
+            // The limit has room: measured headroom decides, for members. Still a wait, never a
+            // refusal. A Manager skips it - it is the run that would free the memory.
+            if (!IsManager(id) && _headroom?.Invoke() is { } reason)
+            {
+                WaitLocked(id, key, reason, headroom: true);
                 return null;
             }
 
             RemoveWaiterLocked(key);
             _running[key] = new WipHold(id.Team, id.Name, DateTimeOffset.UtcNow);
             return new Release(this, key);
+        }
+    }
+
+    /// <summary>
+    /// A new measurement: when the gate now has room and a waiter was held for headroom, the waiters
+    /// ask again; otherwise each such waiter's reason is brought up to date (the figure in it moved).
+    /// </summary>
+    public void HeadroomChanged()
+    {
+        lock (_gate)
+        {
+            if (_heldForHeadroom.Count == 0) return;
+
+            if (_headroom?.Invoke() is not { } reason)
+            {
+                _heldForHeadroom.Clear();
+                PulseLocked();
+                return;
+            }
+
+            foreach (var key in _heldForHeadroom)
+            {
+                if (_waiting.TryGetValue(key, out var hold)) _waiting[key] = hold with { Reason = reason };
+            }
         }
     }
 
@@ -171,8 +224,27 @@ public sealed class WipLedger
         return taken < (manager ? _max + 1 : _max);
     }
 
+    /// <summary>Records <paramref name="key"/> as waiting - at the tail the first time, keeping its
+    /// place and its <c>Since</c> after that - with what it waits for.</summary>
+    private void WaitLocked(ContainerId id, string key, string reason, bool headroom)
+    {
+        if (_waiting.TryGetValue(key, out var hold))
+        {
+            _waiting[key] = hold with { Reason = reason };
+        }
+        else
+        {
+            _waiting[key] = new WipHold(id.Team, id.Name, DateTimeOffset.UtcNow, reason);
+            _queue.Add(key);
+        }
+
+        if (headroom) _heldForHeadroom.Add(key);
+        else _heldForHeadroom.Remove(key);
+    }
+
     private bool RemoveWaiterLocked(string key)
     {
+        _heldForHeadroom.Remove(key);
         if (!_waiting.Remove(key)) return false;
         _queue.RemoveAll(queued => string.Equals(queued, key, StringComparison.OrdinalIgnoreCase));
         return true;

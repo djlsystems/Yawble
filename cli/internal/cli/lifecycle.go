@@ -199,7 +199,7 @@ func newStatusCommand(deps Deps) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:     "status",
-		Short:   "Whether the instance runs, its URL, engine and image",
+		Short:   "Whether the instance runs, its URL, engine, image and the engine's stats of it",
 		Example: "  yawble status\n  yawble status --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -211,10 +211,11 @@ func newStatusCommand(deps Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			stats, statsErr := containerStats(cmd.Context(), e, st.Container)
 			if asJSON {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				return enc.Encode(st)
+				return enc.Encode(statusJSON{Status: st, Stats: stats, StatsError: errText(statsErr)})
 			}
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "container  %s\n", st.Container)
@@ -227,6 +228,7 @@ func newStatusCommand(deps Deps) *cobra.Command {
 				}
 			}
 			fmt.Fprintf(w, "engine     %s %s\n", st.Engine, st.EngineVersion)
+			fmt.Fprintf(w, "stats      %s\n", statsLine(e, stats, statsErr))
 			if st.Image == "" {
 				fmt.Fprintln(w, "image      none pinned (yawble config set image <reference>)")
 			} else {
@@ -240,6 +242,48 @@ func newStatusCommand(deps Deps) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
 	return cmd
+}
+
+// statusJSON is the status document: the instance's status and, beside it, the engine's own
+// stats of the container (null when it is not running), or why they could not be read.
+type statusJSON struct {
+	instance.Status
+	Stats      *engine.Stats `json:"stats"`
+	StatsError string        `json:"statsError,omitempty"`
+}
+
+// containerStats asks the engine for the container's stats only when it runs: a stopped
+// container has none, and that is said, not asked.
+func containerStats(ctx context.Context, e engine.Engine, state engine.State) (*engine.Stats, error) {
+	if state != engine.StateRunning {
+		return nil, nil
+	}
+	st, err := e.Stats(ctx, instance.ContainerName)
+	if err != nil {
+		return nil, err
+	}
+	return &st, nil
+}
+
+// statsLine is the stats row of `status`, naming the command the figures came from. A failure
+// is "not measured" with the reason; it never fails the status itself.
+func statsLine(e engine.Engine, st *engine.Stats, err error) string {
+	command := e.Name() + " stats"
+	switch {
+	case err != nil:
+		return fmt.Sprintf("not measured: %v  (%s)", err, command)
+	case st == nil:
+		return "the container is not running"
+	default:
+		return fmt.Sprintf("%s  (%s)", st.Summary(), st.Command)
+	}
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func newLogsCommand(deps Deps) *cobra.Command {

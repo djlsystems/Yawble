@@ -73,7 +73,11 @@ public static class ChildProcess
     /// From a system directory, never PATH: setsid runs before the agent-user prefix, so it still
     /// holds the Host's capabilities. The arguments and environment are the caller's to add.
     /// </summary>
-    public static ProcessStartInfo? StartInfo(string resolvedFileName, string workingDirectory, AgentLaunchUser? runAs)
+    /// <param name="limits">What goes between the agent-user prefix and the program: the run's
+    /// memory limit (<see cref="RunMemoryLimits.Prefix"/>), applied after the switch so the agent,
+    /// which keeps no capability, cannot raise it again.</param>
+    public static ProcessStartInfo? StartInfo(
+        string resolvedFileName, string workingDirectory, AgentLaunchUser? runAs, IReadOnlyList<string>? limits = null)
     {
         if (SystemCommand.Find("setsid") is not { } setsid) return null;
 
@@ -97,6 +101,7 @@ public static class ChildProcess
         // As `agent` when the Host can switch, AFTER setsid so the session is still the
         // child's own: setpriv execs in place, and the group kill below reaches it as before.
         foreach (var part in runAs?.Prefix ?? []) start.ArgumentList.Add(part);
+        foreach (var part in limits ?? []) start.ArgumentList.Add(part);
         start.ArgumentList.Add(resolvedFileName);
 
         return start;
@@ -115,12 +120,17 @@ public static class ChildProcess
     /// protocol. Without it stdout is pumped in chunks, which is what an agent's JSON envelope needs.
     /// Either way the text is captured into <see cref="ChildOutcome.Stdout"/>.
     /// </param>
+    /// <param name="run">The run this child is, registered in <paramref name="groups"/> (the Host's
+    /// <see cref="Capacity.RunProcessGroups.Shared"/> when not given) from its start to its end, so
+    /// the capacity sampler can sum its process group under its team and member.</param>
     public static async Task<ChildOutcome> RunAsync(
         ProcessStartInfo start,
         string? stdin,
         CancellationToken stopping,
         Action<Process>? onStarted = null,
-        Func<string, Task>? onStdoutLine = null)
+        Func<string, Task>? onStdoutLine = null,
+        ContainerId? run = null,
+        Capacity.RunProcessGroups? groups = null)
     {
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("The process did not start.");
@@ -129,6 +139,11 @@ public static class ChildProcess
         // it disposes first: every exit from this method, including a run that completes
         // normally, takes whatever is left in the child's process group with it.
         using var group = new ProcessGroup(process.Id);
+
+        // Named for the capacity sampler until the run ends, however it ends.
+        using var registered = run is { } owner
+            ? (groups ?? Capacity.RunProcessGroups.Shared).Register(process.Id, owner)
+            : null;
 
         onStarted?.Invoke(process);
 
@@ -299,6 +314,8 @@ public static class ChildProcess
         private readonly IDisposable? _narrating;
         private readonly CancellationTokenSource _stopping;
         private readonly CancellationToken _caller;
+        private readonly Lock _gate = new();
+        private bool _paused;
 
         internal IdleClock(RunHeartbeat heartbeat, ContainerId who, int? seconds, CancellationToken ct)
         {
@@ -307,9 +324,32 @@ public static class ChildProcess
                 ? new CancellationTokenSource(TimeSpan.FromSeconds(s))
                 : new CancellationTokenSource();
             _narrating = seconds is { } window and > 0
-                ? heartbeat.WhileRunning(who, () => _expiry.CancelAfter(TimeSpan.FromSeconds(window)))
+                ? heartbeat.WhileRunning(who, () => Restart(window), paused => Hold(paused, window))
                 : null;
             _stopping = CancellationTokenSource.CreateLinkedTokenSource(ct, _expiry.Token);
+        }
+
+        /// <summary>A progress report: a full window again, unless the clock is paused.</summary>
+        private void Restart(int window)
+        {
+            lock (_gate)
+            {
+                if (!_paused) _expiry.CancelAfter(TimeSpan.FromSeconds(window));
+            }
+        }
+
+        /// <summary>
+        /// PAUSED WHILE THE MEMBER WAITS IN A LEASE'S QUEUE: an infinite countdown, which a progress
+        /// report does not shorten. Resumed with a full window, so the wait itself is never
+        /// counted as silence.
+        /// </summary>
+        private void Hold(bool paused, int window)
+        {
+            lock (_gate)
+            {
+                _paused = paused;
+                _expiry.CancelAfter(paused ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(window));
+            }
         }
 
         /// <summary>Fires for the caller's token or the clock, whichever is first.</summary>

@@ -37,7 +37,9 @@ public sealed partial class ProcessAgentRunner(
     LiveRuns? live = null,
     IMemberReports? reports = null,
     LaunchLookup? lookup = null,
-    AgentUpdateGate? updates = null) : IAgentRunner
+    AgentUpdateGate? updates = null,
+    RunMemoryLimits? memory = null,
+    MemberTempRoot? temp = null) : IAgentRunner
 {
     /// <summary>How long a launch looks for a program missing from PATH; the Host's is ~30s.</summary>
     private readonly LaunchLookup _lookup = lookup ?? LaunchLookup.Default;
@@ -245,7 +247,12 @@ public sealed partial class ProcessAgentRunner(
 
         // From a system directory, never PATH: setsid runs before the agent prefix, so
         // it still holds the Host's capabilities. Built by the launcher every member shares.
-        if (ChildProcess.StartInfo(resolvedFileName, invocation.WorkingDirectory, runAs) is not { } start)
+        // THE RUN'S OWN MEMORY LIMIT, read now so a changed setting applies to this run. With an
+        // rlimit it is a prefix; with a cgroup the run is put in its own once it exists.
+        var memoryLimit = memory?.Limit();
+        var limits = memory is not null && memoryLimit is not null ? memory.Prefix(memoryLimit) : [];
+
+        if (ChildProcess.StartInfo(resolvedFileName, invocation.WorkingDirectory, runAs, limits) is not { } start)
         {
             return new AgentResult(
                 -1,
@@ -256,7 +263,7 @@ public sealed partial class ProcessAgentRunner(
         // THE MEMBER'S OWN TEMPORARY FOLDER, never the /tmp every member and the Host share.
         // Refused rather than falling back to /tmp when the workspace is there but the folder
         // cannot be made: a member quietly back in the shared folder is the failure this closes.
-        var memberTemp = await MemberTemp.EnsureAsync(invocation.WorkingDirectory, runAs, ct);
+        var memberTemp = await MemberTemp.EnsureAsync(invocation.WorkingDirectory, runAs, ct, temp?.Path);
 
         if (memberTemp is null && Directory.Exists(invocation.WorkingDirectory))
         {
@@ -578,6 +585,8 @@ public sealed partial class ProcessAgentRunner(
             // A transcript the agent names itself is the newest one written from here on.
             var launchedAt = DateTimeOffset.UtcNow;
 
+            using var cgroup = memory is not null && memoryLimit is not null ? memory.BeginRun(memoryLimit) : null;
+
             // Launched, pumped, fed and waited on by the launcher every member shares: its own
             // session, the agent user, both pipes read before the wait, stdin written and CLOSED
             // (a CLI that reads it waits forever on a pipe nobody closed), the process group killed
@@ -593,7 +602,12 @@ public sealed partial class ProcessAgentRunner(
 
                 // Only recorded, so a person can watch: nothing below reads it, so usage and
                 // output are the same with or without a watcher.
-                onStarted: _ => watchable = BeginLive(invocation, start, sessionId, launchedAt));
+                onStarted: process =>
+                {
+                    cgroup?.Add(process.Id);
+                    watchable = BeginLive(invocation, start, sessionId, launchedAt);
+                },
+                run: invocation.Container);
 
             if (outcome.Killed)
             {
@@ -676,6 +690,12 @@ public sealed partial class ProcessAgentRunner(
             // knows it failed and says so in a field, and this reads it.
             var envelopeError = EnvelopeFailure(command.UsageFormat, output);
 
+            // STOPPED BY ITS OWN MEMORY LIMIT: a class of its own, never an agent fault, and its
+            // words name the limit and the setting. Decided before the brand's words are read, so
+            // a dying CLI's message cannot class it as anything else.
+            var outOfMemory = memory is not null && memoryLimit is not null
+                && memory.StoppedBy(memoryLimit, outcome.ExitCode, errors, cgroup);
+
             // WHAT KIND OF FAILURE, FROM THE BRAND'S OWN WORDS. The detection above
             // already tells a 429 from a crash, so its answer is handed to the classifier along
             // with everything else the run said rather than detected twice.
@@ -743,7 +763,7 @@ public sealed partial class ProcessAgentRunner(
 
                 // The usage is kept even when the envelope failed: it was still spent, and a
                 // refused run that cost 43k tokens must not be filed as costing nothing.
-                envelopeError,
+                outOfMemory ? memory!.Sentence(memoryLimit!) : envelopeError,
                 Usage: usage,
                 ProcessId: outcome.ProcessId,
 
@@ -751,8 +771,8 @@ public sealed partial class ProcessAgentRunner(
                 // this design wants: a preset with no entry in the evidence table is honestly
                 // silent, exactly as a preset with no usage format is today, and the container
                 // files that as `unknown`.
-                FailureClass: finding?.FailureClass,
-                RetryAfter: finding?.RetryAfter,
+                FailureClass: outOfMemory ? FailureClasses.OutOfMemory : finding?.FailureClass,
+                RetryAfter: outOfMemory ? null : finding?.RetryAfter,
 
                 // Recorded on the run's terminal row; read by nothing above, so usage and
                 // output are the same whether or not there is one.

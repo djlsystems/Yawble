@@ -138,7 +138,8 @@ public sealed class PluginMemberRunner(
                 request,
                 clock.Stopping,
                 onStdoutLine: line => OnLineAsync(
-                    invocation.Member, manifest, invocation.Context.Limits, line, gathered, redacted, ct));
+                    invocation.Member, manifest, invocation.Context.Limits, line, gathered, redacted, ct),
+                run: invocation.Member);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

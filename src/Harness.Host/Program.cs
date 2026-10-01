@@ -20,6 +20,7 @@ using Harness.Backlog;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
+using Harness.Host.Capacity;
 using Harness.Host.Solutions;
 using Harness.Identity;
 using Harness.Kanban;
@@ -681,6 +682,13 @@ builder.Services.AddSingleton(new AgentInstallProbe());
 // The one path from the progress ROUTE to whatever is currently running that member. Singleton
 // because both ends have to be looking at the same object for a heartbeat to mean anything.
 builder.Services.AddSingleton<RunHeartbeat>();
+// THE INSTANCE-WIDE LEASES (`heavy`), across every team. The holder count is read through a
+// delegate on every call, so a settings write applies at the next acquire or release. ILeaseState
+// is the read-only view the activity monitor reads. See InstanceLeases and LeaseActions.
+builder.Services.AddSingleton(sp =>
+    new InstanceLeases(() => sp.GetRequiredService<TenantSettings>().LeasesHeavyHolders));
+builder.Services.AddSingleton<ILeaseState>(sp => sp.GetRequiredService<InstanceLeases>());
+builder.Services.AddSingleton<LeaseActions>();
 // WRAPPED, AND THE WRAPPING IS LOAD-BEARING. `ProcessAgentRunner` spawns the process and reads what
 // it wrote; `CredentialUseRunner` answers what the SERVER saw while it ran, which is how a run that
 // did nothing is told from one that decided there was nothing to do. Unwrap this and every result
@@ -701,6 +709,12 @@ builder.Services.AddSingleton(sp => new AgentCliUpdater(
     sp.GetRequiredService<AgentUpdateGate>(),
     sp.GetRequiredService<AgentLaunchUser>(),
     dataRoot));
+// HOW MUCH MEMORY ONE RUN MAY USE, AND HOW: a cgroup per run, an rlimit per process, or nothing,
+// decided once here from the container's own cgroup and logged at start (RunMemoryLimits). The
+// figure is a setting, read through a delegate at every launch.
+builder.Services.AddSingleton(_ => RunMemoryLimits.Resolve(tenantSettings.RunMemoryLimit));
+// Member TMPDIRs on the data volume, never a /tmp the engine may hold in memory (MemberTemp).
+builder.Services.AddSingleton(_ => MemberTemp.RootUnder(dataRoot));
 builder.Services.AddSingleton<ProcessAgentRunner>();
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
@@ -776,7 +790,32 @@ var workflowSpendLimit = tenantSettings.WorkflowSpendLimit;
 //
 // `wip.maxRunning`: settable at runtime. One place reads it - here, at start, and on every
 // change through `WipLedger.SetMax`, which applies it under the ledger's lock and evicts nothing.
-var wip = new WipLedger(tenantSettings.WipMaxRunning);
+//
+// AND MEASURED HEADROOM: a run the limit has room for still waits while memory in use or memory
+// pressure is over its `admission.*` threshold, read through delegates from the capacity sampler's
+// last measurement (`HeadroomGate`). Not measured falls back to the limit alone. The cgroup and proc
+// roots are configuration so a test Host reads a fixture, never the machine it runs on.
+var headroom = new HeadroomGate(
+    () => tenantSettings.AdmissionMemoryPercent, () => tenantSettings.AdmissionMemoryPressurePercent);
+var wip = new WipLedger(tenantSettings.WipMaxRunning, headroom.Reason);
+builder.Services.AddSingleton(headroom);
+
+// The `heavy` lease's holders and queue, read from the instance's leases on every sample; the
+// capacity sample and its push carry them.
+builder.Services.AddSingleton<IHeavyLeaseView>(sp => new HeavyLeaseFromLeases(sp.GetRequiredService<ILeaseState>()));
+builder.Services.AddSingleton(sp => new CapacitySampler(
+    new CgroupReader(builder.Configuration["Capacity:CgroupRoot"] ?? CgroupReader.DefaultRoot),
+    new ProcessGroupReader(builder.Configuration["Capacity:ProcRoot"] ?? "/proc"),
+    RunProcessGroups.Shared,
+    wip,
+    headroom,
+    sp.GetRequiredService<IHeavyLeaseView>(),
+    () => tenantSettings.AdmissionMemoryPercent,
+    () => tenantSettings.AdmissionMemoryPressurePercent,
+    push: sample => sp.GetRequiredService<IHubContext<ContainerHub>>()
+        .Clients.Group(ContainerHub.PeopleGroup).SendAsync(CapacityEndpoints.PushName, sample),
+    logger: sp.GetRequiredService<ILogger<CapacitySampler>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CapacitySampler>());
 tenantSettings.Changed += name =>
 {
     // The per-run allowance moves the default, so a change to it re-reads the limit too.
@@ -857,6 +896,12 @@ builder.Services.AddSingleton(sp => new ContainerHost(
 
     onRunEnding: async (member, causation, succeeded, ct) =>
     {
+        // NO LEASE OUTLIVES ITS RUN. First, because it cannot fail and everything below can, and
+        // because a run waiting on a push should not keep another team's heavy work waiting too.
+        // Every way a run ends reaches this hook - completed, failed, stopped, a runner that
+        // threw - and a Host that goes down holds no lease when it comes back: they live in memory.
+        await sp.GetRequiredService<LeaseActions>().EndedAsync(LeaseOwner.For(member), ct);
+
         // THE PUBLISH IGNORES `succeeded` AND THAT IS THE WHOLE POINT: a run killed between
         // doing the work and finishing its turn is the case this exists for, so its branch
         // matters MORE than a clean run's, not less.
@@ -1201,6 +1246,7 @@ builder.Services.AddSingleton(sp =>
     // ObjectDisposedException out of disposal and takes every live session's cleanup with it.
     var launcher = sp.GetRequiredService<ConciergeLaunchFactory>();
     var teams = sp.GetRequiredService<TeamRegistry>();
+    var leases = sp.GetRequiredService<InstanceLeases>();
 
     // The LOGIN, for the workspace's directory name. Resolved here rather than inside the
     // factory for teamLabel's stated reason - the factory has no store of its own - and captured
@@ -1250,7 +1296,14 @@ builder.Services.AddSingleton(sp =>
                 publicUrl,
                 ct);
         },
-        (key, ct) => launcher.RevokeAsync(key.User, ct));
+        async (key, ct) =>
+        {
+            // A Concierge's run is its session: a lease it took ends with it. It has no card and
+            // no silence clock, so only the lease moves; a member the queue hands it to has its
+            // clock resumed at its next acquire, which answers granted.
+            leases.Ended(LeaseOwner.ForConcierge(ConciergeLaunchFactory.PrincipalId(key.User)));
+            await launcher.RevokeAsync(key.User, ct);
+        });
 });
 
 // HOW DEEP ONE CHAIN OF CAUSATION MAY GO before the platform stops it.
@@ -1520,6 +1573,14 @@ app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
     }
 
     AgentLaunchRecord.Write(dataRoot, runAs, app.Logger);
+
+    var memoryLimits = app.Services.GetRequiredService<RunMemoryLimits>();
+    var runLimit = memoryLimits.Limit();
+    app.Logger.LogInformation("{RunMemoryLimits} (each run now: {Limit})", memoryLimits.LogLine,
+        runLimit.Mb is { } mb ? $"{mb} MB, as {runLimit.Source}" : $"no limit, as {runLimit.Source}");
+
+    var memberTemp = app.Services.GetRequiredService<MemberTempRoot>();
+    app.Logger.LogInformation("Member temporary folders: {Path} - {Reason}", memberTemp.Path, memberTemp.Reason);
 }
 
 // THE ADDRESS EVERY MEMBER IS TOLD TO CALL, printed for the reason the dev server prints its proxy
@@ -2024,6 +2085,7 @@ PrincipalLogScope.Use(app);
 // call on that route's own marker. RouteMarkerTests requires a marker here like everywhere else.
 app.MapMcp("/mcp").NoPermitRequired();
 SurfaceEndpoints.Map(app, dataRoot);
+CapacityEndpoints.Map(app);
 SiteEndpoints.Map(app);
 SiteApiEndpoints.Map(app);
 TenantSettingsEndpoints.Map(app);
@@ -2099,6 +2161,7 @@ RepoEndpoints.Map(app);
 KeyEndpoints.Map(app);
 FileSystemEndpoints.Map(app);
 SkillsEndpoints.Map(app);
+LeaseEndpoints.Map(app);
 KanbanEndpoints.Map(app);
 BacklogEndpoints.Map(app);
 BacklogEndpoints.MapTeamScoped(app);
@@ -5235,16 +5298,17 @@ app.MapGet("/api/teams/rollup", async (
         var elapsed = await log.ElapsedForTeamAsync(team.Id, floor, ct);
         var open = await log.WorkflowsForTeamAsync(team.Id, floor, ct);
 
-        var held = slots.Waiting
+        var waiting = slots.Waiting
             .Where(hold => string.Equals(hold.Team, team.Id, StringComparison.OrdinalIgnoreCase))
-            .Select(hold => hold.Member)
             .ToList();
+        var held = waiting.Select(hold => hold.Member).ToList();
         var running = slots.Running
             .Count(hold => string.Equals(hold.Team, team.Id, StringComparison.OrdinalIgnoreCase));
 
         rows.Add(new TeamRollupRow(
             team.Id, elapsed, open, running, held.Count, held,
-            held.Count > 0 ? TeamRollupRow.WaitingForASlot : null));
+            // What the first of them waits for: a slot, or measured headroom ("waiting for memory: ...").
+            held.Count > 0 ? waiting[0].Reason ?? TeamRollupRow.WaitingForASlot : null));
     }
 
     return Results.Ok(new TeamRollup(rows));
@@ -5261,7 +5325,7 @@ app.MapGet("/api/teams/rollup", async (
         + "predecessor than each other.\n\n"
         + "`running` and `waiting` count this team's holders of, and waiters for, the "
         + "instance-wide run slots (`GET /api/wip`); `held` names the waiting members in queue "
-        + "order, and `slotStatus` reads \"waiting for a slot\" while any are waiting - a team "
+        + "order, and `slotStatus` reads what the first of them waits for while any are waiting - \"waiting for a slot\", or \"waiting for memory: ...\" when measured headroom holds it - a team "
         + "whose Manager has a delivered wake held by the limit is waiting, not idle.\n\n"
         + "It carries NOTHING ELSE - no name, no containers. Those are on "
         + "`/api/overview`, which a console already holds, and a second source for a team's name is "
@@ -8805,9 +8869,20 @@ internal sealed class ContainerHub(
     ///
     /// The DROP itself is always recorded, below. This pairs with it.
     /// </summary>
+    /// <summary>
+    /// Every connection a PERSON holds, and no machine principal's: what only people may read
+    /// (the capacity sample, as <c>GET /api/capacity</c> is <c>HumansOnly</c>) is pushed here.
+    /// </summary>
+    public const string PeopleGroup = "people";
+
     public override async Task OnConnectedAsync()
     {
         await base.OnConnectedAsync();
+
+        if (Context.User is not null && PrincipalClaims.From(Context.User) is { Kind: PrincipalKind.User })
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, PeopleGroup);
+        }
 
         if (diagnostics is null || watch is null) return;
         if (PrincipalClaims.From(Context.User!) is not { } principal) return;

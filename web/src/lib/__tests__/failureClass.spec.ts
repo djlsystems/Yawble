@@ -47,7 +47,7 @@ describe('resumesAutomatically', () => {
     expect(resumesAutomatically('quota')).toBe(true)
     expect(resumesAutomatically('rate')).toBe(true)
 
-    for (const never of ['transport', 'timeout', 'agent-fault', 'launch-missing', 'interrupted', 'unknown']) {
+    for (const never of ['transport', 'timeout', 'agent-fault', 'launch-missing', 'out-of-memory', 'interrupted', 'unknown']) {
       expect(resumesAutomatically(never)).toBe(false)
     }
   })
@@ -69,6 +69,7 @@ describe('failureClassWords', () => {
       'transport',
       'agent-fault',
       'launch-missing',
+      'out-of-memory',
       'timeout',
       'interrupted',
       'unknown',
@@ -97,6 +98,15 @@ describe('failureClassWords', () => {
     expect(words).not.toMatch(/repair/i)
     expect(words).not.toContain('agent itself failed')
     expect(failureClassLabel('launch-missing')).toBe('launch-missing')
+  })
+
+  /** A run stopped by its own memory limit names the setting and is not the agent's fault. */
+  it('says an out-of-memory run hit its limit, names the setting and blames no agent', () => {
+    const words = failureClassWords('out-of-memory')!
+    expect(words).toContain('runs.memoryLimitMb')
+    expect(words).toContain('not an agent fault')
+    expect(failureClassWords('out-of-memory', 'plugin')).toContain('runs.memoryLimitMb')
+    expect(failureClassLabel('out-of-memory')).toBe('out-of-memory')
   })
 
   /** `unknown` is a real class with something to say, not an absence dressed up as one. */

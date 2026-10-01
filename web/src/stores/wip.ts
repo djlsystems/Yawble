@@ -63,6 +63,13 @@ export const useWipStore = defineStore('wip', {
       return this.view?.waiting.filter((hold) => hold.team === team) ?? []
     },
 
+    /** A waiting member's reason, in the ledger's own words; null when the ledger does not name it. */
+    reasonFor(team: string, member: string | null | undefined): string | null {
+      if (!member) return null
+
+      return this.view?.waiting.find((hold) => hold.team === team && hold.member === member)?.reason ?? null
+    },
+
     isWaiting(team: string, member: string | null | undefined): boolean {
       if (!member) return false
 

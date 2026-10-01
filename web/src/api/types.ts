@@ -2434,11 +2434,16 @@ export interface BacklogDispatchView {
   teamGone: boolean
 }
 
-/** One slot holder or waiter on the instance-wide WIP ledger, as `GET /api/wip` names it. */
+/**
+ * One slot holder or waiter on the instance-wide WIP ledger, as `GET /api/wip` names it. A waiter's
+ * `reason` is the ledger's own sentence for what holds it - "waiting for a slot", or "waiting for
+ * memory: 11.2 of 12.9 GB in use" - and absent on a holder or from a Host that predates it.
+ */
 export interface WipHold {
   team: string
   member: string
   since: string
+  reason?: string | null
 }
 
 /**
@@ -3391,4 +3396,85 @@ export interface SolutionUninstallResult {
   documentsKept: string | null
   /** Anything that could not be removed, one sentence each. */
   failures: string[]
+}
+
+/** Pressure stall figures for one resource: percent of wall time some (or all) work waited. */
+export interface PressureLine {
+  avg10: number
+  avg60: number
+  avg300: number
+  totalUsec: number
+}
+
+export interface Pressure {
+  some: PressureLine
+  full: PressureLine | null
+}
+
+/** One run's process group, summed: who it is and what it uses. `cpuPercent` is of ONE CPU. */
+export interface RunFigures {
+  team: string
+  member: string
+  processes: number
+  residentBytes: number
+  cpuPercent: number | null
+}
+
+/** A holder of, or waiter for, the heavy lease. `team` is null for the Concierge. */
+export interface LeaseParty {
+  team: string | null
+  member: string
+  since: string
+}
+
+/**
+ * ONE CAPACITY SAMPLE, as `GET /api/capacity` serves it and `capacityChanged` pushes it. EVERY NULL
+ * FIGURE IS NOT MEASURED - shown as "not measured", never as 0. A null limit with `unlimited` true is
+ * "no limit". `heavyLease` null is "not available", not "nobody holds it".
+ */
+export interface CapacitySample {
+  at: string
+  cgroup: 'v2' | 'v1' | null
+  cpu: {
+    limitCpus: number | null
+    unlimited: boolean
+    usageUsec: number | null
+    cpusInUse: number | null
+    percentOfLimit: number | null
+    throttledPeriods: number | null
+    throttledUsec: number | null
+    pressure: Pressure | null
+  }
+  memory: {
+    limitBytes: number | null
+    unlimited: boolean
+    currentBytes: number | null
+    anonBytes: number | null
+    fileBytes: number | null
+    shmemBytes: number | null
+    inUseBytes: number | null
+    percentOfLimit: number | null
+    pressure: Pressure | null
+  }
+  pids: { current: number | null; limit: number | null; unlimited: boolean }
+  notMeasured: string[]
+  runs: {
+    limit: number
+    managerReserved: number
+    runningCount: number
+    waitingCount: number
+    running: WipHold[]
+    waiting: WipHold[]
+  }
+  admission: { memoryPercent: number; memoryPressurePercent: number; holding: string | null }
+  topByMemory: RunFigures[]
+  topByCpu: RunFigures[]
+  heavyLease: { holders: number; holding: LeaseParty[]; queued: LeaseParty[] } | null
+}
+
+/** `GET /api/capacity`: the sampler's interval, its latest sample and about ten minutes of history. */
+export interface CapacityView {
+  intervalSeconds: number
+  latest: CapacitySample | null
+  history: CapacitySample[]
 }

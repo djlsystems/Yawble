@@ -36,6 +36,14 @@ namespace Harness.Host;
 /// the agent owns them and keeps no capability; otherwise by the Host, whose user is the agent's.
 /// On Windows, whose pipes are not files, the folder is <c>&lt;workspace&gt;/.tmp</c> itself.
 /// </para>
+///
+/// <para>
+/// ON THE DATA VOLUME, NOT IN /tmp. An engine may mount <c>/tmp</c> as tmpfs, where every file a
+/// member's builds and tests leave there is held in the container's MEMORY and counts against its
+/// limit. So the Host passes <see cref="RootUnder"/>'s folder, <c>&lt;dataRoot&gt;/tmp</c>, which is on disk
+/// whatever the engine and the image; <c>/tmp</c> is only the fallback for a data root whose path is too
+/// long to leave room for a socket, and the Host log's "Member temporary folders" line says which.
+/// </para>
 /// </summary>
 public static partial class MemberTemp
 {
@@ -59,7 +67,9 @@ public static partial class MemberTemp
     /// workspace itself does not exist (the child then runs in the Host's directory, and inherits
     /// its <c>TMPDIR</c> as it always has) or the folder or its link could not be made.
     /// </summary>
-    public static async Task<string?> EnsureAsync(string workspace, AgentLaunchUser? runAs, CancellationToken ct)
+    /// <param name="root">Where the folder is made: the Host's <see cref="RootUnder"/>; <see cref="Root"/> when null.</param>
+    public static async Task<string?> EnsureAsync(
+        string workspace, AgentLaunchUser? runAs, CancellationToken ct, string? root = null)
     {
         if (!Directory.Exists(workspace)) return null;
 
@@ -76,10 +86,11 @@ public static partial class MemberTemp
             }
         }
 
+        root ??= Root;
         var link = LinkFor(workspace);
-        if (FolderNamedBy(link) is { } existing) return existing;
+        if (FolderNamedBy(link, root) is { } existing) return existing;
 
-        var fresh = Path.Combine(Root, FolderPrefix + Convert.ToHexStringLower(Guid.NewGuid().ToByteArray())[..12]);
+        var fresh = Path.Combine(root, FolderPrefix + Convert.ToHexStringLower(Guid.NewGuid().ToByteArray())[..12]);
 
         // No -p: a folder already there under a fresh random name is not this member's. -T: what
         // sits at the link's name is replaced, never entered, so a directory there refuses the
@@ -104,11 +115,55 @@ public static partial class MemberTemp
             }
         }
 
-        return FolderNamedBy(link);
+        return FolderNamedBy(link, root);
     }
 
     /// <summary>
-    /// Where every member folder is made: <c>/tmp</c>, never the Host's own temp folder. When the
+    /// The longest root a member folder may be made in. A tool's socket in TMPDIR is
+    /// <c>root/member-&lt;12&gt;/CoreFxPipe_&lt;name&gt;</c>, a socket path holds 103 bytes, and the
+    /// longest pipe name met in practice is the compiler server's 43 characters.
+    /// </summary>
+    public const int MaxRootLength = 28;
+
+    /// <summary>
+    /// Where the Host makes member folders: <c>&lt;dataRoot&gt;/tmp</c>, on disk, made when missing.
+    /// The entrypoint's volume pass creates it as the agent's; a Host that makes it itself (a
+    /// development data root) leaves it open to every user with the sticky bit, as <c>/tmp</c> is,
+    /// because the agent makes its folder there. Falls back to <see cref="Root"/>, saying why, when
+    /// the path is longer than <see cref="MaxRootLength"/> or the folder cannot be made.
+    /// </summary>
+    public static MemberTempRoot RootUnder(string dataRoot)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return new MemberTempRoot(Root, "on Windows each member's folder is <workspace>/.tmp");
+        }
+
+        var candidate = Path.Combine(Path.GetFullPath(dataRoot), "tmp");
+        if (candidate.Length > MaxRootLength)
+        {
+            return new MemberTempRoot(Root,
+                $"{candidate} is longer than {MaxRootLength} characters, too long for a socket path in it, so they stay in {Root}");
+        }
+
+        try
+        {
+            if (!Directory.Exists(candidate))
+            {
+                Directory.CreateDirectory(candidate);
+                File.SetUnixFileMode(candidate, (UnixFileMode)Convert.ToInt32("1777", 8));
+            }
+
+            return new MemberTempRoot(candidate, $"{candidate} is on the data volume, so temporary files cost disk, not memory");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new MemberTempRoot(Root, $"{candidate} could not be made ({ex.Message}), so they stay in {Root}");
+        }
+    }
+
+    /// <summary>
+    /// Where member folders are made when the caller names no root: <c>/tmp</c>, never the Host's own temp folder. When the
     /// Host switches users the AGENT makes the folder, so the place must be one every user can
     /// write; <c>/tmp</c> is <c>1777</c> in the image (the entrypoint sees to it) and short enough
     /// for socket paths. The Host's <c>TMPDIR</c> may name a folder the agent cannot write - the
@@ -120,14 +175,15 @@ public static partial class MemberTemp
 
     /// <summary>
     /// The folder <paramref name="link"/> names, when it is a link to a real member folder in
-    /// <see cref="Root"/>; null for anything else.
+    /// <paramref name="root"/>; null for anything else, including a folder in another root (a
+    /// member whose folder was in /tmp gets a new one in the data root).
     /// </summary>
-    private static string? FolderNamedBy(string link)
+    private static string? FolderNamedBy(string link, string root)
     {
         try
         {
             if (new FileInfo(link).LinkTarget is not { } target) return null;
-            if (Path.GetDirectoryName(target) != Root || !FolderName().IsMatch(Path.GetFileName(target))) return null;
+            if (Path.GetDirectoryName(target) != root || !FolderName().IsMatch(Path.GetFileName(target))) return null;
 
             var folder = new DirectoryInfo(target);
             return folder.Exists && folder.LinkTarget is null ? target : null;
@@ -169,3 +225,6 @@ public static partial class MemberTemp
         }
     }
 }
+
+/// <summary>Where member temporary folders are made, and why there; the Host logs both at start.</summary>
+public sealed record MemberTempRoot(string Path, string Reason);

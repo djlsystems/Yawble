@@ -35,6 +35,7 @@ import OutcomesDialog from '../components/OutcomesDialog.vue';
 import ConciergePanel from '../components/ConciergePanel.vue';
 import StatusStrip from '../components/StatusStrip.vue';
 import VersionTag from '../components/VersionTag.vue';
+import CapacityMonitor from '../components/CapacityMonitor.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
 import {
@@ -438,6 +439,10 @@ async function signOut() {
             </q-item>
           </q-list>
         </q-btn-dropdown>
+
+        <!-- The activity monitor, to the right of the person's name: the instance's load as one
+             gauge, its figures a click away. People only, as its route is. -->
+        <CapacityMonitor v-if="session.user" />
       </q-toolbar>
 
       <!-- The application bar, inside the header rather than beside it: a QLayout computes ONE

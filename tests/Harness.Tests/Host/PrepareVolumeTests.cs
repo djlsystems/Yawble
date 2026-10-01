@@ -287,6 +287,23 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Equal("2750", Mode("repos"));
     }
 
+    /// <summary>
+    /// Members' TMPDIRs live in <c>&lt;data&gt;/tmp</c> (MemberTemp), on the volume rather than a /tmp
+    /// the engine may hold in memory: made when missing, and the agent's, which makes them there.
+    /// </summary>
+    [Fact]
+    public void A_missing_tmp_directory_is_created_for_agent_on_the_volume()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+
+        var output = Run("ownership");
+
+        Assert.True(Directory.Exists(Path.Combine(_data, "tmp")), output);
+        // Handed to agent, or already agent's when this process is agent (nothing to chown).
+        Assert.Equal(AgentOwner, ChownedPaths().GetValueOrDefault(Path.Combine(_data, "tmp")) ?? Owner("tmp"));
+        Assert.StartsWith("27", Mode("tmp"));
+    }
+
     [Fact]
     public void A_second_start_changes_nothing()
     {
