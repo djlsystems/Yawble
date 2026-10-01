@@ -49,8 +49,8 @@ public static class RemovalEndpoints
             .HumansOnly()
             .WithSummary("Folders whose removal did not finish")
             .WithDescription(
-                "Every team root, member workspace or reset folder a deletion or reset could not "
-                + "finish removing, with each path still on disk. A team root keeps its "
+                "Every team root, member workspace, reset folder or deleted local repository's "
+                + "`.deleting-<guid>` folder a deletion or reset could not finish removing, with each path still on disk. A team root keeps its "
                 + "`.harness-team` marker until it is gone. The Host retries every one at start.\n\n"
                 + "**A person's action.**");
 

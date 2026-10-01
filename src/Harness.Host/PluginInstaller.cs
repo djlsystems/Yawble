@@ -294,6 +294,9 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
     {
         try
         {
+            // RECURSIVE DELETE REVIEWED: agents cannot write here. A stage or outgoing folder is inside
+            // the plugins folder, which is the Host's (harness:agent, directories 0750, no group
+            // write, set at every start by prepare-volume.sh), so nothing in it is an agent's.
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

@@ -295,21 +295,35 @@ public sealed class PluginInstallRouteTests : IAsyncLifetime
     [Fact]
     public async Task The_operator_cli_installs_through_the_request_file_with_the_same_checks_and_verdict()
     {
-        var requests = ActivatorUtilities.CreateInstance<PluginRescanRequests>(Services);
         Directory.CreateDirectory(Plugins);
 
+        // What the CLI does: write the request, then wait for the Host's own service to answer it.
+        // Never a second PluginRescanRequests: the Host's polls the same file once a second, so two
+        // would both answer one request, and the slower one's report overwrites a later answer.
         async Task<JsonElement> AskAsync(string nonce, string path, bool replace)
         {
-            await File.WriteAllTextAsync(
-                Path.Combine(Plugins, PluginRescanRequests.InstallRequestFile),
-                JsonSerializer.Serialize(new { request = nonce, path, replace }), Ct);
-            Assert.True(await requests.AnswerInstallAsync(Ct));
-            Assert.False(File.Exists(Path.Combine(Plugins, PluginRescanRequests.InstallRequestFile)));
+            var request = Path.Combine(Plugins, PluginRescanRequests.InstallRequestFile);
             var report = Path.Combine(Plugins, PluginRescanRequests.InstallReportFile);
-            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, Mode(report));
-            var answer = JsonDocument.Parse(await File.ReadAllTextAsync(report, Ct)).RootElement.Clone();
-            Assert.Equal(nonce, answer.GetProperty("request").GetString());
-            return answer;
+            await File.WriteAllTextAsync(request, JsonSerializer.Serialize(new { request = nonce, path, replace }), Ct);
+
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!File.Exists(request) && File.Exists(report))
+                {
+                    var answer = JsonDocument.Parse(await File.ReadAllTextAsync(report, Ct)).RootElement.Clone();
+                    if (answer.GetProperty("request").GetString() == nonce)
+                    {
+                        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, Mode(report));
+                        return answer;
+                    }
+                }
+
+                await Task.Delay(50, Ct);
+            }
+
+            Assert.Fail($"The Host did not answer install request '{nonce}' within 15 seconds.");
+            return default;
         }
 
         var folder = InWorktree();

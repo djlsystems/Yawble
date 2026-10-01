@@ -173,8 +173,11 @@ public sealed class SolutionInstaller(
     int group = -1,
     ISecretStore? secretStore = null,
     TriggerSweep? sweep = null,
-    Harness.Messaging.SqliteOutcomeStore? outcomes = null)
+    Harness.Messaging.SqliteOutcomeStore? outcomes = null,
+    FolderRemoval? removal = null)
 {
+    private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
+
     public const string StepPlugins = "plugins";
     public const string StepTeam = "team";
     public const string StepMembers = "members";
@@ -716,7 +719,7 @@ public sealed class SolutionInstaller(
                 if (package.ToolsFolder is not { } source) return;
 
                 CopyReadOnly(source, tools!);
-                run.Made($"tools {tools}", () => { RemoveFolder(tools!); return Task.CompletedTask; });
+                run.Made($"tools {tools}", () => RemoveFolderAsync(tools!));
 
                 // Every agent member's prompt now names the folder.
                 await teams.RepromptTeamAsync(stored!, ct);
@@ -928,11 +931,7 @@ public sealed class SolutionInstaller(
         // 5. THE TOOLS FOLDER, the Host's own copy under the team's folder.
         var tools = ToolsFolderOf(paths, stored);
         var hadTools = Directory.Exists(tools);
-        await Try("tools", () =>
-        {
-            RemoveFolder(tools);
-            return Task.CompletedTask;
-        });
+        await Try("tools", () => RemoveFolderAsync(tools));
 
         // 6. THE PLUGINS, only when asked and only when no other team hires them. After the members,
         // so this team's own members no longer count as a use.
@@ -1109,9 +1108,9 @@ public sealed class SolutionInstaller(
                 }
             });
 
-            await run.StepAsync(StepTools, () =>
+            await run.StepAsync(StepTools, async () =>
             {
-                if (!diff.Tools.Any) return Task.CompletedTask;
+                if (!diff.Tools.Any) return;
 
                 // THE NEW COPY IS MADE BESIDE THE OLD ONE AND SWAPPED IN, so a failed copy leaves the
                 // old tools, and the swap is undone by swapping back.
@@ -1121,22 +1120,20 @@ public sealed class SolutionInstaller(
 
                 if (incoming is not null)
                 {
-                    RemoveFolder(incoming);
+                    await RemoveFolderAsync(incoming);
                     CopyReadOnly(package.ToolsFolder!, incoming);
                 }
 
-                RemoveFolder(outgoing);
+                await RemoveFolderAsync(outgoing);
                 if (Directory.Exists(folder)) Directory.Move(folder, outgoing);
                 if (incoming is not null) Directory.Move(incoming, folder);
 
-                run.Made("tools (changed)", () =>
+                run.Made("tools (changed)", async () =>
                 {
-                    RemoveFolder(folder);
+                    await RemoveFolderAsync(folder);
                     if (Directory.Exists(outgoing)) Directory.Move(outgoing, folder);
-                    return Task.CompletedTask;
                 });
-                removals.Add(() => { RemoveFolder(outgoing); return Task.CompletedTask; });
-                return Task.CompletedTask;
+                removals.Add(() => RemoveFolderAsync(outgoing));
             });
 
             await run.StepAsync(StepSites, async () =>
@@ -1316,11 +1313,11 @@ public sealed class SolutionInstaller(
 
         run.Made($"plugin {plugin.Id} {plugin.Manifest.Version}", async () =>
         {
-            RemoveFolder(Path.Combine(directory, plugin.Manifest.Version));
+            await RemoveFolderAsync(Path.Combine(directory, plugin.Manifest.Version));
 
             if (!existed)
             {
-                RemoveFolder(directory);
+                await RemoveFolderAsync(directory);
             }
             else if (previous is not null)
             {
@@ -1455,7 +1452,7 @@ public sealed class SolutionInstaller(
         // PUBLISHED FROM A COPY IN THE TEAM'S FOLDER, where a site may be published from, and never
         // from the package's own folder, which its builder can still change.
         var staging = Path.Combine(paths.RootFor(team), ".solution-sites", site.Name);
-        RemoveFolder(staging);
+        await RemoveFolderAsync(staging);
         CopyReadOnly(site.Folder, staging);
 
         try
@@ -1465,7 +1462,7 @@ public sealed class SolutionInstaller(
         }
         finally
         {
-            RemoveFolder(Path.Combine(paths.RootFor(team), ".solution-sites"));
+            await RemoveFolderAsync(Path.Combine(paths.RootFor(team), ".solution-sites"));
         }
 
         if (!isNew)
@@ -1817,18 +1814,35 @@ public sealed class SolutionInstaller(
         File.SetUnixFileMode(path, mode);
     }
 
-    /// <summary>Removes a folder the Host made itself (tools, staging): its own files, so no agent
-    /// pass is needed.</summary>
-    private static void RemoveFolder(string folder)
+    /// <summary>
+    /// Removes a folder the Host made (tools, staging, a plugin version) through
+    /// <see cref="FolderRemoval"/>, bounded by its parent. The Host made the folder, but the tools
+    /// and staging folders sit in the team's root, which agents write in: an agent can make those
+    /// names, or an owner-only folder inside them, before or after the Host does. The Host's own
+    /// directories are made writable to it first; one it does not own is left to the agent's pass.
+    /// Not cancellable, as an undo must not be. Throws naming what is left.
+    /// </summary>
+    private Task RemoveFolderAsync(string folder)
     {
-        if (!Directory.Exists(folder)) return;
+        if (!Directory.Exists(folder)) return Task.CompletedTask;
 
-        foreach (var directory in Directory.EnumerateDirectories(folder, "*", SearchOption.AllDirectories).Prepend(folder))
+        if (!OperatingSystem.IsWindows() && new FileInfo(folder).LinkTarget is null)
         {
-            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(directory, DirectoryMode);
+            var walk = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.ReparsePoint,
+            };
+
+            foreach (var directory in Directory.EnumerateDirectories(folder, "*", walk).Prepend(folder))
+            {
+                try { File.SetUnixFileMode(directory, DirectoryMode); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
         }
 
-        Directory.Delete(folder, recursive: true);
+        return _removal.RemoveInsideOrThrowAsync(Path.GetDirectoryName(Path.GetFullPath(folder))!, folder, CancellationToken.None);
     }
 
     [DllImport("libc", SetLastError = true)]

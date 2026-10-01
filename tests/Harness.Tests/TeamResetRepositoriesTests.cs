@@ -260,6 +260,121 @@ public sealed class TeamResetRepositoriesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_team_branch_that_moved_on_origin_after_the_compare_is_kept_by_the_lease_and_named()
+    {
+        var team = await TeamAsync("Theta");
+        var clone = ClonePath(team);
+        var before = DefaultBranchShas(clone);
+
+        Git(clone, "branch", $"team/{team}", "trunk");
+        Git(clone, "push", "origin", $"team/{team}");
+
+        // The reset reads a view of origin in which the team branch holds nothing trunk lacks; by the
+        // time it deletes, origin holds a push that landed since. The clone fetches and ls-remotes a
+        // copy of origin taken now, and pushes (so deletes) to origin itself.
+        var view = Path.Combine(_root, "view.git");
+        Git(_root, "clone", "--bare", _origin, view);
+        Git(_seed, "fetch", "origin");
+        Git(_seed, "checkout", "-b", $"team/{team}", $"origin/team/{team}");
+        Commit(_seed, "landed after the compare", "after.txt");
+        Git(_seed, "push", "origin", $"team/{team}");
+        var landed = RevParse(_seed, "HEAD");
+        Git(clone, "remote", "set-url", "origin", view);
+        Git(clone, "remote", "set-url", "--push", "origin", _origin);
+
+        var person = await PersonAsync();
+        var response = await ResetAsync(person, team, ["Manager", "Dev", "Writer"]);
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, body);
+        var repos = JsonDocument.Parse(body).RootElement.GetProperty("repositories");
+
+        // The lease refused the delete: the commit that landed is still on origin, and the answer
+        // names the branch as kept because it changed after it was compared.
+        Assert.Equal(landed, TryRevParse(_origin, $"refs/heads/team/{team}"));
+        Assert.DoesNotContain($"origin/team/{team}", Names(repos, "teamBranchReset"));
+        Assert.Contains("changed on origin after it was compared", Reason(repos, "teamBranchKept", $"origin/team/{team}"), StringComparison.Ordinal);
+
+        var done = await _factory.Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.TeamReset, team, Ct);
+        Assert.NotNull(done);
+        var detail = JsonDocument.Parse(done.Detail!).RootElement.GetProperty("repositories");
+        Assert.Contains("changed on origin after it was compared", Reason(detail, "teamBranchKept", $"origin/team/{team}"), StringComparison.Ordinal);
+
+        Assert.Equal(before, DefaultBranchShas(clone));
+    }
+
+    [Fact]
+    public async Task A_team_branch_origin_could_not_be_asked_about_is_kept_on_origin_and_named()
+    {
+        var team = await TeamAsync("Iota");
+        var clone = ClonePath(team);
+        var before = DefaultBranchShas(clone);
+
+        Git(clone, "branch", $"team/{team}", "trunk");
+        Git(clone, "push", "origin", $"team/{team}");
+        var onOrigin = RevParse(_origin, $"refs/heads/team/{team}");
+
+        // Origin cannot be reached: git ls-remote fails. The clone's own view still says the branch
+        // holds nothing trunk lacks, which a reset must not act on.
+        Git(clone, "remote", "set-url", "origin", Path.Combine(_root, "unreachable.git"));
+
+        var person = await PersonAsync();
+        var response = await ResetAsync(person, team, ["Manager", "Dev", "Writer"]);
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, body);
+        var repos = JsonDocument.Parse(body).RootElement.GetProperty("repositories");
+
+        Assert.Equal(onOrigin, TryRevParse(_origin, $"refs/heads/team/{team}"));
+        Assert.DoesNotContain($"origin/team/{team}", Names(repos, "teamBranchReset"));
+        Assert.Contains("Could not ask origin for it", Reason(repos, "teamBranchKept", $"origin/team/{team}"), StringComparison.Ordinal);
+
+        var done = await _factory.Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.TeamReset, team, Ct);
+        Assert.NotNull(done);
+        var detail = JsonDocument.Parse(done.Detail!).RootElement.GetProperty("repositories");
+        Assert.Contains("Could not ask origin for it", Reason(detail, "teamBranchKept", $"origin/team/{team}"), StringComparison.Ordinal);
+
+        Assert.Equal(before, DefaultBranchShas(clone));
+    }
+
+    [Fact]
+    public async Task A_team_branch_that_could_not_be_fetched_is_kept_on_origin_and_named()
+    {
+        var team = await TeamAsync("Kappa");
+        var clone = ClonePath(team);
+        var before = DefaultBranchShas(clone);
+
+        Git(clone, "branch", $"team/{team}", "trunk");
+        Git(clone, "push", "origin", $"team/{team}");
+
+        // Origin moves on, and the clone cannot take the new sha: its remote-tracking ref is locked,
+        // so git ls-remote answers but the fetch fails. The clone's stale view says "nothing new".
+        Git(_seed, "fetch", "origin");
+        Git(_seed, "checkout", "-b", $"team/{team}", $"origin/team/{team}");
+        Commit(_seed, "pushed from elsewhere", "elsewhere.txt");
+        Git(_seed, "push", "origin", $"team/{team}");
+        var pushed = RevParse(_seed, "HEAD");
+        var tracking = Path.Combine(clone, ".git", "refs", "remotes", "origin", "team", team);
+        Assert.True(File.Exists(tracking), "the clone's view of the team branch is not a loose ref");
+        File.WriteAllText(tracking + ".lock", "");
+
+        var person = await PersonAsync();
+        var response = await ResetAsync(person, team, ["Manager", "Dev", "Writer"]);
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, body);
+        var repos = JsonDocument.Parse(body).RootElement.GetProperty("repositories");
+
+        Assert.Equal(pushed, TryRevParse(_origin, $"refs/heads/team/{team}"));
+        Assert.DoesNotContain($"origin/team/{team}", Names(repos, "teamBranchReset"));
+        Assert.Contains("Could not fetch it from origin", Reason(repos, "teamBranchKept", $"origin/team/{team}"), StringComparison.Ordinal);
+
+        var done = await _factory.Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.TeamReset, team, Ct);
+        Assert.NotNull(done);
+        var detail = JsonDocument.Parse(done.Detail!).RootElement.GetProperty("repositories");
+        Assert.Contains("Could not fetch it from origin", Reason(detail, "teamBranchKept", $"origin/team/{team}"), StringComparison.Ordinal);
+
+        Assert.Equal(before, DefaultBranchShas(clone));
+    }
+
+    [Fact]
     public async Task While_the_default_branch_is_not_known_resetting_every_members_repositories_is_refused_and_nothing_changes()
     {
         var team = await TeamAsync("Delta");

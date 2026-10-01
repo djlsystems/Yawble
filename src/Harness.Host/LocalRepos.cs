@@ -18,6 +18,17 @@ public sealed record LocalRepoInfo(
     public int? CommitCount { get; init; }
 }
 
+/// <summary>
+/// What <see cref="LocalRepos.DeleteAsync"/> did: the name is gone, and the repository was moved to
+/// <paramref name="Aside"/>. <paramref name="Remaining"/> is every path still on disk there, with why
+/// in <paramref name="Reasons"/>; empty only when the removal finished.
+/// </summary>
+public sealed record LocalRepoRemoval(
+    string Aside, IReadOnlyList<string> Remaining, IReadOnlyDictionary<string, string>? Reasons = null)
+{
+    public bool Complete => Remaining.Count == 0;
+}
+
 /// <summary>The newest commit on a local repository's default branch.</summary>
 public sealed record LocalRepoCommit(string Sha, string Subject, DateTimeOffset? CommittedAt);
 
@@ -41,7 +52,7 @@ public sealed record LocalRepoCommit(string Sha, string Subject, DateTimeOffset?
 /// <c>scripts/prepare-volume.sh</c> puts the modes back at every start.
 /// </para>
 /// </summary>
-public sealed partial class LocalRepos(string dataRoot, GitRunner git)
+public sealed partial class LocalRepos(string dataRoot, GitRunner git, FolderRemoval? removal = null)
 {
     public const string Scheme = "local:";
 
@@ -50,9 +61,12 @@ public sealed partial class LocalRepos(string dataRoot, GitRunner git)
 
     private const string Suffix = ".git";
     private const string PendingPrefix = ".creating-";
-    private const string DeletingPrefix = ".deleting-";
+
+    /// <summary>What a deleted repository is renamed to before it is removed: <c>.deleting-&lt;guid&gt;</c>.</summary>
+    public const string DeletingPrefix = ".deleting-";
 
     private readonly SemaphoreSlim _writes = new(1, 1);
+    private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
     /// <summary><c>&lt;dataRoot&gt;/repos</c>.</summary>
     public string Root { get; } = Path.Combine(Path.GetFullPath(dataRoot), "repos");
@@ -183,18 +197,32 @@ public sealed partial class LocalRepos(string dataRoot, GitRunner git)
     /// <summary>
     /// Removes the bare repository. Moved aside first, so a removal that fails part-way leaves no
     /// half-repository under the name a team could clone. The caller refuses while a team uses it.
+    ///
+    /// <para>
+    /// <b>NEVER GONE WHILE FILES REMAIN.</b> The moved-aside <c>.deleting-&lt;guid&gt;</c> folder is
+    /// removed through <see cref="FolderRemoval.RemoveLocalRepositoryAsync"/>, not a recursive
+    /// delete that swallows its failure: whatever is still on disk is answered in
+    /// <see cref="LocalRepoRemoval.Remaining"/>, recorded as an unfinished removal and retried to
+    /// completion. Null when there is no such repository.
+    /// </para>
     /// </summary>
-    public async Task<bool> DeleteAsync(string name, CancellationToken ct)
+    public async Task<LocalRepoRemoval?> DeleteAsync(string name, CancellationToken ct)
     {
         await _writes.WaitAsync(ct);
         try
         {
-            if (!Exists(name)) return false;
+            if (!Exists(name)) return null;
 
             var aside = Path.Combine(Root, DeletingPrefix + Guid.NewGuid().ToString("N"));
             Directory.Move(PathFor(name)!, aside);
-            RemoveQuietly(aside);
-            return true;
+
+            var report = await _removal.RemoveLocalRepositoryAsync(Root, aside, CancellationToken.None);
+
+            // Refused (the repositories root became a link): nothing was removed, and that is
+            // said, never read as finished.
+            return report.Refused is { } refused
+                ? new LocalRepoRemoval(aside, [aside], new Dictionary<string, string> { [aside] = refused })
+                : new LocalRepoRemoval(aside, report.Remaining, report.Reasons);
         }
         finally
         {
@@ -202,10 +230,31 @@ public sealed partial class LocalRepos(string dataRoot, GitRunner git)
         }
     }
 
+    /// <summary>
+    /// Every <c>.deleting-&lt;guid&gt;</c> folder in <see cref="Root"/>: a delete that did not finish,
+    /// including one from before a delete named what it left. Never a symbolic link.
+    /// </summary>
+    public IReadOnlyList<string> DeletesLeft()
+    {
+        if (!Directory.Exists(Root)) return [];
+
+        return [.. Directory.EnumerateDirectories(Root, DeletingPrefix + "*")
+            .Where(path => new DirectoryInfo(path).LinkTarget is null)
+            .Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Clears away a <c>.creating-</c> folder a create that failed left. A recursive delete, not
+    /// <see cref="FolderRemoval"/>, because agents cannot write here (the comment at the call says why).
+    /// Quiet, because the create it follows is already refused.
+    /// </summary>
     private static void RemoveQuietly(string path)
     {
         try
         {
+            // RECURSIVE DELETE REVIEWED: agents cannot write here. The Host makes the .creating- folder
+            // as itself under Root, which agents only read (harness:agent 2750, no group write), and it
+            // has never been a repository a team could clone.
             if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

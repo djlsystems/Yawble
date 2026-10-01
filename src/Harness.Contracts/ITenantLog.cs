@@ -38,6 +38,12 @@ public static class TenantActions
     public const string TeamRelabelled = "team.renamed";
     public const string TeamDeleted = "team.deleted";
 
+    /// <summary>A person asked for a team to be deleted. Written BEFORE anything is removed, naming
+    /// its containers and root, and not swallowed: when it cannot be written the delete answers 500
+    /// and nothing is removed. What was removed and what remains is on the <see cref="TeamDeleted"/>
+    /// row after it.</summary>
+    public const string TeamDeleting = "team.deleting";
+
     /// <summary>Unfinished removals were retried - at the Host's start (no actor) or by a person.
     /// Detail names every folder retried, whether it finished, and each path still remaining.</summary>
     public const string RemovalRetried = "removal.retried";
@@ -278,6 +284,11 @@ public static class TenantActions
     /// <summary>A person deleted a local repository. Written BEFORE the delete, which does not
     /// happen when this row cannot be.</summary>
     public const string LocalRepoDeleted = "local-repo.deleted";
+
+    /// <summary>A local repository delete could not remove everything: its moved-aside
+    /// <c>.deleting-&lt;guid&gt;</c> folder and each path still in it are named, and it is retried as
+    /// an unfinished removal. Written AFTER the attempt. Subject is the name.</summary>
+    public const string LocalRepoDeleteIncomplete = "local-repo.delete-incomplete";
 
     /// <summary>A person asked GitHub to fork an upstream for a team repository.</summary>
     public const string RepoFork = "repo.fork";

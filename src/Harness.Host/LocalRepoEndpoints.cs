@@ -106,6 +106,9 @@ public static class LocalRepoEndpoints
                 LocalRepoDeleteOutcome.IllegalName => Results.BadRequest(new { error = result.Error }),
                 LocalRepoDeleteOutcome.NotFound => Results.NotFound(new { error = result.Error }),
                 LocalRepoDeleteOutcome.InUse => Results.Conflict(new { error = result.Error, teams = result.Teams }),
+                LocalRepoDeleteOutcome.Incomplete => Results.Json(
+                    new { error = result.Error, folder = result.Folder, remaining = result.Remaining },
+                    statusCode: StatusCodes.Status500InternalServerError),
                 _ => Results.Json(new { error = result.Error }, statusCode: StatusCodes.Status500InternalServerError),
             };
         })
@@ -116,6 +119,9 @@ public static class LocalRepoEndpoints
                 "Removes `<dataRoot>/repos/<name>.git` and everything in it. Refused with 409, naming the teams, "
                 + "while any team's repository list names `local:<name>`. Appends `local-repo.deleted` to the "
                 + "tenant log first; when that row cannot be written nothing is deleted. 404 for an unknown "
-                + "name, 400 for one that is not legal. The web app asks before it sends this.\n\n**A person's action.**");
+                + "name, 400 for one that is not legal. **Never 204 while files remain:** a delete that could not "
+                + "remove everything answers 500 with `error` naming its `folder` (`.deleting-<guid>`) and each "
+                + "path `remaining`, appends `local-repo.delete-incomplete`, and the folder is retried as an "
+                + "unfinished removal (`GET /api/removals`) at every start and on request. The web app asks before it sends this.\n\n**A person's action.**");
     }
 }

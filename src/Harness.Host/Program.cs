@@ -336,7 +336,8 @@ builder.Services.AddSingleton(sp => new SiteService(
     sp.GetRequiredService<ISiteStore>(),
     team => sp.GetRequiredService<TeamRegistry>().ExistingName(team),
     sp.GetRequiredService<TeamPaths>(),
-    sp.GetRequiredService<IMessageLog>()));
+    sp.GetRequiredService<IMessageLog>(),
+    removal: sp.GetRequiredService<FolderRemoval>()));
 builder.Services.AddSingleton<SiteCapability>();
 
 // The folders a deletion or reset could not finish removing (auth-012), retried at start and on
@@ -633,7 +634,8 @@ builder.Services.AddSingleton(sp =>
         runAs.Switches ? runAs.Gid : -1,
         sp.GetRequiredService<ISecretStore>(),
         sp.GetRequiredService<TriggerSweep>(),
-        sp.GetRequiredService<SqliteOutcomeStore>());
+        sp.GetRequiredService<SqliteOutcomeStore>(),
+        sp.GetRequiredService<FolderRemoval>());
 });
 
 // THE SOLUTIONS LAUNCHER AND A SOLUTION'S CONTROL PANEL: reads only; every control is an existing route.
@@ -964,7 +966,8 @@ builder.Services.AddSingleton(sp => new TeamRegistry(
 
 // THE INSTANCE'S LOCAL REPOSITORIES: bare, under <dataRoot>/repos, the Host's and read-only to the
 // agent. A team names one as `local:<name>`; see LocalRepos.
-builder.Services.AddSingleton(sp => new LocalRepos(dataRoot, sp.GetRequiredService<GitRunner>()));
+builder.Services.AddSingleton(sp => new LocalRepos(
+    dataRoot, sp.GetRequiredService<GitRunner>(), sp.GetRequiredService<FolderRemoval>()));
 
 // The one delete of a local repository: Admin -> Repositories' and a team deletion's.
 builder.Services.AddSingleton(sp => new LocalRepoDeletion(
@@ -1036,7 +1039,8 @@ builder.Services.AddSingleton(sp => new UnfinishedRemovalRetry(
     sp.GetRequiredService<IUnfinishedRemovals>(),
     sp.GetRequiredService<TeamRegistry>(),
     sp.GetRequiredService<ContainerHost>(),
-    sp.GetRequiredService<TeamPaths>()));
+    sp.GetRequiredService<TeamPaths>(),
+    sp.GetRequiredService<LocalRepos>()));
 
 // Constructed BY HAND, like ContainerHost, and for the same reason: every dependency here is one a
 // deletion would silently skip if it were optional. A TeamDeletion missing its pending-delivery
@@ -2832,8 +2836,8 @@ app.MapDelete("/api/teams/{team}", async (
         "A `local:<name>` repository of this team's to delete after the team, repeated for each one "
         + "the person ticked. Only a local repository the team uses; a URL is refused with 400.")]
     string[]? deleteLocalRepository,
-    TeamDeletion deletion, LocalRepoDeletion localRepoDeletion, TenantLogging audit, TeamRegistry teams,
-    TeamListPush listPush,
+    TeamDeletion deletion, LocalRepoDeletion localRepoDeletion, TenantLogging audit, ITenantLog tenantLog,
+    TeamRegistry teams, TeamListPush listPush,
     HttpContext context,
     CancellationToken ct) =>
 {
@@ -2874,7 +2878,25 @@ app.MapDelete("/api/teams/{team}", async (
     TeamDeleted? removed;
     try
     {
-        removed = await deletion.DeleteAsync(team, confirm, ct);
+        // TEAM.DELETING COMES FIRST, and is not swallowed: it is written after the confirmation
+        // refusal and before anything is removed, so a row that cannot be written leaves the whole
+        // team in place. The team.deleted row after names what went and what remains.
+        removed = await deletion.DeleteAsync(team, confirm, ct, (plan, token) => tenantLog.WriteAsync(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+            context.User.FindFirstValue(ClaimTypes.Email),
+            TenantActions.TeamDeleting, plan.Team, label,
+            JsonSerializer.Serialize(new
+            {
+                containers = plan.Containers,
+                root = plan.Root,
+                deleteLocalRepositories = ticked,
+                confirmed = !string.IsNullOrWhiteSpace(confirm),
+            }, JsonSerializerOptions.Web),
+            token));
+    }
+    catch (TeamDeletionNotRecordedException unrecorded)
+    {
+        return Results.Json(new { error = unrecorded.Message }, statusCode: StatusCodes.Status500InternalServerError);
     }
     catch (TeamDeletionConfirmationRequiredException refusal)
     {
@@ -2909,14 +2931,23 @@ app.MapDelete("/api/teams/{team}", async (
             continue;
         }
 
+        // Incomplete: its name is gone, so it is not kept, and what is left is retried, not
+        // deleted again from Admin -> Repositories.
+        if (result.Outcome == LocalRepoDeleteOutcome.Incomplete)
+        {
+            localRepositoryFailures.Add(new LocalRepositoryNotDeleted(reference, result.Error!));
+            continue;
+        }
+
         if (result.Outcome != LocalRepoDeleteOutcome.NotFound) localRepositoriesKept.Add(reference);
         localRepositoryFailures.Add(new LocalRepositoryNotDeleted(
             reference, $"{result.Error} Delete it from Admin → Repositories."));
     }
 
     // Exactly what went, because this is the one act in the system with nothing to inspect
-    // afterwards. Written AFTER the delete: recording an intention that then failed would be worse
-    // than recording nothing.
+    // afterwards. The AFTER-row, carrying the result; the team.deleting row before the act is the
+    // one that must land, and this one stays on the swallowing path so a team already gone is
+    // never reported as a failure.
     await audit.WriteAsync(
         context, TenantActions.TeamDeleted, removed.Team, label,
         // Named explicitly rather than by shorthand: a shorthand property keeps its C# casing and
@@ -2984,6 +3015,10 @@ app.MapDelete("/api/teams/{team}", async (
         + "**The message log is not touched.** It is append-only, and a team's messages are the "
         + "history of what happened rather than a property of the team; deleting them would take "
         + "other teams' causally-linked messages with them.\n\n"
+        + "**A `team.deleting` row is written to the tenant log BEFORE anything is removed** (after the "
+        + "confirmation refusal), naming the containers and root. When it cannot be written the delete "
+        + "answers 500 with a sentence saying so and removes nothing. The `team.deleted` row after the "
+        + "act carries the result.\n\n"
         + "Answers 200 with what was removed, including any directory that could NOT be deleted - "
         + "usually a file still held by a child process that has not finished exiting. Those are "
         + "named rather than swallowed, and the team is gone either way.\n\n"

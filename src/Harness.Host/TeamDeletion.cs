@@ -72,6 +72,16 @@ public sealed record TeamDeleted(
     public IReadOnlyList<string> SessionFoldersRemaining { get; init; } = [];
 }
 
+/// <summary>What a team deletion is about to remove, for the <c>team.deleting</c> row written before
+/// any of it is.</summary>
+public sealed record TeamDeletionPlan(string Team, IReadOnlyList<string> Containers, string Root);
+
+/// <summary>The <c>team.deleting</c> row could not be written, so nothing was removed.</summary>
+public sealed class TeamDeletionNotRecordedException(string team, Exception inner)
+    : InvalidOperationException(
+        $"'{team}' was not deleted: its tenant log row could not be written ({inner.Message}). Nothing was removed.",
+        inner);
+
 /// <summary>A local repository a person asked to delete with its team, which was not deleted.</summary>
 public sealed record LocalRepositoryNotDeleted(string Reference, string Reason);
 
@@ -173,10 +183,13 @@ public sealed class TeamDeletion(
     /// Deletes <paramref name="team"/>. Returns null when there is no such team, which is a 404
     /// rather than an error - asking twice is not a fault.
     /// </summary>
+    /// <exception cref="TeamDeletionNotRecordedException"><paramref name="recordFirst"/> threw: the
+    /// row naming what is about to be removed was not written, so nothing was removed.</exception>
     public async Task<TeamDeleted?> DeleteAsync(
         string team,
         string? confirmation = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Func<TeamDeletionPlan, CancellationToken, Task>? recordFirst = null)
     {
         // The STORED spelling, resolved once. Every path, row key and principal id below is built
         // from it, so taking the caller's capitalisation here would delete a directory that is not
@@ -204,6 +217,22 @@ public sealed class TeamDeletion(
         }
 
         var containers = teams.ContainerIdsOf(stored);
+
+        // THE ROW FIRST, after the refusals and before step 1, and not swallowed: a team removed
+        // with no record of who asked is the one outcome refused, so a row that cannot be written
+        // stops the delete while every container, row and folder is still there.
+        if (recordFirst is not null)
+        {
+            try
+            {
+                await recordFirst(new TeamDeletionPlan(stored, [.. containers.Select(id => id.ToString())], root), ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                throw new TeamDeletionNotRecordedException(stored, exception);
+            }
+        }
+
         var failures = new List<string>();
 
         // Read while the registry and the root still name them: the step after the root removes the
