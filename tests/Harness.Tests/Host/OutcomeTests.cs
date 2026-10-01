@@ -660,8 +660,8 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         var workflow = await WorkflowAsync(person, host.Alpha, outcome.Id);
 
         var listBefore = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
-        var noneBefore = NoOutcomeTotal(listBefore);
         Assert.Equal(1, OutcomeTotal(listBefore, outcome.Id));
+        Assert.DoesNotContain(workflow, await NoOutcomeWorkflowsAsync());
 
         var unlinked = await person.DeleteAsync($"/api/teams/{host.Alpha}/workflows/{workflow}/outcome", Ct);
         Assert.Equal(HttpStatusCode.OK, unlinked.StatusCode);
@@ -683,10 +683,11 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Equal(JsonValueKind.Null, detail.GetProperty("to").ValueKind);
         Assert.Equal(workflow, detail.GetProperty("workflow").GetInt64());
 
-        // IT COUNTS UNDER NO OUTCOME, and the board's card carries none.
+        // IT COUNTS UNDER NO OUTCOME, not under the outcome it left, and the board's card carries none.
+        // Its own membership, never the tenant's No-outcome total: other tests' workflows land there too.
         var listAfter = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
         Assert.Equal(0, OutcomeTotal(listAfter, outcome.Id));
-        Assert.Equal(noneBefore + 1, NoOutcomeTotal(listAfter));
+        Assert.Contains(workflow, await NoOutcomeWorkflowsAsync());
         var none = await JsonAsync(await person.GetAsync($"/api/kanban/board?team={host.Alpha}&outcome=none", Ct));
         Assert.Contains(workflow, none.GetProperty("cards").EnumerateArray().Select(c => c.GetProperty("workflowSeq").GetInt64()));
 
@@ -717,8 +718,39 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
             .Single(o => o.GetProperty("id").GetString() == id)
             .GetProperty("figures").GetProperty("workflows").GetProperty("total").GetInt32();
 
-        static int NoOutcomeTotal(JsonElement list) =>
-            list.GetProperty("noOutcome").GetProperty("figures").GetProperty("workflows").GetProperty("total").GetInt32();
+        // The workflows the list's `noOutcome` figures are computed over.
+        async Task<List<long>> NoOutcomeWorkflowsAsync() =>
+            OutcomeFigures.Open(await Outcomes.ReadLedgerAsync(null, null, Ct), await Outcomes.ListAsync(Ct), null, null)
+                .WorkflowsOf(null).ToList();
+    }
+
+    [Fact]
+    public async Task A_teams_list_after_a_None_answers_and_does_not_count_the_unlinked_workflow_under_the_outcome_it_left()
+    {
+        var person = await host.PersonAsync();
+        var outcome = await CreateAsync(person, Unique("Left by None"));
+        await WorkflowAsync(person, host.Alpha, outcome.Id);
+        var unlinked = await WorkflowAsync(person, host.Alpha, outcome.Id);
+        Assert.Equal(2, TeamWorkflows(await TeamListAsync(), outcome.Id));
+
+        Assert.Equal(HttpStatusCode.OK, (await person.DeleteAsync($"/api/teams/{host.Alpha}/workflows/{unlinked}/outcome", Ct)).StatusCode);
+
+        // THE TEAM'S LIST STILL ANSWERS: the unlinked workflow is counted under no outcome of the team's.
+        var list = await TeamListAsync();
+        Assert.Equal(1, TeamWorkflows(list, outcome.Id));
+        Assert.Equal(1, list.GetProperty("outcomes").EnumerateArray()
+            .Single(o => o.GetProperty("id").GetString() == outcome.Id)
+            .GetProperty("figures").GetProperty("workflows").GetProperty("total").GetInt32());
+
+        async Task<JsonElement> TeamListAsync()
+        {
+            var response = await person.GetAsync($"/api/outcomes?team={host.Alpha}", Ct);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return await JsonAsync(response);
+        }
+
+        static int TeamWorkflows(JsonElement list, string id) => list.GetProperty("outcomes").EnumerateArray()
+            .Single(o => o.GetProperty("id").GetString() == id).GetProperty("teamWorkflows").GetInt32();
     }
 
     // ---- permissions ----

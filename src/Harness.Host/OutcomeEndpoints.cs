@@ -63,11 +63,15 @@ public static class OutcomeEndpoints
 
                 var shown = all.Where(o => statuses.Length == 0 ? o.Status != OutcomeStatus.Merged : statuses.Contains(o.Status));
 
+                // A workflow whose newest link is an unlink serves no outcome: OutcomeOf leaves it out,
+                // so it is counted under none of the team's outcomes.
                 var teamCounts = team is null
                     ? new Dictionary<string, int>()
                     : book.LinkOf.Values
                         .Where(l => string.Equals(l.TeamId, team.Trim(), StringComparison.OrdinalIgnoreCase))
-                        .GroupBy(l => book.OutcomeOf[l.Correlation])
+                        .Select(l => book.OutcomeOf.GetValueOrDefault(l.Correlation))
+                        .OfType<string>()
+                        .GroupBy(id => id)
                         .ToDictionary(g => g.Key, g => g.Count());
 
                 var list = shown
