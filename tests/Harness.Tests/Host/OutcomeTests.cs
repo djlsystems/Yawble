@@ -345,6 +345,44 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
     }
 
     [Fact]
+    public async Task The_detail_lists_its_renames_status_changes_and_merges_with_who_and_when()
+    {
+        var person = await host.PersonAsync();
+        var first = Unique("Hire engineers");
+        var outcome = await CreateAsync(person, first);
+        var second = Unique("Fill open engineering roles");
+        var since = DateTimeOffset.UtcNow.AddSeconds(-5);
+        Assert.Equal(HttpStatusCode.OK, (await person.PatchAsJsonAsync($"/api/outcomes/{outcome.Id}", new { name = second }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await person.PostAsync($"/api/outcomes/{outcome.Id}/retire", null, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await person.PostAsync($"/api/outcomes/{outcome.Id}/reactivate", null, Ct)).StatusCode);
+
+        var absorbed = await CreateAsync(person, Unique("Recruit developers"));
+        Assert.Equal(HttpStatusCode.OK,
+            (await person.PostAsJsonAsync($"/api/outcomes/{absorbed.Id}/merge", new { into = outcome.Id }, Ct)).StatusCode);
+
+        var events = (await JsonAsync(await person.GetAsync($"/api/outcomes/{outcome.Id}", Ct)))
+            .GetProperty("events").EnumerateArray().ToList();
+        Assert.Equal(
+            [TenantActions.OutcomeCreated, TenantActions.OutcomeRenamed, TenantActions.OutcomeRetired,
+             TenantActions.OutcomeReactivated, TenantActions.OutcomeCreated, TenantActions.OutcomeMerged],
+            events.Select(e => e.GetProperty("action").GetString()));
+        Assert.All(events, e =>
+        {
+            Assert.Equal(Email, e.GetProperty("by").GetString());
+            Assert.True(e.GetProperty("at").GetDateTimeOffset() >= since);
+        });
+
+        var renamed = events[1];
+        Assert.Equal((first, second), (renamed.GetProperty("from").GetString(), renamed.GetProperty("name").GetString()));
+        Assert.Equal(outcome.Id, events[2].GetProperty("outcomeId").GetString());
+        Assert.Equal(absorbed.Id, events[5].GetProperty("outcomeId").GetString());
+        Assert.Equal(outcome.Id, events[5].GetProperty("detail").GetProperty("into").GetString());
+
+        // Another outcome's acts are not in this one's history.
+        Assert.DoesNotContain(events, e => e.GetProperty("outcomeId").GetString() is var id && id != outcome.Id && id != absorbed.Id);
+    }
+
+    [Fact]
     public async Task A_merge_moves_the_figures_without_rewriting_a_link_and_its_preview_changes_nothing()
     {
         var person = await host.PersonAsync();

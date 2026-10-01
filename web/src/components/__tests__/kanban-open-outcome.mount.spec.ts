@@ -85,6 +85,7 @@ beforeEach(() => {
     mergedFrom: [],
     workflows: [],
     history: [],
+    events: [],
     ledgerStartedAt: null,
   });
 });

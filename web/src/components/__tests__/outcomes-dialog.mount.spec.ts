@@ -131,6 +131,12 @@ function detailOf(o: Outcome, links = 1): OutcomeDetail {
           },
         ]
       : [],
+    events: [
+      { seq: 10, at: '2026-09-01T08:00:00Z', action: 'outcome.created', outcomeId: o.id, name: 'Job pipeline', from: null, by: 'ada@example.com', detail: null },
+      { seq: 11, at: '2026-09-02T08:00:00Z', action: 'outcome.renamed', outcomeId: o.id, name: o.name, from: 'Job pipeline', by: 'grace@example.com', detail: { name: o.name } },
+      { seq: 12, at: '2026-09-03T08:00:00Z', action: 'outcome.retired', outcomeId: o.id, name: o.name, from: null, by: 'grace@example.com', detail: null },
+      { seq: 13, at: '2026-09-04T08:00:00Z', action: 'outcome.reactivated', outcomeId: o.id, name: o.name, from: null, by: 'ada@example.com', detail: null },
+    ],
     ledgerStartedAt: '2026-08-15T00:00:00Z',
   };
 }
@@ -284,6 +290,21 @@ describe('Manage Outcomes: an outcome opened', () => {
     expect(bodyFind('[data-outcome-workflow="4100"]')?.textContent).toContain('Alpha');
     expect(bodyFind('[data-outcome-workflow="4100"]')?.textContent).toContain('+ 1 unmeasured run');
     expect(bodyFind('[data-outcome-history]')?.textContent).toContain('Workflow 4100 (Alpha) linked');
+  });
+
+  it('lists renames and status changes from the route, each with who and when', async () => {
+    await open({ outcome: 'o-1' });
+
+    const lines = [...document.body.querySelectorAll('[data-outcome-history] li')].map((li) => li.textContent ?? '');
+    const renamed = lines.find((l) => l.includes('Renamed from "Job pipeline" to "Current job pipeline"'));
+    expect(renamed).toContain('by grace@example.com');
+    expect(renamed).toContain(new Date('2026-09-02T08:00:00Z').toLocaleString());
+    const retired = lines.find((l) => l.includes('Retired'));
+    expect(retired).toContain('by grace@example.com');
+    expect(retired).toContain(new Date('2026-09-03T08:00:00Z').toLocaleString());
+    expect(lines.find((l) => l.includes('Reactivated'))).toContain('by ada@example.com');
+    // Oldest first, links among them by time.
+    expect(lines.findIndex((l) => l.includes('Retired'))).toBeLessThan(lines.findIndex((l) => l.includes('Workflow 4100')));
   });
 
   it('renames through the edit route, sending only what changed', async () => {

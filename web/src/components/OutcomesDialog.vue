@@ -13,6 +13,7 @@ import {
   type MergePreview,
   type Outcome,
   type OutcomeDetail,
+  type OutcomeEvent,
   type OutcomeFields,
   type OutcomeFigures,
   type OutcomeList,
@@ -322,21 +323,49 @@ async function confirmCreate() {
 
 interface HistoryLine {
   key: string;
-  at: string | null;
+  at: string;
   text: string;
 }
 
-/** What the route answers: the outcome's own dates, what was merged into it, and every link. */
+/** A tenant row as a person reads it. Names are interpolated as text, never as HTML. */
+function eventText(e: OutcomeEvent): string {
+  const name = e.name ?? 'an outcome';
+  switch (e.action) {
+    case 'outcome.created':
+      return `Created as "${name}"`;
+    case 'outcome.renamed':
+      return e.from ? `Renamed from "${e.from}" to "${name}"` : `Renamed to "${name}"`;
+    case 'outcome.changed':
+      return 'Description or target changed';
+    case 'outcome.confirmed':
+      return 'Confirmed';
+    case 'outcome.retired':
+      return 'Retired';
+    case 'outcome.reactivated':
+      return 'Reactivated';
+    case 'outcome.rejected':
+      return 'Rejected';
+    case 'outcome.merged': {
+      const into = typeof e.detail?.intoName === 'string' ? e.detail.intoName : outcomeName(String(e.detail?.into ?? ''));
+      return `"${name}" merged into "${into}"`;
+    }
+    default:
+      return e.action;
+  }
+}
+
+/** What the route answers, oldest first: every act on the outcome (and on one merged into it) and
+ *  every link, each with who and when. */
 const history = computed<HistoryLine[]>(() => {
   const d = detail.value;
   if (!d) return [];
 
   const o = d.outcome;
-  const lines: HistoryLine[] = [
-    { key: 'created', at: o.createdAt, text: `${o.createdByKind === 'member' ? 'Proposed' : 'Created'} by ${o.createdBy}` },
-  ];
-  if (o.confirmedAt) lines.push({ key: 'confirmed', at: o.confirmedAt, text: `Confirmed by ${o.confirmedBy ?? 'a person'}` });
-  for (const from of d.mergedFrom) lines.push({ key: `merged-${from.id}`, at: null, text: `${from.name} was merged into this outcome` });
+  const lines: HistoryLine[] = [];
+  for (const e of d.events) {
+    const other = e.outcomeId !== o.id && e.action !== 'outcome.merged' ? ` (on "${e.name ?? ''}", merged in since)` : '';
+    lines.push({ key: `event-${e.seq}`, at: e.at, text: `${eventText(e)}${other} by ${e.by ?? 'unknown'}` });
+  }
   for (const link of d.history) {
     const team = link.teamNameAtLink ?? link.teamId ?? 'no team';
     lines.push({
@@ -345,14 +374,7 @@ const history = computed<HistoryLine[]>(() => {
       text: `Workflow ${link.correlation} (${team}) linked to "${link.outcomeNameAtLink}" by ${link.setBy} (${LinkHowLabel[link.how] ?? link.how})`,
     });
   }
-  if (o.status !== 'proposed' && o.status !== 'active') {
-    lines.push({
-      key: 'status',
-      at: o.updatedAt,
-      text: o.status === 'merged' ? `Merged into ${outcomeName(o.mergedInto)}` : `${StatusLabel[o.status]}`,
-    });
-  }
-  return lines;
+  return lines.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 });
 
 function tokensCell(figures: OutcomeFigures) {
@@ -491,7 +513,7 @@ function tokensCell(figures: OutcomeFigures) {
         <div class="text-subtitle2 q-mt-md">History</div>
         <ul class="outcome-history" data-outcome-history>
           <li v-for="line in history" :key="line.key">
-            <span class="os-text-muted">{{ line.at ? when(line.at) : '' }}</span>
+            <span class="os-text-muted">{{ when(line.at) }}</span>
             {{ line.text }}
           </li>
         </ul>

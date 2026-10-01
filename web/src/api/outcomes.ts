@@ -104,6 +104,21 @@ export interface OutcomeLinkRow {
   how: string
 }
 
+/** One `outcome.*` tenant row about the outcome or one merged into it: what was done, by whom, when. */
+export interface OutcomeEvent {
+  seq: number
+  at: string
+  action: string
+  outcomeId: string | null
+  /** The outcome's name after the act. */
+  name: string | null
+  /** A rename's previous name, when a row before it recorded one. */
+  from: string | null
+  /** The actor's email, or id. */
+  by: string | null
+  detail: Record<string, unknown> | null
+}
+
 export interface OutcomeDetail {
   outcome: Outcome
   /** A merged outcome: the outcome holding its figures now. */
@@ -111,6 +126,7 @@ export interface OutcomeDetail {
   mergedFrom: { id: string; name: string }[]
   workflows: OutcomeWorkflowLine[]
   history: OutcomeLinkRow[]
+  events: OutcomeEvent[]
   ledgerStartedAt: string | null
 }
 

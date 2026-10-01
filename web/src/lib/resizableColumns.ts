@@ -97,6 +97,10 @@ interface TableState {
 const states = new WeakMap<HTMLElement, TableState>();
 
 function tableOf(el: HTMLElement): HTMLTableElement | null {
+  // A re-render that lands after the DOM is gone (a test file's environment torn down while a
+  // promise was still settling) has no table to attach to; the global itself is missing then.
+  if (typeof HTMLTableElement === 'undefined') return null;
+
   return el instanceof HTMLTableElement ? el : el.querySelector('table');
 }
 

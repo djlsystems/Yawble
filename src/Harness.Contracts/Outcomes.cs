@@ -215,6 +215,11 @@ public interface IOutcomeStore
     /// <summary>Every link, oldest first.</summary>
     Task<IReadOnlyList<OutcomeLink>> ReadLinksAsync(CancellationToken ct = default);
 
+    /// <summary>The tenant rows (<c>outcome.*</c> only) whose subject is one of <paramref name="ids"/>,
+    /// oldest first: each outcome's creation, renames, changes, status changes and merges, with who
+    /// and when.</summary>
+    Task<IReadOnlyList<TenantEvent>> ReadEventsAsync(IReadOnlyCollection<string> ids, CancellationToken ct = default);
+
     /// <summary>What the figures are read from: every workflow's newest link, and the ledger's rows,
     /// narrowed to the window.</summary>
     Task<OutcomeLedgerRows> ReadLedgerAsync(DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default);

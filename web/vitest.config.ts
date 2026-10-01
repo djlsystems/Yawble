@@ -30,5 +30,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.spec.ts'],
+    // A timer a spec file leaves pending is cleared when the file ends, before it can fire into
+    // a later file whose `document` is gone. See the file.
+    setupFiles: ['src/test/pendingTimers.ts'],
   },
 });

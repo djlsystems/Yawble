@@ -134,6 +134,29 @@ public static class OutcomeEndpoints
                     .Where(l => resolution.GetValueOrDefault(l.OutcomeId, l.OutcomeId) == holder)
                     .ToList();
 
+                // AND WHAT WAS DONE TO IT: the tenant rows naming this outcome or one merged into it -
+                // created, renamed, changed, confirmed, retired, reactivated, merged - with who and when.
+                // A rename's `from` is the name the row before it left.
+                var family = all.Where(o => resolution.GetValueOrDefault(o.Id, o.Id) == holder).Select(o => o.Id)
+                    .Append(outcome.Id).ToHashSet();
+                var nameOf = new Dictionary<string, string?>();
+                var events = (await outcomes.ReadEventsAsync(family, ct)).Select(e =>
+                {
+                    var from = e.Subject is null ? null : nameOf.GetValueOrDefault(e.Subject);
+                    if (e.Subject is not null && e.SubjectName is not null) nameOf[e.Subject] = e.SubjectName;
+                    return new
+                    {
+                        e.Seq,
+                        At = e.OccurredAt,
+                        e.Action,
+                        OutcomeId = e.Subject,
+                        Name = e.SubjectName,
+                        From = e.Action == TenantActions.OutcomeRenamed ? from : null,
+                        By = e.ActorEmail ?? e.ActorId,
+                        Detail = e.Detail is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(e.Detail),
+                    };
+                }).ToList();
+
                 return Results.Ok(new
                 {
                     outcome = Shape(outcome, OutcomeFigures.For(book, holder, open), null),
@@ -141,6 +164,7 @@ public static class OutcomeEndpoints
                     mergedFrom = all.Where(o => o.Id != holder && resolution[o.Id] == holder).Select(o => new { o.Id, o.Name }),
                     workflows = lines,
                     history,
+                    events,
                     ledgerStartedAt = ledger.LedgerStartedAt,
                 });
             })
@@ -151,7 +175,10 @@ public static class OutcomeEndpoints
                 "The outcome with its `figures` (as the list gives them), each workflow it serves now - "
                 + "team, state, when it started, elapsed, agent time, billable tokens, unmeasured runs, "
                 + "and how and by whom it was linked - and `history`, every link row that named it or an "
-                + "outcome merged into it, oldest first, each with the outcome name it was made under. "
+                + "outcome merged into it, oldest first, each with the outcome name it was made under - and "
+                + "`events`, every `outcome.*` tenant row about it or an outcome merged into it, oldest "
+                + "first: `action`, `at`, `by` (the actor's email, or id), `name` (its name after the act), "
+                + "`from` (a rename's previous name, when a row before it recorded one) and `detail`. "
                 + "A merged outcome answers with `resolvedTo`, the outcome holding its figures now.");
 
         app.MapPost("/api/outcomes", async (
