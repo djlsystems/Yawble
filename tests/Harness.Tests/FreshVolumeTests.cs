@@ -35,13 +35,13 @@ public sealed class FreshVolumeTests : IDisposable
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
     /// settings; `auth-008` is a plugin member's configuration and secret bindings; `auth-009` is who
     /// last set a member's own instructions, and when; `auth-010` is a trigger's wake choice and daily
-    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `outcome-001` is the usage ledger (`usage_ledger`, `workflow_ledger`); `outcome-002` is the outcomes and their append-only workflow links; `auth-017` is the outcome a trigger's fires serve; `backlog-002` is a dispatch's recorded tips, where it started and its stored landed; `backlog-003` is the outcome a backlog item serves.
+    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `outcome-001` is the usage ledger (`usage_ledger`, `workflow_ledger`); `outcome-002` is the outcomes and their append-only workflow links; `auth-017` is the outcome a trigger's fires serve; `auth-018` is the email of the person who last configured a trigger; `backlog-002` is a dispatch's recorded tips, where it started and its stored landed; `backlog-003` is the outcome a backlog item serves.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "messages-002", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "outcome-001", "outcome-002"],
+            ["messages-001", "messages-002", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "outcome-001", "outcome-002"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -53,7 +53,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "backlog-001", "backlog-002", "backlog-003", "messages-001", "messages-002", "outcome-001", "outcome-002", "skill-001", "skill-002", "skill-003", "skill-004"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "backlog-001", "backlog-002", "backlog-003", "messages-001", "messages-002", "outcome-001", "outcome-002", "skill-001", "skill-002", "skill-003", "skill-004"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -291,6 +291,38 @@ public sealed class FreshVolumeTests : IDisposable
         await backlog.SetOutcomeAsync(item.Id, outcome.Id, Ct);
         Assert.Equal(outcome.Id, (await triggers.FindAsync("t1", Ct))!.OutcomeId);
         Assert.Equal(outcome.Id, (await backlog.GetAsync(item.Id, Ct))!.OutcomeId);
+    }
+
+    /// <summary>
+    /// A trigger made before `auth-018` has no configurer's email - its fires resolve `created_by` as
+    /// before - and a save by no person keeps an email a person's save stored.
+    /// </summary>
+    [Fact]
+    public async Task A_trigger_from_before_the_configurer_step_has_no_email_and_a_save_by_no_person_keeps_one()
+    {
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "auth-018")], ct: Ct);
+
+        await ExecuteAsync(
+            """
+            INSERT INTO teams (id, created_utc) VALUES ('old-team', '2026-09-01T00:00:00Z');
+            INSERT INTO triggers
+                (id, team, container, name, instruction, kind, interval_seconds, idle_only, enabled,
+                 missed_count, created_at, created_by)
+            VALUES
+                ('t1', 'old-team', 'Manager', 'Poll', 'look', 'every', 300, 1, 1, 0,
+                 '2026-09-01T00:00:00Z', 'person');
+            """);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        var store = new SqliteTriggerStore(Database);
+        var old = (await store.FindAsync("t1", Ct))!;
+        Assert.Null(old.ConfiguredByEmail);
+
+        await store.SaveAsync(old with { ConfiguredByEmail = "person@example.test" }, Ct);
+        await store.SaveAsync(old with { Name = "Renamed" }, Ct);
+        Assert.Equal("person@example.test", (await store.FindAsync("t1", Ct))!.ConfiguredByEmail);
     }
 
     /// <summary>

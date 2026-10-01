@@ -55,11 +55,12 @@ public static class OutcomeLinks
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        // SET_BY IS THE PERSON'S EMAIL, as on every other link and tenant row a person causes;
-        // `created_by` is the user id, so it is resolved here, and kept as it is only when no
-        // user of that id is left.
+        // SET_BY IS THE PERSON'S EMAIL, as on every other link and tenant row a person causes:
+        // the configurer's email the trigger snapshotted (`auth-018`), which outlives their user.
+        // A trigger from before that step has none, so its `created_by` (a user id) is resolved
+        // here, and kept as it is only when no user of that id is left.
         command.CommandText = """
-            SELECT t.outcome_id, COALESCE(u.email, t.created_by), t.team
+            SELECT t.outcome_id, COALESCE(t.configured_by_email, u.email, t.created_by), t.team
             FROM triggers t LEFT JOIN users u ON u.id = t.created_by
             WHERE t.id = $id
             """;

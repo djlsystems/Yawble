@@ -51,7 +51,8 @@ public sealed class TriggerCreation(
         $"No active or proposed outcome '{asked}'. Name one by its id or its exact name.";
 
     public async Task<TriggerCreated> CreateAsync(
-        string stored, NewTrigger request, string createdBy, Func<TriggerRow, TriggerAudit> audit, CancellationToken ct = default)
+        string stored, NewTrigger request, string createdBy, string? createdByEmail, Func<TriggerRow, TriggerAudit> audit,
+        CancellationToken ct = default)
     {
         var name = (request.Name ?? "").Trim();
         var instruction = (request.Instruction ?? "").Trim();
@@ -207,6 +208,7 @@ public sealed class TriggerCreation(
             WakeManager = wakeManager,
             DailyTokenCap = request.DailyTokenCap,
             OutcomeId = outcomeId,
+            ConfiguredByEmail = createdByEmail,
         };
 
         // The row and its tenant_events row are one transaction: a trigger with no record of who made

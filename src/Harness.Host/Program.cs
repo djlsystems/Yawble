@@ -3310,6 +3310,7 @@ app.MapPost("/api/teams/{team}/triggers", async (
             request.WatchGlob, request.PollSeconds, request.QuietSeconds, request.MinIntervalSeconds,
             request.WakeManager, request.DailyTokenCap, request.OutcomeId),
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown",
+        context.User.FindFirstValue(ClaimTypes.Email),
         row => TenantLogging.Row(
             context, TenantActions.ScheduleCreated, row.Id, row.Name, new { team = row.Team, member = row.Container }),
         ct);
@@ -3508,6 +3509,10 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
             };
         }
     }
+
+    // THE PERSON WHO CHANGED IT IS NOW ITS CONFIGURER: their email is what its fires' outcome links
+    // name. A caller with no email keeps the one stored.
+    candidate = candidate with { ConfiguredByEmail = context.User.FindFirstValue(ClaimTypes.Email) ?? existing.ConfiguredByEmail };
 
     // The row and its tenant_events row are one transaction: a change with no record of who made
     // it does not land.

@@ -1556,7 +1556,7 @@ public sealed class SolutionInstaller(
             DailyTokenCap: trigger.DailyTokenCap,
             OutcomeId: outcomeId);
 
-        var created = await triggers.CreateAsync(team, request, actor.Label,
+        var created = await triggers.CreateAsync(team, request, actor.Label, actor.Email,
             row => actor.Row(TenantActions.ScheduleCreated, row.Id, row.Name, new { team = row.Team, member = row.Container, solution = true }), ct);
 
         if (created.Row is not { } made) throw new SolutionStepException($"The trigger '{trigger.Name}' was refused: {created.Refusal}");
