@@ -1750,11 +1750,12 @@ var resumed = await app.Services.GetRequiredService<ContainerHost>().ResumePendi
 // BOTH numbers, and a line whenever either is non-zero. An interrupted run is reported to the log
 // and is exactly the thing whoever dispatched it needs told about, so a restart that cut runs short
 // must say so even when none of them could be re-offered.
-if (resumed.Reoffered > 0 || resumed.Interrupted > 0)
+if (resumed.Reoffered > 0 || resumed.Interrupted > 0 || resumed.ManagersWoken > 0)
 {
     Console.WriteLine(
         $"Resumed {resumed.Reoffered} queued item(s) and reported {resumed.Interrupted} "
-        + "interrupted run(s) from the last stop.");
+        + $"interrupted run(s) from the last stop; told {resumed.ManagersWoken} Manager(s) cut off "
+        + "by the restart to carry on.");
 }
 
 // THE STARTUP AND LIFECYCLE FACTS, IN ONE PASS.
