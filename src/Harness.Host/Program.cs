@@ -20,6 +20,7 @@ using Harness.Backlog;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
+using Harness.Host.Capacity;
 using Harness.Host.Solutions;
 using Harness.Identity;
 using Harness.Kanban;
@@ -776,7 +777,32 @@ var workflowSpendLimit = tenantSettings.WorkflowSpendLimit;
 //
 // `wip.maxRunning`: settable at runtime. One place reads it - here, at start, and on every
 // change through `WipLedger.SetMax`, which applies it under the ledger's lock and evicts nothing.
-var wip = new WipLedger(tenantSettings.WipMaxRunning);
+//
+// AND MEASURED HEADROOM: a run the limit has room for still waits while memory in use or memory
+// pressure is over its `admission.*` threshold, read through delegates from the capacity sampler's
+// last measurement (`HeadroomGate`). Not measured falls back to the limit alone. The cgroup and proc
+// roots are configuration so a test Host reads a fixture, never the machine it runs on.
+var headroom = new HeadroomGate(
+    () => tenantSettings.AdmissionMemoryPercent, () => tenantSettings.AdmissionMemoryPressurePercent);
+var wip = new WipLedger(tenantSettings.WipMaxRunning, headroom.Reason);
+builder.Services.AddSingleton(headroom);
+
+// THE SEAM FOR THE `heavy` LEASE: the lease registers its own view of holders and queue in place
+// of this one, and the capacity sample carries it.
+builder.Services.AddSingleton<IHeavyLeaseView, NoHeavyLease>();
+builder.Services.AddSingleton(sp => new CapacitySampler(
+    new CgroupReader(builder.Configuration["Capacity:CgroupRoot"] ?? CgroupReader.DefaultRoot),
+    new ProcessGroupReader(builder.Configuration["Capacity:ProcRoot"] ?? "/proc"),
+    RunProcessGroups.Shared,
+    wip,
+    headroom,
+    sp.GetRequiredService<IHeavyLeaseView>(),
+    () => tenantSettings.AdmissionMemoryPercent,
+    () => tenantSettings.AdmissionMemoryPressurePercent,
+    push: sample => sp.GetRequiredService<IHubContext<ContainerHub>>()
+        .Clients.Group(ContainerHub.PeopleGroup).SendAsync(CapacityEndpoints.PushName, sample),
+    logger: sp.GetRequiredService<ILogger<CapacitySampler>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CapacitySampler>());
 tenantSettings.Changed += name =>
 {
     // The per-run allowance moves the default, so a change to it re-reads the limit too.
@@ -2024,6 +2050,7 @@ PrincipalLogScope.Use(app);
 // call on that route's own marker. RouteMarkerTests requires a marker here like everywhere else.
 app.MapMcp("/mcp").NoPermitRequired();
 SurfaceEndpoints.Map(app, dataRoot);
+CapacityEndpoints.Map(app);
 SiteEndpoints.Map(app);
 SiteApiEndpoints.Map(app);
 TenantSettingsEndpoints.Map(app);
@@ -5235,16 +5262,17 @@ app.MapGet("/api/teams/rollup", async (
         var elapsed = await log.ElapsedForTeamAsync(team.Id, floor, ct);
         var open = await log.WorkflowsForTeamAsync(team.Id, floor, ct);
 
-        var held = slots.Waiting
+        var waiting = slots.Waiting
             .Where(hold => string.Equals(hold.Team, team.Id, StringComparison.OrdinalIgnoreCase))
-            .Select(hold => hold.Member)
             .ToList();
+        var held = waiting.Select(hold => hold.Member).ToList();
         var running = slots.Running
             .Count(hold => string.Equals(hold.Team, team.Id, StringComparison.OrdinalIgnoreCase));
 
         rows.Add(new TeamRollupRow(
             team.Id, elapsed, open, running, held.Count, held,
-            held.Count > 0 ? TeamRollupRow.WaitingForASlot : null));
+            // What the first of them waits for: a slot, or measured headroom ("waiting for memory: ...").
+            held.Count > 0 ? waiting[0].Reason ?? TeamRollupRow.WaitingForASlot : null));
     }
 
     return Results.Ok(new TeamRollup(rows));
@@ -5261,7 +5289,7 @@ app.MapGet("/api/teams/rollup", async (
         + "predecessor than each other.\n\n"
         + "`running` and `waiting` count this team's holders of, and waiters for, the "
         + "instance-wide run slots (`GET /api/wip`); `held` names the waiting members in queue "
-        + "order, and `slotStatus` reads \"waiting for a slot\" while any are waiting - a team "
+        + "order, and `slotStatus` reads what the first of them waits for while any are waiting - \"waiting for a slot\", or \"waiting for memory: ...\" when measured headroom holds it - a team "
         + "whose Manager has a delivered wake held by the limit is waiting, not idle.\n\n"
         + "It carries NOTHING ELSE - no name, no containers. Those are on "
         + "`/api/overview`, which a console already holds, and a second source for a team's name is "
@@ -8805,9 +8833,20 @@ internal sealed class ContainerHub(
     ///
     /// The DROP itself is always recorded, below. This pairs with it.
     /// </summary>
+    /// <summary>
+    /// Every connection a PERSON holds, and no machine principal's: what only people may read
+    /// (the capacity sample, as <c>GET /api/capacity</c> is <c>HumansOnly</c>) is pushed here.
+    /// </summary>
+    public const string PeopleGroup = "people";
+
     public override async Task OnConnectedAsync()
     {
         await base.OnConnectedAsync();
+
+        if (Context.User is not null && PrincipalClaims.From(Context.User) is { Kind: PrincipalKind.User })
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, PeopleGroup);
+        }
 
         if (diagnostics is null || watch is null) return;
         if (PrincipalClaims.From(Context.User!) is not { } principal) return;

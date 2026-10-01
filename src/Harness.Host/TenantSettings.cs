@@ -67,6 +67,8 @@ public sealed class TenantSettings
 {
     public const string WipMaxRunningName = "wip.maxRunning";
     public const string WipMemoryPerRunMbName = "wip.memoryPerRunMb";
+    public const string AdmissionMemoryPercentName = "admission.memoryPercent";
+    public const string AdmissionMemoryPressurePercentName = "admission.memoryPressurePercent";
     public const string WorkflowSpendLimitName = "workflow.spendLimit";
     public const string ConciergeIdleTimeoutName = "concierge.idleTimeout";
     public const string QuietWindowName = "quiet.window";
@@ -123,6 +125,20 @@ public sealed class TenantSettings
                 + "wip.maxRunning is at most the limit divided by this. It changes only that default: "
                 + "a value set for wip.maxRunning wins. Takes effect immediately.",
                 Min: 1, Max: 1_048_576),
+            new(AdmissionMemoryPercentName, TenantSettingKind.Integer, "80", "Admission:MemoryPercent",
+                "A run waits to start while the container's memory in use (anonymous memory and shmem, "
+                + "which the kernel cannot reclaim) is at or above this percentage of its memory limit, "
+                + "even when wip.maxRunning has room. It waits as it would for a slot, and is never "
+                + "refused. When the container's memory cannot be measured, only wip.maxRunning applies. "
+                + "0 turns this check off. Takes effect immediately.",
+                Min: 0, Max: 100),
+            new(AdmissionMemoryPressurePercentName, TenantSettingKind.Integer, "10", "Admission:MemoryPressurePercent",
+                "A run waits to start while the container's memory pressure (the share of the last "
+                + "10 seconds some work stalled waiting for memory) is at or above this percentage, "
+                + "even when wip.maxRunning has room. It waits as it would for a slot, and is never "
+                + "refused. When pressure cannot be measured, only wip.maxRunning applies. 0 turns "
+                + "this check off. Takes effect immediately.",
+                Min: 0, Max: 100),
             new(WorkflowSpendLimitName, TenantSettingKind.Integer, "100000000", "WorkflowSpendLimit",
                 "The instance's per-workflow token ceiling, the backstop under every team's own "
                 + "budget. 0 means none. Settable from the product: there is no admin tier "
@@ -226,6 +242,12 @@ public sealed class TenantSettings
 
     /// <summary><c>wip.memoryPerRunMb</c>: the memory allowance one run is counted at.</summary>
     public int WipMemoryPerRunMb => (int)Integer(WipMemoryPerRunMbName);
+
+    /// <summary><c>admission.memoryPercent</c>: memory in use, as a percentage of the limit, at which a run waits. 0 is off.</summary>
+    public int AdmissionMemoryPercent => (int)Integer(AdmissionMemoryPercentName);
+
+    /// <summary><c>admission.memoryPressurePercent</c>: memory pressure some avg10 at which a run waits. 0 is off.</summary>
+    public int AdmissionMemoryPressurePercent => (int)Integer(AdmissionMemoryPressurePercentName);
 
     /// <summary>
     /// The running limit in force and which bound decided it: a <c>tenant_settings</c> row

@@ -21,7 +21,9 @@ public static class SurfaceEndpoints
                 "`limit` says where `max` comes from: `bound` is `setting` (a Tenant Settings row), "
                 + "`configuration` (appsettings), or the default's `cpu` or `memory` bound - the smaller "
                 + "of max(1, CPUs - 1) and the container's memory limit / `wip.memoryPerRunMb` - with "
-                + "both bounds and a `reason` sentence.");
+                + "both bounds and a `reason` sentence. Each waiting hold carries the `reason` it waits for: "
+                + "\"waiting for a slot\", or \"waiting for memory: ...\" while measured headroom holds it "
+                + "(`admission.memoryPercent`, `admission.memoryPressurePercent`).");
 
         app.MapGet("/api/agents/auth", async (
                 AgentAuthProbe probe, ITeamStore teams, CancellationToken ct) =>

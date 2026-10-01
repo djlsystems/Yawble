@@ -593,7 +593,8 @@ public sealed partial class ProcessAgentRunner(
 
                 // Only recorded, so a person can watch: nothing below reads it, so usage and
                 // output are the same with or without a watcher.
-                onStarted: _ => watchable = BeginLive(invocation, start, sessionId, launchedAt));
+                onStarted: _ => watchable = BeginLive(invocation, start, sessionId, launchedAt),
+                run: invocation.Container);
 
             if (outcome.Killed)
             {

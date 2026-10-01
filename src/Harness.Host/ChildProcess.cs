@@ -115,12 +115,17 @@ public static class ChildProcess
     /// protocol. Without it stdout is pumped in chunks, which is what an agent's JSON envelope needs.
     /// Either way the text is captured into <see cref="ChildOutcome.Stdout"/>.
     /// </param>
+    /// <param name="run">The run this child is, registered in <paramref name="groups"/> (the Host's
+    /// <see cref="Capacity.RunProcessGroups.Shared"/> when not given) from its start to its end, so
+    /// the capacity sampler can sum its process group under its team and member.</param>
     public static async Task<ChildOutcome> RunAsync(
         ProcessStartInfo start,
         string? stdin,
         CancellationToken stopping,
         Action<Process>? onStarted = null,
-        Func<string, Task>? onStdoutLine = null)
+        Func<string, Task>? onStdoutLine = null,
+        ContainerId? run = null,
+        Capacity.RunProcessGroups? groups = null)
     {
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("The process did not start.");
@@ -129,6 +134,11 @@ public static class ChildProcess
         // it disposes first: every exit from this method, including a run that completes
         // normally, takes whatever is left in the child's process group with it.
         using var group = new ProcessGroup(process.Id);
+
+        // Named for the capacity sampler until the run ends, however it ends.
+        using var registered = run is { } owner
+            ? (groups ?? Capacity.RunProcessGroups.Shared).Register(process.Id, owner)
+            : null;
 
         onStarted?.Invoke(process);
 
