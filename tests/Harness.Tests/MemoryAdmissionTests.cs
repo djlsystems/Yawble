@@ -7,8 +7,9 @@ namespace Harness.Tests;
 /// <summary>
 /// ADMIT BY MEASURED HEADROOM. A run the limit has room for still WAITS - exactly as for a slot, with
 /// the reason on its hold, never failed or refused - while memory in use or memory pressure is over
-/// its threshold, and starts when the next measurement clears it. The Manager's reserved slot still
-/// applies, and figures that are not measured fall back to the run limit alone.
+/// its threshold, and starts when the next measurement clears it. A Manager is never held by the gate -
+/// it is the run that frees the memory - and the run limit, with its reserved slot, still applies to
+/// it; figures that are not measured fall back to the run limit alone.
 /// </summary>
 public sealed class MemoryAdmissionTests : IDisposable
 {
@@ -139,6 +140,41 @@ public sealed class MemoryAdmissionTests : IDisposable
 
         // The pool is full of members; the Manager still starts, in the one slot above the limit.
         Assert.NotNull(wip.TryEnter(AlphaManager));
+        Assert.Equal(2, wip.View().Running.Count);
+    }
+
+    [Fact]
+    public void A_manager_starts_over_the_memory_threshold_while_a_member_waits_with_the_memory_reason()
+    {
+        var gate = Gate();
+        var wip = new WipLedger(4, gate.Reason);
+        Measure(gate, anon: 9_400_000_000, pressure: 14);
+
+        Assert.Null(wip.TryEnter(AlphaWorker));
+        Assert.Equal(MemoryReason, WaitReason(wip, AlphaWorker));
+
+        // The Manager is the run that stops or redirects the work holding the memory: the gate never holds it.
+        Assert.NotNull(wip.TryEnter(AlphaManager));
+        Assert.Equal(["Manager"], wip.View().Running.Select(hold => hold.Member));
+        Assert.Equal(MemoryReason, WaitReason(wip, AlphaWorker));
+    }
+
+    [Fact]
+    public void Over_the_memory_threshold_a_manager_still_gets_only_its_reserved_slot_when_the_limit_is_full()
+    {
+        var gate = Gate();
+        var wip = new WipLedger(1, gate.Reason);
+
+        Assert.NotNull(wip.TryEnter(AlphaWorker));
+        Measure(gate, anon: 9_400_000_000);
+
+        // The limit is full; the Manager takes the one slot above it, as with no gate.
+        Assert.NotNull(wip.TryEnter(AlphaManager));
+
+        // The reserved slot is taken: a second Manager waits for a slot, never for memory.
+        var betaManager = new ContainerId("Beta", "Manager");
+        Assert.Null(wip.TryEnter(betaManager));
+        Assert.Equal(WipLedger.SlotReason, WaitReason(wip, betaManager));
         Assert.Equal(2, wip.View().Running.Count);
     }
 

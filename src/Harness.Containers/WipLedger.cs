@@ -37,7 +37,9 @@ public sealed record WipView(int Max, IReadOnlyList<WipHold> Running, IReadOnlyL
 /// <b>AND MEASURED HEADROOM.</b> A run the limit has room for still waits while the headroom gate
 /// (handed in, read on every claim) answers a reason - memory in use or memory pressure over its
 /// threshold. It waits exactly as for a slot, in the same queue, with that reason on its hold; it is
-/// never refused. The gate covers a Manager too, but its reserved slot is unchanged. Whoever feeds the
+/// never refused. A Manager is never held by the gate: when memory is high the Manager is the run that
+/// stops or redirects the work holding it, so it is admitted by the run limit alone, reserved slot
+/// included, exactly as without a gate. Whoever feeds the
 /// gate calls <see cref="HeadroomChanged"/> after each new measurement, so a waiter held for headroom
 /// asks again when it clears.
 /// </para>
@@ -139,8 +141,9 @@ public sealed class WipLedger
                 return null;
             }
 
-            // The limit has room: measured headroom decides. Still a wait, never a refusal.
-            if (_headroom?.Invoke() is { } reason)
+            // The limit has room: measured headroom decides, for members. Still a wait, never a
+            // refusal. A Manager skips it - it is the run that would free the memory.
+            if (!IsManager(id) && _headroom?.Invoke() is { } reason)
             {
                 WaitLocked(id, key, reason, headroom: true);
                 return null;
