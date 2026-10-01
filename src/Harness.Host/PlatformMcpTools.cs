@@ -186,6 +186,19 @@ public sealed partial class PlatformMcpTools(
     public Task<string> Wip(CancellationToken cancellationToken = default) =>
         SendAsync(HttpMethod.Get, "/api/wip", null, cancellationToken);
 
+    [McpServerTool(Name = "lease"), Description(
+        "Take or release an instance-wide lease, shared by every team. The only lease is heavy: take "
+        + "it before running the repository's full test command, a full build, an image build or "
+        + "anything else you know to be heavy, and release it when that command finishes. Acquire "
+        + "answers granted, or queued with your position and who holds it; call acquire again to "
+        + "wait. Your silence clock is paused while you are queued, and a lease is released when "
+        + "your run ends.")]
+    public Task<string> Lease(
+        [Description("acquire or release.")] string action,
+        [Description("The lease's name. The only one is heavy.")] string name = InstanceLeases.Heavy,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(HttpMethod.Post, "/api/me/lease", new { action, name }, cancellationToken);
+
     [McpServerTool(Name = "status"), Description(
         "The roster and what each member is doing, including who they were hired for and why a run "
         + "failed, then each member's queued and deferred instructions (seq, first line, source): "

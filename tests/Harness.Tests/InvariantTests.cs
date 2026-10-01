@@ -131,6 +131,57 @@ public sealed class McpContractTests
 
     private const string PackageDoneWhen = "\"`/api/solutions/check` passes\"";
 
+    /// <summary>The heavy-work rule, word for word, in the Manager and Member skills.</summary>
+    public const string HeavyLeaseRule =
+        "Before running the repository's full test command, a full build, an image build or anything else "
+        + "you know to be heavy, take the `heavy` lease with `lease`; release it when that command finishes.";
+
+    public static string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+
+    /// <summary>
+    /// The Manager and Member skills send heavy work through the `heavy` lease, in words for any
+    /// repository, and keep the rules they had: covering tests while iterating, the whole command
+    /// once when finished, the merged-commit run once. The test sections name no language,
+    /// framework or test runner. Every skill lists `lease` among the tools.
+    /// </summary>
+    [Fact]
+    public void The_manager_and_member_skills_take_the_heavy_lease_in_project_neutral_words()
+    {
+        var manager = Flat(BuiltInSkills.Find("manager")!.Body);
+        var member = Flat(BuiltInSkills.Find("member")!.Body);
+
+        Assert.Contains(HeavyLeaseRule, manager, StringComparison.Ordinal);
+        Assert.Contains(HeavyLeaseRule, member, StringComparison.Ordinal);
+
+        Assert.Contains("run only the tests that cover their change while iterating, the whole command once when finished", manager, StringComparison.Ordinal);
+        Assert.Contains("The full run over every member's merged work is yours, once, at the merged commit.", manager, StringComparison.Ordinal);
+        Assert.Contains("While iterating: run only the tests that cover your change", member, StringComparison.Ordinal);
+        Assert.Contains("When your change is finished: run the repository's own test command once", member, StringComparison.Ordinal);
+        Assert.Contains("The full run over the team's merged work is the Manager's, not yours.", member, StringComparison.Ordinal);
+
+        foreach (var section in new[] { Section(manager, "## Test runs"), Section(member, "## Run the smallest thing that covers your change") })
+        {
+            foreach (var word in new[]
+                     {
+                         "dotnet", "npm", "yarn", "pnpm", "pytest", "go test", "cargo", "mvn", "maven", "gradle",
+                         "jest", "vitest", "xunit", "nunit", "make ", "docker", "podman", "C#", "Python", "TypeScript",
+                     })
+            {
+                Assert.DoesNotContain(word, section, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        Assert.All(BuiltInSkills.Bodies(), body => Assert.Contains("`lease`", body, StringComparison.Ordinal));
+    }
+
+    private static string Section(string flat, string heading)
+    {
+        var start = flat.IndexOf(heading, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"no section {heading}");
+        var end = flat.IndexOf("## ", start + heading.Length, StringComparison.Ordinal);
+        return end < 0 ? flat[start..] : flat[start..end];
+    }
+
     [Fact]
     public void The_package_done_when_line_is_quoted_only_in_packaging_solutions()
     {

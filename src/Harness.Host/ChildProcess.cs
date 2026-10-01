@@ -299,6 +299,8 @@ public static class ChildProcess
         private readonly IDisposable? _narrating;
         private readonly CancellationTokenSource _stopping;
         private readonly CancellationToken _caller;
+        private readonly Lock _gate = new();
+        private bool _paused;
 
         internal IdleClock(RunHeartbeat heartbeat, ContainerId who, int? seconds, CancellationToken ct)
         {
@@ -307,9 +309,32 @@ public static class ChildProcess
                 ? new CancellationTokenSource(TimeSpan.FromSeconds(s))
                 : new CancellationTokenSource();
             _narrating = seconds is { } window and > 0
-                ? heartbeat.WhileRunning(who, () => _expiry.CancelAfter(TimeSpan.FromSeconds(window)))
+                ? heartbeat.WhileRunning(who, () => Restart(window), paused => Hold(paused, window))
                 : null;
             _stopping = CancellationTokenSource.CreateLinkedTokenSource(ct, _expiry.Token);
+        }
+
+        /// <summary>A progress report: a full window again, unless the clock is paused.</summary>
+        private void Restart(int window)
+        {
+            lock (_gate)
+            {
+                if (!_paused) _expiry.CancelAfter(TimeSpan.FromSeconds(window));
+            }
+        }
+
+        /// <summary>
+        /// PAUSED WHILE THE MEMBER WAITS IN A LEASE'S QUEUE: an infinite countdown, which a progress
+        /// report does not shorten. Resumed with a full window, so the wait itself is never
+        /// counted as silence.
+        /// </summary>
+        private void Hold(bool paused, int window)
+        {
+            lock (_gate)
+            {
+                _paused = paused;
+                _expiry.CancelAfter(paused ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(window));
+            }
         }
 
         /// <summary>Fires for the caller's token or the clock, whichever is first.</summary>
