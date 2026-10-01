@@ -59,13 +59,13 @@ public sealed class SqliteTriggerStore : ITriggerStore
                  interval_seconds, fire_at, idle_only, enabled, next_due_at, last_fired_at,
                  last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
                  watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds, min_interval_seconds,
-                 wake_manager, daily_token_cap, outcome_id)
+                 wake_manager, daily_token_cap, outcome_id, configured_by_email)
             VALUES
                 ($id, $team, $container, $name, $instruction, $kind, $expression, $timezone,
                  $intervalSeconds, $fireAt, $idleOnly, $enabled, $nextDueAt, $lastFiredAt,
                  $lastOutcome, $lastSeq, $missedCount, $createdAt, $createdBy, $eventType, $filter,
                  $watchRoot, $watchPath, $watchGlob, $pollSeconds, $quietSeconds, $minIntervalSeconds,
-                 $wakeManager, $dailyTokenCap, $outcomeId)
+                 $wakeManager, $dailyTokenCap, $outcomeId, $configuredByEmail)
             ON CONFLICT(id) DO UPDATE SET
                 team             = excluded.team,
                 container        = excluded.container,
@@ -112,7 +112,10 @@ public sealed class SqliteTriggerStore : ITriggerStore
                 min_interval_seconds = excluded.min_interval_seconds,
                 wake_manager         = excluded.wake_manager,
                 daily_token_cap      = excluded.daily_token_cap,
-                outcome_id           = excluded.outcome_id
+                outcome_id           = excluded.outcome_id,
+
+                -- A SAVE BY NO PERSON KEEPS THE CONFIGURER: only a person's email replaces it.
+                configured_by_email  = COALESCE(excluded.configured_by_email, triggers.configured_by_email)
             """;
 
     public async Task<IReadOnlyList<TriggerRow>> ListForTeamAsync(
@@ -129,7 +132,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
                    last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
-                   capped_skips_day, capped_skips, outcome_id
+                   capped_skips_day, capped_skips, outcome_id, configured_by_email
             FROM triggers
             WHERE team = $team COLLATE NOCASE
             ORDER BY created_at, id
@@ -152,7 +155,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
                    last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
-                   capped_skips_day, capped_skips, outcome_id
+                   capped_skips_day, capped_skips, outcome_id, configured_by_email
             FROM triggers
             WHERE id = $id
             """;
@@ -175,7 +178,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
                    last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
-                   capped_skips_day, capped_skips, outcome_id
+                   capped_skips_day, capped_skips, outcome_id, configured_by_email
             FROM triggers
             WHERE enabled = 1
               AND next_due_at IS NOT NULL
@@ -435,7 +438,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
                    watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
                    min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
                    last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
-                   capped_skips_day, capped_skips, outcome_id
+                   capped_skips_day, capped_skips, outcome_id, configured_by_email
             FROM triggers
             WHERE team = $team COLLATE NOCASE
               AND container = $container COLLATE NOCASE
@@ -576,6 +579,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
                 reader.GetInt32(36))
             {
                 OutcomeId = ReadNullableString(reader, 37),
+                ConfiguredByEmail = ReadNullableString(reader, 38),
             });
         }
 
@@ -619,6 +623,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
         command.Parameters.AddWithValue(
             "$dailyTokenCap", row.DailyTokenCap is null ? DBNull.Value : row.DailyTokenCap.Value);
         command.Parameters.AddWithValue("$outcomeId", (object?)row.OutcomeId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$configuredByEmail", (object?)row.ConfiguredByEmail ?? DBNull.Value);
     }
 
     /// <summary>UTC, always: `next_due_at` is compared as TEXT, and a round-trip string with a local

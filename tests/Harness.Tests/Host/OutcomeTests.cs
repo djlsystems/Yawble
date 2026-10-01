@@ -164,6 +164,101 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
     }
 
+    /// <summary>A person other than the fixture's, signed in: their user id, email and client.</summary>
+    private async Task<(string Id, string Email, HttpClient Client)> OtherPersonAsync()
+    {
+        var email = $"configurer-{Guid.NewGuid():N}@example.test";
+        var user = await host.Services.GetRequiredService<IUserStore>().CreateAsync(email, HostFixture.Password, Ct);
+        var client = host.Anonymous();
+        (await client.PostAsJsonAsync("/api/auth/login", new { email, password = HostFixture.Password }, Ct)).EnsureSuccessStatusCode();
+        return (user.Id, email, client);
+    }
+
+    /// <summary>The link Run now's fire of <paramref name="trigger"/> made.</summary>
+    private async Task<OutcomeLink> RunNowLinkAsync(HttpClient person, string trigger)
+    {
+        var ran = await JsonAsync(await person.PostAsync($"/api/teams/{host.Alpha}/triggers/{trigger}/run", null, Ct));
+        Assert.Equal("fired", ran.GetProperty("outcome").GetString());
+        var fired = (await Log.FindAsync(ran.GetProperty("seq").GetInt64(), Ct))!;
+        return (await Outcomes.CurrentLinkAsync(fired.CorrelationId, Ct))!;
+    }
+
+    [Fact]
+    public async Task A_trigger_whose_configurer_was_deleted_still_fires_and_links_with_their_email()
+    {
+        var person = await host.PersonAsync();
+        var outcome = await CreateAsync(person, Unique("Openings after a departure"));
+        var (id, email, configurer) = await OtherPersonAsync();
+
+        var created = await configurer.PostAsJsonAsync($"/api/teams/{host.Alpha}/triggers", new
+        {
+            name = Unique("crawl"), kind = "every", intervalSeconds = 3600, instruction = "crawl", idleOnly = false,
+            outcomeId = outcome.Id,
+        }, Ct);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var trigger = (await JsonAsync(created)).GetProperty("id").GetString()!;
+
+        await host.Services.GetRequiredService<IUserStore>().DeleteAsync(id, Ct);
+        Assert.Null(await host.Services.GetRequiredService<IUserStore>().FindByIdAsync(id, Ct));
+
+        // SET_BY STAYS THE PERSON'S EMAIL: the trigger snapshotted it, so no raw user id reaches the link.
+        var link = await RunNowLinkAsync(person, trigger);
+        Assert.Equal((outcome.Id, OutcomeLinkHow.Trigger, email, OutcomeActorKind.Person), (link.OutcomeId, link.How, link.SetBy, link.SetByKind));
+    }
+
+    [Fact]
+    public async Task A_persons_change_to_a_trigger_makes_them_its_configurer()
+    {
+        var person = await host.PersonAsync();
+        var outcome = await CreateAsync(person, Unique("Openings, reconfigured"));
+        var (_, email, configurer) = await OtherPersonAsync();
+
+        var created = await configurer.PostAsJsonAsync($"/api/teams/{host.Alpha}/triggers", new
+        {
+            name = Unique("crawl"), kind = "every", intervalSeconds = 3600, instruction = "crawl", idleOnly = false,
+            outcomeId = outcome.Id,
+        }, Ct);
+        var trigger = (await JsonAsync(created)).GetProperty("id").GetString()!;
+        Assert.Equal(email, (await host.Services.GetRequiredService<ITriggerStore>().FindAsync(trigger, Ct))!.ConfiguredByEmail);
+
+        var changed = await person.PatchAsJsonAsync($"/api/teams/{host.Alpha}/triggers/{trigger}", new { instruction = "crawl again" }, Ct);
+        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+
+        Assert.Equal(Email, (await RunNowLinkAsync(person, trigger)).SetBy);
+    }
+
+    /// <summary>
+    /// A trigger from before <c>auth-018</c> has no snapshot: its <c>created_by</c> resolves through
+    /// <c>users</c> as before, and only when that user is gone too does the link keep the raw id.
+    /// </summary>
+    [Fact]
+    public async Task A_trigger_from_before_the_snapshot_resolves_its_creator_and_falls_back_to_the_id_only_when_they_are_gone()
+    {
+        var person = await host.PersonAsync();
+        var outcome = await CreateAsync(person, Unique("Openings from an old trigger"));
+        var users = host.Services.GetRequiredService<IUserStore>();
+        var store = host.Services.GetRequiredService<ITriggerStore>();
+        var (id, email, _) = await OtherPersonAsync();
+
+        TriggerRow Old(string createdBy) => new(
+            Guid.NewGuid().ToString("N"), host.Alpha, TeamRegistry.DefaultManagerName, Unique("old"), "crawl", "every",
+            null, null, 3600, null, false, true, null, null, null, null, 0, DateTimeOffset.UtcNow, createdBy)
+        {
+            OutcomeId = outcome.Id,
+        };
+
+        var old = Old(id);
+        await store.SaveAsync(old, Ct);
+        Assert.Null((await store.FindAsync(old.Id, Ct))!.ConfiguredByEmail);
+
+        Assert.Equal(email, (await RunNowLinkAsync(person, old.Id)).SetBy);
+
+        await users.DeleteAsync(id, Ct);
+
+        var gone = await RunNowLinkAsync(person, old.Id);
+        Assert.Equal((id, OutcomeActorKind.Person), (gone.SetBy, gone.SetByKind));
+    }
+
     // ---- the Manager's set, and the rule ----
 
     [Fact]

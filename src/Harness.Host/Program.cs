@@ -359,7 +359,9 @@ tenantSettings.Changed += name =>
     if (name == TenantSettings.SystemPackagesName) SystemPackages.WriteFile(dataRoot, tenantSettings.SystemPackages);
 };
 builder.Services.AddSingleton<ISkillStore>(new SqliteSkillStore(database));
-builder.Services.AddSingleton<IBacklogStore>(new SqliteBacklogStore(database));
+// A person's edit lands with its tenant_events row in one transaction, as the outcomes' writes do.
+builder.Services.AddSingleton<IBacklogStore>(
+    new SqliteBacklogStore(database, audit: TenantAuditRow.AppendAsync));
 builder.Services.AddSingleton<TenantLogging>();
 
 // THE THIRD STORE. Not the message log and not the tenant log: see IDiagnosticsLog for the
@@ -3343,6 +3345,7 @@ app.MapPost("/api/teams/{team}/triggers", async (
             request.WatchGlob, request.PollSeconds, request.QuietSeconds, request.MinIntervalSeconds,
             request.WakeManager, request.DailyTokenCap, request.OutcomeId),
         context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown",
+        context.User.FindFirstValue(ClaimTypes.Email),
         row => TenantLogging.Row(
             context, TenantActions.ScheduleCreated, row.Id, row.Name, new { team = row.Team, member = row.Container }),
         ct);
@@ -3541,6 +3544,10 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
             };
         }
     }
+
+    // THE PERSON WHO CHANGED IT IS NOW ITS CONFIGURER: their email is what its fires' outcome links
+    // name. A caller with no email keeps the one stored.
+    candidate = candidate with { ConfiguredByEmail = context.User.FindFirstValue(ClaimTypes.Email) ?? existing.ConfiguredByEmail };
 
     // The row and its tenant_events row are one transaction: a change with no record of who made
     // it does not land.

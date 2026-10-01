@@ -81,6 +81,11 @@ public sealed record TriggerRow(
     /// <summary>The outcome this trigger's fires serve (<c>auth-017</c>), or null. A fire rooting a
     /// workflow links it to this outcome, attributed to <see cref="CreatedBy"/>.</summary>
     public string? OutcomeId { get; init; }
+
+    /// <summary>The email of the person who last created or changed this trigger (<c>auth-018</c>),
+    /// the <c>set_by</c> of its fires' outcome links. Null for a row from before the step, and on a
+    /// save by no person, which keeps the email already stored.</summary>
+    public string? ConfiguredByEmail { get; init; }
 }
 
 /// <summary>
