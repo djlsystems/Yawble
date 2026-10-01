@@ -515,3 +515,32 @@ describe('the Workflows dialog, where the run time went', () => {
     wrapper.unmount();
   });
 });
+
+describe('the Workflows dialog, its Outcome column', () => {
+  /** Each row names the outcome it serves as text, says proposed, and reads No outcome for none. */
+  it('names each row\'s outcome, a proposed one as proposed, and No outcome for none', async () => {
+    const wrapper = await openDialog(
+      payload({
+        totalCount: 3,
+        workflows: [
+          timing({ correlation: 1707, outcome: { id: 'o1', name: 'Ship <i>it</i>', status: 'active' } }),
+          timing({ correlation: 1708, outcome: { id: 'o2', name: 'Faster onboarding', status: 'proposed' } }),
+          timing({ correlation: 1709, outcome: null }),
+        ],
+      }),
+      null,
+    );
+
+    const cells = [...document.body.querySelectorAll('[data-workflow-outcome]')] as HTMLElement[];
+
+    expect(cells.map((cell) => cell.textContent?.trim())).toEqual([
+      'Outcome: Ship <i>it</i>',
+      'Outcome: Faster onboarding (proposed)',
+      'Outcome: No outcome',
+    ]);
+    expect(cells[0]!.querySelector('i')).toBeNull();
+    expect(cells.map((cell) => cell.classList.contains('workflow-row-outcome--proposed'))).toEqual([false, true, false]);
+
+    wrapper.unmount();
+  });
+});
