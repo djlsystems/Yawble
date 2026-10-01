@@ -2,9 +2,9 @@
 import { nextTick, ref } from 'vue';
 import type { QInput } from 'quasar';
 import { composedLine } from '../lib/keys';
-import { dragCarriesFiles, droppedImages, pastedImage } from '../lib/conciergeAttachment';
+import { dragCarriesFiles, droppedImages, NotAnImage, pastedImage } from '../lib/conciergeAttachment';
 
-const emit = defineEmits<{ send: [sequence: string]; images: [files: File[]] }>();
+const emit = defineEmits<{ send: [sequence: string]; images: [files: File[]]; refused: [sentence: string] }>();
 
 /**
  * A real text field, which is the entire point.
@@ -53,8 +53,10 @@ function onDrop(event: DragEvent) {
   event.preventDefault();
   event.stopPropagation();
 
+  // A drop with no image in it is told so in the same sentence the shell uses, not ignored.
   const images = droppedImages(event.dataTransfer);
   if (images.length > 0) emit('images', images);
+  else emit('refused', NotAnImage);
 }
 
 /**

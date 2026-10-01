@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host;
@@ -55,19 +56,26 @@ public sealed class ConciergeAttachmentTests : IAsyncLifetime
         catch (UnauthorizedAccessException) { }
     }
 
-    /// <summary>Starts this test's Host, with a person and (unless told not to) their Concierge folder.</summary>
-    private async Task StartAsync(Action<IWebHostBuilder>? configure = null, bool workspace = true)
+    /// <summary>Starts this test's Host, with a person and (unless told not to) their Concierge
+    /// running on a silent terminal, which makes its folder as the real launch does. With no CLI,
+    /// <paramref name="workspace"/> says whether the folder is there anyway, as one is after a
+    /// session ended.</summary>
+    private async Task StartAsync(Action<IWebHostBuilder>? configure = null, bool workspace = true, bool cli = true)
     {
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host =>
         {
             host.UseSetting("DataRoot", _dataRoot).UseSetting("Logging:LogLevel:Default", "Warning");
+            if (cli) host.ConfigureTestServices(services => services.AddSingleton<IPtyEngine>(new SilentEngine()));
             configure?.Invoke(host);
         });
 
         _user = (await _factory.Services.GetRequiredService<IUserStore>().CreateAsync(Email, HostFixture.Password, Ct)).Id;
 
-        if (workspace) ConciergeWorkspaces.Resolve(Paths, _user, Email);
+        if (cli) await Consoles.AttachAsync(new ConciergeSessionKey(_user), "", 80, 24, Ct);
+        else if (workspace) ConciergeWorkspaces.Resolve(Paths, _user, Email);
     }
+
+    private ConciergeSessionStore Consoles => _factory.Services.GetRequiredService<ConciergeSessionStore>();
 
     private async Task<HttpClient> PersonAsync()
     {
@@ -211,7 +219,7 @@ public sealed class ConciergeAttachmentTests : IAsyncLifetime
     [Fact]
     public async Task A_person_with_no_concierge_folder_is_told_to_open_one_and_none_is_made()
     {
-        await StartAsync(workspace: false);
+        await StartAsync(workspace: false, cli: false);
         using var client = await PersonAsync();
 
         using var answer = await client.PostAsync("/api/concierge/attachments", Form(Png), Ct);
@@ -239,23 +247,115 @@ public sealed class ConciergeAttachmentTests : IAsyncLifetime
     [Fact]
     public async Task Ending_the_concierge_session_removes_its_attachments()
     {
-        await StartAsync(
-            host => host.ConfigureTestServices(services => services.AddSingleton<IPtyEngine>(new SilentEngine())),
-            workspace: false);
-        var consoles = _factory.Services.GetRequiredService<ConciergeSessionStore>();
-        var key = new ConciergeSessionKey(_user);
-
-        // The real launch, as the socket route makes it: it makes the person's folder.
-        await consoles.AttachAsync(key, "", 80, 24, Ct);
+        await StartAsync();
         using var client = await PersonAsync();
         using var answer = await client.PostAsync("/api/concierge/attachments", Form(Png), Ct);
         Assert.Equal(HttpStatusCode.OK, answer.StatusCode);
         Assert.Single(Stored());
 
-        await consoles.EndAsync(key);
+        await Consoles.EndAsync(new ConciergeSessionKey(_user));
 
         Assert.False(Directory.Exists(Attachments));
         Assert.True(File.Exists(TeamPaths.ConciergeMarkerIn(ConciergeWorkspaces.TryExisting(Paths, _user)!)));
+    }
+
+    [Fact]
+    public async Task With_no_concierge_running_the_upload_is_refused_with_a_sentence_and_nothing_is_kept()
+    {
+        // The folder is there, as it is after a session ended: only the CLI is missing.
+        await StartAsync(cli: false);
+        using var client = await PersonAsync();
+
+        using var answer = await client.PostAsync("/api/concierge/attachments", Form(Png), Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, answer.StatusCode);
+        Assert.Equal("application/json", answer.Content.Headers.ContentType?.MediaType);
+        // The panel shows this sentence as it stands, so it must not drift.
+        Assert.Equal(
+            "The image was not attached: the Concierge is not running. Start it, then attach the image again.",
+            (await answer.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+        Assert.False(Directory.Exists(Attachments));
+        Assert.Empty(await RowsAsync());
+    }
+
+    [Fact]
+    public async Task With_its_concierge_ended_a_person_is_refused_again()
+    {
+        await StartAsync();
+        await Consoles.EndAsync(new ConciergeSessionKey(_user));
+        using var client = await PersonAsync();
+
+        using var answer = await client.PostAsync("/api/concierge/attachments", Form(Png), Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, answer.StatusCode);
+        Assert.Empty(Stored());
+        Assert.Empty(await RowsAsync());
+    }
+
+    [Fact]
+    public async Task An_attachments_folder_swapped_for_a_link_mid_write_sends_nothing_to_the_link_target()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        await StartAsync();
+        using var client = await PersonAsync();
+        var elsewhere = Directory.CreateDirectory(Path.Combine(_dataRoot, "elsewhere")).FullName;
+        var aside = Attachments + ".aside";
+
+        // Between the Host's link check and its create, as an agent writing in its own folder could.
+        _factory.Services.GetRequiredService<ConciergeAttachments>().BeforeCreate = folder =>
+        {
+            Directory.Move(folder, aside);
+            Directory.CreateSymbolicLink(folder, elsewhere);
+        };
+
+        using var answer = await client.PostAsync("/api/concierge/attachments", Form(Png), Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, answer.StatusCode);
+        Assert.Contains("symbolic link", (await answer.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+        Assert.Empty(Directory.GetFileSystemEntries(elsewhere));
+        // Refused, so not kept in the folder the Host opened either, and no row.
+        Assert.Empty(Directory.GetFileSystemEntries(aside));
+        Assert.Empty(await RowsAsync());
+    }
+
+    [Fact]
+    public async Task An_attachments_folder_moved_away_and_replaced_mid_write_is_refused_and_nothing_is_kept()
+    {
+        // Only the held-folder path tells two real folders apart; the path fallback cannot.
+        if (!OperatingSystem.IsLinux() || ConciergeAttachments.LinuxOpenFlagsFor(RuntimeInformation.ProcessArchitecture) is null) return;
+
+        await StartAsync();
+        using var client = await PersonAsync();
+        var aside = Attachments + ".aside";
+
+        // A real folder, not a link, put back at the name: the link check alone would pass it.
+        _factory.Services.GetRequiredService<ConciergeAttachments>().BeforeCreate = folder =>
+        {
+            Directory.Move(folder, aside);
+            Directory.CreateDirectory(folder);
+        };
+
+        using var answer = await client.PostAsync("/api/concierge/attachments", Form(Png), Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, answer.StatusCode);
+        Assert.Contains("was replaced", (await answer.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+        Assert.Empty(Directory.GetFileSystemEntries(Attachments));
+        Assert.Empty(Directory.GetFileSystemEntries(aside));
+        Assert.Empty(await RowsAsync());
+    }
+
+    [Fact]
+    public void Each_architecture_gets_its_own_open_flags_and_any_other_takes_the_fallback()
+    {
+        var x64 = ConciergeAttachments.LinuxOpenFlagsFor(Architecture.X64);
+        var arm64 = ConciergeAttachments.LinuxOpenFlagsFor(Architecture.Arm64);
+
+        Assert.Equal(new LinuxOpenFlags(Wronly: 0x1, Creat: 0x40, Excl: 0x80, Directory: 0x10000, Nofollow: 0x20000, Cloexec: 0x80000), x64);
+        // On arm64 0x10000 is O_DIRECT and 0x20000 O_LARGEFILE.
+        Assert.Equal(new LinuxOpenFlags(Wronly: 0x1, Creat: 0x40, Excl: 0x80, Directory: 0x4000, Nofollow: 0x8000, Cloexec: 0x80000), arm64);
+        Assert.Null(ConciergeAttachments.LinuxOpenFlagsFor(Architecture.X86));
+        Assert.Null(ConciergeAttachments.LinuxOpenFlagsFor(Architecture.Arm));
     }
 
     [Fact]
@@ -279,7 +379,7 @@ public sealed class ConciergeAttachmentTests : IAsyncLifetime
         await File.WriteAllBytesAsync(strayFile, Png, Ct);
         File.SetLastWriteTimeUtc(strayFile, DateTime.UtcNow - TimeSpan.FromDays(30));
 
-        await StartAsync(workspace: false);
+        await StartAsync(workspace: false, cli: false);
 
         Assert.False(File.Exists(old));
         Assert.True(File.Exists(recent));
