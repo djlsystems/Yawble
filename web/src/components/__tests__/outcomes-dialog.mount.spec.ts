@@ -267,6 +267,47 @@ describe('Manage Outcomes: tabs and figures', () => {
     expect(rows.at(-1)?.hasAttribute('data-no-outcome-row')).toBe(true);
   });
 
+  it('shows three teams then "+27 more" on one line, with all 30 in the tooltip, deleted ones marked', async () => {
+    const teams = Array.from({ length: 30 }, (_, i) => ({
+      id: `t-${i + 1}`,
+      name: `Team ${i + 1}`,
+      deleted: i % 2 === 1,
+    }));
+    api.listOutcomes.mockResolvedValue(
+      listing({ noOutcome: { name: 'No outcome', figures: figures({ teams }) } }),
+    );
+    await open();
+
+    const cell = bodyFind('[data-no-outcome-row] [data-outcome-teams]') as HTMLElement;
+    expect(cell.textContent?.trim()).toBe('Team 1, Team 2 (deleted), Team 3 +27 more');
+    expect(cell.querySelector('.outcome-teams')).not.toBeNull();
+
+    const tooltip = cell.getAttribute('title')!.split(', ');
+    expect(tooltip).toHaveLength(30);
+    expect(tooltip).toEqual(teams.map((t) => (t.deleted ? `${t.name} (deleted)` : t.name)));
+  });
+
+  it('shows three or fewer teams in full, with no "+N more"', async () => {
+    const three = [
+      { id: 'alpha', name: 'Alpha', deleted: false },
+      { id: 'beta', name: 'Beta', deleted: false },
+      { id: 'gone', name: 'Old crew', deleted: true },
+    ];
+    api.listOutcomes.mockResolvedValue(
+      listing({ outcomes: [outcome('o-1', 'Current job pipeline', 'active', { figures: figures({ teams: three }) })] }),
+    );
+    await open();
+
+    const cell = bodyFind('[data-outcome-row="o-1"] [data-outcome-teams]') as HTMLElement;
+    expect(cell.textContent?.trim()).toBe('Alpha, Beta, Old crew (deleted)');
+    expect(cell.textContent).not.toContain('more');
+    expect(cell.getAttribute('title')).toBe('Alpha, Beta, Old crew (deleted)');
+
+    const none = bodyFind('[data-no-outcome-row] [data-outcome-teams]') as HTMLElement;
+    expect(none.textContent?.trim()).toBe('Beta');
+    expect(none.textContent).not.toContain('more');
+  });
+
   it('says "Accounting since" when the period reaches before the ledger began, and not after it', async () => {
     const wrapper = await open();
     const note = bodyFind('[data-accounting-since]')?.textContent ?? '';

@@ -56,8 +56,27 @@ export function elapsedText(elapsed: OutcomeFigures['elapsed']): string {
   return `${duration(elapsed.medianSeconds)} · ${duration(elapsed.longestSeconds)}`
 }
 
+function teamName(team: OutcomeFigures['teams'][number]): string {
+  return team.deleted ? `${team.name} (deleted)` : team.name
+}
+
+/** Every team, a gone one named deleted: the Teams cell's tooltip. */
 export function teamsText(teams: OutcomeFigures['teams']): string {
-  return teams.map((team) => (team.deleted ? `${team.name} (deleted)` : team.name)).join(', ')
+  return teams.map(teamName).join(', ')
+}
+
+/** How many team names the Teams cell shows before "+N more". */
+export const TeamsShown = 3
+
+/**
+ * `Alpha, Beta, Old crew (deleted) +27 more`: the Teams cell. The No outcome row can name dozens of
+ * teams, which would push every figure column off-screen; the rest, deleted ones counted, are in
+ * the tooltip (`teamsText`).
+ */
+export function teamsCellText(teams: OutcomeFigures['teams']): string {
+  const shown = teams.slice(0, TeamsShown).map(teamName).join(', ')
+  const more = teams.length - TeamsShown
+  return more > 0 ? `${shown} +${more} more` : shown
 }
 
 export function firstLine(text: string | null | undefined): string {
