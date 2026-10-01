@@ -122,9 +122,10 @@ public sealed class TenantSettings
                 Min: 0, Max: 1000),
             new(WipMemoryPerRunMbName, TenantSettingKind.Integer,
                 DefaultMemoryPerRunMb.ToString(CultureInfo.InvariantCulture), "Wip:MemoryPerRunMb",
-                "Megabytes of the container's memory limit allowed for each agent run - the CLI, its "
-                + "builds and its test hosts. When the container has a memory limit, the default for "
-                + "wip.maxRunning is at most the limit divided by this. It changes only that default: "
+                "Megabytes of the container's memory limit counted for each agent run - the CLI, its "
+                + "builds and its test hosts - when working out how many runs fit. It caps no run: "
+                + "nothing is stopped for using more. When the container has a memory limit, the default "
+                + "for wip.maxRunning is at most the limit divided by this. It changes only that default: "
                 + "a value set for wip.maxRunning wins. Takes effect immediately.",
                 Min: 1, Max: 1_048_576),
             new(AdmissionMemoryPercentName, TenantSettingKind.Integer, "80", "Admission:MemoryPercent",
@@ -142,17 +143,19 @@ public sealed class TenantSettings
                 + "this check off. Takes effect immediately.",
                 Min: 0, Max: 100),
             new(RunsMemoryLimitMbName, TenantSettingKind.Integer, "0", "Runs:MemoryLimitMb",
-                "Megabytes one agent run may use before it is stopped and failed out-of-memory, so a "
-                + "runaway build or test cannot take the Host and every other team down. 0 (the "
-                + "default) computes it: (the container's memory limit - "
-                + $"{HostReserveMb} MB kept for the Host) / wip.maxRunning, at least {MinRunMemoryLimitMb} MB; "
-                + "no limit when the container has none. How it is applied depends on the engine, "
-                + "decided at start and logged as \"Run memory limits\": a cgroup per run where one is "
-                + "delegated, otherwise a per-process limit on each of the run's processes, otherwise "
-                + "nothing. A run holding the heavy lease gets more while it holds it: the container's "
-                + $"memory limit - {HostReserveMb} MB for the Host - what the other running runs are measured "
-                + "to use at that moment, never less than this limit; it goes back to this limit when the "
-                + "lease is released, once the run is back inside it. Applies to the next run.",
+                "Megabytes of a per-process data limit on each of an agent run's processes, applied "
+                + "where the Host cannot write its cgroup. It caps the memory a process reserves, not the "
+                + "memory it uses, and some runtimes reserve far more than they use: below a few GB some "
+                + "refuse to start at all. 0 (the default) sets no per-run cap there; admission by "
+                + "measured memory guards the container instead. Where the Host can write its cgroup, "
+                + "each run gets its own cgroup instead, limited to this figure, or when it is 0 to (the "
+                + $"container's memory limit - {HostReserveMb} MB kept for the Host) / wip.maxRunning, at "
+                + $"least {MinRunMemoryLimitMb} MB. Which applies is decided at start and logged as \"Run "
+                + "memory limits\". A run holding the heavy lease gets more while it holds it, when it has "
+                + $"a limit at all: the container's memory limit - {HostReserveMb} MB for the Host - what the "
+                + "other running runs are measured to use at that moment, never less than this limit; it "
+                + "goes back to this limit when the lease is released, once the run is back inside it. "
+                + "Applies to the next run.",
                 Min: 0, Max: 1_048_576),
             new(WorkflowSpendLimitName, TenantSettingKind.Integer, "100000000", "WorkflowSpendLimit",
                 "The instance's per-workflow token ceiling, the backstop under every team's own "
@@ -346,7 +349,7 @@ public sealed class TenantSettings
         var set = Integer(RunsMemoryLimitMbName);
         if (set > 0)
         {
-            return new RunMemoryLimit(set, $"{RunsMemoryLimitMbName} is set to {set} MB");
+            return new RunMemoryLimit(set, $"{RunsMemoryLimitMbName} is set to {set} MB", Set: true);
         }
 
         if (_memoryLimitMb is not { } containerMb)
@@ -858,8 +861,12 @@ public sealed class TenantSettings
 /// <c>MemoryBound</c> are what the built-in default would allow; <c>MemoryBound</c> is null when the
 /// container has no memory limit, and <c>Cpus</c> when its CPU count is not known.
 /// </summary>
-/// <summary>One run's memory limit in megabytes (null: none), and the sentence saying where it came from.</summary>
-public sealed record RunMemoryLimit(long? Mb, string Source);
+/// <summary>
+/// One run's memory limit in megabytes (null: none), and the sentence saying where it came from.
+/// <paramref name="Set"/> is true only when a person set the figure (<c>runs.memoryLimitMb</c> &gt; 0):
+/// a per-process rlimit is applied only then, never from a computed figure (<see cref="RunMemoryLimits"/>).
+/// </summary>
+public sealed record RunMemoryLimit(long? Mb, string Source, bool Set = false);
 
 public sealed record WipRunLimit(
     int Limit, string Bound, int CpuBound, int? Cpus, int? MemoryBound, long? MemoryLimitMb,

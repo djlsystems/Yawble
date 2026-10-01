@@ -23,7 +23,7 @@ public sealed class RunAllowancesTests : IDisposable
     private static readonly ContainerId Other = new("beta", "Tester");
     private static readonly string Key = LeaseOwner.For(Run).Key;
 
-    private static readonly RunMemoryLimit SixtyFour = new(64, "runs.memoryLimitMb is set to 64 MB");
+    private static readonly RunMemoryLimit SixtyFour = new(64, "runs.memoryLimitMb is set to 64 MB", Set: true);
     private static readonly RunMemoryLimit Ceiling = new(256, "256 MB ceiling");
 
     private readonly string _root = Directory.CreateTempSubdirectory("harness-run-allowance-").FullName;
@@ -144,6 +144,37 @@ public sealed class RunAllowancesTests : IDisposable
         await allowances.ReconcileAsync(Ct);
         Assert.Equal([(501, 64 * Mb)], written);
         Assert.False(allowance.Raised);
+    }
+
+    /// <summary>
+    /// WITHOUT A SET FIGURE, NO HEAVY RAISE EITHER. Under rlimit with runs.memoryLimitMb at 0 a run
+    /// starts with no data limit and no hard ceiling, so there is nothing to raise: no allowance is
+    /// made and taking the lease writes no limit to any process.
+    /// </summary>
+    [Fact]
+    public async Task On_rlimit_with_nothing_set_a_run_gets_no_allowance_and_the_heavy_lease_writes_no_limit()
+    {
+        var proc = Directory.CreateDirectory(Path.Combine(_root, "proc")).FullName;
+        Proc(proc, 500, session: 500, dataPages: 10 * Mb / Page);
+
+        var computed = new RunMemoryLimit(1792, "runs.memoryLimitMb is 0, so a computed share");
+        var memory = RunMemoryLimits.Decide(new CgroupFacts(null, "not writable"), "/usr/bin/prlimit", () => computed, () => Ceiling);
+        List<string> holders = [Key];
+        List<(int Pid, long Bytes)> written = [];
+        var allowances = new RunAllowances(memory, (_, _) => new RunMemoryLimit(512, "512 MB measured"), () => holders,
+            groups: new RunProcessGroups(), procRoot: proc, pageSize: Page, retry: TimeSpan.FromHours(1),
+            writeSoft: (pid, bytes, _) =>
+            {
+                written.Add((pid, bytes));
+                return Task.FromResult(true);
+            });
+
+        Assert.Empty(memory.Prefix(memory.Limit(), memory.Ceiling()));
+        Assert.Null(allowances.Begin(Run, 500, memory.Limit(), memory.Ceiling(), null));
+
+        await allowances.ReconcileAsync(Ct);
+        Assert.Empty(written);
+        Assert.Null(allowances.Find(Key));
     }
 
     [Fact]

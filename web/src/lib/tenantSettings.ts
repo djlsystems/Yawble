@@ -62,6 +62,23 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     hint: 'Across all teams, Managers included. Work over this number waits its turn; nothing is refused. 0 means no limit.',
     max: 1000,
   },
+  // NO HINT: these two show the server's description, the one place their wording lives.
+  {
+    name: 'wip.memoryPerRunMb',
+    tab: 'admission',
+    kind: 'count',
+    label: 'Memory counted per run (MB)',
+    hint: '',
+    max: 1_048_576,
+  },
+  {
+    name: 'runs.memoryLimitMb',
+    tab: 'admission',
+    kind: 'count',
+    label: 'Per-process memory limit (MB)',
+    hint: '',
+    max: 1_048_576,
+  },
   {
     name: 'workflow.spendLimit',
     tab: 'spend',
@@ -539,10 +556,22 @@ export function settingErrorText(field: string | null | undefined, message: stri
   const labels: [string, string][] = TenantSettingFields.map((entry) => [entry.name, entry.label])
   if (field && !labels.some(([name]) => name === field)) labels.push([field, 'This setting'])
 
-  // Longest key first, so a key that is a prefix of another cannot take a bite out of it.
-  labels.sort(([a], [b]) => b.length - a.length)
+  return withLabels(labels, message)
+}
 
-  return labels.reduce(
+/**
+ * A server description as the field shows it: every setting key it mentions replaced by that
+ * setting's label, so "the default for wip.maxRunning" reads "the default for Agents running at once".
+ */
+export function descriptionText(description: string): string {
+  return withLabels(TenantSettingFields.map((entry) => [entry.name, entry.label]), description)
+}
+
+function withLabels(labels: [string, string][], message: string): string {
+  // Longest key first, so a key that is a prefix of another cannot take a bite out of it.
+  const ordered = [...labels].sort(([a], [b]) => b.length - a.length)
+
+  return ordered.reduce(
     (text, [name, label]) => text.split(`'${name}'`).join(label).split(name).join(label),
     message,
   )
