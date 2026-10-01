@@ -504,7 +504,11 @@ public sealed class ConnectionsTests : IAsyncLifetime
     {
         var folder = Path.Combine(_dataRoot, ConnectRequests.Folder);
         await WaitUntilAsync(() => Directory.Exists(folder));
-        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(folder));
+        // The permission bits only: under a setgid parent (a member's temporary folder on the data
+        // volume) the folder also carries SetGroup, which gives nobody else access.
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(folder) & ~(UnixFileMode.SetUser | UnixFileMode.SetGroup | UnixFileMode.StickyBit));
 
         var started = await ExchangeAsync(new { op = "start", provider = "google", scopes = new[] { MailScope }, name = "Work mail", redirectUri = "http://127.0.0.1:53121/" });
         Assert.Equal(200, started.GetProperty("status").GetInt32());
