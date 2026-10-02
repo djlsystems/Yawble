@@ -486,6 +486,9 @@ name. The install checks the same before it writes.
   },
   "workingDirectory": "/data/teams/Mixed/workspaces/Echo",
   "worktrees": [],
+  "siteFiles": [
+    { "site": "board", "folder": "/data/documents/Mixed/sites/board/files" }
+  ],
   "sites": [
     { "site": "board", "collection": "items",
       "documents": [
@@ -493,9 +496,6 @@ name. The install checks the same before it writes.
           "updatedAt": "2026-10-02T09:00:00Z", "updatedBy": "person@example.com" }
       ],
       "total": 1, "cut": null, "missing": null }
-  ],
-  "siteFiles": [
-    { "site": "board", "folder": "/data/documents/Mixed/sites/board/files" }
   ]
 }
 ```
@@ -917,7 +917,7 @@ plugin declares none.
   request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side.
   `cli/internal/plugin` pins the manifest rules against the samples, the `connections` slot rules
   included.
-- **A site's files folder.** `PluginSiteFilesTests` pins `siteFiles`: own team only, every site,
+- **A site's files folder.** `PluginSiteFilesTests` pins `siteFiles`: own team only, every site, with or without `reads`,
   absolute and existing, `[]` without sites, paths only; `SiteFilesEndToEndTests` pins a file a plugin
   writes there downloading from the page by its stored path, and nothing secret in anything served.
 - **Reading site data.** `PluginSiteReadsTests` pins `reads` and its refusals, the `sites` block,

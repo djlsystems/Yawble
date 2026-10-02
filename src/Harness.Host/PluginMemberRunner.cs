@@ -398,11 +398,13 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 ["scopes"] = new JsonArray([.. g.Value.Scopes.Select(scope => (JsonNode?)JsonValue.Create(scope))]),
             }))),
 
-            // THE DECLARED READS of the member's own team's sites (see ReadSitesAsync); [] for none.
-            ["sites"] = sites ?? new JsonArray(),
-
             // EACH OF THE MEMBER'S OWN TEAM'S SITES' FILES FOLDER (see SiteFilesAsync); [] for none.
-            ["siteFiles"] = siteFiles ?? new JsonArray(),
+            // Cloned: the request is built twice when reads are measured, and a node has one parent.
+            ["siteFiles"] = siteFiles?.DeepClone() ?? new JsonArray(),
+
+            // THE DECLARED READS of the member's own team's sites (see ReadSitesAsync); [] for none.
+            // Last, so what is measured before it is the whole rest of the request.
+            ["sites"] = sites ?? new JsonArray(),
         };
 
         return document.ToJsonString() + "\n";

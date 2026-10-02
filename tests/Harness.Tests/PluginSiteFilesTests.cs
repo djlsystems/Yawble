@@ -81,10 +81,14 @@ public sealed class PluginSiteFilesTests : IAsyncLifetime
     /// <summary>One run of the fixture plugin as <paramref name="member"/>, which copies its stdin
     /// outside the data root and then runs <paramref name="then"/>.</summary>
     private async Task<ContainerTestBed> RunAsync(
-        ContainerId member, string then = """echo '{"t":"result","ok":true,"output":"done"}'""", bool serveSites = true)
+        ContainerId member, string then = """echo '{"t":"result","ok":true,"output":"done"}'""", bool serveSites = true,
+        string? reads = null)
     {
-        PluginInstall.Write(_dataRoot, "fixture", script: $"cat > '{StdinCopy}'\n{then}", manifest: PluginInstall.Manifest("fixture",
-            edit: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}""")));
+        PluginInstall.Write(_dataRoot, "fixture", script: $"cat > '{StdinCopy}'\n{then}", manifest: PluginInstall.Manifest("fixture", edit: m =>
+        {
+            m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}""");
+            if (reads is not null) m["reads"] = JsonNode.Parse(reads);
+        }));
 
         var catalog = new PluginCatalog(PluginInstall.PluginsRoot(_dataRoot));
         catalog.Rescan();
@@ -139,6 +143,17 @@ public sealed class PluginSiteFilesTests : IAsyncLifetime
         Assert.DoesNotContain("\"other\"", stdin, StringComparison.Ordinal);
         Assert.DoesNotContain(Path.Combine(_dataRoot, "documents", "beta"), stdin, StringComparison.Ordinal);
         Assert.False(Directory.Exists(FolderOf("beta", "other")));
+    }
+
+    [Fact]
+    public async Task A_plugin_that_reads_site_data_is_told_its_sites_files_folders_too()
+    {
+        // The request is measured, then built again with the documents read: both carry the folders.
+        var bed = await RunAsync(new ContainerId("alpha", "plug"), reads: """[{"site":"board","collection":"items"}]""");
+
+        Assert.Single(await bed.OfTypeAsync(MessageTypes.Completed));
+        Assert.Equal(["board", "ledger"], Request()["siteFiles"]!.AsArray().Select(e => (string)e!["site"]!));
+        Assert.Equal("board", (string?)Request()["sites"]!.AsArray().Single()!["site"]);
     }
 
     [Fact]
