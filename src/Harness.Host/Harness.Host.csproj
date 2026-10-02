@@ -8,6 +8,7 @@
     <ProjectReference Include="..\Harness.Skills\Harness.Skills.csproj" />
     <ProjectReference Include="..\Harness.Kanban\Harness.Kanban.csproj" />
     <ProjectReference Include="..\Harness.Backlog\Harness.Backlog.csproj" />
+    <ProjectReference Include="..\Harness.Worker\Harness.Worker.csproj" />
   </ItemGroup>
 
   <!-- The API reference. Versionless by rule: central package management resolves these from
@@ -39,6 +40,11 @@
 
   <ItemGroup>
     <Content Update="auth-probes.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The run worker's, compiled into Harness.Worker; see its project file. -->
+  <ItemGroup>
+    <Compile Remove="McpLaunchConfig.cs" />
   </ItemGroup>
 
   <!-- The site helper script, served at /sites/_sdk/site.js from the build, never from the volume. -->

@@ -1,3 +1,4 @@
+using Harness.Contracts;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -48,7 +49,7 @@ public enum RunMemoryMechanism
 /// </list>
 ///
 /// <para>
-/// HOW MUCH is <see cref="TenantSettings.RunMemoryLimit"/>, read through a delegate at every launch
+/// HOW MUCH is <c>TenantSettings.RunMemoryLimit</c>, read through a delegate at every launch
 /// so a change applies to the next run without a restart.
 /// </para>
 /// <para>
@@ -78,7 +79,7 @@ public sealed partial class RunMemoryLimits
     private readonly Func<RunMemoryLimit> _ceiling;
 
     /// <param name="ceiling">The most a run holding the heavy lease can be raised to
-    /// (<see cref="TenantSettings.RunMemoryCeiling"/>); the run's own limit when not given.</param>
+    /// (<c>TenantSettings.RunMemoryCeiling</c>); the run's own limit when not given.</param>
     public RunMemoryLimits(
         RunMemoryMechanism mechanism, string reason, Func<RunMemoryLimit> limit,
         string? prlimitPath = null, string? cgroupDirectory = null, Func<RunMemoryLimit>? ceiling = null)
@@ -166,7 +167,7 @@ public sealed partial class RunMemoryLimits
     }
 
     private static RunMemoryLimit Unset() => new(null,
-        $"{TenantSettings.RunsMemoryLimitMbName} is not set and the cgroup is not writable, so no per-run limit is "
+        $"{SettingNames.RunsMemoryLimitMb} is not set and the cgroup is not writable, so no per-run limit is "
         + "applied; admission by measured memory guards the container");
 
     /// <summary>Nothing is applied: what a runner without this service, and the suite, gets.</summary>
@@ -354,7 +355,7 @@ public sealed partial class RunMemoryLimits
     public string Sentence(RunMemoryLimit limit) =>
         $"This run went over its memory limit of {limit.Mb} MB and was stopped ({limit.Source}; applied as "
         + (Mechanism == RunMemoryMechanism.Cgroup ? "a cgroup for the whole run" : "a limit on each of its processes")
-        + $"). Raise {TenantSettings.RunsMemoryLimitMbName} in the Tenant Settings, or make the work use less. "
+        + $"). Raise {SettingNames.RunsMemoryLimitMb} in the Tenant Settings, or make the work use less. "
         + "This is not an agent fault.";
 
     /// <summary>
@@ -365,7 +366,7 @@ public sealed partial class RunMemoryLimits
         $"A process in this run was stopped by the run's memory limit ({seen}): the limit is {limit.Mb} MB "
         + (Mechanism == RunMemoryMechanism.Cgroup ? "for the whole run" : "for each of its processes")
         + $" ({limit.Source}). The agent carried on, but that process's work did not finish. Raise "
-        + $"{TenantSettings.RunsMemoryLimitMbName} in the Tenant Settings, or take the heavy lease before heavy work: "
+        + $"{SettingNames.RunsMemoryLimitMb} in the Tenant Settings, or take the heavy lease before heavy work: "
         + "a run holding it gets the container's memory less the Host's reserve and what the other runs use. "
         + "This is not an agent fault.";
 

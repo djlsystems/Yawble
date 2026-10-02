@@ -33,6 +33,7 @@
 
   <ItemGroup Label="Runtime">
     <PackageVersion Include="Cronos" Version="0.13.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.10" />
 
     <!-- Harness.Pty's dependency. A project resolves central package versions from its OWN

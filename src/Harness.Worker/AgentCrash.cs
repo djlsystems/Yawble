@@ -64,7 +64,7 @@ public static class AgentCrash
             ? $" This run had a memory limit of {mb} MB "
               + (mechanism == RunMemoryMechanism.Cgroup ? "for the whole run" : "on each of its processes")
               + $" ({limit.Source}); a program that cannot start or work inside it can end like this. If that is the "
-              + $"cause, raise {TenantSettings.RunsMemoryLimitMbName} in the Tenant Settings."
+              + $"cause, raise {SettingNames.RunsMemoryLimitMb} in the Tenant Settings."
             : string.Empty;
 
         return ended + said + memory + " Classed crashed, not an agent fault.";

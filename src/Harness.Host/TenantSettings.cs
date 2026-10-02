@@ -861,13 +861,6 @@ public sealed class TenantSettings
 /// <c>MemoryBound</c> are what the built-in default would allow; <c>MemoryBound</c> is null when the
 /// container has no memory limit, and <c>Cpus</c> when its CPU count is not known.
 /// </summary>
-/// <summary>
-/// One run's memory limit in megabytes (null: none), and the sentence saying where it came from.
-/// <paramref name="Set"/> is true only when a person set the figure (<c>runs.memoryLimitMb</c> &gt; 0):
-/// a per-process rlimit is applied only then, never from a computed figure (<see cref="RunMemoryLimits"/>).
-/// </summary>
-public sealed record RunMemoryLimit(long? Mb, string Source, bool Set = false);
-
 public sealed record WipRunLimit(
     int Limit, string Bound, int CpuBound, int? Cpus, int? MemoryBound, long? MemoryLimitMb,
     int MemoryPerRunMb, string Reason);
