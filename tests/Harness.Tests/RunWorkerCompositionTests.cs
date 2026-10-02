@@ -24,6 +24,7 @@ public sealed class RunWorkerCompositionTests(HostFixture host) : IClassFixture<
             ["leases"] = host.Services.GetRequiredService<LeaseActions>(),
             ["reports"] = Assert.IsType<MemberReports>(host.Services.GetRequiredService<IMemberReports>()),
             ["capacity"] = host.Services.GetRequiredService<CapacitySampler>(),
+            ["plugins"] = host.Services.GetRequiredService<PluginMemberRunner>(),
         };
 
         Assert.All(clients, client => Assert.Same(worker, client.Value.Worker));

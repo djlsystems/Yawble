@@ -27,16 +27,77 @@ namespace Harness.Host;
 ///
 /// It holds no platform credential and needs none: everything it reports, the runtime writes.
 /// </summary>
-public sealed class PluginMemberRunner(
-    PluginCatalog catalog,
-    IMemberReports reports,
-    RunHeartbeat heartbeat,
-    AgentLaunchUser? runAs = null,
-    IPluginMemberSettings? settings = null,
-    ISecretStore? secrets = null,
-    Connections? connections = null,
-    SiteService? sites = null) : IMemberRunner
+public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 {
+    private readonly PluginCatalog catalog;
+    private readonly IMemberReports reports;
+    private readonly IRunWorker worker;
+    private readonly RunDirectory directory;
+    private readonly AgentLaunchUser? runAs;
+    private readonly IPluginMemberSettings? settings;
+    private readonly ISecretStore? secrets;
+    private readonly Connections? connections;
+    private readonly SiteService? sites;
+
+    /// <summary>
+    /// The Host's: the plugin runs on <paramref name="worker"/>, through the run protocol, and
+    /// <paramref name="directory"/> hands each line it prints back here. <paramref name="runAs"/> is
+    /// who the worker runs members as, asked only whether it refuses.
+    /// </summary>
+    public PluginMemberRunner(
+        PluginCatalog catalog,
+        IMemberReports reports,
+        IRunWorker worker,
+        RunDirectory directory,
+        AgentLaunchUser? runAs = null,
+        IPluginMemberSettings? settings = null,
+        ISecretStore? secrets = null,
+        Connections? connections = null,
+        SiteService? sites = null)
+    {
+        this.catalog = catalog;
+        this.reports = reports;
+        this.worker = worker;
+        this.directory = directory;
+        this.runAs = runAs;
+        this.settings = settings;
+        this.secrets = secrets;
+        this.connections = connections;
+        this.sites = sites;
+    }
+
+    /// <summary>
+    /// Over a worker of its own, in this process, made from <paramref name="heartbeat"/> and
+    /// <paramref name="runAs"/>: the plugin crosses the protocol all the same.
+    /// </summary>
+    public PluginMemberRunner(
+        PluginCatalog catalog,
+        IMemberReports reports,
+        RunHeartbeat heartbeat,
+        AgentLaunchUser? runAs = null,
+        IPluginMemberSettings? settings = null,
+        ISecretStore? secrets = null,
+        Connections? connections = null,
+        SiteService? sites = null)
+    {
+        var directory = new RunDirectory(reports);
+        this.catalog = catalog;
+        this.reports = reports;
+        this.worker = InProcessWorker.Connect(
+            WorkerId.Local,
+            events => new WorkerHost(WorkerId.Local, events, new RunLauncher(heartbeat, runAs: runAs), heartbeat),
+            directory.HandleAsync).Worker;
+        this.directory = directory;
+        this.runAs = runAs;
+        this.settings = settings;
+        this.secrets = secrets;
+        this.connections = connections;
+        this.sites = sites;
+    }
+
+    /// <summary>The worker plugin runs go to.</summary>
+    public IRunWorker Worker => worker;
+
     /// <summary>The only variables a plugin child inherits from the Host. Everything else - provider
     /// keys, HARNESS_*, CLAUDE_*, GROK_* - is absent because it was never copied.</summary>
     public static readonly IReadOnlyList<string> InheritedVariables =
@@ -102,62 +163,71 @@ public sealed class PluginMemberRunner(
         // THE REDACTION SET: every bound secret AND every access token this run is handed.
         IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.Select(g => g.AccessToken)];
 
-        if (ChildProcess.StartInfo(plugin.Executable, invocation.WorkingDirectory, runAs) is not { } start)
-        {
-            return MemberResult.NotRun(
-                $"setsid is not in a root-owned system directory ({string.Join(", ", SystemCommand.Directories)}), so this plugin member could not be started.");
-        }
-
-        foreach (var argument in manifest.Arguments) start.ArgumentList.Add(argument);
-
-        // MINIMAL AND ALLOW-LISTED, the opposite of an agent's inherited-then-scrubbed environment:
-        // a plugin is given only what it is named here.
-        start.Environment.Clear();
-        foreach (var name in InheritedVariables)
-        {
-            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value) start.Environment[name] = value;
-        }
-
-        start.Environment[CausationVariable] = invocation.Causation.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
         var request = Request(invocation, manifest, config, resolvedSecrets, grants);
 
         // The run's record, gathered as the lines arrive.
         var gathered = new Gathered();
 
-        using var clock = ChildProcess.Clock(heartbeat, invocation.Member, manifest.TimeoutSeconds, ct);
+        // ON THE WORKER, through the run protocol: the same launcher every member shares, over
+        // MINIMAL AND ALLOW-LISTED variables, the opposite of an agent's inherited-then-scrubbed
+        // environment - a plugin is given only what it is named here. Each line it prints comes back
+        // here, in order, before the next is read.
+        var (ended, lost) = await directory.RunProcessAsync(
+            worker,
+            new StartRun(
+                RunId.For(invocation.Member),
+                invocation.Implementation,
+                "",
+                "",
+                "",
+                invocation.WorkingDirectory,
+                new Dictionary<string, string>(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                new RunProcess(
+                    plugin.Executable,
+                    manifest.Arguments,
+                    InheritedVariables,
+                    new Dictionary<string, string>
+                    {
+                        [CausationVariable] = invocation.Causation.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    },
+                    request,
+                    manifest.TimeoutSeconds,
+                    plugin.Directory)),
+            line => OnLineAsync(invocation.Member, manifest, invocation.Context.Limits, line, gathered, redacted, ct),
+            ct);
 
-        ChildOutcome outcome;
+        if (lost) return MemberResult.NotRun(RunDirectory.LostRunText, FailureClasses.Interrupted);
 
-        try
+        var outcome = ended.Process!;
+
+        if (outcome.Refused is not null)
         {
-            runAs?.Share(plugin.Directory);
-
-            outcome = await ChildProcess.RunAsync(
-                start,
-                request,
-                clock.Stopping,
-                onStdoutLine: line => OnLineAsync(
-                    invocation.Member, manifest, invocation.Context.Limits, line, gathered, redacted, ct),
-                run: invocation.Member);
+            return MemberResult.NotRun(
+                $"setsid is not in a root-owned system directory ({string.Join(", ", SystemCommand.Directories)}), so this plugin member could not be started.");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+
+        if (outcome.StartError is { } startError)
         {
-            return MemberResult.NotRun($"The plugin '{manifest.Id}' could not be started: {ex.Message}");
+            return MemberResult.NotRun($"The plugin '{manifest.Id}' could not be started: {startError}");
         }
 
         if (outcome.Killed)
         {
-            return clock.Expired
+            return outcome.Expired
                 ? MemberResult.NotRun(
                     $"This run went {manifest.TimeoutSeconds}s without reporting progress and was stopped. "
                     + $"That limit is the plugin's own `timeoutSeconds` in its {PluginManifest.FileName}. It "
                     + "measures SILENCE, so a plugin that writes progress records can work for as long as it needs to.",
-                    FailureClasses.Timeout) with { ProcessId = outcome.ProcessId }
+                    FailureClasses.Timeout) with { ProcessId = ended.ProcessId }
                 : MemberResult.NotRun(
                     "This run was stopped before it finished, because the Host was shutting down. "
                     + "Whatever it had done is not recorded.",
-                    FailureClasses.Interrupted) with { ProcessId = outcome.ProcessId };
+                    FailureClasses.Interrupted) with { ProcessId = ended.ProcessId };
         }
 
         var output = new StringBuilder(gathered.Result?.Output ?? "");
@@ -192,20 +262,20 @@ public sealed class PluginMemberRunner(
 
         string? reason = gathered.Result switch
         {
-            null => $"The plugin exited {outcome.ExitCode} without a result record.",
+            null => $"The plugin exited {ended.ExitCode} without a result record.",
             { Ok: false } failed => Redact(
                 string.IsNullOrWhiteSpace(failed.Error) ? "The plugin reported that it failed." : failed.Error!,
                 redacted),
-            _ when outcome.ExitCode != 0 => $"The plugin exited {outcome.ExitCode}.",
+            _ when ended.ExitCode != 0 => $"The plugin exited {ended.ExitCode}.",
             _ => null,
         };
 
         return new MemberResult(
             reason is null,
-            outcome.ExitCode,
+            ended.ExitCode,
             text,
             FailureReason: reason,
-            ProcessId: outcome.ProcessId,
+            ProcessId: ended.ProcessId,
             // A FAILURE IS NEVER QUIET, whatever the record said: ok:false, a non-zero exit, a
             // timeout and a Stop all wake as they always did.
             Quiet: reason is null && gathered.Result is { Quiet: true });

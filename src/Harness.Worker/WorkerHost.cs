@@ -138,10 +138,19 @@ public sealed class WorkerHost
     {
         AgentResult? result = null;
         RunFault? fault = null;
+        RunEnded? processEnd = null;
 
         try
         {
-            result = await _launcher.RunAsync(open.Start, open, open.Stop.Token);
+            if (open.Start.Process is { } process)
+            {
+                var (exitCode, processId, outcome) = await _launcher.RunProcessAsync(open.Start, process, open, open.Stop.Token);
+                processEnd = new RunEnded(open.Start.Run, exitCode, processId, null, null, null, null, null, Process: outcome);
+            }
+            else
+            {
+                result = await _launcher.RunAsync(open.Start, open, open.Stop.Token);
+            }
         }
         catch (OperationCanceledException exception)
         {
@@ -154,7 +163,7 @@ public sealed class WorkerHost
 
         try
         {
-            await EndAsync(open, result, fault);
+            await EndAsync(open, result, fault, processEnd);
         }
         catch (Exception exception)
         {
@@ -167,7 +176,7 @@ public sealed class WorkerHost
     }
 
     /// <summary>The run's output, usage and end, with it leaving the open set, as one publish.</summary>
-    private async Task EndAsync(OpenRun open, AgentResult? result, RunFault? fault)
+    private async Task EndAsync(OpenRun open, AgentResult? result, RunFault? fault, RunEnded? processEnd)
     {
         var run = open.Start.Run;
 
@@ -175,7 +184,12 @@ public sealed class WorkerHost
         try
         {
             RunEnded ended;
-            if (result is null)
+            if (processEnd is not null)
+            {
+                // A program's output crossed line by line as it ran.
+                ended = processEnd;
+            }
+            else if (result is null)
             {
                 ended = new RunEnded(run, -1, null, null, null, null, open.StderrTail, null, fault);
             }
@@ -278,5 +292,7 @@ public sealed class WorkerHost
             worker.PublishAsync(new RunDiagnostic(Run, severity, kind, source, message, detail, exceptionType));
 
         public void Stderr(string tail) => StderrTail = tail.Length == 0 ? null : tail;
+
+        public Task OutputLineAsync(string line) => worker.PublishAsync(new RunOutput(Run, line));
     }
 }

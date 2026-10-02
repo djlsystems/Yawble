@@ -163,6 +163,47 @@ public sealed class RunBoundaryTests : IDisposable
         Assert.Equal(new AgentTranscript(watched.Transcript!, LiveViewNames.ClaudeJsonl), result.AgentTranscript);
     }
 
+    [Fact]
+    public async Task A_plugin_member_run_crosses_the_transport()
+    {
+        using var bed = new Bed(_root);
+        using var secret = new EnvironmentScope([new("HARNESS_TEST_NOT_INHERITED", "leak")]);
+        var script = await Script(
+            "read request; echo \"one $request\"\n"
+            + "echo \"two $HARNESS_CAUSATION ${HOME:-none} ${HARNESS_TEST_NOT_INHERITED:-absent}\"\n"
+            + "echo oops >&2; exit 3\n");
+        var lines = new List<string>();
+
+        var start = bed.Start(Launch("sh", [])) with
+        {
+            Launch = null,
+            Process = new RunProcess(
+                PathSearch.Find("sh")!, [script], ["HOME"], new Dictionary<string, string> { ["HARNESS_CAUSATION"] = "42" },
+                "{\"x\":1}\n", null, null),
+        };
+        var (ended, lost) = await bed.Directory.RunProcessAsync(
+            bed.Worker,
+            start,
+            line =>
+            {
+                lines.Add(line);
+                return Task.CompletedTask;
+            },
+            Ct).WaitAsync(Bound, Ct);
+
+        // Each line crossed in order, the environment is only what was named, and the end says how.
+        var home = Environment.GetEnvironmentVariable("HOME") is { Length: > 0 } set ? set : "none";
+        Assert.False(lost);
+        Assert.Equal(["one {\"x\":1}", $"two 42 {home} absent"], lines);
+        Assert.Equal(3, ended.ExitCode);
+        Assert.NotNull(ended.ProcessId);
+        Assert.Contains("oops", ended.Process!.Stderr, StringComparison.Ordinal);
+        Assert.False(ended.Process.Killed);
+        Assert.Equal(
+            [nameof(StartRun), nameof(RunStarted), nameof(RunOutput), nameof(RunOutput), nameof(RunEnded)],
+            bed.Order(start.Run));
+    }
+
     // ---------------------------------------------------------------------------------------------
     // A run whose end never arrives is a lost run, never a hang.
     // ---------------------------------------------------------------------------------------------

@@ -28,6 +28,9 @@ public interface IRunSink
 
     /// <summary>The redacted end of what the run's child wrote on stderr.</summary>
     void Stderr(string tail);
+
+    /// <summary>One line a program run printed. The next is not read until control has handled it.</summary>
+    Task OutputLineAsync(string line);
 }
 
 /// <summary>

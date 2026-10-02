@@ -792,7 +792,8 @@ builder.Services.AddSingleton(sp => new AgentMemberRunner(
 builder.Services.AddSingleton(sp => new PluginMemberRunner(
     sp.GetRequiredService<PluginCatalog>(),
     sp.GetRequiredService<IMemberReports>(),
-    sp.GetRequiredService<RunHeartbeat>(),
+    sp.GetRequiredService<IRunWorker>(),
+    sp.GetRequiredService<RunDirectory>(),
     sp.GetRequiredService<AgentLaunchUser>(),
     sp.GetRequiredService<IPluginMemberSettingsStore>(),
     sp.GetRequiredService<ISecretStore>(),

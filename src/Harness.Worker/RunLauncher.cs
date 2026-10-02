@@ -814,6 +814,57 @@ public sealed partial class RunLauncher(
         }
     }
     /// <summary>
+    /// THE LAUNCH OF A MEMBER THAT IS A PROGRAM (a plugin): the same launcher every member shares - its
+    /// own session, the agent user, the run's idle clock - over exactly the environment it is given:
+    /// the variables it inherits by name and the ones control set, nothing else. The request is
+    /// written on stdin; each line it prints goes to <paramref name="sink"/> and is handled before the
+    /// next is read. Every sentence about how it ended is control's.
+    /// </summary>
+    public async Task<(int ExitCode, int? ProcessId, RunProcessOutcome Outcome)> RunProcessAsync(
+        StartRun run, RunProcess process, IRunSink sink, CancellationToken ct)
+    {
+        if (ChildProcess.StartInfo(process.Executable, run.WorkingDirectory, runAs) is not { } start)
+        {
+            return (-1, null, new RunProcessOutcome("setsid", null, false, false, false, string.Empty));
+        }
+
+        foreach (var argument in process.Arguments) start.ArgumentList.Add(argument);
+
+        // MINIMAL AND ALLOW-LISTED, the opposite of an agent's inherited-then-scrubbed environment.
+        start.Environment.Clear();
+        foreach (var name in process.Inherited)
+        {
+            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value) start.Environment[name] = value;
+        }
+
+        foreach (var (name, value) in process.Environment) start.Environment[name] = value;
+
+        using var clock = ChildProcess.Clock(heartbeat, run.Run.Member, process.TimeoutSeconds, ct);
+
+        ChildOutcome outcome;
+
+        try
+        {
+            if (process.SharedFolder is { } folder) runAs?.Share(folder);
+
+            outcome = await ChildProcess.RunAsync(
+                start,
+                process.Stdin,
+                clock.Stopping,
+                onStarted: child => sink.Started(child.Id),
+                onStdoutLine: sink.OutputLineAsync,
+                run: run.Run.Member);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return (-1, null, new RunProcessOutcome(null, ex.Message, false, false, false, string.Empty));
+        }
+
+        return (outcome.ExitCode, outcome.ProcessId,
+            new RunProcessOutcome(null, null, outcome.Killed, outcome.Killed && clock.Expired, outcome.HeldOpen, outcome.Stderr));
+    }
+
+    /// <summary>
     /// Linux's bound on one argument (MAX_ARG_STRLEN), terminating NUL included. A prompt at or
     /// over it is handed over as a file.
     /// </summary>

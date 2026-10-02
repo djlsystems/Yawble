@@ -72,7 +72,6 @@ public sealed class WorkerArchitectureTests
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
 
         // Moved behind the protocol by the commits after this one, each deleting its own entries.
-        ["PluginMemberRunner.RunPluginAsync: " + ReachesAWorkerLauncher] = "pending: moves in this item, to StartRun.",
     };
 
     /// <summary>The worker types control may compose and talk to: the protocol's in-process ends.</summary>

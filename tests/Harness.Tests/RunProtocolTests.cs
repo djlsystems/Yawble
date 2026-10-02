@@ -28,7 +28,8 @@ public sealed class RunProtocolTests
                 ["FORCE_COLOR", "OTHER_KEY"]),
             new RunMemoryAllowance(new MemoryFigure(2048, "set", true), new MemoryFigure(4096, "ceiling", false)),
             "/data/tmp",
-            new RunLiveView(null, LiveViewNames.CodexRollout, new AgentLiveViewFind("~/s", "*/x.jsonl", LiveViewNames.CwdFromFirstLine))),
+            new RunLiveView(null, LiveViewNames.CodexRollout, new AgentLiveViewFind("~/s", "*/x.jsonl", LiveViewNames.CwdFromFirstLine)),
+            new RunProcess("/plugins/p/run", ["--once"], ["PATH", "HOME"], new Dictionary<string, string> { ["C"] = "7" }, "{}", 30, "/plugins/p")),
         new CancelRun(Run),
         new ChangeRunMemoryAllowance(["alpha/worker", "beta/other"]),
         new HoldIdleClock(Run.Member, true),
@@ -50,7 +51,8 @@ public sealed class RunProtocolTests
         new RunLiveViewChanged(Run, "/home/t.jsonl", LiveViewNames.ClaudeJsonl, "", false),
         new RunDiagnostic(Run, DiagnosticSeverity.Warning, "kind", "source", "message", "{}", "System.Exception"),
         new RunEnded(Run, 1, 42, "error", FailureClasses.Interrupted, At, "tail", new AgentTranscript("/t", "fmt"),
-            new RunFault(false, "System.IO.IOException", "disk")),
+            new RunFault(false, "System.IO.IOException", "disk"),
+            new RunProcessOutcome(null, "no such file", true, true, false, "stderr")),
         new WorkerCapacitySampled(
             At,
             new CapacityFigures(

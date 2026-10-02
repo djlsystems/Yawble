@@ -55,6 +55,8 @@ public abstract record MemberCommand(ContainerId Member) : ControlMessage;
 /// Start a run with everything control resolved for it. <see cref="Agent"/> through
 /// <see cref="UnreachableRoot"/> are the invocation's own fields; <see cref="Launch"/> is null when
 /// the catalog has no headless preset by that name, and the worker refuses it in today's words.
+/// <see cref="Process"/> is set instead for a member that is a program rather than an agent (a
+/// plugin): the worker starts it as given and streams what it prints.
 /// </summary>
 public sealed record StartRun(
     RunId Run,
@@ -68,7 +70,23 @@ public sealed record StartRun(
     RunLaunch? Launch,
     RunMemoryAllowance? Memory,
     string? TempRoot,
-    RunLiveView? LiveView) : RunCommand(Run);
+    RunLiveView? LiveView,
+    RunProcess? Process = null) : RunCommand(Run);
+
+/// <summary>
+/// A member that is a program: its executable and arguments, the only variables it inherits from the
+/// worker (<see cref="Inherited"/>, by name) and the ones control sets, the request it reads on
+/// stdin, how long it may go without progress, and the folder its user is given read access to.
+/// Each line it prints crosses as a <see cref="RunOutput"/>, in order, before the next is read.
+/// </summary>
+public sealed record RunProcess(
+    string Executable,
+    IReadOnlyList<string> Arguments,
+    IReadOnlyList<string> Inherited,
+    IReadOnlyDictionary<string, string> Environment,
+    string Stdin,
+    int? TimeoutSeconds,
+    string? SharedFolder);
 
 /// <summary>
 /// The preset's launch as control resolved it: the command, its tokens, its isolation and the
@@ -227,7 +245,18 @@ public sealed record RunEnded(
     DateTimeOffset? RetryAfter,
     string? StderrTail,
     AgentTranscript? Transcript,
-    RunFault? Fault = null) : RunEvent(Run);
+    RunFault? Fault = null,
+    RunProcessOutcome? Process = null) : RunEvent(Run);
+
+/// <summary>
+/// How a <see cref="RunProcess"/> came out, for control to say in its own words: refused before it
+/// started (<see cref="Refused"/>: <c>setsid</c> was not in a system directory), failed to start
+/// (<see cref="StartError"/>), stopped (<see cref="Killed"/>, by its idle clock when
+/// <see cref="Expired"/>), still holding its output after the drain, and everything it wrote on
+/// stderr, unredacted: control holds the secrets to redact.
+/// </summary>
+public sealed record RunProcessOutcome(
+    string? Refused, string? StartError, bool Killed, bool Expired, bool HeldOpen, string Stderr);
 
 /// <summary>
 /// A launch that threw rather than answered: cancelled, or an exception with its type and message.

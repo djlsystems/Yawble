@@ -64,7 +64,26 @@ public sealed class RunDirectory
     /// </summary>
     public async Task<AgentResult> RunAsync(IRunWorker worker, StartRun start, CancellationToken ct = default)
     {
-        var open = new Open(worker, start.Run);
+        var (ended, output, usage, lost) = await EndOfAsync(worker, start, null, ct);
+        return lost ? Lost() : RunResults.Result(output, usage, ended);
+    }
+
+    /// <summary>
+    /// Starts a program run (<see cref="StartRun.Process"/>) and answers with its end, or
+    /// <c>Lost</c> when its end never arrived. Each line it prints is handed to
+    /// <paramref name="onLine"/>, in order, before the worker reads the next.
+    /// </summary>
+    public async Task<(RunEnded Ended, bool Lost)> RunProcessAsync(
+        IRunWorker worker, StartRun start, Func<string, Task> onLine, CancellationToken ct = default)
+    {
+        var (ended, _, _, lost) = await EndOfAsync(worker, start, onLine, ct);
+        return (ended, lost);
+    }
+
+    private async Task<(RunEnded Ended, string Output, UsageFigures? Usage, bool Lost)> EndOfAsync(
+        IRunWorker worker, StartRun start, Func<string, Task>? onLine, CancellationToken ct)
+    {
+        var open = new Open(worker, start.Run) { OnLine = onLine };
         _runs[start.Run] = open;
         Watch(worker);
 
@@ -88,7 +107,7 @@ public sealed class RunDirectory
                 ended = await open.Ended.Task;
             }
 
-            if (ReferenceEquals(ended, open.LostEnd)) return Lost();
+            if (ReferenceEquals(ended, open.LostEnd)) return (ended, string.Empty, null, true);
 
             if (ended.Fault is { } fault)
             {
@@ -96,7 +115,7 @@ public sealed class RunDirectory
                 throw new RunFaultException(fault);
             }
 
-            return RunResults.Result(open.Output.ToString(), open.Usage, ended);
+            return (ended, open.Output.ToString(), open.Usage, false);
         }
         finally
         {
@@ -183,7 +202,8 @@ public sealed class RunDirectory
                 break;
 
             case RunOutput output:
-                open.Output.Append(output.Text);
+                if (open.OnLine is { } onLine) await onLine(output.Text);
+                else open.Output.Append(output.Text);
                 break;
 
             case RunUsage usage:
@@ -225,6 +245,9 @@ public sealed class RunDirectory
         public StringBuilder Output { get; } = new();
 
         public UsageFigures? Usage { get; set; }
+
+        /// <summary>Where a program run's lines go, as they arrive.</summary>
+        public Func<string, Task>? OnLine { get; init; }
 
         public LiveRun? Live { get; set; }
 
