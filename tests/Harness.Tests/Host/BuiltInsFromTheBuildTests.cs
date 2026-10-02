@@ -528,6 +528,215 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         }
     }
 
+    /// <summary>
+    /// The `concierge` skill, as served to the Concierge, says which of four shapes the work is
+    /// delivered in - repository work, a solution package, a plugin inside one, or neither - each
+    /// with what it obliges, and maps typical requests to them in a table.
+    /// </summary>
+    [Fact]
+    public async Task The_concierge_skill_names_the_four_delivery_shapes_and_maps_typical_requests_to_them()
+    {
+        var raw = DeliveryShapeSection(await ServedToConciergeAsync("concierge"));
+        var section = Flat(raw);
+
+        foreach (var (obligation, clause) in new[]
+        {
+            ("repository work is a shape", "**Repository work**"),
+            ("repository work is merged by the person", "merged by the person"),
+            ("a standalone app is repository work", "A standalone app is this shape, in a repository of its own"),
+            ("a solution package is a shape", "**A solution package**"),
+            ("a package runs inside the platform", "runs inside this platform"),
+            ("the person reviews and installs a package", "the person reviews and installs"),
+            ("a package is built by one team and run by another", "one team builds it"),
+            ("a plugin is a shape", "**A plugin, always inside a package**"),
+            ("a plugin is never delivered alone", "It is never delivered alone"),
+            ("a plugin points to its skill", "`authoring-plugins`"),
+            ("neither is a shape", "**Neither**"),
+            ("neither delivers no code", "no code is delivered"),
+            ("the table has its header", "| The request sounds like | The shape |"),
+        })
+        {
+            Assert.True(section.Contains(clause, StringComparison.Ordinal), $"Missing ({obligation}): {clause}");
+        }
+
+        var rows = raw.Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith('|'))
+            .Skip(1)
+            .Where(line => !line.Contains("---", StringComparison.Ordinal))
+            .Select(line => line.Trim('|').Split('|').Last().Trim())
+            .ToList();
+        foreach (var (mapping, words) in new[]
+        {
+            ("a request maps to repository work", new[] { "Repository work" }),
+            ("a request maps to a package with triggers", new[] { "solution package", "triggers" }),
+            ("a request maps to a package with a site", new[] { "solution package", "site" }),
+            ("a request maps to a plugin in a package", new[] { "plugin", "package" }),
+        })
+        {
+            Assert.True(
+                rows.Any(cell => words.All(w => cell.Contains(w, StringComparison.OrdinalIgnoreCase))),
+                $"No table row maps to it ({mapping}); last cells: {string.Join(" / ", rows)}");
+        }
+    }
+
+    /// <summary>
+    /// When a request could be either repository work or a solution package, the Concierge asks
+    /// one question naming both and what each means for the person, before planning or creating a
+    /// team - and does not ask when the request names the shape or only one fits. The plan names
+    /// the shape, and a backlog item it writes states it in its first lines.
+    /// </summary>
+    [Fact]
+    public async Task The_concierge_asks_which_shape_when_a_request_could_be_either_and_not_otherwise()
+    {
+        var section = Flat(DeliveryShapeSection(await ServedToConciergeAsync("concierge")));
+
+        foreach (var (obligation, clause) in new[]
+        {
+            ("the ask has its heading", "### Ask when it could be either"),
+            ("the ask comes before planning or a team", "ask the person which they want before you plan or create a team"),
+            ("the ask is one question naming both shapes", "Ask one question that names both shapes"),
+            ("the question says where it runs", "where it runs"),
+            ("the question says who installs it", "who installs it"),
+            ("the question says what they maintain", "what they maintain"),
+            ("no ask when the request names the shape", "Do not ask when the request names the shape"),
+            ("no ask when only one shape fits", "or when only one shape fits"),
+            ("the plan names the shape", "The plan you tell the person before dispatching names the shape"),
+            ("a shape chosen without asking says why", "When you chose it without asking, say why in one line"),
+            ("a backlog item states its shape first", "states its delivery shape in its first lines"),
+        })
+        {
+            Assert.True(section.Contains(clause, StringComparison.Ordinal), $"Missing ({obligation}): {clause}");
+        }
+    }
+
+    /// <summary>
+    /// The `concierge` line on plugins, sites and triggers, the `new-team` skill and the
+    /// `packaging-solutions` skill (as served to both roles that read it) point to the section.
+    /// `packaging-solutions` never sends a Manager to load `concierge`, which it cannot.
+    /// </summary>
+    [Fact]
+    public async Task The_line_on_plugins_sites_and_triggers_new_team_and_packaging_solutions_point_to_the_delivery_shape_section()
+    {
+        const string Pointer = "\"Choosing the delivery shape\"";
+        const string Phrase = "a plugin, a site or triggers";
+
+        var restOfTheJob = RawSection(await ServedToConciergeAsync("concierge"), "## The rest of the job");
+        Assert.Equal(1, CountOf(Flat(restOfTheJob), Phrase));
+        var bullet = Flat(Bullet(restOfTheJob, "- Planning work that includes " + Phrase));
+        Assert.True(bullet.Contains(Pointer, StringComparison.Ordinal), $"The line on {Phrase} does not point to the section: {bullet}");
+
+        var newTeam = Flat(await ServedToConciergeAsync("new-team"));
+        Assert.Contains(Pointer + " in the `concierge` skill", newTeam, StringComparison.Ordinal);
+        var stepOneAt = newTeam.IndexOf("1. **What is this team for", StringComparison.Ordinal);
+        Assert.True(stepOneAt >= 0, "new-team has no first step");
+        var stepOne = newTeam[stepOneAt..newTeam.IndexOf("2. **", stepOneAt, StringComparison.Ordinal)];
+        Assert.True(
+            stepOne.Contains("ask the person first when it could be either", StringComparison.Ordinal),
+            $"new-team's first step does not ask before the team is made: {stepOne}");
+
+        var managerKey = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+        using var manager = host.Container(managerKey);
+        foreach (var packaging in new[]
+        {
+            await ServedToConciergeAsync("packaging-solutions"),
+            await manager.GetStringAsync("/api/me/skills/packaging-solutions", Ct),
+        })
+        {
+            var flat = Flat(packaging);
+            Assert.Contains(Pointer, flat, StringComparison.Ordinal);
+            Assert.DoesNotContain("load the `concierge` skill", flat, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// The section is in words for any project: it names no language, framework, build tool or
+    /// product as the answer. A deny-list cannot prove that; it catches the likeliest slips.
+    /// </summary>
+    [Fact]
+    public async Task The_delivery_shape_section_is_written_for_any_project()
+    {
+        var section = Flat(DeliveryShapeSection(await ServedToConciergeAsync("concierge")));
+
+        foreach (var word in new[]
+                 {
+                     "dotnet", "npm", "yarn", "pnpm", "pytest", "go test", "cargo", "mvn", "maven", "gradle",
+                     "jest", "vitest", "xunit", "nunit", "docker", "podman", "C#", "Python", "TypeScript", "JavaScript",
+                 })
+        {
+            Assert.DoesNotContain(word, section, StringComparison.OrdinalIgnoreCase);
+        }
+
+        foreach (var product in new[]
+                 {
+                     "React", "Vue", "Angular", "Next.js", "Django", "Flask", "Rails", "Node", "Electron", "Java",
+                     "Ruby", "Rust", "Gmail", "Outlook", "Slack", "GitHub",
+                 })
+        {
+            Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex($@"\b{System.Text.RegularExpressions.Regex.Escape(product)}\b"), section);
+        }
+    }
+
+    /// <summary>A skill's text exactly as the platform serves it to a Concierge.</summary>
+    private async Task<string> ServedToConciergeAsync(string name)
+    {
+        var person = await host.Services.GetRequiredService<IUserStore>().FindAsync("person@example.test", Ct);
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            ConciergeLaunchFactory.PrincipalId(person!.Id), PrincipalKind.TenantConcierge, null,
+            ConciergeLaunchFactory.ConciergePermits, ownerUserId: person.Id, ct: Ct);
+        using var concierge = host.Container(key);
+        return await concierge.GetStringAsync($"/api/me/skills/{name}", Ct);
+    }
+
+    /// <summary>
+    /// "## Choosing the delivery shape" up to the next level-two heading. A slice cut short at a
+    /// "###" subheading would lose the ask and the plan rules, so its last subheading is checked.
+    /// </summary>
+    private static string DeliveryShapeSection(string skill)
+    {
+        var section = RawSection(skill, "## Choosing the delivery shape");
+        Assert.Contains("### Say the shape", section, StringComparison.Ordinal);
+        return section;
+    }
+
+    /// <summary>
+    /// Raw text from a "## " heading to the next line that starts "## ". Cut before flattening:
+    /// flattened, "### " contains "## " and would end the section early.
+    /// </summary>
+    private static string RawSection(string text, string heading)
+    {
+        var start = text.IndexOf(heading, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing heading: {heading}");
+        var rest = text[(start + heading.Length)..];
+        var next = System.Text.RegularExpressions.Regex.Match(rest, "^## ", System.Text.RegularExpressions.RegexOptions.Multiline);
+        return heading + (next.Success ? rest[..next.Index] : rest);
+    }
+
+    /// <summary>
+    /// One list item, by line: from the line that starts with <paramref name="start"/> to the next
+    /// item at the same indent or a blank line. A dash inside the item does not end it.
+    /// </summary>
+    private static string Bullet(string text, string start)
+    {
+        var lines = text.Split('\n');
+        var first = Array.FindIndex(lines, l => l.TrimStart().StartsWith(start, StringComparison.Ordinal));
+        Assert.True(first >= 0, $"Missing list item: {start}");
+        var indent = lines[first].Length - lines[first].TrimStart().Length;
+        var item = new List<string> { lines[first] };
+        foreach (var line in lines.Skip(first + 1))
+        {
+            if (line.Trim().Length == 0) break;
+            if (line.Length - line.TrimStart().Length == indent && line.TrimStart().StartsWith("- ", StringComparison.Ordinal)) break;
+            item.Add(line);
+        }
+        return string.Join("\n", item);
+    }
+
+    private static int CountOf(string text, string phrase) =>
+        System.Text.RegularExpressions.Regex.Matches(text, System.Text.RegularExpressions.Regex.Escape(phrase)).Count;
+
     /// <summary>Whitespace-insensitive text, so a pinned sentence survives re-wrapping.</summary>
     private static string Flat(string text) =>
         System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
