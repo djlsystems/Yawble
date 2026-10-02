@@ -58,6 +58,29 @@ export function installationFor(
   )
 }
 
+/**
+ * "a", "a and b", "a, b and c" - the server's own way of listing workers in a sentence.
+ */
+export function listOf(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? ''
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
+/**
+ * WHERE a preset's CLI is missing, in words: the workers that measured it missing, or "this
+ * machine" for a server that answers from its own PATH.
+ *
+ * THE ROLE IS READ FROM THE ANSWER, never from a flag: a server whose agent CLIs are on workers
+ * sends `measuredOn` (empty when nothing is measured), and one that runs its runs itself sends none.
+ */
+export function whereMissing(installation: AgentInstallation): string {
+  const measured = installation.measuredOn
+  if (!measured) return 'this machine'
+
+  const missing = measured.filter((entry) => !entry.installed).map((entry) => entry.worker)
+  return missing.length > 0 ? listOf(missing) : 'a worker'
+}
+
 /** What one row on the Agents screen shows: a word and a glyph, never a colour on its own. */
 export interface InstallStatus {
   readonly text: string
@@ -90,9 +113,28 @@ export function installStatus(
     return { text: 'Not checked', icon: 'help', tone: 'unknown' }
   }
 
-  return isNotInstalled(installation)
-    ? { text: 'Not found on this machine', icon: 'error', tone: 'warn' }
-    : { text: 'Found on PATH', icon: 'check_circle', tone: 'ok' }
+  const measured = installation.measuredOn
+
+  if (!measured) {
+    return isNotInstalled(installation)
+      ? { text: 'Not found on this machine', icon: 'error', tone: 'warn' }
+      : { text: 'Found on PATH', icon: 'check_circle', tone: 'ok' }
+  }
+
+  // MEASURED ON WORKERS. Nothing measured is a real answer and never "found": no worker that runs
+  // agents has said, so no claim is made either way. Two workers that disagree read as missing on
+  // the one that lacks it; the server's sentence beside the row names both.
+  if (isNotInstalled(installation)) {
+    return { text: `Not installed on ${whereMissing(installation)}`, icon: 'error', tone: 'warn' }
+  }
+
+  return measured.length === 0
+    ? { text: 'Not measured', icon: 'help', tone: 'unknown' }
+    : {
+        text: `Installed on ${listOf(measured.map((entry) => entry.worker))}`,
+        icon: 'check_circle',
+        tone: 'ok',
+      }
 }
 
 /** What a person is told, and where - if anywhere - they can go about it. */
@@ -163,8 +205,9 @@ export interface AgentsBadge {
  * it on the day it matters.
  *
  * The words name the REMEDY's location rather than the count alone - "not installed on this
- * machine" is what sends somebody to a terminal, where "3" sends them to the Agents screen to fix
- * a catalog that is already correct.
+ * machine", or on the named worker, is what sends somebody to a terminal, where "3" sends them to
+ * the Agents screen to fix a catalog that is already correct. A preset nothing has measured is
+ * never counted: its state is null.
  */
 export function agentsBadge(
   installations: readonly AgentInstallation[] | undefined | null,
@@ -173,7 +216,18 @@ export function agentsBadge(
 
   if (missing.length === 0) return null
 
-  const names = missing.map((entry) => entry.agent).join(', ')
+  // Grouped by WHERE, in the order first met: one place reads as before; several name each.
+  const groups = new Map<string, string[]>()
+  for (const entry of missing) {
+    const where = whereMissing(entry)
+    groups.set(where, [...(groups.get(where) ?? []), entry.agent])
+  }
+
+  const clauses = [...groups].map(([where, agents]) =>
+    agents.length === 1
+      ? `${agents[0]} is not installed on ${where}`
+      : `${agents.join(', ')} are not installed on ${where}`,
+  )
 
   return {
     count: missing.length,
@@ -181,7 +235,7 @@ export function agentsBadge(
     icon: 'error',
     label:
       missing.length === 1
-        ? `${names} is not installed on this machine, and a team uses it.`
-        : `${names} are not installed on this machine, and teams use them.`,
+        ? `${clauses[0]}, and a team uses it.`
+        : `${clauses.join(' and ')}, and teams use them.`,
   }
 }
