@@ -50,14 +50,26 @@ public sealed class RunBoundaryTests : IDisposable
         var start = bed.Start(Launch("sh", [script], usageFormat: "claude-json"));
         var running = bed.Directory.RunAsync(bed.Worker, start, Ct);
 
-        await bed.Recorded<RunProgress>().WaitAsync(TimeSpan.FromSeconds(10), Ct);
-        release.SetResult(true);
-        await update;
+        RunMeasured measured;
+        try
+        {
+            await bed.Recorded<RunProgress>().WaitAsync(TimeSpan.FromSeconds(10), Ct);
+            release.SetResult(true);
+            await update;
 
-        // 2 and 3. The child is up: measure it by hand while it is alive.
-        await Until(() => File.Exists(ready), TimeSpan.FromSeconds(10));
-        await bed.Worker.SendAsync(new SampleCapacity(), Ct);
-        var measured = await bed.Recorded<RunMeasured>(m => m.Run == start.Run).WaitAsync(TimeSpan.FromSeconds(10), Ct);
+            // 2 and 3. The child is up: measure it by hand while it is alive.
+            // Its start is handled by control first, as the order below expects.
+            await Until(() => File.Exists(ready), TimeSpan.FromSeconds(10));
+            await bed.Recorded<RunLiveViewChanged>(v => v.Run == start.Run).WaitAsync(TimeSpan.FromSeconds(10), Ct);
+            await bed.Worker.SendAsync(new SampleCapacity(), Ct);
+            measured = await bed.Recorded<RunMeasured>(m => m.Run == start.Run).WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        }
+        catch
+        {
+            release.TrySetResult(true);
+            await EndChild(go, running);
+            throw;
+        }
 
         // 4. The end.
         await File.WriteAllTextAsync(go, "", Ct);
@@ -165,13 +177,22 @@ public sealed class RunBoundaryTests : IDisposable
         };
         var running = bed.Directory.RunAsync(bed.Worker, start, Ct);
 
-        var begun = await bed.Recorded<RunLiveViewChanged>(v => v.Run == start.Run).WaitAsync(Bound, Ct);
-        var watched = bed.Live.Find(Member);
+        LiveRun? watched;
+        try
+        {
+            var begun = await bed.Recorded<RunLiveViewChanged>(v => v.Run == start.Run).WaitAsync(Bound, Ct);
+            watched = bed.Live.Find(Member);
 
-        Assert.NotNull(watched);
-        Assert.Equal(begun.Transcript, watched.Transcript);
-        Assert.StartsWith(Path.Combine(home, "session-"), watched.Transcript, StringComparison.Ordinal);
-        Assert.Equal(LiveViewNames.ClaudeJsonl, watched.Format);
+            Assert.NotNull(watched);
+            Assert.Equal(begun.Transcript, watched.Transcript);
+            Assert.StartsWith(Path.Combine(home, "session-"), watched.Transcript, StringComparison.Ordinal);
+            Assert.Equal(LiveViewNames.ClaudeJsonl, watched.Format);
+        }
+        catch
+        {
+            await EndChild(go, running);
+            throw;
+        }
 
         await File.WriteAllTextAsync(go, "", Ct);
         var result = await running.WaitAsync(Bound, Ct);
@@ -513,6 +534,23 @@ public sealed class RunBoundaryTests : IDisposable
     private static RunLaunch Launch(string fileName, IReadOnlyList<string> arguments, string? usageFormat = null) =>
         new(fileName, arguments, null, null, usageFormat, false, null, null, null, []);
 
+    /// <summary>
+    /// Lets a waiting child go and waits, bounded, for its run to end, so a failed test leaves no process
+    /// registered for the next one to measure.
+    /// </summary>
+    private static async Task EndChild<T>(string go, Task<T> running)
+    {
+        await File.WriteAllTextAsync(go, "");
+        try
+        {
+            await running.WaitAsync(Bound);
+        }
+        catch
+        {
+            // The test's own failure is the one to report.
+        }
+    }
+
     private static async Task Until(Func<bool> condition, TimeSpan bound, Func<Task>? between = null)
     {
         var deadline = DateTime.UtcNow + bound;
@@ -562,7 +600,7 @@ public sealed class RunBoundaryTests : IDisposable
 
     /// <summary>
     /// Control and one in-process worker, with every message and event stamped by one counter in the
-    /// order it was delivered.
+    /// order it was delivered. A wait for an event returns only after control has handled it.
     /// </summary>
     private sealed class Bed : IDisposable, IRunWorker
     {
@@ -570,6 +608,7 @@ public sealed class RunBoundaryTests : IDisposable
         private readonly InProcessWorker _worker;
         private readonly ConcurrentQueue<(long Order, object Record)> _log = new();
         private readonly List<(Func<object, bool> Matches, TaskCompletionSource<object> Found)> _waiters = [];
+        private readonly List<object> _handled = [];
         private long _counter;
 
         public Bed(string root, bool reports = true, Func<WorkerEvent, bool>? drop = null, IDiagnosticsLog? diagnostics = null)
@@ -588,8 +627,11 @@ public sealed class RunBoundaryTests : IDisposable
                     lock (Seqs) Seqs.Add(envelope.Seq);
                     if (drop?.Invoke(envelope.Event) == true) return;
 
-                    Record(envelope.Event);
+                    // Logged in delivery order before control handles it, so a run's end is in the log by the time
+                    // its caller sees it; a waiter wakes only once control has handled it.
+                    Log(envelope.Event);
                     await Directory.HandleAsync(envelope, ct);
+                    Wake(envelope.Event);
                 });
         }
 
@@ -635,7 +677,7 @@ public sealed class RunBoundaryTests : IDisposable
             var found = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
             lock (_waiters)
             {
-                if (_log.Select(l => l.Record).OfType<T>().FirstOrDefault(matches) is { } already) return already;
+                if (_handled.OfType<T>().FirstOrDefault(matches) is { } already) return already;
                 _waiters.Add((record => record is T typed && matches(typed), found));
             }
 
@@ -660,15 +702,21 @@ public sealed class RunBoundaryTests : IDisposable
 
         async Task IRunWorker.SendAsync(ControlMessage message, CancellationToken ct)
         {
-            Record(message);
+            Log(message);
+            Wake(message);
             await _worker.Worker.SendAsync(message, ct);
         }
 
-        private void Record(object record)
+        private void Log(object record)
+        {
+            lock (_waiters) _log.Enqueue((Interlocked.Increment(ref _counter), record));
+        }
+
+        private void Wake(object record)
         {
             lock (_waiters)
             {
-                _log.Enqueue((Interlocked.Increment(ref _counter), record));
+                _handled.Add(record);
                 foreach (var waiter in _waiters.Where(w => w.Matches(record)).ToList())
                 {
                     waiter.Found.TrySetResult(record);
