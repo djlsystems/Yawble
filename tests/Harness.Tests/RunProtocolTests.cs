@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Host.Capacity;
 
 namespace Harness.Tests;
 
@@ -133,6 +134,43 @@ public sealed class RunProtocolTests
 
         Assert.Null(RunResults.Result("ok", null, ended).ReachedThePlatform);
     }
+
+    [Fact]
+    public void Capacity_figures_map_to_cgroup_figures_without_loss()
+    {
+        // Field for field: a field added to one side and not the other fails here.
+        Assert.Equal(Parameters<CgroupFigures>(), Parameters<CapacityFigures>());
+        Assert.Equal(Parameters<PressureFigures>(), Parameters<PressureReading>());
+        Assert.Equal(Parameters<PressureLine>(), Parameters<PressureLines>());
+
+        var figures = new CgroupFigures(
+            "v2", 2.5, true, 11, 12, 13, 14, true, 15, 16, 17, 18,
+            new PressureFigures(new PressureLine(1.5, 2.5, 3.5, 4), new PressureLine(5.5, 6.5, 7.5, 8)),
+            new PressureFigures(new PressureLine(9.5, 10.5, 11.5, 12), null),
+            19, 20, true, ["memory.stat"]);
+
+        var back = WorkerCapacity.ToCgroup(RoundTrip(WorkerCapacity.ToFigures(figures)));
+
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(figures), System.Text.Json.JsonSerializer.Serialize(back));
+        Assert.Equal(figures.MemoryInUseBytes, back.MemoryInUseBytes);
+    }
+
+    [Fact]
+    public void Memory_figure_maps_to_run_memory_limit_without_loss()
+    {
+        Assert.Equal(Parameters<RunMemoryLimit>(), Parameters<MemoryFigure>());
+
+        var limit = new RunMemoryLimit(2048, "runs.memoryLimitMb is set to 2048 MB", Set: true);
+        var ceiling = new RunMemoryLimit(7168, "8192 MB container limit - 1024 MB for the Host");
+
+        var allowance = RoundTrip(ProcessAgentRunner.Allowance((limit, ceiling)));
+
+        Assert.Equal(limit, RunLauncher.Figure(allowance.Limit));
+        Assert.Equal(ceiling, RunLauncher.Figure(allowance.Ceiling));
+    }
+
+    private static IEnumerable<string> Parameters<T>() =>
+        typeof(T).GetConstructors().OrderByDescending(c => c.GetParameters().Length).First().GetParameters().Select(p => p.Name!);
 
     private static T RoundTrip<T>(T value) =>
         JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value, Json), Json)!;
