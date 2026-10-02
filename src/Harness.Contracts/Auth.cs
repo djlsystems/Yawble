@@ -20,6 +20,11 @@ public enum PrincipalKind
     /// Concierge and unlike a Container, it acts as its owner rather than in its own
     /// right.</summary>
     ApiKey,
+
+    /// <summary>The instance's WORKER KEY: what a worker process connects to control with. It
+    /// holds no permit and is taken on the worker connection alone; every other route refuses it
+    /// with a sentence.</summary>
+    Worker,
 }
 
 /// <summary>

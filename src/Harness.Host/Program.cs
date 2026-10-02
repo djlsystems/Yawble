@@ -323,6 +323,14 @@ var principals = new SqlitePrincipalStore(database);
 builder.Services.AddSingleton<IUserStore>(users);
 builder.Services.AddSingleton<IPrincipalStore>(principals);
 
+// THE WORKER KEY: what a worker process connects to control with (Workers:Key, or HARNESS_WORKER_KEY).
+// Stored hashed as a principal with no permit, or removed when none is configured, so a key a
+// previous start stored never outlives its configuration. Taken on the worker connection alone.
+var workerKey = builder.Configuration["Workers:Key"] ?? builder.Configuration["HARNESS_WORKER_KEY"];
+WorkerKeyGate.SetAsync(principals, workerKey).GetAwaiter().GetResult();
+var workerKeys = new WorkerKeyGate(workerKey);
+builder.Services.AddSingleton(workerKeys);
+
 // Teams and their members, in the same file for the same reason accounts are - see AuthSchema's
 // remarks on why the non-message tables live together and why the Host does not own one directly.
 builder.Services.AddSingleton<ITeamStore>(new SqliteTeamStore(database));
@@ -2125,6 +2133,10 @@ DiagnosticsMiddleware.Use(app);
 // SECOND, so every response carries them - the bundle, an API answer, a gate's refusal, a 404.
 SecurityHeaders.Use(app);
 
+// THIRD, before the console's pages and files are served: the worker key is refused everywhere but
+// the worker connection, with a sentence, before anything else reads it.
+workerKeys.Use(app);
+
 app.UseDefaultFiles();
 
 // no-cache, not no-store: ETag/Last-Modified stay in play, so an unchanged file still answers a
@@ -2249,6 +2261,7 @@ LedgerEndpoints.Map(app);
 OutcomeEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
+WorkerEndpoints.Map(app);
 RemovalEndpoints.Map(app);
 LocalRepoEndpoints.Map(app);
 
