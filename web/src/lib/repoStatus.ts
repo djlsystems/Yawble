@@ -686,7 +686,15 @@ export function pushState(status: RepoStatus): PushState {
  * the row and the ladder. Composing a sentence of its own would let the header and the step
  * line disagree.
  */
+/** The card's headline for a repository with no working clone (`cloneReady: false`). */
+export const NOT_READY = 'Not ready: this repository has not been cloned. Fetch makes the clone.'
+
 export function repoHeadline(status: RepoStatus): RepoHeadline {
+  // NO CLONE OUTRANKS EVEN NOT MEASURED: there is nothing here to measure, and Fetch makes it.
+  if (status.cloneReady === false) {
+    return { text: NOT_READY, tone: 'attention' }
+  }
+
   if (defaultBranchOf(status) === null) {
     return {
       text: `This repository\u2019s default branch is not known, so nothing here is measured against it — ${DEFAULT_BRANCH_NOT_KNOWN}.`,

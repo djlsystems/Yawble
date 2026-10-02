@@ -34,6 +34,7 @@ import {
   type RepoChoice,
 } from '../api/types';
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
+import { carriesOnMessage, creatingLine, waitWasCutOff } from '../lib/slowCreate';
 import OutcomePicker from './OutcomePicker.vue';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
 import { applyDefaults, readRemembered, remember } from '../lib/newTeamDefaults';
@@ -140,6 +141,12 @@ const teamFilter = ref<string | null | undefined>(undefined);
 
 const selected = ref<BacklogItemDetail | null>(null);
 const busy = ref(false);
+
+/** The new team being created by a dispatch, shown while it is; the field can change under a wait. */
+const creatingNewTeam = ref('');
+
+/** Set when the wait for a dispatch to a new team was cut off: it carries on on the server. */
+const newTeamCarriesOn = ref('');
 
 const draftTitle = ref('');
 const draftBody = ref('');
@@ -760,6 +767,7 @@ function openDispatch(row: BacklogItemView) {
 
   dispatchTarget.value = row;
   errorText.value = '';
+  newTeamCarriesOn.value = '';
   dispatchConfirm.value = false;
   dispatchToNew.value = false;
   newTeamLocalRepository.value = true;
@@ -874,6 +882,8 @@ async function dispatchIntoNewTeam() {
   if (dispatchTarget.value === null || newTeamSettings.value === null) return;
 
   errorText.value = '';
+  newTeamCarriesOn.value = '';
+  creatingNewTeam.value = newTeamName.value.trim();
   busy.value = true;
 
   const settings = newTeamSettings.value;
@@ -947,6 +957,13 @@ async function dispatchIntoNewTeam() {
     }
 
     clearNewTeamRefusal();
+
+    // A WAIT THAT WAS CUT OFF IS NOT A FAILURE: the Host finishes the create and the dispatch.
+    if (waitWasCutOff(cause)) {
+      newTeamCarriesOn.value = carriesOnMessage(creatingNewTeam.value);
+      return;
+    }
+
     errorText.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     busy.value = false;
@@ -1583,6 +1600,17 @@ function down(index: number) {
             :busy="busy"
             @choose="chooseForNewTeam"
           />
+
+          <!-- A LARGE CLONE TAKES MINUTES, and a spinning button alone reads as stuck. -->
+          <q-banner
+            v-if="busy && dispatchToNew" dense class="os-bg-tint-info q-mt-md" data-testid="create-progress"
+          >
+            {{ creatingLine(creatingNewTeam) }}
+          </q-banner>
+
+          <q-banner v-if="newTeamCarriesOn" dense class="os-bg-tint-info q-mt-md" data-testid="create-carries-on">
+            {{ newTeamCarriesOn }}
+          </q-banner>
 
           <q-banner v-if="errorText" dense class="os-bg-tint-error text-negative q-mt-md">
             {{ errorText }}
