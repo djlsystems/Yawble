@@ -46,6 +46,56 @@ public static class SolutionSamples
         return target;
     }
 
+    /// <summary>
+    /// A small neutral package under <paramref name="parent"/>: one plugin member whose plugin
+    /// <paramref name="pluginId"/> reads <paramref name="reads"/> (site/collection pairs), and the
+    /// sites <paramref name="sites"/>, each a one-page folder. Answers the package folder.
+    /// </summary>
+    public static string Neutral(
+        string parent, string pluginId, IReadOnlyList<string> sites, IReadOnlyList<(string Site, string Collection)> reads,
+        string version = "1.0.0")
+    {
+        var target = Path.Combine(parent, $"{pluginId}-{version}");
+        var plugin = Path.Combine(target, "plugins", pluginId);
+        Directory.CreateDirectory(Path.Combine(plugin, "bin"));
+
+        File.WriteAllText(Path.Combine(target, "solution.json"), new JsonObject
+        {
+            ["format"] = 1,
+            ["id"] = pluginId + "-pack",
+            ["name"] = "Pack " + pluginId,
+            ["version"] = version,
+            ["description"] = "A neutral test package.",
+            ["team"] = new JsonObject { ["name"] = "Pack " + pluginId, ["instructions"] = "Keep the board." },
+            ["members"] = new JsonArray(new JsonObject { ["name"] = "Keeper", ["pluginId"] = pluginId }),
+            ["sites"] = new JsonArray([.. sites.Select(site => (JsonNode)site)]),
+        }.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+        File.WriteAllText(Path.Combine(plugin, "plugin.json"), new JsonObject
+        {
+            ["schemaVersion"] = 1,
+            ["id"] = pluginId,
+            ["name"] = "Keeper " + pluginId,
+            ["description"] = "Reads its team's board.",
+            ["version"] = "0.1.0",
+            ["protocol"] = "harness.member/1",
+            ["executable"] = new JsonObject { ["path"] = "bin/run" },
+            ["reads"] = new JsonArray([.. reads.Select(r => (JsonNode)new JsonObject { ["site"] = r.Site, ["collection"] = r.Collection })]),
+        }.ToJsonString());
+
+        var executable = Path.Combine(plugin, "bin", "run");
+        File.WriteAllText(executable, "#!/bin/sh\ncat >/dev/null; echo '{\"t\":\"result\",\"ok\":true}'\n");
+        File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        foreach (var site in sites)
+        {
+            Directory.CreateDirectory(Path.Combine(target, "sites", site));
+            File.WriteAllText(Path.Combine(target, "sites", site, "index.html"), "<!doctype html><title>Board</title>\n");
+        }
+
+        return target;
+    }
+
     /// <summary>Changes the copy's <c>solution.json</c> in place.</summary>
     public static void Edit(string package, Action<JsonObject> change) =>
         EditJson(Path.Combine(package, "solution.json"), change);
