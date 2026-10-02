@@ -15,6 +15,9 @@ export function publishSteering(correlationId: number | null): void {
 import type {
   Agent,
   AgentAuthReport,
+  AgentCredential,
+  AgentCredentialStatus,
+  IssuedCredentialKind,
   AgentToolsReport,
   AgentUpdateState,
   BacklogDispatchView,
@@ -1562,6 +1565,27 @@ export const listCatalog = () => json<Catalog>('/api/agents')
  * false alarm.
  */
 export const getAgentAuth = () => json<AgentAuthReport[]>('/api/agents/auth')
+
+/**
+ * Each model preset's credential source and its command's issued credential: whether one is set, by
+ * whom and when. NEVER the value - no route sends it, and nothing here could show it.
+ */
+export const getAgentCredentials = () => json<AgentCredential[]>('/api/agents/credentials')
+
+/**
+ * Sets or replaces the credential of a preset's command. `name` is a preset or a command; either way
+ * the ONE value stored for the command changes, for every preset that runs it.
+ */
+export const setAgentCredential = (name: string, body: { kind: IssuedCredentialKind['kind']; value: string }) =>
+  json<AgentCredentialStatus>(`/api/agents/${encodeURIComponent(name)}/credential`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+/** Clears the credential of a preset's command. Clearing one that is not set is not an error. */
+export const clearAgentCredential = (name: string) =>
+  json<AgentCredentialStatus>(`/api/agents/${encodeURIComponent(name)}/credential`, { method: 'DELETE' })
 
 /** Asks the platform to update a preset's CLI. ANSWERED AT ONCE with the update's state: it waits in
  *  the Host's gate for that CLI's runs in flight and holds new ones, and is read back with

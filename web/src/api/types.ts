@@ -1779,6 +1779,58 @@ export interface AgentAuthReport {
    * the Agents screen, not a problem on every page.
    */
   referenced: boolean
+
+  /**
+   * How the preset signs in: `home` through the shared home, `issued` through the credential stored
+   * for its command. Absent from an older server, which reads as not known rather than as home.
+   */
+  source?: AgentCredentialSource
+}
+
+/** How a preset signs in. Chosen per preset in the tenant setting `agents.credentialSource`. */
+export type AgentCredentialSource = 'home' | 'issued'
+
+/** One kind of credential a preset declares, and the variable its CLI reads it from. */
+export interface IssuedCredentialKind {
+  kind: 'apiKey' | 'token'
+  variable: string
+}
+
+/**
+ * A preset's issued-credential declaration. `loginPrecedence` is which credential its CLI uses when a
+ * login also exists in the shared home - what the Concierge, which keeps that home, actually runs on.
+ */
+export interface IssuedCredentialDeclaration {
+  kinds: IssuedCredentialKind[]
+  displaces: string[]
+  loginPrecedence: 'credential' | 'login' | 'unmeasured'
+  measuredWith: string
+}
+
+/**
+ * One model preset as `GET /api/agents/credentials` answers it.
+ *
+ * TWO SCOPES ON ONE ROW. `source` is this preset's own choice; `set`, `setBy` and `setAt` are its
+ * COMMAND'S, since one credential is stored per command and shared by every preset that runs it -
+ * `sharedWith` names the others. No answer ever carries the value or any part of it.
+ */
+export interface AgentCredential {
+  agent: string
+  command: string
+  sharedWith: string[]
+  source: AgentCredentialSource
+  issuedCredential: IssuedCredentialDeclaration | null
+  set: boolean
+  setBy: string | null
+  setAt: string | null
+}
+
+/** What `PUT` and `DELETE /api/agents/{name}/credential` answer: the command's state after it. */
+export interface AgentCredentialStatus {
+  command: string
+  set: boolean
+  setBy: string | null
+  setAt: string | null
 }
 
 /** What `GET /api/agents` answers. Launch definitions only: the prompt an agent is told is chosen by

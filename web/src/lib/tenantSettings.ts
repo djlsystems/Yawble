@@ -32,6 +32,7 @@ export const WipMaxRunning = 'wip.maxRunning'
 export const KanbanWipLimits = 'kanban.wipLimits'
 export const SystemPackages = 'system.packages'
 export const AgentTags = 'agents.tags'
+export const AgentCredentialSources = 'agents.credentialSource'
 
 /** This sentence is put in front of a person, word for word. */
 export const SystemPackagesRestartSentence = 'Adding one costs a restart, not an image rebuild.'
@@ -179,6 +180,31 @@ export function tagMapOf(value: unknown): Record<string, string[]> {
   const map: Record<string, string[]> = {}
   for (const [preset, tags] of Object.entries(parsed as Record<string, unknown>)) {
     if (Array.isArray(tags)) map[preset] = tags.filter((tag): tag is string => typeof tag === 'string')
+  }
+
+  return map
+}
+
+/**
+ * `agents.credentialSource` read tolerantly: an object of preset name to `home` or `issued`, or a
+ * JSON string of one. Anything else in it is dropped rather than shown. Absent means home.
+ */
+export function sourceMapOf(value: unknown): Record<string, 'home' | 'issued'> {
+  let parsed = value
+
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return {}
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+
+  const map: Record<string, 'home' | 'issued'> = {}
+  for (const [preset, source] of Object.entries(parsed as Record<string, unknown>)) {
+    if (source === 'home' || source === 'issued') map[preset] = source
   }
 
   return map

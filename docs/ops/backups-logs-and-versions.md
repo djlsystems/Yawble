@@ -107,6 +107,8 @@ yawble restore yawble-backup-20260928-101500.tar.gz
 3. `yawble restore <file>`.
 4. Set again the keys `restore` listed, with `yawble secret set NAME` (and `yawble github` for `GH_TOKEN`), then `yawble up`.
 
+**Issued agent credentials survive a restore only with `keys/`.** Each is stored once per CLI command, as Data Protection ciphertext in the database, and decrypts only with the key ring in `/data/keys`. `yawble backup` carries both, so `yawble restore` keeps them. A database restored without that key ring reads every issued credential as not set: a member run on an `issued` preset does not start until it is set again in Admin → Agents or with `yawble agents credential set <preset|command>`. Each preset's source (`agents.credentialSource`) is a setting in the database and comes back either way. You are responsible for your provider's terms when one credential is used by many runs.
+
 To switch engines on the same computer: `yawble backup`, then `yawble uninstall --keep-settings --data`, then `yawble config set engine docker` (or `podman`), then `yawble restore <file>`. The `--keep-settings` flag keeps your keys and port. The uninstall deletes the volume, so check that the backup was written first.
 
 ## Logs

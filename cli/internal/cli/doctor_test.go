@@ -495,3 +495,25 @@ func TestDoctorPrintsNoFormulaDerivedFigure(t *testing.T) {
 		}
 	}
 }
+
+// The doctor's agents row carries each source; an issued agent with no credential set warns.
+func TestDoctorShowsEachCredentialSource(t *testing.T) {
+	signedIn := strings.Replace(doctorStdout, `"authenticated":false,"detail":"exit 1"`, `"authenticated":true,"detail":"ok"`, 1)
+	for _, c := range []struct{ codex, want, verdict string }{
+		{`"credentialSource":"home","issuedSet":null`, "codex signed in, source home, launch not known", "ok"},
+		{`"credentialSource":"issued","issuedSet":true`, "codex signed in, source issued (set), launch not known", "ok"},
+		{`"credentialSource":"issued","issuedSet":false`, "codex signed in, source issued (NOT set), launch not known", "warn"},
+	} {
+		stdout := strings.Replace(signedIn, `"credentialVariable":"OPENAI_API_KEY"}`, `"credentialVariable":"OPENAI_API_KEY",`+c.codex+`}`, 1)
+		s := runningScript()
+		s.On(doctorExec, engine.Result{Stdout: stdout})
+		_, out, _ := run(t, stubbed(s), "doctor", "--json")
+		v, detail, fix := verdict(t, parseDoctor(t, out), "agents")
+		if v != c.verdict || detail != "claude signed in, launch not known · "+c.want {
+			t.Errorf("agents row %s %q, want %s %q", v, detail, c.verdict, c.want)
+		}
+		if v == "warn" && fix != "yawble agents" {
+			t.Errorf("an issued agent with no credential should point at yawble agents, got %q", fix)
+		}
+	}
+}

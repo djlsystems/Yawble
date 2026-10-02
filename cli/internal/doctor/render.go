@@ -41,6 +41,9 @@ func RenderAgents(w io.Writer, agents []Agent) {
 		default:
 			fmt.Fprintln(w, "  signed in   NO")
 		}
+		if source := a.SourceText(); source != "" {
+			fmt.Fprintf(w, "  source      %s\n", source)
+		}
 		if a.Installed {
 			fmt.Fprintf(w, "  launch      %s\n", a.LaunchText())
 			if l := a.Launch; l != nil {

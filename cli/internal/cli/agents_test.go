@@ -157,3 +157,65 @@ func TestDoctorShowsEachLaunchBesideTheSignIn(t *testing.T) {
 		}
 	}
 }
+
+// sourced is agentsStdout from a Host that reports each agent's credential source: claude on the
+// shared home, codex issued with its credential set, copilot issued with none set.
+func sourced() string {
+	return strings.NewReplacer(
+		`"credentialVariable":"ANTHROPIC_API_KEY"}`, `"credentialVariable":"ANTHROPIC_API_KEY","credentialSource":"home","issuedSet":null}`,
+		`"authenticated":false,"detail":"The status command exited 1.","credentialVariable":"OPENAI_API_KEY"}`,
+		`"authenticated":true,"detail":"issued API key set","credentialVariable":"OPENAI_API_KEY","credentialSource":"issued","issuedSet":true}`,
+		`"authenticated":null,"detail":"no probe","credentialVariable":"GH_TOKEN"}`,
+		`"authenticated":false,"detail":"issued credential not set","credentialVariable":"GH_TOKEN","credentialSource":"issued","issuedSet":false}`,
+	).Replace(agentsStdout)
+}
+
+// Each agent shows its source; an issued one says whether its command's credential is set, and the
+// hint for one with none set is the credential command, not a home sign-in.
+func TestAgentsShowsEachSourceAndTheIssuedHint(t *testing.T) {
+	s := runningScript()
+	s.On(doctorExec, engine.Result{Stdout: sourced()})
+	code, out, errOut := run(t, stubbed(s), "agents")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	blocks := map[string]string{}
+	for _, block := range strings.Split(out, "\n\n") {
+		name, _, _ := strings.Cut(block, "\n")
+		blocks[name] = block
+	}
+	for agent, want := range map[string]string{
+		"claude":  "  source      home",
+		"codex":   "  source      issued (set)",
+		"copilot": "  source      issued (NOT set)",
+	} {
+		if !strings.Contains(blocks[agent], want) {
+			t.Errorf("%s lacks %q:\n%s", agent, want, blocks[agent])
+		}
+	}
+	if !strings.Contains(blocks["copilot"], "to fix      its source is issued and no credential is set: yawble agents credential set copilot") {
+		t.Errorf("copilot's hint:\n%s", blocks["copilot"])
+	}
+	if strings.Contains(blocks["copilot"], "Concierge") || strings.Contains(blocks["codex"], "to fix") {
+		t.Errorf("an issued agent was sent to the shared home, or a set one given a fix:\n%s", out)
+	}
+	if strings.Contains(blocks["newcomer"], "source") {
+		t.Errorf("an agent the Host gave no source shows one:\n%s", blocks["newcomer"])
+	}
+
+	s = runningScript()
+	s.On(doctorExec, engine.Result{Stdout: sourced()})
+	_, out, _ = run(t, stubbed(s), "agents", "--json")
+	var got []struct {
+		Agent            string  `json:"agent"`
+		CredentialSource *string `json:"credentialSource"`
+		IssuedSet        *bool   `json:"issuedSet"`
+		Hint             string  `json:"hint"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("not json: %v\n%s", err, out)
+	}
+	if *got[2].CredentialSource != "issued" || got[2].IssuedSet == nil || *got[2].IssuedSet || !strings.Contains(got[2].Hint, "yawble agents credential set copilot") {
+		t.Errorf("copilot %+v", got[2])
+	}
+}

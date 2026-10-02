@@ -4,7 +4,7 @@ import { useQuasar } from 'quasar';
 import * as api from '../api/client';
 import { type Agent } from '../api/types';
 import { visibleAgents } from '../lib/hiddenAgents';
-import { AgentTags, tagMapOf } from '../lib/tenantSettings';
+import { AgentCredentialSources, AgentTags, sourceMapOf, tagMapOf } from '../lib/tenantSettings';
 import {
   installGuidance,
   installStatus,
@@ -12,10 +12,20 @@ import {
   isNotInstalled,
 } from '../lib/agentInstall';
 import { useAgentInstallations } from '../lib/useAgentInstallations';
-import { authReportFor, authStatus, refreshAgentAuth, useAgentAuth } from '../lib/useAgentAuth';
+import { authReportFor, authStatus, refreshAgentAuth, sourceLabel, useAgentAuth } from '../lib/useAgentAuth';
+import {
+  ProviderTermsSentence,
+  conciergeLine,
+  credentialFor,
+  credentialState,
+  kindLabel,
+  sharedLine,
+  withCredentialStatus,
+  withSource,
+} from '../lib/agentCredentials';
 import { toolsReportFor, toolsStatus } from '../lib/agentTools';
 import { cliVersionFor, heldLine, updateInGate, updateStateLine, versionLine, withCliVersion } from '../lib/agentVersions';
-import type { AgentUpdateState, CliVersion, PresetToolReport } from '../api/types';
+import type { AgentCredential, AgentCredentialSource, AgentUpdateState, CliVersion, PresetToolReport } from '../api/types';
 import AgentEditDialog from './AgentEditDialog.vue';
 
 /**
@@ -77,6 +87,140 @@ const statusOf = (agent: Agent) => installStatus(installationFor(installations.v
 
 /** The sign-in caption. `Not measured` is grey and never a warning - see `authStatus`. */
 const authOf = (agent: Agent) => authStatus(authReportFor(authReports.value, agent.name));
+const authSourceOf = (agent: Agent) => sourceLabel(authReportFor(authReports.value, agent.name));
+
+/**
+ * Each model preset's credential source and its command's issued credential, from
+ * `GET /api/agents/credentials`. Beside the catalog for `installations`' reason: the source is the
+ * tenant setting `agents.credentialSource` and the credential is the Host's store, and neither may
+ * be folded into an `Agent` that the wholesale save writes back. Empty when it could not be read,
+ * which shows no credential block rather than a wrong one.
+ *
+ * NO VALUE IS EVER HELD HERE. The Host answers set, by whom and when; the field a person types into
+ * is the only place a value exists in this screen, and it is emptied once it is saved.
+ */
+const credentials = ref<AgentCredential[]>([]);
+const credentialOf = (agent: Agent) => credentialFor(credentials.value, agent.name);
+const declared = (agent: Agent) => credentialOf(agent)?.issuedCredential != null;
+
+async function loadCredentials() {
+  try {
+    credentials.value = await api.getAgentCredentials();
+  } catch {
+    credentials.value = [];
+  }
+}
+
+/** The options of a row's source toggle: issued only where the preset declares a credential. */
+const sourceOptions = (agent: Agent) => [
+  { label: 'Shared home', value: 'home' },
+  { label: 'Issued', value: 'issued', disable: !declared(agent) },
+];
+
+/** The preset whose source is on its way to the Host, or null. */
+const sourceBusy = ref<string | null>(null);
+
+/**
+ * Writes `agents.credentialSource` as it will read after this change - the SOURCE IS THE PRESET'S, so
+ * only this preset's entry moves. The setting is one value, read fresh, and every other entry goes
+ * back as it was. Home is the entry's absence, which is what the Host reads as home.
+ */
+async function saveSource(agent: Agent, source: AgentCredentialSource) {
+  const entry = credentialOf(agent);
+  if (!entry || entry.source === source) return;
+  // The server refuses it too; this is so a person never sees the attempt.
+  if (source === 'issued' && !declared(agent)) return;
+
+  sourceBusy.value = agent.name;
+  error.value = '';
+
+  try {
+    const settings = await api.getTenantSettings();
+    const map = sourceMapOf(settings.settings.find((setting) => setting.name === AgentCredentialSources)?.value);
+
+    for (const key of Object.keys(map)) {
+      if (key.toLowerCase() === agent.name.toLowerCase()) delete map[key];
+    }
+
+    if (source === 'issued') map[agent.name] = 'issued';
+
+    await api.saveTenantSettings({ [AgentCredentialSources]: map });
+    credentials.value = withSource(credentials.value, agent.name, source);
+    $q.notify({
+      type: 'positive',
+      message: source === 'issued'
+        ? `${agent.name} signs in through its issued ${entry.command} credential.`
+        : `${agent.name} signs in through the shared home.`,
+    });
+    void refreshAgentAuth();
+  } catch (failure) {
+    // Verbatim, as a tags refusal is.
+    error.value = (failure as Error).message;
+  } finally {
+    sourceBusy.value = null;
+  }
+}
+
+// --- The credential of a preset's command -------------------------------------------------------
+
+/** The row the credential editor was opened from; the credential is its command's. */
+const credentialEditing = ref<AgentCredential | null>(null);
+const credentialKind = ref<'apiKey' | 'token'>('apiKey');
+const credentialValue = ref('');
+const clearCredential = ref(false);
+const credentialBusy = ref(false);
+const credentialProblem = ref('');
+
+function editCredential(agent: Agent) {
+  const entry = credentialOf(agent);
+  if (!entry?.issuedCredential) return;
+
+  credentialEditing.value = entry;
+  credentialKind.value = entry.issuedCredential.kinds[0]?.kind ?? 'apiKey';
+  // NEVER FILLED: the Host does not send the value, and a person replaces it by typing a new one.
+  credentialValue.value = '';
+  clearCredential.value = false;
+  credentialProblem.value = '';
+}
+
+const credentialKinds = computed(() => credentialEditing.value?.issuedCredential?.kinds ?? []);
+
+/**
+ * Left empty, the stored value is kept; "clear" removes it. Either write answers the COMMAND'S state,
+ * laid over every row of that command - the sibling preset's row included - since it is one value.
+ */
+async function saveCredential() {
+  const entry = credentialEditing.value;
+  if (!entry || credentialBusy.value) return;
+
+  if (!clearCredential.value && credentialValue.value === '') {
+    credentialEditing.value = null;
+    return;
+  }
+
+  credentialBusy.value = true;
+  credentialProblem.value = '';
+
+  try {
+    const status = clearCredential.value
+      ? await api.clearAgentCredential(entry.agent)
+      : await api.setAgentCredential(entry.agent, { kind: credentialKind.value, value: credentialValue.value });
+
+    credentialValue.value = '';
+    credentials.value = withCredentialStatus(credentials.value, status);
+    credentialEditing.value = null;
+    $q.notify({
+      type: 'positive',
+      message: status.set ? `The ${status.command} credential is saved.` : `The ${status.command} credential is cleared.`,
+    });
+    void refreshAgentAuth();
+  } catch (failure) {
+    // The server's words, which never repeat the value.
+    credentialProblem.value = (failure as Error).message;
+  } finally {
+    credentialBusy.value = false;
+  }
+}
 
 /**
  * What each preset's CLI would load, from the Host's last pre-flight (`GET /api/agents/tools`).
@@ -331,6 +475,8 @@ watch(open, (showing) => {
   // status command and is the slower of the two, and a list that waited for it would open blank.
   void refreshAgentAuth();
   void loadTools();
+  credentialEditing.value = null;
+  void loadCredentials();
 });
 
 onUnmounted(stopPolling);
@@ -499,7 +645,7 @@ async function resetTags(agent: Agent) {
 }
 
 const rowBusy = computed(
-  () => busy.value || formBusy.value || removing.value !== null || updating.value !== null,
+  () => busy.value || formBusy.value || removing.value !== null || updating.value !== null || sourceBusy.value !== null,
 );
 </script>
 
@@ -516,6 +662,8 @@ const rowBusy = computed(
         How each CLI is launched. Built-in Agents come with this build: open one to see its whole
         launch, read-only apart from its tags, which hiring matches on, or clone it to make your own
         with a different launch. What an agent is told comes with this build, by its role.
+        Each preset signs in through the shared home or through the one credential issued for its
+        command. {{ ProviderTermsSentence }}
       </q-card-section>
 
       <!-- THE FILTER: free text over name, command, arguments, mode and tags, and one checkbox per
@@ -653,6 +801,55 @@ const rowBusy = computed(
                 }"
               >{{ authOf(agent).text }}</span>
               <span v-if="authOf(agent).detail" class="os-text-muted">{{ authOf(agent).detail }}</span>
+              <span v-if="authSourceOf(agent)" class="os-text-muted agent-auth-source">· {{ authSourceOf(agent) }}</span>
+            </div>
+
+            <!-- THE CREDENTIAL SOURCE, the preset's own, and its COMMAND'S credential, shared by every
+                 preset that runs it: who set it and when, never a value. -->
+            <div
+              v-if="credentialOf(agent)"
+              class="agent-tile-line agent-credential"
+              :data-agent-credential="agent.name"
+            >
+              <div class="agent-source">
+                <span class="os-text-muted">Signs in through</span>
+                <q-btn-toggle
+                  :model-value="credentialOf(agent)!.source"
+                  :options="sourceOptions(agent)"
+                  dense
+                  no-caps
+                  unelevated
+                  size="sm"
+                  toggle-color="primary"
+                  :disable="rowBusy"
+                  :aria-label="`Credential source ${agent.name}`"
+                  data-credential-source
+                  @update:model-value="(source: AgentCredentialSource) => saveSource(agent, source)"
+                />
+              </div>
+              <div v-if="!declared(agent)" class="os-text-muted" data-no-declaration>
+                This preset declares no issued credential: it signs in through the shared home only.
+              </div>
+              <template v-else>
+                <div data-credential-state>
+                  <q-icon name="key" size="14px" class="q-mr-xs" aria-hidden="true" />
+                  <span class="mono">{{ credentialOf(agent)!.command }}</span> credential:
+                  <span :class="credentialOf(agent)!.set ? 'text-positive' : 'os-text-muted'">
+                    {{ credentialState(credentialOf(agent)!) }}
+                  </span>
+                </div>
+                <div class="os-text-muted" data-credential-shared>{{ sharedLine(credentialOf(agent)!) }}</div>
+                <div
+                  v-if="credentialOf(agent)!.source === 'issued' && !credentialOf(agent)!.set"
+                  class="text-warning"
+                  data-credential-missing
+                >
+                  Not set: its member runs do not start until one is. The Concierge starts on the person's own login.
+                </div>
+                <div v-if="agent.mode !== 'Headless'" class="os-text-muted" data-concierge-line>
+                  {{ conciergeLine(credentialOf(agent)!.issuedCredential!) }}
+                </div>
+              </template>
             </div>
 
             <!-- What this preset's CLI would load, as the Host listed it. Its gaps are counted here
@@ -683,6 +880,19 @@ const rowBusy = computed(
             <div class="agent-tile-actions">
               <span v-if="isBuiltIn(agent)" class="os-text-muted agent-read-only q-mr-auto">
                 <q-icon name="lock" size="14px" aria-hidden="true" /> Read-only
+              </span>
+
+              <span v-if="declared(agent)" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="key"
+                  :disable="rowBusy"
+                  :aria-label="`Credential ${agent.name}`"
+                  @click="editCredential(agent)"
+                />
+                <q-tooltip>Set, replace or clear the {{ credentialOf(agent)?.command }} credential</q-tooltip>
               </span>
 
               <span v-if="canUpdate(agent)" class="row-btn-wrap">
@@ -790,6 +1000,62 @@ const rowBusy = computed(
     @save-tags="saveDetailsTags"
     @reset-tags="resetDetailsTags"
   />
+
+  <!-- THE CREDENTIAL EDITOR, write-only as Connections' client secret is: the field is never filled,
+       empty keeps what is stored, clearing is a checkbox, and the field is emptied once it is saved. -->
+  <q-dialog :model-value="credentialEditing !== null" @update:model-value="credentialEditing = null">
+    <q-card v-if="credentialEditing" class="os-dialog-sm" data-credential-editor>
+      <q-card-section class="os-dialog-title">The {{ credentialEditing.command }} credential</q-card-section>
+
+      <q-card-section class="q-pt-none column q-gutter-sm">
+        <div class="os-text-muted">
+          Stored once for <span class="mono">{{ credentialEditing.command }}</span>.
+          {{ sharedLine(credentialEditing) }} A preset uses it when its source is Issued.
+        </div>
+        <div data-credential-editor-state>Now: {{ credentialState(credentialEditing) }}</div>
+
+        <q-option-group
+          v-if="credentialKinds.length > 1"
+          v-model="credentialKind"
+          :options="credentialKinds.map((k) => ({ label: `${kindLabel(k.kind)} (${k.variable})`, value: k.kind }))"
+          :disable="clearCredential"
+          dense
+          inline
+        />
+        <q-input
+          v-model="credentialValue"
+          outlined
+          dense
+          type="password"
+          :label="kindLabel(credentialKind)"
+          :hint="credentialEditing.set
+            ? 'Set. Leave empty to keep it; type a new one to replace it.'
+            : 'Not set.'"
+          :disable="clearCredential"
+          autocomplete="new-password"
+          spellcheck="false"
+          data-credential-input
+        >
+          <template v-if="credentialEditing.set" #append>
+            <q-badge outline color="positive" label="set" data-credential-set />
+          </template>
+        </q-input>
+        <q-checkbox
+          v-if="credentialEditing.set"
+          v-model="clearCredential"
+          dense
+          :label="`Clear it, for every preset that runs ${credentialEditing.command}`"
+        />
+        <div class="os-text-muted" data-provider-terms>{{ ProviderTermsSentence }}</div>
+        <div v-if="credentialProblem" class="text-negative" data-credential-problem>{{ credentialProblem }}</div>
+      </q-card-section>
+
+      <q-card-actions align="right">
+        <q-btn flat no-caps label="Cancel" :disable="credentialBusy" @click="credentialEditing = null" />
+        <q-btn unelevated color="primary" no-caps label="Save" :loading="credentialBusy" @click="saveCredential" />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
 
   <!-- Its own `q-dialog` in this template rather than `$q.dialog()`. The plugin's `class` option
        lands on the inner card and not on the dialog root, so a confirmation opened this way cannot
@@ -914,6 +1180,22 @@ const rowBusy = computed(
   flex-wrap: wrap;
   align-items: center;
   gap: 0 0.35rem;
+}
+
+/* The credential block wraps: its sentences are the part a person reads. */
+.agent-credential {
+  white-space: normal;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.agent-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.5rem;
 }
 
 /* The sign-in caption wraps for the same reason: the probe's sentence is the part worth reading

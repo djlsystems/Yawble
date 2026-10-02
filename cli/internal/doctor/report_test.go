@@ -47,3 +47,24 @@ func TestProseWithoutJsonIsAnErrorSayingTheImagePredatesDoctor(t *testing.T) {
 		t.Error("empty stdout must be an error")
 	}
 }
+
+// A Host that reports sources gives each agent its source and, under issued, whether its command's
+// credential is set; an older Host gives neither, and no source is shown.
+func TestParseHostReportReadsTheCredentialSource(t *testing.T) {
+	r, err := doctor.ParseHostReport(`{"agents":[` +
+		`{"agent":"claude","installed":true,"detail":"x","credentialSource":"home","issuedSet":null},` +
+		`{"agent":"claude-headless","installed":true,"detail":"x","credentialSource":"issued","issuedSet":true},` +
+		`{"agent":"copilot","installed":true,"detail":"x","credentialSource":"issued","issuedSet":false},` +
+		`{"agent":"grok","installed":true,"detail":"x"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"home", "issued (set)", "issued (NOT set)", ""} {
+		if got := r.Agents[i].SourceText(); got != want {
+			t.Errorf("%s: %q, want %q", r.Agents[i].Agent, got, want)
+		}
+	}
+	if r.Agents[0].Issued() || !r.Agents[1].Issued() || r.Agents[0].IssuedSet != nil || r.Agents[3].CredentialSource != nil {
+		t.Errorf("agents %+v", r.Agents)
+	}
+}
