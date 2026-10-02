@@ -96,9 +96,11 @@ public sealed class WorkerProcessTests
             (await bed.RowsOfAsync(team, "BlockOne", MessageTypes.Completed)).Count >= 1
             && (await bed.RowsOfAsync(team, "BlockTwo", MessageTypes.Completed)).Count >= 1);
 
-        // None was ever on A: no run's process descends from it.
-        Assert.All(bed.FakeRuns(), run => Assert.DoesNotContain(workerA.Pid, run.Chain));
-        Assert.All(bed.FakeRuns().Where(r => r.Member.StartsWith("Block")), run => Assert.Contains(workerB.Pid, run.Chain));
+        // No member's run was ever on A: none of their processes descends from it. (The Manager is never
+        // held for memory, so a Manager's run woken meanwhile takes the worker with the most headroom, A.)
+        var members = bed.FakeRuns().Where(r => r.Member.StartsWith("Block")).ToList();
+        Assert.All(members, run => Assert.DoesNotContain(workerA.Pid, run.Chain));
+        Assert.All(members, run => Assert.Contains(workerB.Pid, run.Chain));
     }
 
     [Fact]
