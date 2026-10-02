@@ -272,7 +272,13 @@ public sealed class AgentToolPreflight(
 
         try
         {
-            var member = new SortedDictionary<string, string>(environment.ToDictionary(), StringComparer.Ordinal) { ["HOME"] = home };
+            // The cache beside the listing homes, kept across listings as a member's is across its
+            // runs, so a fresh home does not unpack a CLI's cache on every listing.
+            var member = new SortedDictionary<string, string>(environment.ToDictionary(), StringComparer.Ordinal)
+            {
+                ["HOME"] = home,
+                ["XDG_CACHE_HOME"] = RunHome.CacheBeside(home),
+            };
             return await AgentToolListers.ListAsync(command, arguments, member, runner, ct, credential);
         }
         finally

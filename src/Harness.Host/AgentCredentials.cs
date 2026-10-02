@@ -20,6 +20,10 @@ namespace Harness.Host;
 public sealed class AgentCredentials(
     AgentCatalog catalog, AgentCredentialStore store, TenantSettings settings, AgentAuthProbe? probe = null)
 {
+    /// <summary>The refusal for a name nothing answers to. Fixed, never quoting the name: a value
+    /// typed where the name goes would otherwise come back on stderr, in a response or a log.</summary>
+    public const string NotFound = "No agent preset or command by that name.";
+
     /// <summary>Raised after a command's credential or a preset's source changes. Never carries the value.</summary>
     public event Action? Changed;
 
@@ -96,14 +100,14 @@ public sealed class AgentCredentials(
     /// <summary>Clears the credential of <paramref name="name"/>'s command. Nothing set answers the same, and writes no row.</summary>
     public async Task<(int Status, object Body)> ClearAsync(string name, CredentialActor actor, CancellationToken ct)
     {
-        if (Resolve(name) is not ({ } command, not null))
+        if (Resolve(name) is not ({ } command, { } declaration))
         {
             return Refusal(name);
         }
 
         try
         {
-            await store.ClearAsync(command, actor, ct);
+            await store.ClearAsync(command, actor, ct, declaration);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -133,7 +137,7 @@ public sealed class AgentCredentials(
     {
         if (catalog.Definition(preset) is not { } definition)
         {
-            return (404, Error($"'{preset}' is not an Agent preset this instance has."));
+            return (404, Error(NotFound));
         }
 
         var map = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -227,7 +231,7 @@ public sealed class AgentCredentials(
 
     private (int Status, object Body) Refusal(string name) => Resolve(name) switch
     {
-        (null, _) => (404, Error($"'{name}' is neither an Agent preset nor a command one launches.")),
+        (null, _) => (404, Error(NotFound)),
         var (command, _) => (400, Error(
             $"`{command}` takes no issued credential: no preset launching it declares one, so it signs in only through the shared home.")),
     };

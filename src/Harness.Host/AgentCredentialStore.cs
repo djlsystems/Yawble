@@ -155,30 +155,38 @@ public sealed class AgentCredentialStore(string databasePath, IDataProtectionPro
 
     /// <summary>
     /// Clears <paramref name="command"/>'s credential with its
-    /// <see cref="TenantActions.AgentCredentialCleared"/> row in the same transaction. Nothing set
-    /// changes nothing and writes no row. Throws, clearing nothing, when the row cannot be written.
+    /// <see cref="TenantActions.AgentCredentialCleared"/> row in the same transaction, naming the
+    /// command, the kind that was set and its variable in <paramref name="declaration"/>, as the set
+    /// row does. Nothing set changes nothing and writes no row. Throws, clearing nothing, when the
+    /// row cannot be written.
     /// </summary>
-    public async Task ClearAsync(string command, CredentialActor actor, CancellationToken ct = default)
+    public async Task ClearAsync(
+        string command, CredentialActor actor, CancellationToken ct = default, IssuedCredential? declaration = null)
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
+        string kind;
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
-            delete.CommandText = "DELETE FROM agent_credentials WHERE command = $command";
+            delete.CommandText = "DELETE FROM agent_credentials WHERE command = $command RETURNING kind";
             delete.Parameters.AddWithValue("$command", command);
 
-            if (await delete.ExecuteNonQueryAsync(ct) == 0)
+            if (await delete.ExecuteScalarAsync(ct) is not string deleted)
             {
                 await transaction.RollbackAsync(ct);
                 return;
             }
+
+            kind = deleted;
         }
+
+        var variable = declaration?.Kinds.FirstOrDefault(k => string.Equals(k.Kind, kind, StringComparison.Ordinal))?.Variable;
 
         await TenantAuditRow.AppendAsync(connection, transaction, new TriggerAudit(
             actor.Id, actor.Email, TenantActions.AgentCredentialCleared, command, command,
-            JsonSerializer.Serialize(new { command })), ct);
+            JsonSerializer.Serialize(new { command, kind, variable })), ct);
 
         await transaction.CommitAsync(ct);
     }
