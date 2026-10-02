@@ -17,11 +17,12 @@ import { describe, expect, it } from 'vitest';
  */
 const componentsDirectory = join(import.meta.dirname, '..');
 
-/** Every `.vue` file beside this spec's parent directory. */
-function components(): string[] {
-  return readdirSync(componentsDirectory)
-    .filter((name) => name.endsWith('.vue'))
-    .map((name) => join(componentsDirectory, name));
+/** Every `.vue` file under this spec's parent directory, subfolders included. */
+function components(directory = componentsDirectory): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return entry.name === '__tests__' ? [] : components(join(directory, entry.name));
+    return entry.name.endsWith('.vue') ? [join(directory, entry.name)] : [];
+  });
 }
 
 /**

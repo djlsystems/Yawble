@@ -5,9 +5,11 @@ import {
   computeInitialWindowGeometry,
   DefaultTerminalDisplay,
   readTerminalDisplay,
+  TerminalDisplayStorageKey,
   writeTerminalDisplay,
   type TerminalDisplay,
 } from '../lib/terminalDisplay';
+import { isPlaced, readStored } from '../lib/windowGeometry';
 
 /**
  * How this viewer wants the terminal displayed.
@@ -86,58 +88,34 @@ export const useTerminalDisplayStore = defineStore('terminalDisplay', {
      * Placed includes left:0 / top:0 (user may have dragged window to top-left).
      */
     initializeGeometryIfNeeded(viewportWidth: number, viewportHeight: number) {
-      // Check raw storage for key presence and own properties - don't rely on clamped values
-      try {
-        const rawStored = localStorage.getItem('harness.terminalDisplay');
-        
-        // Unplaced: no storage key at all
-        if (!rawStored) {
-          const geometry = computeInitialWindowGeometry(viewportWidth, viewportHeight);
-          this.set(geometry);
-          return;
-        }
+      // Read from RAW storage for own `left`/`top` - never from the clamped state, which always has
+      // both. Unreadable storage reads as nothing stored, so it is unplaced too.
+      if (!isPlaced(readStored(TerminalDisplayStorageKey))) {
+        this.set(computeInitialWindowGeometry(viewportWidth, viewportHeight));
+        return;
+      }
 
-        // Parse raw JSON to check own properties
-        const parsed = JSON.parse(rawStored);
-        
-        // Unplaced: missing left and/or top as own properties in raw storage
-        if (
-          typeof parsed !== 'object' ||
-          parsed === null ||
-          !Object.prototype.hasOwnProperty.call(parsed, 'left') ||
-          !Object.prototype.hasOwnProperty.call(parsed, 'top')
-        ) {
-          const geometry = computeInitialWindowGeometry(viewportWidth, viewportHeight);
-          this.set(geometry);
-          return;
-        }
+      // Placed: has both left and top keys. Clamp to viewport if it overflowed.
+      // This keeps user-placed windows even if viewport changed, instead of jumping to default.
+      const current = {
+        fontFamily: this.fontFamily,
+        fontSize: this.fontSize,
+        maximised: this.maximised,
+        width: this.width,
+        height: this.height,
+        left: this.left,
+        top: this.top,
+      };
 
-        // Placed: has both left and top keys. Clamp to viewport if it overflowed.
-        // This keeps user-placed windows even if viewport changed, instead of jumping to default.
-        const current = {
-          fontFamily: this.fontFamily,
-          fontSize: this.fontSize,
-          maximised: this.maximised,
-          width: this.width,
-          height: this.height,
-          left: this.left,
-          top: this.top,
-        };
-        
-        // Only clamp if needed, don't reinitialize
-        const clamped = clampTerminalDisplayToViewport(current, viewportWidth, viewportHeight);
-        if (
-          clamped.left !== current.left ||
-          clamped.top !== current.top ||
-          clamped.width !== current.width ||
-          clamped.height !== current.height
-        ) {
-          this.set(clamped);
-        }
-      } catch {
-        // On any error reading storage, treat as unplaced
-        const geometry = computeInitialWindowGeometry(viewportWidth, viewportHeight);
-        this.set(geometry);
+      // Only clamp if needed, don't reinitialize
+      const clamped = clampTerminalDisplayToViewport(current, viewportWidth, viewportHeight);
+      if (
+        clamped.left !== current.left ||
+        clamped.top !== current.top ||
+        clamped.width !== current.width ||
+        clamped.height !== current.height
+      ) {
+        this.set(clamped);
       }
     },
 
