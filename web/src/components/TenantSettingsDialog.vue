@@ -30,6 +30,7 @@ import {
 import { useKanbanStore } from '../stores/kanban';
 import { useWipStore } from '../stores/wip';
 import ConciergeAgentForm from './ConciergeAgentForm.vue';
+import ConciergeSessions from './ConciergeSessions.vue';
 import ConciergeDisplayForm from './ConciergeDisplayForm.vue';
 import TenantSettingField from './TenantSettingField.vue';
 
@@ -400,6 +401,8 @@ function holdText(hold: { team: string; member: string }) {
 
         <q-tab-panel name="concierge">
           <ConciergeAgentForm ref="conciergeForm" />
+          <q-separator class="q-my-md" />
+          <ConciergeSessions />
           <q-separator class="q-my-md" />
           <ConciergeDisplayForm />
           <q-separator class="q-my-md" />

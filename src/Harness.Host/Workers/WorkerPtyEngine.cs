@@ -132,6 +132,9 @@ public sealed class WorkerPtySession : IPtySession
     /// <summary>The worker this terminal runs on.</summary>
     public WorkerId Worker => _worker.Id;
 
+    /// <summary>The terminal's session id, as its worker names it.</summary>
+    public string Id => _id;
+
     public event Action<byte[]> Output
     {
         add

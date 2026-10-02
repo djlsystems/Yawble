@@ -804,7 +804,7 @@ builder.Services.AddSingleton(sp => InProcessWorker.Create(
     {
         await sp.GetRequiredService<WorkerAsks>().HandleAsync(envelope, ct);
         await sp.GetRequiredService<RunDirectory>().HandleAsync(envelope, ct);
-        if (envelope.Event is RunMeasured or WorkerCapacitySampled)
+        if (envelope.Event is RunMeasured or TerminalMeasured or WorkerCapacitySampled)
         {
             await sp.GetRequiredService<CapacitySampler>().HandleAsync(envelope, ct);
         }
@@ -1452,6 +1452,10 @@ builder.Services.AddSingleton(sp =>
     var catalog = sp.GetRequiredService<AgentCatalog>();
     var probe = sp.GetRequiredService<AgentAuthProbe>();
 
+    // The output floor each session must pass, from the preset it launched with: recorded against
+    // the staged spec's environment, which the store's own `with` for the size keeps.
+    var floors = new System.Runtime.CompilerServices.ConditionalWeakTable<IReadOnlyDictionary<string, string>, OutputFloor>();
+
     return new ConciergeSessionStore(
         sp.GetRequiredService<IPtyEngine>(),
         // Console config belongs to the TEAM, not a global setting: an embedded console for one
@@ -1479,23 +1483,29 @@ builder.Services.AddSingleton(sp =>
             // pin this person to the id-named folder the migration exists to retire.
             var account = await accounts.FindByIdAsync(key.User, ct);
 
+            var agent = await ConciergeAgentDefault.ResolveAsync(settings.Agent, catalog, probe, ct);
+
             // Resolved here, made into a terminal by the worker that runs it.
-            return terminals.Stage(await launcher.ResolveAsync(
+            var staged = terminals.Stage(await launcher.ResolveAsync(
                 stored ?? "",
                 stored is null ? "this instance" : teams.LabelFor(stored),
                 key.User,
                 account?.Email ?? string.Empty,
-                await ConciergeAgentDefault.ResolveAsync(settings.Agent, catalog, probe, ct),
+                agent,
                 teams.EnvFor(stored ?? ""),
                 SteeringFile.Read(dataRoot, key.User),
                 publicUrl,
                 ct));
+            if (staged.Env is { } environment) floors.AddOrUpdate(environment, OutputFloor.Of(catalog.Definition(agent)));
+            return staged;
         },
         // A Concierge's run is its session: a lease it took ends with it, through the same path
         // as a run's end, so a member the queue hands it to is un-paused and its card told.
         // And the images the person attached go with it, however it ended.
         sp.GetRequiredService<ConciergeAttachments>().RemovingOnEnd(
-            leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct))));
+            leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct))),
+        sp.GetRequiredService<TimeProvider>(),
+        spec => spec.Env is { } environment && floors.TryGetValue(environment, out var floor) ? floor : OutputFloor.PlatformDefault);
 });
 
 // HOW DEEP ONE CHAIN OF CAUSATION MAY GO before the platform stops it.
@@ -1523,7 +1533,7 @@ builder.Services.AddSingleton(sp =>
 // `causation.depthLimit`: read on every tell from `tenantSettings`, 0 meaning no limit.
 
 
-// How long a console may sit unattended before it is ended, and how often that is checked.
+// How long a console may sit unattended AND inactive before it is ended, and how often that is checked.
 //
 // Configurable for deployment AND for a demonstration: the default is far too long to sit through,
 // so setting ConciergeIdleTimeout to something like 00:02:00 is how a person watches this work.
@@ -1567,11 +1577,21 @@ var resumeSweepEnabled = !bool.TryParse(builder.Configuration["ResumeSweepEnable
 // had to know whether a background service exists would be a second thing to keep in step.
 builder.Services.AddSingleton<TriggerWakeSignal>();
 
-builder.Services.AddSingleton<IHostedService>(sp => new ConciergeReaper(
-    sp.GetRequiredService<ConciergeSessionStore>(),
-    () => tenantSettings.ConciergeIdleTimeout,
-    consoleSweep,
-    sp.GetRequiredService<ILogger<ConciergeReaper>>()));
+// The doctor's record of the running Concierge sessions, written once the app is built: after each
+// sweep, and when a session starts or ends.
+Action? recordConciergeSessions = null;
+builder.Services.AddSingleton<IHostedService>(sp =>
+{
+    var accounts = sp.GetRequiredService<IUserStore>();
+    return new ConciergeReaper(
+        sp.GetRequiredService<ConciergeSessionStore>(),
+        () => tenantSettings.ConciergeIdleTimeout,
+        consoleSweep,
+        sp.GetRequiredService<ILogger<ConciergeReaper>>(),
+        sp.GetRequiredService<ITenantLog>(),
+        async (user, ct) => (await accounts.FindByIdAsync(user, ct))?.Email,
+        () => recordConciergeSessions?.Invoke());
+});
 builder.Services.AddSingleton<QuietTeamSweep>();
 if (quietSweepEnabled)
 {
@@ -2337,6 +2357,10 @@ JsonBodyErrors.Use(app);
 // AFTER UseAuthorization, which is what populates context.User for a key-authenticated request.
 PrincipalLogScope.Use(app);
 
+// A call under a Concierge session's own credential is that session's activity while it runs,
+// /mcp included. AFTER UseAuthorization for the same reason.
+ConciergeCallClock.Use(app);
+
 // NoPermitRequired, and not an exemption from anything: every tool relays to an /api route with
 // the caller's own X-Api-Key (PlatformMcpTools.SendAsync), so TeamGate and PermitGate judge each
 // call on that route's own marker. RouteMarkerTests requires a marker here like everywhere else.
@@ -2359,7 +2383,7 @@ var workerConnections = new WorkerConnections(
     {
         await app.Services.GetRequiredService<WorkerAsks>().HandleAsync(envelope, ct);
         await app.Services.GetRequiredService<RunDirectory>().HandleAsync(envelope, ct);
-        if (envelope.Event is RunMeasured or WorkerCapacitySampled)
+        if (envelope.Event is RunMeasured or TerminalMeasured or WorkerCapacitySampled)
         {
             await app.Services.GetRequiredService<CapacitySampler>().HandleAsync(envelope, ct);
         }
@@ -2410,10 +2434,37 @@ if (control)
     workerConnections.Changed += RecordWorkers;
     workersRecording = new System.Threading.Timer(_ => RecordWorkers(), null, TimeSpan.Zero, WorkersRecord.Every);
 }
+recordConciergeSessions = () => _ = Task.Run(async () =>
+{
+    // A session ended by shutdown has nothing left to record, and nothing left to record it with.
+    if (app.Lifetime.ApplicationStopping.IsCancellationRequested) return;
+
+    try
+    {
+        var consoles = app.Services.GetRequiredService<ConciergeSessionStore>();
+        var accounts = app.Services.GetRequiredService<IUserStore>();
+        var sessions = await ConciergeSessionsView.ReadAsync(
+            consoles, tenantSettings.ConciergeIdleTimeout, app.Services.GetRequiredService<CapacitySampler>().Terminal,
+            async (user, ct) => (await accounts.FindByIdAsync(user, ct))?.Email, CancellationToken.None);
+        ConciergeSessionsRecord.Of(consoles.Clock.GetUtcNow(), tenantSettings.ConciergeIdleTimeout, sessions).Write(dataRoot, app.Logger);
+    }
+    catch (ObjectDisposedException)
+    {
+        // The Host stopped between the check and the read.
+    }
+    catch (Exception exception) when (exception is not OutOfMemoryException)
+    {
+        app.Logger.LogWarning("Concierge: could not record the sessions for the doctor: {Error}", exception.Message);
+    }
+});
+app.Services.GetRequiredService<ConciergeSessionStore>().Changed += () => recordConciergeSessions?.Invoke();
+recordConciergeSessions();
 app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
 app.Lifetime.ApplicationStopping.Register(() => workersRecording?.Dispose());
 Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
-    app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version);
+    app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version,
+    worker => ConciergeSessionsView.TerminalsOn(
+        app.Services.GetRequiredService<ConciergeSessionStore>(), worker, app.Services.GetRequiredService<CapacitySampler>().Terminal));
 WorkerEndpoints.MapList(app, workersNow);
 app.Services.GetRequiredService<CapacitySampler>().Describe = workersNow;
 if (control)
@@ -4575,8 +4626,14 @@ app.MapPut("/api/teams/{team}/repos/{repo}/contributor", async (
 // Its OWN route because this is tenant-wide Concierge launch configuration, not team
 // metadata at all.
 app.MapGet("/api/concierge", async (
-    TeamRegistry teams, AgentCatalog catalog, AgentAuthProbe probe, CancellationToken ct) =>
-    Results.Ok(await ConciergeView.ReadAsync(teams.Concierge(), catalog, probe, ct)))
+    TeamRegistry teams, AgentCatalog catalog, AgentAuthProbe probe, ConciergeSessionStore consoles,
+    CapacitySampler capacity, TenantSettings settings, IUserStore accounts, CancellationToken ct) =>
+    Results.Ok(await ConciergeView.ReadAsync(
+        teams.Concierge(), catalog, probe,
+        await ConciergeSessionsView.ReadAsync(
+            consoles, settings.ConciergeIdleTimeout, capacity.Terminal,
+            async (user, token) => (await accounts.FindByIdAsync(user, token))?.Email, ct),
+        ct)))
     .WithTags("Teams")
     .HumansOnly()
     .WithSummary("What the tenant Concierge launches")
@@ -4584,6 +4641,7 @@ app.MapGet("/api/concierge", async (
         "One setting for the whole instance. NO TEAM IS NAMED, and that is the point: reading it through a team read as though the setting belonged to that team.\n\n"
         + "There is no prompt setting: the Concierge always runs the built-in Concierge prompt.\n\n"
         + "`effective` is what the launcher will actually use after defaults, from the same code the launcher runs: `agent` with `agentSource` (`chosen` or `default`), and `auth`, the auth probe's verdict for that agent. `agent` is NULL when no agent can start. `auth.signedIn` is true only when the probe measured a sign-in, and `auth.detail` says what it found.\n\n"
+        + "`sessions` is every running Concierge session, any person's, oldest first: `user` and `email`; `worker`, the worker its terminal runs on; `startedAt`; `viewer`, whether a browser has it open now, and `lastViewerAt`, null while one does, otherwise when the last left (its start, when nobody ever opened it); `lastActivityAt` and `lastActivity` (`started`, `output`, `typed`, `attached` or `call`), now while `callsInFlight` - platform calls under its own credential - is above 0; `outputFloor`, the bytes in one minute its output must exceed to count as activity, with `source` `declared` (its preset's measured floor, `measuredWith` saying what was measured) or `default` (the platform's, never a measurement); `outputPerMinute`, the bytes it printed in each of its last 60 minutes, oldest first, which is how a floor is measured; `wouldEndAt`, null while viewed, otherwise the later of `lastViewerAt` and `lastActivityAt` plus `concierge.idleTimeout` - it is ended at the first sweep at or after it; and `memory`, the resident bytes and processes of its process group on its worker at the last capacity sample, null when not measured.\n\n"
         + "**A person's action.**");
 
 app.MapPut("/api/concierge", async (

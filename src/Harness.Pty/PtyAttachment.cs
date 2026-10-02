@@ -20,8 +20,14 @@ namespace Harness.Pty;
 /// </summary>
 /// <param name="cols">The size the child was spawned at, so a client attaching at that same size is
 /// correctly recognised as needing no resize at all.</param>
-public sealed class PtyAttachment(IPtySession session, PtyRecord record, int cols, int rows)
+/// <param name="clock">What <see cref="IdleSince"/> is stamped from: the clock of whatever reads it, so
+/// an idle time and the moment it is judged at are the same kind of time.</param>
+/// <param name="attached">Told each time a client takes the terminal, after it holds it.</param>
+public sealed class PtyAttachment(
+    IPtySession session, PtyRecord record, int cols, int rows, TimeProvider? clock = null, Action? attached = null)
 {
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
     private readonly object _gate = new();
     private long _issued;
     private long _current;
@@ -31,7 +37,7 @@ public sealed class PtyAttachment(IPtySession session, PtyRecord record, int col
     // Set at construction, not on first detach: a session that spawned and was never reached is
     // unattended from birth, and anything that reaps the unattended has to be able to see that.
     // Otherwise a child whose client died during the upgrade would live until the host restarted.
-    private DateTimeOffset? _idleSince = DateTimeOffset.UtcNow;
+    private DateTimeOffset? _idleSince = (clock ?? TimeProvider.System).GetUtcNow();
 
     /// <summary>Whether a client currently holds the terminal.</summary>
     public bool HasViewer { get { lock (_gate) { return _current != 0; } } }
@@ -66,6 +72,8 @@ public sealed class PtyAttachment(IPtySession session, PtyRecord record, int col
 
             Resize(cols, rows);
         }
+
+        attached?.Invoke();
 
         try
         {
@@ -114,7 +122,7 @@ public sealed class PtyAttachment(IPtySession session, PtyRecord record, int col
             // AFTER the guard. An evicted viewer's pump also calls Detach on its way out, and
             // stamping this before the check would restart the idle clock for the client that just
             // took over - so a busy terminal would look unattended to anything reaping.
-            _idleSince = DateTimeOffset.UtcNow;
+            _idleSince = _clock.GetUtcNow();
         }
     }
 

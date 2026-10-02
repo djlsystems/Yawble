@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Host.Capacity;
 using Harness.Pty;
 
 namespace Harness.Tests;
@@ -64,6 +65,42 @@ public sealed partial class ConciergeRelayTests
         {
             foreach (var file in composed.TempFiles ?? []) File.Delete(file);
             mcp?.Delete();
+        }
+    }
+
+    [Fact]
+    public async Task A_terminals_measurement_reaches_control_named_by_its_session()
+    {
+        // A fixture /proc and a fixture pid: nothing here reads a live process.
+        var proc = Directory.CreateTempSubdirectory("harness-relay-proc-").FullName;
+        try
+        {
+            FixtureProc.Write(proc, pid: 4321, group: 4321, residentPages: 2500);
+            FixtureProc.Write(proc, pid: 4322, group: 4321, residentPages: 500);
+
+            await using var bed = new WorkerStreamBed(processes: new ProcessGroupReader(proc, 4096));
+            bed.Pty.ProcessId = 4321;
+            var sampler = new CapacitySampler(
+                () => [(bed.Remote, new HeadroomGate(() => 80, () => 0))], bed.Wip, new NoHeavyLease(), () => 80, () => 0);
+            bed.Events = sampler.HandleAsync;
+            await bed.StartAsync();
+
+            await using var session = (WorkerPtySession)await bed.Engine.SpawnAsync(bed.Engine.Stage(Launch()), Ct);
+            await WorkerStreamBed.Until(() => bed.Pty.Spawned.Count == 1);
+
+            // The worker records the terminal just after spawning it: sampled until it is there.
+            for (var i = 0; i < 100 && sampler.Terminal(session.Id) is null; i++) await sampler.SampleAsync(Ct);
+
+            var measured = sampler.Terminal(session.Id);
+            Assert.NotNull(measured);
+            Assert.Equal(4321, measured.Group);
+            Assert.Equal(2, measured.Processes);
+            Assert.Equal(3000 * 4096L, measured.ResidentBytes);
+            Assert.Equal(session.Id, Assert.Single(sampler.TerminalsOn(new WorkerId("w1"))).Session);
+        }
+        finally
+        {
+            Directory.Delete(proc, recursive: true);
         }
     }
 

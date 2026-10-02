@@ -48,6 +48,15 @@ public sealed record StopTerminal(string Session) : TerminalCommand;
 public sealed record TerminalEnded(string Session, int ExitCode) : WorkerEvent;
 
 /// <summary>
+/// A person's terminal's process group as <c>/proc</c> read it at a capacity sample, sent before that
+/// sample's <see cref="WorkerCapacitySampled"/>: the CLI and every process it started that did not
+/// start a session of its own. A terminal whose group no readable process belongs to is not sent -
+/// not measured, never 0.
+/// </summary>
+public sealed record TerminalMeasured(string Session, int Group, int Processes, long ResidentBytes, long CpuTicks, DateTimeOffset At)
+    : WorkerEvent;
+
+/// <summary>
 /// Follow <see cref="Run"/>'s transcript at <see cref="Path"/> as the agent, from its first line, each
 /// line one chunk of <see cref="Stream"/>, until the run ends on this worker or control stops it.
 /// </summary>

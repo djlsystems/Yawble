@@ -71,8 +71,27 @@ public sealed class PortaPtyEngine : IPtyEngine
 /// Pumps the reader stream on a dedicated background loop, raising <see cref="Output"/> for
 /// each non-empty read, and raises <see cref="Exited"/> exactly once after the pump loop ends.
 /// </summary>
-internal sealed class PortaPtySession : IPtySession
+internal sealed class PortaPtySession : IPtySession, IPtyProcess
 {
+    /// <summary>
+    /// The child's pid: the shell that execs the CLI in place (see <see cref="PortaPtyEngine"/>), so
+    /// the CLI's own, and, as a PTY child leads its own session, its process group's.
+    /// </summary>
+    public int? ProcessId
+    {
+        get
+        {
+            try
+            {
+                return _conn.Pid > 0 ? _conn.Pid : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
     private readonly IPtyConnection _conn;
     private readonly Task _pumpTask;
     private readonly TaskCompletionSource<int> _exitCodeSource =

@@ -3,6 +3,10 @@ using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Tests.Host;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Harness.Tests;
 
@@ -121,6 +125,61 @@ public sealed class ConciergeEffectiveTests : IDisposable
             "The signed-in preset needs a credential variable in auth-probes.json.");
 
         return new EnvironmentScope(values);
+    }
+
+    [Fact]
+    public async Task The_concierge_route_lists_each_session_with_its_worker_last_activity_last_viewer_and_would_end_at()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var start = new DateTimeOffset(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
+        var clock = new ManualTime(start);
+        var root = Directory.CreateDirectory(Path.Combine(_dataRoot, "host")).FullName;
+
+        await using var app = new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder
+            .UseSetting("DataRoot", root)
+            .UseSetting("Logging:LogLevel:Default", "Warning")
+            .ConfigureTestServices(services => services.AddSingleton(new ConciergeSessionStore(
+                new FakePtyEngine(),
+                (_, _, _, _) => Task.FromResult(new Harness.Pty.PtySpec("fixture-cli", root)),
+                (_, _) => Task.CompletedTask,
+                clock))));
+
+        var person = await app.Services.GetRequiredService<IUserStore>().CreateAsync("person@example.test", "correct horse battery", ct);
+        using var client = app.CreateClient();
+        (await client.PostAsJsonAsync("/api/auth/login", new { email = "person@example.test", password = "correct horse battery" }, ct))
+            .EnsureSuccessStatusCode();
+
+        var store = app.Services.GetRequiredService<ConciergeSessionStore>();
+        var session = await store.AttachAsync(new ConciergeSessionKey(person.Id), "", 80, 24, ct);
+        clock.Advance(TimeSpan.FromMinutes(10));
+        ((FakePty)session.Terminal).Print(new byte[3000]);
+
+        var listed = (await client.GetFromJsonAsync<JsonElement>("/api/concierge", ct)).GetProperty("sessions").EnumerateArray().Single();
+        Assert.Equal(person.Id, listed.GetProperty("user").GetString());
+        Assert.Equal("person@example.test", listed.GetProperty("email").GetString());
+        // A terminal not on a worker names none.
+        Assert.Equal(JsonValueKind.Null, listed.GetProperty("worker").ValueKind);
+        Assert.Equal(start, listed.GetProperty("startedAt").GetDateTimeOffset());
+        Assert.False(listed.GetProperty("viewer").GetBoolean());
+        Assert.Equal(start, listed.GetProperty("lastViewerAt").GetDateTimeOffset());
+        Assert.Equal(start.AddMinutes(10), listed.GetProperty("lastActivityAt").GetDateTimeOffset());
+        Assert.Equal("output", listed.GetProperty("lastActivity").GetString());
+        Assert.Equal(0, listed.GetProperty("callsInFlight").GetInt32());
+        Assert.Equal(2048, listed.GetProperty("outputFloor").GetProperty("bytesPerMinute").GetInt64());
+        Assert.Equal("default", listed.GetProperty("outputFloor").GetProperty("source").GetString());
+        Assert.Equal([0L, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3000], listed.GetProperty("outputPerMinute").EnumerateArray().Select(m => m.GetInt64()));
+        // The window is the default hour, from the later of the two.
+        Assert.Equal(start.AddMinutes(70), listed.GetProperty("wouldEndAt").GetDateTimeOffset());
+        Assert.Equal(JsonValueKind.Null, listed.GetProperty("memory").ValueKind);
+
+        // While someone has it open there is no time it would end.
+        using var evict = new CancellationTokenSource();
+        session.Attachment.Attach(evict, 80, 24);
+        var viewed = (await client.GetFromJsonAsync<JsonElement>("/api/concierge", ct)).GetProperty("sessions").EnumerateArray().Single();
+        Assert.True(viewed.GetProperty("viewer").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, viewed.GetProperty("lastViewerAt").ValueKind);
+        Assert.Equal(JsonValueKind.Null, viewed.GetProperty("wouldEndAt").ValueKind);
+        Assert.Equal("attached", viewed.GetProperty("lastActivity").GetString());
     }
 
     public void Dispose()

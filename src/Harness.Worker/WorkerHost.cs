@@ -329,7 +329,7 @@ public sealed class WorkerHost
         }
     }
 
-    /// <summary>Each open run's process groups, then the worker's cgroup with the runs it has open.</summary>
+    /// <summary>Each open run's and each terminal's process groups, then the worker's cgroup with the runs it has open.</summary>
     private async Task SampleAsync(CancellationToken ct)
     {
         await _publish.WaitAsync(ct);
@@ -347,7 +347,10 @@ public sealed class WorkerHost
             if (_processes is not null)
             {
                 var registered = _groups.Snapshot();
-                var figures = _processes.Read(registered.Keys.ToArray());
+                // A person's terminal is measured in the same read: what it costs this worker is
+                // charged to it, not left in the cgroup's total attributed to nothing.
+                var terminals = _terminals?.Groups() ?? new Dictionary<string, int>();
+                var figures = _processes.Read([.. registered.Keys.Concat(terminals.Values).Distinct()]);
                 foreach (var (group, member) in registered)
                 {
                     if (figures.GetValueOrDefault(group) is not { } measured) continue;
@@ -355,6 +358,14 @@ public sealed class WorkerHost
                     var owner = byMember.GetValueOrDefault(member) ?? new RunId(member, "");
                     await DeliverLockedAsync(new RunMeasured(
                         owner, group, measured.Processes, measured.ResidentBytes, measured.CpuTicks, at));
+                }
+
+                foreach (var (session, group) in terminals)
+                {
+                    if (registered.ContainsKey(group) || figures.GetValueOrDefault(group) is not { } measured) continue;
+
+                    await DeliverLockedAsync(new TerminalMeasured(
+                        session, group, measured.Processes, measured.ResidentBytes, measured.CpuTicks, at));
                 }
             }
 

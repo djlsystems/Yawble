@@ -170,6 +170,38 @@ public sealed class AgentLaunchCheckTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// An idle-output floor is declared only from a measurement, the way the launch check is
+    /// declared: on an interactive built-in, with what was measured. Until a person measures one, it
+    /// reads the platform's default - said as `default`, never as measured.
+    /// </summary>
+    [Fact]
+    public void Every_built_in_interactive_preset_declares_an_idle_output_floor_or_reads_default_and_no_headless_preset_declares_one()
+    {
+        foreach (var preset in AgentCatalogFile.BuiltIns())
+        {
+            if (preset.Mode == AgentMode.Headless)
+            {
+                Assert.Null(preset.IdleOutput);
+                continue;
+            }
+
+            var floor = OutputFloor.Of(preset);
+            if (preset.IdleOutput is { } declared)
+            {
+                Assert.Equal(OutputFloor.Declared, floor.Source);
+                Assert.True(declared.BytesPerMinute > 0, preset.Name);
+                Assert.False(string.IsNullOrWhiteSpace(declared.MeasuredWith), preset.Name);
+            }
+            else
+            {
+                Assert.Equal(OutputFloor.PlatformDefault, floor);
+                Assert.Equal(OutputFloor.Default, floor.Source);
+                Assert.Null(floor.MeasuredWith);
+            }
+        }
+    }
+
     [Fact]
     public void The_launch_report_serialises_to_the_contract_shape()
     {

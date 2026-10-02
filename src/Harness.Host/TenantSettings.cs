@@ -170,9 +170,12 @@ public sealed class TenantSettings
                 + "setting - every change is in the tenant log with the person who made it. Applies "
                 + "from the next delivery.",
                 Min: 0),
-            new(ConciergeIdleTimeoutName, TenantSettingKind.Duration, "08:00:00", "ConciergeIdleTimeout",
-                "How long a Concierge session may sit unattended before it is ended. Applies at the "
-                + "next sweep.",
+            new(ConciergeIdleTimeoutName, TenantSettingKind.Duration, "01:00:00", "ConciergeIdleTimeout",
+                "How long a Concierge session may go both unwatched and inactive before it is ended. "
+                + "Idle means no browser has had it open for this long AND it has shown no activity for "
+                + "this long: no terminal output above its preset's floor, no keystrokes, and no "
+                + "platform call under its own credential (a call still in flight counts). A session "
+                + "someone has open is never ended. Applies at the next sweep.",
                 MinDuration: TimeSpan.FromMinutes(1), MaxDuration: TimeSpan.FromDays(30)),
             new(QuietWindowName, TenantSettingKind.Duration, "00:30:00", "QuietSweepWindow",
                 "How long a team may be quiet with work open before the quiet-team sweep acts on it. "

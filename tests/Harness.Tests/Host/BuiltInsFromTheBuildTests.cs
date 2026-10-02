@@ -511,6 +511,23 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         }
     }
 
+    [Fact]
+    public void The_backlog_running_skill_says_a_run_continues_unwatched_and_resumes_from_its_run_log()
+    {
+        var body = Flat(BuiltInSkills.Find("running-the-backlog")!.Body);
+
+        foreach (var line in new[]
+        {
+            "A run continues while you work, whether or not the person is watching: closing the tab does not end you while you are producing output or calling the platform.",
+            "A Concierge that has done nothing for the idle window with nobody watching is ended.",
+            "A restarted Concierge resumes from the run log, so keep it current before every wait.",
+            "Keep one document, `backlog-run-<date>.md`, in your own working folder.",
+        })
+        {
+            Assert.Contains(Flat(line), body, StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>Whitespace-insensitive text, so a pinned sentence survives re-wrapping.</summary>
     private static string Flat(string text) =>
         System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");

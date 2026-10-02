@@ -28,7 +28,9 @@ internal sealed class WorkerStreamBed : IAsyncDisposable
     private readonly ConcurrentQueue<Link> _links = new();
     private Task<int>? _running;
 
-    public WorkerStreamBed(Func<IDictionary<string, string?>>? environment = null, AgentLaunchUser? runAs = null)
+    /// <param name="processes">How the worker reads process groups; a fixture tree in a test, never the live one.</param>
+    public WorkerStreamBed(
+        Func<IDictionary<string, string?>>? environment = null, AgentLaunchUser? runAs = null, ProcessGroupReader? processes = null)
     {
         Pool = new WorkerPool(_ => new HeadroomGate(() => 80, () => 0, Clock), clock: Clock);
         Wip = new WipLedger(5, Pool);
@@ -41,6 +43,7 @@ internal sealed class WorkerStreamBed : IAsyncDisposable
             {
                 await Directory.HandleAsync(envelope, ct);
                 await Streams.HandleAsync(envelope, ct);
+                if (Events is { } events) await events(envelope, ct);
             },
             Directory.OpenOn, Key, takesWorkers: true, BuildVersion.Current.Version, timings: Timings, clock: Clock,
             streams: Streams.Deliver);
@@ -59,6 +62,7 @@ internal sealed class WorkerStreamBed : IAsyncDisposable
         var heartbeat = new RunHeartbeat();
         Host = new WorkerHost(
             new WorkerId("w1"), Connection, new RunLauncher(heartbeat, reports: false, lookup: LaunchLookup.Once), heartbeat,
+            processes: processes, groups: new RunProcessGroups(),
             streaming: new WorkerStreaming(Connection, Pty, runAs ?? AgentLaunchUser.Same("tester", "the test runs everything as itself"), environment));
 
         Apply = Host.ApplyAsync;
@@ -89,6 +93,9 @@ internal sealed class WorkerStreamBed : IAsyncDisposable
     public WorkerHost Host { get; }
 
     public FakePtyEngine Pty { get; } = new();
+
+    /// <summary>What else control does with each event a worker sends; a test may measure with it.</summary>
+    public Func<WorkerEnvelope, CancellationToken, Task>? Events { get; set; }
 
     /// <summary>How the worker applies control's commands; a test may hold one back.</summary>
     public Func<ControlMessage, CancellationToken, Task> Apply { get; set; }
@@ -172,16 +179,22 @@ internal sealed class FakePtyEngine : IPtyEngine
 {
     public ConcurrentQueue<FakePty> Spawned { get; } = new();
 
+    /// <summary>The process id each terminal it spawns says its child has; none when null.</summary>
+    public int? ProcessId { get; set; }
+
     public Task<IPtySession> SpawnAsync(PtySpec spec, CancellationToken ct)
     {
-        var pty = new FakePty(spec);
+        var pty = new FakePty(spec) { ProcessId = ProcessId };
         Spawned.Enqueue(pty);
         return Task.FromResult<IPtySession>(pty);
     }
 }
 
-internal sealed class FakePty(PtySpec spec) : IPtySession
+internal sealed class FakePty(PtySpec spec) : IPtySession, IPtyProcess
 {
+    /// <summary>The child's process id this terminal reports: a fixture's, never a live process.</summary>
+    public int? ProcessId { get; set; }
+
     private readonly Lock _gate = new();
     private readonly List<byte> _typed = [];
 

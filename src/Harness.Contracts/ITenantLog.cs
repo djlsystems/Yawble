@@ -223,6 +223,11 @@ public static class TenantActions
     /// the file: a file whose row cannot land is removed.</summary>
     public const string ConciergeAttachmentAdded = "concierge.attachment-added";
 
+    /// <summary>The platform ended a Concierge session nobody had open and that had done nothing for
+    /// the idle window. Actor null; subject the person; detail the worker, the window, when it was
+    /// last viewed and last active, and the sentence saying so. A person's own end writes no row.</summary>
+    public const string ConciergeEndedIdle = "concierge.ended-idle";
+
     /// <summary>A team's additional instructions changed.</summary>
     public const string TeamInstructionsChanged = "team.instructions-changed";
 

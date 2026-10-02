@@ -9,7 +9,8 @@ namespace Harness.Tests;
 /// THE --doctor REPORT IS THE OPERATOR CLI'S CONTRACT, ON BOTH SIDES. The report here is the Host's
 /// own: a real launch check of a fake CLI that aborts under the run memory limit through the member
 /// launch path, leaking a credential on stderr, and the wip figures recorded from the Host's own
-/// decision under cgroup, rlimit and not enforced, and control's record of its workers. Its shape must equal the fixtures under
+/// decision under cgroup, rlimit and not enforced, control's record of its workers, and its record of the
+/// running Concierge sessions. Its shape must equal the fixtures under
 /// <c>cli/internal/doctor/testdata</c>, which the Go side decodes (<c>TestTheHostsOwnDoctorReportDecodes</c>),
 /// so a field renamed on either side fails a test. Set <c>HARNESS_WRITE_CLI_FIXTURES=1</c> to rewrite them.
 /// </summary>
@@ -83,6 +84,16 @@ public sealed class DoctorReportCliContractTests : IDisposable
                 new WorkerRecordCapacity(4, 8L * 1024 * 1024 * 1024, 123L * 1024 * 1024, 3, false)),
         ]).Write(_root);
 
+        // The Host's record of its running Concierge sessions: one nobody has open, on worker-1, with
+        // when the idle window would end it, and one open in a browser.
+        new ConciergeSessionsRecord(probedAt, "01:00:00",
+        [
+            new ConciergeSessionRecordItem("user-1", "person@example.test", "worker-1", probedAt, false,
+                probedAt.AddMinutes(5), probedAt.AddMinutes(20), ConciergeActivity.Call, probedAt.AddMinutes(80), 300L * 1024 * 1024),
+            new ConciergeSessionRecordItem("user-2", null, "worker-1", probedAt, true,
+                null, probedAt.AddMinutes(30), ConciergeActivity.Typed, null, null),
+        ]).Write(_root);
+
         var fixtures = Path.Combine(FindRepoRoot(), "cli", "internal", "doctor", "testdata");
         foreach (var (name, memory) in mechanisms)
         {
@@ -105,6 +116,13 @@ public sealed class DoctorReportCliContractTests : IDisposable
             Assert.Equal("connected", worker["state"]!.GetValue<string>());
             Assert.Equal("Dev", worker["runs"]![0]!["member"]!.GetValue<string>());
             Assert.Equal(3, worker["capacity"]!["bound"]!.GetValue<int>());
+
+            var concierge = JsonNode.Parse(json)!["concierge"]!;
+            Assert.Equal("01:00:00", concierge["window"]!.GetValue<string>());
+            var session = concierge["sessions"]![0]!;
+            Assert.Equal("worker-1", session["worker"]!.GetValue<string>());
+            Assert.Equal(probedAt.AddMinutes(20), session["lastActivityAt"]!.GetValue<DateTimeOffset>());
+            Assert.Equal(probedAt.AddMinutes(80), session["wouldEndAt"]!.GetValue<DateTimeOffset>());
 
             var path = Path.Combine(fixtures, $"host-doctor-{name}.json");
             if (Environment.GetEnvironmentVariable("HARNESS_WRITE_CLI_FIXTURES") == "1")

@@ -472,6 +472,7 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 		checks = append(checks, row)
 	}
 	checks = append(checks, runLimitRow(r), runMemoryRow(r))
+	checks = append(checks, ConciergeRows(r)...)
 	return checks
 }
 

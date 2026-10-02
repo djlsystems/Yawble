@@ -135,6 +135,7 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
     private readonly object _gate = new();
     private readonly SemaphoreSlim _sampling = new(1, 1);
     private readonly Dictionary<WorkerId, Round> _rounds = [];
+    private readonly Dictionary<WorkerId, IReadOnlyList<TerminalMeasured>> _terminals = [];
 
     /// <summary>What a worker that did not answer in time reads as: every figure not measured, never 0.</summary>
     private static readonly WorkerCapacitySampled Unanswered =
@@ -153,6 +154,21 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         }
     }
 
+    /// <summary>
+    /// The terminals <paramref name="worker"/> measured at its last answered sample: a person's
+    /// Concierge, by its terminal session. A terminal it runs whose group was not readable is absent.
+    /// </summary>
+    public IReadOnlyList<TerminalMeasured> TerminalsOn(WorkerId worker)
+    {
+        lock (_gate) return _terminals.GetValueOrDefault(worker) ?? [];
+    }
+
+    /// <summary>The last measurement of one terminal on any worker, or null when it has none.</summary>
+    public TerminalMeasured? Terminal(string session)
+    {
+        lock (_gate) return _terminals.Values.SelectMany(each => each).FirstOrDefault(t => t.Session == session);
+    }
+
     /// <summary>Oldest first, about <see cref="HistorySpan"/> of it.</summary>
     public IReadOnlyList<CapacitySample> History()
     {
@@ -168,6 +184,7 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
             if (!_rounds.TryGetValue(envelope.Worker, out var round)) return Task.CompletedTask;
 
             if (envelope.Event is RunMeasured measured) round.Measured.Add(measured);
+            else if (envelope.Event is TerminalMeasured terminal) round.Terminals.Add(terminal);
             else if (envelope.Event is WorkerCapacitySampled sampled) round.Sampled.TrySetResult(sampled);
         }
 
@@ -229,6 +246,7 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         }
 
         var answers = new List<(IRunWorker Worker, HeadroomGate Gate, WorkerCapacitySampled? Answer, IReadOnlyList<RunMeasured> Measured)>();
+        var terminals = new Dictionary<WorkerId, IReadOnlyList<TerminalMeasured>>();
         foreach (var (worker, gate, round) in rounds)
         {
             WorkerCapacitySampled? answer;
@@ -247,9 +265,19 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
             }
 
             answers.Add((worker, gate, answer, answer is null ? [] : [.. round.Measured]));
+            if (answer is not null)
+            {
+                lock (_rounds) terminals[worker.Id] = [.. round.Terminals];
+            }
         }
 
         lock (_rounds) _rounds.Clear();
+
+        // Each worker that answered says which terminals it runs now; one that did not keeps what it last said.
+        lock (_gate)
+        {
+            foreach (var (worker, measured) in terminals) _terminals[worker] = measured;
+        }
 
         // Each gate answers from its own worker's measurement from here on. A worker that did not
         // answer leaves its gate with the figures it last had, at their own age.
@@ -405,6 +433,8 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         public TaskCompletionSource<WorkerCapacitySampled?> Sampled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public List<RunMeasured> Measured { get; } = [];
+
+        public List<TerminalMeasured> Terminals { get; } = [];
     }
 
     private sealed record Previous(DateTimeOffset At, long? CpuUsageUsec, IReadOnlyDictionary<(WorkerId, int), long> RunTicks);
