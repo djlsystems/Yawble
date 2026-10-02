@@ -180,6 +180,10 @@ function remember() {
 
 const windowed = computed(() => !narrow.value && !maximised.value);
 
+/** Whether it fills the screen, for the shell: its Concierge bubble would sit over the corner. */
+const fullScreen = defineModel<boolean>('fullScreen', { default: false });
+watch(() => open.value && !windowed.value, (full) => (fullScreen.value = full), { immediate: true });
+
 const frame = useWindowFrame({
   geometry: () => placed.value,
   apply: (next) => {
@@ -1213,10 +1217,12 @@ onBeforeUnmount(() => drag.end());
         </div>
       </div>
 
-      <div class="documents-status row items-center q-px-md text-caption os-text-muted" aria-live="polite">
-        <span data-status>{{ status }}</span>
+      <!-- ONE LINE. The counts come first and never shrink; the sentence gives way, and at phone
+           width it is left out rather than wrapped under them. -->
+      <div class="documents-status row items-center no-wrap q-px-md text-caption os-text-muted" aria-live="polite">
+        <span data-status class="documents-status-counts">{{ status }}</span>
         <q-space />
-        <span>Documents live in one place for the whole tenant.</span>
+        <span v-if="!narrow" class="ellipsis q-ml-md" data-status-note>Documents live in one place for the whole tenant.</span>
       </div>
 
       <!-- Edges and a corner: only while it is a window. -->
@@ -1388,6 +1394,11 @@ onBeforeUnmount(() => drag.end());
 .documents-status {
   min-height: 28px;
   border-top: 1px solid var(--os-rule);
+}
+
+.documents-status-counts {
+  flex: none;
+  white-space: nowrap;
 }
 
 .documents-resize {

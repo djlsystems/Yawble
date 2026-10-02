@@ -155,6 +155,33 @@ public sealed class DocumentsRenameTests(HostFixture host) : IClassFixture<HostF
     }
 
     [Fact]
+    public async Task A_rename_to_the_current_name_is_skipped_changes_nothing_and_is_recorded_unchanged()
+    {
+        using var client = await host.PersonAsync();
+        Docs.Write(host.Alpha, "same/a.md", "kept");
+        var mark = await NoticeMarkAsync(host.Services);
+
+        var response = await client.RenameAsync(host.Alpha, ("same/a.md", "a.md"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(
+            [("same/a.md", "same/a.md", "skipped", (string?)"same/a.md is already named a.md.")],
+            (await response.BodyAsync()).Results());
+        Assert.Equal(["a.md"], Directory.GetFiles(Docs.At(host.Alpha, "same")).Select(Path.GetFileName));
+        Assert.Equal("kept", File.ReadAllText(Docs.At(host.Alpha, "same/a.md")));
+        Assert.DoesNotContain(await NoticesSinceAsync(host.Services, mark), n => n.Team == host.Alpha);
+
+        var row = await host.Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.DocumentsRenamed, host.Alpha, TestContext.Current.CancellationToken);
+        Assert.NotNull(row);
+        Assert.Equal("same/a.md", row.SubjectName);
+        using var detail = JsonDocument.Parse(row.Detail!);
+        Assert.Equal(
+            [("same/a.md", "same/a.md", 0)],
+            detail.RootElement.GetProperty("items").EnumerateArray()
+                .Select(i => (i.GetProperty("from").GetString(), i.GetProperty("to").GetString(), i.GetProperty("files").GetInt32())));
+    }
+
+    [Fact]
     public async Task Every_rename_appends_documents_renamed_naming_each_old_and_new_path()
     {
         using var client = await host.PersonAsync();

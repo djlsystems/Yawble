@@ -74,8 +74,12 @@ const columns = computed(() => {
 </template>
 
 <style scoped>
+/* NOT A SCROLLER OF ITS OWN. Quasar's table scrolls sideways inside its wrapper, whose scrollbar is
+   under the last row - out of sight in a long folder, so a narrow window just cut the last column
+   off. The pane scrolls both ways instead, its scrollbar at the bottom of what is visible. */
 .documents-details {
   background: transparent;
+  overflow: visible;
 }
 
 .documents-row {

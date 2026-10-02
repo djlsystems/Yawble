@@ -4,6 +4,8 @@
 // the view and the sort are remembered; Details' headers sort with `aria-sort` and its columns are
 // resizable; Tiles use the shared tile grid; each item has its kind's icon; and selection by click,
 // Ctrl/Cmd+click, Shift+click, Ctrl/Cmd+A and a rubber band, with the status bar saying so.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const q = vi.hoisted(() => ({
@@ -107,6 +109,26 @@ describe('the three views', () => {
     expect(row('a.pdf').textContent).toContain('PDF');
     // `v-resizable-columns` gives each header a grip.
     expect(document.body.querySelectorAll('.documents-details th .os-col-resizer').length).toBeGreaterThan(0);
+  });
+
+  /**
+   * A NARROW WINDOW SCROLLS, it does not clip. happy-dom lays nothing out, so this pins the rule
+   * that does it: Quasar's table wrapper scrolls on its own, with its scrollbar under the last row,
+   * and Details turns that off so the pane - which scrolls both ways - is the one scroller.
+   */
+  it('scrolls Details sideways in the pane rather than cutting off its last column', async () => {
+    await openExplorer('alpha');
+
+    const table = pane().querySelector<HTMLElement>(':scope > .documents-details')!;
+    expect(table).not.toBeNull();
+    expect(table.querySelectorAll('th[data-col]').length).toBe(4);
+
+    const read = (file: string) => readFileSync(join(import.meta.dirname, file), 'utf8');
+    const rule = (source: string, selector: string) =>
+      source.match(new RegExp(`\\n${selector.replace('.', '\\.')} \\{([^}]*)\\}`))?.[1] ?? '';
+
+    expect(rule(read('../documents/DocumentsDetails.vue'), '.documents-details')).toMatch(/overflow:\s*visible;/);
+    expect(rule(read('../DocumentsDialog.vue'), '.documents-pane')).toMatch(/overflow:\s*auto;/);
   });
 
   it('shows the Team column at the root', async () => {

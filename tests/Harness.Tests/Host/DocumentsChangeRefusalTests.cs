@@ -125,6 +125,12 @@ public sealed class DocumentsChangeRefusalTests(DocumentsRefusalHost fixture) : 
             HttpStatusCode.BadRequest, s => $"{s.P}/a.md is named twice."),
         ["move R21 onto one"] = new("move", s => { s.File("x/a.md"); s.File("y/a.md"); s.Dir("to"); return Transfer("Alpha", $"{s.P}/to", $"{s.P}/x/a.md", $"{s.P}/y/a.md"); },
             HttpStatusCode.BadRequest, s => $"{s.P}/x/a.md and {s.P}/y/a.md would both become {s.P}/to/a.md."),
+        ["move no destination"] = new("move", s => { s.File("a.md"); return Transfer("", null, $"{s.P}/a.md"); },
+            HttpStatusCode.BadRequest, _ => "Name the folder to move them into in to.folder."),
+        ["move folder and inside"] = new("move", s => { s.File("f/a.md"); s.Dir("to"); return Transfer("Alpha", $"{s.P}/to", $"{s.P}/f", $"{s.P}/f/a.md"); },
+            HttpStatusCode.BadRequest, s => $"{s.P}/f/a.md is inside {s.P}/f, which is named too."),
+        ["move replace own holder"] = new("move", s => { s.File("a/a/x.md"); return Transfer("Alpha", s.P, Item($"{s.P}/a/a", "replace")); },
+            HttpStatusCode.Conflict, s => $"{s.P}/a/a is inside {s.P}/a, which it would replace."),
 
         // ---- copy
         ["copy R1"] = new("copy", s => Transfer("Beta", null, "a.md"), HttpStatusCode.NotFound, _ => "No team 'Nobody'.", Team: "Nobody"),
@@ -149,6 +155,12 @@ public sealed class DocumentsChangeRefusalTests(DocumentsRefusalHost fixture) : 
             HttpStatusCode.Conflict, _ => "That is 6 files; at most 5 can be copied at a time."),
         ["copy R21"] = new("copy", s => { s.File("a.md"); return Transfer("Beta", null, $"{s.P}/a.md", $"{s.P}/a.md"); },
             HttpStatusCode.BadRequest, s => $"{s.P}/a.md is named twice."),
+        ["copy no destination"] = new("copy", s => { s.File("a.md"); return Transfer("", null, $"{s.P}/a.md"); },
+            HttpStatusCode.BadRequest, _ => "Name the folder to copy them into in to.folder."),
+        ["copy folder and inside"] = new("copy", s => { s.File("f/a.md"); s.Dir("to"); return Transfer("Alpha", $"{s.P}/to", $"{s.P}/f", $"{s.P}/f/a.md"); },
+            HttpStatusCode.BadRequest, s => $"{s.P}/f/a.md is inside {s.P}/f, which is named too."),
+        ["copy replace own holder"] = new("copy", s => { s.File("a/a/x.md"); return Transfer("Alpha", s.P, Item($"{s.P}/a/a", "replace")); },
+            HttpStatusCode.Conflict, s => $"{s.P}/a/a is inside {s.P}/a, which it would replace."),
     };
 
     public static TheoryData<string> Refusals => [.. Cases.Keys];
