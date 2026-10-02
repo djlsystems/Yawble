@@ -262,7 +262,11 @@ public sealed class WorkerProcessTests
         // the way to them it may only pass through; the go folder and the fake CLI it may only read.
         var tempRoot = MemberTemp.RootUnder(bed.Root).Path;
         var workspace = Directory.CreateDirectory(Path.Combine(bed.Root, "teams", team, "workspaces", "Dev")).FullName;
-        string[] granted = [bed.Out, bed.State, tempRoot, workspace];
+
+        // Its own temporary folder: each launch's MCP config goes under <temp>/harness-mcp, and the
+        // system's one belongs to whichever user made it first.
+        var otherTemp = Directory.CreateDirectory(Path.Combine(bed.Work, "tmp-other")).FullName;
+        string[] granted = [bed.Out, bed.State, tempRoot, workspace, otherTemp];
         foreach (var dir in granted.Where(d => d.StartsWith(bed.Work + "/", StringComparison.Ordinal)))
         {
             // (A temporary root outside the bed is the system's /tmp, open to every user already.)
@@ -293,6 +297,10 @@ public sealed class WorkerProcessTests
             Assert.True(code == 0, $"the other user cannot write {dir}: {said}");
         }
 
+        // ...can make a launch's MCP folder under its own temporary folder...
+        var (made, mkdirSaid) = await RunAsync([.. nobody.Prefix, "env", $"TMPDIR={otherTemp}", "sh", "-c", "mkdir -p \"$TMPDIR/harness-mcp/probe\" && rmdir \"$TMPDIR/harness-mcp/probe\""]);
+        Assert.True(made == 0, $"the other user cannot make a folder under {otherTemp}/harness-mcp: {mkdirSaid}");
+
         // ...and can read neither the database nor the key ring.
         foreach (var probe in new[] { $"cat '{bed.Root}/messages.db' >/dev/null", $"ls '{bed.Root}/keys'" })
         {
@@ -301,7 +309,7 @@ public sealed class WorkerProcessTests
             Assert.Contains("Permission denied", said);
         }
 
-        bed.StartWorker("other-user", prefix: nobody.Prefix);
+        bed.StartWorker("other-user", prefix: nobody.Prefix, more: new Dictionary<string, string> { ["TMPDIR"] = otherTemp });
         (await bed.TellAsync(team, "Dev", "Run as the other user.")).EnsureSuccessStatusCode();
         await bed.UntilAsync("Dev completed", async () => (await bed.RowsOfAsync(team, "Dev", MessageTypes.Completed)).Count >= 1);
         Assert.Matches("^2[0-9][0-9]$", bed.FakeRuns().First(r => r.Member == "Dev").Progress ?? "");

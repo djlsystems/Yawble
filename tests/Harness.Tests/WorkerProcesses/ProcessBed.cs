@@ -101,8 +101,8 @@ internal sealed class ProcessBed : IAsyncDisposable
         (await Person.PostAsJsonAsync("/api/auth/login", person)).EnsureSuccessStatusCode();
     }
 
-    /// <summary>A worker process, optionally reading a cgroup fixture, under a prefix (another user), in a working directory, with another key.</summary>
-    public HostProcess StartWorker(string id, string? cgroup = null, IReadOnlyList<string>? prefix = null, string? key = null, string? cwd = null)
+    /// <summary>A worker process, optionally reading a cgroup fixture, under a prefix (another user), in a working directory, with another key, with more environment.</summary>
+    public HostProcess StartWorker(string id, string? cgroup = null, IReadOnlyList<string>? prefix = null, string? key = null, string? cwd = null, IReadOnlyDictionary<string, string>? more = null)
     {
         var environment = new Dictionary<string, string?>
         {
@@ -114,6 +114,7 @@ internal sealed class ProcessBed : IAsyncDisposable
             ["HARNESS_WORKER_STATE_DIR"] = State,
         };
         if (cgroup is not null) environment["Capacity__CgroupRoot"] = cgroup;
+        foreach (var (name, value) in more ?? new Dictionary<string, string>()) environment[name] = value;
 
         var worker = Start(id, [.. prefix ?? [], "dotnet", Dll, "--Role", "worker"], environment, cwd);
         Workers[id] = worker;
