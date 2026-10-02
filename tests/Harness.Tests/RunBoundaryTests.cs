@@ -15,7 +15,13 @@ namespace Harness.Tests;
 /// </summary>
 public sealed class RunBoundaryTests : IDisposable
 {
-    private static readonly ContainerId Member = new("alpha", "worker");
+    private static int _members;
+
+    /// <summary>
+    /// This test's own member. Every test is its own instance, so no two tests share a member, and a sample
+    /// in one test can never charge it with a child another test left in <see cref="RunProcessGroups.Shared"/>.
+    /// </summary>
+    private ContainerId Member { get; } = new("alpha", $"worker-{Interlocked.Increment(ref _members)}");
 
     /// <summary>How long a lost run may take to be seen as one. A run past it failed, it did not hang.</summary>
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(10);
@@ -33,7 +39,7 @@ public sealed class RunBoundaryTests : IDisposable
     [Fact]
     public async Task A_run_starts_reports_and_ends_across_the_transport()
     {
-        using var bed = new Bed(_root);
+        using var bed = new Bed(_root, Member);
         var ready = Path.Combine(_root, "ready");
         var go = Path.Combine(_root, "go");
 
@@ -100,7 +106,7 @@ public sealed class RunBoundaryTests : IDisposable
     public async Task The_same_run_through_the_runner_gives_the_same_result()
     {
         // The protocol's answer, beside the runner's own for the same child.
-        using var bed = new Bed(_root);
+        using var bed = new Bed(_root, Member);
         var script = await Script(
             "printf '%s' '{\"result\":\"the answer\",\"usage\":{\"input_tokens\":7,\"output_tokens\":11}}'\n");
 
@@ -122,7 +128,7 @@ public sealed class RunBoundaryTests : IDisposable
     public async Task Diagnostics_rows_are_written_by_control_not_the_worker()
     {
         var rows = new Rows();
-        using var bed = new Bed(_root, diagnostics: rows);
+        using var bed = new Bed(_root, Member, diagnostics: rows);
 
         var start = bed.Start(Launch("harness-no-such-command-anywhere", []));
         var result = await bed.Directory.RunAsync(bed.Worker, start, Ct).WaitAsync(Bound, Ct);
@@ -132,14 +138,14 @@ public sealed class RunBoundaryTests : IDisposable
         var row = Assert.Single(rows.Written);
         Assert.Equal((DiagnosticSeverity.Warning, DiagnosticKinds.ProcessExecutableNotFound, DiagnosticSources.Process), (row.Severity, row.Kind, row.Source));
         Assert.Equal("harness-no-such-command-anywhere", row.Message);
-        Assert.Contains("\"container\":\"alpha/worker\"", row.Detail, StringComparison.Ordinal);
+        Assert.Contains($"\"container\":\"{Member}\"", row.Detail, StringComparison.Ordinal);
         Assert.Equal(FailureClasses.LaunchMissing, result.FailureClass);
     }
 
     [Fact]
     public async Task A_stop_crosses_as_cancel_and_ends_as_today()
     {
-        using var bed = new Bed(_root);
+        using var bed = new Bed(_root, Member);
         var script = await Script("sleep 30\n");
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
 
@@ -162,7 +168,7 @@ public sealed class RunBoundaryTests : IDisposable
     [Fact]
     public async Task The_live_view_crosses_and_the_live_route_reads_it()
     {
-        using var bed = new Bed(_root);
+        using var bed = new Bed(_root, Member);
         var home = Directory.CreateDirectory(Path.Combine(_root, "home")).FullName;
         var go = Path.Combine(_root, "go");
         var script = await Script(
@@ -206,7 +212,7 @@ public sealed class RunBoundaryTests : IDisposable
     [Fact]
     public async Task A_plugin_member_run_crosses_the_transport()
     {
-        using var bed = new Bed(_root);
+        using var bed = new Bed(_root, Member);
         using var secret = new EnvironmentScope([new("HARNESS_TEST_NOT_INHERITED", "leak")]);
         var script = await Script(
             "read request; echo \"one $request\"\n"
@@ -252,7 +258,7 @@ public sealed class RunBoundaryTests : IDisposable
     public async Task A_transport_that_drops_the_end_is_a_lost_run_not_a_hang()
     {
         var swallowed = 0;
-        var bed = new Bed(_root, drop: e => e is RunEnded && Interlocked.Increment(ref swallowed) > 0);
+        var bed = new Bed(_root, Member, drop: e => e is RunEnded && Interlocked.Increment(ref swallowed) > 0);
         try
         {
             var start = bed.Start(Launch("sh", ["-c", "exit 0"]));
@@ -280,7 +286,7 @@ public sealed class RunBoundaryTests : IDisposable
     public async Task A_dropped_end_through_the_member_runtime_frees_its_slot_and_ends_its_card()
     {
         var swallowed = 0;
-        var bed = new Bed(_root, drop: e => e is RunEnded && Interlocked.Increment(ref swallowed) > 0);
+        var bed = new Bed(_root, Member, drop: e => e is RunEnded && Interlocked.Increment(ref swallowed) > 0);
         try
         {
             var ended = new ConcurrentQueue<ContainerId>();
@@ -294,7 +300,7 @@ public sealed class RunBoundaryTests : IDisposable
                 new AgentDefinition("probe", AgentMode.Headless, new AgentLaunch("sh", [script], LanguageModel: false)),
             ]);
             var runner = new ProcessAgentRunner(catalog, bed.Worker, bed.Directory, bed.Launcher, () => null, null);
-            var id = new ContainerId("alpha", "lost");
+            var id = Member;
             await members.Host.AddAsync(
                 new ContainerDefinition(
                     id, "probe", SystemPrompt: "You are a probe.", WorkingDirectory: Workspace(), Subscribes: [],
@@ -327,7 +333,7 @@ public sealed class RunBoundaryTests : IDisposable
     [Fact]
     public async Task A_closed_transport_ends_an_open_run_as_interrupted()
     {
-        var bed = new Bed(_root);
+        var bed = new Bed(_root, Member);
         var go = Path.Combine(_root, "go");
         try
         {
@@ -348,6 +354,7 @@ public sealed class RunBoundaryTests : IDisposable
         {
             File.WriteAllText(go, "");
             bed.Dispose();
+            await Settled(bed);
         }
     }
 
@@ -366,7 +373,7 @@ public sealed class RunBoundaryTests : IDisposable
     [Fact]
     public async Task A_connection_that_closes_after_the_start_and_before_the_process_ends_it_as_interrupted()
     {
-        var bed = new Bed(_root);
+        var bed = new Bed(_root, Member);
         var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
@@ -387,6 +394,7 @@ public sealed class RunBoundaryTests : IDisposable
         {
             release.TrySetResult(true);
             bed.Dispose();
+            await Settled(bed);
         }
     }
 
@@ -422,7 +430,7 @@ public sealed class RunBoundaryTests : IDisposable
     [Fact]
     public async Task An_end_during_a_sample_is_not_a_lost_run()
     {
-        using var bed = new Bed(_root);
+        using var bed = new Bed(_root, Member);
 
         for (var batch = 0; batch < 4; batch++)
         {
@@ -455,7 +463,7 @@ public sealed class RunBoundaryTests : IDisposable
     [Fact]
     public async Task A_granted_lease_raises_the_allowance_before_the_call_answers()
     {
-        using var bed = new Bed(_root);
+        using var bed = new Bed(_root, Member);
         var reports = new ProgressLines();
         var leases = new LeaseActions(new InstanceLeases(() => 1), bed.Worker, reports);
 
@@ -474,7 +482,7 @@ public sealed class RunBoundaryTests : IDisposable
     [Fact]
     public async Task A_queued_lease_holds_the_idle_clock_across_the_transport()
     {
-        using var bed = new Bed(_root);
+        using var bed = new Bed(_root, Member);
         var holding = new ContainerId("alpha", "holder");
         var held = new ConcurrentQueue<bool>();
         using var clock = bed.Heartbeat.WhileRunning(Member, () => { }, paused => held.Enqueue(paused));
@@ -494,7 +502,7 @@ public sealed class RunBoundaryTests : IDisposable
     [Fact]
     public async Task A_progress_report_touches_the_idle_clock_across_the_transport()
     {
-        using var bed = new Bed(_root);
+        using var bed = new Bed(_root, Member);
         await using var members = new ContainerTestBed();
         await members.AddAsync(Member);
         var touched = 0;
@@ -551,6 +559,15 @@ public sealed class RunBoundaryTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Waits, bounded, until the worker has ended this test's runs and none of its processes is still
+    /// registered, for a test that lets its child go only after closing the connection.
+    /// </summary>
+    private Task Settled(Bed bed) =>
+        Until(
+            () => !bed.Host.OpenRuns().Any(r => r.Member == Member) && !RunProcessGroups.Shared.Snapshot().Values.Contains(Member),
+            Bound);
+
     private static async Task Until(Func<bool> condition, TimeSpan bound, Func<Task>? between = null)
     {
         var deadline = DateTime.UtcNow + bound;
@@ -605,15 +622,17 @@ public sealed class RunBoundaryTests : IDisposable
     private sealed class Bed : IDisposable, IRunWorker
     {
         private readonly string _root;
+        private readonly ContainerId _member;
         private readonly InProcessWorker _worker;
         private readonly ConcurrentQueue<(long Order, object Record)> _log = new();
         private readonly List<(Func<object, bool> Matches, TaskCompletionSource<object> Found)> _waiters = [];
         private readonly List<object> _handled = [];
         private long _counter;
 
-        public Bed(string root, bool reports = true, Func<WorkerEvent, bool>? drop = null, IDiagnosticsLog? diagnostics = null)
+        public Bed(string root, ContainerId member, bool reports = true, Func<WorkerEvent, bool>? drop = null, IDiagnosticsLog? diagnostics = null)
         {
             _root = root;
+            _member = member;
             Reports = new ProgressLines();
             Directory = new RunDirectory(Reports, diagnostics, Live);
             Launcher = new RunLauncher(Heartbeat, reports: reports, lookup: LaunchLookup.Once, updates: Updates);
@@ -665,7 +684,7 @@ public sealed class RunBoundaryTests : IDisposable
         public IReadOnlyList<WorkerCapacitySampled> Sampled => [.. _log.Select(l => l.Record).OfType<WorkerCapacitySampled>()];
 
         public StartRun Start(RunLaunch launch) =>
-            new(RunId.For(Member), "probe", "You are a probe.", "hello", "", System.IO.Directory.CreateDirectory(Path.Combine(_root, "workspace")).FullName,
+            new(RunId.For(_member), "probe", "You are a probe.", "hello", "", System.IO.Directory.CreateDirectory(Path.Combine(_root, "workspace")).FullName,
                 new Dictionary<string, string>(), null, launch, null, null, null);
 
         /// <summary>The first record of this type, once delivered.</summary>
