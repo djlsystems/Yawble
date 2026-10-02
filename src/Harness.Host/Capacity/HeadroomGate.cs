@@ -36,6 +36,23 @@ public sealed class HeadroomGate(
 
     public void Update(CgroupFigures figures, DateTimeOffset at) => _last = new Measured(figures, at);
 
+    /// <summary>
+    /// Bytes of memory the last measurement left under the limit, or null when the limit or the use
+    /// is not measured or the measurement is stale: an unmeasured worker has no headroom figure,
+    /// never 0 and never unlimited.
+    /// </summary>
+    public long? Headroom =>
+        _last is { } last && _clock.GetUtcNow() - last.At <= StaleAfter
+            && last.Figures.MemoryLimitBytes is > 0 and var limit && last.Figures.MemoryInUseBytes is { } used
+            ? limit - used
+            : null;
+
+    /// <summary>When the last measurement was taken, or null before the first.</summary>
+    public DateTimeOffset? MeasuredAt => _last?.At;
+
+    /// <summary>The last measurement, or null before the first.</summary>
+    public CgroupFigures? Figures => _last?.Figures;
+
     /// <summary>Null when a run may start; otherwise the sentence it waits with.</summary>
     public string? Reason()
     {
