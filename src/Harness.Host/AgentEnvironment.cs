@@ -112,6 +112,34 @@ public sealed class AgentEnvironment(
         Providers.Value.ByCommand.GetValueOrDefault(Path.GetFileName(command));
 
     /// <summary>
+    /// AN ISSUED CREDENTIAL APPLIED AS A MEMBER RUN APPLIES IT, after the preset's and the team's env
+    /// (<paramref name="handedIn"/>) so neither can outrank it: every variable the CLI would read for
+    /// authentication, or that points it at a home, is REMOVED (whoever set it), then the issued one
+    /// is set. Another command's declared variables go too unless <paramref name="handedIn"/> holds
+    /// them - the rule <see cref="ScopeProviderKeys"/> holds for every provider key. Returns what
+    /// <see cref="ScopeProviderKeys"/> is then to keep: <paramref name="handedIn"/> with the issued
+    /// variables. Under the shared home it changes nothing and returns <paramref name="handedIn"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ApplyIssued(
+        IDictionary<string, string?> environment, RunCredential? credential, IReadOnlyDictionary<string, string> handedIn)
+    {
+        if (credential is not { Source: CredentialSource.Issued }) return handedIn;
+
+        foreach (var name in credential.Displace) environment.Remove(name);
+
+        foreach (var name in credential.OtherProviders)
+        {
+            if (!handedIn.ContainsKey(name)) environment.Remove(name);
+        }
+
+        foreach (var (name, value) in credential.Environment) environment[name] = value;
+
+        var merged = new Dictionary<string, string>(handedIn, StringComparer.Ordinal);
+        foreach (var (name, value) in credential.Environment) merged[name] = value;
+        return merged;
+    }
+
+    /// <summary>
     /// Takes every provider key that is not <paramref name="command"/>'s own out of
     /// <paramref name="environment"/> - REMOVED, not set empty, because an empty key is still a
     /// variable a CLI may read and report on. A key the caller handed in explicitly

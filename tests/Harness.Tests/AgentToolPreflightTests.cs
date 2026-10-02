@@ -1,3 +1,4 @@
+using Harness.Contracts;
 using Harness.Host;
 
 namespace Harness.Tests;
@@ -22,15 +23,32 @@ public sealed class AgentToolPreflightTests
         IReadOnlySet<string>? missing = null, Func<string, IReadOnlyList<string>, string?>? overrideOutput = null)
         : IListingRunner
     {
-        public List<(string Command, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment)> Calls { get; } = [];
+        public List<(string Command, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment, RunCredential? Credential)> Calls { get; } = [];
+
+        public List<string> Made { get; } = [];
+
+        public List<string> Removed { get; } = [];
 
         public bool Installed(string command) => missing?.Contains(command) != true;
 
+        public Task<string?> MakeHomeAsync(CancellationToken ct)
+        {
+            var home = "/run-homes/home-" + Made.Count;
+            Made.Add(home);
+            return Task.FromResult<string?>(home);
+        }
+
+        public Task RemoveHomeAsync(string home)
+        {
+            Removed.Add(home);
+            return Task.CompletedTask;
+        }
+
         public Task<ListingRun> RunAsync(
             string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment,
-            CancellationToken ct)
+            CancellationToken ct, RunCredential? credential = null)
         {
-            lock (Calls) Calls.Add((command, arguments, environment));
+            lock (Calls) Calls.Add((command, arguments, environment, credential));
 
             if (overrideOutput?.Invoke(command, arguments) is { } given)
                 return Task.FromResult(given == "FAIL" ? new ListingRun(1, "") : new ListingRun(0, given));
@@ -61,8 +79,116 @@ public sealed class AgentToolPreflightTests
     }
 
     private static async Task<IReadOnlyList<PresetToolReport>> Reports(
-        IReadOnlyList<AgentDefinition> definitions, IListingRunner runner) =>
-        await AgentToolPreflight.ReportsAsync(definitions, runner, TestContext.Current.CancellationToken);
+        IReadOnlyList<AgentDefinition> definitions, IListingRunner runner, IRunCredentials? credentials = null) =>
+        await AgentToolPreflight.ReportsAsync(definitions, runner, TestContext.Current.CancellationToken, credentials);
+
+    private const string FakeKey = "fake-listing-key-5c1e";
+
+    /// <summary>The resolver's answer per preset: issued (with a fake key, or not set) for the named
+    /// ones, the shared home for the rest.</summary>
+    private sealed class Sources(IReadOnlySet<string> issued, bool set = true) : IRunCredentials
+    {
+        public Task<RunCredential> ResolveAsync(string agent, AgentDefinition? definition, CancellationToken ct)
+        {
+            if (!issued.Contains(agent) || definition?.IssuedCredential is not { } declaration)
+                return Task.FromResult(RunCredential.Home);
+
+            if (!set) return Task.FromResult(RunCredential.NotSet($"The credential issued for `{definition.Launch.FileName}` is not set."));
+
+            var variable = declaration.Kinds[0].Variable;
+            return Task.FromResult(new RunCredential(
+                CredentialSource.Issued,
+                new Dictionary<string, string> { [variable] = FakeKey },
+                [.. declaration.Displaces.Concat(declaration.HomeVariables ?? []).Where(v => v != variable)],
+                ["XAI_API_KEY"],
+                PerRunHome: true,
+                Missing: null));
+        }
+    }
+
+    [Fact]
+    public async Task Under_the_shared_home_every_preset_is_listed_as_before_with_no_credential_and_no_home_of_its_own()
+    {
+        var clis = new RecordedClis();
+        var reports = await Reports(AgentCatalogFile.BuiltIns(), clis, new Sources(new HashSet<string>()));
+
+        Assert.NotEmpty(clis.Calls);
+        Assert.All(clis.Calls, c =>
+        {
+            Assert.Null(c.Credential);
+            Assert.False(c.Environment.ContainsKey("HOME"));
+            Assert.DoesNotContain(FakeKey, c.Environment.Values);
+        });
+        Assert.Empty(clis.Made);
+
+        // The same reports as with no resolver at all.
+        var without = await Reports(AgentCatalogFile.BuiltIns(), new RecordedClis());
+        Assert.Equal(without.Select(r => (r.Preset, r.Verdict)), reports.Select(r => (r.Preset, r.Verdict)));
+    }
+
+    [Fact]
+    public async Task An_issued_member_preset_is_listed_with_its_credential_in_a_home_of_its_own_removed_after()
+    {
+        var clis = new RecordedClis();
+        var reports = await Reports(AgentCatalogFile.BuiltIns(), clis, new Sources(new HashSet<string> { "claude-headless" }));
+
+        var issued = clis.Calls.Where(c => c.Credential is not null).ToList();
+        Assert.Equal(2, issued.Count);
+        Assert.All(issued, c =>
+        {
+            Assert.Equal("claude", c.Command);
+            Assert.Equal(FakeKey, c.Credential!.Environment["ANTHROPIC_API_KEY"]);
+
+            // The member's launch shape - its isolation - in the home made for this listing.
+            Assert.Equal("false", c.Environment["ENABLE_CLAUDEAI_MCP_SERVERS"]);
+            Assert.Equal(Assert.Single(clis.Made), c.Environment["HOME"]);
+
+            // The value travels on the credential, never in the shape the listings are keyed on.
+            Assert.DoesNotContain(FakeKey, c.Environment.Values);
+        });
+
+        Assert.Equal(clis.Made, clis.Removed);
+        Assert.Equal(ToolVerdicts.Isolated, Named(reports, "claude-headless").Verdict);
+
+        // The Concierge's own preset is still on the shared home: no credential, no home.
+        Assert.Contains(clis.Calls, c => c.Command == "claude" && c.Credential is null
+            && !c.Environment.ContainsKey("HOME") && !c.Environment.ContainsKey("ENABLE_CLAUDEAI_MCP_SERVERS"));
+    }
+
+    [Fact]
+    public async Task An_issued_member_preset_whose_credential_is_not_set_is_not_measured_and_runs_nothing()
+    {
+        var clis = new RecordedClis();
+        var reports = await Reports(AgentCatalogFile.BuiltIns(), clis, new Sources(new HashSet<string> { "codex-headless" }, set: false));
+
+        var codex = Named(reports, "codex-headless");
+        Assert.Equal(ToolVerdicts.NotMeasured, codex.Verdict);
+        Assert.Contains("is not set", codex.Detail);
+        Assert.Empty(codex.Ran);
+        Assert.Empty(clis.Made);
+        Assert.DoesNotContain(clis.Calls, c => c.Credential is not null);
+    }
+
+    [Fact]
+    public async Task The_concierge_under_issued_keeps_its_home_with_the_credential_set_and_its_displaced_variables_empty()
+    {
+        var clis = new RecordedClis();
+        await Reports(AgentCatalogFile.BuiltIns(), clis, new Sources(new HashSet<string> { "claude" }));
+
+        var concierge = clis.Calls.Where(c => c.Command == "claude" && c.Environment.ContainsKey("ANTHROPIC_API_KEY")).ToList();
+        Assert.NotEmpty(concierge);
+        Assert.All(concierge, c =>
+        {
+            Assert.Equal(FakeKey, c.Environment["ANTHROPIC_API_KEY"]);
+            Assert.Equal("", c.Environment["CLAUDE_CODE_OAUTH_TOKEN"]);
+
+            // Its home and its config-directory variables are left alone.
+            Assert.False(c.Environment.ContainsKey("HOME"));
+            Assert.False(c.Environment.ContainsKey("CLAUDE_CONFIG_DIR"));
+            Assert.Null(c.Credential);
+        });
+        Assert.Empty(clis.Made);
+    }
 
     private static PresetToolReport Named(IReadOnlyList<PresetToolReport> reports, string preset) =>
         Assert.Single(reports, r => r.Preset == preset);

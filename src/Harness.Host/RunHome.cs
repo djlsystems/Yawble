@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Harness.Contracts;
 
 namespace Harness.Host;
 
@@ -30,6 +31,10 @@ public static class RunHome
     /// <summary>Where a run home's CLIs keep their caches: beside the homes, kept across runs.
     /// Copilot unpacks about 186 MB into a fresh HOME's cache otherwise, on every run.</summary>
     public const string CacheFolder = ".cache";
+
+    /// <summary>Where a run home's transcripts are kept once the run ends: beside the homes, so the
+    /// finished run's transcript is still there to read after its home is removed.</summary>
+    public const string TranscriptsFolder = "transcripts";
 
     /// <summary>The grok config file inside a home, as grok looks for it.</summary>
     public static string GrokConfigIn(string home) => Path.Combine(home, ".grok", "config.toml");
@@ -93,6 +98,56 @@ public static class RunHome
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="transcript"/> MOVED OUT of <paramref name="home"/> before the home is removed,
+    /// to <c>&lt;memberTemp&gt;/transcripts/&lt;home's name&gt;-&lt;file name&gt;</c>, and the moved one
+    /// returned, so the run's terminal row names a file that outlives the home. As the agent, as the
+    /// home was made: a rename, so a link is moved as a link and never followed. A transcript outside
+    /// the home, or one that cannot be moved, is returned as it was. Never throws.
+    /// </summary>
+    public static async Task<AgentTranscript?> KeepTranscriptAsync(
+        AgentTranscript? transcript, string home, string memberTemp, AgentLaunchUser? runAs)
+    {
+        if (transcript is null) return null;
+
+        string source;
+        try
+        {
+            source = Path.GetFullPath(transcript.Path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return transcript;
+        }
+
+        if (!source.StartsWith(Path.GetFullPath(home) + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return transcript;
+
+        var folder = Path.Combine(memberTemp, TranscriptsFolder);
+        var kept = Path.Combine(folder, Path.GetFileName(home) + "-" + Path.GetFileName(source));
+
+        if (runAs is { Switches: true } agent)
+        {
+            if (SystemCommand.Find("mkdir") is not { } mkdir || SystemCommand.Find("mv") is not { } mv) return transcript;
+            if (!await RunAsync([.. agent.Prefix, mkdir, "-p", "-m", "700", "--", folder], CancellationToken.None)) return transcript;
+            if (!await RunAsync([.. agent.Prefix, mv, "-n", "-T", "--", source, kept], CancellationToken.None)) return transcript;
+
+            return transcript with { Path = kept };
+        }
+
+        try
+        {
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(folder);
+            else Directory.CreateDirectory(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+            File.Move(source, kept);
+            return transcript with { Path = kept };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return transcript;
         }
     }
 
