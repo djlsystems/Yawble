@@ -23,6 +23,9 @@ var (
 	// credentialWait is how long the Host has to answer one request before it is withdrawn.
 	credentialWait = 60 * time.Second
 	credentialPoll = 500 * time.Millisecond
+	// credentialGrace is how long a report may still take once the request is found gone: the
+	// Host deletes a request before it writes the report.
+	credentialGrace = 2 * time.Second
 )
 
 // maxCredentialBytes is the longest value the Host stores; a longer one is refused here first.
@@ -271,7 +274,8 @@ func checkCredentialValue(value string) error {
 
 // askCredentialHost hands one request to the Host on exec stdin - never in exec's arguments - and
 // waits credentialWait for the report carrying its nonce. A request no Host answered is withdrawn,
-// so a Host started later never carries it out.
+// so a Host started later never carries it out. One that is already gone was taken by the Host,
+// which deletes a request it cannot answer safely and, in a folder it cannot trust, writes nothing.
 func askCredentialHost(ctx context.Context, e engine.Engine, req credentialRequest) (credentialBody, error) {
 	req.Request = newNonce()
 	req.Value = strings.TrimSpace(req.Value)
@@ -279,47 +283,82 @@ func askCredentialHost(ctx context.Context, e engine.Engine, req credentialReque
 	if _, err := e.ExecInput(ctx, instance.ContainerName, string(body)+"\n", "sh", "-c", credentialRequestScript, "sh", agentCredentialsRoot); err != nil {
 		return credentialBody{}, err
 	}
-	withdraw := func(ctx context.Context) {
-		_, _ = e.Exec(ctx, instance.ContainerName, "sh", "-c", credentialWithdrawScript, "sh", agentCredentialsRoot, req.Request)
+	withdraw := func(ctx context.Context) string {
+		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", credentialWithdrawScript, "sh", agentCredentialsRoot, req.Request)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(res.Stdout)
 	}
-	deadline := time.Now().Add(credentialWait)
-	for {
+	// report reads the report once: its body when it answers this request, or ok false.
+	report := func() (credentialBody, bool, error) {
 		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", credentialReportScript, "sh", agentCredentialsRoot)
 		if err != nil {
+			return credentialBody{}, false, err
+		}
+		var r credentialReport
+		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) != nil || r.Request != req.Request {
+			return credentialBody{}, false, nil
+		}
+		var b credentialBody
+		_ = json.Unmarshal(r.Body, &b)
+		if r.Status < 200 || r.Status > 299 {
+			if reason := b.refusal(); reason != "" {
+				return credentialBody{}, true, errors.New(reason)
+			}
+			return credentialBody{}, true, fmt.Errorf("the Host refused the %s request (status %d)", req.Action, r.Status)
+		}
+		return b, true, nil
+	}
+	wait := func(d time.Duration) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(d):
+			return nil
+		}
+	}
+
+	deadline := time.Now().Add(credentialWait)
+	for {
+		b, ok, err := report()
+		if ok || err != nil {
+			if err != nil && !ok {
+				withdraw(context.WithoutCancel(ctx))
+			}
+			return b, err
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		if err := wait(credentialPoll); err != nil {
 			withdraw(context.WithoutCancel(ctx))
 			return credentialBody{}, err
 		}
-		var r credentialReport
-		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.answers(req.Request) {
-			var b credentialBody
-			_ = json.Unmarshal(r.Body, &b)
-			if r.Status < 200 || r.Status > 299 {
-				if reason := b.refusal(); reason != "" {
-					return credentialBody{}, errors.New(reason)
-				}
-				return credentialBody{}, fmt.Errorf("the Host refused the %s request (status %d)", req.Action, r.Status)
-			}
-			return b, nil
+	}
+
+	switch withdraw(ctx) {
+	case "withdrawn":
+		return credentialBody{}, fmt.Errorf("the Host did not answer the %s request within %s, and the request was withdrawn. "+
+			"An image from before issued credentials does not answer; `yawble update` brings the instance current", req.Action, credentialWait)
+	case "replaced":
+		return credentialBody{}, fmt.Errorf("the Host did not answer the %s request within %s, and another request has replaced it, "+
+			"so there was nothing of it to withdraw. Run the command again once the other one has finished", req.Action, credentialWait)
+	}
+	// Gone: the Host took it. Its report, if it writes one, follows the deletion closely.
+	graceEnd := time.Now().Add(credentialGrace)
+	for {
+		if b, ok, err := report(); ok || err != nil {
+			return b, err
 		}
-		if time.Now().After(deadline) {
-			withdraw(ctx)
-			return credentialBody{}, fmt.Errorf("the Host did not answer the %s request within %s, and the request was withdrawn. "+
-				"An image from before issued credentials does not answer; `yawble update` brings the instance current", req.Action, credentialWait)
+		if time.Now().After(graceEnd) {
+			return credentialBody{}, fmt.Errorf("the Host took the %s request and deleted it without acting on it, "+
+				"so nothing was stored or changed. The Host's log says why; most often its request folder %s is not its own", req.Action, agentCredentialsRoot)
 		}
-		select {
-		case <-ctx.Done():
-			withdraw(context.WithoutCancel(ctx))
-			return credentialBody{}, ctx.Err()
-		case <-time.After(credentialPoll):
+		if err := wait(credentialPoll); err != nil {
+			return credentialBody{}, err
 		}
 	}
-}
-
-// answers reports whether this report is the answer to the request carrying nonce. A refusal
-// with no nonce is one too: the Host deletes a request it cannot answer safely without trusting
-// anything in it, and the request script removed any older report before this request went in.
-func (r credentialReport) answers(nonce string) bool {
-	return r.Request == nonce || (r.Request == "" && (r.Status < 200 || r.Status > 299))
 }
 
 // refusal is the Host's sentence for a refused request, whichever key carries it.
@@ -367,6 +406,9 @@ mv -f "$1/.request.tmp" "$1/.request"`
 	// $1 root.
 	credentialReportScript = `cat "$1/.request-report.json" 2>/dev/null || true`
 
-	// $1 root, $2 nonce: removes the request if it is still this one.
-	credentialWithdrawScript = `grep -qF "$2" "$1/.request" 2>/dev/null && rm -f "$1/.request"; true`
+	// $1 root, $2 nonce: removes the request if it is still this one, and says what it found:
+	// withdrawn, replaced (another request is there) or gone.
+	credentialWithdrawScript = `if grep -qF "$2" "$1/.request" 2>/dev/null; then rm -f "$1/.request"; echo withdrawn
+elif [ -e "$1/.request" ] || [ -L "$1/.request" ]; then echo replaced
+else echo gone; fi`
 )
