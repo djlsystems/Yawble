@@ -102,6 +102,24 @@ public sealed class PluginManifestListAndRequiresTests : IDisposable
     }
 
     [Fact]
+    public void Reads_are_refused_in_the_words_the_CLI_uses()
+    {
+        // The CLI's pre-check refuses in these same words (cli/internal/plugin, TestReadsRefusals).
+        foreach (var (reads, expected) in new[]
+        {
+            ("""{"site":"board","collection":"items"}""", "`reads` must be a list of { site, collection }."),
+            ("""[{"site":"board"}]""", "`reads[0]` must be an object with `site` and `collection`."),
+            ("""[{"site":"board","collection":"items","team":"beta"}]""", "`reads[0]` names a team; a plugin reads only its own team's sites."),
+            ("""[{"site":"board","collection":"items"},{"site":"board","collection":"items"}]""", "`reads[1]` repeats board/items."),
+        })
+        {
+            var (manifest, refusal) = PluginManifest.Parse(PluginInstall.Manifest(edit: m => m["reads"] = JsonNode.Parse(reads)).ToJsonString());
+            Assert.Null(manifest);
+            Assert.Equal(expected, refusal);
+        }
+    }
+
+    [Fact]
     public void A_nested_config_type_is_refused_in_the_words_the_CLI_uses()
     {
         var (field, refusal) = PluginConfigField.Parse("x", Value("""{"type":"object"}"""));

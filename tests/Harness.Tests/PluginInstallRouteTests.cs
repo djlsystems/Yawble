@@ -189,6 +189,19 @@ public sealed class PluginInstallRouteTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_plugin_whose_reads_are_malformed_is_refused_at_install_naming_the_field()
+    {
+        using var person = await PersonAsync();
+        var (status, body) = await InstallAsync(person, InWorktree(edit: m =>
+            m["reads"] = JsonNode.Parse("""[{"site":"board","collection":"Items"}]""")));
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Contains("`reads[0].collection`: \"Items\" is not a valid collection name.", body.GetProperty("error").GetString());
+        Assert.False(body.GetProperty("installed").GetBoolean());
+        Assert.False(Directory.Exists(Path.Combine(Plugins, "built-echo")));
+    }
+
+    [Fact]
     public async Task A_folder_outside_the_data_root_is_refused_and_nothing_is_written()
     {
         using var person = await PersonAsync();
