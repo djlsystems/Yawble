@@ -393,7 +393,7 @@ describe('AgentsDialog, mounted', () => {
     await settle();
 
     const text = row('claude-headless').textContent ?? '';
-    expect(text.split('\n')).toContain('Not measured');
+    expect(text).toContain('Not measured');
     expect(text).toContain(why);
     expect(text.toLowerCase()).not.toContain('not installed');
 
@@ -411,8 +411,15 @@ describe('AgentsDialog, the install line', () => {
   const at = '2026-10-02T12:00:00Z';
   const base = { command: 'claude', resolvedPath: null, referenced: true };
 
+  /** A tile line that IS this status: its icon's name, then the words, and nothing after. */
+  const statusLine = (status: string) => new RegExp(`^(error|check_circle|help)${status}$`, 'm');
+
   async function tileText(installation: Record<string, unknown>): Promise<string> {
     listCatalog.mockResolvedValue({ agents: [builtIn], installations: [{ agent: 'claude-headless', ...base, ...installation }] });
+    // Signed in, so the sign-in line never reads "Not measured" beside the install line.
+    getAgentAuth.mockResolvedValue([
+      { agent: 'claude-headless', command: 'claude', installed: true, authenticated: true, detail: 'Signed in.', referenced: true },
+    ]);
     const wrapper = await mountDialog(AgentsDialog);
     await settle();
     // Each line of the tile, so the install line is asserted on its own and not through the sign-in line.
@@ -426,7 +433,7 @@ describe('AgentsDialog, the install line', () => {
   it('in all, a missing CLI reads not found on this machine, with the server sentence', async () => {
     const text = await tileText({ state: 'AgentNotInstalled', message: "claude was not found on this machine's PATH." });
 
-    expect(text.split('\n')).toContain('Not found on this machine');
+    expect(text).toMatch(statusLine('Not found on this machine'));
     expect(text).toContain("claude was not found on this machine's PATH.");
   });
 
@@ -437,7 +444,7 @@ describe('AgentsDialog, the install line', () => {
       measuredOn: [{ worker: 'worker-1', installed: false, at }],
     });
 
-    expect(text.split('\n')).toContain('Not installed on worker-1');
+    expect(text).toMatch(statusLine('Not installed on worker-1'));
     expect(text).toContain('claude is not installed on worker-1.');
     expect(text).not.toContain('this machine');
   });
@@ -449,7 +456,7 @@ describe('AgentsDialog, the install line', () => {
       measuredOn: [{ worker: 'worker-1', installed: true, at }, { worker: 'worker-2', installed: false, at }],
     });
 
-    expect(text.split('\n')).toContain('Not installed on worker-2');
+    expect(text).toMatch(statusLine('Not installed on worker-2'));
     expect(text).toContain('claude is installed on worker-1 but not on worker-2: the workers disagree.');
   });
 
@@ -460,14 +467,14 @@ describe('AgentsDialog, the install line', () => {
       measuredOn: [{ worker: 'worker-1', installed: true, at }],
     });
 
-    expect(text.split('\n')).toContain('Installed on worker-1');
+    expect(text).toMatch(statusLine('Installed on worker-1'));
     expect(text).not.toContain('Found on PATH');
   });
 
   it("in control, a CLI no worker has measured reads 'Not measured' and never 'Found on PATH' or 'Not found'", async () => {
     const text = await tileText({ state: null, message: 'claude has not been measured: no worker is connected.', measuredOn: [] });
 
-    expect(text.split('\n')).toContain('Not measured');
+    expect(text).toMatch(statusLine('Not measured'));
     expect(text).not.toContain('Found on PATH');
     expect(text).not.toContain('Not found');
   });

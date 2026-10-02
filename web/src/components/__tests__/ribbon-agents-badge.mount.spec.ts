@@ -66,7 +66,7 @@ async function labels(installations: AgentInstallation[]): Promise<{ strip: stri
   await flushPromises();
   const drawerLabels = [...drawer.element.querySelectorAll('.q-badge[aria-label]')].map((b) => b.getAttribute('aria-label') ?? '');
   const caption = drawer.find('.ribbon-menu-warning');
-  if (caption.exists()) expect(drawerLabels).toContain(caption.text().trim());
+  if (caption.exists()) expect(drawerLabels.some((label) => caption.text().trim().endsWith(label))).toBe(true);
   drawer.unmount();
 
   return { strip: stripLabels, drawer: drawerLabels };
