@@ -69,7 +69,7 @@ public sealed class TenantSettings
     public const string WipMemoryPerRunMbName = "wip.memoryPerRunMb";
     public const string AdmissionMemoryPercentName = "admission.memoryPercent";
     public const string AdmissionMemoryPressurePercentName = "admission.memoryPressurePercent";
-    public const string RunsMemoryLimitMbName = "runs.memoryLimitMb";
+    public const string RunsMemoryLimitMbName = Harness.Contracts.SettingNames.RunsMemoryLimitMb;
     public const string WorkflowSpendLimitName = "workflow.spendLimit";
     public const string ConciergeIdleTimeoutName = "concierge.idleTimeout";
     public const string QuietWindowName = "quiet.window";

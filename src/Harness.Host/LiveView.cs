@@ -17,36 +17,36 @@ namespace Harness.Host;
 public static class LiveView
 {
     /// <summary>Claude Code's session jsonl, one JSON object per line.</summary>
-    public const string ClaudeJsonl = "claude-jsonl";
+    public const string ClaudeJsonl = LiveViewNames.ClaudeJsonl;
 
     /// <summary>Grok's <c>updates.jsonl</c>: one ACP <c>session/update</c> per line.</summary>
-    public const string GrokUpdates = "grok-updates";
+    public const string GrokUpdates = LiveViewNames.GrokUpdates;
 
     /// <summary>Copilot's <c>events.jsonl</c> under <c>session-state/&lt;id&gt;/</c>.</summary>
-    public const string CopilotEvents = "copilot-events";
+    public const string CopilotEvents = LiveViewNames.CopilotEvents;
 
     /// <summary>Codex's <c>rollout-*.jsonl</c> under <c>sessions/YYYY/MM/DD/</c>.</summary>
-    public const string CodexRollout = "codex-rollout";
+    public const string CodexRollout = LiveViewNames.CodexRollout;
 
     /// <summary>Every format something renders.</summary>
-    public static IReadOnlyList<string> Formats { get; } = [ClaudeJsonl, GrokUpdates, CopilotEvents, CodexRollout];
+    public static IReadOnlyList<string> Formats => LiveViewNames.Formats;
 
     /// <summary><see cref="AgentLiveViewFind.CwdFrom"/>: the first folder's name, percent-decoded (Grok).</summary>
-    public const string CwdFromFolderName = "folder-name";
+    public const string CwdFromFolderName = LiveViewNames.CwdFromFolderName;
 
     /// <summary><see cref="AgentLiveViewFind.CwdFrom"/>: <c>workspace.yaml</c>'s <c>cwd:</c> beside the file (Copilot).</summary>
-    public const string CwdFromWorkspaceYaml = "workspace-yaml";
+    public const string CwdFromWorkspaceYaml = LiveViewNames.CwdFromWorkspaceYaml;
 
     /// <summary><see cref="AgentLiveViewFind.CwdFrom"/>: the first line's <c>cwd</c> (Codex).</summary>
-    public const string CwdFromFirstLine = "first-line-cwd";
+    public const string CwdFromFirstLine = LiveViewNames.CwdFromFirstLine;
 
-    public static IReadOnlyList<string> CwdRules { get; } = [CwdFromFolderName, CwdFromWorkspaceYaml, CwdFromFirstLine];
+    public static IReadOnlyList<string> CwdRules => LiveViewNames.CwdRules;
 
     /// <summary>The display line's bound, in characters, the ellipsis included.</summary>
-    public const int MaxLine = 240;
+    public const int MaxLine = LiveViewNames.MaxLine;
 
     /// <summary>How long after launch the Host looks for a transcript it has to find.</summary>
-    public static readonly TimeSpan FindFor = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan FindFor = LiveViewNames.FindFor;
 
     /// <summary>
     /// The transcript path for one run, or null when <paramref name="view"/> is not one this Host
@@ -113,21 +113,19 @@ public static class LiveView
         view is not null && Refusal(view) is null && LiveTranscriptReader.Refusal(runAs) is null;
 
     /// <summary>How Claude names a project folder: the working directory with every <c>/</c> and every <c>.</c> as <c>-</c>.</summary>
-    public static string Dashed(string workingDirectory) =>
-        workingDirectory.Replace('/', '-').Replace('.', '-');
+    public static string Dashed(string workingDirectory) => LiveViewNames.Dashed(workingDirectory);
 
     /// <summary>
     /// How Grok names a session's workspace folder: the working directory percent-encoded as one
     /// segment, <c>/</c> as <c>%2F</c> (as of Grok 1.0.41).
     /// </summary>
-    public static string Encoded(string workingDirectory) => Uri.EscapeDataString(workingDirectory);
+    public static string Encoded(string workingDirectory) => LiveViewNames.Encoded(workingDirectory);
 
     /// <summary>The time a transcript line carries, as the live and past-run routes send it: UTC, milliseconds, or empty.</summary>
     public static string When(DateTimeOffset? at) =>
         at is { } stamp ? stamp.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture) : "";
 
-    private static bool UnderHome(string path) =>
-        !string.IsNullOrEmpty(path) && path.StartsWith("~/", StringComparison.Ordinal) && !path.Split('/').Contains("..");
+    private static bool UnderHome(string path) => LiveViewNames.UnderHome(path);
 }
 
 /// <summary>
@@ -554,12 +552,7 @@ public static class ClaudeTranscriptLines
         return [Clip("Attachment: " + first)];
     }
 
-    internal static string? Text(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(property, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
+    internal static string? Text(JsonElement element, string property) => JsonFields.Text(element, property);
 
     internal static string FirstLine(string text) =>
         text.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0) ?? "";

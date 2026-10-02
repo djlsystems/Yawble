@@ -60,8 +60,7 @@ public static class TranscriptLines
         }
     }
 
-    internal static JsonElement Property(JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) ? value : default;
+    internal static JsonElement Property(JsonElement element, string name) => Harness.Contracts.JsonFields.Property(element, name);
 
     /// <summary>A tool line in the shape Claude's are: <c>&lt;name&gt;: &lt;short input&gt;</c>, or the name alone.</summary>
     internal static string Tool(string name, JsonElement input)
