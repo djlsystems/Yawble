@@ -147,4 +147,3 @@ func workerLine(w instance.WorkerStatus, record *doctor.WorkersRecord) string {
 	}
 	return line
 }
-

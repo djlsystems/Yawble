@@ -359,6 +359,9 @@ type ScaleOptions struct {
 // control. New workers are started and waited for; workers above the count are removed highest
 // first, each drained of its runs unless Now.
 func Scale(ctx context.Context, e engine.Engine, s Settings, runsOf RunsOf, opt ScaleOptions, out io.Writer) error {
+	if s.Workers < 1 {
+		s.Workers = 1
+	}
 	ref, err := s.WorkerRef()
 	if err != nil {
 		return err
