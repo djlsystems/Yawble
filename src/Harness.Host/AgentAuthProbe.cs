@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Harness.Contracts;
-using Harness.Pty;
 using Microsoft.Extensions.Logging;
 
 namespace Harness.Host;
@@ -56,8 +55,12 @@ public sealed record AgentAuthReport(
 /// reads: it is another process, and asks nothing.
 /// </para>
 /// <para>
+/// Each answer's <c>installed</c> is recorded against the worker that gave it (<see cref="WorkerInstalls"/>,
+/// in control), which is where the Agents badge and the warnings read whether a CLI is installed.
+/// </para>
+/// <para>
 /// A PRESET THAT SIGNS IN WITH AN ISSUED CREDENTIAL is answered from the run credential resolver
-/// alone: signed in when the credential its command was issued is set and decrypts, not signed in
+/// alone, and whether its CLI is installed from <see cref="AgentInstallProbe.Measured"/>: signed in when the credential its command was issued is set and decrypts, not signed in
 /// otherwise. The shared home is not looked at - no credential file, no status command, no Host
 /// variable - because an issued run never reads it. Whether the value is ACCEPTED is not known
 /// until a run: no CLI here has a status command that checks a key.
@@ -124,7 +127,9 @@ public sealed class AgentAuthProbe(
 
             if (credential.Source == CredentialSource.Issued)
             {
-                var installed = PathSearch.Find(command) is not null;
+                // Installed where its runs go: this machine's PATH in `all`, the workers' measurement in
+                // control - null when no worker has answered, never control's own PATH.
+                var installed = _installs.Measured(definition);
                 var detail = credential.Missing is null
                     ? $"Signs in with the credential issued for `{RunCredentials.CommandOf(definition)}`, in "
                       + $"{string.Join(", ", credential.Environment.Keys)}. Whether it is accepted shows at the first run."
@@ -143,6 +148,13 @@ public sealed class AgentAuthProbe(
         // Every command on the shared home, once each, in one request to one worker.
         var commands = home.Select(h => h.Command).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var (answers, worker, why) = await ProbeAsync(commands, specs, ct);
+
+        // What each command's install is on the worker that answered, for the Agents badge and every
+        // warning. A worker that did not answer measured nothing.
+        if (worker is { } answeredBy && answers.Count > 0)
+        {
+            _measured?.Record(answeredBy, answers.Values.Select(answer => (answer.Command, answer.Installed)));
+        }
 
         var answered = reports.Select(entry => entry.Report ?? Answer(entry.Definition, answers, why)).ToList();
 

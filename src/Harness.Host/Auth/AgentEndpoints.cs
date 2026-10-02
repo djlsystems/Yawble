@@ -37,6 +37,20 @@ public static class AgentEndpoints
         "\n\n**A person's action.** `env` is where an outside Agent's key lives, so the full "
         + "record - including every command line - is a credential surface.";
 
+    /// <summary>
+    /// The probe as a machine principal reads it: no command and no Host disk path. <c>measuredOn</c>
+    /// is the workers' answer in control - worker ids, booleans and times - and written only there,
+    /// so in <c>all</c> this is the shape it always was.
+    /// </summary>
+    internal sealed record RedactedInstallation(
+        string Agent,
+        string? State,
+        bool Referenced,
+        string Message,
+        AgentInstall? Install,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<InstallMeasurement>? MeasuredOn);
+
     public static void Map(WebApplication app, string dataRoot)
     {
         app.MapGet("/api/agents", async (
@@ -111,14 +125,8 @@ public static class AgentEndpoints
                     tagsFromOperator = catalog.TagsFromOperator(a.Name),
                     buildTags = catalog.BuildTags(a.Name),
                 }),
-                installations = installations.Select(i => new
-                {
-                    i.Agent,
-                    i.State,
-                    i.Referenced,
-                    i.Message,
-                    i.Install,
-                }),
+                installations = installations.Select(i => new RedactedInstallation(
+                    i.Agent, i.State, i.Referenced, i.Message, i.Install, i.MeasuredOn)),
                 ignoredTagOverrides = catalog.IgnoredTagOverrides,
             });
         })
