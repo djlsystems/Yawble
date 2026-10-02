@@ -100,7 +100,8 @@ func TestWorkersRefusesACountOverTheEngineNamingTheBound(t *testing.T) {
 	}
 }
 
-func TestWorkersThreeAddsTwoWorkersSavesTheCountAndTouchesNoVolume(t *testing.T) {
+// workers 3 through the command: two workers added, the count saved, nothing else touched.
+func TestWorkersTouchesNoVolume(t *testing.T) {
 	s, deps := dockerInstance(t, 1, doctorStdout)
 	for i := 2; i <= 3; i++ {
 		s.On(healthLine("docker", instance.WorkerName(i)), engine.Result{Stdout: "healthy\n"})
