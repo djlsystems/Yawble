@@ -374,8 +374,9 @@ is paused); **blocked**, naming what the team waits for ("Upload a file to Resum
 **idle**. The launcher reads `GET /api/solutions/installed`.
 
 **The control panel** (`GET /api/teams/{team}/solution/panel`) is the platform's own screen, not a
-site: its controls act with the person's authority, which a site is deliberately without. Its
-sections:
+site: its controls act with the person's authority, which a site is deliberately without. The
+read also answers `sites`: each site the package publishes, in the package's order, with its
+address and whether it is published now - a read, with no control of its own. Its sections:
 
 - **Status**: each member's state and last run; each trigger with its next fire; anything blocked,
   with the fix inline (an upload box for a missing document, a picker for a missing connection);

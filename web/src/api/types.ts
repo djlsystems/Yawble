@@ -3485,6 +3485,11 @@ export interface SolutionPanel {
   state: SolutionState
   status: string
   primarySite: SolutionPrimarySite | null
+  /**
+   * Each site the package publishes, in its order, with whether it is published now. Optional on
+   * the client only, so a panel from a Host that predates it still reads: then no Sites are shown.
+   */
+  sites?: SolutionPrimarySite[]
   members: SolutionPanelMember[]
   triggers: SolutionPanelTrigger[]
   blocked: SolutionPanelBlocked[]
