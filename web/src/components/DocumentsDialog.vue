@@ -1300,8 +1300,13 @@ onBeforeUnmount(() => drag.end());
   overflow: hidden;
 }
 
-.documents-window-full {
+/* MAXIMISED OR AT PHONE WIDTH: the whole screen. Not a width of the dialog's own - the scale's
+   phone cap (100vw less a margin) is for a dialog sitting on the page, and a maximised one does
+   not sit on anything. */
+.documents-window.documents-window-full {
   height: 100%;
+  width: 100%;
+  max-width: none;
 }
 
 .documents-titlebar {

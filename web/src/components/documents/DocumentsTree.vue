@@ -234,6 +234,7 @@ onBeforeUnmount(stopHover);
       :nodes="nodes"
       node-key="key"
       :selected="selectedKey()"
+      selected-color="primary"
       no-transition
       dense
       no-nodes-label="No team documents yet"
