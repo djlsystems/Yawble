@@ -1,6 +1,8 @@
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Capacity;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace Harness.Tests;
 
@@ -229,6 +231,64 @@ public sealed class WorkerTranscriptTests : IDisposable
 
         await WorkerStreamBed.Until(() => transcripts.Following.Count == 0);
     }
+
+    [Fact]
+    public async Task With_two_workers_a_live_view_is_asked_of_the_runs_own_worker()
+    {
+        var (directory, pool, first, second) = TwoWorkers();
+        var member = new ContainerId("alpha", "Dev");
+        var start = StartOf(member);
+        var running = directory.RunAsync(second, start, Ct);
+        await WorkerStreamBed.Until(() => second.Sent.Count > 0);
+
+        // Any worker would be the first; the run is on the second.
+        Assert.Same(first, pool.Worker(null));
+
+        Assert.Null(LiveViewEndpoints.Place(directory, pool, member, out var placed));
+        Assert.Same(second, placed.Worker);
+        Assert.Equal(start.Run, placed.Run);
+
+        second.Lose("the test is over");
+        await running.WaitAsync(WorkerStreamBed.Bound, Ct);
+    }
+
+    [Fact]
+    public async Task A_dropped_workers_live_view_answers_503_with_a_sentence()
+    {
+        var (directory, pool, first, second) = TwoWorkers();
+        var member = new ContainerId("alpha", "Dev");
+        var running = directory.RunAsync(second, StartOf(member), Ct);
+        await WorkerStreamBed.Until(() => second.Sent.Count > 0);
+        second.Dropped = true;
+
+        // Not followed on the connected first worker instead: the run's own worker says, or nobody does.
+        var refused = Assert.IsType<ProblemHttpResult>(LiveViewEndpoints.Place(directory, pool, member, out _));
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, refused.StatusCode);
+        Assert.Equal(LiveViewEndpoints.NotConnectedText(second.Id), refused.ProblemDetails.Detail);
+        Assert.Equal(
+            "The worker running this run (w2) is not connected, so its live view cannot be read; it comes back if the worker reconnects within its grace.",
+            refused.ProblemDetails.Detail);
+        Assert.Empty(first.Sent);
+
+        second.Lose("the test is over");
+        await running.WaitAsync(WorkerStreamBed.Bound, Ct);
+    }
+
+    private static (RunDirectory Directory, WorkerPool Pool, FakeWorker First, FakeWorker Second) TwoWorkers()
+    {
+        var first = new FakeWorker("w1");
+        var second = new FakeWorker("w2");
+        var pool = new WorkerPool([
+            (first.Id, new HeadroomGate(() => 80, () => 0, TimeProvider.System)),
+            (second.Id, new HeadroomGate(() => 80, () => 0, TimeProvider.System)),
+        ]);
+        pool.Connect(first);
+        pool.Connect(second);
+        return (new RunDirectory(), pool, first, second);
+    }
+
+    private static StartRun StartOf(ContainerId member) =>
+        new(RunId.For(member), "probe", "You are a probe.", "hello", "", "/", new Dictionary<string, string>(), null, null, null, null, null);
 
     private (WorkerReads Reads, FakeWorker Worker, WorkerStreams Streams) Faked()
     {

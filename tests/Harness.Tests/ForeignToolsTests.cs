@@ -3,6 +3,7 @@ using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
+using Harness.Host.Capacity;
 using Harness.Kanban;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -459,6 +460,40 @@ public sealed class ForeignToolsCheckTests : IAsyncDisposable
             e => e.Action == TenantActions.AgentForeignTools && e.Subject == row.Source);
     }
 
+    [Fact]
+    public async Task With_no_worker_connected_a_run_is_not_measured_and_says_why()
+    {
+        // The transcript is read as the agent on a worker; with none connected there is nothing to
+        // judge, so the run is not measured - never clean - and its row says why.
+        var noWorker = new WorkerReads(new WorkerPool(_ => new HeadroomGate(() => 80, () => 0, TimeProvider.System)), new WorkerStreams());
+        await StartAsync(null, "claude-headless", reads: noWorker);
+        var services = _factory.Services;
+        var transcript = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ForeignTools", "claude-calls-connectors.jsonl");
+        var row = await services.GetRequiredService<IMessageLog>().AppendAsync(new NewMessage(
+            MessageTypes.Completed,
+            JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                [PayloadFields.AgentTranscript] = transcript,
+                [PayloadFields.AgentTranscriptFormat] = LiveView.ClaudeJsonl,
+            }),
+            new ContainerId(_team, "Dev").ToString()), Ct);
+
+        var finding = await services.GetRequiredService<ForeignToolsCheck>().CheckAsync(row, Ct);
+
+        Assert.NotNull(finding);
+        Assert.Equal(ForeignToolsStatus.NotMeasured, finding.Status);
+        Assert.Equal("no worker is connected to read its transcript", finding.Why);
+        Assert.Empty(finding.Called);
+        Assert.Empty(finding.Offered);
+
+        var written = Assert.Single(await DevRowsAsync());
+        var payload = JsonDocument.Parse(written.Payload).RootElement;
+        Assert.Equal("notMeasured", payload.GetProperty(PayloadFields.ForeignToolsStatus).GetString());
+        Assert.Equal("nothing: the transcript could not be read", payload.GetProperty(PayloadFields.Measured).GetString());
+        Assert.Contains("no worker is connected to read its transcript", payload.GetProperty(PayloadFields.Text).GetString(), StringComparison.Ordinal);
+        Assert.Empty(await TenantRowsAsync());
+    }
+
     // --- host -------------------------------------------------------------------------------------
 
     private string? _transcript;
@@ -469,7 +504,7 @@ public sealed class ForeignToolsCheckTests : IAsyncDisposable
     /// <paramref name="otherMember"/> is given, a member Con launched as that preset. A null
     /// <paramref name="allowed"/> keeps Program.cs's own wiring.
     /// </summary>
-    private async Task StartAsync(PresetAllowedTools? allowed, string preset, string? otherMember = null)
+    private async Task StartAsync(PresetAllowedTools? allowed, string preset, string? otherMember = null, WorkerReads? reads = null)
     {
         var dataRoot = Path.Combine(_root, "data");
         Directory.CreateDirectory(dataRoot);
@@ -483,6 +518,7 @@ public sealed class ForeignToolsCheckTests : IAsyncDisposable
             {
                 services.AddSingleton<IAgentRunner>(agent);
                 if (allowed is not null) services.AddSingleton(allowed);
+                if (reads is not null) services.AddSingleton(reads);
             }));
 
         var services = _factory.Services;

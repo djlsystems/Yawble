@@ -31,12 +31,14 @@ public sealed class WorkerArchitectureTests
     public const string SignalsAProcessGroup = "signals a process group";
     public const string ReachesAWorkerLauncher = "reaches a worker launcher";
 
-    /// <summary>Why an entry may stay: what a later change moves, or what control keeps for good.</summary>
-    private static readonly string[] Categories =
+    /// <summary>Why an entry may stay: what control keeps for good, or what a later change moves.</summary>
+    private static readonly string[] Categories = ["git", "gh", "settings default"];
+
+    /// <summary>The only processes control starts itself: a person's and a team's git, and the GitHub CLI.</summary>
+    private static readonly string[] ControlStarts =
     [
-        "Concierge PTY", "sign-in probe", "tool pre-flight", "launch check", "CLI updates",
-        "live transcript reader", "FolderRemoval's agent pass", "git", "gh", "agent user", "settings default",
-        "run home",
+        "GhContributor.RunAsync: " + StartsAProcess,
+        "GitRunner.ExecuteGitAsync: " + StartsAProcess,
     ];
 
     /// <summary>Every caller outside the worker that still does one of these things, and why.</summary>
@@ -72,6 +74,27 @@ public sealed class WorkerArchitectureTests
             "Outside Harness.Worker, these start a process, read /proc, touch a cgroup, call setpriv or prlimit, "
             + "or call a worker method that does. Move them behind the run protocol, or allow-list them with a reason:"
             + Environment.NewLine + string.Join(Environment.NewLine, unexpected));
+    }
+
+    /// <summary>
+    /// THE CONTROL ROLE STARTS NOTHING BUT GIT AND GH. Every agent CLI, a person's terminal, a probe, a
+    /// listing, an update and a removal's agent pass run on a worker, reached through the run protocol -
+    /// in <c>all</c> too, through the in-process connection, since this scan cannot tell roles apart.
+    /// So outside the worker exactly two methods start a process, none signals one, calls setpriv or
+    /// prlimit, or calls a worker method that does; allow-listing another start fails here.
+    /// </summary>
+    [Fact]
+    public void Control_starts_no_process_but_git_and_gh()
+    {
+        string[] processRules = [StartsAProcess, SignalsAProcessGroup, CallsSetprivOrPrlimit, ReachesAWorkerLauncher];
+        var starts = Violations(Scanned())
+            .Where(v => processRules.Any(rule => v.EndsWith(": " + rule, StringComparison.Ordinal)))
+            .ToList();
+
+        Assert.Equal(ControlStarts, starts);
+        Assert.Equal(
+            ControlStarts,
+            AllowList.Keys.Where(key => processRules.Any(rule => key.EndsWith(": " + rule, StringComparison.Ordinal))).Order(StringComparer.Ordinal));
     }
 
     [Fact]

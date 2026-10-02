@@ -139,30 +139,7 @@ public static class LiveViewEndpoints
 
         var format = run.Format ?? LiveView.ClaudeJsonl;
 
-        // FOLLOWED ON THE WORKER THE RUN IS ON, as the agent: control reads no agent's file itself. A
-        // run control has no open start for is followed on any connected worker: the file is on the
-        // shared volume, and this run's end is control's to say.
-        (IRunWorker Worker, RunId Run) placed;
-        if (directory.WorkerOf(container.Id) is { } open)
-        {
-            placed = open;
-        }
-        else
-        {
-            try
-            {
-                placed = (reads.Workers.Worker(null), new RunId(container.Id, string.Empty));
-            }
-            catch (InvalidOperationException)
-            {
-                return Results.Problem(WorkerReads.NoWorkerText, statusCode: StatusCodes.Status503ServiceUnavailable);
-            }
-        }
-
-        if (placed.Worker is IRunWorkerConnection { Dropped: true })
-        {
-            return NotConnected(placed.Worker.Id);
-        }
+        if (Place(directory, reads.Workers, container.Id, out var placed) is { } refused) return refused;
 
         var id = "live:" + Guid.NewGuid().ToString("N");
         using var stream = streams.Open(id, placed.Worker);
@@ -257,6 +234,34 @@ public static class LiveViewEndpoints
         }
 
         return Results.Empty;
+    }
+
+    /// <summary>
+    /// FOLLOWED ON THE WORKER THE RUN IS ON, as the agent: control reads no agent's file itself. A run
+    /// control has no open start for is followed on any connected worker: the file is on the shared
+    /// volume, and this run's end is control's to say. Answers the 503 to send instead when there is no
+    /// worker to ask, or the run's own worker is dropped.
+    /// </summary>
+    public static IResult? Place(RunDirectory directory, WorkerPool workers, ContainerId member, out (IRunWorker Worker, RunId Run) placed)
+    {
+        if (directory.WorkerOf(member) is { } open)
+        {
+            placed = open;
+        }
+        else
+        {
+            try
+            {
+                placed = (workers.Worker(null), new RunId(member, string.Empty));
+            }
+            catch (InvalidOperationException)
+            {
+                placed = default;
+                return Results.Problem(WorkerReads.NoWorkerText, statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        }
+
+        return placed.Worker is IRunWorkerConnection { Dropped: true } ? NotConnected(placed.Worker.Id) : null;
     }
 
     /// <summary>What a live view of a run whose worker is not connected answers.</summary>
