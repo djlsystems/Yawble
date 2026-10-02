@@ -471,6 +471,19 @@ body.body--dark {
   z-index: 7200;
 }
 
+// The app bar's DROP-DOWN MENUS, above the Concierge: the ribbon's "..." overflow menu and its team
+// list, the team switcher, the account menu and the activity monitor. Each is a QMenu teleported to
+// <body> at 6000, so with the panel open (`.concierge-shell`, 7000) it opened BEHIND the terminal -
+// present, focused and invisible. A menu is a glance, so it rises above the panel rather than
+// minimizing it; choosing a command from one minimizes the panel (`MainLayout.onRibbonAction`), so
+// the dialog it opens is not hidden either.
+//
+// Global for the reason every rule here is, and handed to Quasar as `class` on a QMenu or
+// `content-class` on a QBtnDropdown. Equal specificity with `.q-menu`, so it wins on source order.
+.above-concierge {
+  z-index: 7100;
+}
+
 // `TriggerEditDialog`'s five QSelects, above `.q-menu`'s own default of 6000.
 //
 // A NO-OP today, deliberately defined anyway: `TriggersDialog` opens from an ordinary

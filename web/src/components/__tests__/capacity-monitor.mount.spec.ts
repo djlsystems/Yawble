@@ -69,6 +69,18 @@ describe('the app-bar gauge', () => {
     expect(document.body.querySelector('[data-test="capacity-memory"]')?.textContent).toContain('11.2 of 12.9 GB in use');
   });
 
+  // The Concierge panel sits at 7000 and a QMenu at 6000: without the lift the dropdown opens
+  // behind an open panel. The class is what `app.scss` raises above it.
+  it('opens its dropdown above the Concierge panel', async () => {
+    const wrapper = await mountGauge(memoryAt(87));
+
+    await wrapper.get('[data-test="capacity-gauge"]').trigger('click');
+    await flushPromises();
+
+    const menu = document.body.querySelector('[data-test="capacity-memory"]')?.closest('.q-menu');
+    expect(menu?.classList.contains('above-concierge')).toBe(true);
+  });
+
   it('is green, amber and red by memory in use, naming the figure that set it', async () => {
     expect(level(await mountGauge(memoryAt(50)))).toBe('green');
     expect(level(await mountGauge(memoryAt(80)))).toBe('amber');

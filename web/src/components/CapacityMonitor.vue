@@ -86,7 +86,7 @@ function openTeam(team: string) {
     </svg>
     <q-tooltip>{{ state.reason }}</q-tooltip>
 
-    <q-menu anchor="bottom right" self="top right">
+    <q-menu anchor="bottom right" self="top right" class="above-concierge">
       <CapacityPanel
         :sample="latest"
         :history="history"

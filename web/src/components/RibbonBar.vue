@@ -143,6 +143,7 @@ const overflowGroups = computed(() => {
           dense
           no-caps
           class="ribbon-btn"
+          content-class="above-concierge"
           :disable="teams.length === 0"
           :icon="entry.item.icon"
           :label="entry.item.label"
@@ -192,7 +193,7 @@ const overflowGroups = computed(() => {
       class="ribbon-overflow"
       aria-label="More commands"
     >
-      <q-menu anchor="bottom right" self="top right">
+      <q-menu anchor="bottom right" self="top right" class="above-concierge">
         <q-list dense class="ribbon-overflow-menu">
           <template v-for="group in overflowGroups" :key="group.label">
             <q-item-label header class="ribbon-overflow-section">{{ group.label }}</q-item-label>
@@ -212,7 +213,7 @@ const overflowGroups = computed(() => {
                   <q-icon name="chevron_right" />
                 </q-item-section>
 
-                <q-menu anchor="top start" self="top end">
+                <q-menu anchor="top start" self="top end" class="above-concierge">
                   <RibbonTeamList @pick="board.setActiveTeam" />
                 </q-menu>
               </q-item>

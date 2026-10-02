@@ -176,6 +176,12 @@ const conciergeSessionTeam = computed<TeamId | null>(() => conciergeLaunchTeam.v
 const conciergeSessionTeamName = computed(() => conciergeLaunchTeamName.value ?? board.activeWorkTeam?.name);
 
 /** The bubble opens the Concierge and, pressed again, minimises it: one control, both ways. */
+/** A dialog chosen outside the ribbon (the account menu's): the same rule as `onRibbonAction`. */
+function minimizeConciergeFor(open: () => void) {
+  conciergeOpen.value = false;
+  open();
+}
+
 function toggleConcierge() {
   conciergeOpen.value = !conciergeOpen.value;
 }
@@ -234,6 +240,12 @@ const teamSettingsTabs: Record<string, 'general' | 'members'> = {
  * every branch has to thread.
  */
 function onRibbonAction(action: string) {
+  // CHOOSING ANOTHER COMMAND MINIMIZES THE CONCIERGE. The panel's shell sits at z-index 7000, above
+  // every QDialog (6000), so a dialog opened from the ribbon with the panel open painted BEHIND the
+  // terminal - and, being modal, took the keyboard from it, so neither could be used. Minimizing keeps
+  // the session running; the bubble brings it back.
+  conciergeOpen.value = false;
+
   if (action === 'admin-new-team') {
     creatingTeam.value = true;
     return;
@@ -376,6 +388,7 @@ async function signOut() {
           dense
           no-caps
           class="q-ml-sm user-menu"
+          content-class="above-concierge"
           :aria-label="`Account: ${session.user.email}`"
         >
           <template #label>
@@ -395,7 +408,7 @@ async function signOut() {
             <!-- A DISPLAY preference, which is why it is here rather than in the ribbon: it is
                  about this browser's view rather than about a team or the tenant, and it sits
                  beside the other thing in this menu that is about you. -->
-            <q-item v-close-popup clickable @click="boardDisplayOpen = true">
+            <q-item v-close-popup clickable @click="minimizeConciergeFor(() => (boardDisplayOpen = true))">
               <q-item-section avatar>
                 <q-icon name="dashboard_customize" />
               </q-item-section>
@@ -424,7 +437,7 @@ async function signOut() {
               </q-item-section>
             </q-item>
 
-            <q-item v-close-popup clickable @click="profileOpen = true">
+            <q-item v-close-popup clickable @click="minimizeConciergeFor(() => (profileOpen = true))">
               <q-item-section avatar>
                 <q-icon name="manage_accounts" />
               </q-item-section>

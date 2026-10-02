@@ -84,6 +84,8 @@ describe('the command bar', () => {
 
     const menu = document.body.querySelector('.ribbon-overflow-menu');
     expect(menu).not.toBeNull();
+    // Above an open Concierge panel (7000), not behind it at a QMenu's 6000.
+    expect(menu!.closest('.q-menu')?.classList.contains('above-concierge')).toBe(true);
 
     const text = menu!.textContent ?? '';
     for (const entry of entries.slice(3)) {

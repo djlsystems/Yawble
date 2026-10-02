@@ -298,6 +298,26 @@ describe('MainLayout ribbon actions', () => {
     return { wrapper, pullRepoStatus, openForTeam };
   }
 
+  // A dialog opened from the ribbon painted behind an open panel (7000 over a dialog's 6000) and,
+  // being modal, took the keyboard from the terminal. Choosing a command minimizes the panel.
+  it('minimizes an open Concierge when a command is chosen, and still opens what was chosen', async () => {
+    const wrapper = await mountShellWithActiveTeam();
+    const pullRepoStatus = vi.spyOn(useConsoleStore(), 'pullRepoStatus').mockResolvedValue();
+    const panel = wrapper.findComponent(ConciergePanel);
+
+    await clickTheConciergeFab(wrapper);
+    expect(panel.props('modelValue')).toBe(true);
+
+    wrapper.findComponent(RibbonBar).vm.$emit('action', 'team-git');
+    await flushPromises();
+
+    expect(panel.props('modelValue')).toBe(false);
+    expect(pullRepoStatus).toHaveBeenCalled();
+    expect(wrapper.find('.concierge-fab').attributes('aria-label')).toBe('Open the Concierge');
+
+    wrapper.unmount();
+  });
+
   it('re-reads repo status when the git dialog opens', async () => {
     const { wrapper, pullRepoStatus } = await ribbonAction('team-git');
 
