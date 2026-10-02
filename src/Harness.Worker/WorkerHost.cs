@@ -219,9 +219,11 @@ public sealed class WorkerHost
             // The cgroup first, then the process groups: the order the capacity sample always read them in.
             var at = _clock.GetUtcNow();
             var cgroup = _cgroup?.Read() ?? WorkerCapacity.NotMeasured;
-            Dictionary<ContainerId, RunId> byMember;
-            lock (_runsGate) byMember = _runs.Keys.GroupBy(r => r.Member).ToDictionary(g => g.Key, g => g.First());
-            IReadOnlyList<RunId> open = [.. byMember.Values];
+            // Every open run is listed; a process group is registered by member, so its measurement
+            // is charged to one open run of that member.
+            IReadOnlyList<RunId> open;
+            lock (_runsGate) open = [.. _runs.Keys];
+            var byMember = open.GroupBy(r => r.Member).ToDictionary(g => g.Key, g => g.First());
 
             if (_processes is not null)
             {
