@@ -110,25 +110,26 @@ func (c *WorkerCapacity) FiguresText() string {
 // recorded none yet.
 var ErrNoWorkerRecord = errors.New("control's report carries no record of its workers")
 
-// RunsOf reads one worker's runs from control's report, for `yawble workers` to wait on.
+// RunsOf reads one worker from control's report, its runs and whether it is draining, for
+// `yawble workers` to drain and wait on.
 func RunsOf(fetch func(context.Context) (*HostReport, error)) instance.RunsOf {
-	return func(ctx context.Context, id string) ([]instance.Run, error) {
+	return func(ctx context.Context, id string) (instance.Recorded, error) {
 		r, err := fetch(ctx)
 		if err != nil {
-			return nil, err
+			return instance.Recorded{}, err
 		}
 		if r.Workers == nil {
-			return nil, ErrNoWorkerRecord
+			return instance.Recorded{}, ErrNoWorkerRecord
 		}
 		w := r.Workers.Worker(id)
 		if w == nil {
-			return nil, nil
+			return instance.Recorded{}, nil
 		}
-		runs := make([]instance.Run, len(w.Runs))
+		rec := instance.Recorded{Runs: make([]instance.Run, len(w.Runs)), Draining: w.Draining, Connected: w.State == "connected"}
 		for i, run := range w.Runs {
-			runs[i] = instance.Run{Run: run.Run, Team: run.Team, Member: run.Member}
+			rec.Runs[i] = instance.Run{Run: run.Run, Team: run.Team, Member: run.Member}
 		}
-		return runs, nil
+		return rec, nil
 	}
 }
 

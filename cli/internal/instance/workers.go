@@ -334,15 +334,29 @@ func Bound(engineMB, engineCPUs, workers, workerMB, workerCPUs int) (cpuWarning 
 // Run is one run on a worker, as control recorded it.
 type Run struct{ Run, Team, Member string }
 
-// RunsOf answers the runs on one worker, by its id, as control recorded them. An error is control
-// not answering, or recording nothing: the runs are then not known.
-type RunsOf func(ctx context.Context, id string) ([]Run, error)
+// Recorded is one worker as control's record shows it: its runs, and whether it is draining.
+// Connected is false when the record holds no live connection of that worker, so a drain cannot
+// show in it.
+type Recorded struct {
+	Runs      []Run
+	Draining  bool
+	Connected bool
+}
+
+// RunsOf answers one worker, by its id, as control recorded it. An error is control not
+// answering, or recording nothing: the runs are then not known.
+type RunsOf func(ctx context.Context, id string) (Recorded, error)
 
 // Drain polling bounds: how often the runs of a draining worker are asked, and how long a drain
-// may wait before it gives up and leaves the worker running.
+// may wait before it gives up and leaves the worker running. drainShownWithin bounds the wait for
+// control's record to show a worker draining, read every drainShownInterval; recordPeriod is one
+// of control's record periods and a second over, waited once when the record cannot show it.
 var (
-	drainInterval = 10 * time.Second
-	drainTimeout  = 24 * time.Hour
+	drainInterval      = 10 * time.Second
+	drainTimeout       = 24 * time.Hour
+	drainShownInterval = time.Second
+	drainShownWithin   = 2 * time.Minute
+	recordPeriod       = 6 * time.Second
 )
 
 // errKept is a removal the person declined: nothing more is removed.
@@ -411,8 +425,10 @@ func plural(n int, one, many string) string {
 }
 
 // removeWorker stops and removes worker i. One that is not running holds no run and goes at once.
-// A running one is drained: told to take no new run, then waited for until its runs end. With
-// Now it is stopped at once instead, after a warning naming the runs that fail.
+// A running one is drained first, always: told to take no new run, and its runs read only once
+// control's record shows it draining, since a run can be placed on it until then and the record
+// is not written as a run starts. It is then waited for until its runs end. With Now it is
+// stopped at once instead, after a warning naming the runs that fail.
 func removeWorker(ctx context.Context, e engine.Engine, i int, runsOf RunsOf, opt ScaleOptions, out io.Writer) error {
 	name, id := WorkerName(i), WorkerID(i)
 	state, err := e.ContainerState(ctx, name)
@@ -426,9 +442,9 @@ func removeWorker(ctx context.Context, e engine.Engine, i int, runsOf RunsOf, op
 		fmt.Fprintf(out, "removed %s (it was not running)\n", name)
 		return nil
 	}
-	runs, err := runsOf(ctx, id)
+	runs, err := drain(ctx, e, name, id, runsOf, opt.Now, out)
 	if err != nil && !opt.Now {
-		return fmt.Errorf("the runs on %s are not known (%v), so it was not stopped; `yawble workers <n> --now` stops it anyway, failing any run on it as worker-lost", id, err)
+		return err
 	}
 	if opt.Now {
 		if err != nil || len(runs) > 0 {
@@ -438,11 +454,16 @@ func removeWorker(ctx context.Context, e engine.Engine, i int, runsOf RunsOf, op
 			}
 			fmt.Fprintf(out, "Stopping %s now: %s.\n", id, what)
 			ok, err := opt.Confirm("Stop " + id + " now?")
-			if err != nil {
-				return err
-			}
-			if !ok {
-				fmt.Fprintf(out, "%s was kept; nothing more was stopped\n", id)
+			if err != nil || !ok {
+				// Kept: its drain is lifted so it takes runs again.
+				if _, lift := e.Exec(ctx, name, "rm", "-f", DrainFile); lift != nil {
+					fmt.Fprintf(out, "%s was kept but is still draining (%v); `yawble up` restarts it taking runs\n", id, lift)
+				} else if err == nil {
+					fmt.Fprintf(out, "%s was kept and takes runs again; nothing more was stopped\n", id)
+				}
+				if err != nil {
+					return err
+				}
 				return errKept
 			}
 		}
@@ -452,30 +473,26 @@ func removeWorker(ctx context.Context, e engine.Engine, i int, runsOf RunsOf, op
 		fmt.Fprintf(out, "stopped and removed %s\n", name)
 		return nil
 	}
-	if len(runs) > 0 {
-		if _, err := e.Exec(ctx, name, "touch", DrainFile); err != nil {
-			return fmt.Errorf("%s could not be told to take no new run: %w", id, err)
+	deadline := time.Now().Add(drainTimeout)
+	said := -1
+	for len(runs) > 0 {
+		if len(runs) != said {
+			fmt.Fprintf(out, "%s: %s still going (%s); waiting. `--now` stops it at once.\n", id, plural(len(runs), "run", "runs"), runNames(runs))
+			said = len(runs)
 		}
-		fmt.Fprintf(out, "draining %s: control places no new run on it\n", id)
-		deadline := time.Now().Add(drainTimeout)
-		said := -1
-		for len(runs) > 0 {
-			if len(runs) != said {
-				fmt.Fprintf(out, "%s: %s still going (%s); waiting. `--now` stops it at once.\n", id, plural(len(runs), "run", "runs"), runNames(runs))
-				said = len(runs)
-			}
-			if time.Now().After(deadline) {
-				return fmt.Errorf("%s still holds %s after %s; it is left running and draining. `yawble workers <n> --now` stops it", id, plural(len(runs), "run", "runs"), drainTimeout)
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(drainInterval):
-			}
-			if runs, err = runsOf(ctx, id); err != nil {
-				return fmt.Errorf("the runs on draining %s are no longer known (%v); it is left running and draining. `yawble workers <n> --now` stops it", id, err)
-			}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s still holds %s after %s; it is left running and draining. `yawble workers <n> --now` stops it", id, plural(len(runs), "run", "runs"), drainTimeout)
 		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(drainInterval):
+		}
+		rec, err := runsOf(ctx, id)
+		if err != nil {
+			return fmt.Errorf("the runs on draining %s are no longer known (%v); it is left running and draining. `yawble workers <n> --now` stops it", id, err)
+		}
+		runs = rec.Runs
 	}
 	if err := e.StopWithin(ctx, name, 30); err != nil {
 		return err
@@ -485,6 +502,69 @@ func removeWorker(ctx context.Context, e engine.Engine, i int, runsOf RunsOf, op
 	}
 	fmt.Fprintf(out, "stopped and removed %s (no runs on it)\n", name)
 	return nil
+}
+
+// drain tells a running worker to take no new run, waits until control's record shows it
+// draining (or one record period, when the record holds no connection of it to show it in),
+// and answers its runs as read after that. Only then is a count of none one no new run can
+// follow. With now, a drain that cannot be asked or does not show is said and not waited out:
+// the caller warns with what is known.
+func drain(ctx context.Context, e engine.Engine, name, id string, runsOf RunsOf, now bool, out io.Writer) ([]Run, error) {
+	if _, err := e.Exec(ctx, name, "touch", DrainFile); err != nil {
+		if !now {
+			return nil, fmt.Errorf("%s could not be told to take no new run, so it was not stopped: %w", id, err)
+		}
+		fmt.Fprintf(out, "%s could not be told to take no new run (%v)\n", id, err)
+		rec, err := runsOf(ctx, id)
+		return rec.Runs, err
+	}
+	notKnown := func(err error) error {
+		return fmt.Errorf("the runs on %s are not known (%v), so it was not stopped; it is left running and draining. `yawble workers <n> --now` stops it anyway, failing any run on it as worker-lost", id, err)
+	}
+	deadline := time.Now().Add(drainShownWithin)
+	waitedPeriod := false
+	for {
+		rec, err := runsOf(ctx, id)
+		if err != nil {
+			if now {
+				return nil, err
+			}
+			return nil, notKnown(err)
+		}
+		switch {
+		case rec.Draining:
+			fmt.Fprintf(out, "draining %s: control places no new run on it\n", id)
+			return rec.Runs, nil
+		case !rec.Connected && waitedPeriod:
+			// No connection of it to place a run on, a whole record period after the drain.
+			return rec.Runs, nil
+		case !rec.Connected:
+			waitedPeriod = true
+			if err := sleep(ctx, recordPeriod); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if time.Now().After(deadline) {
+			if now {
+				fmt.Fprintf(out, "control's record did not show %s draining within %s\n", id, drainShownWithin)
+				return rec.Runs, nil
+			}
+			return nil, fmt.Errorf("control's record did not show %s draining within %s, so its runs cannot be trusted to have ended; it is left running and draining. `yawble workers <n> --now` stops it", id, drainShownWithin)
+		}
+		if err := sleep(ctx, drainShownInterval); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 func errText(err error) string {

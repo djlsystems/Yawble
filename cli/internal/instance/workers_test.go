@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -397,20 +398,66 @@ func TestCPUsOverTheEngineOnlyWarn(t *testing.T) {
 	}
 }
 
-// runsScript answers a worker's runs from a list of answers, one per ask, the last repeated.
-func runsScript(answers ...[]instance.Run) (instance.RunsOf, *[]string) {
-	var asked []string
-	n := 0
-	return func(_ context.Context, id string) ([]instance.Run, error) {
-		asked = append(asked, id)
-		if id != "worker-3" {
-			return nil, nil
+// recordOf is control's record of the workers on s. Each worker answers its list in answers in
+// turn, one per read and the last repeated; a worker not in answers holds no runs. A worker shows
+// draining only from the (lag+1)th read after its drain file was touched on s, never when lag is
+// below 0. Every read is put in s.Calls as "read <id>: draining=<bool> runs=<n>", so a test sees
+// the reads and the engine's commands in one order.
+func recordOf(s *engine.Scripted, lag int, answers map[string][][]instance.Run) instance.RunsOf {
+	reads := map[string]int{}
+	since := map[string]int{}
+	return func(_ context.Context, id string) (instance.Recorded, error) {
+		touched := false
+		for _, c := range s.Calls {
+			if strings.HasSuffix(c, " yawble-"+id+" touch "+instance.DrainFile) {
+				touched = true
+			}
 		}
-		r := answers[min(n, len(answers)-1)]
-		n++
-		return r, nil
-	}, &asked
+		draining := false
+		if touched {
+			draining = lag >= 0 && since[id] >= lag
+			since[id]++
+		}
+		var runs []instance.Run
+		if a := answers[id]; len(a) > 0 {
+			runs = a[min(reads[id], len(a)-1)]
+		}
+		reads[id]++
+		s.Calls = append(s.Calls, fmt.Sprintf("read %s: draining=%v runs=%d", id, draining, len(runs)))
+		return instance.Recorded{Runs: runs, Draining: draining, Connected: true}, nil
+	}
 }
+
+// removalSteps is what removing workers did, in order: the reads of control's record, and each
+// exec, stop and rm, without the engine's name.
+func removalSteps(s *engine.Scripted, name string) []string {
+	var steps []string
+	for _, c := range s.Calls {
+		if strings.HasPrefix(c, "read ") {
+			steps = append(steps, c)
+			continue
+		}
+		for _, verb := range []string{" exec ", " stop ", " rm -f "} {
+			if strings.Contains(c, verb) {
+				steps = append(steps, strings.TrimPrefix(c, name+" "))
+				break
+			}
+		}
+	}
+	return steps
+}
+
+func sameSteps(t *testing.T, label string, got, want []string) {
+	t.Helper()
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("%s steps:\n%s\nwant:\n%s", label, strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+const (
+	touch3 = "exec -e HARNESS_WORKER_KEY= yawble-worker-3 touch /var/lib/harness-worker/drain"
+	touch2 = "exec -e HARNESS_WORKER_KEY= yawble-worker-2 touch /var/lib/harness-worker/drain"
+)
 
 func threeRunning(e struct {
 	name, inspect, health string
@@ -427,82 +474,201 @@ func threeRunning(e struct {
 	return s
 }
 
-// workers 1: the highest goes first. It is told to drain, waited for while control still records
-// runs on it, and stopped only once the answer is none; then the next.
+// workers 1: the highest goes first. Every removed worker is told to drain, its runs are read
+// only once control's record shows it draining, it is waited for while runs remain, and stopped
+// once the answer is none; then the next. A worker that looked idle is drained all the same.
 func TestWorkersOneDrainsWaitsForRunsThenStopsHighestFirst(t *testing.T) {
 	defer instance.SetDrainPollingForTests(time.Millisecond, time.Minute)()
 	two := []instance.Run{{"r1", "acme", "Ada"}, {"r2", "acme", "Bo"}}
 	for _, e := range engines {
 		s := threeRunning(e)
-		runsOf, _ := runsScript(two, two[:1], nil)
-		st := keyed()
+		runsOf := recordOf(s, 0, map[string][][]instance.Run{"worker-3": {two, two[:1], nil}})
 		var out bytes.Buffer
-		if err := instance.Scale(context.Background(), e.make(s), st, runsOf, instance.ScaleOptions{}, &out); err != nil {
+		if err := instance.Scale(context.Background(), e.make(s), keyed(), runsOf, instance.ScaleOptions{}, &out); err != nil {
 			t.Fatal(err)
 		}
-		var steps []string
-		for _, c := range s.Calls {
-			for _, verb := range []string{" exec ", " stop ", " rm -f "} {
-				if strings.Contains(c, verb) {
-					steps = append(steps, strings.TrimPrefix(c, e.name+" "))
-				}
-			}
-		}
-		want := []string{
-			"exec -e HARNESS_WORKER_KEY= yawble-worker-3 touch /var/lib/harness-worker/drain",
+		sameSteps(t, e.name, removalSteps(s, e.name), []string{
+			touch3,
+			"read worker-3: draining=true runs=2",
+			"read worker-3: draining=true runs=1",
+			"read worker-3: draining=true runs=0",
 			"stop -t 30 yawble-worker-3",
 			"rm -f yawble-worker-3",
+			touch2,
+			"read worker-2: draining=true runs=0",
 			"stop -t 30 yawble-worker-2",
 			"rm -f yawble-worker-2",
-		}
-		if strings.Join(steps, "\n") != strings.Join(want, "\n") {
-			t.Errorf("%s steps:\n%s\nwant:\n%s", e.name, strings.Join(steps, "\n"), strings.Join(want, "\n"))
-		}
+		})
 		o := out.String()
 		waiting := "worker-3: 2 runs still going (acme/Ada, acme/Bo); waiting. `--now` stops it at once."
 		stopped := strings.Index(o, "stopped and removed yawble-worker-3")
 		if i := strings.Index(o, waiting); i < 0 || stopped < i || !strings.Contains(o, "worker-3: 1 run still going (acme/Ada)") {
 			t.Errorf("%s out:\n%s", e.name, o)
 		}
-		if strings.Contains(o, "worker-2: ") {
-			t.Errorf("%s: worker-2 had no runs and is stopped with no wait:\n%s", e.name, o)
+		if !strings.Contains(o, "draining worker-2: control places no new run on it") || strings.Contains(o, "worker-2: 0") || strings.Contains(o, "worker-2: 1") {
+			t.Errorf("%s: worker-2 had no runs once draining and is stopped with no wait:\n%s", e.name, o)
 		}
 	}
 }
 
-// A drain that stops at once is what the test above must catch: here the runs never end, and
-// nothing is stopped before the drain gives up.
+// A worker whose record says no runs before its drain shows is not trusted on that: the drain is
+// touched before anything is stopped, and the record is read again once it shows draining.
+func TestAnIdleWorkerIsDrainedAndReadAgainOnceDrainingBeforeItIsStopped(t *testing.T) {
+	defer instance.SetDrainPollingForTests(time.Millisecond, time.Minute)()
+	for _, e := range engines {
+		s := threeRunning(e)
+		st := keyed()
+		st.Workers = 2
+		var out bytes.Buffer
+		if err := instance.Scale(context.Background(), e.make(s), st, recordOf(s, 1, nil), instance.ScaleOptions{}, &out); err != nil {
+			t.Fatal(err)
+		}
+		sameSteps(t, e.name, removalSteps(s, e.name), []string{
+			touch3,
+			"read worker-3: draining=false runs=0",
+			"read worker-3: draining=true runs=0",
+			"stop -t 30 yawble-worker-3",
+			"rm -f yawble-worker-3",
+		})
+	}
+}
+
+// A run placed in the moment before the drain showed - the record said none, then one once
+// draining - is waited for, not killed: the worker is stopped only after it ends.
+func TestARunPlacedBeforeTheDrainShowsIsWaitedForNotStopped(t *testing.T) {
+	defer instance.SetDrainPollingForTests(time.Millisecond, time.Minute)()
+	late := []instance.Run{{"r9", "acme", "Ada"}}
+	for _, e := range engines {
+		s := threeRunning(e)
+		st := keyed()
+		st.Workers = 2
+		var out bytes.Buffer
+		runsOf := recordOf(s, 1, map[string][][]instance.Run{"worker-3": {nil, late, late, nil}})
+		if err := instance.Scale(context.Background(), e.make(s), st, runsOf, instance.ScaleOptions{}, &out); err != nil {
+			t.Fatal(err)
+		}
+		sameSteps(t, e.name, removalSteps(s, e.name), []string{
+			touch3,
+			"read worker-3: draining=false runs=0",
+			"read worker-3: draining=true runs=1",
+			"read worker-3: draining=true runs=1",
+			"read worker-3: draining=true runs=0",
+			"stop -t 30 yawble-worker-3",
+			"rm -f yawble-worker-3",
+		})
+		if !strings.Contains(out.String(), "worker-3: 1 run still going (acme/Ada); waiting.") {
+			t.Errorf("%s out:\n%s", e.name, out.String())
+		}
+	}
+}
+
+// A drain control's record never shows is no ground to trust a count of none: the worker is left
+// running and draining, not stopped.
+func TestAWorkerWhoseDrainNeverShowsIsNotStopped(t *testing.T) {
+	defer instance.SetDrainPollingForTests(time.Millisecond, 20*time.Millisecond)()
+	for _, e := range engines {
+		s := threeRunning(e)
+		err := instance.Scale(context.Background(), e.make(s), keyed(), recordOf(s, -1, nil), instance.ScaleOptions{}, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "did not show worker-3 draining") || !strings.Contains(err.Error(), "left running and draining") {
+			t.Errorf("%s err %v", e.name, err)
+		}
+		for _, c := range s.Calls {
+			if strings.Contains(c, " stop ") || strings.Contains(c, " rm -f ") {
+				t.Errorf("%s stopped a worker whose drain never showed: %q", e.name, c)
+			}
+		}
+	}
+}
+
+// A worker control holds no connection of cannot show draining: it is drained, and read again a
+// whole record period later before it is stopped.
+func TestAWorkerControlHoldsNoConnectionOfIsReadAgainARecordPeriodAfterTheDrain(t *testing.T) {
+	defer instance.SetDrainPollingForTests(time.Millisecond, time.Minute)()
+	for _, e := range engines {
+		s := threeRunning(e)
+		st := keyed()
+		st.Workers = 2
+		unconnected := func(_ context.Context, id string) (instance.Recorded, error) {
+			s.Calls = append(s.Calls, "read "+id)
+			return instance.Recorded{}, nil
+		}
+		if err := instance.Scale(context.Background(), e.make(s), st, unconnected, instance.ScaleOptions{}, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		sameSteps(t, e.name, removalSteps(s, e.name), []string{touch3, "read worker-3", "read worker-3", "stop -t 30 yawble-worker-3", "rm -f yawble-worker-3"})
+	}
+}
+
+// A drain the run count is never read before: a run left at its last record must not be killed.
 func TestADrainNeverStopsAWorkerThatStillHoldsRuns(t *testing.T) {
 	defer instance.SetDrainPollingForTests(time.Millisecond, 20*time.Millisecond)()
-	runsOf, _ := runsScript([]instance.Run{{"r1", "acme", "Ada"}})
 	s := threeRunning(engines[0])
+	runsOf := recordOf(s, 0, map[string][][]instance.Run{"worker-3": {{{"r1", "acme", "Ada"}}}})
 	err := instance.Scale(context.Background(), engine.NewPodman(s), keyed(), runsOf, instance.ScaleOptions{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "left running and draining") {
 		t.Errorf("err %v", err)
 	}
 	for _, c := range s.Calls {
-		if strings.Contains(c, "stop") || strings.Contains(c, "rm -f") {
+		if strings.Contains(c, " stop ") || strings.Contains(c, " rm -f ") {
 			t.Errorf("stopped a worker with runs: %q", c)
 		}
 	}
 }
 
-// --now names the runs that fail worker-lost and asks; a no keeps the worker and stops nothing.
+// --now drains first, so no run lands after the warning, then names the runs that fail
+// worker-lost and asks; a no keeps the worker, lifts its drain and stops nothing.
 func TestWorkersOneNowWarnsNamingTheRunsThatFailWorkerLostAndANoKeepsIt(t *testing.T) {
-	runsOf, _ := runsScript([]instance.Run{{"r1", "acme", "Ada"}, {"r2", "beta", "Cy"}})
-	s := threeRunning(engines[0])
-	var asked []string
-	var out bytes.Buffer
-	opt := instance.ScaleOptions{Now: true, Confirm: func(q string) (bool, error) { asked = append(asked, q); return false, nil }}
-	if err := instance.Scale(context.Background(), engine.NewPodman(s), keyed(), runsOf, opt, &out); err != nil {
-		t.Fatal(err)
+	defer instance.SetDrainPollingForTests(time.Millisecond, time.Minute)()
+	for _, e := range engines {
+		s := threeRunning(e)
+		runsOf := recordOf(s, 0, map[string][][]instance.Run{"worker-3": {{{"r1", "acme", "Ada"}, {"r2", "beta", "Cy"}}}})
+		var asked []string
+		var out bytes.Buffer
+		opt := instance.ScaleOptions{Now: true, Confirm: func(q string) (bool, error) {
+			asked = append(asked, q)
+			s.Calls = append(s.Calls, "read asked")
+			return false, nil
+		}}
+		if err := instance.Scale(context.Background(), e.make(s), keyed(), runsOf, opt, &out); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "Stopping worker-3 now: this fails its 2 runs as worker-lost (acme/Ada, beta/Cy); the Manager re-sends each once.") || len(asked) != 1 {
+			t.Errorf("%s out %q asked %q", e.name, out.String(), asked)
+		}
+		sameSteps(t, e.name, removalSteps(s, e.name), []string{
+			touch3,
+			"read worker-3: draining=true runs=2",
+			"read asked",
+			"exec -e HARNESS_WORKER_KEY= yawble-worker-3 rm -f /var/lib/harness-worker/drain",
+		})
 	}
-	if !strings.Contains(out.String(), "Stopping worker-3 now: this fails its 2 runs as worker-lost (acme/Ada, beta/Cy); the Manager re-sends each once.") || len(asked) != 1 {
-		t.Errorf("out %q asked %q", out.String(), asked)
-	}
-	for _, c := range s.Calls {
-		if strings.Contains(c, "rm -f") || strings.Contains(c, " stop ") || strings.Contains(c, "drain") {
-			t.Errorf("a no stopped something: %q", c)
+}
+
+// --now with a yes: the drain shows before the warning, and the worker goes at once with no wait.
+func TestWorkersOneNowDrainsBeforeItWarnsThenRemovesAtOnce(t *testing.T) {
+	defer instance.SetDrainPollingForTests(time.Millisecond, time.Minute)()
+	for _, e := range engines {
+		s := threeRunning(e)
+		st := keyed()
+		st.Workers = 2
+		runsOf := recordOf(s, 1, map[string][][]instance.Run{"worker-3": {nil, {{"r1", "acme", "Ada"}}}})
+		opt := instance.ScaleOptions{Now: true, Confirm: func(string) (bool, error) {
+			s.Calls = append(s.Calls, "read asked")
+			return true, nil
+		}}
+		var out bytes.Buffer
+		if err := instance.Scale(context.Background(), e.make(s), st, runsOf, opt, &out); err != nil {
+			t.Fatal(err)
+		}
+		sameSteps(t, e.name, removalSteps(s, e.name), []string{
+			touch3,
+			"read worker-3: draining=false runs=0",
+			"read worker-3: draining=true runs=1",
+			"read asked",
+			"rm -f yawble-worker-3",
+		})
+		if !strings.Contains(out.String(), "Stopping worker-3 now: this fails its 1 run as worker-lost (acme/Ada)") {
+			t.Errorf("%s out %q", e.name, out.String())
 		}
 	}
 }
@@ -510,8 +676,8 @@ func TestWorkersOneNowWarnsNamingTheRunsThatFailWorkerLostAndANoKeepsIt(t *testi
 // Runs that cannot be read are never taken as none: without --now nothing is stopped.
 func TestWorkersRefusesToStopAWorkerWhoseRunsAreNotKnown(t *testing.T) {
 	s := threeRunning(engines[0])
-	unknown := func(context.Context, string) ([]instance.Run, error) {
-		return nil, errors.New("control did not answer")
+	unknown := func(context.Context, string) (instance.Recorded, error) {
+		return instance.Recorded{}, errors.New("control did not answer")
 	}
 	err := instance.Scale(context.Background(), engine.NewPodman(s), keyed(), unknown, instance.ScaleOptions{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "runs on worker-3 are not known") || !strings.Contains(err.Error(), "--now") {

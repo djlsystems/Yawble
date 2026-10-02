@@ -130,7 +130,8 @@ func TestWorkersTouchesNoVolume(t *testing.T) {
 
 // Through the command: --now names the runs on each worker it stops, and --yes answers.
 func TestWorkersOneNowWarnsNamingTheRunsThatFailWorkerLost(t *testing.T) {
-	report := reportWith(workerItem("worker-1", "connected") + "," + workerItem("worker-2", "connected") + "," + workerItem("worker-3", "connected", "acme/Ada", "beta/Cy"))
+	draining := func(item string) string { return strings.Replace(item, `"draining":false`, `"draining":true`, 1) }
+	report := reportWith(workerItem("worker-1", "connected") + "," + draining(workerItem("worker-2", "connected")) + "," + draining(workerItem("worker-3", "connected", "acme/Ada", "beta/Cy")))
 	s, deps := dockerInstance(t, 3, report)
 	code, out, errOut := run(t, deps, "workers", "1", "--now", "--yes")
 	if code != 0 {
@@ -146,13 +147,26 @@ func TestWorkersOneNowWarnsNamingTheRunsThatFailWorkerLost(t *testing.T) {
 	if rm3 < 0 || rm2 < rm3 || indexOf(s.Calls, "docker rm -f yawble-worker-1") >= 0 {
 		t.Errorf("calls:\n%s", calls(s))
 	}
+	// Each is drained, and control's record read, before the warning and the removal.
+	for _, w := range []string{"yawble-worker-3", "yawble-worker-2"} {
+		touch, rm := indexOf(s.Calls, "docker exec -e HARNESS_WORKER_KEY= "+w+" touch /var/lib/harness-worker/drain"), indexOf(s.Calls, "docker rm -f "+w)
+		read := -1
+		for i := touch + 1; touch >= 0 && i < rm; i++ {
+			if strings.HasPrefix(s.Calls[i], dockerDoc) {
+				read = i
+			}
+		}
+		if touch < 0 || read < 0 {
+			t.Errorf("%s not drained and read before it was removed:\n%s", w, calls(s))
+		}
+	}
 	// Without --yes and no terminal, the question is a refusal and nothing is stopped.
 	s2, deps2 := dockerInstance(t, 3, report)
 	if code, _, errOut := run(t, deps2, "workers", "1", "--now"); code == 0 || !strings.Contains(errOut, "--yes") {
 		t.Errorf("exit %d: %s", code, errOut)
 	}
-	if len(callsContaining(s2, "rm -f yawble-worker-3")) != 0 {
-		t.Error("stopped without a yes")
+	if len(callsContaining(s2, "docker rm -f yawble-worker-3")) != 0 || len(callsContaining(s2, "yawble-worker-3 rm -f /var/lib/harness-worker/drain")) != 1 {
+		t.Errorf("stopped without a yes, or left it draining:\n%s", calls(s2))
 	}
 }
 

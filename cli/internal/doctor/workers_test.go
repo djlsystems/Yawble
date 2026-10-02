@@ -38,11 +38,17 @@ func TestTheWorkersRecordDecodes(t *testing.T) {
 	}
 
 	runsOf := doctor.RunsOf(func(context.Context) (*doctor.HostReport, error) { return &r, nil })
-	if runs, err := runsOf(context.Background(), "worker-1"); err != nil || len(runs) != 1 || runs[0].Team != "acme" || runs[0].Member != "Ada" || runs[0].Run != "r-17" {
-		t.Errorf("runs of worker-1: %+v %v", runs, err)
+	if rec, err := runsOf(context.Background(), "worker-1"); err != nil || len(rec.Runs) != 1 || rec.Runs[0].Team != "acme" || rec.Runs[0].Member != "Ada" || rec.Runs[0].Run != "r-17" || rec.Draining || !rec.Connected {
+		t.Errorf("worker-1: %+v %v", rec, err)
 	}
-	if runs, err := runsOf(context.Background(), "worker-9"); err != nil || len(runs) != 0 {
-		t.Errorf("a worker with no record holds no runs: %+v %v", runs, err)
+	if rec, err := runsOf(context.Background(), "worker-2"); err != nil || !rec.Draining || !rec.Connected {
+		t.Errorf("a draining worker reads draining: %+v %v", rec, err)
+	}
+	if rec, err := runsOf(context.Background(), "worker-3"); err != nil || rec.Connected {
+		t.Errorf("a dropped worker has no connection a drain could show in: %+v %v", rec, err)
+	}
+	if rec, err := runsOf(context.Background(), "worker-9"); err != nil || len(rec.Runs) != 0 || rec.Connected || rec.Draining {
+		t.Errorf("a worker with no record holds no runs and no connection: %+v %v", rec, err)
 	}
 }
 
