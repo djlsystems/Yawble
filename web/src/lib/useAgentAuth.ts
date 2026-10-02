@@ -65,6 +65,12 @@ export interface AuthStatus {
  * Symbols Outlined only, and an Icons-only name renders as its own letters at the wrong width.
  */
 export function authStatus(report: AgentAuthReport | undefined | null): AuthStatus {
+  // NOT MEASURED BECAUSE NO WORKER ANSWERED: whether the CLI is even installed is not known, and the
+  // probe's sentence says why. Never "not installed": nothing looked.
+  if (report && report.installed === null) {
+    return { text: 'Not measured', icon: 'help', tone: 'unknown', detail: report.detail || null }
+  }
+
   if (!report || !report.installed || report.authenticated === null) {
     return { text: 'Not measured', icon: 'help', tone: 'unknown', detail: null }
   }

@@ -42,26 +42,10 @@ public sealed class WorkerArchitectureTests
     /// <summary>Every caller outside the worker that still does one of these things, and why.</summary>
     private static readonly Dictionary<string, string> AllowList = new(StringComparer.Ordinal)
     {
-        ["AgentAuthProbe.ProbeCommandAsync: " + StartsAProcess] =
-            "sign-in probe: asks each CLI whether it is signed in; a later change moves it to a worker.",
-        ["CliListingRunner.RunAsync: " + StartsAProcess] =
-            "tool pre-flight: lists each CLI's configured tools; a later change moves it to a worker.",
-        ["AgentCliUpdater.RunAsync: " + StartsAProcess] =
-            "CLI updates: a person's update of a shared CLI install; a later change moves it to a worker.",
-        ["FolderRemoval.RunAsync: " + StartsAProcess] =
-            "FolderRemoval's agent pass: removes what the agent owns, as the agent; a later change moves it to a worker.",
         ["GitRunner.ExecuteGitAsync: " + StartsAProcess] =
             "git: a person's and a team's git stays in control.",
         ["GhContributor.RunAsync: " + StartsAProcess] =
             "gh: the GitHub CLI for a person's contributions stays in control.",
-        ["ProcessAgentRunner.CheckLaunchAsync: " + ReachesAWorkerLauncher] =
-            "launch check: starts a preset's free invocation through the worker's own launch, not a run; a later change sends it as a message.",
-        ["HostDoctor.AgentsAsync: " + ReachesAWorkerLauncher] =
-            "agent user: the doctor resolves who agent children would run as, to report it; a later change reads it from the worker.",
-        ["RunHome.CreateAsync: " + ReachesAWorkerLauncher] =
-            "tool pre-flight: a tool listing of a preset that signs in with an issued credential runs in a home the worker's RunHomes makes as the agent; a later change moves the listing to a worker.",
-        ["RunHome.KeepTranscriptAsync: " + ReachesAWorkerLauncher] =
-            "run home: control's door to the worker's RunHomes, with no production caller - a run's transcript is kept by the worker that ran it; it goes when the listing moves.",
         ["TenantSettings..ctor: " + TouchesACgroup] =
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
     };

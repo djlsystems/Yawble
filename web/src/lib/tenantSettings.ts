@@ -618,7 +618,7 @@ export interface HealthLine {
 export function catalogHealth(input: {
   /** Agents whose command is not on this machine, or null when the probe has not answered. */
   notInstalled: readonly string[] | null
-  auth: readonly { agent: string; installed: boolean; authenticated: boolean | null }[] | null
+  auth: readonly { agent: string; installed: boolean | null; authenticated: boolean | null }[] | null
 }): HealthLine[] {
   const lines: HealthLine[] = []
 
@@ -637,7 +637,7 @@ export function catalogHealth(input: {
     lines.push({ label: 'Auth probe', text: 'Not measured.', ok: null })
   } else {
     const signedOut = input.auth.filter((entry) => entry.installed && entry.authenticated === false).map((entry) => entry.agent)
-    const unknown = input.auth.filter((entry) => entry.installed && entry.authenticated === null).length
+    const unknown = input.auth.filter((entry) => entry.installed !== false && entry.authenticated === null).length
     const tail = unknown > 0 ? ` ${unknown} not measured.` : ''
     lines.push({
       label: 'Auth probe',

@@ -64,6 +64,13 @@ public sealed partial class RunLauncher(
         + ", so this member was not started. It may be being installed or updated; re-sending the "
         + "instruction will try again.";
 
+    /// <summary>What a launch check says while the platform updates its CLI: not checked, never failed.</summary>
+    public static string UpdatingText(string command) => $"The platform is updating `{command}`; a member run would wait for it.";
+
+    /// <summary>What a run stopped while it waited for an update of its CLI ends with.</summary>
+    public static string StoppedWhileHeldText(string command) =>
+        $"This run was stopped while it waited for the platform's update of `{command}`, so it did not start.";
+
     /// <summary>What a launch held behind an update says, once, on its card: held, never failed.</summary>
     public static string HeldText(string command) =>
         $"Waiting for the {command} update: the platform is updating `{command}`, and this run starts when it is done.";
@@ -101,7 +108,7 @@ public sealed partial class RunLauncher(
             return new AgentResult(
                 -1,
                 string.Empty,
-                $"This run was stopped while it waited for the platform's update of `{launching.FileName}`, so it did not start.",
+                StoppedWhileHeldText(launching.FileName),
                 FailureClass: FailureClasses.Interrupted);
         }
 
@@ -1582,7 +1589,7 @@ public sealed partial class RunLauncher(
 
         if (updates?.Updating(command.FileName) == true)
         {
-            return AgentLaunchReport.Unchecked($"The platform is updating `{command.FileName}`; a member run would wait for it.");
+            return AgentLaunchReport.Unchecked(UpdatingText(command.FileName));
         }
 
         if (await ChildProcess.FindAsync(command.FileName, LaunchLookup.Once, null, ct) is not { } resolved)

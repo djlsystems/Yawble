@@ -60,19 +60,15 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
     private bool _gone;
 
     // What was said while the worker was dropped, said again when it is back: the latest of each.
-    private ControlMessage? _settings;
     private ChangeRunMemoryAllowance? _heavy;
     private readonly Dictionary<ContainerId, bool> _holds = [];
     private readonly HashSet<ContainerId> _touches = [];
     private readonly List<CancelRun> _cancels = [];
     private readonly List<ControlMessage> _ends = [];
 
-    /// <summary>
-    /// A terminal's or a read's request, which means nothing said later: refused at once while the
-    /// worker is dropped, so its caller answers now, never replayed after the caller gave up.
-    /// </summary>
-    private static bool CannotWait(ControlMessage message) =>
-        message is StartTerminal or ResizeTerminal or FollowTranscript or ReadAgentFile;
+    /// <summary>What <see cref="Keep"/> keeps while the worker is dropped; anything else is refused.</summary>
+    private static bool Kept(ControlMessage message) =>
+        message is ChangeRunMemoryAllowance or HoldIdleClock or TouchIdleClock or CancelRun or StopTerminal or StopStream;
 
     public RemoteWorker(
         WorkerInfo info,
@@ -406,10 +402,10 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
             _keepAlive?.Dispose();
             _keepAlive = null;
 
-            // A start or a sample cannot wait for the worker; anything else is kept and said again.
+            // What is kept is said again; anything else - a start, a sample, a request - cannot wait for the worker.
             foreach (var (applied, message) in _pending.Values)
             {
-                if (message is StartRun or SampleCapacity || CannotWait(message))
+                if (!Kept(message))
                 {
                     failed.Add(applied);
                 }
@@ -463,17 +459,16 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
         }
     }
 
-    /// <summary>Keeps what control says while the worker is dropped, the latest of each kind.</summary>
+    /// <summary>
+    /// Keeps what control says to the worker's runs while it is dropped, the latest of each kind.
+    /// Anything else - a start, a measurement, a request answered by an event - is refused at once:
+    /// its caller waits for the answer within a bound, and one applied after the caller gave up
+    /// would be applied for nobody.
+    /// </summary>
     private void Keep(ControlMessage message)
     {
         switch (message)
         {
-            case StartRun or SampleCapacity:
-                throw new InvalidOperationException($"Worker {Id} is not connected.");
-
-            case var waiting when CannotWait(waiting):
-                throw new InvalidOperationException($"Worker {Id} is not connected.");
-
             case StopTerminal or StopStream:
                 // Said again when the worker is back, so a terminal or a tail nobody wants is ended there.
                 _ends.Add(message);
@@ -496,22 +491,19 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
                 break;
 
             default:
-                _settings = message;
-                break;
+                throw new InvalidOperationException($"Worker {Id} is not connected.");
         }
     }
 
     private List<ControlMessage> KeptLocked()
     {
         List<ControlMessage> kept = [];
-        if (_settings is not null) kept.Add(_settings);
         if (_heavy is not null) kept.Add(_heavy);
         kept.AddRange(_holds.Select(h => new HoldIdleClock(h.Key, h.Value)));
         kept.AddRange(_touches.Select(m => new TouchIdleClock(m)));
         kept.AddRange(_cancels);
         kept.AddRange(_ends);
 
-        _settings = null;
         _heavy = null;
         _holds.Clear();
         _touches.Clear();

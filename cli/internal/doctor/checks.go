@@ -428,7 +428,11 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 	for _, a := range r.Agents {
 		var part string
 		switch {
-		case !a.Installed:
+		case a.Installed == nil:
+			// Not measured: no worker answered the Host's probe. Never "not installed", never a failure.
+			parts = append(parts, a.Agent+" not measured")
+			continue
+		case !*a.Installed:
 			parts = append(parts, a.Agent+" not installed")
 			continue
 		case a.Authenticated == nil:
@@ -456,7 +460,14 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 	if verdict == Warn {
 		fix = "yawble agents"
 	}
-	checks = append(checks, Check{"agents", verdict, strings.Join(parts, " · "), fix})
+	summary := strings.Join(parts, " · ")
+	for _, a := range r.Agents {
+		if measured := a.MeasuredText(); measured != "" {
+			summary += " (sign-ins measured " + measured + ")"
+			break
+		}
+	}
+	checks = append(checks, Check{"agents", verdict, summary, fix})
 	if row, ok := versionsRow(r.Agents); ok {
 		checks = append(checks, row)
 	}
@@ -470,7 +481,7 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 func versionsRow(agents []Agent) (Check, bool) {
 	var parts []string
 	for _, a := range agents {
-		if !a.IsModelAgent() || !a.Installed {
+		if !a.IsModelAgent() || !a.IsInstalled() {
 			continue
 		}
 		if text := a.UpdatedText(); text != "" {
@@ -486,7 +497,9 @@ func versionsRow(agents []Agent) (Check, bool) {
 // SignInHint is what a person does about one agent, or "" when nothing is needed.
 func SignInHint(a Agent) string {
 	switch {
-	case !a.Installed:
+	case a.Installed == nil:
+		return ""
+	case !*a.Installed:
 		return "not installed in the instance; the image's first start installs it, or install it by hand inside the container"
 	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
 		return "its source is issued and no credential is set: yawble agents credential set " + a.Agent +

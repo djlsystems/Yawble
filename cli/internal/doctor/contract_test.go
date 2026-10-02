@@ -35,6 +35,9 @@ func TestTheHostsOwnDoctorReportDecodes(t *testing.T) {
 
 		var failed *doctor.Agent
 		for i, a := range r.Agents {
+			if !a.IsInstalled() || a.MeasuredText() != "2026-10-02 12:00 UTC on worker w1" {
+				t.Errorf("%s: %s installed %v measured %q, want the Host's recorded probe on w1", c.file, a.Agent, a.Installed, a.MeasuredText())
+			}
 			if a.Launch == nil {
 				t.Errorf("%s: %s has no launch decoded", c.file, a.Agent)
 				continue

@@ -748,11 +748,17 @@ builder.Services.AddSingleton<RunSecrets>();
 // and a launch that arrives during an update waits for it. One per Host, shared by the runner, the
 // Concierge's launch and the updater, or the hold holds nothing.
 builder.Services.AddSingleton<AgentUpdateGate>();
+// WHAT CONTROL ASKS A WORKER ABOUT ITS AGENT CLIS - a sign-in probe, a listing, a version, an update,
+// a removal as the agent - and the answers, by request. Asked of the connected worker with the most
+// measured headroom; in a Host that runs its runs itself that is its own worker, over the transport.
+builder.Services.AddSingleton(sp => new WorkerAsks(() => sp.GetRequiredService<WorkerPool>().Worker(null)));
+// A person's update runs once, on one connected worker, when the gate has drained (AgentCliUpdater).
 builder.Services.AddSingleton(sp => new AgentCliUpdater(
     sp.GetRequiredService<AgentCatalog>(),
     sp.GetRequiredService<AgentUpdateGate>(),
     sp.GetRequiredService<AgentLaunchUser>(),
-    dataRoot));
+    dataRoot,
+    sp.GetRequiredService<WorkerAsks>()));
 // THE RUN WORKER, IN THIS PROCESS. Control talks to runs only through the run protocol: a run is
 // started, reported and ended by records over the in-process transport, and this worker is the one
 // place that launches, measures and limits them. ONE worker, shared by the runner, the leases, the
@@ -787,6 +793,7 @@ builder.Services.AddSingleton(sp => InProcessWorker.Create(
     tenantSettings.HeavyRunMemoryLimit,
     async (envelope, ct) =>
     {
+        await sp.GetRequiredService<WorkerAsks>().HandleAsync(envelope, ct);
         await sp.GetRequiredService<RunDirectory>().HandleAsync(envelope, ct);
         if (envelope.Event is RunMeasured or WorkerCapacitySampled)
         {
@@ -837,7 +844,12 @@ builder.Services.AddSingleton(sp => new ProcessAgentRunner(
             ? ProcessAgentRunner.Allowance((
                 tenantSettings.RunMemoryLimit(WorkerBounds.Of(placed.Info)), tenantSettings.RunMemoryCeiling(WorkerBounds.Of(placed.Info))))
             : null
-        : null));
+        : null,
+    // In control no worker in this process takes a run's share of its CLI's install, so the runner
+    // takes it from this control's one gate, around every run on every worker. In all the Host's own
+    // worker takes it from the same gate, as before, and the runner does not, so a run counts once.
+    control ? sp.GetRequiredService<AgentUpdateGate>() : null,
+    () => sp.GetRequiredService<IMemberReports>()));
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
     sp.GetRequiredService<IPrincipalStore>(),
@@ -1234,9 +1246,12 @@ builder.Services.AddSingleton<TeamListPush>();
 // THE ONE REMOVAL a team root, a member's workspace and a reset's folders go through: the marker
 // last, agent content removed as the agent through its launch prefix, and whatever remains recorded
 // to be retried. See FolderRemoval.
+// The agent's pass goes to a connected worker; in control always, in all only where agents run as
+// another user, as before.
 builder.Services.AddSingleton(sp => new FolderRemoval(
     sp.GetRequiredService<AgentLaunchUser>(),
-    sp.GetRequiredService<IUnfinishedRemovals>()));
+    sp.GetRequiredService<IUnfinishedRemovals>(),
+    agent: new WorkerAgentPass(sp.GetRequiredService<WorkerAsks>(), always: control)));
 
 // IMAGES A PERSON GIVES THEIR CONCIERGE. The cap and the retention are configuration rather than
 // tenant settings: they bound one route and one sweep, and nothing reads them while running.
@@ -1711,7 +1726,10 @@ builder.Services.ConfigureHttpJsonOptions(options => ConfigureHostJson(options.S
 builder.Services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddSingleton<AgentAuthProbe>();
+// THE SIGN-IN PROBE: asked of a connected worker, recorded in agent-auth.json for the doctor.
+builder.Services.AddSingleton(sp => new AgentAuthProbe(
+    sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<AgentLaunchUser>(), sp.GetRequiredService<IRunCredentials>(),
+    sp.GetRequiredService<WorkerAsks>(), dataRoot, sp.GetRequiredService<ILogger<AgentAuthProbe>>()));
 // THE LAUNCH CHECK: each preset's free invocation through the member runner's own launch (AgentLaunchChecks).
 builder.Services.AddSingleton(sp => new AgentLaunchChecks(
     sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<ProcessAgentRunner>(), dataRoot,
@@ -1720,8 +1738,9 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentLaunchChecks>
 
 // THE PRE-FLIGHT: what each preset's CLI would load, listed by the CLI itself as the agent user,
 // once the Host is serving and again after every catalog save. Never on the start path.
-builder.Services.AddSingleton<IListingRunner>(sp => new CliListingRunner(
-    sp.GetRequiredService<AgentLaunchUser>(), sp.GetRequiredService<MemberTempRoot>().Path));
+// Each listing runs on the connected worker with the most headroom (WorkerListingRunner).
+builder.Services.AddSingleton<IListingRunner>(sp => new WorkerListingRunner(
+    sp.GetRequiredService<WorkerAsks>(), sp.GetRequiredService<MemberTempRoot>().Path, pathIsTheWorkers: !control));
 builder.Services.AddSingleton(sp =>
 {
     var preflight = new AgentToolPreflight(
@@ -1791,7 +1810,7 @@ app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
     app.Logger.LogInformation("Member temporary folders: {Path} - {Reason}", memberTemp.Path, memberTemp.Reason);
 
     // The homes a launch check or a listing made there and a stopped Host never removed.
-    await RunHome.SweepSharedAsync(memberTemp.Path, runAs, CancellationToken.None);
+    await RunHome.SweepSharedAsync(memberTemp.Path, runAs, CancellationToken.None, removal: app.Services.GetRequiredService<FolderRemoval>());
 }
 
 // THE ADDRESS EVERY MEMBER IS TOLD TO CALL, printed for the reason the dev server prints its proxy
@@ -2329,6 +2348,7 @@ var workerConnections = new WorkerConnections(
     app.Services.GetRequiredService<WipLedger>(),
     async (envelope, ct) =>
     {
+        await app.Services.GetRequiredService<WorkerAsks>().HandleAsync(envelope, ct);
         await app.Services.GetRequiredService<RunDirectory>().HandleAsync(envelope, ct);
         if (envelope.Event is RunMeasured or WorkerCapacitySampled)
         {
@@ -2349,6 +2369,12 @@ var workerConnections = new WorkerConnections(
     log: app.Services.GetRequiredService<ILogger<WorkerConnections>>(),
     streams: app.Services.GetRequiredService<WorkerStreams>().Deliver);
 workerConnections.Changed += () => wip.SetMax(tenantSettings.WipMaxRunning);
+// In control the start's retry of unfinished removals ran before any worker could connect: each worker
+// that joins retries them once, so what only the agent's pass can remove does not wait for a person.
+RetryWhenAWorkerJoins.Wire(
+    control, workerConnections,
+    ct => app.Services.GetRequiredService<UnfinishedRemovalRetry>().RetryAsync(ct: ct),
+    app.Services.GetRequiredService<ILogger<WorkerConnections>>());
 app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
 Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
     app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version);
@@ -2358,7 +2384,7 @@ if (control)
 {
     app.Logger.LogInformation(
         workerKeys.Configured
-            ? "Control role: runs go to workers that connect at {Route} with the worker key; none runs in this process. CLI updates are the workers' own."
+            ? "Control role: runs go to workers that connect at {Route} with the worker key; none runs in this process. CLI updates run on one connected worker, through this control's one update gate."
             : "Control role: no worker key is configured (HARNESS_WORKER_KEY), so no worker can connect and every run waits for a worker ({Route}).",
         WorkerKeyGate.ConnectRoute);
 }

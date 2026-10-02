@@ -198,6 +198,14 @@ public sealed class WorkerFrameCodec
                     Sealed = Seal(new Secrets(null, applied.Redaction)),
                 };
                 break;
+
+            case CommandFrame { Message: RunAgentCommands { Credential: not null } commands } command:
+                frame = command with
+                {
+                    Message = commands with { Credential = null },
+                    Sealed = Seal(new Secrets(commands.Credential, null)),
+                };
+                break;
         }
 
         var text = JsonSerializer.Serialize(frame, Json);
@@ -246,6 +254,9 @@ public sealed class WorkerFrameCodec
             case EventFrame { Sealed: { } blob, Envelope.Event: RunCredentialApplied applied } @event:
                 var forEvent = Open(blob);
                 return @event with { Envelope = @event.Envelope with { Event = applied with { Redaction = forEvent.Redaction } }, Sealed = null };
+
+            case CommandFrame { Sealed: { } blob, Message: RunAgentCommands commands } command:
+                return command with { Message = commands with { Credential = Open(blob).Credential }, Sealed = null };
 
             case CommandFrame { Sealed: not null } or EventFrame { Sealed: not null }:
                 throw new InvalidDataException(UnsealableText);

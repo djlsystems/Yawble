@@ -41,6 +41,9 @@ public sealed record RunId(ContainerId Member, string Nonce)
 
 /// <summary>What control sends a worker. A send completes once the worker has applied it.</summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "message")]
+[JsonDerivedType(typeof(ProbeSignIn), "probeSignIn")]
+[JsonDerivedType(typeof(RunAgentCommands), "runAgentCommands")]
+[JsonDerivedType(typeof(RemoveAsAgent), "removeAsAgent")]
 [JsonDerivedType(typeof(StartRun), "startRun")]
 [JsonDerivedType(typeof(CancelRun), "cancelRun")]
 [JsonDerivedType(typeof(ChangeRunMemoryAllowance), "changeRunMemoryAllowance")]
@@ -193,6 +196,9 @@ public sealed record WorkerEnvelope(WorkerId Worker, long Seq, WorkerEvent Event
 
 /// <summary>What a worker says.</summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "event")]
+[JsonDerivedType(typeof(SignInProbed), "signInProbed")]
+[JsonDerivedType(typeof(AgentCommandsRan), "agentCommandsRan")]
+[JsonDerivedType(typeof(RemovedAsAgent), "removedAsAgent")]
 [JsonDerivedType(typeof(WorkerReady), "workerReady")]
 [JsonDerivedType(typeof(RunCredentialApplied), "runCredentialApplied")]
 [JsonDerivedType(typeof(RunStarted), "runStarted")]

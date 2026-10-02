@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Text;
 using Harness.Contracts;
 
 namespace Harness.Host;
@@ -48,12 +46,26 @@ public sealed record FolderRemovalReport(
 /// on request. A removal that finishes forgets its row.</item>
 /// </list>
 /// </summary>
+/// <para>
+/// THE AGENT'S PASS IS A WORKER'S (<see cref="IAgentPass"/>): the paths are sent to a connected worker,
+/// which checks each against the boundary again and runs <c>rm</c> as the agent. With none connected
+/// nothing is removed as the agent, the Host's second pass finds what remains, and the removal is
+/// recorded unfinished with the reason, to be retried when one connects. A removal composed without
+/// a pass, where this process switches users, asks a worker of its own process.
+/// </para>
 public sealed class FolderRemoval(
     AgentLaunchUser? runAs = null,
     IUnfinishedRemovals? unfinished = null,
-    FolderRemoval.HostDeletes? host = null)
+    FolderRemoval.HostDeletes? host = null,
+    IAgentPass? agent = null)
 {
     private readonly HostDeletes _host = host ?? HostDeletes.Real;
+
+    private readonly Lazy<IAgentPass?> _agent = new(() =>
+        agent ?? (runAs is { Switches: true } ? WorkerAgentPass.InProcess(runAs) : null));
+
+    /// <summary>The agent's pass, when there is one to ask: a worker elsewhere always, this process's only when it switches users.</summary>
+    private IAgentPass? AgentPass => _agent.Value is { } pass && (pass.Always || runAs is { Switches: true }) ? pass : null;
 
     /// <summary>
     /// How the Host itself removes one file or link and one empty directory, and lists a directory.
@@ -475,7 +487,7 @@ public sealed class FolderRemoval(
         var left = new List<string>();
         foreach (var path in old) RemoveAsHost(path, left);
 
-        if (left.Count > 0 && runAs is { Switches: true } agent)
+        if (left.Count > 0 && AgentPass is { } agent)
         {
             await RemoveAsAgentAsync(agent, boundary, left, ct);
 
@@ -658,18 +670,26 @@ public sealed class FolderRemoval(
         List<string> remaining = new Leftovers();
         hostPass(remaining);
 
-        if (remaining.Count == 0 || runAs is not { Switches: true } agent) return remaining;
+        if (remaining.Count == 0 || AgentPass is not { } agent) return remaining;
 
         // What the agent is handed: the entry of the folder that holds each leftover, so an agent
         // directory nested in one of the Host's is removed in one pass.
         var targets = remaining.Select(path => TopLevel(boundary, path)).OfType<string>();
 
-        await RemoveAsAgentAsync(
+        var why = await RemoveAsAgentAsync(
             agent, boundary, [.. targets.Where(path => !string.Equals(path, keep, StringComparison.Ordinal))], ct);
 
-        remaining = new Leftovers();
-        hostPass(remaining);
-        return remaining;
+        var after = new Leftovers();
+        hostPass(after);
+
+        // What the agent's pass could not reach is still there for that reason, not the Host's own.
+        if (why is not null && after.Count > 0)
+        {
+            after.AgentPass = why;
+            foreach (var path in after) after.Reasons[path] = why;
+        }
+
+        return after;
     }
 
     /// <summary>The entry directly inside <paramref name="boundary"/> that holds <paramref name="path"/>,
@@ -750,10 +770,12 @@ public sealed class FolderRemoval(
         }
     }
 
-    /// <summary>What a pass left, with why the Host's own delete of each refused.</summary>
+    /// <summary>What a pass left, with why the Host's own delete of each refused, and why the agent's pass did not run when it did not.</summary>
     private sealed class Leftovers : List<string>
     {
         public Dictionary<string, string> Reasons { get; } = new(StringComparer.Ordinal);
+
+        public string? AgentPass { get; set; }
     }
 
     private static void Leave(List<string> remaining, string path, Exception ex)
@@ -773,59 +795,17 @@ public sealed class FolderRemoval(
     };
 
     /// <summary>
-    /// <c>rm -rf --one-file-system -- &lt;paths&gt;</c> as the agent, through the launch prefix.
-    /// Only paths confined to <paramref name="boundary"/>, and never the boundary itself (a team
-    /// root's marker must go last, and by the Host).
+    /// What the Host left, handed to the agent's pass: only paths confined to
+    /// <paramref name="boundary"/>, and never the boundary itself (a team root's marker must go last,
+    /// and by the Host). The worker checks each again and removes it as the agent. Null when it was
+    /// handed over; otherwise why not.
     /// </summary>
-    private static async Task RemoveAsAgentAsync(
-        AgentLaunchUser agent, string boundary, IReadOnlyList<string> remaining, CancellationToken ct)
+    private static async Task<string?> RemoveAsAgentAsync(
+        IAgentPass agent, string boundary, IReadOnlyList<string> remaining, CancellationToken ct)
     {
         var targets = remaining.Where(path => Confined(boundary, path)).Distinct(StringComparer.Ordinal).ToList();
 
-        if (targets.Count == 0 || SystemCommand.Find("rm") is not { } rm) return;
-
-        foreach (var chunk in targets.Chunk(100))
-        {
-            await RunAsync([.. agent.Prefix, rm, "-rf", "--one-file-system", "--", .. chunk], ct);
-        }
-    }
-
-    private static async Task RunAsync(IReadOnlyList<string> command, CancellationToken ct)
-    {
-        var start = new ProcessStartInfo(command[0])
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            StandardOutputEncoding = Encoding.UTF8,
-        };
-        foreach (var argument in command.Skip(1)) start.ArgumentList.Add(argument);
-
-        try
-        {
-            using var process = Process.Start(start);
-            if (process is null) return;
-
-            var output = process.StandardOutput.ReadToEndAsync(ct);
-            var error = process.StandardError.ReadToEndAsync(ct);
-
-            try
-            {
-                await process.WaitForExitAsync(ct);
-            }
-            catch (OperationCanceledException)
-            {
-                try { process.Kill(); }
-                catch (InvalidOperationException) { }
-                throw;
-            }
-
-            await Task.WhenAll(output, error);
-        }
-        catch (System.ComponentModel.Win32Exception)
-        {
-            // Not startable: the Host's pass that follows names what is still there.
-        }
+        return targets.Count == 0 ? null : await agent.RemoveAsync(boundary, targets, ct);
     }
 
     // ---- The record.
@@ -848,7 +828,10 @@ public sealed class FolderRemoval(
                 new UnfinishedRemoval(path, kind, team, member, sorted, DateTimeOffset.UtcNow, 1, hostLeft), ct);
         }
 
-        return new FolderRemovalReport(sorted);
+        // Left because the agent's pass could not run: each path says so.
+        return (remaining as Leftovers)?.AgentPass is { } why
+            ? new FolderRemovalReport(sorted, Reasons: sorted.ToDictionary(p => p, _ => why, StringComparer.Ordinal))
+            : new FolderRemovalReport(sorted);
     }
 
     private Task ForgetAsync(string path, CancellationToken ct) =>

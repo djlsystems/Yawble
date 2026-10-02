@@ -95,6 +95,7 @@ public sealed class InProcessWorker
             events => host = new WorkerHost(
                 id, events, launcher, heartbeat, allowances,
                 new CgroupReader(cgroupRoot ?? WorkerPaths.CgroupRoot), new ProcessGroupReader(proc), RunProcessGroups.Shared,
+                cli: new WorkerAgentCli(id, runAs, homes ?? new RunHomes(runAs, RunHomeRemoval.For(runAs)), launchLog),
                 log: launchLog,
                 streaming: new WorkerStreaming((IRunStreamSink)events, pty ?? new Harness.Pty.PortaPtyEngine(), runAs)),
             control,
@@ -104,6 +105,29 @@ public sealed class InProcessWorker
         worker.Allowances = allowances;
         return worker;
     }
+
+    /// <summary>
+    /// A worker in this process that answers only about its agent CLIs (a sign-in probe, commands, a
+    /// removal as the agent) and takes no run: what a control part composed without the Host's own
+    /// worker - a test's - asks, over the same transport and the same worker code.
+    /// </summary>
+    public static InProcessWorker ForAgentClis(
+        WorkerId id, AgentLaunchUser? runAs, Func<WorkerEnvelope, CancellationToken, Task> control, RunHomes? homes = null)
+    {
+        var heartbeat = new RunHeartbeat();
+        return Connect(
+            id,
+            events => new WorkerHost(
+                id, events, new RunLauncher(heartbeat, runAs: runAs), heartbeat,
+                cli: new WorkerAgentCli(id, runAs, homes ?? new RunHomes(runAs, RunHomeRemoval.For(runAs)))),
+            control);
+    }
+
+    /// <summary>
+    /// The run homes of the Host's own worker, removed by the worker's own <see cref="RunHomeRemoval"/>,
+    /// the rule a worker process uses.
+    /// </summary>
+    public static RunHomes Homes(AgentLaunchUser? runAs) => new(runAs, RunHomeRemoval.For(runAs));
 
     /// <summary>Who agent children run as on this worker, decided once (<see cref="AgentLaunchUser.Resolve"/>).</summary>
     public static AgentLaunchUser LaunchUser(string? configured) => AgentLaunchUser.Resolve(configured);

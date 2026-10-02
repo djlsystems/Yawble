@@ -62,7 +62,7 @@ public static class ConciergeAgentDefault
                 agent is null
                     ? "No interactive agent is installed."
                     : $"'{agent}' is not an agent this tenant has.")
-            : new ConciergeAuth(report.Installed, report.Authenticated == true, report.Detail);
+            : new ConciergeAuth(report.Installed == true, report.Authenticated == true, report.Detail);
 
         return new ConciergeEffective(
             agent,
@@ -81,6 +81,6 @@ public static class ConciergeAgentDefault
 
         // NOT "the first that exists" when nothing is installed: that launched a command that is not
         // on PATH and left a person a closed socket. Null lets the panel say so first.
-        return First(r => r.Authenticated == true) ?? First(r => r.Installed);
+        return First(r => r.Authenticated == true) ?? First(r => r.Installed == true);
     }
 }

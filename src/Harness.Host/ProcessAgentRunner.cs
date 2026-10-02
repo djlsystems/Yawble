@@ -32,12 +32,13 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     private readonly AgentCatalog _catalog;
     private readonly IRunWorker _worker;
     private readonly RunDirectory _directory;
-    private readonly RunLauncher? _launcher;
     private readonly Func<RunMemoryAllowance?> _memory;
     private readonly Func<ContainerId, RunMemoryAllowance?>? _memoryFor;
     private readonly string? _tempRoot;
     private readonly Func<ContainerId, IRunWorker>? _placedOn;
     private readonly IRunCredentials? _credentials;
+    private readonly AgentUpdateGate? _gateHere;
+    private readonly Func<IMemberReports?>? _reports;
 
     public ProcessAgentRunner(
         AgentCatalog catalog,
@@ -66,7 +67,6 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
 
         _catalog = catalog;
         _worker = worker.Worker;
-        _launcher = launcher;
         _memory = () => memory is null ? null : Allowance(memory.Settings());
         _tempRoot = temp?.Path;
         _credentials = credentials;
@@ -78,6 +78,11 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// <paramref name="tempRoot"/> is where members' temporary folders go. <paramref name="placedOn"/> is
     /// the worker admission placed a member's run on; without it, every run goes to <paramref name="worker"/>.
     /// <paramref name="credentials"/> resolves a run's credential when its invocation carries none.
+    /// <paramref name="launcher"/> is not called: the launch check goes to a worker over the transport
+    /// in every role; it stays a parameter so the runner's callers compose it as before.
+    /// <paramref name="gateHere"/> is control's one update gate, which a run's share is taken from
+    /// before it is sent - set only where no worker in this process takes it (<c>--Role control</c>);
+    /// <paramref name="reports"/> is where a held run says so.
     /// </summary>
     public ProcessAgentRunner(
         AgentCatalog catalog,
@@ -88,14 +93,17 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         string? tempRoot,
         Func<ContainerId, IRunWorker>? placedOn = null,
         IRunCredentials? credentials = null,
-        Func<ContainerId, RunMemoryAllowance?>? memoryFor = null)
+        Func<ContainerId, RunMemoryAllowance?>? memoryFor = null,
+        AgentUpdateGate? gateHere = null,
+        Func<IMemberReports?>? reports = null)
     {
+        _gateHere = gateHere;
+        _reports = reports;
         _memoryFor = memoryFor;
         _catalog = catalog;
         _worker = worker;
         _placedOn = placedOn;
         _directory = directory;
-        _launcher = launcher;
         _memory = memory;
         _tempRoot = tempRoot;
         _credentials = credentials;
@@ -130,8 +138,38 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// a per-container binding captured when the member was created: the answer is derivable from
     /// `invocation.Agent`, which is read off the container's own definition on every wake.
     /// </summary>
-    public async Task<AgentResult> RunAsync(AgentInvocation invocation, CancellationToken ct = default) =>
-        await _directory.RunAsync(_placedOn?.Invoke(invocation.Container) ?? _worker, await StartAsync(invocation, ct), ct);
+    public async Task<AgentResult> RunAsync(AgentInvocation invocation, CancellationToken ct = default)
+    {
+        var start = await StartAsync(invocation, ct);
+        if (_gateHere is null || start.Launch is not { } launching)
+        {
+            return await _directory.RunAsync(_placedOn?.Invoke(invocation.Container) ?? _worker, start, ct);
+        }
+
+        // CONTROL'S ONE UPDATE GATE: the run holds a share of its CLI's install from before it is sent
+        // until it ends, however it ends - on whichever worker, dropped or not, until it ends there or is
+        // lost. While an update waits or runs the run is HELD here, never sent, and says so once.
+        IDisposable share;
+        try
+        {
+            share = await _gateHere.EnterRunAsync(
+                launching.FileName,
+                _reports?.Invoke() is { } reports
+                    ? () => reports.ProgressAsync(invocation.Container, HeldText(launching.FileName), CancellationToken.None)
+                    : null,
+                ct,
+                new AgentRunHolder(invocation.Container.Team, invocation.Container.Name));
+        }
+        catch (OperationCanceledException)
+        {
+            return new AgentResult(-1, string.Empty, RunLauncher.StoppedWhileHeldText(launching.FileName), FailureClass: FailureClasses.Interrupted);
+        }
+
+        using (share)
+        {
+            return await _directory.RunAsync(_placedOn?.Invoke(invocation.Container) ?? _worker, start, ct);
+        }
+    }
 
     /// <summary>
     /// THE LAUNCH CHECK FOR ONE PRESET: its declared free invocation (<see cref="AgentDefinition.LaunchCheck"/>)
@@ -161,24 +199,20 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         var environment = AgentToolPreflight.LaunchShape(definition).Environment;
         var credential = _credentials is null ? RunCredential.Home : await _credentials.ResolveAsync(agent, definition, ct);
         var launch = Launch(command, definition.TimeoutSeconds, environment, credential);
-        if (_launcher is null) return await CheckOnAWorkerAsync(launch, check, definition, environment, credential, timeout, ct);
 
-        return await _launcher.CheckLaunchAsync(
-            launch,
-            check,
-            definition.Updates?.Arguments ?? [],
-            environment,
-            _memory(),
-            ct,
-            timeout,
-            credential,
-            Redaction(launch, environment, credential),
-            _tempRoot);
+        // Under control's one update gate: not checked while an update waits or runs, and a check in
+        // flight holds the update off as a run does.
+        if (_gateHere is null) return await CheckOnAWorkerAsync(launch, check, definition, environment, credential, timeout, ct);
+        if (_gateHere.Updating(launch.FileName)) return AgentLaunchReport.Unchecked(RunLauncher.UpdatingText(launch.FileName));
+
+        using var share = await _gateHere.EnterRunAsync(launch.FileName, null, ct);
+        return await CheckOnAWorkerAsync(launch, check, definition, environment, credential, timeout, ct);
     }
 
     /// <summary>
-    /// The launch check where this process launches nothing itself: sent to the connected worker with
-    /// the most measured headroom, as a member run of the preset would be placed, and answered by it.
+    /// The launch check, in every role: sent to the connected worker with the most measured headroom,
+    /// as a member run of the preset would be placed, and answered by it. In a Host that runs its runs
+    /// itself that is its own worker, over the in-process transport, which runs the same launch.
     /// </summary>
     private async Task<AgentLaunchReport> CheckOnAWorkerAsync(
         RunLaunch launch, IReadOnlyList<string> check, AgentDefinition definition, IReadOnlyDictionary<string, string> environment,

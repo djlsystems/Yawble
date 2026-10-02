@@ -106,9 +106,9 @@ public static class WorkerProcess
             procRoot: proc,
             runAs: runAs);
 
+        var homes = new RunHomes(runAs, RunHomeRemoval.For(runAs));
         var launcher = new RunLauncher(
-            heartbeat, log, runAs, reports: true, updates: updates, memory: memory, allowances: allowances,
-            homes: new RunHomes(runAs, RunHomeRemoval.For(runAs)));
+            heartbeat, log, runAs, reports: true, updates: updates, memory: memory, allowances: allowances, homes: homes);
 
         var connection = new ControlConnection(
             id, version, key.Trim(), ControlConnection.Connector(Http(control), key.Trim()),
@@ -120,7 +120,8 @@ public static class WorkerProcess
             log: log);
 
         host = new WorkerHost(
-            id, connection, launcher, heartbeat, allowances, cgroup, new ProcessGroupReader(proc), RunProcessGroups.Shared, log: log,
+            id, connection, launcher, heartbeat, allowances, cgroup, new ProcessGroupReader(proc), RunProcessGroups.Shared,
+            cli: new WorkerAgentCli(id, runAs, homes, log), log: log,
             streaming: new WorkerStreaming(connection, new Harness.Pty.PortaPtyEngine(), runAs));
         connection.Apply = host.ApplyAsync;
         connection.Input = host.Input;
