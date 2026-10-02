@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -502,7 +503,8 @@ func TestWorkerKeyReachesContainersOnlyAsAnEnvFile(t *testing.T) {
 		}
 	}
 	info, err := os.Stat(filepath.Join(dir, config.WorkerKeyFileName))
-	if err != nil || info.Mode().Perm() != 0o600 {
+	// File modes are not Unix modes on Windows: there the file is private by the user profile's ACL.
+	if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
 		t.Errorf("worker.env mode %v %v", info.Mode(), err)
 	}
 	left, _ := os.ReadDir(dir)

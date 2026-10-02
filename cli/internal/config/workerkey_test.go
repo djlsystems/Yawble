@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -33,7 +34,8 @@ func TestTheWorkerKeyIsMadeOnceOwnerOnlyAndOnlyItsHashIsAnswered(t *testing.T) {
 	if hash != hex.EncodeToString(sum[:])[:12] || strings.Contains(hash, m[1]) {
 		t.Errorf("hash %q", hash)
 	}
-	if info, _ := os.Stat(config.WorkerKeyFile(dir)); info.Mode().Perm() != 0o600 {
+	// File modes are not Unix modes on Windows: there the file is private by the user profile's ACL.
+	if info, _ := os.Stat(config.WorkerKeyFile(dir)); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", info.Mode())
 	}
 	again, made, err := config.EnsureWorkerKey(dir)
