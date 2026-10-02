@@ -25,6 +25,10 @@ type credentialHost struct {
 	set      map[string]bool
 	sources  map[string]string
 	silent   bool
+	// unsafe, when set, is the reason the Host deletes each request unanswered, as it does with
+	// one it cannot answer safely; withNonce says whether its refusal names the request.
+	unsafe    string
+	withNonce bool
 }
 
 func newCredentialHost(t *testing.T) *credentialHost {
@@ -83,7 +87,14 @@ func (h *credentialHost) RunInput(ctx context.Context, stdin string, name string
 		}
 		h.mu.Lock()
 		h.requests = append(h.requests, req)
-		if !h.silent {
+		if h.unsafe != "" {
+			var nonce any = ""
+			if h.withNonce {
+				nonce = req["request"]
+			}
+			b, _ := json.Marshal(map[string]any{"request": nonce, "status": 409, "body": map[string]any{"error": h.unsafe}})
+			h.report = string(b)
+		} else if !h.silent {
 			status, body := h.answer(req)
 			b, _ := json.Marshal(map[string]any{"request": req["request"], "status": status, "body": body})
 			h.report = string(b)
@@ -351,5 +362,74 @@ func TestATimedOutRequestIsWithdrawn(t *testing.T) {
 func TestTheHostIsGivenSixtySeconds(t *testing.T) {
 	if got := cli.CredentialWaitDefault(); got != 60*time.Second {
 		t.Errorf("wait %s", got)
+	}
+}
+
+// A secret pasted where the name goes is refused before a value is read or anything is sent, and
+// the refusal never repeats it.
+func TestANameThatIsNotPlainIsRefusedUnsentAndUnrepeated(t *testing.T) {
+	secrets := []string{
+		"ghu_AbCdEf/0123+xyzQ",          // characters no name has
+		secretValue + "-" + secretValue, // name characters, but longer than any name
+	}
+	for _, secret := range secrets {
+		for _, args := range [][]string{
+			{"agents", "credential", "set", secret},
+			{"agents", "credential", "set", "--token", secret},
+			{"agents", "credential", "clear", secret},
+			{"agents", "source", secret, "issued"},
+		} {
+			h := newCredentialHost(t)
+			stdin := strings.NewReader("piped-value-that-must-not-be-read\n")
+			deps := piped(h, "")
+			deps.Stdin = stdin
+			read := false
+			deps.Interactive, deps.ReadSecret = false, func(string) (string, error) { read = true; return "", nil }
+			code, out, errOut := run(t, deps, args...)
+			if code != 2 {
+				t.Errorf("%v: exit %d, want 2: %s", args[:3], code, errOut)
+			}
+			if !strings.Contains(errOut, "not a preset or command name") {
+				t.Errorf("%v: stderr %q", args[:3], errOut)
+			}
+			if len(h.requests) != 0 || len(h.Scripted.Calls) != 0 || len(h.Scripted.Inputs) != 0 {
+				t.Errorf("%v: something was sent: %+v %v", args[:3], h.requests, h.Scripted.Calls)
+			}
+			if read || stdin.Len() == 0 {
+				t.Errorf("%v: a value was read before the name was refused", args[:3])
+			}
+			if strings.Contains(out+errOut, secret[:8]) {
+				t.Errorf("%v: the output repeats the argument: %q %q", args[:3], out, errOut)
+			}
+		}
+	}
+}
+
+// The source word is not repeated either: it may be a value typed in the wrong place.
+func TestASourceThatIsNotHomeOrIssuedIsNotRepeated(t *testing.T) {
+	h := newCredentialHost(t)
+	code, out, errOut := run(t, stubbed(h), "agents", "source", "claude-headless", secretValue)
+	if code != 2 || len(h.requests) != 0 || strings.Contains(out+errOut, secretValue[:12]) {
+		t.Errorf("exit %d requests %+v output %q %q", code, h.requests, out, errOut)
+	}
+}
+
+// A request the Host cannot answer safely is deleted unanswered; the CLI shows the Host's reason
+// and fails, whether or not the refusal carries the request's nonce.
+func TestARequestTheHostDeletesUnansweredShowsItsReason(t *testing.T) {
+	const reason = "The agent credential folder is open to other users, so the request was deleted unanswered; nothing was stored."
+	for _, withNonce := range []bool{false, true} {
+		h := newCredentialHost(t)
+		h.unsafe, h.withNonce = reason, withNonce
+		code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude", "--api-key")
+		if code != 1 || !strings.Contains(errOut, reason) || strings.Contains(out, "is set") {
+			t.Errorf("nonce %v: exit %d out %q stderr %q", withNonce, code, out, errOut)
+		}
+		if strings.Contains(out+errOut, secretValue[:12]) || strings.Contains(errOut, "withdrawn") {
+			t.Errorf("nonce %v: stderr %q", withNonce, errOut)
+		}
+	}
+	if !strings.Contains(cli.CredentialRequestScript, `rm -f "$1/.request-report.json"`) {
+		t.Errorf("an older report is not removed before a request goes in, so a refusal with no nonce could be stale:\n%s", cli.CredentialRequestScript)
 	}
 }

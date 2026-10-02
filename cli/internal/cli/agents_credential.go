@@ -55,6 +55,7 @@ type credentialBody struct {
 	SetBy   *string `json:"setBy"`
 	SetAt   *string `json:"setAt"`
 	Error   string  `json:"error"`
+	Reason  string  `json:"reason"`
 }
 
 func newAgentsCredentialCommand(deps Deps) *cobra.Command {
@@ -78,16 +79,42 @@ func newAgentsCredentialCommand(deps Deps) *cobra.Command {
 	return cmd
 }
 
-// oneName refuses anything but a single preset or command name: a second argument, or a name
-// carrying '=', could only be a value, and a value never comes from the command line.
+// maxAgentName is the longest preset or command name sent; a longer one is far likelier a value.
+const maxAgentName = 64
+
+// plainName reports whether name can only be a preset or command name: letters, digits, '-', '_'
+// and '.', at most maxAgentName long. Anything else may be a value pasted in the wrong place.
+func plainName(name string) bool {
+	if name == "" || len(name) > maxAgentName {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// notAName refuses a name that is not plain without repeating it: it may be a credential.
+func notAName(usage string) error {
+	return UsageError{fmt.Sprintf("that is not a preset or command name (letters, digits, '-', '_' and '.', at most %d); "+
+		"nothing was read or sent, and it is not repeated here in case it was a credential. "+
+		"A credential is never taken from the command line: %s", maxAgentName, usage)}
+}
+
+// oneName refuses anything but a single plain preset or command name: a second argument, or a
+// name that is not plain, could be a value, and a value never comes from the command line.
 func oneName(verb string) cobra.PositionalArgs {
 	return func(_ *cobra.Command, args []string) error {
 		switch {
 		case len(args) == 0:
 			return UsageError{fmt.Sprintf("name the preset or command: yawble agents credential %s <preset|command>", verb)}
-		case len(args) > 1 || strings.Contains(args[0], "="):
+		case len(args) > 1:
 			return UsageError{"a credential is never taken from the command line, where it would stay in your shell's history; " +
 				"nothing was sent. Type it at the prompt or pipe it in: <command> | yawble agents credential set <preset|command>"}
+		case !plainName(args[0]):
+			return notAName("type it at the prompt or pipe it in: <command> | yawble agents credential set <preset|command>")
 		}
 		return nil
 	}
@@ -173,11 +200,19 @@ func newAgentsSourceCommand(deps Deps) *cobra.Command {
 			"set with `yawble agents credential set` for the preset's command, and a home of its own; an " +
 			"issued member run whose credential is not set does not start.",
 		Example: "  yawble agents source claude-headless issued\n  yawble agents source claude-headless home",
-		Args:    cobra.ExactArgs(2),
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				return UsageError{"name the preset and the source: yawble agents source <preset> home|issued"}
+			}
+			if !plainName(args[0]) {
+				return notAName("yawble agents source <preset> home|issued")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			preset, source := args[0], args[1]
 			if source != "home" && source != "issued" {
-				return UsageError{fmt.Sprintf("the source is home or issued, not %q", source)}
+				return UsageError{"the source is home or issued; nothing was sent"}
 			}
 			e, err := runningEngine(cmd.Context(), deps, "agents source")
 			if err != nil {
@@ -255,12 +290,12 @@ func askCredentialHost(ctx context.Context, e engine.Engine, req credentialReque
 			return credentialBody{}, err
 		}
 		var r credentialReport
-		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.Request == req.Request {
+		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.answers(req.Request) {
 			var b credentialBody
 			_ = json.Unmarshal(r.Body, &b)
 			if r.Status < 200 || r.Status > 299 {
-				if b.Error != "" {
-					return credentialBody{}, errors.New(b.Error)
+				if reason := b.refusal(); reason != "" {
+					return credentialBody{}, errors.New(reason)
 				}
 				return credentialBody{}, fmt.Errorf("the Host refused the %s request (status %d)", req.Action, r.Status)
 			}
@@ -278,6 +313,21 @@ func askCredentialHost(ctx context.Context, e engine.Engine, req credentialReque
 		case <-time.After(credentialPoll):
 		}
 	}
+}
+
+// answers reports whether this report is the answer to the request carrying nonce. A refusal
+// with no nonce is one too: the Host deletes a request it cannot answer safely without trusting
+// anything in it, and the request script removed any older report before this request went in.
+func (r credentialReport) answers(nonce string) bool {
+	return r.Request == nonce || (r.Request == "" && (r.Status < 200 || r.Status > 299))
+}
+
+// refusal is the Host's sentence for a refused request, whichever key carries it.
+func (b credentialBody) refusal() string {
+	if b.Error != "" {
+		return b.Error
+	}
+	return b.Reason
 }
 
 func (b credentialBody) commandOr(name string) string {
@@ -311,6 +361,7 @@ chmod 0700 "$1"
 cat > "$1/.request.tmp"
 chown harness "$1/.request.tmp"
 chmod 0600 "$1/.request.tmp"
+rm -f "$1/.request-report.json"
 mv -f "$1/.request.tmp" "$1/.request"`
 
 	// $1 root.

@@ -410,6 +410,48 @@ describe('AgentsDialog credentials, mounted', () => {
     wrapper.unmount();
   });
 
+  it('says the Concierge starts on the person\'s login only on a Concierge row', async () => {
+    // Every preset on issued with nothing set: each row warns, but only a Concierge row names it.
+    getTenantSettings.mockResolvedValue(settingsWith({
+      claude: 'issued', 'claude-headless': 'issued', grok: 'issued', 'copilot-headless': 'issued',
+    }));
+    getAgentCredentials.mockResolvedValue(credentials({ source: 'issued' }).map((one) => ({ ...one, source: 'issued' as const })));
+    const wrapper = await mountDialog(AgentsDialog);
+
+    for (const name of ['claude', 'grok']) {
+      expect(block(name).querySelector('[data-credential-missing]')?.textContent)
+        .toContain("The Concierge starts on the person's own login");
+    }
+    for (const name of ['claude-headless', 'copilot-headless']) {
+      const missing = block(name).querySelector('[data-credential-missing]')?.textContent ?? '';
+      expect(missing).toContain('do not start');
+      expect(missing).not.toContain('Concierge');
+      expect(block(name).textContent).not.toContain("person's own login");
+    }
+
+    wrapper.unmount();
+  });
+
+  it('takes the value in a password field and holds nothing once it is saved', async () => {
+    const wrapper = await mountDialog(AgentsDialog);
+    const state = wrapper.vm as unknown as { credentialValue: string };
+
+    await openEditor('claude-headless');
+    expect(field('API key').getAttribute('type')).toBe('password');
+    await type('API key', Secret);
+    expect(state.credentialValue).toBe(Secret);
+
+    button('Save').click();
+    await settle();
+
+    expect(setAgentCredential).toHaveBeenCalledTimes(1);
+    // The saved value is gone from the screen's state, not only from a field that closed.
+    expect(state.credentialValue).toBe('');
+    expect(everythingShown()).not.toContain(Secret.slice(0, 12));
+
+    wrapper.unmount();
+  });
+
   it('refuses issued for a preset with no declaration', async () => {
     const wrapper = await mountDialog(AgentsDialog);
 
