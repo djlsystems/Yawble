@@ -19,8 +19,9 @@ public interface IRunCredentials
 /// <see cref="IssuedCredential"/> declaration and the credential stored for its command.
 ///
 /// <para>
-/// HOME COSTS NOTHING AND CHANGES NOTHING: a preset whose source is home resolves to
-/// <see cref="RunCredential.Home"/> without touching the store, so its launch is the one it always was.
+/// HOME SETS NOTHING AND NEVER TOUCHES THE STORE: a preset whose source is home resolves to
+/// <see cref="RunCredential.Home"/> carrying only the variables other commands declare, so its run
+/// loses another provider's credential the Host holds, as an issued run does.
 /// </para>
 ///
 /// <para>
@@ -43,10 +44,13 @@ public sealed class RunCredentials(AgentCatalog catalog, Func<string, Credential
 
     public async Task<RunCredential> ResolveAsync(string agent, AgentDefinition? definition, CancellationToken ct)
     {
-        if (sourceOf(agent) != CredentialSource.Issued) return RunCredential.Home;
-
         definition ??= catalog.Definition(agent);
         if (definition is null) return RunCredential.Home;
+
+        if (sourceOf(agent) != CredentialSource.Issued)
+        {
+            return RunCredential.Home with { OtherProviders = OtherProviders(definition) };
+        }
 
         if (definition.IssuedCredential is not { } declaration)
         {
@@ -76,7 +80,7 @@ public sealed class RunCredentials(AgentCatalog catalog, Func<string, Credential
             CredentialSource.Issued,
             new Dictionary<string, string>(StringComparer.Ordinal) { [variable] = issued.Value },
             Own(declaration, variable),
-            OtherProviders(definition, variable),
+            OtherProviders(definition),
             PerRunHome: true,
             Missing: null);
     }
@@ -93,22 +97,24 @@ public sealed class RunCredentials(AgentCatalog catalog, Func<string, Credential
     }
 
     /// <summary>Every variable another command's declaration names, so another provider's key the
-    /// Host holds cannot ride along with an issued run.</summary>
-    private IReadOnlyList<string> OtherProviders(AgentDefinition definition, string variable)
+    /// Host holds cannot ride along with a run. Never one this preset's own command declares, and
+    /// never the team's git token, which no declaration displaces.</summary>
+    private IReadOnlyList<string> OtherProviders(AgentDefinition definition)
     {
         var own = CommandOf(definition);
         var names = new SortedSet<string>(StringComparer.Ordinal);
+        var ours = new HashSet<string>(StringComparer.Ordinal) { AgentEnvironment.GitHubVariable };
 
         foreach (var other in catalog.Definitions)
         {
-            if (other.IssuedCredential is not { } theirs
-                || string.Equals(CommandOf(other), own, StringComparison.OrdinalIgnoreCase)) continue;
+            if (other.IssuedCredential is not { } declaration) continue;
 
-            foreach (var name in theirs.Displaces) names.Add(name);
-            foreach (var kind in theirs.Kinds) names.Add(kind.Variable);
+            ISet<string> into = string.Equals(CommandOf(other), own, StringComparison.OrdinalIgnoreCase) ? ours : names;
+            foreach (var name in declaration.Displaces) into.Add(name);
+            foreach (var kind in declaration.Kinds) into.Add(kind.Variable);
         }
 
-        names.Remove(variable);
+        names.ExceptWith(ours);
         return [.. names];
     }
 }

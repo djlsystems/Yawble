@@ -68,8 +68,8 @@ public interface IListingRunner
     /// <summary>Whether <paramref name="command"/> resolves, the way a launch resolves it.</summary>
     bool Installed(string command);
 
-    /// <param name="credential">An issued credential, applied as a member run applies it
-    /// (<see cref="AgentEnvironment.ApplyIssued"/>); null for the shared home.</param>
+    /// <param name="credential">A member run's credential, applied as the run applies it
+    /// (<see cref="AgentEnvironment.ApplyCredential"/>); null for the Concierge on the shared home.</param>
     Task<ListingRun> RunAsync(
         string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment,
         CancellationToken ct, RunCredential? credential = null);
@@ -140,9 +140,9 @@ public sealed class CliListingRunner(AgentLaunchUser? runAs = null, string? home
             foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
             foreach (var (name, value) in environment) process.StartInfo.Environment[name] = value;
 
-            // An issued credential as a member run gets it, then every provider key but this CLI's
-            // own taken out, as at a member's spawn.
-            var handedIn = AgentEnvironment.ApplyIssued(process.StartInfo.Environment, credential, environment);
+            // The credential as a member run gets it, then every provider key but this CLI's own
+            // taken out, as at a member's spawn.
+            var handedIn = AgentEnvironment.ApplyCredential(process.StartInfo.Environment, credential, environment);
             AgentEnvironment.ScopeProviderKeys(process.StartInfo.Environment, command, handedIn);
 
             if (!process.Start()) return new ListingRun(null, "", "It could not be started.");

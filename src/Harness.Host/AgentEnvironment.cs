@@ -112,18 +112,18 @@ public sealed class AgentEnvironment(
         Providers.Value.ByCommand.GetValueOrDefault(Path.GetFileName(command));
 
     /// <summary>
-    /// AN ISSUED CREDENTIAL APPLIED AS A MEMBER RUN APPLIES IT, after the preset's and the team's env
-    /// (<paramref name="handedIn"/>) so neither can outrank it: every variable the CLI would read for
-    /// authentication, or that points it at a home, is REMOVED (whoever set it), then the issued one
-    /// is set. Another command's declared variables go too unless <paramref name="handedIn"/> holds
-    /// them - the rule <see cref="ScopeProviderKeys"/> holds for every provider key. Returns what
-    /// <see cref="ScopeProviderKeys"/> is then to keep: <paramref name="handedIn"/> with the issued
-    /// variables. Under the shared home it changes nothing and returns <paramref name="handedIn"/>.
+    /// A RUN'S CREDENTIAL APPLIED AS A MEMBER RUN APPLIES IT, after the preset's and the team's env
+    /// (<paramref name="handedIn"/>) so neither can outrank it. Under either source, another
+    /// command's declared variables are REMOVED unless <paramref name="handedIn"/> holds them - the
+    /// rule <see cref="ScopeProviderKeys"/> holds for every provider key. An issued credential also
+    /// removes every variable the CLI would read for authentication, or that points it at a home
+    /// (whoever set it), then sets the issued one. Returns what <see cref="ScopeProviderKeys"/> is
+    /// then to keep: <paramref name="handedIn"/> with the issued variables, if any.
     /// </summary>
-    public static IReadOnlyDictionary<string, string> ApplyIssued(
+    public static IReadOnlyDictionary<string, string> ApplyCredential(
         IDictionary<string, string?> environment, RunCredential? credential, IReadOnlyDictionary<string, string> handedIn)
     {
-        if (credential is not { Source: CredentialSource.Issued }) return handedIn;
+        if (credential is null) return handedIn;
 
         foreach (var name in credential.Displace) environment.Remove(name);
 

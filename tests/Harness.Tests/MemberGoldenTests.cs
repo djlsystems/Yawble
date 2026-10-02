@@ -440,3 +440,31 @@ public sealed class MemberGoldenTests
         Assert.Contains("\"kind\":\"agent\"", JsonSerializer.Serialize(member.Snapshot(), JsonSerializerOptions.Web), StringComparison.Ordinal);
     }
 }
+
+/// <summary>
+/// WHICH CREDENTIAL VARIABLES REACH A HOME RUN'S CHILD, by name, for each built-in headless preset
+/// launched through the real path for a team with a GitHub remote while the Host holds every
+/// declared variable, every provider key and the git token. Its own class because it changes this
+/// process's environment.
+/// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
+public sealed class MemberCredentialGoldenTests
+{
+    [Fact]
+    public async Task Credential_variable_names_each_built_in_headless_preset_receives_on_home()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "The fake CLIs are shell scripts.");
+
+        using var bed = new HomeLaunchBed();
+        var text = new StringBuilder();
+
+        foreach (var preset in HomeLaunchBed.HeadlessPresets())
+        {
+            var seen = await bed.RunAsync(preset.Data);
+            var names = seen.Keys.Where(HomeLaunchBed.HostCredentials.Contains).Order(StringComparer.Ordinal);
+            text.Append(preset.Data).Append(':').AppendJoin("", names.Select(n => " " + n)).Append('\n');
+        }
+
+        Golden.Match("home-credential-variables", text.ToString());
+    }
+}
