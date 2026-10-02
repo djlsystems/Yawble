@@ -3493,6 +3493,34 @@ export interface RunFigures {
   processes: number
   residentBytes: number
   cpuPercent: number | null
+  /** The worker the run is on; absent from a server that does not say. */
+  worker?: string | null
+}
+
+/**
+ * ONE WORKER, as `GET /api/workers` lists it and each capacity sample's `workers` carries it: its
+ * build, when it connected, `connected` or `dropped` (in its grace to come back, since `droppedAt`),
+ * what it measured of its own container - every null figure NOT MEASURED, never 0 - its own `bound`
+ * under the default run limit (null when the limit is set), what a run asking it now would wait for,
+ * and the runs placed on it.
+ */
+export interface WorkerSample {
+  id: string
+  version: string | null
+  connectedSince: string
+  state: 'connected' | 'dropped'
+  droppedAt: string | null
+  capacity: {
+    cpus: number | null
+    memoryLimitBytes: number | null
+    bound: number | null
+    sampledAt: string | null
+    memoryInUseBytes: number | null
+    memoryPercent: number | null
+    notMeasured: string[]
+  }
+  holding: string | null
+  runs: { team: string; member: string; since: string }[]
 }
 
 /** A holder of, or waiter for, the heavy lease. `team` is null for the Concierge. */
@@ -3545,6 +3573,8 @@ export interface CapacitySample {
   topByMemory: RunFigures[]
   topByCpu: RunFigures[]
   heavyLease: { holders: number; holding: LeaseParty[]; queued: LeaseParty[] } | null
+  /** Each worker's own figures and runs; absent from a server that does not say. */
+  workers?: WorkerSample[] | null
 }
 
 /** `GET /api/capacity`: the sampler's interval, its latest sample and about ten minutes of history. */

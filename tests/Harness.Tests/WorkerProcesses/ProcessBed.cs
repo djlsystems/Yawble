@@ -102,6 +102,9 @@ internal sealed class ProcessBed : IAsyncDisposable
             ["HARNESS_CONTROL_URL"] = Url.ToString().TrimEnd('/'),
             ["HARNESS_WORKER_KEY"] = key ?? Key,
             ["HARNESS_WORKER_ID"] = id,
+
+            // Its record of its runs' groups is the bed's, never a file another test or team shares.
+            ["HARNESS_WORKER_STATE_DIR"] = Work,
         };
         if (cgroup is not null) environment["Capacity__CgroupRoot"] = cgroup;
 

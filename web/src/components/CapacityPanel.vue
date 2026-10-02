@@ -12,6 +12,7 @@ import {
   pressureWords,
   runsWords,
   sparkline,
+  workerWords,
 } from '../lib/capacity';
 
 /**
@@ -56,6 +57,20 @@ const memoryParts = computed(() => {
 
 function cpuOfRun(run: RunFigures): string {
   return run.cpuPercent === null ? NotMeasured : `${Math.round(run.cpuPercent)}% of a CPU`;
+}
+
+/**
+ * The workers, when runs go to workers of their own. The Host's own worker alone (`local`, as the
+ * server names it) says nothing the figures above do not.
+ */
+const workers = computed(() => {
+  const all = props.sample?.workers ?? [];
+  return all.length === 1 && all[0]?.id === 'local' ? [] : all;
+});
+
+/** Which worker a top run is on, when there is more than one to tell apart. */
+function onWorker(run: RunFigures): string {
+  return run.worker && workers.value.length > 1 ? ` on ${run.worker}` : '';
 }
 </script>
 
@@ -129,6 +144,16 @@ function cpuOfRun(run: RunFigures): string {
         </ul>
       </section>
 
+      <section v-if="workers.length" class="q-mb-sm" data-test="capacity-workers">
+        <div class="text-subtitle2">Workers</div>
+        <ul class="capacity-list text-caption">
+          <li v-for="worker in workers" :key="worker.id" :data-test="`capacity-worker-${worker.id}`">
+            <strong>{{ worker.id }}</strong> ({{ worker.version ?? NotMeasured }}, connected {{ new Date(worker.connectedSince).toLocaleString() }}):
+            {{ workerWords(worker) }}<template v-if="worker.holding">; a run asking it now would be {{ worker.holding }}</template>
+          </li>
+        </ul>
+      </section>
+
       <section class="q-mb-sm" data-test="capacity-lease">
         <div class="text-subtitle2">Heavy-work lease</div>
         <div v-if="!sample.heavyLease" class="text-body2">not available</div>
@@ -157,7 +182,7 @@ function cpuOfRun(run: RunFigures): string {
         <ul v-else class="capacity-list text-caption">
           <li v-for="run in sample.topByMemory" :key="`${run.team}/${run.member}`">
             <a href="#" class="capacity-team" @click.prevent="emit('team', run.team)">{{ run.team }}</a>
-            {{ run.member }}: {{ bytesWords(run.residentBytes) }}, {{ run.processes }} processes
+            {{ run.member }}{{ onWorker(run) }}: {{ bytesWords(run.residentBytes) }}, {{ run.processes }} processes
           </li>
         </ul>
       </section>
@@ -168,7 +193,7 @@ function cpuOfRun(run: RunFigures): string {
         <ul v-else class="capacity-list text-caption">
           <li v-for="run in sample.topByCpu" :key="`${run.team}/${run.member}`">
             <a href="#" class="capacity-team" @click.prevent="emit('team', run.team)">{{ run.team }}</a>
-            {{ run.member }}: {{ cpuOfRun(run) }}
+            {{ run.member }}{{ onWorker(run) }}: {{ cpuOfRun(run) }}
           </li>
         </ul>
       </section>

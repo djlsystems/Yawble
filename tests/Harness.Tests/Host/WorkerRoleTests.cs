@@ -191,6 +191,8 @@ public sealed class WorkerRoleTests
         start.Environment["HARNESS_CONTROL_URL"] = $"http://127.0.0.1:{closed}";
         start.Environment["HARNESS_WORKER_KEY"] = "a-key-nobody-checks";
         start.Environment["HARNESS_WORKER_ID"] = "no-data-root";
+        var state = Directory.CreateTempSubdirectory("harness-worker-state-").FullName;
+        start.Environment["HARNESS_WORKER_STATE_DIR"] = state;
 
         var output = new StringBuilder();
         using var process = new Process { StartInfo = start };
@@ -225,6 +227,7 @@ public sealed class WorkerRoleTests
             // The one process this test started, by its recorded PID.
             if (!process.HasExited) process.Kill(entireProcessTree: true);
             await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+            Directory.Delete(state, recursive: true);
         }
     }
 

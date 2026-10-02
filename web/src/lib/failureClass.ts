@@ -28,6 +28,7 @@ export const FailureClasses = {
   Crashed: 'crashed',
   Timeout: 'timeout',
   Interrupted: 'interrupted',
+  WorkerLost: 'worker-lost',
   Unknown: 'unknown',
 } as const
 
@@ -75,6 +76,8 @@ export function failureClassWords(
       return 'the idle clock fired'
     case FailureClasses.Interrupted:
       return 'the run was cut off before it finished'
+    case FailureClasses.WorkerLost:
+      return 'the worker running this run stopped, so how far it got is not known; re-sending the instruction runs it on a worker that is there'
     case FailureClasses.Unknown:
       return 'nothing could say why, so this is treated as an agent fault and is not resumed'
     default:
@@ -107,6 +110,8 @@ function pluginFailureWords(failureClass: string | null | undefined): string | n
       return 'the idle clock fired'
     case FailureClasses.Interrupted:
       return 'the run was cut off before it finished'
+    case FailureClasses.WorkerLost:
+      return 'the worker running this run stopped; re-sending the instruction runs it on a worker that is there'
     case FailureClasses.Unknown:
       return 'nothing could say why, so this is not resumed'
     default:
