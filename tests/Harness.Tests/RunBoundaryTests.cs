@@ -128,6 +128,41 @@ public sealed class RunBoundaryTests : IDisposable
             result.LaunchError);
     }
 
+    [Fact]
+    public async Task The_live_view_crosses_and_the_live_route_reads_it()
+    {
+        using var bed = new Bed(_root);
+        var home = Directory.CreateDirectory(Path.Combine(_root, "home")).FullName;
+        var go = Path.Combine(_root, "go");
+        var script = await Script(
+            "printf '{}\\n' > \"$HOME/session-$1.jsonl\"\n"
+            + $"i=0; while [ ! -e '{go}' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done\n");
+
+        // The preset names its transcript before launch, by the run's session id.
+        var start = bed.Start(Launch("sh", [script, "{sessionId}"])) with
+        {
+            Environment = new Dictionary<string, string> { ["HOME"] = home },
+            LiveView = new RunLiveView("~/session-{sessionId}.jsonl", LiveViewNames.ClaudeJsonl, null),
+        };
+        var running = bed.Directory.RunAsync(bed.Worker, start, Ct);
+
+        var begun = await bed.Recorded<RunLiveViewChanged>(v => v.Run == start.Run).WaitAsync(Bound, Ct);
+        var watched = bed.Live.Find(Member);
+
+        Assert.NotNull(watched);
+        Assert.Equal(begun.Transcript, watched.Transcript);
+        Assert.StartsWith(Path.Combine(home, "session-"), watched.Transcript, StringComparison.Ordinal);
+        Assert.Equal(LiveViewNames.ClaudeJsonl, watched.Format);
+
+        await File.WriteAllTextAsync(go, "", Ct);
+        var result = await running.WaitAsync(Bound, Ct);
+
+        // Ended with the run, and the transcript the agent wrote is on its result.
+        Assert.Null(bed.Live.Find(Member));
+        Assert.True(watched.Ended.IsCancellationRequested);
+        Assert.Equal(new AgentTranscript(watched.Transcript!, LiveViewNames.ClaudeJsonl), result.AgentTranscript);
+    }
+
     // ---------------------------------------------------------------------------------------------
     // A run whose end never arrives is a lost run, never a hang.
     // ---------------------------------------------------------------------------------------------
@@ -481,7 +516,7 @@ public sealed class RunBoundaryTests : IDisposable
         {
             _root = root;
             Reports = new ProgressLines();
-            Directory = new RunDirectory(Reports);
+            Directory = new RunDirectory(Reports, live: Live);
             Launcher = new RunLauncher(Heartbeat, reports: reports, lookup: LaunchLookup.Once, updates: Updates);
             _worker = InProcessWorker.Connect(
                 WorkerId.Local,
@@ -510,6 +545,9 @@ public sealed class RunBoundaryTests : IDisposable
         public RunLauncher Launcher { get; }
 
         public RunHeartbeat Heartbeat { get; } = new();
+
+        /// <summary>Control's runs in flight, as the live route reads them.</summary>
+        public LiveRuns Live { get; } = new();
 
         public AgentUpdateGate Updates { get; } = new();
 
