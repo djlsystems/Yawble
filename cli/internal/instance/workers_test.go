@@ -510,7 +510,9 @@ func TestWorkersOneNowWarnsNamingTheRunsThatFailWorkerLostAndANoKeepsIt(t *testi
 // Runs that cannot be read are never taken as none: without --now nothing is stopped.
 func TestWorkersRefusesToStopAWorkerWhoseRunsAreNotKnown(t *testing.T) {
 	s := threeRunning(engines[0])
-	unknown := func(context.Context, string) ([]instance.Run, error) { return nil, errors.New("control did not answer") }
+	unknown := func(context.Context, string) ([]instance.Run, error) {
+		return nil, errors.New("control did not answer")
+	}
 	err := instance.Scale(context.Background(), engine.NewPodman(s), keyed(), unknown, instance.ScaleOptions{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "runs on worker-3 are not known") || !strings.Contains(err.Error(), "--now") {
 		t.Errorf("err %v", err)

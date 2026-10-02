@@ -320,3 +320,35 @@ func TestStatusReportsTheSidecarAndItsURLFallingBackToTheLastKnown(t *testing.T)
 		t.Errorf("fallback: %+v", st)
 	}
 }
+
+// With control and workers, the tunnel is unchanged: it joins the pod (Podman) or the instance's
+// network (Docker), never a worker's namespace, and targets control, which keeps the name.
+func TestTheTunnelStillJoinsThePodAndTargetsControl(t *testing.T) {
+	fast(t)
+	for _, c := range []struct {
+		program, inspect, join, target string
+		make                           func(engine.Runner) engine.Engine
+	}{
+		{"podman", "podman container inspect --format {{.State.Status}}|{{.ImageName}}|{{index .Config.Labels \"yawble.settings\"}} ", "--pod yawble", "http://127.0.0.1:8080", engine.NewPodman},
+		{"docker", "docker container inspect --format {{.State.Status}}|{{.Config.Image}}|{{index .Config.Labels \"yawble.settings\"}} ", "--network yawble", "http://yawble:8080", engine.NewDocker},
+	} {
+		s := engine.NewScripted()
+		s.On(c.inspect+"yawble", engine.Result{Stdout: "running|img|{\"role\":\"control\"}\n"})
+		s.OnSequence(c.inspect+"yawble-tunnel",
+			engine.Result{Stderr: "no such container", ExitCode: 1},
+			engine.Result{Stdout: "running|docker.io/cloudflare/cloudflared:latest|\n"},
+		)
+		s.On(c.program+" logs --tail 200 yawble-tunnel", engine.Result{Stdout: "https://quiet-owl.trycloudflare.com\n"})
+		cf, _ := remote.ProviderNamed("cloudflare")
+		if _, err := remote.Enable(context.Background(), c.make(s), cf, remote.Credential{}, t.TempDir(), &bytes.Buffer{}); err != nil {
+			t.Fatalf("%s: %v", c.program, err)
+		}
+		want := c.program + " run -d --name yawble-tunnel " + c.join + " --restart unless-stopped --label yawble.remote=cloudflare docker.io/cloudflare/cloudflared:latest tunnel --no-autoupdate --url " + c.target
+		if !strings.Contains(strings.Join(s.Calls, "\n"), want) {
+			t.Errorf("%s: missing %q in:\n%s", c.program, want, strings.Join(s.Calls, "\n"))
+		}
+		if strings.Contains(strings.Join(s.Calls, "\n"), "worker") {
+			t.Errorf("%s: the tunnel touched a worker", c.program)
+		}
+	}
+}
