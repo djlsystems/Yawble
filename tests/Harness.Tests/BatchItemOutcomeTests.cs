@@ -118,6 +118,10 @@ public sealed class BatchItemOutcomeTests
         Assert.Equal(x.CorrelationId, yStarted.CorrelationId);
 
         // One Manager wake per finished run: three runs, three rows handed to the Manager.
+        // The Manager's wakes are their own runs: wait for them, settle, then count, so a slow
+        // machine cannot read the count before the deliveries land.
+        Assert.True(await bed.PumpUntilAsync(() => HandedToManager(bed) >= 3));
+        await bed.SettleAsync();
         Assert.Equal(3, HandedToManager(bed));
         Assert.Empty(await bed.Pending!.ForAsync(Dev, Ct));
     }
@@ -170,6 +174,10 @@ public sealed class BatchItemOutcomeTests
         // Billed once, and the Manager woken once per run: two runs, two rows handed to it - the
         // batch's second row is never delivered.
         Assert.Equal(answer.Seq, updateRow.GetProperty(PayloadFields.UsageCountedOn).GetInt64());
+        // The Manager's wakes are their own runs: wait for them, settle, then count, so a slow
+        // machine cannot read the count before the deliveries land.
+        Assert.True(await bed.PumpUntilAsync(() => HandedToManager(bed) >= 2));
+        await bed.SettleAsync();
         Assert.Equal(2, HandedToManager(bed));
     }
 
