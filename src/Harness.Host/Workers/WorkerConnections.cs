@@ -22,7 +22,7 @@ public sealed class WorkerConnections
     private readonly string? _workerKey;
     private readonly bool _takesWorkers;
     private readonly string _version;
-    private readonly Func<RunWorkerSettings> _settings;
+    private readonly Func<WorkerInfo, RunWorkerSettings> _settings;
     private readonly WorkerTimings _timings;
     private readonly TimeProvider _clock;
     private readonly IDiagnosticsLog? _diagnostics;
@@ -38,7 +38,7 @@ public sealed class WorkerConnections
         string? workerKey,
         bool takesWorkers,
         string version,
-        Func<RunWorkerSettings>? settings = null,
+        Func<WorkerInfo, RunWorkerSettings>? settings = null,
         WorkerTimings? timings = null,
         TimeProvider? clock = null,
         IDiagnosticsLog? diagnostics = null,
@@ -51,7 +51,7 @@ public sealed class WorkerConnections
         _workerKey = string.IsNullOrWhiteSpace(workerKey) ? null : workerKey.Trim();
         _takesWorkers = takesWorkers;
         _version = version;
-        _settings = settings ?? (() => RunWorkerSettings.None);
+        _settings = settings ?? (_ => RunWorkerSettings.None);
         _timings = timings ?? WorkerTimings.Default;
         _clock = clock ?? TimeProvider.System;
         _diagnostics = diagnostics;
@@ -147,7 +147,7 @@ public sealed class WorkerConnections
 
         try
         {
-            await socket.SendAsync(new WorkerWelcome(nonce, remote.HandledSeq, _settings()), ct);
+            await socket.SendAsync(new WorkerWelcome(nonce, remote.HandledSeq, _settings(remote.Info)), ct);
         }
         catch (Exception exception) when (exception is WebSocketException or IOException or OperationCanceledException)
         {

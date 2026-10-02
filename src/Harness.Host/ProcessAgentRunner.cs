@@ -32,8 +32,9 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     private readonly AgentCatalog _catalog;
     private readonly IRunWorker _worker;
     private readonly RunDirectory _directory;
-    private readonly RunLauncher _launcher;
+    private readonly RunLauncher? _launcher;
     private readonly Func<RunMemoryAllowance?> _memory;
+    private readonly Func<ContainerId, RunMemoryAllowance?>? _memoryFor;
     private readonly string? _tempRoot;
     private readonly Func<ContainerId, IRunWorker>? _placedOn;
     private readonly IRunCredentials? _credentials;
@@ -82,12 +83,14 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         AgentCatalog catalog,
         IRunWorker worker,
         RunDirectory directory,
-        RunLauncher launcher,
+        RunLauncher? launcher,
         Func<RunMemoryAllowance?> memory,
         string? tempRoot,
         Func<ContainerId, IRunWorker>? placedOn = null,
-        IRunCredentials? credentials = null)
+        IRunCredentials? credentials = null,
+        Func<ContainerId, RunMemoryAllowance?>? memoryFor = null)
     {
+        _memoryFor = memoryFor;
         _catalog = catalog;
         _worker = worker;
         _placedOn = placedOn;
@@ -115,6 +118,9 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// over it is handed over as a file.
     /// </summary>
     public const int MaxArgumentBytes = RunLauncher.MaxArgumentBytes;
+
+    /// <summary>What the launch check says where this process launches no run itself.</summary>
+    public const string NotCheckedHere = "Not checked: this Host launches no run itself, and no worker is connected to check it.";
 
     /// <summary>How long the launch check waits for a free invocation before it is killed and read as failed.</summary>
     public static readonly TimeSpan LaunchCheckTimeout = RunLauncher.LaunchCheckTimeout;
@@ -155,6 +161,8 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         var environment = AgentToolPreflight.LaunchShape(definition).Environment;
         var credential = _credentials is null ? RunCredential.Home : await _credentials.ResolveAsync(agent, definition, ct);
         var launch = Launch(command, definition.TimeoutSeconds, environment, credential);
+        if (_launcher is null) return AgentLaunchReport.Unchecked(NotCheckedHere);
+
         return await _launcher.CheckLaunchAsync(
             launch,
             check,
@@ -193,7 +201,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             invocation.Environment,
             invocation.UnreachableRoot,
             launch,
-            _memory(),
+            _memoryFor is { } memoryFor ? memoryFor(invocation.Container) : _memory(),
             _tempRoot,
             definition?.LiveView is { } view ? LiveView.ToRun(view) : null,
             Credential: credential,

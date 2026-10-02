@@ -352,6 +352,16 @@ public interface IRunWorkerConnection
     string? Lost { get; }
 }
 
+/// <summary>
+/// Control's handle on several workers as one: a run's messages go to the worker its member was
+/// placed on. Whoever starts a run asks it for that worker (<see cref="For"/>) and watches that one.
+/// </summary>
+public interface IRunWorkerRouter
+{
+    /// <summary>The worker <paramref name="member"/>'s runs go to now. Throws when there is none.</summary>
+    IRunWorker For(ContainerId member);
+}
+
 /// <summary>A worker's handle on control: where its events go, in <see cref="WorkerEnvelope.Seq"/> order.</summary>
 public interface IRunEvents
 {

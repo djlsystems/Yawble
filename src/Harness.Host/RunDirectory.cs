@@ -105,6 +105,19 @@ public sealed class RunDirectory
     private async Task<(RunEnded Ended, string Output, UsageFigures? Usage, bool Lost)> EndOfAsync(
         IRunWorker worker, StartRun start, Func<string, Task>? onLine, CancellationToken ct)
     {
+        // Several workers as one: the run is on, and watched on, the worker its member was placed on.
+        if (worker is IRunWorkerRouter router)
+        {
+            try
+            {
+                worker = router.For(start.Run.Member);
+            }
+            catch (InvalidOperationException)
+            {
+                return (new RunEnded(start.Run, -1, null, LostRunText, FailureClasses.Interrupted, null, null, null), string.Empty, null, true);
+            }
+        }
+
         var open = new Open(worker, start.Run) { OnLine = onLine, Redaction = start.Redaction };
         _runs[start.Run] = open;
         Watch(worker);

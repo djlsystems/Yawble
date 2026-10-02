@@ -76,10 +76,14 @@ public sealed class WorkerArchitectureTests
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
     };
 
-    /// <summary>The worker types control may compose and talk to: the protocol's in-process ends.</summary>
+    /// <summary>
+    /// The worker types control may compose and talk to: the protocol's in-process ends, and the
+    /// worker process's own entry, which the Host executable runs instead of control when started as a
+    /// worker - before control is composed.
+    /// </summary>
     private static readonly HashSet<string> ProtocolSurface = new(StringComparer.Ordinal)
     {
-        "InProcessWorker", "InProcessTransport", "WorkerHost",
+        "InProcessWorker", "InProcessTransport", "WorkerHost", "WorkerProcess",
     };
 
     private static readonly Assembly Worker = typeof(ChildProcess).Assembly;

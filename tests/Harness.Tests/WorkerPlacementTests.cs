@@ -2,6 +2,10 @@ using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Capacity;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using System.Net.Http.Json;
 
 namespace Harness.Tests;
 
@@ -199,6 +203,43 @@ public sealed class WorkerPlacementTests
 
         Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(Member("A")));
         Assert.Equal(new WorkerId("w2"), bed.Wip.PlacedOn(Member("B")));
+    }
+
+    [Fact]
+    public async Task A_tell_is_accepted_while_no_worker_is_connected()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var root = Directory.CreateTempSubdirectory("harness-tell-no-worker-").FullName;
+        try
+        {
+            await using var control = new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder
+                .UseSetting("DataRoot", root).UseSetting("Role", "control").UseSetting("Logging:LogLevel:Default", "Warning"));
+            var services = control.Services;
+            var agent = services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;
+            var team = (await services.GetRequiredService<TeamRegistry>().CreateAsync("Alpha", agent, memberAgent: agent, ct: ct)).Id;
+            await services.GetRequiredService<IUserStore>().CreateAsync("person@example.test", Host.HostFixture.Password, ct);
+            using var person = control.CreateClient();
+            (await person.PostAsJsonAsync("/api/auth/login", new { email = "person@example.test", password = Host.HostFixture.Password }, ct))
+                .EnsureSuccessStatusCode();
+
+            // The tell is the log's: it is taken at once. The hold is at the wake, waiting for a worker.
+            var told = await person.PostAsJsonAsync($"/api/teams/{team}/containers/{WipLedger.ManagerName}/tell", new { instruction = "Plan the work." }, ct);
+            Assert.True(told.IsSuccessStatusCode, $"{(int)told.StatusCode} {await told.Content.ReadAsStringAsync(ct)}");
+
+            var wip = services.GetRequiredService<WipLedger>();
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (!wip.View().Waiting.Any(h => h.Member == WipLedger.ManagerName) && DateTime.UtcNow < deadline) await Task.Delay(50, ct);
+
+            var hold = Assert.Single(wip.View().Waiting, h => h.Member == WipLedger.ManagerName);
+            Assert.Equal(WipLedger.WorkerReason, hold.Reason);
+            Assert.Empty(wip.View().Running);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+        }
     }
 
     private static ContainerId Member(string name) => new("Alpha", name);
