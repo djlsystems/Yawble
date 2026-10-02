@@ -67,6 +67,18 @@ public sealed class WorkerConnections
         lock (_gate) return [.. _workers.Values];
     }
 
+    /// <summary>Control is stopping: every worker's timers stop, and nothing more is said about any of them.</summary>
+    public void Stop()
+    {
+        lock (_gate)
+        {
+            _stopping = true;
+            foreach (var worker in _workers.Values) worker.Shutdown();
+        }
+    }
+
+    private bool _stopping;
+
     /// <summary>Takes one worker's connection and runs it until it ends.</summary>
     public async Task AcceptAsync(WebSocket webSocket, CancellationToken ct)
     {
@@ -203,6 +215,11 @@ public sealed class WorkerConnections
 
     private void Dropped(RemoteWorker remote)
     {
+        lock (_gate)
+        {
+            if (_stopping) return;
+        }
+
         _pool.Drop(remote.Id);
         var sentence = $"Worker {remote.Id}'s connection dropped; it has {_timings.Grace.TotalSeconds:0} s to come back before its runs fail worker-lost.";
         _log?.LogWarning("{Sentence}", sentence);
@@ -214,6 +231,7 @@ public sealed class WorkerConnections
     {
         lock (_gate)
         {
+            if (_stopping) return;
             if (_workers.TryGetValue(remote.Id, out var current) && ReferenceEquals(current, remote)) _workers.Remove(remote.Id);
         }
 

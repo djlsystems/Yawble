@@ -181,7 +181,7 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
             _missed = 0;
             _grace?.Dispose();
             _grace = null;
-            _keepAlive = _clock.CreateTimer(_ => KeepAlive(generation), null, _timings.KeepAlive, Timeout.InfiniteTimeSpan);
+            _keepAlive = _clock.CreateTimer(_ => Safely(() => KeepAlive(generation)), null, _timings.KeepAlive, Timeout.InfiniteTimeSpan);
             again = KeptLocked();
         }
 
@@ -221,6 +221,43 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
             events.Writer.TryComplete();
             await handling;
             Drop(generation);
+        }
+    }
+
+    /// <summary>
+    /// Control is stopping: no timer of this worker's fires again, and nothing more is said about it.
+    /// Its runs end as the Host's own stopping ends them.
+    /// </summary>
+    public void Shutdown()
+    {
+        lock (_gate)
+        {
+            _grace?.Dispose();
+            _keepAlive?.Dispose();
+            _grace = null;
+            _keepAlive = null;
+            _stopped = true;
+            _socket?.Abort();
+        }
+    }
+
+    private bool _stopped;
+
+    /// <summary>A timer's work, which must never throw on the timer's thread.</summary>
+    private void Safely(Action work)
+    {
+        try
+        {
+            lock (_gate)
+            {
+                if (_stopped) return;
+            }
+
+            work();
+        }
+        catch (Exception exception)
+        {
+            _log?.LogWarning(exception, "Worker {Worker}'s timer failed.", Id);
         }
     }
 
@@ -325,7 +362,7 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
         List<TaskCompletionSource> failed = [];
         lock (_gate)
         {
-            if (_gone || generation != _generation || _socket is null) return;
+            if (_gone || _stopped || generation != _generation || _socket is null) return;
 
             _socket = null;
             DroppedAt = _clock.GetUtcNow();
@@ -347,7 +384,7 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
             }
 
             _pending.Clear();
-            _grace = _clock.CreateTimer(_ => Expire(generation, null), null, _timings.Grace, Timeout.InfiniteTimeSpan);
+            _grace = _clock.CreateTimer(_ => Safely(() => Expire(generation, null)), null, _timings.Grace, Timeout.InfiniteTimeSpan);
         }
 
         foreach (var applied in failed) applied.TrySetException(new InvalidOperationException($"The connection to worker {Id} dropped."));

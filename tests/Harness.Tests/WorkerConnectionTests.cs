@@ -238,6 +238,23 @@ public sealed class WorkerConnectionTests
     }
 
     [Fact]
+    public async Task A_stopping_control_fires_no_timer_of_its_workers_again()
+    {
+        var bed = new Bed();
+        var raw = await bed.RawWorkerAsync(Hello("w1"));
+        raw.Link.Drop();
+        await Until(() => raw.Remote.Dropped);
+
+        // The Host stops while the worker is in its grace: nothing fires after, into a Host that is gone.
+        var changed = bed.Wip.Changed;
+        bed.Connections.Stop();
+        bed.Clock.Advance(Timings.Grace + Timings.KeepAlive);
+
+        Assert.False(raw.Remote.Closed.IsCompleted);
+        Assert.False(changed.IsCompleted);
+    }
+
+    [Fact]
     public async Task A_worker_back_as_a_new_session_loses_its_runs_at_once()
     {
         var bed = new Bed();

@@ -23,6 +23,13 @@ public static class WorkerProcess
     /// <summary>Exit codes: a configuration that cannot work.</summary>
     public const int Misconfigured = 2;
 
+    /// <summary>The variables a worker is configured by, removed from its environment once read so no child inherits them.</summary>
+    public static IReadOnlyList<string> OwnVariables { get; } =
+    [
+        "HARNESS_CONTROL_URL", "HARNESS_WORKER_KEY", "HARNESS_WORKER_ID", HostRoles.Variable,
+        "Worker__ControlUrl", "Worker__Key", "Worker__Id",
+    ];
+
     /// <summary>Runs the worker until it is stopped (SIGTERM, SIGINT) or refused. Returns the process's exit code.</summary>
     public static async Task<int> RunAsync(IReadOnlyList<string> args, string version)
     {
@@ -35,6 +42,10 @@ public static class WorkerProcess
         var url = Setting("Worker:ControlUrl", "HARNESS_CONTROL_URL");
         var key = Setting("Worker:Key", "HARNESS_WORKER_KEY");
         var id = new WorkerId(Setting("Worker:Id", "HARNESS_WORKER_ID") is { Length: > 0 } named ? named : Environment.MachineName);
+
+        // THE WORKER'S OWN SETTINGS NEVER REACH A RUN. An agent child inherits this process's
+        // environment, and the worker key in it would let a member connect as a worker.
+        foreach (var own in OwnVariables) Environment.SetEnvironmentVariable(own, null);
 
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var control)
             || control.Scheme is not ("http" or "https" or "ws" or "wss"))
@@ -72,8 +83,10 @@ public static class WorkerProcess
             settings.RunLimit is { } figure ? new RunMemoryLimit(figure.Mb, figure.Source, figure.Set) : new RunMemoryLimit(null, "control has not said yet");
         long? ContainerMb() => cgroup.Read().MemoryLimitBytes is > 0 and var bytes ? bytes / (1024 * 1024) : null;
 
+        // The mechanism is this process's own cgroup's, as the Host's own worker decides it; a configured
+        // root is where capacity is read, which a test points at a fixture.
         var memory = RunMemoryLimits.Resolve(
-            Normal, cgroupRoot, WorkerPaths.ProcSelfCgroup, () => RunMemoryRules.Ceiling(Normal(), ContainerMb(), settings.ReserveMb));
+            Normal, WorkerPaths.CgroupRoot, WorkerPaths.ProcSelfCgroup, () => RunMemoryRules.Ceiling(Normal(), ContainerMb(), settings.ReserveMb));
         log.LogInformation("{RunMemoryLimits}", memory.LogLine);
 
         WorkerHost? host = null;
@@ -165,6 +178,9 @@ public static class WorkerProcess
     {
         private static readonly Lock Gate = new();
 
+        // A sentence is read by a person on the worker's stderr: written as it is, quotes and all.
+        private static readonly JsonSerializerOptions Readable = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
@@ -180,7 +196,7 @@ public static class WorkerProcess
                 Category = category,
                 Message = formatter(state, exception),
                 Exception = exception?.ToString(),
-            });
+            }, Readable);
 
             lock (Gate)
             {

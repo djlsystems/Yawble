@@ -2328,7 +2328,8 @@ var workerConnections = new WorkerConnections(
     timings: WorkerBounds.Timings(builder.Configuration),
     diagnostics: app.Services.GetRequiredService<IDiagnosticsLog>(),
     log: app.Services.GetRequiredService<ILogger<WorkerConnections>>());
-workerConnections.Changed += () => app.Services.GetRequiredService<WipLedger>().SetMax(tenantSettings.WipMaxRunning);
+workerConnections.Changed += () => wip.SetMax(tenantSettings.WipMaxRunning);
+app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
 Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
     app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version);
 WorkerEndpoints.MapList(app, workersNow);
