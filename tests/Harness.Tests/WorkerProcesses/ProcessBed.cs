@@ -41,6 +41,7 @@ internal sealed class ProcessBed : IAsyncDisposable
         Root = Directory.CreateDirectory(Path.Combine(Work, "root")).FullName;
         Out = Directory.CreateDirectory(Path.Combine(Work, "out")).FullName;
         GoFolder = Directory.CreateDirectory(Path.Combine(Work, "go")).FullName;
+        State = Directory.CreateDirectory(Path.Combine(Work, "state")).FullName;
         Fake = Path.Combine(Work, "fake.sh");
         File.WriteAllText(Fake, FakeScript());
 
@@ -57,6 +58,9 @@ internal sealed class ProcessBed : IAsyncDisposable
     public string Out { get; }
 
     public string GoFolder { get; }
+
+    /// <summary>Where the workers keep their record of their runs' groups.</summary>
+    public string State { get; }
 
     public string Fake { get; }
 
@@ -82,6 +86,9 @@ internal sealed class ProcessBed : IAsyncDisposable
             Control = Start("control", [
                 "dotnet", Dll, "--Role", "control", "--DataRoot", Root, "--urls", Url.ToString().TrimEnd('/'),
                 "--Workers:Key", Key, "--Workers:GraceSeconds", $"{graceSeconds}", "--Workers:KeepAliveSeconds", $"{keepAliveSeconds}",
+
+                // Its own lines, not the request log of the bed's polling, are what a failure shows.
+                "--Logging:LogLevel:Microsoft.AspNetCore", "Warning",
             ], new Dictionary<string, string?>());
 
             if (await ReadyAsync()) break;
@@ -104,7 +111,7 @@ internal sealed class ProcessBed : IAsyncDisposable
             ["HARNESS_WORKER_ID"] = id,
 
             // Its record of its runs' groups is the bed's, never a file another test or team shares.
-            ["HARNESS_WORKER_STATE_DIR"] = Work,
+            ["HARNESS_WORKER_STATE_DIR"] = State,
         };
         if (cgroup is not null) environment["Capacity__CgroupRoot"] = cgroup;
 

@@ -60,9 +60,10 @@ public sealed class WorkerProcessTests
         await using var bed = new ProcessBed();
         await bed.StartControlAsync();
 
-        // A is over admission.memoryPercent (80 by default): 9.5 of 10 GB in use, and more bytes free
-        // than B. B has room for at least two runs: 4 CPUs (bound 3) and 10 GB (bound 4).
-        var a = Cgroup(bed, "a", inUse: 9_500_000_000);
+        // A is over admission.memoryPercent (80 by default), 85 of 100 GB in use, yet has the most
+        // bytes free: 15 GB against B's 5 GB. Ordering by headroom alone would choose A, so only the
+        // threshold passes it over. B has room for two runs: 4 CPUs (bound 3) and 6 GB (bound 2).
+        var a = Cgroup(bed, "a", inUse: 85_000_000_000, limit: 100_000_000_000);
         var b = Cgroup(bed, "b", inUse: 1_000_000_000, limit: 6_000_000_000);
 
         // A first, so a placement by connection order would choose it.
@@ -89,8 +90,11 @@ public sealed class WorkerProcessTests
 
         bed.Go("BlockOne");
         bed.Go("BlockTwo");
+        // Each member has completed. (Not a total: a member that answered without handing back is woken
+        // again and completes at once, so the count of completed rows keeps growing.)
         await bed.UntilAsync("both completed", async () =>
-            (await bed.RowsAsync()).Count(r => r.Type == MessageTypes.Completed && r.Source.Contains("/Block")) == 2);
+            (await bed.RowsOfAsync(team, "BlockOne", MessageTypes.Completed)).Count >= 1
+            && (await bed.RowsOfAsync(team, "BlockTwo", MessageTypes.Completed)).Count >= 1);
 
         // None was ever on A: no run's process descends from it.
         Assert.All(bed.FakeRuns(), run => Assert.DoesNotContain(workerA.Pid, run.Chain));
@@ -245,19 +249,49 @@ public sealed class WorkerProcessTests
 
         await using var bed = new ProcessBed();
         await bed.StartControlAsync();
+        var team = await bed.TeamAsync("Apart", "Dev");
 
-        // The database and the key ring stay control's user's alone; the bed's own tree is the group's.
+        // The database and the key ring stay control's user's alone.
         foreach (var path in Directory.GetFiles(bed.Root, "messages.db*")) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         File.SetUnixFileMode(Path.Combine(bed.Root, "keys"), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        foreach (var dir in new[] { bed.Work, bed.Out, bed.GoFolder })
+
+        // The other user is given exactly what a worker writes: the fake CLI's out folder, the workers'
+        // state folder, the member temporary folders' root and the member's workspace. The folders on
+        // the way to them it may only pass through; the go folder and the fake CLI it may only read.
+        var tempRoot = MemberTemp.RootUnder(bed.Root).Path;
+        var workspace = Directory.CreateDirectory(Path.Combine(bed.Root, "teams", team, "workspaces", "Dev")).FullName;
+        string[] granted = [bed.Out, bed.State, tempRoot, workspace];
+        foreach (var dir in granted.Where(d => d.StartsWith(bed.Work + "/", StringComparison.Ordinal)))
         {
-            File.SetUnixFileMode(dir, File.GetUnixFileMode(dir) | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute
-                | UnixFileMode.OtherExecute);
+            // (A temporary root outside the bed is the system's /tmp, open to every user already.)
+            Grant(dir, UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute);
         }
 
-        File.SetUnixFileMode(bed.Fake, File.GetUnixFileMode(bed.Fake) | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        foreach (var dir in new[] { bed.Work, bed.Root, Path.Combine(bed.Root, "teams"), Path.Combine(bed.Root, "teams", team), Path.GetDirectoryName(workspace)! })
+        {
+            Grant(dir, UnixFileMode.OtherExecute);
+        }
 
-        // Precondition, before the worker starts: as that user, neither can be read.
+        Grant(bed.GoFolder, UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        Grant(bed.Fake, UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+
+        // Preconditions, before the worker starts. The other user can start this build's Host at all;
+        // if it cannot, that is this machine's layout, not the worker's behaviour.
+        var dll = Path.Combine(AppContext.BaseDirectory, "Harness.Host.dll");
+        var (runs, why) = await RunAsync([.. nobody.Prefix, "sh", "-c", $"dotnet --list-runtimes >/dev/null && test -r '{dll}'"]);
+        if (runs != 0)
+        {
+            Assert.Skip($"The other user cannot run dotnet or read {dll} from this test's folder: {why}");
+        }
+
+        // It can write each granted folder...
+        foreach (var dir in granted)
+        {
+            var (code, said) = await RunAsync([.. nobody.Prefix, "sh", "-c", $"touch '{dir}/.probe' && rm '{dir}/.probe'"]);
+            Assert.True(code == 0, $"the other user cannot write {dir}: {said}");
+        }
+
+        // ...and can read neither the database nor the key ring.
         foreach (var probe in new[] { $"cat '{bed.Root}/messages.db' >/dev/null", $"ls '{bed.Root}/keys'" })
         {
             var (code, said) = await RunAsync([.. nobody.Prefix, "sh", "-c", probe]);
@@ -266,7 +300,6 @@ public sealed class WorkerProcessTests
         }
 
         bed.StartWorker("other-user", prefix: nobody.Prefix);
-        var team = await bed.TeamAsync("Apart", "Dev");
         (await bed.TellAsync(team, "Dev", "Run as the other user.")).EnsureSuccessStatusCode();
         await bed.UntilAsync("Dev completed", async () => (await bed.RowsOfAsync(team, "Dev", MessageTypes.Completed)).Count >= 1);
         Assert.Matches("^2[0-9][0-9]$", bed.FakeRuns().First(r => r.Member == "Dev").Progress ?? "");
@@ -336,6 +369,8 @@ public sealed class WorkerProcessTests
         File.WriteAllText(Path.Combine(root, "pids.max"), "max");
         return root;
     }
+
+    private static void Grant(string path, UnixFileMode mode) => File.SetUnixFileMode(path, File.GetUnixFileMode(path) | mode);
 
     private static async Task<(int Code, string Said)> RunAsync(IReadOnlyList<string> command)
     {
