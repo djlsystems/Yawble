@@ -1,6 +1,6 @@
 # Architecture
 
-Yawble runs agent teams inside one container. A person signs in to the web board, talks to their
+Yawble runs agent teams in a control container and its worker containers, on one volume. A person signs in to the web board, talks to their
 **Concierge** (an interactive agent in a terminal), and the Concierge hands work to **teams**: a
 **Manager** and headless **members**, each launched from an agent CLI (Claude Code, Codex, GitHub
 Copilot CLI, Grok). A message log decides who wakes, when, and with what context.
@@ -46,16 +46,48 @@ The product name, Yawble, lives in the web app's presentation layer
 ## Data
 
 - One data root (`--DataRoot`, else `HARNESS_DATA_ROOT`; `/data` in the container), one SQLite
-  database (`messages.db`), one Host process.
+  database (`messages.db`), one control process. Workers open neither the database nor the key
+  ring; `all` is the single-process form, for tests and development.
 - Schema changes are append-only steps per store; a shipped step is never edited.
 - The Host takes a daily `VACUUM INTO` copy of the database and keeps seven. See
   [ops/backups-logs-and-versions.md](ops/backups-logs-and-versions.md).
 
+## Control and workers
+
+- **Two images from one build.** The `Containerfile`'s `control` target holds the Host, git, gh and
+  sqlite3, and no Node and no agent CLI; its `worker` target, the last stage, holds the toolchain
+  agents use and installs the agent CLIs onto the volume. Both run the one Host from the one build
+  stage, so a worker's version is control's, and both carry `harness`, `agent` and `worker` at the
+  same ids. A release pushes `<image>:<version>` (control) and `<image>:<version>-worker`, then
+  `latest` and `latest-worker`.
+- **The pod.** On Podman, control (`yawble`) and each worker (`yawble-worker-<n>`) run in one pod,
+  so they share a network namespace and nothing else: `127.0.0.1:8080` is control in every
+  container, which is what members are told (`HARNESS_URL`) and what a worker connects to
+  (`ws://127.0.0.1:8080`, loopback, so plain `ws://` is accepted). On Docker each worker joins
+  control's network namespace (`--network container:yawble`). Only control listens, and only the
+  published port reaches it; the tunnel container is unchanged.
+- **The worker key** reaches the containers only as an env file. The entrypoint writes it to
+  `/run/harness/worker-key`, readable only by that container's Host user, and unsets it before
+  anything else runs, so no agent can read it from a process's environment.
+- **Health and drain.** A worker is healthy exactly while it is connected to control: its Host
+  keeps `/var/lib/harness-worker/connected` fresh, and the worker image's healthcheck reads it. The
+  operator CLI drains a worker before stopping it by creating `drain` there: control places nothing
+  new on it, its runs go on, and the CLI waits for them.
+- **Sizes.** The operator's memory and CPU settings are per worker; control gets a fixed allowance
+  of its own. A worker that hears nothing from control for 120 s exits, and the engine's restart
+  policy starts it again.
+- **Who reads what.** Control prepares the volume on every start; a worker changes no ownership on
+  it and waits until control has. The database, the key ring and every record the doctor reads are
+  `harness`'s alone; teams, documents, the agent home and the tool folders are group `agent`'s, which
+  both Host users and the agent are in. Each worker's own state is in its container, not on the
+  volume.
+
 ## Security model
 
-- The container is the trust boundary. Inside it, the Host runs as the user `harness` and agents
-  run as the user `agent` with no capabilities; the database, keys and logs are readable by the
-  Host only.
+- The container is the trust boundary. Inside it, control's Host runs as the user `harness`, a
+  worker's Host as the user `worker`, and agents run as the user `agent` with no capabilities; the
+  database, keys, logs and the doctor's records are readable by control's Host only. `worker`
+  (10003, in group `agent`) reads on the volume exactly what `agent` can.
 - A headless agent receives only its own provider's API key (plus `GH_TOKEN` when its team has a
   GitHub remote). A member's platform key is passed in its environment and referenced, not
   written, in the MCP config files the launcher creates.

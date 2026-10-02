@@ -30,16 +30,19 @@ namespace Harness.Contracts;
 [JsonDerivedType(typeof(PongFrame), "pong")]
 [JsonDerivedType(typeof(StreamFrame), "stream")]
 [JsonDerivedType(typeof(StreamInputFrame), "input")]
+[JsonDerivedType(typeof(WorkerDraining), "draining")]
+[JsonDerivedType(typeof(WorkerSettingsFrame), "settings")]
 public abstract record WorkerFrame;
 
 /// <summary>
 /// The worker's first frame: who it is, its build version, the session it was started as (a new
 /// one each time the worker process starts), its own random nonce, its measured capacity, the runs it
-/// still holds, and the last event sequence number it published.
+/// still holds, the last event sequence number it published, and whether it is draining (takes no new
+/// run), so a drain survives a reconnect.
 /// </summary>
 public sealed record WorkerHello(
     WorkerId Worker, string Version, string Session, string Nonce, WorkerHelloCapacity Capacity,
-    IReadOnlyList<RunId> OpenRuns, long LastSeq) : WorkerFrame;
+    IReadOnlyList<RunId> OpenRuns, long LastSeq, bool Draining = false) : WorkerFrame;
 
 /// <summary>A worker's CPUs and container memory limit as it measured them; null is not measured.</summary>
 public sealed record WorkerHelloCapacity(double? Cpus, long? MemoryLimitBytes);
@@ -79,6 +82,18 @@ public sealed record StreamFrame(StreamChunk Chunk) : WorkerFrame;
 
 /// <summary>A person's keystrokes, control to worker: outside the command queue, never kept, never answered.</summary>
 public sealed record StreamInputFrame(StreamInput Input) : WorkerFrame;
+
+/// <summary>
+/// Worker to control: this worker takes no new run while <see cref="Draining"/> (its operator is about
+/// to stop it); the runs it has go on. Said on a change, and again in every hello.
+/// </summary>
+public sealed record WorkerDraining(bool Draining) : WorkerFrame;
+
+/// <summary>
+/// Control to worker: the figures it runs by changed (a person changed a memory or admission setting).
+/// The worker takes them as it takes a welcome's; a frame lost to a drop is made good by the next welcome.
+/// </summary>
+public sealed record WorkerSettingsFrame(RunWorkerSettings Settings) : WorkerFrame;
 
 /// <summary>
 /// What a worker in a process of its own needs from control's settings to run runs as control's

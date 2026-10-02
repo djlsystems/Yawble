@@ -7,13 +7,23 @@
 #   prepare-volume.sh roots       lists the file-browser roots ownership would take; changes nothing
 #
 # THE USERS (fixed in the Containerfile, so a volume moved to a rebuilt image keeps meaning the same):
-#   harness  10001:10001  runs the host. Also in group `agent`, so it can write in the team trees.
+#   harness  10001:10001  runs the host in control. Also in group `agent`, so it can write in the team trees.
 #   agent    10002:10002  runs every agent child and the Concierge PTY. In no harness group.
+#   worker   10003:10003  runs the host in a worker. In group `agent` and in no harness group, so the
+#                         map below gives it exactly what agent has: no host entry, ever.
+# Only control (and `all`) runs this. A worker's entrypoint changes no ownership: it shares the volume
+# with control and every other worker, and waits for control to have prepared it.
 #
 # THE OWNERSHIP MAP. The data root itself is harness:agent 0750 (agents may pass through it, not
 # create in it). These top-level entries are the host's and nobody else's - harness:harness, 700
 # for directories and 600 for everything else, all the way down:
 #   messages.db*  keys  agents.json*  agent-launch.json*  logs  backups  host.lock*  system-packages*  .healthz-*  connections
+#   agent-credentials  agent-auth.json*  agent-tools.json*  agent-launch-checks.json*  wip.json*  workers.json*
+# agent-credentials is the operator CLI's credential exchange: a request there can carry a credential
+# value, and the host refuses the folder unless it is its own and 0700. agent-auth.json, agent-tools.json,
+# agent-launch-checks.json and wip.json are what --doctor reports as sign-ins, tools, launch checks and
+# run limits, and workers.json what it reports of each worker: an agent that could write one could make
+# the doctor lie. Only control writes any of them.
 # connections is the operator CLI's `connect` exchange: a request there carries an authorization code
 # and the host answers only while no other user can write in it, so it is never agent's.
 # agent-launch.json is what --doctor reports as agentLaunch; an agent that could write it could make
@@ -83,6 +93,8 @@ set_owner() { # path uid gid
 is_host_entry() {
   case "$1" in
     messages.db|messages.db-*|keys|agents.json|agents.json.*|agent-launch.json|agent-launch.json.*|logs|backups|host.lock|host.lock.*|system-packages|system-packages.*|.healthz-*|connections)
+      return 0 ;;
+    agent-credentials|agent-auth.json|agent-auth.json.*|agent-tools.json|agent-tools.json.*|agent-launch-checks.json|agent-launch-checks.json.*|wip.json|wip.json.*|workers.json|workers.json.*)
       return 0 ;;
   esac
   return 1

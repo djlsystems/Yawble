@@ -14,8 +14,11 @@ namespace Harness.Host;
 /// </summary>
 /// <remarks>
 /// Configured by environment or command line: <c>HARNESS_CONTROL_URL</c> (<c>--Worker:ControlUrl</c>),
-/// <c>HARNESS_WORKER_KEY</c> (<c>--Worker:Key</c>), <c>HARNESS_WORKER_ID</c> (<c>--Worker:Id</c>, the
-/// machine name by default), <c>HARNESS_AGENT_USER</c> (<c>--Agents:RunAs</c>), and
+/// <c>HARNESS_WORKER_KEY</c> (<c>--Worker:Key</c>) or the file the entrypoint moved it to,
+/// <c>HARNESS_WORKER_KEY_FILE</c> (<c>--Worker:KeyFile</c>), <c>HARNESS_WORKER_ID</c> (<c>--Worker:Id</c>, the
+/// machine name by default), <c>HARNESS_WORKER_STATE_DIR</c> (<c>--Worker:StateDir</c>: its run groups,
+/// health and drain files), <c>HARNESS_WORKER_GIVE_UP_SECONDS</c> (<c>--Worker:GiveUpSeconds</c>, 0 for
+/// never), <c>HARNESS_AGENT_USER</c> (<c>--Agents:RunAs</c>), and
 /// <c>--Capacity:CgroupRoot</c> / <c>--Capacity:ProcRoot</c> for a fixture.
 /// </remarks>
 public static class WorkerProcess
@@ -26,8 +29,8 @@ public static class WorkerProcess
     /// <summary>The variables a worker is configured by, removed from its environment once read so no child inherits them.</summary>
     public static IReadOnlyList<string> OwnVariables { get; } =
     [
-        "HARNESS_CONTROL_URL", "HARNESS_WORKER_KEY", "HARNESS_WORKER_ID", HostRoles.Variable,
-        "Worker__ControlUrl", "Worker__Key", "Worker__Id",
+        "HARNESS_CONTROL_URL", "HARNESS_WORKER_KEY", WorkerKeyFile.FileVariable, "HARNESS_WORKER_ID", HostRoles.Variable,
+        "HARNESS_WORKER_GIVE_UP_SECONDS", "Worker__ControlUrl", "Worker__Key", "Worker__KeyFile", "Worker__Id", "Worker__GiveUpSeconds",
     ];
 
     /// <summary>Runs the worker until it is stopped (SIGTERM, SIGINT) or refused. Returns the process's exit code.</summary>
@@ -40,7 +43,10 @@ public static class WorkerProcess
             ?? Environment.GetEnvironmentVariable(name.Replace(":", "__", StringComparison.Ordinal));
 
         var url = Setting("Worker:ControlUrl", "HARNESS_CONTROL_URL");
-        var key = Setting("Worker:Key", "HARNESS_WORKER_KEY");
+        var (key, keyRefusal) = WorkerKeyFile.Read(Setting("Worker:Key", "HARNESS_WORKER_KEY"), Setting("Worker:KeyFile", WorkerKeyFile.FileVariable));
+        var giveUp = int.TryParse(Setting("Worker:GiveUpSeconds", "HARNESS_WORKER_GIVE_UP_SECONDS"), out var seconds) && seconds > 0
+            ? TimeSpan.FromSeconds(seconds)
+            : (TimeSpan?)null;
         var id = new WorkerId(Setting("Worker:Id", "HARNESS_WORKER_ID") is { Length: > 0 } named ? named : Environment.MachineName);
 
         // THE WORKER'S OWN SETTINGS NEVER REACH A RUN. An agent child inherits this process's
@@ -51,6 +57,12 @@ public static class WorkerProcess
             || control.Scheme is not ("http" or "https" or "ws" or "wss"))
         {
             log.LogError("No control URL is set: set HARNESS_CONTROL_URL to control's address (http://host:port) and start again.");
+            return Misconfigured;
+        }
+
+        if (keyRefusal is not null)
+        {
+            log.LogError("{Refusal}", keyRefusal);
             return Misconfigured;
         }
 
@@ -70,7 +82,10 @@ public static class WorkerProcess
         var proc = Setting("Capacity:ProcRoot", "HARNESS_CAPACITY_PROC_ROOT") ?? WorkerPaths.Proc;
 
         // The runs a previous worker of this name left running when it was killed are stopped first.
-        var orphans = WorkerOrphans.FileFor(Setting("Worker:StateDir", "HARNESS_WORKER_STATE_DIR") ?? Path.GetTempPath(), id);
+        var stateDir = Setting("Worker:StateDir", "HARNESS_WORKER_STATE_DIR") ?? Path.GetTempPath();
+        var orphans = WorkerOrphans.FileFor(stateDir, id);
+        var state = new WorkerStateFiles(stateDir, log);
+        state.Alive(false);
         if (WorkerOrphans.StopLeftovers(orphans) is { Count: > 0 } stopped)
         {
             log.LogWarning("Stopped {Count} run process group(s) a previous worker {Worker} left running: {Groups}.", stopped.Count, id, string.Join(", ", stopped));
@@ -117,7 +132,9 @@ public static class WorkerProcess
                 var figures = cgroup.Read();
                 return new WorkerHelloCapacity(figures.CpuUnlimited ? null : figures.CpuLimit, figures.MemoryLimitBytes);
             },
-            log: log);
+            log: log,
+            giveUp: giveUp,
+            control: control.ToString());
 
         host = new WorkerHost(
             id, connection, launcher, heartbeat, allowances, cgroup, new ProcessGroupReader(proc), RunProcessGroups.Shared,
@@ -127,7 +144,15 @@ public static class WorkerProcess
         connection.Input = host.Input;
         connection.OpenRuns = host.OpenRuns;
         connection.Ready = host.ReadyAsync;
-        connection.Settings = welcome => settings = welcome;
+        connection.Settings = welcome =>
+        {
+            settings = welcome;
+            log.LogInformation("Control's figures for runs: {Limit}, {Reserve} MB kept for this worker.",
+                welcome.RunLimit is { } figure ? $"{figure.Mb} MB a run ({figure.Source})" : "no run memory limit", welcome.ReserveMb);
+        };
+        connection.Alive = state.Alive;
+        // A drain asked before the first connection is said in the first hello.
+        if (state.Draining) _ = connection.SetDrainingAsync(true);
 
         // Every run's process group, kept where the next worker of this name finds it.
         using var recording = new Timer(_ =>
@@ -140,6 +165,9 @@ public static class WorkerProcess
             {
                 log.LogWarning("Could not record this worker's run process groups in {File}: {Message}", orphans, exception.Message);
             }
+
+            // The operator's drain file, read as often: the worker says so to control as it changes.
+            _ = connection.SetDrainingAsync(state.Draining);
         }, null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
 
         using var stopping = new CancellationTokenSource();
@@ -162,8 +190,9 @@ public static class WorkerProcess
         var deadline = DateTime.UtcNow.AddSeconds(25);
         while (host.OpenRuns().Count > 0 && DateTime.UtcNow < deadline) await Task.Delay(100);
 
-        // Stopped in order: no run is left for a next worker to stop.
+        // Stopped in order: no run is left for a next worker to stop, and nothing reads it as connected.
         recording.Dispose();
+        state.Alive(false);
         try
         {
             File.Delete(orphans);

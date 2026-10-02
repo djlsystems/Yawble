@@ -192,6 +192,62 @@ public sealed class WorkerArchitectureTests
         Assert.Empty(StoreReads(IlScan.Methods(Worker)));
     }
 
+    /// <summary>
+    /// Only the worker writes an MCP config: control starts no agent, so nothing outside the worker
+    /// calls the writer or applies one. In the pod each container has its own /tmp, and in a worker
+    /// container its Host user is the one that ever writes /tmp/harness-mcp.
+    /// </summary>
+    [Fact]
+    public void Only_the_worker_writes_mcp_configs()
+    {
+        static List<string> Callers(IEnumerable<MethodBase> methods) =>
+        [.. methods
+            .Where(method => method.DeclaringType != typeof(McpLaunchConfig))
+            .Where(method => IlScan.Decode(method).Any(instruction => instruction.Method is { } target
+                && target.DeclaringType == typeof(McpLaunchConfig)
+                && target.Name is nameof(McpLaunchConfig.TryWrite) or nameof(McpLaunchConfig.Apply)))
+            .Select(IlScan.Owner)
+            .Distinct()];
+
+        Assert.Empty(Callers(Scanned().SelectMany(IlScan.Methods)));
+        // The scan finds the worker's own calls: it is not looking at nothing.
+        Assert.NotEmpty(Callers(IlScan.Methods(Worker)));
+    }
+
+    /// <summary>
+    /// The worker writes no entry the ownership map keeps for harness: the doctor's records, the
+    /// credential exchange, control's record of its workers. In a worker container its Host user is
+    /// not harness and cannot, so a writer moved into the worker would only show as a doctor that never
+    /// reads signed in. Neither the writers' types nor their file names are in the worker.
+    /// </summary>
+    [Fact]
+    public void The_worker_writes_no_host_entry()
+    {
+        var writers = new[]
+        {
+            typeof(AgentAuthRecord), typeof(AgentToolsRecord), typeof(AgentLaunchChecksRecord), typeof(WipRecord),
+            typeof(WorkersRecord), typeof(AgentCredentialRequests),
+        };
+        string[] names =
+        [
+            AgentAuthRecord.FileName, AgentToolsRecord.FileName, AgentLaunchChecksRecord.FileName, WipRecord.FileName,
+            WorkersRecord.FileName, AgentCredentialRequests.Folder,
+        ];
+
+        Assert.All(writers, type => Assert.NotEqual(Worker, type.Assembly));
+        var worker = IlScan.Methods(Worker).ToList();
+        Assert.DoesNotContain(worker, method => IlScan.Decode(method).Any(instruction =>
+            instruction.Method?.DeclaringType is { } type && writers.Contains(type)));
+        Assert.Empty(worker
+            .SelectMany(method => IlScan.Decode(method).Select(instruction => (method, instruction.String)))
+            .Where(found => found.String is { } text && names.Any(name => text.Contains(name, StringComparison.Ordinal)))
+            .Select(found => $"{IlScan.Owner(found.method)}: \"{found.String}\""));
+
+        // Control does write them: the scan names real writers.
+        Assert.Contains(Scanned().SelectMany(IlScan.Methods), method => IlScan.Decode(method).Any(instruction =>
+            instruction.Method is { Name: "Write" } target && target.DeclaringType == typeof(WorkersRecord)));
+    }
+
     [Fact]
     public void The_store_scan_catches_a_planted_key_ring_path_and_database_file()
     {

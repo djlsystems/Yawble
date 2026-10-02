@@ -63,7 +63,8 @@ public sealed record DoctorReport(
     IReadOnlyList<DoctorAgent> Agents,
     AgentLaunchRecord? AgentLaunch = null,
     AgentToolsRecord? AgentTools = null,
-    DoctorWip? Wip = null);
+    DoctorWip? Wip = null,
+    WorkersRecord? Workers = null);
 
 /// <summary>
 /// The doctor's <c>wip</c>: <c>GET /api/wip</c>'s <c>limit</c> and <c>runMemory</c>, as the running Host
@@ -113,7 +114,9 @@ public static class HostDoctor
             // refuses them, why. Recorded by the Host, because the doctor is a different process.
             AgentLaunchRecord.Read(dataRoot),
             AgentToolsSection(dataRoot),
-            WipSection(dataRoot));
+            WipSection(dataRoot),
+            // Control's workers, as control last recorded them; null when it recorded none (all, or never).
+            WorkersRecord.Read(dataRoot));
     }
 
     /// <summary>
