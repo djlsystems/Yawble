@@ -101,7 +101,9 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         var unknown = await person.PostAsJsonAsync($"/api/teams/{host.Alpha}/containers/Manager/tell",
             new { instruction = "more", outcome = "no such outcome" }, Ct);
         Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
-        Assert.Equal(before, await Log.HighestSeqAsync(Ct));
+        // Nothing was SENT: no instruction after `before`. Not "no row at all" - the shared host's Manager
+        // may still be finishing the earlier tells, and its own rows land meanwhile under a loaded run.
+        Assert.DoesNotContain(await Log.ReadRangeAsync(before, 1000, Ct), row => row.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal));
     }
 
     [Fact]
