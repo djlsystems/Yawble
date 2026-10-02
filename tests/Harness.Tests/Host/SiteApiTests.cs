@@ -330,6 +330,32 @@ public sealed class SiteApiTests(HostFixture host) : IClassFixture<HostFixture>
     }
 
     [Fact]
+    public async Task The_site_tool_names_each_sites_files_folder()
+    {
+        var tools = Tools(host.Alpha, Permits.Read, Permits.Sites);
+        var docs = host.Services.GetRequiredService<TeamDocuments>().RootFor(host.Alpha);
+        string[] names = [Unique("board"), Unique("ledger")];
+
+        foreach (var name in names) Assert.StartsWith("HTTP 201", await tools.Site("create", site: name, cancellationToken: Ct));
+
+        var listed = await tools.Site("list", cancellationToken: Ct);
+        Assert.StartsWith("HTTP 200", listed);
+        var sites = JsonDocument.Parse(listed[listed.IndexOf('\n')..]).RootElement.EnumerateArray().ToList();
+
+        foreach (var name in names)
+        {
+            var folder = Path.Combine(docs, "sites", name, "files");
+            Assert.True(Path.IsPathFullyQualified(folder));
+
+            Assert.Equal(folder, sites.Single(s => s.GetProperty("name").GetString() == name).GetProperty("filesFolder").GetString());
+
+            var shown = await tools.Site("show", site: name, cancellationToken: Ct);
+            Assert.Equal(folder, JsonDocument.Parse(shown[shown.IndexOf('\n')..]).RootElement.GetProperty("site").GetProperty("filesFolder").GetString());
+            Assert.True(Directory.Exists(folder));
+        }
+    }
+
+    [Fact]
     public async Task The_site_tools_refusals_name_the_tool_and_never_a_url()
     {
         var tools = Tools(host.Alpha, Permits.Read, Permits.Sites);
