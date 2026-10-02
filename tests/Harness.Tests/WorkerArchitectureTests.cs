@@ -201,6 +201,31 @@ public sealed class WorkerArchitectureTests
         Assert.Empty(Violations(Probes(nameof(HoldsTextThatIsNotAPath))));
     }
 
+    /// <summary>
+    /// CONTROL CATCHES NO EXCEPTION TYPE THE WORKER DECLARES: a worker in another process cannot
+    /// throw into control, so a fault crosses as a <c>RunFault</c> with its type as text, and control
+    /// throws its own. A catch on a worker type would work in one process and silently never match
+    /// over a connection.
+    /// </summary>
+    [Fact]
+    public void Control_catches_no_exception_type_declared_by_the_worker()
+    {
+        var caught = WorkerCatches(Scanned().SelectMany(IlScan.Methods), Worker);
+
+        Assert.True(caught.Count == 0,
+            "Outside Harness.Worker, these catch an exception type the worker declares; read the run's fault from the protocol instead:"
+            + Environment.NewLine + string.Join(Environment.NewLine, caught));
+    }
+
+    [Fact]
+    public void The_catch_scan_catches_a_planted_catch()
+    {
+        // The probe's exception type stands in for a worker's: declared in the assembly the scan is told is the worker.
+        Assert.Equal(
+            [$"{nameof(WorkerArchitectureTests)}.{nameof(PlantsACatchOfAWorkerException)}: catches {nameof(PlantedWorkerException)}"],
+            WorkerCatches(Probes(nameof(PlantsACatchOfAWorkerException), nameof(PlantsACatchOfAnOrdinaryException)), typeof(PlantedWorkerException).Assembly));
+    }
+
     // ---------------------------------------------------------------------------------------------
     // The scan.
     // ---------------------------------------------------------------------------------------------
@@ -218,6 +243,16 @@ public sealed class WorkerArchitectureTests
                 && (text == "keys" || text.EndsWith("/keys", StringComparison.Ordinal)
                     || text.Contains("/keys/", StringComparison.Ordinal) || text.EndsWith(".db", StringComparison.Ordinal))))
             .Select(IlScan.Owner)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)];
+
+    /// <summary>Each <c>Owner: catches Type</c> whose catch clause names an exception type <paramref name="worker"/> declares.</summary>
+    private static List<string> WorkerCatches(IEnumerable<MethodBase> methods, Assembly worker) =>
+        [.. methods
+            .SelectMany(method => (method.GetMethodBody()?.ExceptionHandlingClauses ?? [])
+                .Where(clause => clause.Flags == ExceptionHandlingClauseOptions.Clause
+                    && clause.CatchType is { } type && type.Assembly == worker && typeof(Exception).IsAssignableFrom(type))
+                .Select(clause => $"{IlScan.Owner(method)}: catches {clause.CatchType!.Name}"))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)];
 
@@ -373,6 +408,30 @@ public sealed class WorkerArchitectureTests
     private static string PlantsAKeyRingRead() => File.ReadAllText(Path.Combine("/data", "keys", "key.xml"));
 
     private static bool PlantsADatabaseRead() => File.Exists("/data/messages.db");
+
+    private static void PlantsACatchOfAWorkerException()
+    {
+        try
+        {
+            PlantsAProcRead();
+        }
+        catch (PlantedWorkerException)
+        {
+        }
+    }
+
+    private static void PlantsACatchOfAnOrdinaryException()
+    {
+        try
+        {
+            PlantsAProcRead();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private sealed class PlantedWorkerException : Exception;
 
     private static string[] HoldsTextThatIsNotAPath() =>
         ["/processes", "/proc-like", "see the process group in /proc, every 5 s", "prlimit is a command", "/sys/fs/cgroupish"];
