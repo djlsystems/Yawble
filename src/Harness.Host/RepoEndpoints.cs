@@ -215,7 +215,9 @@ public static partial class RepoEndpoints
             var repoName = RepoUrls.DeriveName(url);
             var clonePath = Path.Combine(paths.ReposFor(stored), repoName, "main");
 
-            if (!Directory.Exists(clonePath))
+            // AN EMPTY CLONE IS NOT A CLONE: what a killed `git clone` leaves reads not ready, as a
+            // missing one does, and the card offers Fetch, which makes it.
+            if (!Directory.Exists(clonePath) || await RepoClone.IsEmptyCloneAsync(gitRunner, clonePath, ct))
             {
                 // Repository not yet cloned
                 repoStatuses.Add(new RepoStatus(
@@ -241,7 +243,8 @@ public static partial class RepoEndpoints
                     DefaultBranch: teams.DefaultBranchFor(stored, repoName).Branch,
                     DefaultBranchSource: DefaultBranchSource(teams.DefaultBranchFor(stored, repoName)),
                     OriginUrl: GitOutputRedaction.RedactUserInfo(url),
-                    UpstreamUrl: GitOutputRedaction.RedactUserInfo(teams.ContributorFor(stored, repoName).UpstreamUrl)));
+                    UpstreamUrl: GitOutputRedaction.RedactUserInfo(teams.ContributorFor(stored, repoName).UpstreamUrl),
+                    CloneReady: false));
                 repoStatuses[^1] = await WithContributorAsync(httpContext, repoStatuses[^1], stored, ct);
                 continue;
             }
@@ -326,8 +329,9 @@ public static partial class RepoEndpoints
 
         // A CLONE THAT NEVER HAPPENED IS MADE HERE. The platform clones at team creation; when
         // that failed (a private repository before its credential was set, a network error) the
-        // team had no way back but deletion. Bringing a missing clone current means making it.
-        if (!Directory.Exists(clonePath))
+        // team had no way back but deletion. Bringing a missing clone current means making it -
+        // and an empty one, what a killed clone leaves; anything else at the path is left alone.
+        if (!Directory.Exists(clonePath) || await RepoClone.IsEmptyCloneAsync(gitRunner, clonePath, ct))
         {
             var made = (await cloner.EnsureAllAsync([(repoUrl, clonePath)], ct))[0];
             if (made.Result != RepoCloneResult.Cloned)
@@ -551,8 +555,9 @@ public static partial class RepoEndpoints
         // A CLONE THAT NEVER HAPPENED IS MADE HERE TOO, as Bring current makes one. A repository
         // attached while its token is unusable fails to clone, and with no clone to measure the Git
         // dialog offers only Fetch - so Fetch answering 404 "not cloned yet" would be a dead end.
-        // Pinned by FetchMakesAMissingCloneTests.
-        if (!Directory.Exists(clonePath))
+        // Pinned by FetchMakesAMissingCloneTests. An empty clone, what a killed clone leaves, is
+        // made the same way; anything else at the path is left alone (CloneNeverAdoptTests).
+        if (!Directory.Exists(clonePath) || await RepoClone.IsEmptyCloneAsync(gitRunner, clonePath, ct))
         {
             var made = (await cloner.EnsureAllAsync([(repoUrl, clonePath)], ct))[0];
             if (made.Result is not (RepoCloneResult.Cloned or RepoCloneResult.AlreadyThere))

@@ -61,7 +61,10 @@ public interface IRepoClone
 /// </param>
 /// <param name="localRepos">Where a <c>local:&lt;name&gt;</c> repository is. Without one, such a
 /// repository cannot be cloned and says so.</param>
-public sealed class RepoClone(GitRunner git, bool enabled = true, LocalRepos? localRepos = null) : IRepoClone
+/// <param name="removal">How an empty clone moved aside is removed: agents can write in a team's
+/// repos folder, so never a recursive delete. Absent, the Host's own pass only.</param>
+public sealed class RepoClone(
+    GitRunner git, bool enabled = true, LocalRepos? localRepos = null, FolderRemoval? removal = null) : IRepoClone
 {
     /// <summary>Every repository in the list, in order. Never throws: a clone that fails is an
     /// OUTCOME, because a team whose creation 500s over an unreachable remote is worse than a team
@@ -82,16 +85,21 @@ public sealed class RepoClone(GitRunner git, bool enabled = true, LocalRepos? lo
     /// <summary>
     /// One repository.
     ///
-    /// **AN EXISTING DIRECTORY IS LEFT ALONE, whatever is in it.** This is the never-adopt rule from
-    /// the other side: a path that is there may be a healthy clone, a half-finished one, or somebody's
-    /// unrelated work under a team root a person typed. Re-cloning over it destroys unpushed commits,
-    /// which is the one unrecoverable thing in this whole file.
+    /// **AN EXISTING DIRECTORY IS LEFT ALONE, unless it is an empty clone.** This is the never-adopt
+    /// rule from the other side: a path that is there may be a healthy clone, a half-finished one,
+    /// or somebody's unrelated work under a team root a person typed. Re-cloning over it destroys
+    /// unpushed commits, which is the one unrecoverable thing in this whole file. The one exception
+    /// is what a killed <c>git clone</c> leaves (<see cref="IsEmptyCloneAsync"/>): it holds nothing,
+    /// and calling it already there passed an empty folder off as a working clone.
     /// </summary>
     public async Task<RepoCloneOutcome> EnsureAsync(string url, string path, CancellationToken ct)
     {
         if (!enabled) return new RepoCloneOutcome(url, path, RepoCloneResult.NotAttempted);
 
-        if (Directory.Exists(path)) return new RepoCloneOutcome(url, path, RepoCloneResult.AlreadyThere);
+        if (Directory.Exists(path) && !await SetEmptyCloneAsideAsync(path, ct))
+        {
+            return new RepoCloneOutcome(url, path, RepoCloneResult.AlreadyThere);
+        }
 
         // The PARENT, because `git clone` makes the leaf and needs somewhere to make it in - and
         // because `GitRunner` runs every operation with its path as the WORKING DIRECTORY, and
@@ -138,6 +146,72 @@ public sealed class RepoClone(GitRunner git, bool enabled = true, LocalRepos? lo
         // On clone, read the branch origin's HEAD names. Null is not known.
         return new RepoCloneOutcome(
             url, path, RepoCloneResult.Cloned, DefaultBranch: await git.ReadOriginHeadBranchAsync(path, ct));
+    }
+
+    /// <summary>
+    /// WHETHER THE FOLDER AT <paramref name="path"/> IS AN EMPTY CLONE - what a killed
+    /// <c>git clone</c> leaves, and nothing a person could lose. ALL of: <c>.git</c> is a directory
+    /// that git reads as this folder's own repository; there is no ref at all (stash included);
+    /// HEAD does not resolve; nothing but <c>.git</c> is in the folder; and no worktree was ever
+    /// cut from it. Anything else is not empty, and every caller leaves it alone.
+    /// </summary>
+    public static async Task<bool> IsEmptyCloneAsync(GitRunner git, string path, CancellationToken ct)
+    {
+        var dotGit = Path.Combine(path, ".git");
+
+        try
+        {
+            if (!Directory.Exists(dotGit) || new DirectoryInfo(dotGit).LinkTarget is not null) return false;
+            if (Directory.EnumerateFileSystemEntries(path).Any(e => Path.GetFileName(e) != ".git")) return false;
+            if (Directory.Exists(Path.Combine(dotGit, "worktrees"))) return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        // Its OWN repository: a broken .git would let git walk up to a parent and answer for that.
+        // git names a repository found at the working directory itself as the relative `.git`.
+        var gitDir = await git.RunGitAsync(path, ["rev-parse", "--git-dir"], ct);
+        if (gitDir.ExitCode != 0 || gitDir.Stdout.Trim() != ".git") return false;
+
+        var refs = await git.RunGitAsync(path, ["for-each-ref"], ct);
+        if (refs.ExitCode != 0 || refs.Stdout.Trim().Length > 0) return false;
+
+        return (await git.RunGitAsync(path, ["rev-parse", "--verify", "--quiet", "HEAD"], ct)).ExitCode != 0;
+    }
+
+    /// <summary>
+    /// Moves an empty clone out of the way and removes it, so the clone can be made. False, with
+    /// nothing changed, when the folder is not an empty clone. CHECKED AGAIN AFTER THE MOVE: a file
+    /// written in the gap puts the folder back, untouched, and it is left alone.
+    /// </summary>
+    private async Task<bool> SetEmptyCloneAsideAsync(string path, CancellationToken ct)
+    {
+        if (!await IsEmptyCloneAsync(git, path, ct)) return false;
+
+        var trimmed = Path.TrimEndingDirectorySeparator(path);
+        var parent = Path.GetDirectoryName(trimmed)!;
+        var aside = Path.Combine(parent, $".empty-{Path.GetFileName(trimmed)}-{Guid.NewGuid():N}");
+
+        try
+        {
+            Directory.Move(trimmed, aside);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        if (!await IsEmptyCloneAsync(git, aside, ct))
+        {
+            Directory.Move(aside, trimmed);
+            return false;
+        }
+
+        // What cannot be removed stays beside the clone, named .empty-*; it never blocks the clone.
+        await (removal ?? new FolderRemoval()).RemoveInsideAsync(parent, aside, ct);
+        return true;
     }
 
     /// <summary>git says what went wrong on its FIRST line and then explains at length. This goes

@@ -60,7 +60,8 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
                 services.AddSingleton<IAgentRunner>(new FakeAgent());
                 services.AddSingleton<IStartupFilter>(_witness);
                 services.Replace(ServiceDescriptor.Singleton<IRepoClone>(sp => _clone = new BlockingClone(
-                    new RepoClone(sp.GetRequiredService<GitRunner>(), localRepos: sp.GetRequiredService<LocalRepos>()))));
+                    new RepoClone(sp.GetRequiredService<GitRunner>(), localRepos: sp.GetRequiredService<LocalRepos>()),
+                    sp.GetRequiredService<LocalRepos>())));
             }));
     }
 
@@ -85,7 +86,9 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
 
         Assert.True(HasCommit(ClonePath(team, team)),
             "the create stopped when its request was aborted: the team's clone is empty");
-        Assert.Contains(await TenantRowsAsync(TenantActions.TeamCreated), r => r.Subject == team);
+        var created = Assert.Single(await TenantRowsAsync(TenantActions.TeamCreated), r => r.Subject == team);
+        Assert.Equal(PersonEmail, created.ActorEmail);
+        Assert.Equal(await PersonIdAsync(), created.ActorId);
         Assert.Equal([$"local:{team}"], Teams.ReposFor(team));
     }
 
@@ -109,6 +112,8 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
             "the create stopped when its request was aborted: the team's clone is empty");
         var dispatched = Assert.Single(await DispatchRowsAsync(item));
         Assert.Contains($"\"team\":\"{team}\"", dispatched.Detail, StringComparison.Ordinal);
+        Assert.Equal(PersonEmail, dispatched.ActorEmail);
+        Assert.Equal(await PersonIdAsync(), dispatched.ActorId);
 
         var manager = MessageTypes.InstructionFor(new ContainerId(team, TeamRegistry.DefaultManagerName));
         Assert.Contains(
@@ -135,6 +140,53 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         Assert.Contains(await TenantRowsAsync(TenantActions.TeamCreated), r => r.Subject == team);
     }
 
+    [Fact]
+    public async Task A_create_whose_clone_fails_after_the_abort_still_tells_its_manager_the_repository_is_not_ready()
+    {
+        var person = await PersonAsync();
+        Clone.Arm(failAfterRelease: true);
+
+        await AbandonMidCloneAsync("/api/teams", token =>
+            person.PostAsJsonAsync("/api/teams", new { name = "Abandoned Failure", agent = Agent(), memberAgents = new[] { Agent() } }, token));
+
+        var team = Teams.All().Single(t => t.Name == "Abandoned Failure").Id;
+        var clonePath = ClonePath(team, team);
+        var manager = MessageTypes.InstructionFor(new ContainerId(team, TeamRegistry.DefaultManagerName));
+        var messages = _factory.Services.GetRequiredService<IMessageLog>();
+        bool Notice(Message m) => m.Payload.Contains(PayloadFields.RepoNotReady, StringComparison.Ordinal)
+            && m.Payload.Contains(JsonSerializer.Serialize(clonePath).Trim('"'), StringComparison.Ordinal);
+
+        await EventuallyAsync(async () => (await messages.ReadAfterAsync(0, [manager], 100, Ct)).Any(Notice));
+
+        Assert.Contains(await messages.ReadAfterAsync(0, [manager], 100, Ct), Notice);
+        Assert.Contains(await TenantRowsAsync(TenantActions.TeamCreated), r => r.Subject == team);
+    }
+
+    [Fact]
+    public async Task A_failure_of_detached_work_whose_caller_has_gone_is_logged()
+    {
+        var logger = new RecordingLogger();
+        var detached = new DetachedWork(new Lifetime(), logger);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var caller = new CancellationTokenSource();
+
+        var waiting = detached.RunAsync<int>("Test work", async _ =>
+        {
+            await gate.Task;
+            throw new InvalidOperationException("the clone fell over");
+        }, caller.Token);
+
+        await caller.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        gate.SetResult();
+
+        await EventuallyAsync(() => Task.FromResult(!logger.Entries.IsEmpty));
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Error, entry.Level);
+        Assert.Contains("Test work", entry.Message, StringComparison.Ordinal);
+        Assert.Equal("the clone fell over", entry.Exception?.Message);
+    }
+
     // ---- an empty clone is not a working clone ----
 
     [Fact]
@@ -156,12 +208,84 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         var person = await PersonAsync();
         var team = await CreatedTeamAsync(person, "Refetched");
         Hollow(team);
+        var notice = await NotReadyNoticeAsync(team);
 
         var response = await FetchAsync(person, team, team);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(HasCommit(ClonePath(team, team)), "Fetch left the empty clone empty");
         Assert.True(CloneReady(await RepoStatusAsync(person, team)), "the clone Fetch made does not read ready");
+        await AssertToldReadyAsync(team, notice);
+    }
+
+    [Fact]
+    public async Task Bring_current_makes_an_empty_clone_into_a_working_clone()
+    {
+        var person = await PersonAsync();
+        var team = await CreatedTeamAsync(person, "Rebrought");
+        Hollow(team);
+        var notice = await NotReadyNoticeAsync(team);
+
+        var response = await ActUntilFreeAsync(person, $"/api/teams/{team}/repos/{team}/bring-current");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(HasCommit(ClonePath(team, team)), "Bring current left the empty clone empty");
+        Assert.True(CloneReady(await RepoStatusAsync(person, team)), "the clone Bring current made does not read ready");
+        await AssertToldReadyAsync(team, notice);
+    }
+
+    // ---- Fetch, like the platform's clone, leaves alone anything that is not an empty clone ----
+
+    [Fact]
+    public async Task Fetch_leaves_alone_a_clone_with_a_commit_of_its_own()
+    {
+        var person = await PersonAsync();
+        var team = await CreatedTeamAsync(person, "OwnCommit");
+        var path = ClonePath(team, team);
+        Directory.Delete(path, recursive: true);
+        Directory.CreateDirectory(path);
+        Git(path, "init", "-q", "-b", "work");
+        Git(path, "remote", "add", "origin", Path.Combine(_dataRoot, "repos", team + ".git"));
+        File.WriteAllText(Path.Combine(path, "notes.txt"), "mine\n");
+        Git(path, "add", ".");
+        Git(path, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-m", "unpushed");
+        var head = Head(path);
+
+        await FetchAsync(person, team, team);
+
+        AssertLeftAlone(path, "notes.txt", "mine\n");
+        Assert.Equal(head, Head(path));
+    }
+
+    [Fact]
+    public async Task Fetch_leaves_alone_a_repository_with_no_commit_but_a_file_in_its_working_tree()
+    {
+        var person = await PersonAsync();
+        var team = await CreatedTeamAsync(person, "Drafted");
+        Hollow(team);
+        var path = ClonePath(team, team);
+        File.WriteAllText(Path.Combine(path, "draft.txt"), "not yet committed\n");
+
+        await FetchAsync(person, team, team);
+
+        AssertLeftAlone(path, "draft.txt", "not yet committed\n");
+        Assert.False(HasCommit(path), "Fetch checked a commit out over a working tree it should have left alone");
+    }
+
+    [Fact]
+    public async Task Fetch_leaves_alone_a_folder_that_is_not_a_repository()
+    {
+        var person = await PersonAsync();
+        var team = await CreatedTeamAsync(person, "Unrelated");
+        var path = ClonePath(team, team);
+        Directory.Delete(path, recursive: true);
+        Directory.CreateDirectory(path);
+        File.WriteAllText(Path.Combine(path, "unrelated.txt"), "somebody's work\n");
+
+        await FetchAsync(person, team, team);
+
+        AssertLeftAlone(path, "unrelated.txt", "somebody's work\n");
+        Assert.False(Directory.Exists(Path.Combine(path, ".git")), "Fetch made a repository of a folder it should have left alone");
     }
 
     [Fact]
@@ -213,6 +337,52 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         Clone.Release();
     }
 
+    private const string PersonEmail = "person@example.test";
+
+    private async Task<string> PersonIdAsync() =>
+        (await _factory.Services.GetRequiredService<IUserStore>().FindAsync(PersonEmail, Ct))!.Id;
+
+    /// <summary>The notice a failed clone roots: an instruction to the Manager naming the clone path.</summary>
+    private async Task<long> NotReadyNoticeAsync(string team)
+    {
+        var manager = MessageTypes.InstructionFor(new ContainerId(team, TeamRegistry.DefaultManagerName));
+        var row = await _factory.Services.GetRequiredService<IMessageLog>().AppendAsync(
+            new NewMessage(manager, JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                [PayloadFields.Instruction] = "The platform could not make one of this team's repositories ready.",
+                [PayloadFields.RepoNotReady] = new[] { ClonePath(team, team) },
+            }), "host"),
+            Ct);
+        return row.Seq;
+    }
+
+    /// <summary>The Manager was told, inside the notice's workflow, that the clone is ready now.</summary>
+    private async Task AssertToldReadyAsync(string team, long notice)
+    {
+        var manager = MessageTypes.InstructionFor(new ContainerId(team, TeamRegistry.DefaultManagerName));
+        Assert.Contains(
+            await _factory.Services.GetRequiredService<IMessageLog>().ReadAfterAsync(notice, [manager], 100, Ct),
+            m => m.CorrelationId == notice && m.Payload.Contains("is ready now", StringComparison.Ordinal));
+    }
+
+    /// <summary>The file is as it was, nothing was cloned over it, and nothing was set aside.</summary>
+    private static void AssertLeftAlone(string path, string file, string content)
+    {
+        Assert.Equal(content, File.ReadAllText(Path.Combine(path, file)));
+        Assert.DoesNotContain(Directory.GetFileSystemEntries(Path.GetDirectoryName(path)!), e => e != path);
+    }
+
+    private static string? Head(string path)
+    {
+        var start = new ProcessStartInfo("git") { WorkingDirectory = path, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var arg in new[] { "rev-parse", "--verify", "--quiet", "HEAD" }) start.ArgumentList.Add(arg);
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return process.ExitCode == 0 ? stdout.Trim() : null;
+    }
+
     private static async Task EventuallyAsync(Func<Task<bool>> condition)
     {
         var deadline = DateTime.UtcNow + Patience;
@@ -258,12 +428,16 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
     }
 
     /// <summary>Fetch as a person presses it: again, while the answer is 409 "still working".</summary>
-    private static async Task<HttpResponseMessage> FetchAsync(HttpClient person, string team, string repo)
+    private static Task<HttpResponseMessage> FetchAsync(HttpClient person, string team, string repo) =>
+        ActUntilFreeAsync(person, $"/api/teams/{team}/repos/{repo}/fetch");
+
+    /// <summary>A Git dialog action as a person presses it: again, while the answer is 409 "still working".</summary>
+    private static async Task<HttpResponseMessage> ActUntilFreeAsync(HttpClient person, string route)
     {
         var deadline = DateTime.UtcNow.AddSeconds(30);
         while (true)
         {
-            var response = await person.PostAsync($"/api/teams/{team}/repos/{repo}/fetch", null, Ct);
+            var response = await person.PostAsync(route, null, Ct);
             if (response.StatusCode != HttpStatusCode.Conflict || DateTime.UtcNow > deadline) return response;
             await Task.Delay(100, Ct);
         }
@@ -311,7 +485,7 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
     {
         if (!_personMade)
         {
-            await _factory.Services.GetRequiredService<IUserStore>().CreateAsync("person@example.test", Password);
+            await _factory.Services.GetRequiredService<IUserStore>().CreateAsync(PersonEmail, Password);
             _personMade = true;
         }
 
@@ -361,18 +535,24 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
 
     /// <summary>
     /// The clone, held open partway. Armed, its next clone makes what <c>git clone</c> makes before any
-    /// object arrives - an initialised repository at the target - says it has started, and waits on
-    /// the gate WITH THE TOKEN THE HOST HANDED IT. A cancelled token stops it there, as a killed git
-    /// does, leaving the empty clone; otherwise the real clone is made once the gate opens.
+    /// object arrives - an initialised repository at the target with its origin - says it has
+    /// started, and waits on the gate WITH THE TOKEN THE HOST HANDED IT. A cancelled token stops it
+    /// there, as a killed git does, leaving the empty clone; otherwise, once the gate opens, the real
+    /// clone is made - or, armed to fail, the clone fails as an unreachable remote does.
     /// </summary>
-    private sealed class BlockingClone(IRepoClone real) : IRepoClone
+    private sealed class BlockingClone(IRepoClone real, LocalRepos localRepos) : IRepoClone
     {
         private volatile bool _armed;
+        private volatile bool _fail;
         private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public void Arm() => _armed = true;
+        public void Arm(bool failAfterRelease = false)
+        {
+            _fail = failAfterRelease;
+            _armed = true;
+        }
 
         public void Release() => _gate.TrySetResult();
 
@@ -382,18 +562,47 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
             if (!_armed) return await real.EnsureAllAsync(repos, ct);
             _armed = false;
 
-            foreach (var (_, path) in repos)
+            foreach (var (url, path) in repos)
             {
                 Directory.CreateDirectory(path);
                 Git(path, "init", "-q");
+                Git(path, "remote", "add", "origin", localRepos.PathForReference(url) ?? url);
             }
 
             Started.TrySetResult();
             await _gate.Task.WaitAsync(ct);
 
+            if (_fail)
+            {
+                return [.. repos.Select(r => new RepoCloneOutcome(
+                    r.Url, r.Path, RepoCloneResult.Failed, "fatal: the remote end hung up unexpectedly"))];
+            }
+
             foreach (var (_, path) in repos) Directory.Delete(path, recursive: true);
             return await real.EnsureAllAsync(repos, ct);
         }
+    }
+
+    private sealed class Lifetime : Microsoft.Extensions.Hosting.IHostApplicationLifetime
+    {
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+        public CancellationToken ApplicationStopping => CancellationToken.None;
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+        public void StopApplication() { }
+    }
+
+    private sealed class RecordingLogger : Microsoft.Extensions.Logging.ILogger<DetachedWork>
+    {
+        public ConcurrentQueue<(Microsoft.Extensions.Logging.LogLevel Level, string Message, Exception? Exception)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Enqueue((logLevel, formatter(state, exception), exception));
     }
 
     /// <summary>Records each request path whose <c>RequestAborted</c> fired while it ran.</summary>

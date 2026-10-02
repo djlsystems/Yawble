@@ -1214,8 +1214,13 @@ builder.Services.AddSingleton(sp => new ContributorClone(
 // because a seam that can be omitted is one something quietly omits - and the omission here looks
 // like a team with a repository and nothing at its path.
 //
+// A TEAM CREATE FINISHES WHEN ITS CALLER GOES AWAY: the create, its clone and a dispatch into it run
+// on the Host's lifetime rather than the request's. See DetachedWork.
+builder.Services.AddSingleton<DetachedWork>();
+
 builder.Services.AddSingleton<IRepoClone>(sp => new RepoClone(
-    sp.GetRequiredService<GitRunner>(), localRepos: sp.GetRequiredService<LocalRepos>()));
+    sp.GetRequiredService<GitRunner>(), localRepos: sp.GetRequiredService<LocalRepos>(),
+    removal: sp.GetRequiredService<FolderRemoval>()));
 
 // THE PLATFORM PUBLISHES A TEAM'S WORK TO ORIGIN, on the acceptance of a card, BEFORE the row that
 // accepts it. Wired here for the reason `IRepoClone` above it is - a seam that can be omitted is one
@@ -2881,7 +2886,7 @@ app.MapGet("/api/tenant-log", async (
 app.MapPost("/api/teams", async (
     CreateTeam request, TeamRegistry teams, TenantLogging audit, HttpContext context,
     AgentInstallProbe probe, AgentCatalog catalog, TeamListPush listPush, TeamRepoSetup repoSetup,
-    CancellationToken ct) =>
+    DetachedWork detached, CancellationToken ct) =>
 {
     var name = (request.Name ?? "").Trim();
 
@@ -2929,31 +2934,73 @@ app.MapPost("/api/teams", async (
         return Results.BadRequest(new { error = exception.Message });
     }
 
-    var teamCreated = false;
+    // WHO ACTED, READ NOW: the create below outlives the request when its caller goes away, and
+    // nothing in it may read the request after that.
+    var actorId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    var actorEmail = context.User.FindFirstValue(ClaimTypes.Email);
 
     try
     {
-        var created = await teams.CreateAsync(
-            // VERBATIM, no `??`. Both defaults named a catalog entry a person may rename,
-            // and `CreateAsync` refuses a blank one by name rather than substituting anything.
-            name, request.Agent ?? "",
-            request.AdditionalInstructions,
-            request.MemberAgent, request.MemberAgents, request.Root, newRepos.Repos,
+        // FROM HERE THE CREATE RUNS TO COMPLETION ON THE HOST'S LIFETIME, not the request's. A large
+        // clone outlasts a browser; stopping at the abort left a team with an empty clone and no
+        // `team.created` row. A create that fails still undoes what it made, as it always did.
+        var (created, retiredDocuments) = await detached.RunAsync("Creating a team", async work =>
+        {
+            var teamCreated = false;
+            try
+            {
+                var made = await teams.CreateAsync(
+                    // VERBATIM, no `??`. Both defaults named a catalog entry a person may rename,
+                    // and `CreateAsync` refuses a blank one by name rather than substituting anything.
+                    name, request.Agent ?? "",
+                    request.AdditionalInstructions,
+                    request.MemberAgent, request.MemberAgents, request.Root, newRepos.Repos,
 
-            // CARRIED IN THIS SAME REQUEST rather than by a client-side follow-up call to the PUT
-            // route. A create that answered 201 and then failed its second call would leave a team
-            // running under a figure nobody chose, for the window between them - and the window is
-            // exactly when the Manager's first wake happens.
-            budgetTokens: request.BudgetTokens,
-            ct: ct,
-            upstreams: request.Upstreams,
+                    // CARRIED IN THIS SAME REQUEST rather than by a client-side follow-up call to the PUT
+                    // route. A create that answered 201 and then failed its second call would leave a team
+                    // running under a figure nobody chose, for the window between them - and the window is
+                    // exactly when the Manager's first wake happens.
+                    budgetTokens: request.BudgetTokens,
+                    ct: work,
+                    upstreams: request.Upstreams,
 
-            // ONE UNIT WITH THE TEAM: made once every check on the team has passed and before
-            // anything of it is written, so a repository that cannot be made refuses the create.
-            addRepo: newRepos.AddRepoAsync);
-        teamCreated = true;
+                    // ONE UNIT WITH THE TEAM: made once every check on the team has passed and before
+                    // anything of it is written, so a repository that cannot be made refuses the create.
+                    addRepo: newRepos.AddRepoAsync);
+                teamCreated = true;
 
-        await newRepos.LogAsync(audit, context, created.Id, ct);
+                await newRepos.LogAsync(audit, actorId, actorEmail, made.Id, work);
+
+                // THE DISPLACED DOCUMENTS FOLDER, WHEN THERE WAS ONE, and this row is what makes
+                // "reported, not discovered" durable. Team ids are reusable and documents outlive their
+                // team, so a team created with a dead team's identifier meets its predecessor's folder;
+                // the create moves that folder aside rather than handing it over, and the only way anybody
+                // finds out later is a row that says so.
+                var retired = teams.RetiredDocumentsFor(made.Id);
+
+                await audit.WriteAsAsync(
+                    actorId, actorEmail, TenantActions.TeamCreated, made.Id, made.Name,
+                    new
+                    {
+                        manager = made.Containers.FirstOrDefault()?.Agent,
+                        Concierge = made.Concierge,
+                        retiredDocuments = retired,
+                        localRepository = newRepos.LocalRepository is not { } local
+                            ? null
+                            : new { name = local.Name, reference = local.Reference, created = local.Created },
+                        createdOnGitHub = newRepos.CreatedOnGitHub.Count == 0 ? null : newRepos.CreatedOnGitHub,
+                    },
+                    work);
+
+                await listPush.AnnounceCreatedAsync(made.Id, work);
+                return (made, retired);
+            }
+            finally
+            {
+                await newRepos.ForgetUnlessCreatedAsync(teamCreated);
+            }
+        }, ct);
+
         var localRepository = newRepos.LocalRepository;
         var createdOnGitHub = newRepos.CreatedOnGitHub;
 
@@ -3007,29 +3054,6 @@ app.MapPost("/api/teams", async (
             }
         }
 
-        // THE DISPLACED DOCUMENTS FOLDER, WHEN THERE WAS ONE, and this row is what makes
-        // "reported, not discovered" durable. Team ids are reusable and documents outlive their
-        // team, so a team created with a dead team's identifier meets its predecessor's folder;
-        // the create moves that folder aside rather than handing it over, and the only way anybody
-        // finds out later is a row that says so.
-        var retiredDocuments = teams.RetiredDocumentsFor(created.Id);
-
-        await audit.WriteAsync(
-            context, TenantActions.TeamCreated, created.Id, created.Name,
-            new
-            {
-                manager = created.Containers.FirstOrDefault()?.Agent,
-                Concierge = created.Concierge,
-                retiredDocuments,
-                localRepository = localRepository is null
-                    ? null
-                    : new { name = localRepository.Name, reference = localRepository.Reference, created = localRepository.Created },
-                createdOnGitHub = createdOnGitHub.Count == 0 ? null : createdOnGitHub,
-            },
-            ct);
-
-        await listPush.AnnounceCreatedAsync(created.Id, ct);
-
         // Serialize created to JsonNode and add unresolvedAgents
         var node = JsonSerializer.SerializeToNode(created, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
         if (node is JsonObject obj)
@@ -3077,10 +3101,6 @@ app.MapPost("/api/teams", async (
     catch (ArgumentException exception)
     {
         return Results.BadRequest(new { error = exception.Message });
-    }
-    finally
-    {
-        await newRepos.ForgetUnlessCreatedAsync(teamCreated);
     }
 })
     // Takes its team from the BODY, so TeamGate cannot see it - this route is covered only by this

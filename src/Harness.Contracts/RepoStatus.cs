@@ -97,7 +97,10 @@ public sealed record RepoStatus(
     bool? TeamBranchUnpushed = null,
 
     [property: Description("Set when the clone's default branch holds commits origin/<DefaultBranch> lacks - a Manager moved it, which the delivery rule forbids: \"moved <default> in the clone; the work is on <commit>; the team branch is team/{id}\". Measured on every read and never reset by the platform. Null when it has not moved or could not be measured (default branch not known, no clone, no origin ref).")]
-    string? DefaultBranchMoved = null);
+    string? DefaultBranchMoved = null,
+
+    [property: Description("False when there is no working clone: none was made, or what is there is an empty clone - a .git with no ref, no HEAD and nothing beside it, what an interrupted clone leaves. The card reads it 'Not ready' and offers Fetch, which makes the clone. True otherwise.")]
+    bool CloneReady = true);
 
 /// <summary>
 /// The recorded pull request, as the Git dialog shows it: GitHub's last answer and when it
