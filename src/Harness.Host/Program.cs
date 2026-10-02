@@ -564,7 +564,25 @@ foreach (var agent in loadedCatalog)
 }
 
 // The operator's tags for a built-in are read through the setting on every use.
-builder.Services.AddSingleton(new AgentCatalog(loadedCatalog, () => tenantSettings.AgentTags));
+var agentCatalog = new AgentCatalog(loadedCatalog, () => tenantSettings.AgentTags);
+builder.Services.AddSingleton(agentCatalog);
+
+// ISSUED AGENT CREDENTIALS: one per CLI command, Data Protection ciphertext beside tenant_events
+// (AgentCredentialStore), decided for a run in one place (RunCredentials) and set by a person or
+// the operator CLI's request file (AgentCredentials, AgentCredentialRequests). A preset's source is
+// the agents.credentialSource setting, which refuses `issued` for a preset that declares nothing.
+tenantSettings.IssuedRefusal = preset =>
+    agentCatalog.Definition(preset) is { IssuedCredential: null } definition
+        ? $"'{definition.Name}' declares no issued credential, so it can only sign in through the shared home."
+        : null;
+builder.Services.AddSingleton(sp => new AgentCredentialStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
+builder.Services.AddSingleton<IRunCredentials>(sp => new RunCredentials(
+    agentCatalog, tenantSettings, sp.GetRequiredService<AgentCredentialStore>()));
+builder.Services.AddSingleton(sp => new AgentCredentials(
+    agentCatalog, sp.GetRequiredService<AgentCredentialStore>(), tenantSettings, sp.GetRequiredService<AgentAuthProbe>()));
+builder.Services.AddSingleton(sp => new AgentCredentialRequests(
+    sp.GetRequiredService<AgentCredentials>(), dataRoot, sp.GetRequiredService<ILogger<AgentCredentialRequests>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentCredentialRequests>());
 
 // SOLUTION PACKAGES are checked against this Host's own catalogs - its Agent presets, its events
 // (installed plugins' included) and its runtimes - through one service the route, the install and the
@@ -746,7 +764,8 @@ builder.Services.AddSingleton<IMemberReports>(sp => sp.GetRequiredService<Member
 // choice is made here and nowhere in the pump.
 builder.Services.AddSingleton(sp => new AgentMemberRunner(
     sp.GetRequiredService<IAgentRunner>(),
-    sp.GetRequiredService<IContextBuilder>()));
+    sp.GetRequiredService<IContextBuilder>(),
+    sp.GetRequiredService<IRunCredentials>()));
 builder.Services.AddSingleton(sp => new PluginMemberRunner(
     sp.GetRequiredService<PluginCatalog>(),
     sp.GetRequiredService<IMemberReports>(),
@@ -1264,7 +1283,8 @@ builder.Services.AddSingleton(sp => new ConciergeLaunchFactory(
     sp.GetRequiredService<AgentCatalog>(),
     sp.GetRequiredService<SkillDirectory>(),
     sp.GetRequiredService<AgentLaunchUser>(),
-    sp.GetRequiredService<AgentUpdateGate>()));
+    sp.GetRequiredService<AgentUpdateGate>(),
+    sp.GetRequiredService<IRunCredentials>()));
 builder.Services.AddSingleton(sp =>
 {
     // Resolved ONCE, here, and captured - never re-resolved inside the delegates. The revoke runs
@@ -1587,6 +1607,15 @@ builder.Services.AddMcpServer()
 
 var app = builder.Build();
 app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
+
+{
+    // A preset switched between home and issued reads as such at once, not after the probe's cache.
+    var probe = app.Services.GetRequiredService<AgentAuthProbe>();
+    tenantSettings.Changed += name =>
+    {
+        if (name == TenantSettings.AgentCredentialSourceName) probe.Forget();
+    };
+}
 
 {
     var runAs = app.Services.GetRequiredService<AgentLaunchUser>();

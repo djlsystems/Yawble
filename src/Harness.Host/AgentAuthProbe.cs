@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Harness.Contracts;
 
 namespace Harness.Host;
 
@@ -15,6 +16,9 @@ public sealed record AgentAuthProbeSpec(
 /// of teams.</param>
 /// <param name="Launch">Whether the preset's CLI starts through a member's launch (<see cref="AgentLaunchChecks"/>).
 /// Set by the route, never by this probe: the probe runs the CLI directly and answers only "signed in".</param>
+/// <param name="Source">Where the preset signs in from: <c>home</c> (the shared agent home) or
+/// <c>issued</c> (the credential issued for its command in Admin > Agents), from
+/// <c>agents.credentialSource</c>.</param>
 public sealed record AgentAuthReport(
     string Agent,
     string Command,
@@ -22,7 +26,8 @@ public sealed record AgentAuthReport(
     bool? Authenticated,
     string Detail,
     bool Referenced = false,
-    AgentLaunchReport? Launch = null)
+    AgentLaunchReport? Launch = null,
+    string Source = TenantSettings.HomeSource)
 {
     /// <summary>The reports, each marked with whether <paramref name="referenced"/> names it.</summary>
     public static IReadOnlyList<AgentAuthReport> MarkReferenced(
@@ -40,11 +45,28 @@ public sealed record AgentAuthReport(
 /// the CLI writes when a person signs in, named relative to HOME. A status command is only run
 /// when neither is present, and a non-zero exit means unauthenticated. A timeout stays null.
 /// </remarks>
-public sealed class AgentAuthProbe(AgentCatalog catalog, AgentLaunchUser? runAs = null)
+/// <para>
+/// A PRESET THAT SIGNS IN WITH AN ISSUED CREDENTIAL is answered from the run credential resolver
+/// alone: signed in when the credential its command was issued is set and decrypts, not signed in
+/// otherwise. The shared home is not looked at - no credential file, no status command, no Host
+/// variable - because an issued run never reads it. Whether the value is ACCEPTED is not known
+/// until a run: no CLI here has a status command that checks a key.
+/// </para>
+public sealed class AgentAuthProbe(AgentCatalog catalog, AgentLaunchUser? runAs = null, IRunCredentials? credentials = null)
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(8);
     private readonly object _gate = new();
     private (DateTimeOffset At, IReadOnlyList<AgentAuthReport> Reports)? _cache;
+
+    /// <summary>Drops the cached answer, so the next read probes again: after an issued credential
+    /// or a preset's source changes, which the next read must show.</summary>
+    public void Forget()
+    {
+        lock (_gate)
+        {
+            _cache = null;
+        }
+    }
 
     public async Task<IReadOnlyList<AgentAuthReport>> ReportsAsync(CancellationToken ct)
     {
@@ -64,6 +86,25 @@ public sealed class AgentAuthProbe(AgentCatalog catalog, AgentLaunchUser? runAs 
         foreach (var definition in catalog.Definitions)
         {
             var command = definition.Launch.FileName;
+
+            var credential = credentials is null
+                ? RunCredential.Home
+                : await credentials.ResolveAsync(definition.Name, definition, ct);
+
+            if (credential.Source == CredentialSource.Issued)
+            {
+                var installed = PathSearch.Find(command) is not null;
+                var detail = credential.Missing is null
+                    ? $"Signs in with the credential issued for `{RunCredentials.CommandOf(definition)}`, in "
+                      + $"{string.Join(", ", credential.Environment.Keys)}. Whether it is accepted shows at the first run."
+                    : $"Signs in with an issued credential, and the one for `{RunCredentials.CommandOf(definition)}` is not set.";
+
+                reports.Add(new AgentAuthReport(
+                    definition.Name, command, installed, credential.Missing is null, detail,
+                    Source: TenantSettings.IssuedSource));
+                continue;
+            }
+
             if (!seen.TryGetValue(command, out var answer))
             {
                 answer = await ProbeCommandAsync(command, specs, ct, runAs);

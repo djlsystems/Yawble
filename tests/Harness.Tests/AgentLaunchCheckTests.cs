@@ -1,3 +1,4 @@
+using Harness.Contracts;
 using System.Text.Json;
 using Harness.Host;
 using Harness.Tests.Host;
@@ -115,6 +116,48 @@ public sealed class AgentLaunchCheckTests : IDisposable
         Assert.Equal(AgentLaunchReport.NotChecked, interactive.Result);
 
         Assert.False(File.Exists(seen));
+    }
+
+    [Fact]
+    public async Task An_issued_presets_launch_check_runs_with_its_credential_and_own_home()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "The fake CLI is a shell script.");
+
+        var seen = Path.Combine(_root, "seen-issued");
+        var program = Path.Combine(Directory.CreateDirectory(Path.Combine(_root, "bin-issued")).FullName, "fake-cli");
+        await TestExecutable.WriteAsync(program, $"#!/bin/sh\necho \"key=$FAKE_KEY home=$HOME\" > '{seen}'\n");
+
+        var catalog = new AgentCatalog(
+            [new AgentDefinition("fake", AgentMode.Headless, new AgentLaunch(program, ["-p", "{userPrompt}"]), LaunchCheck: ["--version"])]);
+        var issued = new RunCredential(
+            CredentialSource.Issued, new Dictionary<string, string> { ["FAKE_KEY"] = "fake-launch-check-key" }, [], [], true, null);
+
+        var runner = new ProcessAgentRunner(catalog, new RunHeartbeat(), credentials: new Fixed(issued));
+        var launch = await runner.CheckLaunchAsync("fake", TestContext.Current.CancellationToken);
+
+        Assert.Equal(AgentLaunchReport.Ok, launch.Result);
+        var line = File.ReadAllText(seen).Trim();
+        Assert.StartsWith("key=fake-launch-check-key home=", line);
+
+        // A home of its own, gone once the check is done.
+        var home = line[(line.IndexOf("home=", StringComparison.Ordinal) + 5)..];
+        Assert.StartsWith(RunHome.Prefix, Path.GetFileName(home));
+        Assert.NotEqual(Environment.GetEnvironmentVariable("HOME"), home);
+        Assert.False(Directory.Exists(home));
+
+        // And one whose credential is not set fails as a member run would, starting nothing.
+        File.Delete(seen);
+        var missing = new ProcessAgentRunner(catalog, new RunHeartbeat(), credentials: new Fixed(RunCredential.NotSet("the credential is not set")));
+        var refused = await missing.CheckLaunchAsync("fake", TestContext.Current.CancellationToken);
+        Assert.Equal(AgentLaunchReport.Failed, refused.Result);
+        Assert.Equal("the credential is not set", refused.Detail);
+        Assert.False(File.Exists(seen));
+    }
+
+    private sealed class Fixed(RunCredential credential) : IRunCredentials
+    {
+        public Task<RunCredential> ResolveAsync(string agent, AgentDefinition? definition, CancellationToken ct) =>
+            Task.FromResult(credential);
     }
 
     [Fact]
