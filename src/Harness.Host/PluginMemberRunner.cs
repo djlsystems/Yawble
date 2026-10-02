@@ -187,7 +187,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         // THE REDACTION SET: every bound secret AND every access token this run is handed.
         IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.Select(g => g.AccessToken)];
 
-        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray());
+        var siteFiles = await SiteFilesAsync(invocation.Member, ct);
+        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles);
 
         StartRun Start(string stdin) => new(
             RunId.For(invocation.Member),
@@ -219,7 +220,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         if (manifest.Reads.Count > 0)
         {
             var (read, delivery) = await ReadSitesAsync(invocation.Member, manifest, FramedBytes(Start(request)), ct);
-            request = Request(invocation, manifest, config, resolvedSecrets, grants, read);
+            request = Request(invocation, manifest, config, resolvedSecrets, grants, read, siteFiles);
 
             foreach (var row in (string?[])[delivery.CutRow, delivery.MissingRow])
             {
@@ -326,7 +327,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     internal static string Request(
         MemberInvocation invocation, PluginManifest manifest,
         IReadOnlyDictionary<string, JsonNode?> config, IReadOnlyDictionary<string, string> resolvedSecrets,
-        IReadOnlyDictionary<string, ConnectionGrant>? grants = null, JsonArray? sites = null)
+        IReadOnlyDictionary<string, ConnectionGrant>? grants = null, JsonArray? sites = null,
+        JsonArray? siteFiles = null)
     {
         var work = new JsonArray();
 
@@ -398,9 +400,32 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
             // THE DECLARED READS of the member's own team's sites (see ReadSitesAsync); [] for none.
             ["sites"] = sites ?? new JsonArray(),
+
+            // EACH OF THE MEMBER'S OWN TEAM'S SITES' FILES FOLDER (see SiteFilesAsync); [] for none.
+            ["siteFiles"] = siteFiles ?? new JsonArray(),
         };
 
         return document.ToJsonString() + "\n";
+    }
+
+    /// <summary>
+    /// The run's <c>siteFiles</c> block: every site of the member's OWN team, by name, with the
+    /// absolute path of its files folder in the team's documents, repaired here. Every site, not only
+    /// the declared reads: writing a file needs no read. Paths only, never a secret. <c>[]</c> when the
+    /// team has no site or the Host serves none. Part of the request measured before site documents
+    /// are chosen, so the worker frame's bound holds unchanged.
+    /// </summary>
+    public async Task<JsonArray> SiteFilesAsync(ContainerId member, CancellationToken ct = default)
+    {
+        var listed = new JsonArray();
+        if (sites is null) return listed;
+
+        foreach (var site in (await sites.ListAsync(member.Team, ct)).OrderBy(s => s.Name, StringComparer.Ordinal))
+        {
+            listed.Add(new JsonObject { ["site"] = site.Name, ["folder"] = sites.Files.Ensure(site.Team, site.Name) });
+        }
+
+        return listed;
     }
 
     /// <summary>

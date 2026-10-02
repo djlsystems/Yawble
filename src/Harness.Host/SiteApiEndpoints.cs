@@ -177,7 +177,10 @@ public static class SiteApiEndpoints
 
     // ---- wire ----
 
-    public static async Task<object> WireAsync(SiteRow site, ISiteStore store, CancellationToken ct)
+    /// <summary>A site on the wire. <c>filesFolder</c> is the absolute path of its files folder in the
+    /// team's documents, repaired here: this is how an agent is told it (the <c>site</c> tool relays
+    /// these answers).</summary>
+    public static async Task<object> WireAsync(SiteRow site, SiteService sites, ISiteStore store, CancellationToken ct)
     {
         var versions = await store.VersionsAsync(site.Team, site.Name, ct);
         var usage = await store.UsageAsync(site.Team, site.Name, ct);
@@ -195,6 +198,7 @@ public static class SiteApiEndpoints
             documents = usage.Documents,
             dataBytes = usage.Bytes,
             url = SiteService.EntryPath(site.Team, site.Name),
+            filesFolder = sites.Files.Ensure(site.Team, site.Name),
         };
     }
 
@@ -223,7 +227,7 @@ public static class SiteApiEndpoints
     private static async Task<IResult> ListEvery(SiteService sites, ISiteStore store, CancellationToken ct)
     {
         var listed = new List<object>();
-        foreach (var site in await sites.ListAsync(null, ct)) listed.Add(await WireAsync(site, store, ct));
+        foreach (var site in await sites.ListAsync(null, ct)) listed.Add(await WireAsync(site, sites, store, ct));
         return Results.Ok(listed);
     }
 
@@ -234,7 +238,7 @@ public static class SiteApiEndpoints
         if (teams.ExistingName(team) is null) return Results.NotFound(new { error = TeamGate.NoSuchTeamMessage });
 
         var listed = new List<object>();
-        foreach (var site in await sites.ListAsync(team, ct)) listed.Add(await WireAsync(site, store, ct));
+        foreach (var site in await sites.ListAsync(team, ct)) listed.Add(await WireAsync(site, sites, store, ct));
         return Results.Ok(listed);
     }
 
@@ -248,7 +252,7 @@ public static class SiteApiEndpoints
         var created = await sites.CreateAsync(team, request.Name?.Trim() ?? "", actor, ct);
         if (created.Value is not { } row) return Refused(created);
 
-        return Results.Created(SiteService.EntryPath(row.Team, row.Name), await WireAsync(row, store, ct));
+        return Results.Created(SiteService.EntryPath(row.Team, row.Name), await WireAsync(row, sites, store, ct));
     }
 
     private static async Task<IResult> Show(
@@ -263,7 +267,7 @@ public static class SiteApiEndpoints
 
         return Results.Ok(new
         {
-            site = await WireAsync(view.Site, store, ct),
+            site = await WireAsync(view.Site, sites, store, ct),
             versions = view.Versions.OrderByDescending(v => v.Version).Select(v => Wire(v, view.Site.LiveVersion)),
             collections = view.Collections,
             url = view.Url,
@@ -301,7 +305,7 @@ public static class SiteApiEndpoints
         if (await ActorAsync(context, users, ct) is not { } actor) return NotSignedIn();
 
         var rolled = await sites.RollbackAsync(team, site, request?.Version, actor, ct);
-        return rolled.Value is { } row ? Results.Ok(await WireAsync(row, store, ct)) : Refused(rolled);
+        return rolled.Value is { } row ? Results.Ok(await WireAsync(row, sites, store, ct)) : Refused(rolled);
     }
 
     private static async Task<IResult> Unpublish(
@@ -312,7 +316,7 @@ public static class SiteApiEndpoints
         if (await ActorAsync(context, users, ct) is not { } actor) return NotSignedIn();
 
         var unpublished = await sites.UnpublishAsync(team, site, actor, ct);
-        return unpublished.Value is { } row ? Results.Ok(await WireAsync(row, store, ct)) : Refused(unpublished);
+        return unpublished.Value is { } row ? Results.Ok(await WireAsync(row, sites, store, ct)) : Refused(unpublished);
     }
 
     private static async Task<IResult> Delete(

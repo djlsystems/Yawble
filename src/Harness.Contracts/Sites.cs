@@ -55,6 +55,37 @@ public static partial class SiteRules
     public static string NotAnId(string? id) =>
         $"\"{id}\" is not a valid document id. Use 1-128 letters, digits, '.', '_' and '-', not starting with '.'.";
 
+    /// <summary>The longest path a site's files folder serves, in characters.</summary>
+    public const int MaxFilePathLength = 1024;
+
+    /// <summary>
+    /// A path in a site's files folder, relative to it: names separated by <c>/</c>, 1-1024
+    /// characters, each name 1-255 UTF-8 bytes. No name is <c>.</c> or <c>..</c> or starts with a
+    /// dot, and nothing holds <c>\</c>, <c>%</c>, <c>:</c> or a control character. <c>%</c> is refused
+    /// because a <c>%</c> reaching the route is an encoded separator or a double encoding; an empty
+    /// first name is an absolute path. The helper script repeats this rule.
+    /// </summary>
+    public static bool IsFilePath(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || path.Length > MaxFilePathLength) return false;
+
+        foreach (var name in path.Split('/'))
+        {
+            if (name.Length == 0 || name[0] == '.' || System.Text.Encoding.UTF8.GetByteCount(name) > 255) return false;
+
+            foreach (var c in name)
+            {
+                if (c is '\\' or '%' or ':' || char.IsControl(c)) return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static string NotAFilePath(string? path) =>
+        $"\"{path}\" is not a path in this site's files folder. Use names separated by '/', with no '..', "
+        + "no name starting with '.', and no '\\', '%', ':' or control character.";
+
     [GeneratedRegex("^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,62}$", RegexOptions.CultureInvariant)]
     private static partial Regex SlugPattern();
 

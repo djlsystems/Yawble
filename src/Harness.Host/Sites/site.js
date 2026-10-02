@@ -11,9 +11,14 @@
  *   site.data.delete(collection, id)    -> true when there was such a document
  *   site.action(name, payload)          -> { seq }
  *   site.whoami()                       -> { displayName }
+ *   site.files.url(path)                -> the link that downloads a file from the site's files folder
  *
- * Every call returns a Promise. A refusal rejects with an Error whose message is the platform's
- * sentence and whose `status` is the HTTP status.
+ * Every call but site.files.url returns a Promise. A refusal rejects with an Error whose message is
+ * the platform's sentence and whose `status` is the HTTP status.
+ *
+ * site.files.url answers a string at once, for an <a href>: `path` is the path a file has in the
+ * site's files folder (`<team documents>/sites/<site>/files/`), as stored in the site's data. A path
+ * the platform would refuse throws, with the platform's sentence and `status` 400.
  *
  * The page runs in a sandbox with an opaque origin: it has no cookie, and no localStorage or
  * sessionStorage. Keep state in site.data. This script carries the page's capability - the
@@ -63,6 +68,32 @@
     });
   }
 
+  // The same rule as the platform's for a path in a site's files folder.
+  function isFilePath(path) {
+    if (typeof path !== 'string' || path.length === 0 || path.length > 1024) return false;
+
+    return path.split('/').every(function (name) {
+      if (name.length === 0 || name.charAt(0) === '.') return false;
+      if (unescape(encodeURIComponent(name)).length > 255) return false;
+      return !/[\\%:\u0000-\u001f\u007f-\u009f]/.test(name);
+    });
+  }
+
+  function fileUrl(path) {
+    if (!base) {
+      throw new Error('This page was not opened as a site, so it has no access to site data.');
+    }
+
+    if (!isFilePath(path)) {
+      var error = new Error('"' + path + '" is not a path in this site\'s files folder. Use names separated by \'/\', '
+        + 'with no \'..\', no name starting with \'.\', and no \'\\\', \'%\', \':\' or control character.');
+      error.status = 400;
+      throw error;
+    }
+
+    return base + 'files/' + path.split('/').map(segment).join('/');
+  }
+
   function documentPath(collection, id) {
     return 'data/' + segment(collection) + '/' + segment(id);
   }
@@ -89,6 +120,9 @@
     },
     action: function (name, payload) {
       return call('POST', 'actions/' + segment(name), payload === undefined ? null : payload);
+    },
+    files: {
+      url: fileUrl
     },
     whoami: function () {
       return call('GET', 'whoami').then(function (answer) {
