@@ -318,6 +318,7 @@ Content-Type: application/json
 | `config` | optional | Name → `{type: string, number, bool or list; enum; default; required; setBy; description}`; a `number` may add `min`, `max` and `integer` (see [Number bounds](#number-bounds)). Flat in v1. A `list` is a list of strings, default `[]`. See [List settings](#list-settings). |
 | `secrets` | optional | Name → `{description, required, when?}`. A `value` key is refused. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. |
 | `connections` | optional | Slot name → `{description, providers, scopes, required}`: an OAuth account the plugin acts on, which the Host holds and refreshes. See [Connections](#connections-oauth-accounts). |
+| `reads` | optional | A list of `{site, collection}`, at most 32: the collections of the plugin's OWN team's sites it reads, delivered on stdin at each run. See [Reading site data](#reading-site-data-reads). |
 | `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `inLedger` is not read in v1: a plugin event always reaches the ledger. See [Events](#events). |
 | `skills` | optional | Files inside the plugin, in the same front-matter format as a skill. Indexed at load and on every rescan. See [Skills](#skills). |
 | `requires` | optional | The runtimes the plugin needs from the image: `dotnet`, `node`, `python3`. See [Runtimes](#runtimes-requires). |
@@ -417,6 +418,28 @@ token, refreshes and rotates, and hands the plugin a fresh access token on each 
   The member stores the connection's id, never a token. A Manager or Concierge hire may name a
   connection only when a person has already bound that same connection to a member of the same team.
 
+### Reading site data: `reads`
+
+A plugin reads collections of its own team's sites by declaring them:
+
+```json
+"reads": [
+  { "site": "board", "collection": "items" },
+  { "site": "board", "collection": "settings" }
+]
+```
+
+- **Each entry** names a `site` and a `collection`, both site names (1-63 lower-case letters, digits
+  and hyphens). There is no `team`: an entry that names one is refused, because a plugin reads only
+  its own team's sites. A repeated pair, more than 32 entries, or anything that is not a list of such
+  objects refuses the plugin, with the field in the sentence. Any other key in an entry is ignored.
+- **Without `reads`**, or with `null`, a manifest behaves exactly as before and its runs get
+  `"sites": []`.
+- **In a solution package** a plugin reads only a site the package ships: the check refuses
+  `reads[n].site` naming any other, at install and at update.
+- **At run time** a declared site the team does not have (another team's site included) is reported
+  as missing in the run's `sites`, with a sentence, and on the card. See the protocol below.
+
 ### Runtimes: `requires`
 
 A plugin is self-contained: beyond what the image guarantees, everything it needs lives in its own
@@ -462,11 +485,19 @@ name. The install checks the same before it writes.
               "expiresAt": "2026-09-28T21:05:00Z", "scopes": ["https://mail.google.com/"] }
   },
   "workingDirectory": "/data/teams/Mixed/workspaces/Echo",
-  "worktrees": []
+  "worktrees": [],
+  "sites": [
+    { "site": "board", "collection": "items",
+      "documents": [
+        { "id": "t1", "doc": { "title": "First", "status": "archived" },
+          "updatedAt": "2026-10-02T09:00:00Z", "updatedBy": "person@example.com" }
+      ],
+      "total": 1, "cut": null, "missing": null }
+  ]
 }
 ```
 
-- **`work`** is the batch, oldest first, all from one workflow. Up to 16 messages can arrive in one
+- **`work`** is the batch, oldest first, all from one workflow. Up to 32 messages can arrive in one
   run.
 - **`config`** is the manifest's defaults with this member's own values on top.
 - **`secrets`** holds only the secrets this member binds, resolved at the moment the run starts.
@@ -476,6 +507,30 @@ name. The install checks the same before it writes.
   long. It is `{}` when the manifest declares no slot or the member has none bound; a plugin that ignores it
   is unaffected. The refresh
   token and the client secret never reach a plugin.
+- **`sites`** holds one entry per collection the manifest [`reads`](#reading-site-data-reads), in
+  declaration order; `[]` when it reads none. They are read when the run starts, as the member, from
+  the member's OWN team's sites only - the same team-bound lookup `site.put` uses - and reading them
+  appends nothing to the tenant log.
+  - `documents` are whole, newest `updatedAt` first (`id` breaks a tie): `id`, `doc` (the stored
+    JSON), `updatedAt` (UTC) and `updatedBy`, the same shape a page's `site.data.list` returns.
+    `total` is how many the collection holds.
+  - **The budget.** A run is handed up to 8 MiB of documents, less when the work batch, config or
+    secrets are large: what counts is each document's size inside the message that starts the run,
+    after escaping. The site limits apply as always (64 KB a document, 10 000 documents a
+    collection, 50 MB a site).
+  - **A cut is never silent.** Collections fill in order, and the first document that does not fit
+    ends delivery for the run, so a plugin always has the newest of each collection it got any of.
+    A collection cut gets `cut`, a sentence: "Only 412 of 3000 documents of board/items were
+    delivered (newest first): this run's site data is limited to 8 MiB. The rest were cut." When
+    the rest of the request left less room, it ends "limited to 8 MiB, less what the rest of the
+    request takes; N bytes were left. The rest were cut." The card gets one line for the whole run:
+    "Site data for this run was cut: board/items 412 of 3000. This run's site data is limited to
+    8 MiB."
+  - **A missing site** - one the team does not have, which is how another team's site reads - gets
+    `missing: "No such site."`, `documents: []` and `total: 0`, and the card one line naming every
+    missing read.
+  - What a run reads is never copied into its output, its result, its progress or any file. What it
+    prints stays redacted as before.
 
 **stdout**: JSON Lines, one record per line.
 
@@ -487,7 +542,7 @@ name. The install checks the same before it writes.
 | `{"t":"handback","delivered":"…"}` | Hands the work back and wakes the Manager once. |
 | `{"t":"result","ok":true,"output":"…"}` | The run's result. Send exactly one, last. `ok:false` with `"error"` is a failure in those words. Add `"quiet":true` to finish without waking anyone; see [Quiet runs](#quiet-runs). |
 | `{"t":"publish","type":"…","payload":{…}}` | Publishes one of the events the manifest declares. See [Events](#events). |
-| `{"t":"site.put","site":"…","collection":"…","id":"…","doc":…}` | Writes one document to a site of the plugin's OWN team (see [sites.md](sites.md)). The document is redacted like every other record; a limit, a name, another team or a missing site drops the record with one progress warning per kind per run. |
+| `{"t":"site.put","site":"…","collection":"…","id":"…","doc":…}` | Writes one document to a site of the plugin's OWN team (see [sites.md](sites.md)). The document is redacted like every other record; a limit, a name, another team or a missing site drops the record with one progress warning per kind per run. A page's Delete or Archive is best kept in site data the plugin reads (for example a `status` on the document, with the collection in [`reads`](#reading-site-data-reads)), rather than in a second store of the plugin's own, so a run never brings back what a person removed. |
 | `{"t":"site.delete","site":"…","collection":"…","id":"…"}` | Deletes one document from a site of the plugin's own team. |
 
 - **Same path as agents.** The first four records go through the same code as an agent's MCP tools
@@ -853,6 +908,12 @@ plugin declares none.
   request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side.
   `cli/internal/plugin` pins the manifest rules against the samples, the `connections` slot rules
   included.
+- **Reading site data.** `PluginSiteReadsTests` pins `reads` and its refusals, the `sites` block,
+  newest first, the cut and its sentences, own team only, the tenant log and redaction;
+  `WorkerFrameTests` pins that a cut run still fits the worker frame, including when the rest of the
+  request is large; `PluginSiteReadsEndToEndTests` pins a page's write, archive and delete reaching
+  the next run on the real Host; `SolutionCheckTests` and `SolutionInstallTests` pin the package
+  check.
 - **Connections, the web and the CLI.** The mount specs `connections-dialog`, `connection-picker`
   (the binding picker at hire and in Member settings) and `plugins-dialog` (each slot on the Plugins
   screen). `cli/internal/cli/connect_test.go` runs `yawble connect` against a scripted Host and a real

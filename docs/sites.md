@@ -276,6 +276,12 @@ A plugin member writes with the `site.put` and `site.delete` records, for its ow
 (see [plugins.md](plugins.md)); another team's site, a missing one or a limit drops the record with
 one progress warning.
 
+It reads the collections its manifest declares in `reads`: each run receives them on stdin as
+`sites`, newest first, from its own team's sites only, up to 8 MiB a run (less when the work batch,
+config or secrets are large), with a sentence when some were cut (see
+[plugins.md](plugins.md#reading-site-data-reads)). A page's Delete or Archive is best kept in the
+document itself - a `status` the plugin reads - rather than in a second store of the plugin's own.
+
 ## A complete example: `samples/sites/triage`
 
 [`samples/sites/triage`](../samples/sites/triage) is a triage queue over the `items` collection with
