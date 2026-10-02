@@ -1665,6 +1665,9 @@ app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
 
     var memberTemp = app.Services.GetRequiredService<MemberTempRoot>();
     app.Logger.LogInformation("Member temporary folders: {Path} - {Reason}", memberTemp.Path, memberTemp.Reason);
+
+    // The homes a launch check or a listing made there and a stopped Host never removed.
+    await RunHome.SweepSharedAsync(memberTemp.Path, runAs, CancellationToken.None);
 }
 
 // THE ADDRESS EVERY MEMBER IS TOLD TO CALL, printed for the reason the dev server prints its proxy

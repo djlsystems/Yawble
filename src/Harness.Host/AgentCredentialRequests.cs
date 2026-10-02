@@ -19,8 +19,8 @@ namespace Harness.Host;
 /// <para>
 /// WHO CAN ASK: whoever can write in that folder, which is the Host's own, mode 0700 - root at the
 /// engine and the Host. An agent can neither write a request nor read one: a folder that is a link,
-/// is owned by another user, or that any other user can read or write is refused and nothing in it
-/// is answered. The requester is the operator (<see cref="CredentialActor.Operator"/>), and its
+/// is owned by another user, or that any other user can read or write is refused: a request in it is
+/// deleted unanswered, and the CLI is told why when that is safe (<see cref="RefuseAsync"/>). The requester is the operator (<see cref="CredentialActor.Operator"/>), and its
 /// rows say so. A request left from before a restart is deleted unanswered at start.
 /// </para>
 /// </summary>
@@ -99,7 +99,7 @@ public sealed class AgentCredentialRequests(AgentCredentials credentials, string
         {
             if (_warned != refusal) logger.LogWarning("Agent credential requests are not answered: {Refusal}", refusal);
             _warned = refusal;
-            return false;
+            return await RefuseAsync(request, ct);
         }
 
         _warned = null;
@@ -141,12 +141,52 @@ public sealed class AgentCredentialRequests(AgentCredentials credentials, string
             "clear" => await credentials.ClearAsync(agent, CredentialActor.Operator, ct),
             "source" => await credentials.SourceAsync(agent, Text(root, "source"), CredentialActor.Operator, ct),
             "status" => await credentials.StatusAsync(agent, ct),
-            var other => (400, (object)new { error = $"'{other}' is not an action: set, clear, source or status." }),
+            _ => (400, (object)new { error = "The action must be set, clear, source or status." }),
         };
 
         await WriteReportAsync(new { request = nonce, status, body }, ct);
         return true;
     }
+
+    /// <summary>
+    /// A request in a folder that cannot be trusted: DELETED UNANSWERED, never left on disk, since it
+    /// may hold a value. When the folder is still the Host's own and only too open to read - not a
+    /// link, not another user's, not writable by others, so nobody else can plant a file where the
+    /// report is written - the CLI is also told why, in a report with status 503 and
+    /// <see cref="FolderRefused"/>, which names nothing the request held. Otherwise nothing is written
+    /// there, and the CLI sees its request gone with no report. Returns whether a report was written.
+    /// </summary>
+    private async Task<bool> RefuseAsync(string request, CancellationToken ct)
+    {
+        var reportable = ConnectRequests.FolderRefusal(Root) is null;
+
+        string? nonce = null;
+        try
+        {
+            if (reportable && new FileInfo(request).LinkTarget is null)
+            {
+                nonce = Text(JsonDocument.Parse(await File.ReadAllTextAsync(request, ct)).RootElement, "request");
+            }
+        }
+        catch (JsonException)
+        {
+            // Unreadable as a request: deleted below, unanswered.
+        }
+        finally
+        {
+            File.Delete(request);
+        }
+
+        if (string.IsNullOrWhiteSpace(nonce)) return false;
+
+        await WriteReportAsync(new { request = nonce, status = 503, body = new { error = FolderRefused } }, ct);
+        return true;
+    }
+
+    /// <summary>The reason a refused folder's report gives: fixed, naming nothing the request held.</summary>
+    public const string FolderRefused =
+        "The Host did not act on this request and deleted it: its request folder can be read by other users, "
+        + "and it must be the Host's alone (mode 0700). Nothing was changed; the Host's log says what is wrong.";
 
     /// <summary>Why the folder cannot be trusted, or null: <see cref="ConnectRequests.FolderRefusal(string)"/>,
     /// and nobody but the Host may read it either, because a request can hold a value.</summary>
