@@ -74,6 +74,27 @@ public sealed class WorkerKeyTests(WorkerKeyTests.KeyedHost host) : IClassFixtur
     }
 
     [Fact]
+    public async Task The_console_files_are_served_without_the_worker_key_and_refused_with_it()
+    {
+        foreach (var (url, file) in new[] { ("/", "index.html"), ("/index.html", "index.html"), ("/assets/app.js", "assets/app.js") })
+        {
+            var content = await File.ReadAllTextAsync(Path.Combine(host.WebRoot, file), Ct);
+
+            // Without a key: the file itself, from the web root.
+            using var bare = host.Client(null);
+            var served = await bare.GetAsync(url, Ct);
+            Assert.True(served.StatusCode == HttpStatusCode.OK, $"{url}: {(int)served.StatusCode}");
+            Assert.Equal(content, await served.Content.ReadAsStringAsync(Ct));
+
+            // With the worker key: refused before the file is reached.
+            using var keyed = host.Client(KeyedHost.Key);
+            var refused = await keyed.GetAsync(url, Ct);
+            Assert.True(refused.StatusCode == HttpStatusCode.Forbidden, $"{url}: {(int)refused.StatusCode}");
+            Assert.Equal(WorkerKeyGate.ElsewhereText, await ErrorOf(refused));
+        }
+    }
+
+    [Fact]
     public async Task The_worker_key_is_accepted_on_the_worker_connection()
     {
         // The upgrade is taken: the connection opens, and this Host - which runs its runs itself - says so.
@@ -183,7 +204,10 @@ public sealed class WorkerKeyTests(WorkerKeyTests.KeyedHost host) : IClassFixtur
         try
         {
             using var json = JsonDocument.Parse(text);
-            return json.RootElement.TryGetProperty("error", out var error) ? error.GetString() : text;
+            return json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.String
+                ? error.GetString()
+                : text;
         }
         catch (JsonException)
         {
@@ -199,20 +223,27 @@ public sealed class WorkerKeyTests(WorkerKeyTests.KeyedHost host) : IClassFixtur
         private readonly string _root = Directory.CreateTempSubdirectory("harness-worker-key-").FullName;
         private WebApplicationFactory<Program> _factory = null!;
 
+        /// <summary>The console's files, as a build puts them: an index page and an asset.</summary>
+        public string WebRoot => Path.Combine(_root, "wwwroot");
+
         public IServiceProvider Services => _factory.Services;
 
         public Microsoft.AspNetCore.TestHost.TestServer Server => _factory.Server;
 
-        public static WebApplicationFactory<Program> Over(string root, string? key) =>
+        public static WebApplicationFactory<Program> Over(string root, string? key, string? webRoot = null) =>
             new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("DataRoot", root).UseSetting("Logging:LogLevel:Default", "Warning");
                 if (key is not null) builder.UseSetting("Workers:Key", key);
+                if (webRoot is not null) builder.UseSetting(WebHostDefaults.WebRootKey, webRoot);
             });
 
         public ValueTask InitializeAsync()
         {
-            _factory = Over(_root, Key);
+            Directory.CreateDirectory(Path.Combine(WebRoot, "assets"));
+            File.WriteAllText(Path.Combine(WebRoot, "index.html"), "<!doctype html><title>console</title>");
+            File.WriteAllText(Path.Combine(WebRoot, "assets", "app.js"), "console.log('app');");
+            _factory = Over(_root, Key, WebRoot);
             _ = Services;
             return ValueTask.CompletedTask;
         }
