@@ -113,9 +113,13 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
 
     private readonly TimeProvider _clock;
     private readonly object _gate = new();
-    private readonly object _sampling = new();
+    private readonly SemaphoreSlim _sampling = new(1, 1);
     private readonly List<RunMeasured> _measured = [];
-    private WorkerCapacitySampled? _sampled;
+    private Round? _round;
+
+    /// <summary>What a worker that did not answer in time reads as: every figure not measured, never 0.</summary>
+    private static readonly WorkerCapacitySampled Unanswered =
+        new(DateTimeOffset.MinValue, WorkerCapacity.ToFigures(WorkerCapacity.NotMeasured with { NotMeasured = CgroupReader.AllFigures }), []);
     private readonly Queue<CapacitySample> _history = new();
     private Previous? _previous;
 
@@ -136,53 +140,94 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         lock (_gate) return _history.ToArray();
     }
 
-    /// <summary>Takes one sample now, keeps it, hands it to the gate and the ledger, and returns it.</summary>
     /// <summary>What the worker measured for the sample in progress.</summary>
     public Task HandleAsync(WorkerEnvelope envelope, CancellationToken ct = default)
     {
         lock (_measured)
         {
+            // A measurement that arrives after its round gave up on it is dropped, never charged to the next.
+            if (_round is not { } round || round.Worker != envelope.Worker) return Task.CompletedTask;
+
             if (envelope.Event is RunMeasured measured) _measured.Add(measured);
-            else if (envelope.Event is WorkerCapacitySampled sampled) _sampled = sampled;
+            else if (envelope.Event is WorkerCapacitySampled sampled) round.Sampled.TrySetResult(sampled);
         }
 
         return Task.CompletedTask;
     }
 
-    public CapacitySample Sample()
+    /// <summary>
+    /// Takes one sample now and returns it. An entry point for callers in this process, which have
+    /// always taken a sample synchronously; a worker in this process has answered by the time its
+    /// send completes, so this never waits on a timer.
+    /// </summary>
+    public CapacitySample Sample() => SampleAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Takes one sample, keeps it, hands it to the gate and the ledger, and returns it. A worker that
+    /// has not answered within <see cref="Interval"/> is not measured this round: its gate keeps the
+    /// figures it last had, and nothing waits on it past the interval.
+    /// </summary>
+    public async Task<CapacitySample> SampleAsync(CancellationToken ct = default)
     {
-        lock (_sampling)
+        await _sampling.WaitAsync(ct);
+        try
         {
-            return SampleLocked();
+            return await SampleLockedAsync(ct);
+        }
+        finally
+        {
+            _sampling.Release();
         }
     }
 
-    private CapacitySample SampleLocked()
+    private async Task<CapacitySample> SampleLockedAsync(CancellationToken ct)
     {
         var at = _clock.GetUtcNow();
 
         IReadOnlyList<RunMeasured> measuredRuns;
-        WorkerCapacitySampled sampled;
+        var round = new Round(worker.Id);
         lock (_measured)
         {
             _measured.Clear();
-            _sampled = null;
+            _round = round;
         }
 
-        // In process the worker has measured, and said so, by the time the send completes.
-        worker.SendAsync(new SampleCapacity()).GetAwaiter().GetResult();
+        // A send that fails is a worker that will not answer this round.
+        _ = worker.SendAsync(new SampleCapacity(), ct).ContinueWith(
+            send => round.Sampled.TrySetResult(null),
+            CancellationToken.None,
+            TaskContinuationOptions.NotOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        WorkerCapacitySampled? answered;
+        try
+        {
+            answered = await round.Sampled.Task.WaitAsync(Interval, _clock, ct);
+        }
+        catch (TimeoutException)
+        {
+            answered = null;
+        }
 
         lock (_measured)
         {
-            measuredRuns = [.. _measured];
-            sampled = _sampled ?? throw new InvalidOperationException($"Worker {worker.Id} sent no capacity sample.");
+            measuredRuns = answered is null ? [] : [.. _measured];
+            _measured.Clear();
+            _round = null;
         }
 
+        if (answered is null)
+        {
+            logger?.LogWarning("Worker {Worker} did not answer the capacity sample within {Interval}; it is not measured this round.", worker.Id, Interval);
+        }
+
+        var sampled = answered ?? Unanswered;
         var figures = WorkerCapacity.ToCgroup(sampled.Figures);
         var view = wip.View();
 
-        // The gate answers from this measurement from here on; the sample says what it answers.
-        gate.Update(figures, at);
+        // The gate answers from this measurement from here on; the sample says what it answers. A worker
+        // that did not answer leaves its gate with the figures it last had, at their own age.
+        if (answered is not null) gate.Update(figures, at);
         var holding = gate.Reason();
 
         CapacitySample sample;
@@ -262,7 +307,7 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         {
             try
             {
-                var sample = Sample();
+                var sample = await SampleAsync(stoppingToken);
                 if (push is not null) await push(sample);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -272,6 +317,14 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
             }
         }
         while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    /// <summary>One worker's answer to the sample in progress.</summary>
+    private sealed class Round(WorkerId worker)
+    {
+        public WorkerId Worker => worker;
+
+        public TaskCompletionSource<WorkerCapacitySampled?> Sampled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private sealed record Previous(DateTimeOffset At, long? CpuUsageUsec, IReadOnlyDictionary<int, long> RunTicks);
