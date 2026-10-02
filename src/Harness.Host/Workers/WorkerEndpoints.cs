@@ -12,14 +12,13 @@ namespace Harness.Host;
 public static class WorkerEndpoints
 {
     /// <summary>No worker key, or not this instance's.</summary>
-    public const string WrongKeyText =
-        "This route takes this instance's worker key in X-Api-Key, and none was given or the one given is not it.";
+    public const string WrongKeyText = WorkerSentences.WrongKey;
 
     /// <summary>A person, or a credential that is not the worker key.</summary>
-    public const string NotAWorkerText = "Only a worker connects here, with the worker key.";
+    public const string NotAWorkerText = WorkerSentences.NotAWorker;
 
     /// <summary>The worker key, but not on a WebSocket.</summary>
-    public const string NotAWebSocketText = "A worker connects here with a WebSocket.";
+    public const string NotAWebSocketText = WorkerSentences.NotAWebSocket;
 
     /// <param name="accept">Takes a worker's WebSocket once the request is the worker key's, until the connection ends.</param>
     public static void Map(WebApplication app, Func<HttpContext, Task>? accept = null)

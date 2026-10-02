@@ -2261,7 +2261,23 @@ LedgerEndpoints.Map(app);
 OutcomeEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
-WorkerEndpoints.Map(app);
+// A worker's one connection. This Host runs its runs itself, so it welcomes none: a worker that
+// connects is told so, in a sentence, and stops.
+var workerConnections = new WorkerConnections(
+    app.Services.GetRequiredService<WorkerPool>(),
+    app.Services.GetRequiredService<WipLedger>(),
+    (_, _) => Task.CompletedTask,
+    _ => [],
+    workerKey,
+    takesWorkers: false,
+    BuildVersion.Current.Version,
+    diagnostics: app.Services.GetRequiredService<IDiagnosticsLog>(),
+    log: app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+WorkerEndpoints.Map(app, async context =>
+{
+    using var socket = await context.WebSockets.AcceptWebSocketAsync();
+    await workerConnections.AcceptAsync(socket, context.RequestAborted);
+});
 RemovalEndpoints.Map(app);
 LocalRepoEndpoints.Map(app);
 

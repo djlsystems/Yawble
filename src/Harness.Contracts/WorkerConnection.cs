@@ -82,6 +82,35 @@ public sealed record RunWorkerSettings(MemoryFigure? RunLimit, long ReserveMb)
     public static RunWorkerSettings None { get; } = new(null, 0);
 }
 
+/// <summary>The sentences a worker connection is refused with: control answers them, and a worker logs them.</summary>
+public static class WorkerSentences
+{
+    /// <summary>No worker key, or not this instance's.</summary>
+    public const string WrongKey =
+        "This route takes this instance's worker key in X-Api-Key, and none was given or the one given is not it.";
+
+    /// <summary>A person, or a credential that is not the worker key.</summary>
+    public const string NotAWorker = "Only a worker connects here, with the worker key.";
+
+    /// <summary>The worker key, but not on a WebSocket.</summary>
+    public const string NotAWebSocket = "A worker connects here with a WebSocket.";
+
+    /// <summary>A worker that said nothing in time.</summary>
+    public const string NoHello = "No hello within 10 s.";
+
+    /// <summary>A Host that runs its runs itself takes no worker.</summary>
+    public const string NotControl =
+        "This Host runs its runs itself (--Role all) and takes no worker; start it with --Role control for workers to connect.";
+
+    /// <summary>A worker of another build.</summary>
+    public static string OtherVersion(string worker, string control) =>
+        $"This worker is version {worker} and control is version {control}; a worker must run control's version.";
+
+    /// <summary>A second worker under a name that is connected.</summary>
+    public static string NameTaken(WorkerId worker, DateTimeOffset since) =>
+        $"A worker named {worker} is already connected, since {since.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC; give each worker its own HARNESS_WORKER_ID.";
+}
+
 /// <summary>
 /// Writes and reads one connection's frames: the JSON every frame is written in, and the sealing of
 /// a run's secrets under the connection's key. Made once a connection's nonces are known.

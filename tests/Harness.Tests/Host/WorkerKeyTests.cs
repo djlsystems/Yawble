@@ -76,12 +76,25 @@ public sealed class WorkerKeyTests(WorkerKeyTests.KeyedHost host) : IClassFixtur
     [Fact]
     public async Task The_worker_key_is_accepted_on_the_worker_connection()
     {
-        // Past the key and the kind: only the WebSocket is missing.
+        // The upgrade is taken: the connection opens, and this Host - which runs its runs itself - says so.
+        var sockets = host.Server.CreateWebSocketClient();
+        sockets.ConfigureRequest = request => request.Headers[ApiKeyAuthenticationHandler.Header] = KeyedHost.Key;
+        using var webSocket = await sockets.ConnectAsync(new Uri(host.Server.BaseAddress, WorkerKeyGate.ConnectRoute.TrimStart('/')), Ct);
+        using var socket = new WorkerSocket(webSocket, new WorkerFrameCodec(null));
+        await socket.SendAsync(
+            new WorkerHello(new WorkerId("w1"), BuildVersion.Current.Version, "s1", "n", new WorkerHelloCapacity(null, null), [], 0), Ct);
+        Assert.Equal(WorkerSentences.NotControl, Assert.IsType<WorkerRefused>(await socket.ReceiveAsync(Ct)).Sentence);
+
+        // Past the key and the kind, without a WebSocket: only the WebSocket is missing.
         using var client = host.Client(KeyedHost.Key);
         var response = await client.GetAsync(WorkerKeyGate.ConnectRoute, Ct);
-
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(WorkerEndpoints.NotAWebSocketText, await ErrorOf(response));
+
+        // And a wrong key gets no upgrade.
+        var wrong = host.Server.CreateWebSocketClient();
+        wrong.ConfigureRequest = request => request.Headers[ApiKeyAuthenticationHandler.Header] = "not-it";
+        await Assert.ThrowsAnyAsync<Exception>(() => wrong.ConnectAsync(new Uri(host.Server.BaseAddress, WorkerKeyGate.ConnectRoute.TrimStart('/')), Ct));
     }
 
     [Fact]
@@ -187,6 +200,8 @@ public sealed class WorkerKeyTests(WorkerKeyTests.KeyedHost host) : IClassFixtur
         private WebApplicationFactory<Program> _factory = null!;
 
         public IServiceProvider Services => _factory.Services;
+
+        public Microsoft.AspNetCore.TestHost.TestServer Server => _factory.Server;
 
         public static WebApplicationFactory<Program> Over(string root, string? key) =>
             new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
