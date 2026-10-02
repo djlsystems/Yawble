@@ -9,6 +9,7 @@ import {
   Ribbon,
   SitesAction,
   TeamSitesAction,
+  TeamDocumentsAction,
   TenantSettingsAction,
   needsActiveWorkTeam,
 } from '../ribbon'
@@ -82,11 +83,24 @@ describe('the ribbon', () => {
   })
 
   it('names the documents action for what it needs rather than for its tab or its team', () => {
-    const actions = Ribbon.tabs.flatMap((tab) => tab.items.map((item) => item.action))
+    const projects = Ribbon.tabs.find((tab) => tab.id === 'projects')!.items.map((item) => item.action)
 
-    expect(actions).toContain(DocumentsAction)
-    expect(actions).not.toContain('team-documents')
-    expect(actions).not.toContain('projects-documents')
+    expect(projects).toContain(DocumentsAction)
+    expect(DocumentsAction).not.toMatch(/^team-/)
+    expect(Ribbon.tabs.flatMap((tab) => tab.items.map((item) => item.action))).not.toContain('projects-documents')
+  })
+
+  /**
+   * THE SECOND WAY IN, AND ONLY A SHORTCUT. Active Team > Documents opens the same explorer at the
+   * active team's folder, so it needs an active team and is gated by the prefix like every other
+   * `team-` action. Projects > Documents stays the ungated door to every folder.
+   */
+  it('offers Active Team > Documents, gated by an active team', () => {
+    const active = Ribbon.tabs.find((tab) => tab.id === 'active')!.items.map((item) => item.action)
+
+    expect(active).toContain(TeamDocumentsAction)
+    expect(needsActiveWorkTeam(TeamDocumentsAction, undefined)).toBe(true)
+    expect(needsActiveWorkTeam(TeamDocumentsAction, 'alpha')).toBe(false)
   })
 
   /**

@@ -1,5 +1,18 @@
-import { json, send } from './client'
-import type { DocumentsFolder, DocumentsFolderKey } from './types'
+import { ActionRefused, json, send } from './client'
+import type {
+  DocumentEntry,
+  DocumentsChangeAnswer,
+  DocumentsClash,
+  DocumentsChangeResult,
+  DocumentsFolder,
+  DocumentsFolderKey,
+  DocumentsRenameItem,
+  DocumentsTransfer,
+  DocumentsUploadAnswer,
+  OnClash,
+} from './types'
+
+export type { DocumentEntry } from './types'
 
 /**
  * EVERY CALL TO THE TENANT DOCUMENTS SURFACE, AND THERE IS ONLY ONE OF THIS FILE.
@@ -16,6 +29,9 @@ import type { DocumentsFolder, DocumentsFolderKey } from './types'
  * | create a folder | `POST /api/teams/{folder}/documents/folders` |
  * | upload | `POST /api/teams/{folder}/documents/upload` |
  * | delete | `DELETE /api/teams/{folder}/documents` |
+ * | rename | `POST /api/teams/{folder}/documents/rename` |
+ * | move | `POST /api/teams/{folder}/documents/move` |
+ * | copy | `POST /api/teams/{folder}/documents/copy` |
  *
  * **THE ROUTES DECLARE `{team}`**, which is what puts them inside `TeamGate` STRUCTURALLY - a route
  * naming a team any other way is not gated, silently.
@@ -27,23 +43,6 @@ import type { DocumentsFolder, DocumentsFolderKey } from './types'
  */
 
 /**
- * One row inside a folder.
- *
- * `DocumentEntry` lives here rather than in `types.ts` because it is this surface's own row shape
- * and nothing else names it - where `DocumentsFolder` is the shared wire record in `types.ts`,
- * which is why it is imported rather than restated.
- */
-export interface DocumentEntry {
-  name: string
-  path: string
-  isFolder: boolean
-  size: number
-  modifiedAt: string
-  /** How many things are in a folder. What makes it removable, so the UI can say so up front. */
-  children: number
-}
-
-/**
  * Every documents folder that EXISTS on disk - which is not the same list as the teams, because a
  * folder can outlive its team.
  *
@@ -51,7 +50,18 @@ export interface DocumentEntry {
  * only where it arrives.
  */
 export const listDocumentFolders = async (): Promise<DocumentsFolder[]> =>
-  (await json<{ folders: DocumentsFolder[] }>('/api/documents')).folders
+  (await listDocumentsRoot()).folders
+
+/**
+ * The folders, and `root`: the absolute documents root as an agent sees it (`/data/documents`),
+ * which Copy as path builds `<root>/<folder>/<path>` from. `root` is empty against a server that
+ * does not send it yet, and Copy as path then says so rather than copying a wrong path.
+ */
+export const listDocumentsRoot = async (): Promise<{ folders: DocumentsFolder[]; root: string }> => {
+  const answer = await json<{ folders: DocumentsFolder[]; root?: string }>('/api/documents')
+
+  return { folders: answer.folders, root: answer.root ?? '' }
+}
 
 const docs = (folder: DocumentsFolderKey, suffix = '') =>
   `/api/teams/${encodeURIComponent(folder)}/documents${suffix}`
@@ -80,15 +90,100 @@ export const createFolder = (folder: DocumentsFolderKey, path: string) =>
     body: JSON.stringify({ path }),
   })
 
-export const uploadDocument = (folder: DocumentsFolderKey, file: File, path = '') => {
+/**
+ * One file into `path`. Without `onClash` it is the upload as it always was: a file of the same
+ * name is replaced, and the saved entry comes back. With `onClash` the answer is data: `ask`
+ * answers a clash as `clash` (nothing written), `skip` as `skipped`.
+ */
+export function uploadDocument(folder: DocumentsFolderKey, file: File, path?: string): Promise<DocumentEntry>
+export function uploadDocument(
+  folder: DocumentsFolderKey,
+  file: File,
+  path: string,
+  onClash: 'ask' | OnClash,
+): Promise<DocumentsUploadAnswer>
+export async function uploadDocument(
+  folder: DocumentsFolderKey,
+  file: File,
+  path = '',
+  onClash?: 'ask' | OnClash,
+): Promise<DocumentEntry | DocumentsUploadAnswer> {
   const form = new FormData()
   form.append('file', file)
   form.append('path', path)
+  if (onClash) form.append('onClash', onClash)
 
   // No content-type header: the browser sets it, and the multipart boundary it generates is part
   // of that value. Setting it by hand produces a body the server cannot parse.
-  return json<DocumentEntry>(docs(folder, '/upload'), { method: 'POST', body: form })
+  const init: RequestInit = { method: 'POST', body: form }
+
+  if (!onClash) return json<DocumentEntry>(docs(folder, '/upload'), init)
+
+  try {
+    const answer = await json<DocumentEntry | { skipped: true; path: string }>(docs(folder, '/upload'), init)
+
+    if ('skipped' in answer && answer.skipped) return { kind: 'skipped', path: answer.path }
+
+    return { kind: 'saved', entry: answer as DocumentEntry }
+  } catch (failure) {
+    const clash = clashOf(failure)
+    if (clash) return clash
+
+    throw failure
+  }
 }
+
+/** A 409 that carries `clashes`: the server did nothing and wants a choice per item. */
+function clashOf(failure: unknown): { kind: 'clash'; error: string; clashes: DocumentsClash[] } | null {
+  if (!(failure instanceof ActionRefused)) return null
+  if ((failure as { status?: number }).status !== 409) return null
+  if (!Array.isArray(failure.body.clashes)) return null
+
+  return { kind: 'clash', error: failure.message, clashes: failure.body.clashes as DocumentsClash[] }
+}
+
+/**
+ * A rename, move or copy, with its 409s handed back as DATA: a clash (nothing done, choose per
+ * item) and a partial result (the row was written, some items failed - every item said). Matched
+ * on the status and the presence of `clashes` or `results`, never on the sentence. Any other
+ * refusal is thrown with the server's own sentence.
+ */
+async function change(url: string, body: unknown): Promise<DocumentsChangeAnswer> {
+  try {
+    const answer = await json<{ results: DocumentsChangeResult[] }>(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    return { kind: 'ok', results: answer.results }
+  } catch (failure) {
+    const clash = clashOf(failure)
+    if (clash) return clash
+
+    if (
+      failure instanceof ActionRefused &&
+      (failure as { status?: number }).status === 409 &&
+      Array.isArray(failure.body.results)
+    ) {
+      return { kind: 'partial', error: failure.message, results: failure.body.results as DocumentsChangeResult[] }
+    }
+
+    throw failure
+  }
+}
+
+/** Renames in place: same parent, new leaf name, a batch per request. */
+export const renameDocuments = (folder: DocumentsFolderKey, items: DocumentsRenameItem[]) =>
+  change(docs(folder, '/rename'), { items })
+
+/** Moves from `folder` into `transfer.to`, which may be another team's documents folder. */
+export const moveDocuments = (folder: DocumentsFolderKey, transfer: DocumentsTransfer) =>
+  change(docs(folder, '/move'), transfer)
+
+/** Copies from `folder` into `transfer.to`. */
+export const copyDocuments = (folder: DocumentsFolderKey, transfer: DocumentsTransfer) =>
+  change(docs(folder, '/copy'), transfer)
 
 /**
  * `recursive` takes a folder with things in it, and is sent only after the person was asked -

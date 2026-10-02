@@ -77,6 +77,13 @@ export const OutcomesAction = 'admin-outcomes';
 /** Admin > Sites, every team's published sites: opened, rolled back, unpublished, deleted. */
 export const SitesAction = 'admin-sites';
 
+/**
+ * Active Team > Documents: the same explorer as Projects > Documents, opened at the active team's
+ * own folder instead of the root. `team-`, so it needs one. Projects > Documents stays unprefixed
+ * and ungated - every folder, gone teams' included, is reachable from there.
+ */
+export const TeamDocumentsAction = 'team-documents';
+
 /** Active Team > Sites, the same screen filtered to the active team. `team-`, so it needs one. */
 export const TeamSitesAction = 'team-sites';
 
@@ -119,6 +126,7 @@ export const Ribbon: RibbonSpec = {
         { kind: 'button', action: 'team-kanban', label: 'Kanban', icon: 'view_kanban', size: 'small' },
         { kind: 'button', action: 'team-git', label: 'Git', icon: 'account_tree', size: 'small' },
         { kind: 'button', action: TeamSitesAction, label: 'Sites', icon: 'public', size: 'small' },
+        { kind: 'button', action: TeamDocumentsAction, label: 'Documents', icon: 'folder_open', size: 'small' },
         { kind: 'button', action: 'team-settings', label: 'Settings', icon: 'settings', size: 'small' },
         { kind: 'button', action: 'team-reset', label: 'Reset', icon: 'restart_alt', size: 'small' },
       ],
@@ -206,8 +214,9 @@ export const Ribbon: RibbonSpec = {
  * documents root is the TENANT's, holding a folder per team; the screen names which team's folder
  * it is showing. Requiring an active team to open it would make the folders of every OTHER team
  * unreachable, including the ones whose team is gone - which is the case that matters
- * most. SO IT IS DELIBERATELY NOT `team-documents`. That name would be a lie about where documents
- * live and would impose a coupling to the active team that documents do not have.
+ * most. SO IT IS DELIBERATELY NOT `team-documents`. That name belongs to the second way in, under
+ * Active Team, which opens the same explorer at the active team's folder and is gated like every
+ * other `team-` action - a shortcut, never the only door.
  *
  * DO NOT NAME EITHER OF THEM `projects-...`. A prefix that names the TAB rather than a REQUIREMENT
  * breaks the rule `team-` rests on - the prefix IS the rule - and the next reader would reasonably

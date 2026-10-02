@@ -72,7 +72,11 @@ export default defineConfig((ctx) => {
       // The type scale and the token utility classes. After `app.scss` because it reads its tokens.
       'type.scss',
       // The dialog scale: one class per dialog card. Its own file; the tokens it reads are app.scss's.
-      'dialog-scale.scss'
+      'dialog-scale.scss',
+      // The tile grid Agents, Plugins and Documents share.
+      'tiles.scss',
+      // The Documents explorer's selection and drop states, shared by its views, tree and crumbs.
+      'documents.scss'
     ],
 
     // https://github.com/quasarframework/quasar/tree/dev/extras

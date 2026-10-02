@@ -18,8 +18,7 @@ import type { FileBrowserEntry, FileBrowserListing, FileBrowserSource } from './
  * separate optional prop on `FileBrowser`; this module hands back a source and nothing else, so a
  * picker built on it cannot pass one. The control is then ABSENT because it was never passed -
  * not present and disabled, and not hidden behind a flag. `/api/fs` has no delete route to give it
- * one, and adding a fifth is ruled out. See `documentsSource.ts`, which DOES
- * hand back a `deletion` alongside its source, for the shape this deliberately does not have.
+ * one, and adding a fifth is ruled out.
  *
  * NOTHING HERE SPLITS OR REJOINS A PATH THAT THE RENDERER THEN RE-PARSES. `hostPath.ts` is used
  * unchanged - `breadcrumbs`, `parentWithin`, `childOf` - and what it produces is handed over
@@ -36,8 +35,8 @@ export interface HostBrowser {
    *
    * A ref because the picker's own caption names it ("Documents", "D:\") and only the source knows
    * which root a path landed in - the browser above it treats every path as opaque. Kept OUT of
-   * `FileBrowserListing` for the same reason `documentsSource` keeps its child counts to itself: a
-   * field only one of the two surfaces has is exactly what turns one shared row type back into two.
+   * `FileBrowserListing`: a field only one surface has is exactly what turns one shared row type
+   * back into two.
    */
   activeRoot: Ref<FileSystemRoot | null>
 }

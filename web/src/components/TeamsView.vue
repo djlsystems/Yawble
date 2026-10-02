@@ -26,6 +26,7 @@ import {
   type TeamRow,
   type TeamSort,
 } from '../lib/teamsTable';
+import { ariaSort } from '../lib/tableSort';
 import type { LocalRepo, Team, TeamDeleted, TeamId } from '../api/types';
 import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
@@ -508,9 +509,7 @@ async function setPaused(team: Team | null, paused: boolean) {
             :key="heading.key"
             :data-col="heading.key"
             class="text-left"
-            :aria-sort="sort.column === heading.key
-              ? (sort.descending ? 'descending' : 'ascending')
-              : 'none'"
+            :aria-sort="ariaSort(sort, heading.key)"
           >
             <q-btn
               flat

@@ -36,6 +36,7 @@ import {
 } from '../api/client';
 import { useConsoleStore } from '../stores/console';
 import { useTerminalDisplayStore } from '../stores/terminalDisplay';
+import { useWindowFrame } from '../lib/useWindowFrame';
 import { agentsForMode, type ConciergeSettings, type TeamId } from '../api/types';
 
 const props = defineProps<{
@@ -555,102 +556,22 @@ function refit() {
   }
 }
 
-// Window drag/resize state
-let dragStart = { x: 0, y: 0 };
-let dragMode: 'move' | 'resize-e' | 'resize-s' | 'resize-se' | null = null;
-
-function onToolbarPointerDown(event: PointerEvent) {
-  // Ignore drag from buttons
-  if (
-    (event.target as Element)?.closest('button, [role="button"], q-btn') ||
-    (event.target as Element)?.closest('.q-icon')
-  ) {
-    return;
-  }
-
-  dragStart = { x: event.clientX, y: event.clientY };
-  dragMode = 'move';
-
-  const shell = (event.currentTarget as Element)?.closest('.concierge-shell');
-  if (shell) {
-    shell.setPointerCapture(event.pointerId);
-    shell.addEventListener('pointermove', onShellPointerMove);
-    shell.addEventListener('pointerup', onShellPointerUp);
-    shell.addEventListener('pointercancel', onShellPointerUp);
-  }
-}
-
-function onEdgePointerDown(event: PointerEvent, mode: 'resize-e' | 'resize-s' | 'resize-se') {
-  event.preventDefault();
-  event.stopPropagation();
-  dragStart = { x: event.clientX, y: event.clientY };
-  dragMode = mode;
-
-  const shell = (event.currentTarget as Element)?.closest('.concierge-shell');
-  if (shell) {
-    shell.setPointerCapture(event.pointerId);
-    shell.addEventListener('pointermove', onShellPointerMove);
-    shell.addEventListener('pointerup', onShellPointerUp);
-    shell.addEventListener('pointercancel', onShellPointerUp);
-  }
-}
-
-function onShellPointerMove(event: Event) {
-  if (!(event instanceof PointerEvent)) return;
-  if (!dragMode || !isWindowed.value) return;
-
-  const dx = event.clientX - dragStart.x;
-  const dy = event.clientY - dragStart.y;
-
-  const viewportW = window.visualViewport?.width ?? window.innerWidth;
-  const viewportH = window.visualViewport?.height ?? window.innerHeight;
-
-  if (dragMode === 'move') {
-    display.set({
-      left: display.left + dx,
-      top: display.top + dy,
-    });
-    // Clamp to viewport after move
-    display.clampToViewport(viewportW, viewportH);
-  } else if (dragMode === 'resize-e') {
-    display.set({ width: display.width + dx });
-    display.clampToViewport(viewportW, viewportH);
-  } else if (dragMode === 'resize-s') {
-    display.set({ height: display.height + dy });
-    display.clampToViewport(viewportW, viewportH);
-  } else if (dragMode === 'resize-se') {
-    display.set({
-      width: display.width + dx,
-      height: display.height + dy,
-    });
-    display.clampToViewport(viewportW, viewportH);
-  }
-
-  dragStart = { x: event.clientX, y: event.clientY };
-}
-
-function onShellPointerUp(event: Event) {
-  if (!(event instanceof PointerEvent)) return;
-
-  dragMode = null;
-
-  const shell = (event.currentTarget as Element);
-  if (shell) {
-    // Remove listeners and release capture
-    shell.removeEventListener('pointermove', onShellPointerMove);
-    shell.removeEventListener('pointerup', onShellPointerUp);
-    // SAME HANDLER, BOTH EVENTS. A touch drag frequently ends in `pointercancel` rather than
-    // `pointerup` - a second finger, a system edge gesture - and a drag that is never ended leaves
-    // `dragMode` set and the move listener attached, so the next stray pointermove resizes the
-    // window without anybody touching a handle.
-    shell.removeEventListener('pointercancel', onShellPointerUp);
-    try {
-      shell.releasePointerCapture(event.pointerId);
-    } catch {
-      // Ignore if capture was already released
-    }
-  }
-}
+/**
+ * Window drag/resize: the shared pointer half (`lib/useWindowFrame`), over the display store's
+ * geometry. Every step is clamped to the viewport and remembered by the store.
+ */
+const frame = useWindowFrame({
+  geometry: () => ({ left: display.left, top: display.top, width: display.width, height: display.height }),
+  apply: (next) => {
+    display.set(next);
+    display.clampToViewport(
+      window.visualViewport?.width ?? window.innerWidth,
+      window.visualViewport?.height ?? window.innerHeight,
+    );
+  },
+  isWindowed: () => isWindowed.value,
+  shellSelector: '.concierge-shell',
+});
 
 async function refresh() {
   if (!terminal || !fit || !socket) return;
@@ -1010,7 +931,7 @@ onBeforeUnmount(() => {
             }
       "
     >
-      <q-toolbar class="concierge-bar bg-dark" @pointerdown="onToolbarPointerDown">
+      <q-toolbar class="concierge-bar bg-dark" @pointerdown="frame.onHandlePointerDown">
         <q-toolbar-title class="concierge-heading">
           <div class="concierge-title ellipsis">
             Concierge
@@ -1228,17 +1149,17 @@ onBeforeUnmount(() => {
       <div
         v-if="isWindowed"
         class="concierge-resize-e"
-        @pointerdown="onEdgePointerDown($event, 'resize-e')"
+        @pointerdown="frame.onEdgePointerDown($event, 'resize-e')"
       />
       <div
         v-if="isWindowed"
         class="concierge-resize-s"
-        @pointerdown="onEdgePointerDown($event, 'resize-s')"
+        @pointerdown="frame.onEdgePointerDown($event, 'resize-s')"
       />
       <div
         v-if="isWindowed"
         class="concierge-resize-se"
-        @pointerdown="onEdgePointerDown($event, 'resize-se')"
+        @pointerdown="frame.onEdgePointerDown($event, 'resize-se')"
       />
 
       <!-- Touch, not width. These bars exist for devices whose keyboard is on the screen: no Esc or
@@ -1298,7 +1219,7 @@ onBeforeUnmount(() => {
   cursor: move;
 
   /* The move gesture, and the same reason as the resize handles below: without this the browser
-     pans the page on the first touchmove and the drag is gone before `onToolbarPointerDown`'s
+     pans the page on the first touchmove and the drag is gone before `frame.onHandlePointerDown`'s
      listeners see it. The buttons inside are excluded in the handler, not here. */
   touch-action: none;
 }
