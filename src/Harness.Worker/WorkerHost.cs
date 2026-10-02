@@ -118,6 +118,11 @@ public sealed class WorkerHost
                 await SampleAsync(ct);
                 break;
 
+            case CheckLaunch check:
+                // On its own task, as a run is: the answer is an event, under the check's request.
+                _ = Task.Run(() => CheckAsync(check), CancellationToken.None);
+                break;
+
             default:
                 throw new NotSupportedException($"A worker does not take {message.GetType().Name}.");
         }
@@ -175,6 +180,31 @@ public sealed class WorkerHost
         }
     }
 
+    /// <summary>Runs a launch check with this worker's own launch and says what it found.</summary>
+    private async Task CheckAsync(CheckLaunch check)
+    {
+        AgentLaunchReport report;
+        try
+        {
+            report = await _launcher.CheckLaunchAsync(
+                check.Launch, check.Check, check.UpdateArguments, check.Environment, check.Memory, CancellationToken.None,
+                check.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null, check.Credential, check.Redaction, check.TempRoot);
+        }
+        catch (Exception exception)
+        {
+            report = AgentLaunchReport.Unchecked($"The launch check failed on worker {_id}: {exception.Message}");
+        }
+
+        try
+        {
+            await PublishAsync(new LaunchChecked(check.Request, report.Result, report.ExitCode, report.StderrTail, report.Detail));
+        }
+        catch (Exception exception)
+        {
+            _log?.LogWarning("A launch check ended, and saying so failed: {Message}", exception.Message);
+        }
+    }
+
     /// <summary>The run's output, usage and end, with it leaving the open set, as one publish.</summary>
     private async Task EndAsync(OpenRun open, AgentResult? result, RunFault? fault, RunEnded? processEnd)
     {
@@ -219,9 +249,11 @@ public sealed class WorkerHost
             // The cgroup first, then the process groups: the order the capacity sample always read them in.
             var at = _clock.GetUtcNow();
             var cgroup = _cgroup?.Read() ?? WorkerCapacity.NotMeasured;
-            Dictionary<ContainerId, RunId> byMember;
-            lock (_runsGate) byMember = _runs.Keys.GroupBy(r => r.Member).ToDictionary(g => g.Key, g => g.First());
-            IReadOnlyList<RunId> open = [.. byMember.Values];
+            // Every open run is listed; a process group is registered by member, so its measurement
+            // is charged to one open run of that member.
+            IReadOnlyList<RunId> open;
+            lock (_runsGate) open = [.. _runs.Keys];
+            var byMember = open.GroupBy(r => r.Member).ToDictionary(g => g.Key, g => g.First());
 
             if (_processes is not null)
             {
@@ -283,7 +315,7 @@ public sealed class WorkerHost
 
         public Task ProgressAsync(string sentence) => worker.PublishAsync(new RunProgress(Run, sentence));
 
-        public Task CredentialAppliedAsync() => worker.PublishAsync(new RunCredentialApplied(Run));
+        public Task CredentialAppliedAsync(ValueRedactor redaction) => worker.PublishAsync(new RunCredentialApplied(Run, redaction));
 
         public Task ChildStoppedAsync(string sentence, RunMemoryLimit limit) =>
             worker.PublishAsync(new RunChildStoppedByMemoryLimit(Run, sentence, new MemoryFigure(limit.Mb, limit.Source, limit.Set)));

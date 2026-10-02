@@ -300,7 +300,7 @@ public sealed class TenantSettings
     /// </summary>
     public WipRunLimit RunLimit()
     {
-        var computed = Bounds(WipMemoryPerRunMb);
+        var computed = Computed(WipMemoryPerRunMb);
 
         if (_rows.TryGetValue(WipMaxRunningName, out var row))
         {
@@ -329,16 +329,65 @@ public sealed class TenantSettings
         return computed;
     }
 
-    private WipRunLimit Bounds(int memoryPerRunMb)
+    /// <summary>
+    /// The workers whose own bounds the default limit sums, when the runs go to workers that connect
+    /// (<c>control</c>); null when this Host runs them itself, and its own container is the one bound.
+    /// </summary>
+    public Func<IReadOnlyList<WorkerBoundSource>>? Workers { get; set; }
+
+    /// <summary>
+    /// The built-in default: this Host's own bound, or, over connected workers, the sum of each
+    /// worker's own bound - 0 with none connected, when no run can start anyway.
+    /// </summary>
+    private WipRunLimit Computed(int memoryPerRunMb)
     {
-        var cpuBound = _cpus is { } cpus ? Math.Max(1, cpus - 1) : UnknownCpuBound;
-        var cpuText = _cpus is { } c
+        if (Workers is not { } workers) return Bounds(memoryPerRunMb);
+
+        var connected = workers();
+        if (connected.Count == 0)
+        {
+            return new WipRunLimit(0, "workers", 0, null, null, null, memoryPerRunMb,
+                "no worker is connected, so no run can start; the default is the sum of each connected worker's own bound");
+        }
+
+        var each = connected.Select(w => (Worker: w, Limit: Bounds(w.Cpus, w.MemoryLimitMb, memoryPerRunMb))).ToList();
+        var limit = each.Sum(e => e.Limit.Limit);
+        var memory = each.All(e => e.Limit.MemoryLimitMb is not null) ? each.Sum(e => e.Limit.MemoryLimitMb) : null;
+        return new WipRunLimit(
+            limit, "workers", each.Sum(e => e.Limit.CpuBound),
+            each.All(e => e.Limit.Cpus is not null) ? each.Sum(e => e.Limit.Cpus) : null,
+            each.All(e => e.Limit.MemoryBound is not null) ? each.Sum(e => e.Limit.MemoryBound) : null,
+            memory, memoryPerRunMb,
+            $"sum of {each.Count} worker{(each.Count == 1 ? "" : "s")}' bounds: "
+            + string.Join(", ", each.Select(e => $"{e.Worker.Id} {e.Limit.Limit} ({e.Limit.Reason})")));
+    }
+
+    /// <summary>
+    /// How many runs one worker may hold under the default limit: its own bound. Null when
+    /// <c>wip.maxRunning</c> is set - then the set figure is the instance's total and no worker has a cap
+    /// of its own.
+    /// </summary>
+    public int? WorkerBound(WorkerBoundSource worker) =>
+        _rows.ContainsKey(WipMaxRunningName) || _configured.Contains(WipMaxRunningName)
+            ? null
+            : Bounds(worker.Cpus, worker.MemoryLimitMb, WipMemoryPerRunMb).Limit;
+
+    private WipRunLimit Bounds(int memoryPerRunMb) => Bounds(_cpus, _memoryLimitMb, memoryPerRunMb);
+
+    /// <summary>
+    /// One container's bound: the smaller of max(1, CPUs - 1) (or <see cref="UnknownCpuBound"/> when
+    /// the CPUs are not known) and, when it has a memory limit, floor(limit / per-run MB), at least 1.
+    /// </summary>
+    public static WipRunLimit Bounds(int? cpus, long? memoryLimitMb, int memoryPerRunMb)
+    {
+        var cpuBound = cpus is { } known ? Math.Max(1, known - 1) : UnknownCpuBound;
+        var cpuText = cpus is { } c
             ? $"CPU bound {cpuBound} = {c} CPUs - 1"
             : $"CPU bound {cpuBound}, as the container's CPUs are not known";
 
-        if (_memoryLimitMb is not { } limitMb)
+        if (memoryLimitMb is not { } limitMb)
         {
-            return new WipRunLimit(cpuBound, "cpu", cpuBound, _cpus, null, null, memoryPerRunMb,
+            return new WipRunLimit(cpuBound, "cpu", cpuBound, cpus, null, null, memoryPerRunMb,
                 $"{cpuText}; the container has no memory limit");
         }
 
@@ -346,9 +395,9 @@ public sealed class TenantSettings
         var memoryText = $"memory bound {memoryBound} = {limitMb} MB / {memoryPerRunMb} MB per run";
 
         return memoryBound < cpuBound
-            ? new WipRunLimit(memoryBound, "memory", cpuBound, _cpus, memoryBound, limitMb, memoryPerRunMb,
+            ? new WipRunLimit(memoryBound, "memory", cpuBound, cpus, memoryBound, limitMb, memoryPerRunMb,
                 $"{memoryText}, below the {cpuText}: the memory bound applies")
-            : new WipRunLimit(cpuBound, "cpu", cpuBound, _cpus, memoryBound, limitMb, memoryPerRunMb,
+            : new WipRunLimit(cpuBound, "cpu", cpuBound, cpus, memoryBound, limitMb, memoryPerRunMb,
                 $"{cpuText}, not above the {memoryText}: the CPU bound applies");
     }
 
@@ -358,7 +407,28 @@ public sealed class TenantSettings
     /// at least <see cref="MinRunMemoryLimitMb"/>. Null megabytes when nothing sets one (no setting
     /// and no container limit). Read on use, like every setting.
     /// </summary>
-    public RunMemoryLimit RunMemoryLimit()
+    public RunMemoryLimit RunMemoryLimit() => RunMemoryLimit(_memoryLimitMb, RunLimit().Limit, null);
+
+    /// <summary>
+    /// The memory one run on <paramref name="worker"/> may use: as <see cref="RunMemoryLimit()"/>, over
+    /// that worker's own container limit, divided by its share of the running limit - the limit times
+    /// its bound over the sum of every connected worker's bound, rounded up, at least 1. With one
+    /// worker that share is the whole limit, and the figure and its sentence are this Host's own.
+    /// </summary>
+    public RunMemoryLimit RunMemoryLimit(WorkerBoundSource worker)
+    {
+        var runs = RunLimit().Limit;
+        var connected = Workers?.Invoke() ?? [worker];
+        if (connected.Count <= 1 || runs <= 0) return RunMemoryLimit(worker.MemoryLimitMb, runs, null);
+
+        var perRun = WipMemoryPerRunMb;
+        var total = connected.Sum(w => Bounds(w.Cpus, w.MemoryLimitMb, perRun).Limit);
+        var own = Bounds(worker.Cpus, worker.MemoryLimitMb, perRun).Limit;
+        var share = (int)Math.Max(1, Math.Ceiling(runs * (double)own / Math.Max(1, total)));
+        return RunMemoryLimit(worker.MemoryLimitMb, share, $"{share} (worker {worker.Id}'s share of wip.maxRunning {runs})");
+    }
+
+    private RunMemoryLimit RunMemoryLimit(long? containerLimitMb, int runs, string? runsText)
     {
         var set = Integer(RunsMemoryLimitMbName);
         if (set > 0)
@@ -366,18 +436,17 @@ public sealed class TenantSettings
             return new RunMemoryLimit(set, $"{RunsMemoryLimitMbName} is set to {set} MB", Set: true);
         }
 
-        if (_memoryLimitMb is not { } containerMb)
+        if (containerLimitMb is not { } containerMb)
         {
             return new RunMemoryLimit(null,
                 $"{RunsMemoryLimitMbName} is 0 and the container has no memory limit to divide");
         }
 
-        var runs = RunLimit().Limit;
         var share = (containerMb - HostReserveMb) / Math.Max(1, runs);
         var mb = Math.Max(MinRunMemoryLimitMb, share);
         return new RunMemoryLimit(mb,
             $"{RunsMemoryLimitMbName} is 0, so ({containerMb} MB container limit - {HostReserveMb} MB for the Host) / "
-            + (runs > 0 ? $"{runs} (wip.maxRunning)" : "1 (wip.maxRunning is unlimited)")
+            + (runsText ?? (runs > 0 ? $"{runs} (wip.maxRunning)" : "1 (wip.maxRunning is unlimited)"))
             + (mb != share ? $", raised to the {MinRunMemoryLimitMb} MB floor" : string.Empty));
     }
 
@@ -392,25 +461,8 @@ public sealed class TenantSettings
     /// </summary>
     /// <param name="othersMb">Resident memory of every other running run, summed, in MB.</param>
     /// <param name="others">How many other runs that sum covers, for the sentence.</param>
-    public RunMemoryLimit HeavyRunMemoryLimit(long othersMb, int others)
-    {
-        var normal = RunMemoryLimit();
-        if (_memoryLimitMb is not { } containerMb)
-        {
-            return normal with
-            {
-                Source = $"the container has no memory limit to measure headroom against, so a run holding the heavy lease keeps its own limit ({normal.Source})",
-            };
-        }
-
-        var headroom = containerMb - HostReserveMb - othersMb;
-        var said = $"the run holds the heavy lease, so {containerMb} MB container limit - {HostReserveMb} MB for the Host - "
-            + $"{othersMb} MB measured in use by {others} other running run{(others == 1 ? "" : "s")}";
-
-        return normal.Mb is { } own && headroom <= own
-            ? new RunMemoryLimit(own, $"{said} leaves no more than its own limit, so it keeps {own} MB ({normal.Source})")
-            : new RunMemoryLimit(headroom, said);
-    }
+    public RunMemoryLimit HeavyRunMemoryLimit(long othersMb, int others) =>
+        RunMemoryRules.Heavy(RunMemoryLimit(), _memoryLimitMb, HostReserveMb, othersMb, others);
 
     /// <summary>
     /// The most any run could be raised to: the container's limit less <see cref="HostReserveMb"/>,
@@ -419,17 +471,11 @@ public sealed class TenantSettings
     /// limit needs a capability the Host does not hold). Equal to the run's own limit when the
     /// container has none.
     /// </summary>
-    public RunMemoryLimit RunMemoryCeiling()
-    {
-        var normal = RunMemoryLimit();
-        if (_memoryLimitMb is not { } containerMb || normal.Mb is not { } own || containerMb - HostReserveMb <= own)
-        {
-            return normal;
-        }
+    public RunMemoryLimit RunMemoryCeiling() => RunMemoryRules.Ceiling(RunMemoryLimit(), _memoryLimitMb, HostReserveMb);
 
-        return new RunMemoryLimit(containerMb - HostReserveMb,
-            $"{containerMb} MB container limit - {HostReserveMb} MB for the Host, the most a run holding the heavy lease can be given");
-    }
+    /// <summary>The most a run on <paramref name="worker"/> could be raised to, over that worker's own container limit.</summary>
+    public RunMemoryLimit RunMemoryCeiling(WorkerBoundSource worker) =>
+        RunMemoryRules.Ceiling(RunMemoryLimit(worker), worker.MemoryLimitMb, HostReserveMb);
 
     /// <summary><c>workflow.spendLimit</c> in tokens. 0 is none.</summary>
     public long WorkflowSpendLimit => Integer(WorkflowSpendLimitName);
@@ -515,7 +561,7 @@ public sealed class TenantSettings
     /// limit's built-in default is computed now, from the current <c>wip.memoryPerRunMb</c>.</summary>
     public string Fallback(string name) =>
         name == WipMaxRunningName && !_configured.Contains(name)
-            ? Bounds(WipMemoryPerRunMb).Limit.ToString(CultureInfo.InvariantCulture)
+            ? Computed(WipMemoryPerRunMb).Limit.ToString(CultureInfo.InvariantCulture)
             : _fallbacks[name];
 
     /// <summary>Where <see cref="Fallback"/> comes from: <c>appsettings</c> when the Host's
@@ -955,3 +1001,6 @@ public sealed class TenantSettings
 public sealed record WipRunLimit(
     int Limit, string Bound, int CpuBound, int? Cpus, int? MemoryBound, long? MemoryLimitMb,
     int MemoryPerRunMb, string Reason);
+
+/// <summary>A worker's own CPUs and container memory limit (null: not measured), as its bound is computed from.</summary>
+public sealed record WorkerBoundSource(WorkerId Id, int? Cpus, long? MemoryLimitMb);

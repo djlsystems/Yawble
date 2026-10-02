@@ -1,4 +1,4 @@
-import type { CapacitySample, Pressure } from '../api/types'
+import type { CapacitySample, Pressure, WorkerSample } from '../api/types'
 
 /**
  * WHAT THE ACTIVITY MONITOR SAYS ABOUT ONE CAPACITY SAMPLE, as plain functions so the gauge's colour,
@@ -224,6 +224,24 @@ export function partyWords(party: { team: string | null; member: string }): stri
  * The runs line: "3 of 4 running, 2 waiting, 1 reserved for a Manager". A limit of 0 is no limit,
  * and has no reserved slot to name.
  */
+/**
+ * One worker in words: its memory against its own limit, its CPUs and its bound, each "not measured"
+ * where it is, and whether it is dropped.
+ */
+export function workerWords(worker: WorkerSample): string {
+  const capacity = worker.capacity
+  const memory =
+    capacity.memoryInUseBytes !== null && capacity.memoryLimitBytes !== null
+      ? `${(capacity.memoryInUseBytes / 1e9).toFixed(1)} of ${gigabytes(capacity.memoryLimitBytes)} in use`
+      : `memory ${NotMeasured}`
+  const cpus = capacity.cpus === null ? `CPUs ${NotMeasured}` : `${capacity.cpus} CPU${capacity.cpus === 1 ? '' : 's'}`
+  const bound = capacity.bound === null ? '' : `, up to ${capacity.bound} run${capacity.bound === 1 ? '' : 's'}`
+  const runs = `${worker.runs.length} running`
+  const state = worker.state === 'dropped' ? ' - connection dropped, waiting for it to come back' : ''
+
+  return `${memory}, ${cpus}${bound}, ${runs}${state}`
+}
+
 export function runsWords(runs: CapacitySample['runs']): string {
   const running = runs.limit === 0 ? `${runs.runningCount} running, no limit` : `${runs.runningCount} of ${runs.limit} running`
   const reserved = runs.managerReserved > 0 ? `, ${runs.managerReserved} more reserved for a Manager` : ''

@@ -90,6 +90,19 @@ foreach (var inherited in AgentEnvironment.MustBeAbsent)
         $"Removed {inherited} from this Host's environment so agent children do not inherit it.");
 }
 
+// WHAT THIS PROCESS IS: all (control with its own run worker, the default), or control alone with
+// its runs on workers that connect. A worker never gets here: it runs from WorkerRole, before this
+// method is compiled. An unknown role is refused there for a real start, and here for a test Host.
+var (role, roleRefusal) = HostRoles.Resolve([], builder.Configuration["Role"] ?? builder.Configuration[HostRoles.Variable]);
+if (roleRefusal is not null || role == HostRole.Worker)
+{
+    Console.Error.WriteLine(roleRefusal ?? "--Role worker starts before the Host composes anything; this Host was composed, so it stops.");
+    Environment.ExitCode = 2;
+    return;
+}
+
+var control = role == HostRole.Control;
+
 var dataRoot = builder.Configuration["DataRoot"]
     ?? Environment.GetEnvironmentVariable("HARNESS_DATA_ROOT");
 
@@ -322,6 +335,14 @@ var principals = new SqlitePrincipalStore(database);
 
 builder.Services.AddSingleton<IUserStore>(users);
 builder.Services.AddSingleton<IPrincipalStore>(principals);
+
+// THE WORKER KEY: what a worker process connects to control with (Workers:Key, or HARNESS_WORKER_KEY).
+// Stored hashed as a principal with no permit, or removed when none is configured, so a key a
+// previous start stored never outlives its configuration. Taken on the worker connection alone.
+var workerKey = builder.Configuration["Workers:Key"] ?? builder.Configuration["HARNESS_WORKER_KEY"];
+WorkerKeyGate.SetAsync(principals, workerKey).GetAwaiter().GetResult();
+var workerKeys = new WorkerKeyGate(workerKey);
+builder.Services.AddSingleton(workerKeys);
 
 // Teams and their members, in the same file for the same reason accounts are - see AuthSchema's
 // remarks on why the non-message tables live together and why the Host does not own one directly.
@@ -748,6 +769,8 @@ builder.Services.AddSingleton(sp => new RunDirectory(
     () => sp.GetRequiredService<IDiagnosticsLog>(),
     sp.GetRequiredService<LiveRuns>(),
     secrets: sp.GetRequiredService<RunSecrets>()));
+if (!control)
+{
 builder.Services.AddSingleton(sp => InProcessWorker.Create(
     WorkerId.Local,
     sp.GetRequiredService<RunHeartbeat>(),
@@ -777,6 +800,16 @@ builder.Services.AddSingleton<IRunWorker>(sp =>
 });
 builder.Services.AddSingleton(sp => sp.GetRequiredService<InProcessWorker>().Memory!);
 builder.Services.AddSingleton(sp => sp.GetRequiredService<InProcessWorker>().Allowances!);
+}
+else
+{
+    // CONTROL ALONE: no run worker in this process, so no launcher and no run's memory mechanism here.
+    // Every run goes to the worker its member was placed on, each of which decides its own mechanism.
+    builder.Services.AddSingleton<IRunWorker>(sp => new RunWorkers(
+        sp.GetRequiredService<WorkerPool>(), member => sp.GetRequiredService<WipLedger>().PlacedOn(member)));
+    builder.Services.AddSingleton(_ => RunMemoryLimits.NotAvailable(
+        "this Host runs no member itself (--Role control): each worker limits its own runs and logs how when it starts"));
+}
 // Member TMPDIRs on the data volume, never a /tmp the engine may hold in memory (MemberTemp).
 builder.Services.AddSingleton(_ => MemberTemp.RootUnder(dataRoot));
 // BY FACTORY: the runner has a second constructor, which builds a worker of its own from parts, and
@@ -785,11 +818,17 @@ builder.Services.AddSingleton(sp => new ProcessAgentRunner(
     sp.GetRequiredService<AgentCatalog>(),
     sp.GetRequiredService<IRunWorker>(),
     sp.GetRequiredService<RunDirectory>(),
-    sp.GetRequiredService<InProcessWorker>().Host.Launcher,
+    control ? null : sp.GetRequiredService<InProcessWorker>().Host.Launcher,
     () => ProcessAgentRunner.Allowance((tenantSettings.RunMemoryLimit(), tenantSettings.RunMemoryCeiling())),
     sp.GetRequiredService<MemberTempRoot>().Path,
     member => sp.GetRequiredService<WorkerPool>().Worker(sp.GetRequiredService<WipLedger>().PlacedOn(member)),
-    sp.GetRequiredService<IRunCredentials>()));
+    sp.GetRequiredService<IRunCredentials>(),
+    control
+        ? member => sp.GetRequiredService<WorkerPool>().For(sp.GetRequiredService<WipLedger>().PlacedOn(member)) is RemoteWorker placed
+            ? ProcessAgentRunner.Allowance((
+                tenantSettings.RunMemoryLimit(WorkerBounds.Of(placed.Info)), tenantSettings.RunMemoryCeiling(WorkerBounds.Of(placed.Info))))
+            : null
+        : null));
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
     sp.GetRequiredService<IPrincipalStore>(),
@@ -881,8 +920,20 @@ var workflowSpendLimit = tenantSettings.WorkflowSpendLimit;
 // worker's, fed by its own capacity samples. One worker today, the Host's own (WorkerPool).
 var headroom = new HeadroomGate(
     () => tenantSettings.AdmissionMemoryPercent, () => tenantSettings.AdmissionMemoryPressurePercent);
-var workers = new WorkerPool([(WorkerId.Local, headroom)]);
+// In control the pool starts empty and fills as workers connect, each with a gate of its own and,
+// under the default run limit, its own bound; the default limit is then the sum of their bounds.
+var workers = control
+    ? new WorkerPool(
+        _ => new HeadroomGate(() => tenantSettings.AdmissionMemoryPercent, () => tenantSettings.AdmissionMemoryPressurePercent),
+        info => tenantSettings.WorkerBound(WorkerBounds.Of(info)))
+    : new WorkerPool([(WorkerId.Local, headroom)]);
+if (control)
+{
+    tenantSettings.Workers = () => [.. workers.Entries().Where(e => e.DroppedAt is null).Select(e => WorkerBounds.Of(e.Info))];
+}
+
 var wip = new WipLedger(tenantSettings.WipMaxRunning, workers);
+workers.Placed = wip.PlacedCount;
 builder.Services.AddSingleton(headroom);
 builder.Services.AddSingleton(workers);
 
@@ -892,9 +943,10 @@ builder.Services.AddSingleton<IHeavyLeaseView>(sp => new HeavyLeaseFromLeases(sp
 // The worker measures - its cgroup and each run's process group, on SampleCapacity - and this
 // sampler composes the sample from what it says.
 builder.Services.AddSingleton(sp => new CapacitySampler(
-    sp.GetRequiredService<IRunWorker>(),
+    control
+        ? () => [.. workers.Entries().Where(e => e.Worker is not null && e.DroppedAt is null).Select(e => (e.Worker!, e.Gate))]
+        : () => [(sp.GetRequiredService<IRunWorker>(), workers.Gate(WorkerId.Local))],
     wip,
-    workers.Gate(WorkerId.Local),
     sp.GetRequiredService<IHeavyLeaseView>(),
     () => tenantSettings.AdmissionMemoryPercent,
     () => tenantSettings.AdmissionMemoryPressurePercent,
@@ -2125,6 +2177,10 @@ DiagnosticsMiddleware.Use(app);
 // SECOND, so every response carries them - the bundle, an API answer, a gate's refusal, a 404.
 SecurityHeaders.Use(app);
 
+// THIRD, before the console's pages and files are served: the worker key is refused everywhere but
+// the worker connection, with a sentence, before anything else reads it.
+workerKeys.Use(app);
+
 app.UseDefaultFiles();
 
 // no-cache, not no-store: ETag/Last-Modified stay in play, so an unchanged file still answers a
@@ -2249,6 +2305,48 @@ LedgerEndpoints.Map(app);
 OutcomeEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
+// A worker's one connection. In control a worker joins the pool here; a Host that runs its runs
+// itself (all) welcomes none, and a worker that connects to it is told so, in a sentence, and stops.
+var workerConnections = new WorkerConnections(
+    app.Services.GetRequiredService<WorkerPool>(),
+    app.Services.GetRequiredService<WipLedger>(),
+    async (envelope, ct) =>
+    {
+        await app.Services.GetRequiredService<RunDirectory>().HandleAsync(envelope, ct);
+        if (envelope.Event is RunMeasured or WorkerCapacitySampled)
+        {
+            await app.Services.GetRequiredService<CapacitySampler>().HandleAsync(envelope, ct);
+        }
+    },
+    worker => app.Services.GetRequiredService<RunDirectory>().OpenOn(worker),
+    workerKey,
+    takesWorkers: control,
+    BuildVersion.Current.Version,
+    settings: info => new RunWorkerSettings(
+        ProcessAgentRunner.Allowance((tenantSettings.RunMemoryLimit(WorkerBounds.Of(info)), tenantSettings.RunMemoryCeiling(WorkerBounds.Of(info)))).Limit,
+        TenantSettings.HostReserveMb),
+    timings: WorkerBounds.Timings(builder.Configuration),
+    diagnostics: app.Services.GetRequiredService<IDiagnosticsLog>(),
+    log: app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+workerConnections.Changed += () => wip.SetMax(tenantSettings.WipMaxRunning);
+app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
+Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
+    app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version);
+WorkerEndpoints.MapList(app, workersNow);
+app.Services.GetRequiredService<CapacitySampler>().Describe = workersNow;
+if (control)
+{
+    app.Logger.LogInformation(
+        workerKeys.Configured
+            ? "Control role: runs go to workers that connect at {Route} with the worker key; none runs in this process. CLI updates are the workers' own."
+            : "Control role: no worker key is configured (HARNESS_WORKER_KEY), so no worker can connect and every run waits for a worker ({Route}).",
+        WorkerKeyGate.ConnectRoute);
+}
+WorkerEndpoints.Map(app, async context =>
+{
+    using var socket = await context.WebSockets.AcceptWebSocketAsync();
+    await workerConnections.AcceptAsync(socket, context.RequestAborted);
+});
 RemovalEndpoints.Map(app);
 LocalRepoEndpoints.Map(app);
 

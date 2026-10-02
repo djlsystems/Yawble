@@ -47,6 +47,7 @@ public sealed record RunId(ContainerId Member, string Nonce)
 [JsonDerivedType(typeof(HoldIdleClock), "holdIdleClock")]
 [JsonDerivedType(typeof(TouchIdleClock), "touchIdleClock")]
 [JsonDerivedType(typeof(SampleCapacity), "sampleCapacity")]
+[JsonDerivedType(typeof(CheckLaunch), "checkLaunch")]
 public abstract record ControlMessage;
 
 /// <summary>A command about one run.</summary>
@@ -66,7 +67,8 @@ public abstract record MemberCommand(ContainerId Member) : ControlMessage;
 /// and never reads a store or a key ring - and <see cref="Redaction"/> the values the run's text is
 /// redacted of before it leaves the worker: the credential's and every credential variable the
 /// child's environment carries. Both hold secrets and refuse to be written as JSON; null on a run
-/// that has none.
+/// that has none. <see cref="CredentialNames"/> names every variable that holds a credential - names
+/// only, no values - so the worker redacts the values its own child's environment carries too.
 /// </summary>
 public sealed record StartRun(
     RunId Run,
@@ -83,7 +85,8 @@ public sealed record StartRun(
     RunLiveView? LiveView,
     RunProcess? Process = null,
     RunCredential? Credential = null,
-    ValueRedactor? Redaction = null) : RunCommand(Run);
+    ValueRedactor? Redaction = null,
+    IReadOnlyList<string>? CredentialNames = null) : RunCommand(Run);
 
 /// <summary>
 /// A member that is a program: its executable and arguments, the only variables it inherits from the
@@ -154,6 +157,24 @@ public sealed record TouchIdleClock(ContainerId Member) : MemberCommand(Member);
 /// <summary>Measure now: each open run's process group, then the worker's own cgroup.</summary>
 public sealed record SampleCapacity : ControlMessage;
 
+/// <summary>
+/// THE LAUNCH CHECK OF ONE PRESET, on a worker: its declared free invocation (<see cref="Check"/>,
+/// after <see cref="UpdateArguments"/>) started as a member run of it would start the CLI, with what
+/// control resolved for it. The worker answers with <see cref="LaunchChecked"/> under the same
+/// <see cref="Request"/>. <see cref="Credential"/> and <see cref="Redaction"/> hold secrets, as a start's do.
+/// </summary>
+public sealed record CheckLaunch(
+    string Request,
+    RunLaunch Launch,
+    IReadOnlyList<string> Check,
+    IReadOnlyList<string> UpdateArguments,
+    IReadOnlyDictionary<string, string> Environment,
+    RunMemoryAllowance? Memory,
+    int? TimeoutSeconds,
+    string? TempRoot,
+    RunCredential? Credential = null,
+    ValueRedactor? Redaction = null) : ControlMessage;
+
 // ---------------------------------------------------------------------------------------------
 // Worker to control.
 // ---------------------------------------------------------------------------------------------
@@ -178,6 +199,7 @@ public sealed record WorkerEnvelope(WorkerId Worker, long Seq, WorkerEvent Event
 [JsonDerivedType(typeof(RunDiagnostic), "runDiagnostic")]
 [JsonDerivedType(typeof(RunEnded), "runEnded")]
 [JsonDerivedType(typeof(WorkerCapacitySampled), "workerCapacitySampled")]
+[JsonDerivedType(typeof(LaunchChecked), "launchChecked")]
 public abstract record WorkerEvent;
 
 /// <summary>An event about one run.</summary>
@@ -186,13 +208,16 @@ public abstract record RunEvent(RunId Run) : WorkerEvent;
 /// <summary>The worker is connected and takes runs.</summary>
 public sealed record WorkerReady(WorkerId Worker) : WorkerEvent;
 
-/// <summary>The run's process exists.</summary>
 /// <summary>
 /// The run's credential is applied and its child's environment is final, just before the child is
-/// started: from here control keeps the run's <see cref="StartRun.Redaction"/> as the member's, for
-/// its reports and its transcript. A run refused before this point leaves the member's set as it was.
+/// started: from here control keeps the run's <see cref="StartRun.Redaction"/>, together with
+/// <see cref="Redaction"/> - the set the worker read from the child's environment it built - as the
+/// member's, for its reports and its transcript. A run refused before this point leaves the member's
+/// set as it was. <see cref="Redaction"/> holds secrets and refuses to be written as JSON.
 /// </summary>
-public sealed record RunCredentialApplied(RunId Run) : RunEvent(Run);
+public sealed record RunCredentialApplied(RunId Run, ValueRedactor? Redaction = null) : RunEvent(Run);
+
+/// <summary>The run's process exists.</summary>
 
 public sealed record RunStarted(RunId Run, int ProcessId, DateTimeOffset At) : RunEvent(Run);
 
@@ -288,6 +313,12 @@ public sealed record RunFault(bool Canceled, string Type, string Message);
 public sealed record WorkerCapacitySampled(DateTimeOffset At, CapacityFigures Figures, IReadOnlyList<RunId> OpenRuns)
     : WorkerEvent;
 
+/// <summary>
+/// What a launch check found (<see cref="CheckLaunch"/>): <c>ok</c>, <c>failed</c> or <c>not checked</c>,
+/// the exit code and the redacted end of stderr when a process ran, and what was run or why nothing was.
+/// </summary>
+public sealed record LaunchChecked(string Request, string Result, int? ExitCode, string? StderrTail, string? Detail) : WorkerEvent;
+
 /// <summary>What the worker's cgroup said, field for field the worker's own reading.</summary>
 public sealed record CapacityFigures(
     string? Version,
@@ -329,6 +360,35 @@ public interface IRunWorker
 
     /// <summary>Completes when the connection to the worker is gone.</summary>
     Task Closed { get; }
+}
+
+/// <summary>
+/// A worker reached over a connection that can drop and come back. While <see cref="Dropped"/>, its
+/// runs are neither lost nor placeable: the connection's grace decides. When the worker does not come
+/// back, <see cref="IRunWorker.Closed"/> completes with <see cref="Lost"/> saying why, and every run
+/// still open on it fails <c>worker-lost</c>. A worker in the Host's own process is not one of these:
+/// its connection only closes with the Host.
+/// </summary>
+public interface IRunWorkerConnection
+{
+    /// <summary>The connection is down and may still come back within its grace.</summary>
+    bool Dropped { get; }
+
+    /// <summary>Once <see cref="IRunWorker.Closed"/> has completed: why the worker is lost, as a sentence; null when it was not.</summary>
+    string? Lost { get; }
+}
+
+/// <summary>
+/// Control's handle on several workers as one: a run's messages go to the worker its member was
+/// placed on. Whoever starts a run asks it for that worker (<see cref="For"/>) and watches that one.
+/// </summary>
+public interface IRunWorkerRouter
+{
+    /// <summary>The worker <paramref name="member"/>'s runs go to now. Throws when there is none.</summary>
+    IRunWorker For(ContainerId member);
+
+    /// <summary>The worker a run placed now would go to: the connected one with the most measured headroom. Throws when there is none.</summary>
+    IRunWorker Any();
 }
 
 /// <summary>A worker's handle on control: where its events go, in <see cref="WorkerEnvelope.Seq"/> order.</summary>

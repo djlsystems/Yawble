@@ -205,6 +205,21 @@ public static class DiagnosticKinds
     /// against one of those, and that ratio is the diagnosis.</summary>
     public const string TransportReconnecting = "transport.reconnecting";
 
+    // ---- Anything that went wrong: a worker ----------------------------------------------------
+
+    /// <summary>A worker's connection to control dropped, or the worker was lost with it: which
+    /// worker, and the runs it held.</summary>
+    public const string WorkerDropped = "worker.dropped";
+
+    /// <summary>A worker was refused at its connection: its sentence, which the worker logs too.</summary>
+    public const string WorkerRefused = "worker.refused";
+
+    /// <summary>A connected worker did not end a stopped run within the stop backstop.</summary>
+    public const string WorkerRunUnanswered = "worker.run-unanswered";
+
+    /// <summary>A reconnecting worker still held a run control had already ended, and was told to stop it.</summary>
+    public const string WorkerStaleRunStopped = "worker.stale-run-stopped";
+
     // ---- The startup and lifecycle facts ------------------------------------------------------
 
     /// <summary>WHAT THIS INSTANCE IS: data root, the address members call back on, the durability
@@ -252,6 +267,10 @@ public static class DiagnosticKinds
         ProcessOutputHeldOpen,
         TransportDisconnected,
         TransportReconnecting,
+        WorkerDropped,
+        WorkerRefused,
+        WorkerRunUnanswered,
+        WorkerStaleRunStopped,
         StartupInstance,
         StartupBackupWritten,
         StartupTeamPaused,
@@ -272,6 +291,7 @@ public static class DiagnosticSources
     public const string Database = "db";
     public const string Process = "process";
     public const string Transport = "transport";
+    public const string Worker = "worker";
     public const string Startup = "startup";
 }
 

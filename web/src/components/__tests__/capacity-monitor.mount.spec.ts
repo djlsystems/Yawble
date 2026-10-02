@@ -19,7 +19,7 @@ import CapacityMonitor from '../CapacityMonitor.vue';
 import CapacityPanel from '../CapacityPanel.vue';
 import { useCapacityStore } from '../../stores/capacity';
 import { useConsoleStore } from '../../stores/console';
-import type { CapacitySample } from '../../api/types';
+import type { CapacitySample, WorkerSample } from '../../api/types';
 import { memoryAt, pressure, sample, unmeasured } from '../../test/capacityFixtures';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -227,5 +227,79 @@ describe('a team link', () => {
     wrapper.findComponent(CapacityPanel).vm.$emit('team', 'alpha');
 
     expect(setActiveTeam).toHaveBeenCalledWith('alpha');
+  });
+});
+
+describe('the workers', () => {
+  const worker = (id: string, over: Partial<WorkerSample> = {}): WorkerSample => ({
+    id,
+    version: '2026.10.02.1',
+    connectedSince: At,
+    state: 'connected',
+    droppedAt: null,
+    capacity: {
+      cpus: 4, memoryLimitBytes: 10e9, bound: 3, sampledAt: At, memoryInUseBytes: 2e9, memoryPercent: 20, notMeasured: [],
+    },
+    holding: null,
+    runs: [],
+    ...over,
+  });
+
+  it('lists each worker with its own memory, CPUs, bound and runs', async () => {
+    const s = sample({
+      workers: [
+        worker('w1', { runs: [{ team: 'alpha', member: 'DeveloperA', since: At }] }),
+        worker('w2', {
+          capacity: { cpus: 8, memoryLimitBytes: 10e9, bound: 2, sampledAt: At, memoryInUseBytes: 9.5e9, memoryPercent: 95, notMeasured: [] },
+          holding: 'waiting for memory: 9.5 of 10.0 GB in use',
+        }),
+      ],
+    });
+
+    const workers = section(await mountPanel(s), 'workers');
+
+    expect(workers).toContain('w1');
+    expect(workers).toContain('2.0 of 10.0 GB in use, 4 CPUs, up to 3 runs, 1 running');
+    expect(workers).toContain('9.5 of 10.0 GB in use, 8 CPUs, up to 2 runs, 0 running');
+    expect(workers).toContain('a run asking it now would be waiting for memory: 9.5 of 10.0 GB in use');
+  });
+
+  it('says a dropped worker is waiting to come back, and "not measured" for what it did not measure', async () => {
+    const s = sample({
+      workers: [
+        worker('w1', {
+          state: 'dropped',
+          droppedAt: At,
+          capacity: { cpus: null, memoryLimitBytes: null, bound: 1, sampledAt: null, memoryInUseBytes: null, memoryPercent: null, notMeasured: ['memory.limit'] },
+        }),
+      ],
+    });
+
+    const workers = section(await mountPanel(s), 'workers');
+
+    expect(workers).toContain('memory not measured, CPUs not measured, up to 1 run');
+    expect(workers).toContain('connection dropped, waiting for it to come back');
+    expect(workers).not.toMatch(/\b0(\.0)? of\b/);
+  });
+
+  it('names the worker of each top run when there is more than one', async () => {
+    const s = sample({
+      workers: [worker('w1'), worker('w2')],
+      topByMemory: [{ team: 'alpha', member: 'DeveloperA', processes: 14, residentBytes: 3.4e9, cpuPercent: 180, worker: 'w2' }],
+    });
+
+    expect(section(await mountPanel(s), 'top-memory')).toContain('alpha DeveloperA on w2: 3.4 GB, 14 processes');
+  });
+
+  it('says nothing new for the Host\'s own one worker', async () => {
+    const s = sample({
+      workers: [worker('local')],
+      topByMemory: [{ team: 'alpha', member: 'DeveloperA', processes: 14, residentBytes: 3.4e9, cpuPercent: 180, worker: 'local' }],
+    });
+
+    const wrapper = await mountPanel(s);
+
+    expect(wrapper.find('[data-test="capacity-workers"]').exists()).toBe(false);
+    expect(section(wrapper, 'top-memory')).toContain('alpha DeveloperA: 3.4 GB, 14 processes');
   });
 });

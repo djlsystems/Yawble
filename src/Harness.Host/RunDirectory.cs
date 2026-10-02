@@ -18,6 +18,12 @@ namespace Harness.Host;
 /// lists it, when its start cannot be sent, or when a stop goes unanswered for
 /// <see cref="StopBackstop"/>. Like a Host restart, it is never resumed by itself.
 ///
+/// A WORKER THAT WAS LOST IS NOT A LOST END. A run on a worker reached over a connection
+/// (<see cref="IRunWorkerConnection"/>) whose connection dropped is left open while the worker is
+/// <see cref="IRunWorkerConnection.Dropped"/>: no sample gap and no stop backstop ends it then. If
+/// the worker does not come back, the run fails <see cref="FailureClasses.WorkerLost"/> with the
+/// connection's own sentence; if it does, the run ends as it would have.
+///
 /// The sample rule rests on the worker publishing a run's end and dropping it from its open runs
 /// in one step, in sequence, so only an end lost on the way leaves the gap. "Open on its worker"
 /// is known from the run's <see cref="RunStarted"/>, or for a run that ends before its process
@@ -36,8 +42,19 @@ public sealed class RunDirectory
     /// </summary>
     public static readonly TimeSpan StopBackstop = ChildProcess.DrainGrace + TimeSpan.FromSeconds(20);
 
+    /// <summary>What a run says when its worker's connection dropped and did not come back within its grace.</summary>
+    public static string WorkerLostText(WorkerId worker, DateTimeOffset droppedAt, TimeSpan grace) =>
+        $"The worker running this run ({worker}) stopped: its connection dropped at {droppedAt.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC "
+        + $"and did not come back within {grace.TotalSeconds:0} s. Re-sending the instruction runs it on another worker.";
+
+    /// <summary>What a run says when its worker came back as a new process, without it.</summary>
+    public static string WorkerRestartedText(WorkerId worker) =>
+        $"The worker running this run ({worker}) stopped: it came back as a new process, which does not have this run. "
+        + "Re-sending the instruction runs it on another worker.";
+
     private readonly ConcurrentDictionary<RunId, Open> _runs = new();
     private readonly ConcurrentDictionary<IRunWorker, bool> _watched = new(ReferenceEqualityComparer.Instance);
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<LaunchChecked?>> _checks = new(StringComparer.Ordinal);
     private readonly Func<IMemberReports?> _reports;
     private readonly Func<IDiagnosticsLog?> _diagnostics;
     private readonly LiveRuns? _live;
@@ -71,12 +88,12 @@ public sealed class RunDirectory
     public async Task<AgentResult> RunAsync(IRunWorker worker, StartRun start, CancellationToken ct = default)
     {
         var (ended, output, usage, lost) = await EndOfAsync(worker, start, null, ct);
-        return lost ? Lost() : RunResults.Result(output, usage, ended);
+        return lost ? Lost(ended) : RunResults.Result(output, usage, ended);
     }
 
     /// <summary>
     /// Starts a program run (<see cref="StartRun.Process"/>) and answers with its end, or
-    /// <c>Lost</c> when its end never arrived. Each line it prints is handed to
+    /// <c>Lost</c> when its end never arrived - the end then carries the words and class it was lost with. Each line it prints is handed to
     /// <paramref name="onLine"/>, in order, before the worker reads the next.
     /// </summary>
     public async Task<(RunEnded Ended, bool Lost)> RunProcessAsync(
@@ -89,6 +106,19 @@ public sealed class RunDirectory
     private async Task<(RunEnded Ended, string Output, UsageFigures? Usage, bool Lost)> EndOfAsync(
         IRunWorker worker, StartRun start, Func<string, Task>? onLine, CancellationToken ct)
     {
+        // Several workers as one: the run is on, and watched on, the worker its member was placed on.
+        if (worker is IRunWorkerRouter router)
+        {
+            try
+            {
+                worker = router.For(start.Run.Member);
+            }
+            catch (InvalidOperationException)
+            {
+                return (new RunEnded(start.Run, -1, null, LostRunText, FailureClasses.Interrupted, null, null, null), string.Empty, null, true);
+            }
+        }
+
         var open = new Open(worker, start.Run) { OnLine = onLine, Redaction = start.Redaction };
         _runs[start.Run] = open;
         Watch(worker);
@@ -105,7 +135,7 @@ public sealed class RunDirectory
                 open.Lose();
             }
 
-            if (worker.Closed.IsCompleted) open.Lose();
+            if (worker.Closed.IsCompleted) LoseOnClose(open);
 
             RunEnded ended;
             using (ct.Register(() => _ = CancelAsync(open)))
@@ -113,7 +143,7 @@ public sealed class RunDirectory
                 ended = await open.Ended.Task;
             }
 
-            if (ReferenceEquals(ended, open.LostEnd)) return (ended, string.Empty, null, true);
+            if (open.IsLost(ended)) return (ended, string.Empty, null, true);
 
             if (ended.Fault is { } fault)
             {
@@ -131,9 +161,41 @@ public sealed class RunDirectory
         }
     }
 
+    /// <summary>
+    /// Sends <paramref name="check"/> to <paramref name="worker"/> and answers with what it found, or null
+    /// when no answer came within <paramref name="bound"/> or the worker went first.
+    /// </summary>
+    public async Task<LaunchChecked?> CheckLaunchAsync(IRunWorker worker, CheckLaunch check, TimeSpan bound, CancellationToken ct = default)
+    {
+        var answer = new TaskCompletionSource<LaunchChecked?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _checks[check.Request] = answer;
+        try
+        {
+            await worker.SendAsync(check, ct);
+            var done = await Task.WhenAny(answer.Task, worker.Closed, Task.Delay(bound, _clock, ct));
+            return done == answer.Task ? await answer.Task : null;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        {
+            return null;
+        }
+        finally
+        {
+            _checks.TryRemove(check.Request, out _);
+        }
+    }
+
+    /// <summary>The runs open here on <paramref name="worker"/>: what a worker that comes back is compared with.</summary>
+    public IReadOnlyCollection<RunId> OpenOn(WorkerId worker) =>
+        [.. _runs.Values.Where(open => open.Worker.Id == worker).Select(open => open.Run)];
+
     /// <summary>A lost run's result: nothing it did is known.</summary>
     public static AgentResult Lost() =>
         new(-1, string.Empty, LostRunText, FailureClass: FailureClasses.Interrupted);
+
+    /// <summary>A lost run's result, in the words and class it was lost with.</summary>
+    private static AgentResult Lost(RunEnded lost) =>
+        new(-1, string.Empty, lost.LaunchError, FailureClass: lost.FailureClass);
 
     /// <summary>Every run open on a worker whose connection closes is lost, once it does.</summary>
     private void Watch(IRunWorker worker)
@@ -143,21 +205,37 @@ public sealed class RunDirectory
         _ = worker.Closed.ContinueWith(
             _ =>
             {
-                foreach (var open in _runs.Values.Where(o => ReferenceEquals(o.Worker, worker))) open.Lose();
+                foreach (var open in _runs.Values.Where(o => ReferenceEquals(o.Worker, worker))) LoseOnClose(open);
             },
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
     }
 
+    /// <summary>A run on a worker whose connection closed: lost with its worker when it was lost, otherwise its end was.</summary>
+    private static void LoseOnClose(Open open)
+    {
+        if (open.Worker is IRunWorkerConnection { Lost: { } why }) open.LoseWorker(why);
+        else open.Lose();
+    }
+
+    /// <summary>Whether <paramref name="worker"/>'s connection is down and may still come back.</summary>
+    private static bool Dropped(IRunWorker worker) => worker is IRunWorkerConnection { Dropped: true };
+
     /// <summary>What one worker said. Called in <see cref="WorkerEnvelope.Seq"/> order.</summary>
     public async Task HandleAsync(WorkerEnvelope envelope, CancellationToken ct = default)
     {
+        if (envelope.Event is LaunchChecked found)
+        {
+            if (_checks.TryGetValue(found.Request, out var waiting)) waiting.TrySetResult(found);
+            return;
+        }
+
         if (envelope.Event is WorkerCapacitySampled sampled)
         {
             // A run that was open on the worker before this sample and is not in it ended there,
             // and its end did not arrive.
-            foreach (var candidate in _runs.Values.Where(o => o.Worker.Id == envelope.Worker))
+            foreach (var candidate in _runs.Values.Where(o => o.Worker.Id == envelope.Worker && !Dropped(o.Worker)))
             {
                 if (candidate.Since is null)
                 {
@@ -183,8 +261,8 @@ public sealed class RunDirectory
                 open.Since ??= envelope.Seq;
                 break;
 
-            case RunCredentialApplied:
-                _secrets?.Remember(run.Member, open.Redaction ?? ValueRedactor.Empty);
+            case RunCredentialApplied applied:
+                _secrets?.Remember(run.Member, (open.Redaction ?? ValueRedactor.Empty).With(applied.Redaction ?? ValueRedactor.Empty));
                 break;
 
             case RunProgress progress:
@@ -230,7 +308,7 @@ public sealed class RunDirectory
     private async Task CancelAsync(Open open)
     {
         // The backstop for a worker that is there but no longer answers: a stop it never ends.
-        open.Backstop ??= _clock.CreateTimer(_ => open.Lose(), null, StopBackstop, Timeout.InfiniteTimeSpan);
+        open.Backstop ??= _clock.CreateTimer(_ => Backstop(open), null, StopBackstop, Timeout.InfiniteTimeSpan);
 
         try
         {
@@ -241,6 +319,29 @@ public sealed class RunDirectory
             // A worker that cannot be told is a worker whose run will not end by itself: what
             // happens then is the lost-run path's.
         }
+    }
+
+    /// <summary>
+    /// A stop went unanswered for <see cref="StopBackstop"/>. While the worker's connection is down,
+    /// its grace decides instead: the backstop waits again.
+    /// </summary>
+    private void Backstop(Open open)
+    {
+        if (Dropped(open.Worker))
+        {
+            open.Backstop?.Change(StopBackstop, Timeout.InfiniteTimeSpan);
+            return;
+        }
+
+        if (open.Worker is IRunWorkerConnection && !open.Ended.Task.IsCompleted && _diagnostics() is { } diagnostics)
+        {
+            _ = diagnostics.WriteAsync(
+                DiagnosticSeverity.Warning, DiagnosticKinds.WorkerRunUnanswered, DiagnosticSources.Worker,
+                message: $"Worker {open.Worker.Id} did not end the stopped run {open.Run.Key} within {StopBackstop.TotalSeconds:0} s.",
+                ct: CancellationToken.None);
+        }
+
+        open.Lose();
     }
 
     /// <summary>One run this side has started and not yet seen end.</summary>
@@ -277,6 +378,20 @@ public sealed class RunDirectory
 
         /// <summary>Ends the run as lost, unless its real end came first.</summary>
         public void Lose() => Ended.TrySetResult(LostEnd);
+
+        private RunEnded? _workerLost;
+
+        /// <summary>Ends the run as lost with its worker, in <paramref name="why"/>, unless an end came first.</summary>
+        public void LoseWorker(string why)
+        {
+            // Marked before it is set, so the waiter that wakes on it can tell it apart.
+            var end = new RunEnded(run, -1, null, why, FailureClasses.WorkerLost, null, null, null);
+            Volatile.Write(ref _workerLost, end);
+            Ended.TrySetResult(end);
+        }
+
+        /// <summary>Whether <paramref name="ended"/> is an end this side gave the run rather than one the worker sent.</summary>
+        public bool IsLost(RunEnded ended) => ReferenceEquals(ended, LostEnd) || ReferenceEquals(ended, Volatile.Read(ref _workerLost));
     }
 }
 

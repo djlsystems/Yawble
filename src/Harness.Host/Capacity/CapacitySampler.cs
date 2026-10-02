@@ -20,9 +20,8 @@ namespace Harness.Host.Capacity;
 /// </summary>
 public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
 {
-    private readonly IRunWorker worker;
+    private readonly Func<IReadOnlyList<(IRunWorker Worker, HeadroomGate Gate)>> workers;
     private readonly WipLedger wip;
-    private readonly HeadroomGate gate;
     private readonly IHeavyLeaseView lease;
     private readonly Func<int> memoryPercent;
     private readonly Func<int> pressurePercent;
@@ -46,10 +45,28 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         TimeProvider? clock = null,
         TimeSpan? interval = null,
         int ticksPerSecond = 100)
+        : this(() => [(worker, gate)], wip, lease, memoryPercent, pressurePercent, push, logger, clock, interval, ticksPerSecond)
     {
-        this.worker = worker;
+    }
+
+    /// <summary>
+    /// Over the workers that are connected at each sample, each with the headroom gate its own
+    /// measurements feed: control's, when its runs go to workers in processes of their own.
+    /// </summary>
+    public CapacitySampler(
+        Func<IReadOnlyList<(IRunWorker Worker, HeadroomGate Gate)>> workers,
+        WipLedger wip,
+        IHeavyLeaseView lease,
+        Func<int> memoryPercent,
+        Func<int> pressurePercent,
+        Func<CapacitySample, Task>? push = null,
+        ILogger<CapacitySampler>? logger = null,
+        TimeProvider? clock = null,
+        TimeSpan? interval = null,
+        int ticksPerSecond = 100)
+    {
+        this.workers = workers;
         this.wip = wip;
-        this.gate = gate;
         this.lease = lease;
         this.memoryPercent = memoryPercent;
         this.pressurePercent = pressurePercent;
@@ -81,14 +98,14 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         int ticksPerSecond = 100)
     {
         var heartbeat = new RunHeartbeat();
-        this.worker = InProcessWorker.Connect(
+        var worker = InProcessWorker.Connect(
             WorkerId.Local,
             events => new WorkerHost(
                 WorkerId.Local, events, new RunLauncher(heartbeat), heartbeat, cgroup: cgroup, processes: processes, groups: groups,
                 clock: clock),
             HandleAsync).Worker;
+        this.workers = () => [(worker, gate)];
         this.wip = wip;
-        this.gate = gate;
         this.lease = lease;
         this.memoryPercent = memoryPercent;
         this.pressurePercent = pressurePercent;
@@ -99,8 +116,11 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         Interval = interval ?? DefaultInterval;
     }
 
-    /// <summary>The worker this samples.</summary>
-    public IRunWorker Worker => worker;
+    /// <summary>Each worker as people see it, carried on every sample; null leaves the sample without them.</summary>
+    public Func<IReadOnlyList<WorkerSample>>? Describe { get; set; }
+
+    /// <summary>The worker this samples: the first, when there are several.</summary>
+    public IRunWorker Worker => workers()[0].Worker;
 
     /// <summary>How often a sample is taken.</summary>
     public static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(5);
@@ -113,9 +133,12 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
 
     private readonly TimeProvider _clock;
     private readonly object _gate = new();
-    private readonly object _sampling = new();
-    private readonly List<RunMeasured> _measured = [];
-    private WorkerCapacitySampled? _sampled;
+    private readonly SemaphoreSlim _sampling = new(1, 1);
+    private readonly Dictionary<WorkerId, Round> _rounds = [];
+
+    /// <summary>What a worker that did not answer in time reads as: every figure not measured, never 0.</summary>
+    private static readonly WorkerCapacitySampled Unanswered =
+        new(DateTimeOffset.MinValue, WorkerCapacity.ToFigures(WorkerCapacity.NotMeasured with { NotMeasured = CgroupReader.AllFigures }), []);
     private readonly Queue<CapacitySample> _history = new();
     private Previous? _previous;
 
@@ -136,54 +159,117 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         lock (_gate) return _history.ToArray();
     }
 
-    /// <summary>Takes one sample now, keeps it, hands it to the gate and the ledger, and returns it.</summary>
-    /// <summary>What the worker measured for the sample in progress.</summary>
+    /// <summary>What a worker measured for the sample in progress.</summary>
     public Task HandleAsync(WorkerEnvelope envelope, CancellationToken ct = default)
     {
-        lock (_measured)
+        lock (_rounds)
         {
-            if (envelope.Event is RunMeasured measured) _measured.Add(measured);
-            else if (envelope.Event is WorkerCapacitySampled sampled) _sampled = sampled;
+            // A measurement that arrives after its round gave up on it is dropped, never charged to the next.
+            if (!_rounds.TryGetValue(envelope.Worker, out var round)) return Task.CompletedTask;
+
+            if (envelope.Event is RunMeasured measured) round.Measured.Add(measured);
+            else if (envelope.Event is WorkerCapacitySampled sampled) round.Sampled.TrySetResult(sampled);
         }
 
         return Task.CompletedTask;
     }
 
-    public CapacitySample Sample()
+    /// <summary>
+    /// Takes one sample now and returns it. An entry point for callers in this process, which have
+    /// always taken a sample synchronously; a worker in this process has answered by the time its
+    /// send completes, so this never waits on a timer.
+    /// </summary>
+    public CapacitySample Sample() => SampleAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Takes one sample, keeps it, hands it to each gate and the ledger, and returns it. Every worker
+    /// is asked at once; one that has not answered within <see cref="Interval"/> is not measured this
+    /// round: its gate keeps the figures it last had, and nothing waits on it past the interval.
+    /// </summary>
+    public async Task<CapacitySample> SampleAsync(CancellationToken ct = default)
     {
-        lock (_sampling)
+        await _sampling.WaitAsync(ct);
+        try
         {
-            return SampleLocked();
+            return await SampleLockedAsync(ct);
+        }
+        finally
+        {
+            _sampling.Release();
         }
     }
 
-    private CapacitySample SampleLocked()
+    private async Task<CapacitySample> SampleLockedAsync(CancellationToken ct)
     {
         var at = _clock.GetUtcNow();
+        var asked = workers();
 
-        IReadOnlyList<RunMeasured> measuredRuns;
-        WorkerCapacitySampled sampled;
-        lock (_measured)
+        var rounds = asked.Select(w => (w.Worker, w.Gate, Round: new Round(w.Worker.Id))).ToList();
+        lock (_rounds)
         {
-            _measured.Clear();
-            _sampled = null;
+            _rounds.Clear();
+            foreach (var (worker, _, round) in rounds) _rounds[worker.Id] = round;
         }
 
-        // In process the worker has measured, and said so, by the time the send completes.
-        worker.SendAsync(new SampleCapacity()).GetAwaiter().GetResult();
-
-        lock (_measured)
+        foreach (var (worker, _, round) in rounds)
         {
-            measuredRuns = [.. _measured];
-            sampled = _sampled ?? throw new InvalidOperationException($"Worker {worker.Id} sent no capacity sample.");
+            // A send that fails is a worker that will not answer this round.
+            try
+            {
+                _ = worker.SendAsync(new SampleCapacity(), ct).ContinueWith(
+                    send => round.Sampled.TrySetResult(null),
+                    CancellationToken.None,
+                    TaskContinuationOptions.NotOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
+            catch (Exception)
+            {
+                round.Sampled.TrySetResult(null);
+            }
         }
 
-        var figures = WorkerCapacity.ToCgroup(sampled.Figures);
+        var answers = new List<(IRunWorker Worker, HeadroomGate Gate, WorkerCapacitySampled? Answer, IReadOnlyList<RunMeasured> Measured)>();
+        foreach (var (worker, gate, round) in rounds)
+        {
+            WorkerCapacitySampled? answer;
+            try
+            {
+                answer = await round.Sampled.Task.WaitAsync(Interval - (_clock.GetUtcNow() - at) is { } left && left > TimeSpan.Zero ? left : TimeSpan.Zero, _clock, ct);
+            }
+            catch (TimeoutException)
+            {
+                answer = null;
+            }
+
+            if (answer is null)
+            {
+                logger?.LogWarning("Worker {Worker} did not answer the capacity sample within {Interval}; it is not measured this round.", worker.Id, Interval);
+            }
+
+            answers.Add((worker, gate, answer, answer is null ? [] : [.. round.Measured]));
+        }
+
+        lock (_rounds) _rounds.Clear();
+
+        // Each gate answers from its own worker's measurement from here on. A worker that did not
+        // answer leaves its gate with the figures it last had, at their own age.
+        foreach (var (_, gate, answer, _) in answers)
+        {
+            if (answer is not null) gate.Update(WorkerCapacity.ToCgroup(answer.Figures), at);
+        }
+
+        var figures = answers.Count == 1
+            ? WorkerCapacity.ToCgroup((answers[0].Answer ?? Unanswered).Figures)
+            : Sum([.. answers.Where(a => a.Answer is not null).Select(a => WorkerCapacity.ToCgroup(a.Answer!.Figures))]);
+        var measuredRuns = answers.SelectMany(a => a.Measured.Select(m => (a.Worker.Id, Measured: m))).ToList();
         var view = wip.View();
 
-        // The gate answers from this measurement from here on; the sample says what it answers.
-        gate.Update(figures, at);
-        var holding = gate.Reason();
+        // What a run asking now would wait for: the first worker's reason only when none has room.
+        var holding = answers.Count == 1
+            ? answers[0].Gate.Reason()
+            : answers.Count == 0
+                ? WipLedger.WorkerReason
+                : answers.All(a => a.Gate.Reason() is not null) ? answers[0].Gate.Reason() : null;
 
         CapacitySample sample;
         lock (_gate)
@@ -197,10 +283,10 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
                     : null;
 
             var runs = new List<RunFigures>();
-            var ticks = new Dictionary<int, long>();
-            foreach (var measured in measuredRuns)
+            var ticks = new Dictionary<(WorkerId, int), long>();
+            foreach (var (worker, measured) in measuredRuns)
             {
-                var group = measured.Group;
+                var group = (worker, measured.Group);
                 var run = measured.Run.Member;
 
                 ticks[group] = measured.CpuTicks;
@@ -209,7 +295,7 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
                         ? (measured.CpuTicks - was) / (double)ticksPerSecond / seconds * 100
                         : null;
 
-                runs.Add(new RunFigures(run.Team, run.Name, measured.Processes, measured.ResidentBytes, cpuPercent));
+                runs.Add(new RunFigures(run.Team, run.Name, measured.Processes, measured.ResidentBytes, cpuPercent, worker.Value));
             }
 
             _previous = new Previous(at, figures.CpuUsageUsec, ticks);
@@ -242,7 +328,8 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
                 runs.OrderByDescending(run => run.ResidentBytes).Take(TopRuns).ToArray(),
                 runs.Where(run => run.CpuPercent is not null)
                     .OrderByDescending(run => run.CpuPercent).Take(TopRuns).ToArray(),
-                lease.Read());
+                lease.Read(),
+                Describe?.Invoke());
 
             _history.Enqueue(sample);
             while (_history.Count > 0 && at - _history.Peek().At > HistorySpan) _history.Dequeue();
@@ -262,7 +349,7 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         {
             try
             {
-                var sample = Sample();
+                var sample = await SampleAsync(stoppingToken);
                 if (push is not null) await push(sample);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -274,7 +361,53 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
-    private sealed record Previous(DateTimeOffset At, long? CpuUsageUsec, IReadOnlyDictionary<int, long> RunTicks);
+
+    /// <summary>Several workers' figures as one: each figure summed over the workers that measured it, not measured when none did.</summary>
+    private static CgroupFigures Sum(IReadOnlyList<CgroupFigures> each)
+    {
+        if (each.Count == 0) return WorkerCapacity.NotMeasured with { NotMeasured = CgroupReader.AllFigures };
+        if (each.Count == 1) return each[0];
+
+        static long? Total(IEnumerable<long?> values)
+        {
+            long? sum = null;
+            foreach (var value in values) if (value is { } v) sum = (sum ?? 0) + v;
+            return sum;
+        }
+
+        static double? TotalOf(IEnumerable<double?> values)
+        {
+            double? sum = null;
+            foreach (var value in values) if (value is { } v) sum = (sum ?? 0) + v;
+            return sum;
+        }
+
+        // Pressure is a share of time, not an amount: it does not add up, so several workers' is not measured here; each worker's is its own.
+        var notMeasured = CgroupReader.AllFigures.Where(name => each.All(f => f.NotMeasured.Contains(name)))
+            .Concat(["cpu.pressure", "memory.pressure"]).Distinct().ToList();
+
+        return new CgroupFigures(
+            each.Select(f => f.Version).FirstOrDefault(v => v is not null),
+            TotalOf(each.Select(f => f.CpuLimit)), each.Any(f => f.CpuUnlimited),
+            Total(each.Select(f => f.CpuUsageUsec)), Total(each.Select(f => f.CpuThrottledPeriods)), Total(each.Select(f => f.CpuThrottledUsec)),
+            Total(each.Select(f => f.MemoryLimitBytes)), each.Any(f => f.MemoryUnlimited),
+            Total(each.Select(f => f.MemoryCurrentBytes)), Total(each.Select(f => f.MemoryAnonBytes)), Total(each.Select(f => f.MemoryFileBytes)),
+            Total(each.Select(f => f.MemoryShmemBytes)), null, null,
+            Total(each.Select(f => f.PidsCurrent)), Total(each.Select(f => f.PidsLimit)), each.Any(f => f.PidsUnlimited),
+            notMeasured);
+    }
+
+    /// <summary>One worker's answer to the sample in progress, and what it measured of its runs.</summary>
+    private sealed class Round(WorkerId worker)
+    {
+        public WorkerId Worker => worker;
+
+        public TaskCompletionSource<WorkerCapacitySampled?> Sampled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public List<RunMeasured> Measured { get; } = [];
+    }
+
+    private sealed record Previous(DateTimeOffset At, long? CpuUsageUsec, IReadOnlyDictionary<(WorkerId, int), long> RunTicks);
 }
 
 /// <summary>
@@ -293,7 +426,8 @@ public sealed record CapacitySample(
     AdmissionSample Admission,
     IReadOnlyList<RunFigures> TopByMemory,
     IReadOnlyList<RunFigures> TopByCpu,
-    HeavyLeaseSnapshot? HeavyLease);
+    HeavyLeaseSnapshot? HeavyLease,
+    IReadOnlyList<WorkerSample>? Workers = null);
 
 /// <param name="CpusInUse">CPUs' worth of time used since the last sample.</param>
 /// <param name="PercentOfLimit">That against <c>LimitCpus</c>; null when there is no limit.</param>
@@ -321,4 +455,5 @@ public sealed record RunHold(string Team, string Member, DateTimeOffset Since, s
 public sealed record AdmissionSample(int MemoryPercent, int MemoryPressurePercent, string? Holding);
 
 /// <param name="CpuPercent">Percent of one CPU since the last sample; null on a run's first.</param>
-public sealed record RunFigures(string Team, string Member, int Processes, long ResidentBytes, double? CpuPercent);
+/// <param name="Worker">The worker the run is on.</param>
+public sealed record RunFigures(string Team, string Member, int Processes, long ResidentBytes, double? CpuPercent, string? Worker = null);
