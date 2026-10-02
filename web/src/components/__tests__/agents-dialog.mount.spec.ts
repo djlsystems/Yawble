@@ -384,6 +384,26 @@ describe('AgentsDialog, mounted', () => {
     wrapper.unmount();
   });
 
+  it('shows every Agent again when the filter is cleared with its clear button', async () => {
+    listCatalog.mockResolvedValue({ agents: [custom, builtIn, concierge] });
+    const wrapper = await mountDialog(AgentsDialog);
+    const shown = () => [...document.body.querySelectorAll('.agent-tile .agent-name')].map((n) => n.textContent?.trim());
+    const all = shown();
+
+    const filter = document.body.querySelector<HTMLInputElement>('input[data-agent-filter], [data-agent-filter] input')!;
+    filter.value = 'developer';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(shown()).toEqual(['claude-headless']);
+
+    document.body.querySelector<HTMLElement>('[data-agent-filters] .q-field__focusable-action')!.click();
+    await settle();
+    expect(shown()).toEqual(all);
+    expect(filter.value).toBe('');
+
+    wrapper.unmount();
+  });
+
   it('shows why a sign-in was not measured when no worker answered, and never says not installed', async () => {
     const why = 'Not measured: no worker is connected to ask this CLI.';
     getAgentAuth.mockResolvedValue([

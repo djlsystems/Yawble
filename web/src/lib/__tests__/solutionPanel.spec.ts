@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { InstalledSolution, SolutionPanelTrigger, SolutionStateKind } from '../../api/types';
+import { filterWords } from '../filterWords';
 import {
-  filterWords,
   hasNewRun,
   instructionFirstLine,
   LauncherPath,

@@ -6,6 +6,7 @@ import type {
   SolutionState,
   SolutionStateKind,
 } from '../api/types';
+import { filterWords, matchesWords } from './filterWords';
 import { capWords } from './solutions';
 import { triggerSentence } from './triggers';
 
@@ -135,10 +136,6 @@ export interface SolutionFilter {
   state: SolutionStateKind | null;
 }
 
-/** The filter's words: lower case, split on spaces, blanks dropped. */
-export const filterWords = (text: string | null | undefined) =>
-  (text ?? '').trim().toLowerCase().split(/\s+/).filter((word) => word !== '');
-
 /**
  * Whether a tile is shown: every word found in its name, package id, version, team name or status
  * line, and its team and state the chosen ones when chosen. It only decides what is shown; the rows
@@ -147,8 +144,7 @@ export const filterWords = (text: string | null | undefined) =>
 export function solutionMatches(row: InstalledSolution, filter: SolutionFilter): boolean {
   if (filter.team && row.team !== filter.team) return false;
   if (filter.state && row.state?.kind !== filter.state) return false;
-  const text = [row.name, row.id, row.version, row.teamName, row.status ?? ''].join(' ').toLowerCase();
-  return filterWords(filter.text).every((word) => text.includes(word));
+  return matchesWords(filterWords(filter.text), row.name, row.id, row.version, row.teamName, row.status);
 }
 
 /** The Team choices: each team that has a tile, by its name. */

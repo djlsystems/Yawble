@@ -6,6 +6,8 @@ import { formatManifest, pluginEvents, pluginRows, pluginSkill, type PluginRow }
 import { defaultLabel, setByPerson } from '../lib/pluginSettings';
 import { slotSummary } from '../lib/connections';
 import { useConsoleStore } from '../stores/console';
+import { filterWords, matchesWords } from '../lib/filterWords';
+import FilterText from './FilterText.vue';
 import HostPathPicker from './HostPathPicker.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
@@ -38,18 +40,13 @@ const board = useConsoleStore();
 const list = ref<PluginList | null>(null);
 const rows = computed<PluginRow[]>(() => (list.value ? pluginRows(list.value) : []));
 
-/** The filter's text; empty (or cleared, which is null) shows every version. */
-const filterText = ref<string | null>('');
+/** The filter's text; empty shows every version. */
+const filterText = ref('');
 
 const shownRows = computed<PluginRow[]>(() => {
-  const words = (filterText.value ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return rows.value;
-
-  return rows.value.filter((row) => {
-    const description = row.verdict === 'installed' ? row.plugin.description ?? '' : '';
-    const text = [row.name, row.id, row.version ?? '', description].join(' ').toLowerCase();
-    return words.every((word) => text.includes(word));
-  });
+  const words = filterWords(filterText.value);
+  return rows.value.filter((row) =>
+    matchesWords(words, row.name, row.id, row.version, row.verdict === 'installed' ? row.plugin.description : ''));
 });
 
 const loading = ref(false);
@@ -329,18 +326,13 @@ const verdictText = computed(() => {
       <!-- THE FILTER: free text over name, id, version and description. It narrows what is SHOWN
            only. -->
       <q-card-section class="q-pt-none q-pb-sm">
-        <q-input
+        <FilterText
           v-model="filterText"
-          dense
-          outlined
-          clearable
           class="plugin-filter-text"
           placeholder="Filter: name, id or description"
           aria-label="Filter plugins"
           data-plugin-filter
-        >
-          <template #prepend><q-icon name="search" /></template>
-        </q-input>
+        />
       </q-card-section>
 
       <q-card-section class="q-pt-none plugins-body">

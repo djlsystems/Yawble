@@ -3,6 +3,7 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import * as api from '../api/client';
 import { type Agent } from '../api/types';
+import { filterWords, matchesWords } from '../lib/filterWords';
 import { visibleAgents } from '../lib/hiddenAgents';
 import { AgentCredentialSources, AgentTags, sourceMapOf, tagMapOf } from '../lib/tenantSettings';
 import {
@@ -26,6 +27,7 @@ import {
 import { toolsReportFor, toolsStatus } from '../lib/agentTools';
 import { cliVersionFor, heldLine, updateInGate, updateStateLine, versionLine, withCliVersion } from '../lib/agentVersions';
 import type { AgentCredential, AgentCredentialSource, AgentUpdateState, CliVersion, PresetToolReport } from '../api/types';
+import FilterText from './FilterText.vue';
 import AgentEditDialog from './AgentEditDialog.vue';
 
 /**
@@ -416,17 +418,16 @@ function searchText(agent: Agent): string {
     agent.launch?.fileName ?? '',
     ...(agent.launch?.arguments ?? []),
     ...(agent.tags ?? []),
-  ].join(' ').toLowerCase();
+  ].join(' ');
 }
 
 /** WHAT IS RENDERED after the filter - `shownAgents` narrowed, and never what is submitted. */
 const filteredAgents = computed(() => {
-  const words = filterText.value.toLowerCase().split(/\s+/).filter((word) => word.length > 0);
+  const words = filterWords(filterText.value);
 
   return shownAgents.value.filter((agent) => {
     if (agent.mode === 'Headless' ? !showHeadless.value : !showConcierge.value) return false;
-    const text = searchText(agent);
-    return words.every((word) => text.includes(word));
+    return matchesWords(words, searchText(agent));
   });
 });
 
@@ -669,18 +670,13 @@ const rowBusy = computed(
       <!-- THE FILTER: free text over name, command, arguments, mode and tags, and one checkbox per
            mode. It narrows what is SHOWN only; a save still sends the whole catalog. -->
       <q-card-section class="agent-filters q-py-sm" data-agent-filters>
-        <q-input
+        <FilterText
           v-model="filterText"
-          dense
-          outlined
-          clearable
           class="agent-filter-text"
           placeholder="Filter: name, command, argument or tag"
           aria-label="Filter Agents"
           data-agent-filter
-        >
-          <template #prepend><q-icon name="search" /></template>
-        </q-input>
+        />
         <q-checkbox v-model="showHeadless" dense label="Headless" data-agent-show="headless" />
         <q-checkbox v-model="showConcierge" dense label="Concierge" data-agent-show="concierge" />
       </q-card-section>
