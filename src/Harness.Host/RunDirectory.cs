@@ -54,6 +54,7 @@ public sealed class RunDirectory
 
     private readonly ConcurrentDictionary<RunId, Open> _runs = new();
     private readonly ConcurrentDictionary<IRunWorker, bool> _watched = new(ReferenceEqualityComparer.Instance);
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<LaunchChecked?>> _checks = new(StringComparer.Ordinal);
     private readonly Func<IMemberReports?> _reports;
     private readonly Func<IDiagnosticsLog?> _diagnostics;
     private readonly LiveRuns? _live;
@@ -160,6 +161,30 @@ public sealed class RunDirectory
         }
     }
 
+    /// <summary>
+    /// Sends <paramref name="check"/> to <paramref name="worker"/> and answers with what it found, or null
+    /// when no answer came within <paramref name="bound"/> or the worker went first.
+    /// </summary>
+    public async Task<LaunchChecked?> CheckLaunchAsync(IRunWorker worker, CheckLaunch check, TimeSpan bound, CancellationToken ct = default)
+    {
+        var answer = new TaskCompletionSource<LaunchChecked?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _checks[check.Request] = answer;
+        try
+        {
+            await worker.SendAsync(check, ct);
+            var done = await Task.WhenAny(answer.Task, worker.Closed, Task.Delay(bound, _clock, ct));
+            return done == answer.Task ? await answer.Task : null;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException)
+        {
+            return null;
+        }
+        finally
+        {
+            _checks.TryRemove(check.Request, out _);
+        }
+    }
+
     /// <summary>The runs open here on <paramref name="worker"/>: what a worker that comes back is compared with.</summary>
     public IReadOnlyCollection<RunId> OpenOn(WorkerId worker) =>
         [.. _runs.Values.Where(open => open.Worker.Id == worker).Select(open => open.Run)];
@@ -200,6 +225,12 @@ public sealed class RunDirectory
     /// <summary>What one worker said. Called in <see cref="WorkerEnvelope.Seq"/> order.</summary>
     public async Task HandleAsync(WorkerEnvelope envelope, CancellationToken ct = default)
     {
+        if (envelope.Event is LaunchChecked found)
+        {
+            if (_checks.TryGetValue(found.Request, out var waiting)) waiting.TrySetResult(found);
+            return;
+        }
+
         if (envelope.Event is WorkerCapacitySampled sampled)
         {
             // A run that was open on the worker before this sample and is not in it ended there,

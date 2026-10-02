@@ -36,6 +36,10 @@ public sealed class RunProtocolTests
         new HoldIdleClock(Run.Member, true),
         new TouchIdleClock(Run.Member),
         new SampleCapacity(),
+        new CheckLaunch(
+            "r1", new RunLaunch("cli", ["--version"], null, null, null, true, null, null, 60, []), ["--version"], ["--no-update"],
+            new Dictionary<string, string> { ["A"] = "1" }, new RunMemoryAllowance(new MemoryFigure(2048, "set", true), new MemoryFigure(4096, "ceiling", false)),
+            60, "/data/tmp"),
     ];
 
     private static readonly DateTimeOffset At = new(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
@@ -63,6 +67,7 @@ public sealed class RunProtocolTests
                 new PressureReading(new PressureLines(5, 6, 7, 8), new PressureLines(9, 10, 11, 12)),
                 5, 100, false, ["cpu.stat"]),
             [Run]),
+        new LaunchChecked("r1", "ok", 0, null, "ran cli --version"),
     ];
 
     [Fact]

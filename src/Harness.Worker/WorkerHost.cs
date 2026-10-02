@@ -118,6 +118,11 @@ public sealed class WorkerHost
                 await SampleAsync(ct);
                 break;
 
+            case CheckLaunch check:
+                // On its own task, as a run is: the answer is an event, under the check's request.
+                _ = Task.Run(() => CheckAsync(check), CancellationToken.None);
+                break;
+
             default:
                 throw new NotSupportedException($"A worker does not take {message.GetType().Name}.");
         }
@@ -172,6 +177,31 @@ public sealed class WorkerHost
         finally
         {
             open.Stop.Dispose();
+        }
+    }
+
+    /// <summary>Runs a launch check with this worker's own launch and says what it found.</summary>
+    private async Task CheckAsync(CheckLaunch check)
+    {
+        AgentLaunchReport report;
+        try
+        {
+            report = await _launcher.CheckLaunchAsync(
+                check.Launch, check.Check, check.UpdateArguments, check.Environment, check.Memory, CancellationToken.None,
+                check.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null, check.Credential, check.Redaction, check.TempRoot);
+        }
+        catch (Exception exception)
+        {
+            report = AgentLaunchReport.Unchecked($"The launch check failed on worker {_id}: {exception.Message}");
+        }
+
+        try
+        {
+            await PublishAsync(new LaunchChecked(check.Request, report.Result, report.ExitCode, report.StderrTail, report.Detail));
+        }
+        catch (Exception exception)
+        {
+            _log?.LogWarning("A launch check ended, and saying so failed: {Message}", exception.Message);
         }
     }
 

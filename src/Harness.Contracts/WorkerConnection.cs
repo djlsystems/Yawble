@@ -159,6 +159,14 @@ public sealed class WorkerFrameCodec
                 };
                 break;
 
+            case CommandFrame { Message: CheckLaunch check } command when check.Credential is not null || check.Redaction is not null:
+                frame = command with
+                {
+                    Message = check with { Credential = null, Redaction = null },
+                    Sealed = Seal(new Secrets(check.Credential, check.Redaction)),
+                };
+                break;
+
             case EventFrame { Envelope.Event: RunCredentialApplied { Redaction: not null } applied } @event:
                 frame = @event with
                 {
@@ -194,6 +202,10 @@ public sealed class WorkerFrameCodec
             case CommandFrame { Sealed: { } blob, Message: StartRun start } command:
                 var forStart = Open(blob);
                 return command with { Message = start with { Credential = forStart.Credential, Redaction = forStart.Redaction }, Sealed = null };
+
+            case CommandFrame { Sealed: { } blob, Message: CheckLaunch check } command:
+                var forCheck = Open(blob);
+                return command with { Message = check with { Credential = forCheck.Credential, Redaction = forCheck.Redaction }, Sealed = null };
 
             case EventFrame { Sealed: { } blob, Envelope.Event: RunCredentialApplied applied } @event:
                 var forEvent = Open(blob);

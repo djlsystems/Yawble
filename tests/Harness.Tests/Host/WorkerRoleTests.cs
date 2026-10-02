@@ -77,6 +77,54 @@ public sealed class WorkerRoleTests
     }
 
     [Fact]
+    public async Task The_launch_check_in_control_goes_to_a_connected_worker()
+    {
+        var catalog = new AgentCatalog(
+        [
+            new AgentDefinition("checked", AgentMode.Headless, new AgentLaunch("sh", ["-p", "{userPrompt}"]), LaunchCheck: ["-c", "exit 0"]),
+        ]);
+        var heartbeat = new RunHeartbeat();
+        var directory = new RunDirectory();
+        var worker = InProcessWorker.Connect(
+            new WorkerId("w1"),
+            events => new WorkerHost(new WorkerId("w1"), events, new RunLauncher(heartbeat, reports: false, lookup: LaunchLookup.Once), heartbeat),
+            directory.HandleAsync);
+        var workers = new OneOfMany(worker.Worker);
+
+        // This process has no launcher: the check is sent to a worker, and its answer is the report.
+        var runner = new ProcessAgentRunner(catalog, workers, directory, null, () => null, null);
+        var report = await runner.CheckLaunchAsync("checked", Ct);
+
+        Assert.Equal(AgentLaunchReport.Ok, report.Result);
+        Assert.Single(workers.Sent.OfType<CheckLaunch>());
+
+        // With no worker there is nobody to check it.
+        var none = new ProcessAgentRunner(catalog, new OneOfMany(null), directory, null, () => null, null);
+        Assert.Equal(ProcessAgentRunner.NotCheckedHere, (await none.CheckLaunchAsync("checked", Ct)).Detail);
+        worker.Close();
+    }
+
+    /// <summary>Control's handle on its workers, with one worker or none.</summary>
+    private sealed class OneOfMany(IRunWorker? only) : IRunWorker, IRunWorkerRouter
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<ControlMessage> Sent { get; } = new();
+
+        public WorkerId Id { get; } = new("control");
+
+        public Task Closed { get; } = new TaskCompletionSource().Task;
+
+        public IRunWorker For(ContainerId member) => Any();
+
+        public IRunWorker Any() => only is null ? throw new InvalidOperationException("No worker is connected.") : this;
+
+        public Task SendAsync(ControlMessage message, CancellationToken ct = default)
+        {
+            Sent.Enqueue(message);
+            return only!.SendAsync(message, ct);
+        }
+    }
+
+    [Fact]
     public async Task All_composes_todays_in_process_worker()
     {
         var root = Directory.CreateTempSubdirectory("harness-all-role-").FullName;

@@ -21,6 +21,8 @@ public sealed class RunWorkers(WorkerPool pool, Func<ContainerId, WorkerId?> pla
 
     public IRunWorker For(ContainerId member) => pool.Worker(placedOn(member));
 
+    public IRunWorker Any() => pool.Worker(null);
+
     public async Task SendAsync(ControlMessage message, CancellationToken ct = default)
     {
         switch (message)

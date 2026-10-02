@@ -113,7 +113,13 @@ public sealed class WorkerFrameTests
         {
             codec.Write(new CommandFrame(1, Start())),
             codec.Write(new EventFrame(new WorkerEnvelope(new WorkerId("w1"), 5, new RunCredentialApplied(Run, ValueRedactor.For([Value]))))),
+            codec.Write(new CommandFrame(2, new CheckLaunch(
+                "r1", Start().Launch!, ["--version"], [], new Dictionary<string, string>(), null, 60, null, Start().Credential, Start().Redaction))),
         };
+
+        // A launch check's secrets open again on the other end.
+        var check = (CheckLaunch)((CommandFrame)codec.Read(texts[2])).Message;
+        Assert.Equal(Value, check.Credential!.Environment["ISSUED_KEY"]);
 
         foreach (var text in texts)
         {

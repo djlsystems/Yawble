@@ -47,6 +47,7 @@ public sealed record RunId(ContainerId Member, string Nonce)
 [JsonDerivedType(typeof(HoldIdleClock), "holdIdleClock")]
 [JsonDerivedType(typeof(TouchIdleClock), "touchIdleClock")]
 [JsonDerivedType(typeof(SampleCapacity), "sampleCapacity")]
+[JsonDerivedType(typeof(CheckLaunch), "checkLaunch")]
 public abstract record ControlMessage;
 
 /// <summary>A command about one run.</summary>
@@ -156,6 +157,24 @@ public sealed record TouchIdleClock(ContainerId Member) : MemberCommand(Member);
 /// <summary>Measure now: each open run's process group, then the worker's own cgroup.</summary>
 public sealed record SampleCapacity : ControlMessage;
 
+/// <summary>
+/// THE LAUNCH CHECK OF ONE PRESET, on a worker: its declared free invocation (<see cref="Check"/>,
+/// after <see cref="UpdateArguments"/>) started as a member run of it would start the CLI, with what
+/// control resolved for it. The worker answers with <see cref="LaunchChecked"/> under the same
+/// <see cref="Request"/>. <see cref="Credential"/> and <see cref="Redaction"/> hold secrets, as a start's do.
+/// </summary>
+public sealed record CheckLaunch(
+    string Request,
+    RunLaunch Launch,
+    IReadOnlyList<string> Check,
+    IReadOnlyList<string> UpdateArguments,
+    IReadOnlyDictionary<string, string> Environment,
+    RunMemoryAllowance? Memory,
+    int? TimeoutSeconds,
+    string? TempRoot,
+    RunCredential? Credential = null,
+    ValueRedactor? Redaction = null) : ControlMessage;
+
 // ---------------------------------------------------------------------------------------------
 // Worker to control.
 // ---------------------------------------------------------------------------------------------
@@ -180,6 +199,7 @@ public sealed record WorkerEnvelope(WorkerId Worker, long Seq, WorkerEvent Event
 [JsonDerivedType(typeof(RunDiagnostic), "runDiagnostic")]
 [JsonDerivedType(typeof(RunEnded), "runEnded")]
 [JsonDerivedType(typeof(WorkerCapacitySampled), "workerCapacitySampled")]
+[JsonDerivedType(typeof(LaunchChecked), "launchChecked")]
 public abstract record WorkerEvent;
 
 /// <summary>An event about one run.</summary>
@@ -293,6 +313,12 @@ public sealed record RunFault(bool Canceled, string Type, string Message);
 public sealed record WorkerCapacitySampled(DateTimeOffset At, CapacityFigures Figures, IReadOnlyList<RunId> OpenRuns)
     : WorkerEvent;
 
+/// <summary>
+/// What a launch check found (<see cref="CheckLaunch"/>): <c>ok</c>, <c>failed</c> or <c>not checked</c>,
+/// the exit code and the redacted end of stderr when a process ran, and what was run or why nothing was.
+/// </summary>
+public sealed record LaunchChecked(string Request, string Result, int? ExitCode, string? StderrTail, string? Detail) : WorkerEvent;
+
 /// <summary>What the worker's cgroup said, field for field the worker's own reading.</summary>
 public sealed record CapacityFigures(
     string? Version,
@@ -360,6 +386,9 @@ public interface IRunWorkerRouter
 {
     /// <summary>The worker <paramref name="member"/>'s runs go to now. Throws when there is none.</summary>
     IRunWorker For(ContainerId member);
+
+    /// <summary>The worker a run placed now would go to: the connected one with the most measured headroom. Throws when there is none.</summary>
+    IRunWorker Any();
 }
 
 /// <summary>A worker's handle on control: where its events go, in <see cref="WorkerEnvelope.Seq"/> order.</summary>
