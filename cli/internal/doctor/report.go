@@ -70,6 +70,31 @@ type Agent struct {
 	// Launch is the Host's check that the CLI starts the way a member run launches it. Nil: an
 	// older Host that does not check, which reads "not known" and never ok.
 	Launch *Launch `json:"launch"`
+	// CredentialSource is how the preset signs in: "home" (the shared home) or "issued" (the
+	// credential stored for its command). Nil: an older Host, and no source is shown.
+	CredentialSource *string `json:"credentialSource"`
+	// IssuedSet is whether its command's issued credential is set; nil under home.
+	IssuedSet *bool `json:"issuedSet"`
+}
+
+// Issued says whether the agent signs in through its command's issued credential.
+func (a Agent) Issued() bool { return a.CredentialSource != nil && *a.CredentialSource == "issued" }
+
+// SourceText is the source in one phrase: "home", "issued (set)", "issued (NOT set)" or "issued";
+// "" when the Host did not say.
+func (a Agent) SourceText() string {
+	switch {
+	case a.CredentialSource == nil || *a.CredentialSource == "":
+		return ""
+	case !a.Issued():
+		return *a.CredentialSource
+	case a.IssuedSet == nil:
+		return "issued"
+	case *a.IssuedSet:
+		return "issued (set)"
+	default:
+		return "issued (NOT set)"
+	}
 }
 
 // Launch is one CLI's launch check. Result is the Host's word: "ok", "failed" or "not checked".
