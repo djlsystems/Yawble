@@ -213,8 +213,9 @@ public sealed class ControlUpdateGateTests : IDisposable
         bed.Place["alpha"] = remote;
 
         var (control, worker) = await Pair();
-        var connected = remote.RunAsync(new WorkerSocket(control.Socket, new WorkerFrameCodec(null)), Ct);
-        var socket = new WorkerSocket(worker.Socket, new WorkerFrameCodec(null));
+        var key = WorkerFrameCodec.Key("the-worker-key", "control-nonce", "worker-nonce");
+        var connected = remote.RunAsync(new WorkerSocket(control.Socket, new WorkerFrameCodec(key)), Ct);
+        var socket = new WorkerSocket(worker.Socket, new WorkerFrameCodec(key));
 
         var run = bed.Runner.RunAsync(Bed.Invocation("alpha"), Ct);
         var command = Assert.IsType<CommandFrame>(await socket.ReceiveAsync(Ct).WaitAsync(Bound, Ct));
