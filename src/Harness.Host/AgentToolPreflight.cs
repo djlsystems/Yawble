@@ -1,3 +1,4 @@
+using Harness.Contracts;
 using System.Text.Json;
 
 namespace Harness.Host;
@@ -101,7 +102,8 @@ public sealed record AgentToolsRecord(DateTimeOffset At, IReadOnlyList<PresetToo
 /// the member launch rewrites) is not touched here.
 /// </summary>
 public sealed class AgentToolPreflight(
-    AgentCatalog catalog, IListingRunner runner, string dataRoot, ILogger<AgentToolPreflight>? log = null)
+    AgentCatalog catalog, IListingRunner runner, string dataRoot, ILogger<AgentToolPreflight>? log = null,
+    IRunCredentials? credentials = null)
     : BackgroundService
 {
     private readonly SemaphoreSlim _again = new(0);
@@ -141,13 +143,16 @@ public sealed class AgentToolPreflight(
 
     private void Again() => _again.Release();
 
+    /// <summary>Asks for another pass: a preset's credential source or its command's credential changed.</summary>
+    public void Refresh() => Again();
+
     /// <summary>One pass over the catalog. Public for the tests, which hand it a runner of recorded output.</summary>
     public async Task<AgentToolsRecord> PassAsync(CancellationToken ct)
     {
         Running = true;
         try
         {
-            var record = new AgentToolsRecord(DateTimeOffset.UtcNow, await ReportsAsync(catalog.Definitions, runner, ct));
+            var record = new AgentToolsRecord(DateTimeOffset.UtcNow, await ReportsAsync(catalog.Definitions, runner, ct, credentials));
             _current = record;
             record.Write(dataRoot, log);
 
@@ -166,9 +171,14 @@ public sealed class AgentToolPreflight(
         }
     }
 
-    /// <summary>Every preset's report. A launch shape shared by two presets is listed once.</summary>
+    /// <summary>
+    /// Every preset's report. A launch shape shared by two presets is listed once. Each is listed
+    /// with the credential its launch would start with, from <paramref name="credentials"/>: the
+    /// shared home's, or an issued one (<see cref="ListAsync"/>).
+    /// </summary>
     public static async Task<IReadOnlyList<PresetToolReport>> ReportsAsync(
-        IReadOnlyList<AgentDefinition> definitions, IListingRunner runner, CancellationToken ct)
+        IReadOnlyList<AgentDefinition> definitions, IListingRunner runner, CancellationToken ct,
+        IRunCredentials? credentials = null)
     {
         var listed = new Dictionary<string, CliListing>(StringComparer.Ordinal);
         var reports = new List<PresetToolReport>(definitions.Count);
@@ -182,13 +192,26 @@ public sealed class AgentToolPreflight(
 
             if (launch.LanguageModel && allowance.State != IsolationState.NotAModel)
             {
+                var credential = credentials is null
+                    ? RunCredential.Home
+                    : await credentials.ResolveAsync(definition.Name, definition, ct);
+
                 var (arguments, environment) = LaunchShape(definition);
-                var key = string.Join('\u0001', [launch.FileName, .. arguments, .. environment.Select(e => e.Key + "=" + e.Value)]);
+
+                // The source and the mode in the key, never the credential's value: an issued
+                // member's launch and the Concierge's apply it differently.
+                var key = string.Join('\u0001',
+                [
+                    launch.FileName, credential.Source.ToString(), definition.Mode.ToString(), .. arguments,
+                    .. environment.Select(e => e.Key + "=" + e.Value),
+                ]);
 
                 if (!listed.TryGetValue(key, out listing))
                 {
-                    listing = await AgentToolListers.ListAsync(launch.FileName, arguments, environment, runner, ct);
-                    listed[key] = listing;
+                    listing = await ListAsync(definition, arguments, environment, credential, runner, ct);
+
+                    // A credential that is not set is not a listing, and costs nothing to say again.
+                    if (credential.Missing is null) listed[key] = listing;
                 }
             }
 
@@ -196,6 +219,72 @@ public sealed class AgentToolPreflight(
         }
 
         return reports;
+    }
+
+    /// <summary>
+    /// ONE PRESET'S LISTING, WITH THE CREDENTIAL ITS LAUNCH WOULD START WITH.
+    /// <list type="bullet">
+    /// <item>The shared home: as it always was.</item>
+    /// <item>An issued MEMBER preset: as its member run - the credential applied
+    /// (<see cref="AgentEnvironment.ApplyIssued"/>) in a home of the listing's own, removed after.
+    /// Its credential not set is NOT MEASURED, as such a run does not start.</item>
+    /// <item>The CONCIERGE: as its terminal - its home kept, each displaced variable its declaration
+    /// names set empty and the credential set, the way <see cref="ConciergeLaunchFactory"/> does; on
+    /// the person's login when its credential is not set.</item>
+    /// </list>
+    /// </summary>
+    private static async Task<CliListing> ListAsync(
+        AgentDefinition definition, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment,
+        RunCredential credential, IListingRunner runner, CancellationToken ct)
+    {
+        var command = definition.Launch.FileName;
+
+        if (credential.Source != CredentialSource.Issued)
+        {
+            return await AgentToolListers.ListAsync(command, arguments, environment, runner, ct);
+        }
+
+        if (definition.Mode != AgentMode.Headless)
+        {
+            if (credential.Missing is not null || definition.IssuedCredential is not { } declaration)
+            {
+                return await AgentToolListers.ListAsync(command, arguments, environment, runner, ct);
+            }
+
+            var concierge = new SortedDictionary<string, string>(environment.ToDictionary(), StringComparer.Ordinal);
+            foreach (var name in credential.Displace.Intersect(declaration.Displaces, StringComparer.Ordinal))
+            {
+                concierge[name] = string.Empty;
+            }
+
+            foreach (var (name, value) in credential.Environment) concierge[name] = value;
+
+            return await AgentToolListers.ListAsync(command, arguments, concierge, runner, ct);
+        }
+
+        if (credential.Missing is { } notSet) return CliListing.NotMeasured(command, notSet);
+
+        if (await runner.MakeHomeAsync(ct) is not { } home)
+        {
+            return CliListing.NotMeasured(command,
+                "This preset signs in with an issued credential and runs in a home of its own, which could not be made for its listing.");
+        }
+
+        try
+        {
+            // The cache beside the listing homes, kept across listings as a member's is across its
+            // runs, so a fresh home does not unpack a CLI's cache on every listing.
+            var member = new SortedDictionary<string, string>(environment.ToDictionary(), StringComparer.Ordinal)
+            {
+                ["HOME"] = home,
+                ["XDG_CACHE_HOME"] = RunHome.CacheBeside(home),
+            };
+            return await AgentToolListers.ListAsync(command, arguments, member, runner, ct, credential);
+        }
+        finally
+        {
+            await runner.RemoveHomeAsync(home);
+        }
     }
 
     /// <summary>

@@ -18,8 +18,11 @@ func newAgentsCommand(deps Deps) *cobra.Command {
 		Short: "Each agent CLI inside the instance: installed, signed in, and how to sign in if not",
 		Long: "Reads the instance's own report of its agent CLIs (the Host's --doctor). Sign-in happens " +
 			"in the board: open a Concierge on the agent and log in there. A provider key in the env file " +
-			"beside yawble's config is the other way; `yawble up` hands it to the container.",
-		Example: "  yawble agents\n  yawble agents --json",
+			"beside yawble's config is the other way; `yawble up` hands it to the container.\n\n" +
+			"Each agent also shows its source: home signs in through the shared home, issued uses the one " +
+			"credential stored for its command (`yawble agents credential set`), chosen per preset with " +
+			"`yawble agents source`.",
+		Example: "  yawble agents\n  yawble agents --json\n  yawble agents source claude-headless issued\n  yawble agents credential set claude",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			e, _, _, err := prepare(deps)
@@ -55,5 +58,6 @@ func newAgentsCommand(deps Deps) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	cmd.AddCommand(newAgentsCredentialCommand(deps), newAgentsSourceCommand(deps))
 	return cmd
 }

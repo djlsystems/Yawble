@@ -310,6 +310,52 @@ public static class AgentCatalogFile
         // never launches an interactive one.
         IReadOnlyList<string> versionCheck = ["--version"];
 
+        // HOW EACH CLI TAKES A CREDENTIAL ISSUED IN ADMIN > AGENTS instead of the shared home's
+        // login. Measured with real launches under `env -i` (claude 2.1.287, codex-cli 0.160.0,
+        // copilot 1.0.91, grok 1.0.46): fake keys, once in an empty HOME and once in the shared
+        // home, with a local listener recording which fake each CLI sent.
+        //
+        // - claude: ANTHROPIC_API_KEY (x-api-key) and CLAUDE_CODE_OAUTH_TOKEN (bearer) both beat the
+        //   home login; the key beats the token. ANTHROPIC_AUTH_TOKEN is a gateway bearer sent
+        //   beside the key, so it is displaced too.
+        // - codex: CODEX_API_KEY beats the ChatGPT login and OPENAI_API_KEY; OPENAI_API_KEY LOSES to
+        //   the login, so it is displaced and never issued. CODEX_ACCESS_TOKEN (an identity JWT)
+        //   also beats the login. The interactive TUI could not be driven from a plain pty, so the
+        //   Concierge's precedence is unmeasured.
+        // - copilot: COPILOT_GITHUB_TOKEN, first of the three the CLI reads. GH_TOKEN is the team's
+        //   git token and is never displaced. No copilot login exists on the measuring instance, so
+        //   precedence is the CLI's own help ("takes precedence over previously stored
+        //   credentials"). A classic `ghp_` token in any of the three stops copilot starting.
+        // - grok: XAI_API_KEY beats GROK_CODE_XAI_API_KEY, and the home LOGIN beats both - even a
+        //   key the API accepted.
+        //
+        // HomeVariables are each CLI's own config-directory variable: removed from an issued run so
+        // its own HOME is the only one it reads.
+        var claudeCredential = new IssuedCredential(
+            [new(IssuedCredential.ApiKey, "ANTHROPIC_API_KEY"), new(IssuedCredential.Token, "CLAUDE_CODE_OAUTH_TOKEN")],
+            ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
+            IssuedCredential.CredentialWins,
+            "2.1.287",
+            HomeVariables: ["CLAUDE_CONFIG_DIR"]);
+
+        IReadOnlyList<IssuedCredentialKind> codexKinds = [new(IssuedCredential.ApiKey, "CODEX_API_KEY")];
+        IReadOnlyList<string> codexDisplaces = ["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"];
+        IReadOnlyList<string> codexHome = ["CODEX_HOME"];
+
+        var copilotCredential = new IssuedCredential(
+            [new(IssuedCredential.Token, "COPILOT_GITHUB_TOKEN", RefusedPrefixes: ["ghp_"])],
+            ["COPILOT_GITHUB_TOKEN"],
+            IssuedCredential.CredentialWins,
+            "1.0.91",
+            HomeVariables: ["COPILOT_HOME"]);
+
+        var grokCredential = new IssuedCredential(
+            [new(IssuedCredential.ApiKey, "XAI_API_KEY")],
+            ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"],
+            IssuedCredential.LoginWins,
+            "1.0.46",
+            HomeVariables: ["GROK_HOME"]);
+
         return
         [
             new AgentDefinition(
@@ -321,7 +367,8 @@ public static class AgentCatalogFile
                     claudeArguments),
                 Install: claudeInstall,
                 Updates: claudeUpdates,
-                SessionFolders: claudeSessionFolders),
+                SessionFolders: claudeSessionFolders,
+                IssuedCredential: claudeCredential),
 
             new AgentDefinition(
                 "claude-headless",
@@ -372,7 +419,8 @@ public static class AgentCatalogFile
                 Isolation: claudeIsolation,
                 Updates: claudeUpdates,
                 SessionFolders: claudeSessionFolders,
-                LaunchCheck: versionCheck),
+                LaunchCheck: versionCheck,
+                IssuedCredential: claudeCredential),
 
             // The three other coding CLIs, verified against their own --help rather than from
             // documentation, which disagreed with the binaries in several places.
@@ -395,7 +443,8 @@ public static class AgentCatalogFile
                     ["--dangerously-bypass-approvals-and-sandbox", .. codexMcp],
                     InstructionsFile: AgentsFile),
                 Install: codexInstall,
-                Updates: codexUpdates),
+                Updates: codexUpdates,
+                IssuedCredential: new IssuedCredential(codexKinds, codexDisplaces, IssuedCredential.Unmeasured, "0.160.0", codexHome)),
 
             new AgentDefinition(
                 "codex-headless",
@@ -440,7 +489,8 @@ public static class AgentCatalogFile
                     new AgentLiveViewFind("~/.codex/sessions", "*/*/*/rollout-*.jsonl", LiveView.CwdFromFirstLine)),
                 Isolation: codexIsolation,
                 Updates: codexUpdates,
-                LaunchCheck: versionCheck),
+                LaunchCheck: versionCheck,
+                IssuedCredential: new IssuedCredential(codexKinds, codexDisplaces, IssuedCredential.CredentialWins, "0.160.0", codexHome)),
 
             new AgentDefinition(
                 "copilot",
@@ -479,7 +529,8 @@ public static class AgentCatalogFile
                     ],
                     InstructionsFile: AgentsFile),
                 Install: copilotInstall,
-                Updates: copilotUpdates),
+                Updates: copilotUpdates,
+                IssuedCredential: copilotCredential),
 
             new AgentDefinition(
                 "copilot-headless",
@@ -583,7 +634,8 @@ public static class AgentCatalogFile
                     "~/.copilot/session-state/{sessionId}/events.jsonl", LiveView.CopilotEvents),
                 Isolation: copilotIsolation,
                 Updates: copilotUpdates,
-                LaunchCheck: versionCheck),
+                LaunchCheck: versionCheck,
+                IssuedCredential: copilotCredential),
 
             new AgentDefinition(
                 "grok",
@@ -594,7 +646,8 @@ public static class AgentCatalogFile
                     InstructionsFile: AgentsFile),
                 Install: grokInstall,
                 Updates: grokUpdates,
-                SessionFolders: grokSessionFolders),
+                SessionFolders: grokSessionFolders,
+                IssuedCredential: grokCredential),
 
             new AgentDefinition(
                 "grok-headless",
@@ -647,7 +700,8 @@ public static class AgentCatalogFile
                 Isolation: grokIsolation,
                 Updates: grokUpdates,
                 SessionFolders: grokSessionFolders,
-                LaunchCheck: versionCheck),
+                LaunchCheck: versionCheck,
+                IssuedCredential: grokCredential),
 
             new AgentDefinition(
                 "echo",

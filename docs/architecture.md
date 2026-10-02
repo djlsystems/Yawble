@@ -78,12 +78,35 @@ The product name, Yawble, lives in the web app's presentation layer
 - Provider keys and `GH_TOKEN` are given to the operator CLI (`yawble secret set`, `yawble github`),
   kept in an owner-only file on the operator's machine and handed to the container at `yawble up`.
   Nothing is baked into the image.
+- An agent's **issued credential** is stored once per CLI command, as Data Protection ciphertext in
+  the database, set and cleared only by a person (Admin → Agents) or the operator CLI's request
+  file, each with its audit row. No response, log or file carries the value: a preset answers only
+  whether it is set, by whom and when. You are responsible for your provider's terms when one credential is used by many runs.
 
 ## The shared agent home
 
 Every agent CLI runs as the `agent` user with one shared home, `/data/agent-home`: the CLIs' own
 sign-ins live there, and so does anything a person sets up for the Concierge (account connectors,
 MCP servers, plugins, skills, memory and instruction files).
+
+- **Two ways to sign in: the shared home or an issued credential.** Each preset has a source,
+  chosen per preset in Admin → Agents or with `yawble agents source <preset> home|issued` (the
+  `agents.credentialSource` setting). `home`, the default, signs in through the shared home exactly
+  as before. Under `issued`, a run receives its command's credential in its own environment only,
+  with a HOME of its own under its member temporary folder, removed when the run ends; it never
+  reads the shared home's logins, and a member run whose credential is not set does not start - it
+  never falls back to the home.
+- **The credential is stored once per command, the source is chosen per preset.** One value is kept
+  for each CLI command (`claude`, `codex`, `grok`, `copilot`) and shared by every preset that runs
+  that command: setting the Claude key once serves both `claude` (the Concierge) and
+  `claude-headless` (members) when their source is `issued`. It is set in Admin → Agents or with
+  `yawble agents credential set <preset|command>`, which reads it from a hidden prompt or stdin and
+  never from the command line. You are responsible for your provider's terms when one credential is used by many runs.
+- **The Concierge keeps its home under `issued`, too.** It is given the credential beside its
+  login; which of the two its CLI uses is the preset's measured `loginPrecedence`, and Admin →
+  Agents states it: Claude uses the issued credential, Grok the person's login while one exists,
+  and Codex's terminal interface is not measured. With no credential set, the Concierge starts on
+  the person's own login.
 
 - **The Concierge keeps every tool.** It is the person's own session and launches as it always has,
   with the signed-in account's connectors (for Claude, `claude_ai_*`: Gmail, Claude Docs, Calendar,

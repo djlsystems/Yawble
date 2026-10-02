@@ -10,16 +10,20 @@ namespace Harness.Host;
 /// The built-in codex presets name neither: they pass <c>{mcpUrl}</c> in two <c>-c</c> flags
 /// (see <c>AgentCatalogFile</c>), and the TOML stays for a custom preset that wants a file.
 /// </summary>
-public sealed record McpLaunchConfig(string Url, string JsonPath, string TomlPath)
+public sealed record McpLaunchConfig(string Url, string JsonPath, string TomlPath, string? GrokConfig = null)
 {
     /// <summary>Writes this launch's config, or null when there is no platform to call or no
     /// key for the child to call it with. <paramref name="apiKey"/> gates the write and is never
     /// written: the child holds it as <c>HARNESS_KEY</c>. A grok config.toml that cannot be
     /// written is reported to <paramref name="warn"/> (standard error when null) and the launch
     /// goes on: only grok reads that file. <paramref name="grokConfig"/> overrides
-    /// <see cref="GrokConfigPath"/>, for a test.</summary>
+    /// <see cref="GrokConfigPath"/>, for a test. <paramref name="homeOfItsOwn"/> is a launch that
+    /// runs under a HOME of its own (<see cref="RunHome"/>): the shared home's grok config is not
+    /// touched, and a fresh one holding only the <c>harness</c> entry is written to this launch's
+    /// directory as <see cref="GrokConfig"/>, for the run to copy into its home.</summary>
     public static McpLaunchConfig? TryWrite(
-        string? baseUrl, string? apiKey, string owner, Action<string>? warn = null, string? grokConfig = null)
+        string? baseUrl, string? apiKey, string owner, Action<string>? warn = null, string? grokConfig = null,
+        bool homeOfItsOwn = false)
     {
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(apiKey)) return null;
 
@@ -66,6 +70,13 @@ public sealed record McpLaunchConfig(string Url, string JsonPath, string TomlPat
 
         File.WriteAllText(jsonPath, json);
         File.WriteAllText(tomlPath, toml);
+
+        if (homeOfItsOwn)
+        {
+            var own = Path.Combine(directory, "grok-config.toml");
+            File.WriteAllText(own, WithHarnessEntry(string.Empty, url));
+            return new McpLaunchConfig(url, jsonPath, tomlPath, own);
+        }
 
         // NOT FATAL. With agents running as a separate user, $HOME/.grok belongs to `agent` and
         // the Host writes there only through group permission; a volume from before the switch

@@ -176,6 +176,62 @@ public sealed class AgentAuthProbeTests
         var missing = Assert.Single(reports, r => r.Agent == "missing");
         Assert.False(missing.Installed);
         Assert.Null(missing.Authenticated);
+        Assert.Equal("home", missing.Source);
+    }
+
+    [Fact]
+    public async Task An_issued_preset_is_signed_in_when_its_credential_is_set_and_never_reads_the_shared_home()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "The fake CLI is a shell script.");
+
+        var (catalog, ran) = await FakeAsync();
+        var issued = new RunCredential(
+            CredentialSource.Issued, new Dictionary<string, string> { ["FAKE_KEY"] = "fake-probe-value" }, [], [], true, null);
+
+        var reports = await new AgentAuthProbe(catalog, credentials: new FixedCredentials(issued)).ReportsAsync(TestContext.Current.CancellationToken);
+
+        var report = Assert.Single(reports);
+        Assert.Equal("issued", report.Source);
+        Assert.True(report.Installed);
+        Assert.True(report.Authenticated);
+        Assert.Contains("FAKE_KEY", report.Detail);
+        Assert.DoesNotContain("fake-probe-value", report.Detail);
+
+        // Nothing was started to ask: no status command, no login looked for.
+        Assert.False(File.Exists(ran));
+    }
+
+    [Fact]
+    public async Task An_issued_preset_with_nothing_set_is_not_signed_in()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "The fake CLI is a shell script.");
+
+        var (catalog, ran) = await FakeAsync();
+        var reports = await new AgentAuthProbe(catalog, credentials: new FixedCredentials(RunCredential.NotSet("not set")))
+            .ReportsAsync(TestContext.Current.CancellationToken);
+
+        var report = Assert.Single(reports);
+        Assert.Equal("issued", report.Source);
+        Assert.False(report.Authenticated);
+        Assert.Contains("not set", report.Detail);
+        Assert.False(File.Exists(ran));
+    }
+
+    private static async Task<(AgentCatalog Catalog, string Ran)> FakeAsync()
+    {
+        var bin = Directory.CreateTempSubdirectory("harness-probe-issued-").FullName;
+        var ran = Path.Combine(bin, "ran");
+        var program = Path.Combine(bin, "fake-cli");
+        await TestExecutable.WriteAsync(program, $"#!/bin/sh\ntouch '{ran}'\n");
+
+        return (new AgentCatalog([new AgentDefinition("fake", AgentMode.Headless, new AgentLaunch(program, []))]), ran);
+    }
+
+    /// <summary>A resolver that answers one credential for every preset.</summary>
+    private sealed class FixedCredentials(RunCredential credential) : IRunCredentials
+    {
+        public Task<RunCredential> ResolveAsync(string agent, AgentDefinition? definition, CancellationToken ct) =>
+            Task.FromResult(credential);
     }
 }
 

@@ -22,7 +22,13 @@ namespace Harness.Host;
 /// <c>MemberGoldenTests</c> pin that an agent member's prompt, context, environment and rows are
 /// byte-identical to what the runtime produced when it did this itself.
 /// </summary>
-public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? context = null) : IMemberRunner
+/// <remarks>
+/// THE RUN'S CREDENTIAL IS DECIDED HERE, at run start, through <see cref="IRunCredentials"/>, and
+/// travels on <see cref="AgentInvocation.Credential"/>: the runner below only applies it. Null
+/// <paramref name="credentials"/> leaves it to the runner, which asks the same resolver.
+/// </remarks>
+public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? context = null, IRunCredentials? credentials = null)
+    : IMemberRunner
 {
     /// <summary>The agent stack below this adapter.</summary>
     public IAgentRunner Agent => agent;
@@ -44,6 +50,10 @@ public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? conte
             ? MessageText.Of(invocation.Work)
             : MessageText.Of(invocation.Work) + "\n" + WorktreeText(run.BranchHint, run.Worktrees);
 
+        var credential = credentials is null
+            ? null
+            : await credentials.ResolveAsync(invocation.Implementation, null, ct);
+
         var result = await agent.RunAsync(
             new AgentInvocation(
                 invocation.Member,
@@ -53,7 +63,8 @@ public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? conte
                 invocation.Environment,
                 history,
                 invocation.Implementation,
-                run.UnreachableRoot),
+                run.UnreachableRoot,
+                credential),
             ct);
 
         return ToMemberResult(result);

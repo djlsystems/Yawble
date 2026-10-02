@@ -439,6 +439,12 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 			part = a.Agent + " NOT signed in"
 			verdict = Warn
 		}
+		if source := a.SourceText(); source != "" {
+			part += ", source " + source
+		}
+		if a.Issued() && a.IssuedSet != nil && !*a.IssuedSet {
+			verdict = Warn
+		}
 		// Beside the sign-in: whether the CLI starts the way a member run launches it.
 		part += ", launch " + a.LaunchText()
 		if a.Launch != nil && a.Launch.Result == "failed" {
@@ -482,8 +488,13 @@ func SignInHint(a Agent) string {
 	switch {
 	case !a.Installed:
 		return "not installed in the instance; the image's first start installs it, or install it by hand inside the container"
+	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
+		return "its source is issued and no credential is set: yawble agents credential set " + a.Agent +
+			" (or yawble agents source " + a.Agent + " home)"
 	case a.Authenticated != nil && *a.Authenticated:
 		return ""
+	case a.Issued():
+		return "its source is issued: replace its credential with yawble agents credential set " + a.Agent
 	}
 	hint := "open a Concierge on " + a.Agent + " in the board and sign in there"
 	if a.CredentialVariable != nil && *a.CredentialVariable != "" {

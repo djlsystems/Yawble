@@ -125,6 +125,9 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
     [InlineData("kanban.wipLimits", "{\"todo\":null}")]
     [InlineData("system.packages", "[null]")]
     [InlineData("agents.tags", "{\"claude\":null}")]
+    [InlineData("agents.credentialSource", "{\"claude-headless\":\"elsewhere\"}")]
+    [InlineData("agents.credentialSource", "{\"claude-headless\":true}")]
+    [InlineData("agents.credentialSource", "[\"claude-headless\"]")]
     public async Task An_invalid_value_is_refused_naming_the_field_and_nothing_is_written(string name, string json)
     {
         var ct = TestContext.Current.CancellationToken;
@@ -143,6 +146,39 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
         Assert.Contains(name, refusal.RootElement.GetProperty("error").GetString());
 
         Assert.Equal(causationBefore, host.Services.GetRequiredService<TenantSettings>().CausationDepthLimit);
+    }
+
+    [Fact]
+    public async Task The_credential_source_setting_accepts_home_and_issued_only()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var client = await host.PersonAsync();
+        var settings = host.Services.GetRequiredService<TenantSettings>();
+
+        try
+        {
+            // Absent is home.
+            Assert.Equal(CredentialSource.Home, settings.CredentialSourceOf("claude-headless"));
+
+            var written = await client.PutAsJsonAsync("/api/tenant/settings", new Dictionary<string, object>
+            {
+                ["agents.credentialSource"] = new Dictionary<string, string> { ["claude-headless"] = "Issued", ["grok-headless"] = "home", ["gone"] = "issued" },
+            }, ct);
+            Assert.Equal(HttpStatusCode.OK, written.StatusCode);
+
+            Assert.Equal(CredentialSource.Issued, settings.CredentialSourceOf("CLAUDE-headless"));
+            Assert.Equal(CredentialSource.Home, settings.CredentialSourceOf("grok-headless"));
+            Assert.Equal(CredentialSource.Home, settings.CredentialSourceOf("codex-headless"));
+            Assert.Equal("{\"claude-headless\":\"issued\",\"gone\":\"issued\",\"grok-headless\":\"home\"}", settings.Current("agents.credentialSource"));
+
+            var entry = (await ReadAsync(client, ct)).Single(s => s.GetProperty("name").GetString() == "agents.credentialSource");
+            Assert.Equal("issued", entry.GetProperty("value").GetProperty("claude-headless").GetString());
+        }
+        finally
+        {
+            using var reset = new StringContent("{\"agents.credentialSource\": null}", System.Text.Encoding.UTF8, "application/json");
+            await client.PutAsync("/api/tenant/settings", reset, ct);
+        }
     }
 
     [Fact]
