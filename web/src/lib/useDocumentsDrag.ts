@@ -24,7 +24,7 @@ import type { DocumentsTransfer } from './useDocumentsTransfer';
  * MIME entry on the `DataTransfer` is only there so a drop outside the dialog does nothing.
  */
 
-export const DocumentsDragMime = 'application/x-yawble-documents';
+export const DocumentsDragMime = 'application/x-harness-documents';
 
 export interface DocumentsDragOptions {
   transfer: DocumentsTransfer;

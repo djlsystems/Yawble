@@ -102,7 +102,7 @@ describe('a move by drop', () => {
 
     expect(treeNode('beta')!.classList).toContain('documents-drop-ok');
     expect(hint()).toContain('Move notes.md to Beta');
-    expect(data.getData('application/x-yawble-documents')).toBe(JSON.stringify({ folder: 'alpha', paths: ['notes.md'] }));
+    expect(data.getData('application/x-harness-documents')).toBe(JSON.stringify({ folder: 'alpha', paths: ['notes.md'] }));
     expect(data.effectAllowed).toBe('copyMove');
   });
 });
