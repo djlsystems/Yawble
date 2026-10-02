@@ -17,93 +17,50 @@ namespace Harness.Host;
 public static class LiveView
 {
     /// <summary>Claude Code's session jsonl, one JSON object per line.</summary>
-    public const string ClaudeJsonl = "claude-jsonl";
+    public const string ClaudeJsonl = LiveViewNames.ClaudeJsonl;
 
     /// <summary>Grok's <c>updates.jsonl</c>: one ACP <c>session/update</c> per line.</summary>
-    public const string GrokUpdates = "grok-updates";
+    public const string GrokUpdates = LiveViewNames.GrokUpdates;
 
     /// <summary>Copilot's <c>events.jsonl</c> under <c>session-state/&lt;id&gt;/</c>.</summary>
-    public const string CopilotEvents = "copilot-events";
+    public const string CopilotEvents = LiveViewNames.CopilotEvents;
 
     /// <summary>Codex's <c>rollout-*.jsonl</c> under <c>sessions/YYYY/MM/DD/</c>.</summary>
-    public const string CodexRollout = "codex-rollout";
+    public const string CodexRollout = LiveViewNames.CodexRollout;
 
     /// <summary>Every format something renders.</summary>
-    public static IReadOnlyList<string> Formats { get; } = [ClaudeJsonl, GrokUpdates, CopilotEvents, CodexRollout];
+    public static IReadOnlyList<string> Formats => LiveViewNames.Formats;
 
     /// <summary><see cref="AgentLiveViewFind.CwdFrom"/>: the first folder's name, percent-decoded (Grok).</summary>
-    public const string CwdFromFolderName = "folder-name";
+    public const string CwdFromFolderName = LiveViewNames.CwdFromFolderName;
 
     /// <summary><see cref="AgentLiveViewFind.CwdFrom"/>: <c>workspace.yaml</c>'s <c>cwd:</c> beside the file (Copilot).</summary>
-    public const string CwdFromWorkspaceYaml = "workspace-yaml";
+    public const string CwdFromWorkspaceYaml = LiveViewNames.CwdFromWorkspaceYaml;
 
     /// <summary><see cref="AgentLiveViewFind.CwdFrom"/>: the first line's <c>cwd</c> (Codex).</summary>
-    public const string CwdFromFirstLine = "first-line-cwd";
+    public const string CwdFromFirstLine = LiveViewNames.CwdFromFirstLine;
 
-    public static IReadOnlyList<string> CwdRules { get; } = [CwdFromFolderName, CwdFromWorkspaceYaml, CwdFromFirstLine];
+    public static IReadOnlyList<string> CwdRules => LiveViewNames.CwdRules;
 
     /// <summary>The display line's bound, in characters, the ellipsis included.</summary>
-    public const int MaxLine = 240;
+    public const int MaxLine = LiveViewNames.MaxLine;
 
     /// <summary>How long after launch the Host looks for a transcript it has to find.</summary>
-    public static readonly TimeSpan FindFor = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan FindFor = LiveViewNames.FindFor;
 
     /// <summary>
     /// The transcript path for one run, or null when <paramref name="view"/> is not one this Host
     /// will read: a path that is not under the agent's home, climbs out with <c>..</c>, or names a
     /// format nothing renders. Null too for a view found after launch (<see cref="AgentLiveView.Find"/>).
     /// </summary>
-    public static string? Resolve(AgentLiveView view, string home, string workingDirectory, string sessionId)
-    {
-        if (Refusal(view) is not null || string.IsNullOrEmpty(home) || view.Path is not { } path) return null;
-
-        var relative = path[2..]
-            .Replace("{sessionId}", sessionId, StringComparison.Ordinal)
-            .Replace("{workspaceDashed}", Dashed(workingDirectory), StringComparison.Ordinal)
-            .Replace("{workspaceEncoded}", Encoded(workingDirectory), StringComparison.Ordinal);
-
-        return Path.Combine(home, relative);
-    }
+    public static string? Resolve(AgentLiveView view, string home, string workingDirectory, string sessionId) =>
+        LiveViewPaths.Resolve(ToRun(view), home, workingDirectory, sessionId);
 
     /// <summary>Why a catalog entry's live view is refused, or null when it is usable.</summary>
-    public static string? Refusal(AgentLiveView view)
-    {
-        if (!Formats.Contains(view.Format, StringComparer.Ordinal))
-        {
-            return $"its live view format '{view.Format}' is not one this platform reads ({string.Join(", ", Formats)})";
-        }
+    public static string? Refusal(AgentLiveView view) => LiveViewPaths.Refusal(ToRun(view));
 
-        if ((view.Path is null) == (view.Find is null))
-        {
-            return "its live view must name exactly one of path and find";
-        }
-
-        if (view.Path is { } path && !UnderHome(path))
-        {
-            return "its live view path must start with ~/ and may not contain ..";
-        }
-
-        if (view.Find is { } find)
-        {
-            if (!UnderHome(find.Folder))
-            {
-                return "its live view find folder must start with ~/ and may not contain ..";
-            }
-
-            if (string.IsNullOrWhiteSpace(find.Pattern) || find.Pattern.StartsWith('/')
-                || find.Pattern.Split('/').Any(segment => segment is "" or "." or ".."))
-            {
-                return "its live view find pattern must be relative, one name per level, with no . or ..";
-            }
-
-            if (!CwdRules.Contains(find.CwdFrom, StringComparer.Ordinal))
-            {
-                return $"its live view find cwdFrom '{find.CwdFrom}' is not one of {string.Join(", ", CwdRules)}";
-            }
-        }
-
-        return null;
-    }
+    /// <summary>The catalog's live view as the run protocol carries it.</summary>
+    public static RunLiveView ToRun(AgentLiveView view) => new(view.Path, view.Format, view.Find);
 
     /// <summary>
     /// Whether a member on this preset can be watched here: it names a live view this Host
@@ -113,21 +70,18 @@ public static class LiveView
         view is not null && Refusal(view) is null && LiveTranscriptReader.Refusal(runAs) is null;
 
     /// <summary>How Claude names a project folder: the working directory with every <c>/</c> and every <c>.</c> as <c>-</c>.</summary>
-    public static string Dashed(string workingDirectory) =>
-        workingDirectory.Replace('/', '-').Replace('.', '-');
+    public static string Dashed(string workingDirectory) => LiveViewNames.Dashed(workingDirectory);
 
     /// <summary>
     /// How Grok names a session's workspace folder: the working directory percent-encoded as one
     /// segment, <c>/</c> as <c>%2F</c> (as of Grok 1.0.41).
     /// </summary>
-    public static string Encoded(string workingDirectory) => Uri.EscapeDataString(workingDirectory);
+    public static string Encoded(string workingDirectory) => LiveViewNames.Encoded(workingDirectory);
 
     /// <summary>The time a transcript line carries, as the live and past-run routes send it: UTC, milliseconds, or empty.</summary>
     public static string When(DateTimeOffset? at) =>
         at is { } stamp ? stamp.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture) : "";
 
-    private static bool UnderHome(string path) =>
-        !string.IsNullOrEmpty(path) && path.StartsWith("~/", StringComparison.Ordinal) && !path.Split('/').Contains("..");
 }
 
 /// <summary>
@@ -216,141 +170,6 @@ public sealed class LiveRun : IDisposable
 
         _located.TrySetResult(Transcript);
         _ended.Cancel();
-    }
-}
-
-/// <summary>
-/// Follows a transcript from its first byte. The file is the agent's, mode 600, and stays that
-/// way: when the Host switches users the reader is <c>tail -c +1 -F</c> started through the
-/// same <c>setpriv</c> prefix as every agent child, and when it cannot switch it reads the file
-/// itself, as it already can.
-/// </summary>
-public static class LiveTranscriptReader
-{
-    /// <summary>How long after the run ends the reader keeps collecting lines the agent wrote last.</summary>
-    private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(1500);
-
-    private static readonly TimeSpan Poll = TimeSpan.FromMilliseconds(200);
-
-    /// <summary>The command line that reads <paramref name="path"/> as the agent, or null when this Host reads it directly.</summary>
-    public static IReadOnlyList<string>? ReaderCommand(AgentLaunchUser? runAs, string path) =>
-        runAs is { Switches: true } && SystemCommand.Find("tail") is { } tail
-            ? runAs.Wrap([tail, "-c", "+1", "-F", path])
-            : null;
-
-    /// <summary>Why this Host cannot follow a transcript at all, or null when it can.</summary>
-    public static string? Refusal(AgentLaunchUser? runAs) =>
-        runAs is { Switches: true } && SystemCommand.Find("tail") is null
-            ? $"tail is not in a root-owned system directory ({string.Join(", ", SystemCommand.Directories)}), so the transcript cannot be read as the agent."
-            : null;
-
-    /// <summary>
-    /// Each complete line of the transcript, from the start, then each new one, until
-    /// <paramref name="runEnded"/> fires and what was written before it has been read, or
-    /// <paramref name="ct"/> (the watcher leaving) fires.
-    /// </summary>
-    public static IAsyncEnumerable<string> LinesAsync(
-        string path, AgentLaunchUser? runAs, CancellationToken runEnded, CancellationToken ct) =>
-        ReaderCommand(runAs, path) is { } command
-            ? FollowCommandAsync(command, runEnded, ct)
-            : FollowDirectlyAsync(path, runEnded, ct);
-
-    /// <summary>
-    /// The lines <paramref name="command"/> prints (<see cref="ReaderCommand"/>'s tail), stopped
-    /// when the watcher leaves or a little after the run ends. Public so the suite can drive the
-    /// tail half where it cannot switch users.
-    /// </summary>
-    public static async IAsyncEnumerable<string> FollowCommandAsync(
-        IReadOnlyList<string> command, CancellationToken runEnded, [EnumeratorCancellation] CancellationToken ct)
-    {
-        var start = new ProcessStartInfo(command[0])
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            StandardOutputEncoding = Encoding.UTF8,
-        };
-        foreach (var argument in command.Skip(1)) start.ArgumentList.Add(argument);
-
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("The transcript reader did not start.");
-
-        // tail -F says "cannot open" until the agent creates the file. Drained, never shown.
-        _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
-
-        void Stop()
-        {
-            try { process.Kill(); }
-            catch (InvalidOperationException) { }
-        }
-
-        // The watcher leaving stops the reader at once; the run ending stops it once the agent's
-        // last lines have had time to arrive. What is already in the pipe is still read below.
-        using var left = ct.Register(Stop);
-        using var ended = runEnded.Register(() => _ = Task.Delay(Settle, CancellationToken.None).ContinueWith(_ => Stop(), TaskScheduler.Default));
-
-        try
-        {
-            while (await process.StandardOutput.ReadLineAsync(CancellationToken.None) is { } line)
-            {
-                ct.ThrowIfCancellationRequested();
-                yield return line;
-            }
-        }
-        finally
-        {
-            Stop();
-        }
-    }
-
-    private static async IAsyncEnumerable<string> FollowDirectlyAsync(
-        string path, CancellationToken runEnded, [EnumeratorCancellation] CancellationToken ct)
-    {
-        // The agent may not have created it yet.
-        while (!File.Exists(path))
-        {
-            if (runEnded.IsCancellationRequested) yield break;
-            await Task.Delay(Poll, ct);
-        }
-
-        await using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-
-        var pending = new List<byte>();
-        var buffer = new byte[16 * 1024];
-
-        while (true)
-        {
-            // Read before looking at the clock would lose the last lines: a run that ended is read
-            // to its end once more, then stops.
-            var last = runEnded.IsCancellationRequested;
-
-            int read;
-            while ((read = await stream.ReadAsync(buffer, ct)) > 0)
-            {
-                var from = 0;
-                for (var i = 0; i < read; i++)
-                {
-                    if (buffer[i] != (byte)'\n') continue;
-
-                    pending.AddRange(buffer.AsSpan(from, i - from));
-                    yield return Encoding.UTF8.GetString([.. pending]);
-                    pending.Clear();
-                    from = i + 1;
-                }
-
-                pending.AddRange(buffer.AsSpan(from, read - from));
-            }
-
-            if (last)
-            {
-                if (pending.Count > 0) yield return Encoding.UTF8.GetString([.. pending]);
-                yield break;
-            }
-
-            try { await Task.Delay(Poll, runEnded); }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
-            ct.ThrowIfCancellationRequested();
-        }
     }
 }
 
@@ -554,12 +373,7 @@ public static class ClaudeTranscriptLines
         return [Clip("Attachment: " + first)];
     }
 
-    internal static string? Text(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(property, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
+    internal static string? Text(JsonElement element, string property) => JsonFields.Text(element, property);
 
     internal static string FirstLine(string text) =>
         text.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0) ?? "";

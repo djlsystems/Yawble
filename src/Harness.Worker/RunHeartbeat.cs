@@ -71,7 +71,7 @@ public sealed class RunHeartbeat
 
     /// <summary>
     /// PAUSES this container's clock (<paramref name="paused"/> true) or starts it again from a full
-    /// window (false). Called by <see cref="LeaseActions"/> while the member waits in a lease's
+    /// window (false). Called by <c>LeaseActions</c> while the member waits in a lease's
     /// queue: it was told to call again to wait, and a run stopped for waiting its turn would be the
     /// platform timing out its own queue. A progress report while paused does not restart the clock.
     ///

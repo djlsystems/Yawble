@@ -15,9 +15,41 @@ namespace Harness.Host;
 /// raises the run that now holds <c>heavy</c> and lowers the one that no longer does, so any path
 /// that releases a lease through here restores the run's own limit.
 /// </summary>
-public sealed class LeaseActions(
-    InstanceLeases leases, RunHeartbeat heartbeat, IMemberReports reports, RunAllowances? allowances = null)
+public sealed class LeaseActions : IRunWorkerClient
 {
+    private readonly InstanceLeases leases;
+    private readonly IRunWorker worker;
+    private readonly IMemberReports reports;
+
+    /// <summary>
+    /// The Host's: lease moves reach the runs through <paramref name="worker"/>, as
+    /// <see cref="HoldIdleClock"/> and <see cref="ChangeRunMemoryAllowance"/>.
+    /// </summary>
+    public LeaseActions(InstanceLeases leases, IRunWorker worker, IMemberReports reports)
+    {
+        this.leases = leases;
+        this.worker = worker;
+        this.reports = reports;
+    }
+
+    /// <summary>
+    /// Over a worker of its own, in this process, made from <paramref name="heartbeat"/> and
+    /// <paramref name="allowances"/>: the moves cross the protocol all the same.
+    /// </summary>
+    public LeaseActions(InstanceLeases leases, RunHeartbeat heartbeat, IMemberReports reports, RunAllowances? allowances = null)
+        : this(
+            leases,
+            InProcessWorker.Connect(
+                WorkerId.Local,
+                events => new WorkerHost(WorkerId.Local, events, new RunLauncher(heartbeat), heartbeat, allowances),
+                (_, _) => Task.CompletedTask).Worker,
+            reports)
+    {
+    }
+
+    /// <summary>The worker whose runs these leases move.</summary>
+    public IRunWorker Worker => worker;
+
     /// <summary>The words a queued member's card reads.</summary>
     public const string WaitingWords = "waiting for a heavy-work slot";
 
@@ -32,7 +64,7 @@ public sealed class LeaseActions(
         // paused one ignores it.
         if (answer.NewlyQueued && Member(owner) is { } member)
         {
-            heartbeat.Hold(member, paused: true);
+            await worker.SendAsync(new HoldIdleClock(member, Held: true), CancellationToken.None);
             await CardAsync(member, WaitingWords, ct);
         }
 
@@ -40,7 +72,7 @@ public sealed class LeaseActions(
         // promotes, and this keeps a granted call from leaving a clock paused all the same.
         if (answer.Outcome == LeaseOutcome.Granted && Member(owner) is { } holder)
         {
-            heartbeat.Hold(holder, paused: false);
+            await worker.SendAsync(new HoldIdleClock(holder, Held: false), CancellationToken.None);
         }
 
         await MovedAsync(answer, ct);
@@ -84,11 +116,12 @@ public sealed class LeaseActions(
     {
         // Before the cards: a granted run has its allowance by the time its lease call answers.
         // A courtesy like the card: the lease has moved whether or not the limit could follow.
-        if (allowances is not null)
         {
             try
             {
-                await allowances.ReconcileAsync(CancellationToken.None);
+                await worker.SendAsync(
+                    new ChangeRunMemoryAllowance([.. leases.Holders(InstanceLeases.Heavy).Select(o => o.Key)]),
+                    CancellationToken.None);
             }
             catch (Exception)
             {
@@ -97,14 +130,14 @@ public sealed class LeaseActions(
 
         foreach (var owner in answer.Withdrawn ?? [])
         {
-            if (Member(owner) is { } member) heartbeat.Hold(member, paused: false);
+            if (Member(owner) is { } member) await worker.SendAsync(new HoldIdleClock(member, Held: false), CancellationToken.None);
         }
 
         foreach (var owner in answer.Promoted ?? [])
         {
             if (Member(owner) is not { } member) continue;
 
-            heartbeat.Hold(member, paused: false);
+            await worker.SendAsync(new HoldIdleClock(member, Held: false), CancellationToken.None);
             await CardAsync(member, GrantedWords, ct);
         }
     }

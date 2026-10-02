@@ -19,10 +19,43 @@ namespace Harness.Host;
 /// before anything is written. A plugin member and the Concierge have no set here, so their words
 /// are written as they came; a plugin redacts its own before they arrive.
 /// </summary>
-public sealed class MemberReports(
-    ContainerHost host, IMessageLog log, RunHeartbeat heartbeat, ILoggerFactory? loggers = null, RunSecrets? secrets = null)
-    : IMemberReports
+public sealed class MemberReports : IMemberReports, IRunWorkerClient
 {
+    private readonly ContainerHost host;
+    private readonly IMessageLog log;
+    private readonly IRunWorker worker;
+    private readonly ILoggerFactory? loggers;
+    private readonly RunSecrets? secrets;
+
+    /// <summary>The Host's: a report pushes the run's idle clock out through <paramref name="worker"/>.</summary>
+    public MemberReports(
+        ContainerHost host, IMessageLog log, IRunWorker worker, ILoggerFactory? loggers = null, RunSecrets? secrets = null)
+    {
+        this.host = host;
+        this.log = log;
+        this.worker = worker;
+        this.loggers = loggers;
+        this.secrets = secrets;
+    }
+
+    /// <summary>Over a worker of its own, in this process, made from <paramref name="heartbeat"/>.</summary>
+    public MemberReports(
+        ContainerHost host, IMessageLog log, RunHeartbeat heartbeat, ILoggerFactory? loggers = null, RunSecrets? secrets = null)
+        : this(
+            host,
+            log,
+            InProcessWorker.Connect(
+                WorkerId.Local,
+                events => new WorkerHost(WorkerId.Local, events, new RunLauncher(heartbeat), heartbeat),
+                (_, _) => Task.CompletedTask).Worker,
+            loggers,
+            secrets)
+    {
+    }
+
+    /// <summary>The worker whose runs' idle clocks these reports push out.</summary>
+    public IRunWorker Worker => worker;
+
     public async Task<MemberReportOutcome> ProgressAsync(ContainerId member, string status, CancellationToken ct = default)
     {
         if (host.Find(member) is not { } container) return NoSuchMember(member);
@@ -60,7 +93,7 @@ public sealed class MemberReports(
         container.Republish();
 
         // A DELIBERATE ACT resets the idle clock - see RunHeartbeat.
-        heartbeat.Touch(container.Id);
+        await worker.SendAsync(new TouchIdleClock(container.Id), CancellationToken.None);
 
         return MemberReportOutcome.Ok;
     }
@@ -105,22 +138,22 @@ public sealed class MemberReports(
         return MemberReportOutcome.Ok;
     }
 
-    public Task<MemberReportOutcome> DeferAsync(ContainerId member, int item, string reason, CancellationToken ct = default)
+    public async Task<MemberReportOutcome> DeferAsync(ContainerId member, int item, string reason, CancellationToken ct = default)
     {
-        if (host.Find(member) is not { } container) return Task.FromResult(NoSuchMember(member));
+        if (host.Find(member) is not { } container) return NoSuchMember(member);
 
         // NO ROW NOW, and no mark: the deferral and its reason are written on the run's own terminal
         // rows (`items`), and the item's next run is its record. A row here would wake nobody and
         // say less.
         if (!container.TryDeferItem(item, Redacted(member, reason.Trim()), out _, out var error))
         {
-            return Task.FromResult(MemberReportOutcome.Refused(error!, 400));
+            return MemberReportOutcome.Refused(error!, 400);
         }
 
         // A DELIBERATE ACT resets the idle clock - see RunHeartbeat.
-        heartbeat.Touch(container.Id);
+        await worker.SendAsync(new TouchIdleClock(container.Id), CancellationToken.None);
 
-        return Task.FromResult(MemberReportOutcome.Ok);
+        return MemberReportOutcome.Ok;
     }
 
     public async Task<MemberReportOutcome> HandbackAsync(ContainerId member, string delivered, CancellationToken ct = default)
@@ -182,7 +215,7 @@ public sealed class MemberReports(
         await log.AppendAsync(new NewMessage(type, payload, container.Id.ToString(), causation), ct);
 
         // A DELIBERATE ACT resets the idle clock - see RunHeartbeat.
-        heartbeat.Touch(container.Id);
+        await worker.SendAsync(new TouchIdleClock(container.Id), CancellationToken.None);
 
         return MemberReportOutcome.Ok;
     }

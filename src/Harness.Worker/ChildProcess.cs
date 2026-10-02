@@ -11,7 +11,7 @@ namespace Harness.Host;
 /// wait, stdin written and closed, the whole process group killed when the run ends, and a bounded
 /// drain for a grandchild still holding the pipe.
 ///
-/// EXTRACTED FROM <see cref="ProcessAgentRunner"/> so a plugin member runs under exactly the
+/// EXTRACTED FROM <c>ProcessAgentRunner</c> so a plugin member runs under exactly the
 /// launch an agent does rather than a second copy of it. Nothing here knows what it is launching:
 /// prompts, presets, usage and live views stay with the agent runner, and the plugin protocol stays
 /// with <c>PluginMemberRunner</c>. Pinned by <c>ProcessAgentRunnerLaunchTests</c> (process group,

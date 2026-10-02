@@ -1,3 +1,4 @@
+using Harness.Contracts;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Enumeration;
@@ -195,9 +196,9 @@ public static class AgentFiles
 
             var cwd = find.CwdFrom switch
             {
-                LiveView.CwdFromFolderName => Uri.UnescapeDataString(relative[0]),
-                LiveView.CwdFromWorkspaceYaml => YamlCwd(await head(Path.Combine(Path.GetDirectoryName(path)!, "workspace.yaml"), 50)),
-                LiveView.CwdFromFirstLine => FirstLineCwd(await head(path, 1)),
+                LiveViewNames.CwdFromFolderName => Uri.UnescapeDataString(relative[0]),
+                LiveViewNames.CwdFromWorkspaceYaml => YamlCwd(await head(Path.Combine(Path.GetDirectoryName(path)!, "workspace.yaml"), 50)),
+                LiveViewNames.CwdFromFirstLine => FirstLineCwd(await head(path, 1)),
                 _ => null,
             };
 
@@ -225,8 +226,8 @@ public static class AgentFiles
         {
             using var document = JsonDocument.Parse(first);
             var root = document.RootElement;
-            return ClaudeTranscriptLines.Text(root, "cwd")
-                ?? ClaudeTranscriptLines.Text(TranscriptLines.Property(root, "payload"), "cwd");
+            return JsonFields.Text(root, "cwd")
+                ?? JsonFields.Text(JsonFields.Property(root, "payload"), "cwd");
         }
         catch (JsonException)
         {

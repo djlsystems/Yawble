@@ -9,19 +9,6 @@ namespace Harness.Host;
 public sealed record CliVersionsAtStart(
     DateTimeOffset At, IReadOnlyDictionary<string, string?> Versions, string? By = null, string? Person = null);
 
-/// <summary>A CLI's installed version and when it last changed, as the history says.</summary>
-/// <param name="UpdatedAt">The first line that recorded this version after a different one; null
-/// when every kept line has this version (no update recorded since <paramref name="Since"/>), and
-/// null when the version is not known.</param>
-/// <param name="Since">The oldest line kept.</param>
-/// <param name="UpdatedBy">Who brought this version, from the line at <paramref name="UpdatedAt"/>:
-/// `start` for a container start's line, `person` for a person's update through the platform; null
-/// when <paramref name="UpdatedAt"/> is, so always null for a version that is not known.</param>
-/// <param name="Person">That person's email when the line records it.</param>
-public sealed record CliVersionNow(
-    string Cli, string? Version, DateTimeOffset? UpdatedAt, DateTimeOffset? Since,
-    string? UpdatedBy = null, string? Person = null);
-
 /// <summary>
 /// Which CLI versions this VOLUME has started with, newest first.
 ///

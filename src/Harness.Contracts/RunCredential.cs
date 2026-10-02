@@ -49,6 +49,31 @@ public sealed record RunCredential(
     public static RunCredential NotSet(string why) =>
         new(CredentialSource.Issued, new Dictionary<string, string>(), [], [], true, why);
 
+    /// <summary>
+    /// This credential applied to a child's <paramref name="environment"/> as a member run applies
+    /// it, after the preset's and the team's env (<paramref name="handedIn"/>): the displaced
+    /// variables removed, other commands' declared variables removed unless handed in, the issued
+    /// ones set. Returns <paramref name="handedIn"/> with the issued variables, for the provider-key
+    /// scoping that follows. Here so the worker that launches a run and control that lists its
+    /// tools apply one rule.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> ApplyTo(
+        IDictionary<string, string?> environment, IReadOnlyDictionary<string, string> handedIn)
+    {
+        foreach (var name in Displace) environment.Remove(name);
+
+        foreach (var name in OtherProviders)
+        {
+            if (!handedIn.ContainsKey(name)) environment.Remove(name);
+        }
+
+        foreach (var (name, value) in Environment) environment[name] = value;
+
+        var merged = new Dictionary<string, string>(handedIn, StringComparer.Ordinal);
+        foreach (var (name, value) in Environment) merged[name] = value;
+        return merged;
+    }
+
     public override string ToString() =>
         $"RunCredential({Source}, set: {Environment.Count > 0}{(Missing is null ? "" : ", missing")})";
 }

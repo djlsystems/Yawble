@@ -10,6 +10,7 @@
     <Project Path="src/Harness.Containers/Harness.Containers.csproj" />
     <Project Path="src/Harness.Pty.Abstractions/Harness.Pty.Abstractions.csproj" />
     <Project Path="src/Harness.Pty/Harness.Pty.csproj" />
+    <Project Path="src/Harness.Worker/Harness.Worker.csproj" />
     <Project Path="src/Harness.Host/Harness.Host.csproj" />
   </Folder>
   <Folder Name="/tests/">

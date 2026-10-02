@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Harness.Contracts;
 
 namespace Harness.Host;
@@ -21,7 +22,11 @@ namespace Harness.Host;
 /// Only values in the set are touched - no shape rule runs here - so text holding none of them
 /// comes back as the same instance. A writer that transforms a value otherwise - reversed, base64,
 /// split - defeats this.
+///
+/// In the contracts because a run's set travels to the worker with its start, which applies it; like
+/// the run's credential, it is never written as JSON.
 /// </summary>
+[JsonConverter(typeof(ValueRedactorNeverSerialised))]
 public sealed class ValueRedactor
 {
     /// <summary>The shortest value that is redacted.</summary>
@@ -84,4 +89,14 @@ public sealed class ValueRedactor
     /// <summary>A value as it appears between the quotes of a JSON string.</summary>
     private static string JsonBody(string value, JsonSerializerOptions? options) =>
         JsonSerializer.Serialize(value, options)[1..^1];
+}
+
+/// <summary>Refuses to write a <see cref="ValueRedactor"/>, or read one: it holds secret values.</summary>
+public sealed class ValueRedactorNeverSerialised : JsonConverter<ValueRedactor>
+{
+    public override ValueRedactor Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        throw new NotSupportedException("A redaction set is never read from JSON.");
+
+    public override void Write(Utf8JsonWriter writer, ValueRedactor value, JsonSerializerOptions options) =>
+        throw new NotSupportedException("A redaction set is never written as JSON: it holds secret values.");
 }

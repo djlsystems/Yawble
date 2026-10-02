@@ -9,13 +9,13 @@ namespace Harness.Host;
 
 /// <summary>
 /// THE HEAVY ALLOWANCE: a run holding the <c>heavy</c> lease gets the memory heavy work needs, and
-/// goes back to its own limit when it stops holding it. <see cref="LeaseActions"/> calls
+/// goes back to its own limit when it stops holding it. <c>LeaseActions</c> calls
 /// <see cref="ReconcileAsync"/> after every acquire, release and run end, so whichever path moved
 /// the lease (the route, a run's end, any later release path) also moves the limit: each running run
 /// is brought to the limit its holding says.
 ///
 /// <para>
-/// HOW MUCH is measured, not set (<see cref="TenantSettings.HeavyRunMemoryLimit"/>): the container's
+/// HOW MUCH is measured, not set (<c>TenantSettings.HeavyRunMemoryLimit</c>): the container's
 /// limit less the Host reserve less the resident memory of every other running run, read from
 /// <c>/proc</c> over <see cref="RunProcessGroups"/> at the moment the lease is granted, and never
 /// below the run's own limit. It is not re-read as the others grow; admission still guards them.
@@ -59,7 +59,7 @@ public sealed class RunAllowances
     private int _retrying;
 
     /// <param name="heavy">The heavy figure for the other runs' measured MB and count
-    /// (<see cref="TenantSettings.HeavyRunMemoryLimit"/>).</param>
+    /// (<c>TenantSettings.HeavyRunMemoryLimit</c>).</param>
     /// <param name="heavyHolders">The lease owner keys holding <c>heavy</c> right now.</param>
     /// <param name="procRoot">The proc mount; tests hand a fixture tree.</param>
     /// <param name="writeSoft">How a process's soft limit is set; <c>prlimit --pid</c> as the agent's user when not given.</param>
@@ -425,7 +425,7 @@ public sealed class RunAllowance : IDisposable
     {
         _owner = owner;
         Run = run;
-        Key = LeaseOwner.For(run).Key;
+        Key = run.ToString();
         Leader = leader;
         Normal = normal;
         Ceiling = ceiling;

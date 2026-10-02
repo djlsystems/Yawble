@@ -121,23 +121,8 @@ public sealed class AgentEnvironment(
     /// then to keep: <paramref name="handedIn"/> with the issued variables, if any.
     /// </summary>
     public static IReadOnlyDictionary<string, string> ApplyCredential(
-        IDictionary<string, string?> environment, RunCredential? credential, IReadOnlyDictionary<string, string> handedIn)
-    {
-        if (credential is null) return handedIn;
-
-        foreach (var name in credential.Displace) environment.Remove(name);
-
-        foreach (var name in credential.OtherProviders)
-        {
-            if (!handedIn.ContainsKey(name)) environment.Remove(name);
-        }
-
-        foreach (var (name, value) in credential.Environment) environment[name] = value;
-
-        var merged = new Dictionary<string, string>(handedIn, StringComparer.Ordinal);
-        foreach (var (name, value) in credential.Environment) merged[name] = value;
-        return merged;
-    }
+        IDictionary<string, string?> environment, RunCredential? credential, IReadOnlyDictionary<string, string> handedIn) =>
+        credential is null ? handedIn : credential.ApplyTo(environment, handedIn);
 
     /// <summary>
     /// Takes every provider key that is not <paramref name="command"/>'s own out of
@@ -152,15 +137,28 @@ public sealed class AgentEnvironment(
     public static void ScopeProviderKeys(
         IDictionary<string, string?> environment, string command, IReadOnlyDictionary<string, string> handedIn)
     {
+        foreach (var variable in ProviderKeysToRemove(command, handedIn)) environment.Remove(variable);
+    }
+
+    /// <summary>
+    /// The provider keys <see cref="ScopeProviderKeys"/> takes out for <paramref name="command"/>:
+    /// every one that is not its own and was not in <paramref name="handedIn"/>. A run's start names
+    /// them, so the worker removes them from what its child inherits.
+    /// </summary>
+    public static IReadOnlyList<string> ProviderKeysToRemove(string command, IReadOnlyDictionary<string, string> handedIn)
+    {
         var own = ProviderVariableFor(command);
+        var removed = new List<string>();
 
         foreach (var variable in ProviderVariables)
         {
             if (variable == own || handedIn.ContainsKey(variable)) continue;
             if (variable == GitHubAlias && (own == GitHubVariable || handedIn.ContainsKey(GitHubVariable))) continue;
 
-            environment.Remove(variable);
+            removed.Add(variable);
         }
+
+        return removed;
     }
 
     /// <summary>
