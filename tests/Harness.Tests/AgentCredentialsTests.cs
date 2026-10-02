@@ -366,6 +366,10 @@ public sealed class AgentCredentialsTests : IAsyncLifetime
                 new Dictionary<string, string>(), Agent: "fake-claude"),
             Ct);
         Assert.True(result.Succeeded, result.LaunchError);
+
+        // What the CLI printed comes back with the key it was given replaced, never dropped.
+        Assert.DoesNotContain(Second, result.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"key: {DiagnosticRedaction.Placeholder}", result.Output);
         var seen = File.ReadAllLines(Path.Combine(_outside, "seen.txt"));
         Assert.Contains($"ANTHROPIC_API_KEY={Second}", seen);
         var temp = seen.Single(l => l.StartsWith("TMPDIR=", StringComparison.Ordinal))[7..];

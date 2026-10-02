@@ -718,6 +718,9 @@ builder.Services.AddSingleton(_ => AgentLaunchUser.Resolve(
     builder.Configuration["Agents:RunAs"] ?? Environment.GetEnvironmentVariable("HARNESS_AGENT_USER")));
 // The runs in flight, for the live route. The runner records; nothing is stored.
 builder.Services.AddSingleton<LiveRuns>();
+// WHAT EACH MEMBER RUN'S OWN CREDENTIAL IS, held in memory so its reports and its transcript are
+// redacted of it as the run's output is. Nothing is stored. See RunSecrets.
+builder.Services.AddSingleton<RunSecrets>();
 // WHO MAY USE AN AGENT CLI'S SHARED INSTALL: member runs share it, a platform update has it alone,
 // and a launch that arrives during an update waits for it. One per Host, shared by the runner, the
 // Concierge's launch and the updater, or the hold holds nothing.

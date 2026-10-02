@@ -137,6 +137,51 @@ public sealed class MemberReportsTests
     }
 
     [Fact]
+    public async Task A_members_report_is_written_with_its_runs_credential_replaced()
+    {
+        // Fake, with characters its JSON-escaped forms spell differently.
+        const string Value = "fake-report-key+Wd4nP8sL/2qXv7Ht";
+        var escaped = JsonSerializer.Serialize(Value)[1..^1];
+
+        var release = new TaskCompletionSource();
+        var (bed, _, heartbeat, _) = await RunningAsync(release);
+        await using var _ = bed;
+
+        var secrets = new RunSecrets(new AgentCatalog([]));
+        secrets.Remember(Dev, ValueRedactor.For([Value]));
+        var reports = new MemberReports(bed.Host, bed.Store, heartbeat, secrets: secrets);
+
+        await reports.ProgressAsync(Dev, $"printed {Value}", Ct);
+        await reports.BlockedAsync(Dev, $"key {Value.ToUpperInvariant()}", ct: Ct);
+        await reports.NeedsDecisionAsync(Dev, $"is {escaped} right?", Ct);
+        await reports.HandbackAsync(Dev, $"used {Value}", Ct);
+
+        var snapshot = bed.Host.Find(Dev)!.Snapshot();
+        Assert.Equal($"key {DiagnosticRedaction.Placeholder}", snapshot.Blocked);
+        Assert.Equal($"is {DiagnosticRedaction.Placeholder} right?", snapshot.NeedsDecision);
+        Assert.Equal($"used {DiagnosticRedaction.Placeholder}", snapshot.HandedBack);
+
+        // A process that outlived its run is still redacted: the set is kept until the next run.
+        release.SetResult();
+        await bed.SettleAsync();
+        await reports.ProgressAsync(Dev, $"after {Value}", Ct);
+
+        var rows = new List<Message>();
+        foreach (var type in new[] { MessageTypes.Progress, MessageTypes.Blocked, MessageTypes.NeedsDecision, MessageTypes.Handback })
+        {
+            rows.AddRange(await bed.OfTypeAsync(type));
+        }
+
+        Assert.Equal(5, rows.Count);
+        Assert.Contains(rows, r => r.Payload.Contains("whileIdle", StringComparison.Ordinal));
+        Assert.All(rows, r => Assert.Contains(DiagnosticRedaction.Placeholder, r.Payload));
+        foreach (var needle in new[] { Value, escaped, Value[^12..] })
+        {
+            Assert.DoesNotContain(rows, r => r.Payload.Contains(needle, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Fact]
     public async Task A_member_that_is_not_hosted_is_refused()
     {
         await using var bed = new ContainerTestBed();

@@ -14,9 +14,14 @@ namespace Harness.Host;
 /// Checks that belong to HTTP - the team exists, the caller IS the member, the words are not
 /// empty - stay on the routes. What is refused here is refused for every caller: a member that is
 /// not hosted, a batch item that is not in the run.
+///
+/// An agent member's words are redacted of its run's own credential (<see cref="RunSecrets"/>)
+/// before anything is written. A plugin member and the Concierge have no set here, so their words
+/// are written as they came; a plugin redacts its own before they arrive.
 /// </summary>
 public sealed class MemberReports(
-    ContainerHost host, IMessageLog log, RunHeartbeat heartbeat, ILoggerFactory? loggers = null) : IMemberReports
+    ContainerHost host, IMessageLog log, RunHeartbeat heartbeat, ILoggerFactory? loggers = null, RunSecrets? secrets = null)
+    : IMemberReports
 {
     public async Task<MemberReportOutcome> ProgressAsync(ContainerId member, string status, CancellationToken ct = default)
     {
@@ -26,7 +31,7 @@ public sealed class MemberReports(
         // is inherited from causation at append time, so this one value puts the line in the right
         // workflow.
         var causation = container.CurrentCausation;
-        status = status.Trim();
+        status = Redacted(member, status.Trim());
 
         // A REPORT FROM A MEMBER THAT IS NOT RUNNING is a process that outlived its run - still
         // recorded, because it is a fact, and flagged on the row and in the log, because nothing
@@ -65,7 +70,7 @@ public sealed class MemberReports(
     {
         if (host.Find(member) is not { } container) return NoSuchMember(member);
 
-        reason = reason.Trim();
+        reason = Redacted(member, reason.Trim());
 
         // ONE ITEM OF A BATCH: that delivery is closed by this row instead of by the run's terminal
         // row, and the member is not marked - the rest of its batch may still complete.
@@ -107,7 +112,7 @@ public sealed class MemberReports(
         // NO ROW NOW, and no mark: the deferral and its reason are written on the run's own terminal
         // rows (`items`), and the item's next run is its record. A row here would wake nobody and
         // say less.
-        if (!container.TryDeferItem(item, reason.Trim(), out _, out var error))
+        if (!container.TryDeferItem(item, Redacted(member, reason.Trim()), out _, out var error))
         {
             return Task.FromResult(MemberReportOutcome.Refused(error!, 400));
         }
@@ -122,7 +127,7 @@ public sealed class MemberReports(
     {
         if (host.Find(member) is not { } container) return NoSuchMember(member);
 
-        delivered = delivered.Trim();
+        delivered = Redacted(member, delivered.Trim());
 
         await log.AppendAsync(
             new NewMessage(
@@ -141,7 +146,7 @@ public sealed class MemberReports(
     {
         if (host.Find(member) is not { } container) return NoSuchMember(member);
 
-        question = question.Trim();
+        question = Redacted(member, question.Trim());
 
         await log.AppendAsync(
             new NewMessage(
@@ -181,6 +186,8 @@ public sealed class MemberReports(
 
         return MemberReportOutcome.Ok;
     }
+
+    private string Redacted(ContainerId member, string words) => secrets?.For(member).Apply(words) ?? words;
 
     private static MemberReportOutcome NoSuchMember(ContainerId member) =>
         MemberReportOutcome.Refused($"No member '{member.Name}'.", 404);
