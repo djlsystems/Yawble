@@ -14,8 +14,19 @@ import { describe, expect, it } from 'vitest';
  */
 const componentsDirectory = join(import.meta.dirname, '..');
 
-const components = readdirSync(componentsDirectory)
-  .filter((name) => name.endsWith('.vue'))
+/**
+ * EVERY `.vue` UNDER `components/`, subfolders included. The Documents explorer's own dialogs (the
+ * clash question, Move to…) live in `components/documents/`; a scan of the top level only would
+ * leave them unchecked while reading as green.
+ */
+function vueFiles(directory: string, prefix = ''): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return entry.name === '__tests__' ? [] : vueFiles(join(directory, entry.name), `${prefix}${entry.name}/`);
+    return entry.name.endsWith('.vue') ? [`${prefix}${entry.name}`] : [];
+  });
+}
+
+const components = vueFiles(componentsDirectory)
   .map((name) => ({ name, source: readFileSync(join(componentsDirectory, name), 'utf8') }));
 
 const withoutComments = (source: string) =>
@@ -30,6 +41,12 @@ const Scale = /\bos-dialog-(sm|md|lg|xl)\b/g;
 
 describe('the dialog scale', () => {
   const withDialogs = components.filter(({ source }) => source.includes('<q-dialog'));
+
+  it('reaches into components/documents/', () => {
+    const documents = withDialogs.filter(({ name }) => name.startsWith('documents/')).map(({ name }) => name);
+
+    expect(documents).toEqual(expect.arrayContaining(['documents/DocumentsClashDialog.vue', 'documents/DocumentsMoveDialog.vue']));
+  });
 
   it('finds the dialogs it is meant to check', () => {
     // A regex that matches nothing passes every case below.

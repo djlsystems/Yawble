@@ -11,7 +11,7 @@ namespace Harness.Host;
 /// REQUIRED NOW: <c>schemaVersion</c>, <c>id</c>, <c>name</c>, <c>description</c>, <c>version</c>,
 /// <c>protocol</c>, <c>executable</c>. OPTIONAL NOW: <c>timeoutSeconds</c>, <c>config</c>,
 /// <c>secrets</c>, <c>events.publishes</c>, <c>skills</c>, <c>platforms</c>, <c>requires</c>,
-/// <c>connections</c>.
+/// <c>connections</c>, <c>reads</c>.
 /// RESERVED - kept as raw JSON, validated by nothing, acted on by nothing yet: <c>actions</c>,
 /// <c>consumes</c>, <c>health</c>, <c>signature</c>, <c>publisher</c>, <c>minHostVersion</c>,
 /// <c>permits</c>. A key this version does not know is IGNORED and named in
@@ -45,6 +45,15 @@ public sealed record PluginManifest(
     public IReadOnlyDictionary<string, PluginConnectionSlot> Connections { get; init; } =
         new Dictionary<string, PluginConnectionSlot>(StringComparer.Ordinal);
 
+    /// <summary>The collections of its own team's sites this plugin reads, in declaration order: each
+    /// run receives them on stdin as <c>sites</c>. Empty when the manifest has no <c>reads</c>, which
+    /// behaves exactly as before.</summary>
+    public IReadOnlyList<PluginSiteRead> Reads { get; init; } = [];
+
+    /// <summary>The most collections one plugin may declare in <c>reads</c>. A sanity bound: it also
+    /// bounds what the run's request spends on their envelopes.</summary>
+    public const int MaxReads = 32;
+
     /// <summary>
     /// What the image guarantees and a manifest's <c>requires</c> may name. Everything else a plugin
     /// needs lives in its own folder; nothing a plugin needs is ever added to the image.
@@ -71,6 +80,7 @@ public sealed record PluginManifest(
     {
         "schemaVersion", "id", "name", "description", "version", "protocol", "executable",
         "timeoutSeconds", "config", "secrets", "events", "skills", "platforms", "requires", "connections",
+        "reads",
     };
 
     /// <summary>This machine's platform key, as the <c>platforms</c> map names it.</summary>
@@ -360,6 +370,15 @@ public sealed record PluginManifest(
                 }
             }
 
+            var reads = new List<PluginSiteRead>();
+
+            if (root.TryGetProperty("reads", out var readsElement) && readsElement.ValueKind != JsonValueKind.Null)
+            {
+                var (parsed, refusal) = PluginSiteRead.ParseAll(readsElement);
+                if (refusal is not null) return (null, refusal);
+                reads.AddRange(parsed);
+            }
+
             var reserved = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             var ignored = new List<string>();
 
@@ -377,7 +396,7 @@ public sealed record PluginManifest(
 
             return (new PluginManifest(
                 id, name, description, version, protocol, path, arguments, timeout, config, secrets,
-                publishes, skills, platforms, reserved, ignored) { Requires = requires, Connections = connections }, null);
+                publishes, skills, platforms, reserved, ignored) { Requires = requires, Connections = connections, Reads = reads }, null);
         }
     }
 
@@ -778,5 +797,57 @@ public sealed record PluginConnectionSlot(
         }
 
         return list;
+    }
+}
+
+/// <summary>
+/// One <c>reads</c> entry: a collection of a site of the plugin's OWN team, delivered on stdin at each
+/// run. There is no team in it, so a plugin has no way to name another team's site.
+/// </summary>
+public sealed record PluginSiteRead(string Site, string Collection)
+{
+    /// <summary>The whole <c>reads</c> list, or the first fault in one sentence naming the field. The
+    /// Go CLI refuses in the same order and the same words (cli/internal/plugin).</summary>
+    public static (IReadOnlyList<PluginSiteRead> Reads, string? Refusal) ParseAll(JsonElement element)
+    {
+        var reads = new List<PluginSiteRead>();
+
+        if (element.ValueKind != JsonValueKind.Array) return (reads, "`reads` must be a list of { site, collection }.");
+
+        if (element.GetArrayLength() > PluginManifest.MaxReads)
+        {
+            return (reads, $"`reads` declares {element.GetArrayLength()} collections; a plugin reads at most {PluginManifest.MaxReads}.");
+        }
+
+        var n = 0;
+
+        foreach (var entry in element.EnumerateArray())
+        {
+            var at = $"`reads[{n}]`";
+
+            if (entry.ValueKind != JsonValueKind.Object
+                || !entry.TryGetProperty("site", out var site) || site.ValueKind != JsonValueKind.String
+                || !entry.TryGetProperty("collection", out var collection) || collection.ValueKind != JsonValueKind.String)
+            {
+                return (reads, $"{at} must be an object with `site` and `collection`.");
+            }
+
+            if (entry.TryGetProperty("team", out _)) return (reads, $"{at} names a team; a plugin reads only its own team's sites.");
+
+            if (!SiteRules.IsSlug(site.GetString())) return (reads, $"`reads[{n}].site`: {SiteRules.NotASlug("site", site.GetString())}");
+
+            if (!SiteRules.IsSlug(collection.GetString()))
+            {
+                return (reads, $"`reads[{n}].collection`: {SiteRules.NotASlug("collection", collection.GetString())}");
+            }
+
+            var read = new PluginSiteRead(site.GetString()!, collection.GetString()!);
+            if (reads.Contains(read)) return (reads, $"{at} repeats {read.Site}/{read.Collection}.");
+
+            reads.Add(read);
+            n++;
+        }
+
+        return (reads, null);
     }
 }

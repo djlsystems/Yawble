@@ -312,6 +312,25 @@ public sealed class SolutionCheckTests : IDisposable
     }
 
     [Fact]
+    public void A_plugin_reading_a_site_the_package_does_not_ship_is_refused()
+    {
+        var folder = SolutionSamples.Neutral(_scratch, "keeper", ["board"], [("board", "items"), ("ledger", "items")]);
+
+        var refusal = Refused(Check(folder), "plugins/keeper/plugin.json", "reads[1].site");
+
+        Assert.Equal("'ledger' is not one of this package's `sites`; a plugin in a package reads only a site the package ships.", refusal.Reason);
+    }
+
+    [Fact]
+    public void A_plugin_reading_a_site_the_package_ships_passes()
+    {
+        var check = Check(SolutionSamples.Neutral(_scratch, "keeper", ["board", "ledger"], [("board", "items"), ("ledger", "items")]));
+
+        Assert.True(check.Ok, string.Join("\n", check.Refusals));
+        Assert.Equal([new PluginSiteRead("board", "items"), new PluginSiteRead("ledger", "items")], Assert.Single(check.Package!.Plugins).Manifest.Reads);
+    }
+
+    [Fact]
     public void A_plugin_member_naming_a_plugin_the_package_does_not_ship_is_refused()
     {
         var folder = Sample();

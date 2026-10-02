@@ -1,0 +1,39 @@
+// THE DOCUMENTS EXPLORER'S STATES, shared by its three views, its tree and the breadcrumb: what is
+// selected, where the keyboard is, and how a folder under a dragged item answers. Global because
+// the same classes are set on rows, tiles, tree nodes and crumbs in several components. Theme
+// variables only, so light and dark both read.
+
+.documents-item-selected {
+  background: color-mix(in srgb, var(--q-primary) 16%, transparent);
+}
+
+.documents-item-focus {
+  outline: 1px dotted var(--q-primary);
+  outline-offset: -1px;
+}
+
+// A folder that would accept the drop: outlined and tinted.
+.documents-drop-ok {
+  outline: 2px solid var(--q-primary);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--q-primary) 12%, transparent);
+}
+
+// A folder that would refuse it: the refusal colour, and a cursor that says no.
+.documents-drop-refused {
+  outline: 2px solid var(--q-negative);
+  outline-offset: -2px;
+  cursor: no-drop;
+}
+
+// The chip under the pointer while dragging. Off-screen: the browser photographs it.
+.documents-drag-chip {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--q-primary);
+  color: white;
+  font-size: 12px;
+}

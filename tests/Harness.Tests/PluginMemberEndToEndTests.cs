@@ -205,7 +205,9 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
         // The agent is still handed a composed role prompt, its credential and the prompt text -
         // byte for byte what it was before the refactor, which MemberGoldenTests pins on the goldens
         // recorded at step 0.
-        var invocation = Assert.Single(_agents.Invocations, i => i.Container == Dev);
+        // The FIRST: Dev owns the workflow it was told into, so the platform may offer it the idle
+        // workflow afterwards - a second invocation that a loaded machine can land before this read.
+        var invocation = _agents.Invocations.First(i => i.Container == Dev);
         Assert.StartsWith($"You are Dev, a member of {_team}.", invocation.SystemPrompt);
         Assert.True(invocation.Environment.ContainsKey("HARNESS_KEY"));
         Assert.Contains("build the thing", invocation.Prompt);

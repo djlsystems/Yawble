@@ -39,7 +39,13 @@ var (
 	// connectionProvider is a provider a connection slot may name: a built-in, any custom
 	// provider, or one custom provider by id (at most 40 characters in all, as the Host).
 	connectionProvider = regexp.MustCompile(`^(google|microsoft|custom|custom-[a-z0-9][a-z0-9-]{0,32})$`)
+	// slug is SiteRules.IsSlug: lower-case letters, digits and single hyphens, starting and ending
+	// with a letter or digit, at most 63 characters (the length is checked beside it).
+	slug = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 )
+
+// MaxReads is PluginManifest.MaxReads: the most collections one plugin may declare in `reads`.
+const MaxReads = 32
 
 // ValidID is MemberRef.IsValidPluginId.
 func ValidID(id string) bool { return pluginID.MatchString(id) }
@@ -273,7 +279,53 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			}
 		}
 	}
+	if r, present := root["reads"]; present && r != nil {
+		if reason := reads(r); reason != "" {
+			return m, nil, reason
+		}
+	}
 	return Manifest{ID: id, Name: name, Version: version, Executables: executables}, skills, ""
+}
+
+func validSlug(name string) bool { return len(name) <= 63 && slug.MatchString(name) }
+
+func notASlug(what, name string) string {
+	return fmt.Sprintf("\"%s\" is not a valid %s name. Use 1-63 lower-case letters, digits and hyphens, starting with a letter or digit.", name, what)
+}
+
+// reads checks `reads` as PluginSiteRead.ParseAll does: a list of at most MaxReads entries, each
+// an object with a site and a collection that are slugs, naming no team, none repeated.
+func reads(value any) string {
+	list, ok := value.([]any)
+	if !ok {
+		return "`reads` must be a list of { site, collection }."
+	}
+	if len(list) > MaxReads {
+		return fmt.Sprintf("`reads` declares %d collections; a plugin reads at most %d.", len(list), MaxReads)
+	}
+	seen := map[string]bool{}
+	for n, item := range list {
+		entry, ok := item.(map[string]any)
+		site, siteOK := entry["site"].(string)
+		collection, collectionOK := entry["collection"].(string)
+		if !ok || !siteOK || !collectionOK {
+			return fmt.Sprintf("`reads[%d]` must be an object with `site` and `collection`.", n)
+		}
+		if _, named := entry["team"]; named {
+			return fmt.Sprintf("`reads[%d]` names a team; a plugin reads only its own team's sites.", n)
+		}
+		if !validSlug(site) {
+			return fmt.Sprintf("`reads[%d].site`: %s", n, notASlug("site", site))
+		}
+		if !validSlug(collection) {
+			return fmt.Sprintf("`reads[%d].collection`: %s", n, notASlug("collection", collection))
+		}
+		if seen[site+"/"+collection] {
+			return fmt.Sprintf("`reads[%d]` repeats %s/%s.", n, site, collection)
+		}
+		seen[site+"/"+collection] = true
+	}
+	return ""
 }
 
 // scopeList is a list of scopes as the Host takes one: strings, none empty and none with white

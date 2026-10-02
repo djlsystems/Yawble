@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
+import DocumentsBreadcrumb from './documents/DocumentsBreadcrumb.vue';
 import type { FileBrowserDeletion, FileBrowserEntry, FileBrowserListing, FileBrowserSource }
   from '../lib/fileBrowser';
 
@@ -283,12 +284,7 @@ defineExpose({ reload });
 
 <template>
   <q-card-section v-if="crumbs.length > 0" class="q-py-sm">
-    <div class="row items-center q-gutter-xs text-caption">
-      <template v-for="(crumb, index) in crumbs" :key="crumb.path">
-        <q-icon v-if="index > 0" name="chevron_right" size="14px" class="os-text-muted" />
-        <q-btn flat dense no-caps size="sm" :label="crumb.label" @click="browseTo(crumb.path)" />
-      </template>
-    </div>
+    <DocumentsBreadcrumb :crumbs="crumbs" @go="browseTo($event.path)" />
   </q-card-section>
 
   <q-separator />

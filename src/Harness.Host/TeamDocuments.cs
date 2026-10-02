@@ -1,5 +1,3 @@
-using System.IO.Enumeration;
-
 namespace Harness.Host;
 
 /// <summary>A file or folder in a team's docs area. Paths are relative to that area's root.</summary>
@@ -74,8 +72,11 @@ public sealed record DocumentsFolder(
 /// for every mistyped team anybody ever browsed - litter that a later claim then has to reason
 /// about. The repair is <see cref="EnsureFor"/>, called by the two callers that mean it: an agent being told where to write, and a write arriving.
 /// </summary>
-public sealed class TeamDocuments(TeamPaths paths)
+public sealed partial class TeamDocuments(
+    TeamPaths paths, DocumentFileOps? fileOps = null, int copyLimit = TeamDocuments.MaximumCopyFiles)
 {
+    private readonly DocumentFileOps _fileOps = fileOps ?? DocumentFileOps.Real;
+
     /// <summary>Big enough for a document, small enough that a mistake is not a disk-filling one.</summary>
     public const long MaximumUploadBytes = 25 * 1024 * 1024;
 
@@ -212,6 +213,27 @@ public sealed class TeamDocuments(TeamPaths paths)
         return new DocumentEntry(info.Name, Relative(root, target), true, 0, info.LastWriteTimeUtc, 0);
     }
 
+    /// <summary>
+    /// Where an upload of <paramref name="fileName"/> into <paramref name="folder"/> would land,
+    /// without writing anything: only the LEAF of the name is kept. For an upload that asks before
+    /// it replaces, and for its keep-both name.
+    /// </summary>
+    public (string Path, string Name, bool IsFile, bool IsFolder) UploadTarget(string team, string? folder, string fileName)
+    {
+        var root = RootFor(team);
+        var safeName = Path.GetFileName(fileName.Replace('\\', Path.DirectorySeparatorChar));
+
+        if (string.IsNullOrWhiteSpace(safeName))
+        {
+            throw new DocumentPathException("That file has no name.");
+        }
+
+        var directory = Resolve(team, folder);
+        var target = Resolve(team, Path.Combine(Relative(root, directory), safeName));
+
+        return (Relative(root, target), safeName, File.Exists(target), Directory.Exists(target));
+    }
+
     public async Task<DocumentEntry> SaveAsync(
         string team, string? folder, string fileName, Stream content, CancellationToken ct = default)
     {
@@ -320,23 +342,14 @@ public sealed class TeamDocuments(TeamPaths paths)
     }
 
     /// <summary>
-    /// The files under <paramref name="folder"/>, marker aside. A folder the Host cannot list (an
-    /// agent's owner-only directory, a mode-000 one) is passed over, not thrown on: the delete
+    /// The files under <paramref name="folder"/>, marker aside, through the shared <see cref="Walk"/>.
+    /// A folder the Host cannot list (an agent's owner-only directory, a mode-000 one) is passed
+    /// over here, not thrown on: the delete
     /// still reaches <see cref="FolderRemoval"/>, which names it as left and why. A link to a
     /// folder is listed as itself and never walked into.
     /// </summary>
     private static List<string> FilesUnder(string folder) =>
-        [.. new FileSystemEnumerable<string>(
-                folder,
-                (ref FileSystemEntry entry) => entry.ToFullPath(),
-                new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 })
-            {
-                ShouldIncludePredicate = (ref FileSystemEntry entry) =>
-                    !entry.IsDirectory || entry.Attributes.HasFlag(FileAttributes.ReparsePoint),
-                ShouldRecursePredicate = (ref FileSystemEntry entry) =>
-                    !entry.Attributes.HasFlag(FileAttributes.ReparsePoint),
-            }
-            .Where(file => !IsMarker(file))];
+        Walk(folder) is var walk ? [.. walk.Files, .. walk.Links.Where(link => !IsMarker(link))] : [];
 
     /// <summary>Whether a folder has anything in it; one the Host cannot list counts as not empty.</summary>
     private static bool NotKnownEmpty(string folder)

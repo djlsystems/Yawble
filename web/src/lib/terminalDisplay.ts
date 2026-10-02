@@ -11,6 +11,15 @@
  * Critical through 116 green tests once already. Pure functions are what a test can actually
  * exercise.
  */
+import {
+  clampGeometry,
+  clampNumber,
+  clampToViewport,
+  initialGeometry,
+  readStored,
+  writeStored,
+  type WindowBounds,
+} from './windowGeometry';
 
 export interface TerminalDisplay {
   fontFamily: string;
@@ -40,7 +49,11 @@ export const DefaultTerminalDisplay: TerminalDisplay = {
   top: 0,
 };
 
-const StorageKey = 'harness.terminalDisplay';
+export const TerminalDisplayStorageKey = 'harness.terminalDisplay';
+const StorageKey = TerminalDisplayStorageKey;
+
+/** The terminal's bounds in the shape the shared window rules take. */
+export const TerminalWindowBounds: WindowBounds = { width: WindowWidthBounds, height: WindowHeightBounds };
 
 /**
  * Compute initial window position/size from viewport.
@@ -48,31 +61,7 @@ const StorageKey = 'harness.terminalDisplay';
  * Bottom-right inset that misses the FAB, avoiding keyboard area.
  */
 export function computeInitialWindowGeometry(viewportWidth: number, viewportHeight: number): Pick<TerminalDisplay, 'width' | 'height' | 'left' | 'top'> {
-  // Clamp size to min/max bounds, but prefer ~960x560 if it fits
-  let width = Math.min(960, viewportWidth - 40); // 20px margin on each side
-  let height = Math.min(560, viewportHeight - 40);
-
-  width = Math.max(WindowWidthBounds.min, Math.min(WindowWidthBounds.max, width));
-  height = Math.max(WindowHeightBounds.min, Math.min(WindowHeightBounds.max, height));
-
-  // Bottom-right inset (accounts for FAB in bottom-right)
-  const left = Math.max(0, viewportWidth - width - 20); // 20px from right edge
-  const top = Math.max(0, viewportHeight - height - 20); // 20px from bottom edge
-
-  return { width, height, left, top };
-}
-
-
-function clamp(value: unknown, bounds: { min: number; max: number }, fallback: number): number {
-  // NOT `typeof value === 'number'` alone. A number input yields NaN for an empty box, and NaN
-  // survives every comparison silently - `Math.min(NaN, x)` is NaN - so an unguarded clamp writes
-  // NaN into storage and the terminal takes `font-size: NaNpx`, which the browser DROPS. The
-  // terminal then has no size at all, which looks like a layout bug rather than a bad value.
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    return fallback;
-  }
-
-  return Math.round(Math.min(bounds.max, Math.max(bounds.min, value)));
+  return initialGeometry(viewportWidth, viewportHeight, TerminalWindowBounds, { width: 960, height: 560 }, 'bottom-right');
 }
 
 export function clampTerminalDisplay(partial: Partial<TerminalDisplay>): TerminalDisplay {
@@ -83,41 +72,22 @@ export function clampTerminalDisplay(partial: Partial<TerminalDisplay>): Termina
 
   return {
     fontFamily,
-    fontSize: clamp(partial.fontSize, FontSizeBounds, DefaultTerminalDisplay.fontSize),
+    fontSize: clampNumber(partial.fontSize, FontSizeBounds, DefaultTerminalDisplay.fontSize),
     maximised: typeof partial.maximised === 'boolean' ? partial.maximised : DefaultTerminalDisplay.maximised,
-    width: clamp(partial.width, WindowWidthBounds, DefaultTerminalDisplay.width),
-    height: clamp(partial.height, WindowHeightBounds, DefaultTerminalDisplay.height),
-    left:
-      typeof partial.left === 'number' && Number.isFinite(partial.left)
-        ? Math.round(partial.left)
-        : DefaultTerminalDisplay.left,
-    top:
-      typeof partial.top === 'number' && Number.isFinite(partial.top)
-        ? Math.round(partial.top)
-        : DefaultTerminalDisplay.top,
+    ...clampGeometry(partial, TerminalWindowBounds, DefaultTerminalDisplay),
   };
 }
 
 /**
  * Clamp terminal display to fit within viewport, ensuring left/top don't push the window off-screen.
+ * The window rules are `lib/windowGeometry`'s, shared with every other movable window.
  */
 export function clampTerminalDisplayToViewport(
   partial: Partial<TerminalDisplay>,
   viewportWidth: number,
   viewportHeight: number,
 ): TerminalDisplay {
-  // First apply basic clamping
-  const base = clampTerminalDisplay(partial);
-
-  // Ensure width/height don't exceed viewport
-  const width = Math.min(base.width, Math.max(WindowWidthBounds.min, viewportWidth - 20));
-  const height = Math.min(base.height, Math.max(WindowHeightBounds.min, viewportHeight - 20));
-
-  // Clamp left/top so the window stays on-screen
-  const left = Math.max(0, Math.min(base.left, viewportWidth - width - 10));
-  const top = Math.max(0, Math.min(base.top, viewportHeight - height - 10));
-
-  return { ...base, width, height, left, top };
+  return clampToViewport(clampTerminalDisplay(partial), TerminalWindowBounds, viewportWidth, viewportHeight);
 }
 
 /**
@@ -135,33 +105,21 @@ function isSupportedFontFamily(value: string): boolean {
 }
 
 export function readTerminalDisplay(): TerminalDisplay {
-  try {
-    const stored = localStorage.getItem(StorageKey);
+  // Unreadable storage, unparseable JSON, or access refused outright all read as nothing stored. A
+  // terminal that will not render is a far worse outcome than a preference that quietly resets.
+  const parsed = readStored(StorageKey);
 
-    if (!stored) return { ...DefaultTerminalDisplay };
+  // `typeof null === 'object'`, so the null check is not redundant - and an array passes
+  // `typeof === 'object'` too, which is why the shape is probed by reading the fields rather
+  // than by trusting the type.
+  if (typeof parsed !== 'object' || parsed === null) return { ...DefaultTerminalDisplay };
 
-    const parsed: unknown = JSON.parse(stored);
-
-    // `typeof null === 'object'`, so the null check is not redundant - and an array passes
-    // `typeof === 'object'` too, which is why the shape is probed by reading the fields rather
-    // than by trusting the type.
-    if (typeof parsed !== 'object' || parsed === null) return { ...DefaultTerminalDisplay };
-
-    // CLAMPED ON READ, not only on write. Storage is editable by hand and shared with older
-    // builds, so a value that was legal when it was written may not be now. Trusting it because it
-    // came from us is how a 4000px window reaches the screen.
-    return clampTerminalDisplay(parsed as Partial<TerminalDisplay>);
-  } catch {
-    // Unreadable storage, unparseable JSON, or access refused outright. A terminal that will not
-    // render is a far worse outcome than a preference that quietly resets.
-    return { ...DefaultTerminalDisplay };
-  }
+  // CLAMPED ON READ, not only on write. Storage is editable by hand and shared with older
+  // builds, so a value that was legal when it was written may not be now. Trusting it because it
+  // came from us is how a 4000px window reaches the screen.
+  return clampTerminalDisplay(parsed as Partial<TerminalDisplay>);
 }
 
 export function writeTerminalDisplay(display: Partial<TerminalDisplay>): void {
-  try {
-    localStorage.setItem(StorageKey, JSON.stringify(clampTerminalDisplay(display)));
-  } catch {
-    // Nothing to do and nothing worth saying: the display still applies for this session.
-  }
+  writeStored(StorageKey, clampTerminalDisplay(display));
 }

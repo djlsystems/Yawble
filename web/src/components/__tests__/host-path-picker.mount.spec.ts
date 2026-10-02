@@ -134,7 +134,7 @@ describe('HostPathPicker, mounted on the shared FileBrowser', () => {
 
   /**
    * The same fact one level down, where it is a property of the SOURCE rather than of the markup:
-   * `documentsSource` hands back `{ source, deletion }` and this one hands back no capability at
+   * `hostFileBrowser` hands back a source and no capability at
    * all, so there is nothing here for a caller to pass even by accident.
    */
   it('hands back no delete capability for anything to pass', () => {

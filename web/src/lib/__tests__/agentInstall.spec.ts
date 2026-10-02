@@ -9,6 +9,7 @@ import {
   installStatus,
   installationFor,
   isNotInstalled,
+  listOf,
   referencedNotInstalled,
 } from '../agentInstall'
 
@@ -260,5 +261,94 @@ describe('where the badge attaches', () => {
    */
   it('is the Agents ribbon action, spelled the way the ribbon file spells it', () => {
     expect(AgentsAction).toBe('admin-agents')
+  })
+})
+
+/**
+ * A SERVER WHOSE AGENT CLIS ARE ON WORKERS sends `measuredOn`, and the words follow it: the worker
+ * a CLI is missing on, both when two disagree, and "not measured" - never "found" and never a badge -
+ * when no worker has answered. Without `measuredOn` the words are this machine's, as before.
+ */
+describe('in control, where the workers measured it', () => {
+  const at = '2026-10-02T12:00:00Z'
+
+  const measuredMissing = (agent: string, referenced: boolean, ...workers: [string, boolean][]) =>
+    installation({
+      agent,
+      state: AgentNotInstalled,
+      resolvedPath: null,
+      referenced,
+      message: `${agent} is not installed on worker-1.`,
+      measuredOn: workers.map(([worker, installed]) => ({ worker, installed, at })),
+    })
+
+  it('names the worker a CLI is missing on', () => {
+    const entry = measuredMissing('grok-headless', true, ['worker-1', false])
+
+    expect(installStatus(entry)).toEqual({ text: 'Not installed on worker-1', icon: 'error', tone: 'warn' })
+    expect(agentsBadge([entry])?.label).toBe('grok-headless is not installed on worker-1, and a team uses it.')
+  })
+
+  it('names the worker it is missing on when two workers disagree', () => {
+    const entry = measuredMissing('grok-headless', true, ['worker-1', true], ['worker-2', false])
+
+    expect(installStatus(entry).text).toBe('Not installed on worker-2')
+    expect(agentsBadge([entry])?.label).toBe('grok-headless is not installed on worker-2, and a team uses it.')
+  })
+
+  it('groups presets missing on the same worker, and names each place when they differ', () => {
+    const same = [
+      measuredMissing('claude-headless', true, ['worker-1', false]),
+      measuredMissing('grok-headless', true, ['worker-1', false]),
+    ]
+    expect(agentsBadge(same)?.label).toBe('claude-headless, grok-headless are not installed on worker-1, and teams use them.')
+
+    const differ = [
+      measuredMissing('claude-headless', true, ['worker-2', false]),
+      measuredMissing('grok-headless', true, ['worker-1', false]),
+    ]
+    expect(agentsBadge(differ)?.label).toBe(
+      'claude-headless is not installed on worker-2 and grok-headless is not installed on worker-1, and teams use them.',
+    )
+  })
+
+  it('reads installed on the workers that measured it', () => {
+    const entry = installation({
+      agent: 'claude-headless',
+      resolvedPath: null,
+      referenced: true,
+      message: 'claude is installed on worker-1 and worker-2.',
+      measuredOn: [
+        { worker: 'worker-1', installed: true, at },
+        { worker: 'worker-2', installed: true, at },
+      ],
+    })
+
+    expect(installStatus(entry)).toEqual({ text: 'Installed on worker-1 and worker-2', icon: 'check_circle', tone: 'ok' })
+    expect(agentsBadge([entry])).toBeNull()
+  })
+
+  it('reads not measured when no worker has answered, and lights no badge', () => {
+    const entry = installation({
+      agent: 'claude-headless',
+      resolvedPath: null,
+      referenced: true,
+      message: 'claude has not been measured: no worker is connected.',
+      measuredOn: [],
+    })
+
+    expect(installStatus(entry)).toEqual({ text: 'Not measured', icon: 'help', tone: 'unknown' })
+    expect(agentsBadge([entry])).toBeNull()
+  })
+
+  it("keeps 'this machine' when no measuredOn is sent", () => {
+    expect(agentsBadge([missing('copilot', true)])?.label).toBe('copilot is not installed on this machine, and a team uses it.')
+    expect(installStatus(missing('copilot', true)).text).toBe('Not found on this machine')
+  })
+
+  it('lists workers the way the server does', () => {
+    expect(listOf(['worker-1'])).toBe('worker-1')
+    expect(listOf(['worker-1', 'worker-2'])).toBe('worker-1 and worker-2')
+    expect(listOf(['worker-1', 'worker-2', 'worker-3'])).toBe('worker-1, worker-2 and worker-3')
   })
 })

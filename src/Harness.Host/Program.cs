@@ -663,15 +663,8 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<FolderWatch>(),
         sp.GetRequiredService<TenantLogging>(),
 
-        // THE AGENT a package's agent members run when it names none: the first headless model
-        // preset installed on this machine, else the first in the catalog. The wizard may name one.
-        () =>
-        {
-            var headless = agents.Definitions.Where(d => d.Mode == AgentMode.Headless).ToList();
-            return (headless.FirstOrDefault(d => d.Launch.LanguageModel && probe.Probe(d).State is null)
-                ?? headless.FirstOrDefault(d => d.Launch.LanguageModel)
-                ?? headless.FirstOrDefault())?.Name;
-        },
+        // THE AGENT a package's agent members run when it names none (SolutionDefaultAgent).
+        () => SolutionDefaultAgent.Of(agents, probe),
         sp.GetRequiredService<Connections>(),
         sp.GetRequiredService<ConnectionStore>(),
         sp.GetRequiredService<IPluginMemberSettingsStore>(),
@@ -722,11 +715,17 @@ builder.Services.AddSingleton(sp => new TeamSkills(
 // walk PATH once per preset on every render, and one that lived forever would go on reporting a
 // problem the person had just fixed. It runs no candidate binary - it resolves a name and stops -
 // so it takes no dependency on anything that could.
-// Constructed rather than resolved by type: its three parameters are the injection seams the specs
-// drive (a `fileExists`, a clock, the cache window) and none of them is a service, so leaving the
+// Constructed rather than resolved by type: its parameters are the injection seams the specs
+// drive (a clock, the cache window, the workers' answers) and none of them is resolved by type, so leaving the
 // container to choose a constructor would either fail to find one or quietly pick the wrong shape
 // the day another is added.
-builder.Services.AddSingleton(new AgentInstallProbe());
+// In CONTROL its answer is the workers' and never this machine's PATH, which has no agent CLI on it:
+// what each placeable worker measured (WorkerInstalls), from the sign-in probe and from the
+// measurement each worker gets as it joins. In `all` the runs are this machine's, and so is the PATH.
+builder.Services.AddSingleton(sp => WorkerInstalls.Over(sp.GetRequiredService<WorkerPool>()));
+builder.Services.AddSingleton(sp => control
+    ? new AgentInstallProbe(workers: sp.GetRequiredService<WorkerInstalls>())
+    : new AgentInstallProbe());
 // The one path from the progress ROUTE to whatever is currently running that member. Singleton
 // because both ends have to be looking at the same object for a heartbeat to mean anything.
 builder.Services.AddSingleton<RunHeartbeat>();
@@ -1766,7 +1765,8 @@ builder.Services.AddHttpContextAccessor();
 // THE SIGN-IN PROBE: asked of a connected worker, recorded in agent-auth.json for the doctor.
 builder.Services.AddSingleton(sp => new AgentAuthProbe(
     sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<AgentLaunchUser>(), sp.GetRequiredService<IRunCredentials>(),
-    sp.GetRequiredService<WorkerAsks>(), dataRoot, sp.GetRequiredService<ILogger<AgentAuthProbe>>()));
+    sp.GetRequiredService<WorkerAsks>(), dataRoot, sp.GetRequiredService<ILogger<AgentAuthProbe>>(),
+    installs: sp.GetRequiredService<AgentInstallProbe>(), measured: control ? sp.GetRequiredService<WorkerInstalls>() : null));
 // THE LAUNCH CHECK: each preset's free invocation through the member runner's own launch (AgentLaunchChecks).
 builder.Services.AddSingleton(sp => new AgentLaunchChecks(
     sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<ProcessAgentRunner>(), dataRoot,
@@ -2426,6 +2426,14 @@ if (control)
 RetryWhenAWorkerJoins.Wire(
     control, workerConnections,
     ct => app.Services.GetRequiredService<UnfinishedRemovalRetry>().RetryAsync(ct: ct),
+    app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+// Each worker that joins is asked which agent CLIs it has, so whether one is installed is every
+// worker's answer, and two that disagree are seen.
+MeasureInstallsWhenAWorkerJoins.Wire(
+    control, joined => workerConnections.Joined += joined,
+    worker => app.Services.GetRequiredService<WorkerPool>().For(worker),
+    () => MeasureInstallsWhenAWorkerJoins.Commands(app.Services.GetRequiredService<AgentCatalog>()),
+    app.Services.GetRequiredService<WorkerAsks>(), app.Services.GetRequiredService<WorkerInstalls>(),
     app.Services.GetRequiredService<ILogger<WorkerConnections>>());
 AgentUpdatesAtStart.Wire(
     control, builder.Configuration["HARNESS_IMAGE"], builder.Configuration["HARNESS_UPDATE_AGENTS"], joined => workerConnections.Joined += joined,
@@ -5958,7 +5966,9 @@ app.MapGet("/api/documents", (TeamDocuments docs, TeamRegistry teams, HttpContex
             folder.Entries,
             folder.ModifiedAt));
 
-    return Results.Ok(new { folders });
+    // THE ROOT, so the dialog can say where a document is as an agent sees it: `HARNESS_SHARED` is
+    // this root plus the team.
+    return Results.Ok(new { folders, root = docs.TenantRoot });
 })
     .WithTags("Documents")
     .HumansOnly()
@@ -6121,11 +6131,49 @@ documents.MapPost("/upload", async (
         });
     }
 
+    // WHAT TO DO ABOUT A NAME ALREADY THERE. Absent, an upload replaces a file as it always has; a
+    // drop from the Documents dialog asks first, the way a paste does.
+    var onClash = form["onClash"].ToString() is { Length: > 0 } sent ? sent : null;
+
+    if (onClash is not (null or "ask" or TeamDocuments.KeepBoth or TeamDocuments.Replace or TeamDocuments.Skip))
+    {
+        return Results.BadRequest(new { error = "onClash is ask, keep-both, replace or skip." });
+    }
+
     await using var content = file.OpenReadStream();
 
     return await DocumentsAsync(async () =>
     {
-        var saved = await docs.SaveAsync(stored, form["path"], file.FileName, content, ct);
+        var name = file.FileName;
+
+        if (onClash is not null && docs.UploadTarget(stored, form["path"], name) is { } target
+            && (target.IsFile || target.IsFolder))
+        {
+            var where = Path.GetDirectoryName(target.Path)?.Replace('\\', '/') is { Length: > 0 } parent ? parent : stored;
+
+            switch (onClash)
+            {
+                case "ask":
+                    return Results.Json(
+                        new
+                        {
+                            error = $"{target.Name} is already in {where}. Choose Keep both, Replace or Skip.",
+                            clashes = new[] { new DocumentsClash(target.Name, target.Path, target.IsFolder) },
+                        },
+                        statusCode: StatusCodes.Status409Conflict);
+                case TeamDocuments.Skip:
+                    return Results.Ok(new { skipped = true, path = target.Path });
+                case TeamDocuments.Replace when target.IsFolder:
+                    // AN UPLOAD WRITES NO ROW BEFORE IT ACTS, so it never removes a tree.
+                    return Results.Conflict(new { error = $"{target.Name} is a folder in {where}; an upload replaces only a file." });
+                case TeamDocuments.KeepBoth:
+                    var directory = Path.GetDirectoryName(Path.Combine(docs.RootFor(stored), target.Path))!;
+                    name = TeamDocuments.FreeName(target.Name, isFolder: false, free => Path.Exists(Path.Combine(directory, free)));
+                    break;
+            }
+        }
+
+        var saved = await docs.SaveAsync(stored, form["path"], name, content, ct);
 
         // THE PLATFORM ANNOUNCES ITS OWN WRITE, at once and with no poll: it performed it.
         await folders.AnnounceAsync(
@@ -6139,7 +6187,7 @@ documents.MapPost("/upload", async (
         // Never the contents - this table is readable by every person and kept forever.
         await audit.WriteAsync(
             context, TenantActions.DocumentUploaded, stored, saved.Path,
-            new { team = stored, path = saved.Path, size = saved.Size },
+            new { team = stored, path = saved.Path, size = saved.Size, onClash },
             ct);
 
         return Results.Ok(saved);
@@ -6152,7 +6200,12 @@ documents.MapPost("/upload", async (
         + "Only the LEAF of the uploaded filename is kept, so a name carrying directory separators "
         + "cannot place the file anywhere but where `path` says. 400 for a missing file, an empty "
         + $"one, or one larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB. Audited as "
-        + "`document.uploaded`, with the path and size and never the contents."
+        + "`document.uploaded`, with the path and size and never the contents.\n\n"
+        + "An optional `onClash` says what to do when the name is already taken. Absent, a file of "
+        + "that name is replaced, as it always has been. `ask` answers 409 with `clashes` and "
+        + "writes nothing; `keep-both` saves under the first free `name (copy).ext`; `replace` "
+        + "replaces a file and refuses a folder of that name with 409; `skip` answers "
+        + "`{ skipped: true, path }` and writes nothing."
         + Describe.Documents);
 
 documents.MapDelete("", async (
@@ -6297,6 +6350,60 @@ documents.MapDelete("", async (
         + "Every delete appends a `documents.deleted` tenant event naming the folder, the path, "
         + "whether it was a folder and the number of files removed; nothing is deleted when that "
         + "row cannot be written." + Describe.Documents);
+
+// RENAME, MOVE AND COPY: a person's batch changes, one source folder per request. Each is planned
+// whole before anything is recorded, its row is written before anything is done, and a batch that
+// partly fails says path by path what was done - the delete's pattern, kept by DocumentsChangeAsync
+// for all three. Dragging and dropping in the Documents dialog calls these same routes.
+documents.MapPost("/rename", (
+    [Description(Describe.Team)] string team,
+    DocumentsRename request, TeamRegistry teams, TeamDocuments docs, FolderWatch folders, FolderRemoval removal,
+    ITenantLog tenantLog, HttpContext context, CancellationToken ct) =>
+    DocumentsChangeAsync(
+        DocumentsVerb.Rename, team, request.Items?.Select(item => (item.Path, item.Name)).ToList(), null,
+        teams, docs, folders, removal, tenantLog, context, ct))
+    .HumansOnly()
+    .WithSummary("Rename documents")
+    .WithDescription(
+        "Gives each item in `items` a new leaf name in the folder it is in. The whole batch is "
+        + "checked before anything is renamed: a bad name, a name already there, the marker, a link, "
+        + "the folder itself, or anything in a gone team's or retired folder refuses the request "
+        + "with a sentence in `error`, and nothing is recorded or renamed.\n\n"
+        + Describe.DocumentsChange + Describe.Documents);
+
+documents.MapPost("/move", (
+    [Description(Describe.Team)] string team,
+    DocumentsTransfer request, TeamRegistry teams, TeamDocuments docs, FolderWatch folders, FolderRemoval removal,
+    ITenantLog tenantLog, HttpContext context, CancellationToken ct) =>
+    DocumentsChangeAsync(
+        DocumentsVerb.Move, team, request.Items?.Select(item => (item.Path, item.OnClash)).ToList(), request.To,
+        teams, docs, folders, removal, tenantLog, context, ct))
+    .HumansOnly()
+    .WithSummary("Move documents")
+    .WithDescription(
+        "Moves each item in `items` into the folder `to` names: `to.folder` is a documents folder "
+        + "(this one or another team's) and `to.path` a folder in it. A move is one rename on disk "
+        + "and never a copy and a delete, so it never half-happens. Moving out of a gone team's or "
+        + "retired folder is allowed; moving into one is refused. A folder holding a link does not "
+        + "leave its team.\n\n"
+        + Describe.DocumentsTransfer + Describe.DocumentsChange + Describe.Documents);
+
+documents.MapPost("/copy", (
+    [Description(Describe.Team)] string team,
+    DocumentsTransfer request, TeamRegistry teams, TeamDocuments docs, FolderWatch folders, FolderRemoval removal,
+    ITenantLog tenantLog, HttpContext context, CancellationToken ct) =>
+    DocumentsChangeAsync(
+        DocumentsVerb.Copy, team, request.Items?.Select(item => (item.Path, item.OnClash)).ToList(), request.To,
+        teams, docs, folders, removal, tenantLog, context, ct))
+    .HumansOnly()
+    .WithSummary("Copy documents")
+    .WithDescription(
+        "Copies each item in `items` into the folder `to` names, as for a move. Copying into the "
+        + "folder an item is already in keeps both without asking. Links inside a copied folder are "
+        + "never followed: they are left out and named in that item's `notCopied`. A copy that fails "
+        + $"part way removes what it made for that item. At most {TeamDocuments.MaximumCopyFiles} "
+        + "files in one request.\n\n"
+        + Describe.DocumentsTransfer + Describe.DocumentsChange + Describe.Documents);
 
 /// Telling a container something is publishing an addressed instruction. There is no other way in,
 /// which is what keeps a container event-driven rather than something with two doors.
@@ -8163,6 +8270,193 @@ static string? DocumentsFolderOf(TeamRegistry teams, TeamDocuments docs, string 
     return Directory.Exists(docs.RootFor(team)) ? team : null;
 }
 
+/// <summary>
+/// One rename, move or copy request, start to finish: plan, refuse, record, act, announce, and say
+/// what was left. THE ORDER IS THE CONTRACT, as it is for a delete: nothing is recorded for a
+/// refusal, nothing is done without its row, and a partial result is a 409 with a second row naming
+/// what was not done - never an unhandled error.
+/// </summary>
+static async Task<IResult> DocumentsChangeAsync(
+    DocumentsVerb verb,
+    string team,
+    IReadOnlyList<(string? Path, string? Detail)>? items,
+    DocumentsTransferTarget? to,
+    TeamRegistry teams,
+    TeamDocuments docs,
+    FolderWatch folders,
+    FolderRemoval removal,
+    ITenantLog tenantLog,
+    HttpContext context,
+    CancellationToken ct)
+{
+    // A gone team's folder and a retired one may be a SOURCE, as for a delete: a person may take
+    // things out of a record. Nothing may be added to one, or renamed in one.
+    if (DocumentsFolderOf(teams, docs, team) is not { } stored)
+    {
+        return Results.NotFound(new { error = $"No team '{team}'." });
+    }
+
+    bool Live(string folder) => !TeamPaths.IsRetiredDocumentsFolder(folder) && teams.ExistingName(folder) is not null;
+
+    string? Closed(string folder, string refused) =>
+        Live(folder)
+            ? null
+            : (TeamPaths.IsRetiredDocumentsFolder(folder)
+                ? $"This folder belongs to an earlier team called {TeamPaths.TeamOfDocumentsFolder(folder)}."
+                : $"{teams.LabelFor(TeamPaths.TeamOfDocumentsFolder(folder))} no longer exists.")
+            + $" Its documents can be read, copied or moved out, and deleted, but {refused}.";
+
+    var (verbed, noun, action, incomplete) = verb switch
+    {
+        DocumentsVerb.Rename => ("renamed", "rename", TenantActions.DocumentsRenamed, TenantActions.DocumentsRenameIncomplete),
+        DocumentsVerb.Move => ("moved", "move", TenantActions.DocumentsMoved, TenantActions.DocumentsMoveIncomplete),
+        _ => ("copied", "copy", TenantActions.DocumentsCopied, TenantActions.DocumentsCopyIncomplete),
+    };
+
+    DocumentsChangePlan plan;
+
+    try
+    {
+        if (verb == DocumentsVerb.Rename)
+        {
+            if (Closed(stored, "nothing in them can be renamed") is { } closed) return Results.Conflict(new { error = closed });
+
+            plan = docs.PlanRename(stored, items);
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(to?.Folder))
+            {
+                return Results.BadRequest(new { error = $"Name the folder to {noun} them into in to.folder." });
+            }
+
+            if (DocumentsFolderOf(teams, docs, to.Folder) is not { } destination)
+            {
+                return Results.NotFound(new { error = $"No documents folder '{to.Folder}'." });
+            }
+
+            if (Closed(destination, "nothing can be added to them") is { } closed) return Results.Conflict(new { error = closed });
+
+            plan = docs.PlanTransfer(verb, stored, destination, to.Path, items);
+        }
+    }
+    catch (DocumentsChangeRefusedException refused)
+    {
+        return Results.Json(new { error = refused.Message }, statusCode: refused.Status);
+    }
+    catch (DocumentPathException refused)
+    {
+        return Results.BadRequest(new { error = refused.Message });
+    }
+
+    // A CLASH NOBODY CHOSE FOR: asked about, with nothing recorded or done. The person answers per
+    // item and the request comes again with `onClash`.
+    if (plan.Clashes.Count > 0)
+    {
+        var into = plan.DestinationPath.Length == 0 ? plan.Destination : plan.DestinationPath;
+        var names = string.Join(", ", plan.Clashes.Select(clash => Path.GetFileName(clash.To)));
+        var sentence = plan.Clashes.Count == 1
+            ? $"{names} is already in {into}. Choose Keep both, Replace or Skip."
+            : $"{plan.Clashes.Count} of these are already in {into}: {names}. Choose Keep both, Replace or Skip for each.";
+
+        return Results.Json(new { error = sentence, clashes = plan.Clashes }, statusCode: StatusCodes.Status409Conflict);
+    }
+
+    var actorId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    var email = context.User.FindFirstValue(ClaimTypes.Email);
+    var first = plan.Items[0].From;
+
+    // RECORDED BEFORE DONE, naming every source, destination and replaced path, and not swallowed:
+    // a move whose row cannot be written does not happen, so nothing leaves the documents unrecorded.
+    try
+    {
+        await tenantLog.WriteAsync(
+            actorId, email, action, stored, first.Length == 0 ? stored : first,
+            verb == DocumentsVerb.Rename
+                ? JsonSerializer.Serialize(new
+                {
+                    folder = stored,
+                    items = plan.Items.Select(item => new { from = item.From, to = item.To, files = item.Files.Count }),
+                })
+                : JsonSerializer.Serialize(new
+                {
+                    folder = stored,
+                    to = new { folder = plan.Destination, path = plan.DestinationPath },
+                    items = plan.Items.Select(item => new
+                    {
+                        from = item.From,
+                        to = item.To,
+                        onClash = item.OnClash,
+                        files = item.Files.Count,
+                        outcome = item.Settled,
+                    }),
+                    replaced = plan.Items.Where(item => item.Replaces is not null).Select(item => item.Replaces),
+                }),
+            ct);
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        return Results.Json(
+            new { error = $"The {noun} could not be recorded, so nothing was {verbed}." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    var applied = await docs.ApplyAsync(plan, removal, ct);
+
+    // ANNOUNCED AFTER, one announcement per folder and only what changed: what left the source,
+    // what arrived, and what a Replace removed. A gone or retired folder has no triggers.
+    var actor = actorId ?? "unknown";
+    var changed = applied
+        .SelectMany(item => item.Left.Select(path => (Folder: stored, Path: path))
+            .Concat(item.Arrived.Concat(item.Removed).Select(path => (Folder: plan.Destination, Path: path))))
+        .Where(change => Live(change.Folder));
+
+    foreach (var folder in changed.GroupBy(change => change.Folder, StringComparer.Ordinal))
+    {
+        foreach (var group in folder.GroupBy(
+            change => Path.GetDirectoryName(change.Path)?.Replace('\\', '/') ?? "", StringComparer.Ordinal))
+        {
+            await folders.AnnounceAsync(folder.Key, group.Key, [.. group.Select(change => change.Path).Distinct(StringComparer.Ordinal)], actor, ct);
+        }
+    }
+
+    var results = applied.Select(item => item.Result).ToList();
+    var failed = results.Where(result => result.Outcome == "failed").ToList();
+
+    if (failed.Count == 0) return Results.Ok(new { results });
+
+    var done = results.Count(result => result.Outcome == "done");
+    var said =
+        (done == 0
+            ? $"Nothing was {verbed}. "
+            : $"The {noun} did not finish: {done} of {results.Count} {verbed}. ")
+        + $"Not {verbed}: "
+        + string.Join("; ", failed.Select(result => $"{(result.From.Length == 0 ? stored : result.From)} ({result.Reason})"))
+        + $". {char.ToUpperInvariant(noun[0])}{noun[1..]} them again once that is fixed.";
+
+    // WHAT WAS NOT DONE, AND WHY, as a row after the first - so the log never claims a change that
+    // did not happen.
+    try
+    {
+        await tenantLog.WriteAsync(
+            actorId, email, incomplete, stored, first.Length == 0 ? stored : first,
+            JsonSerializer.Serialize(new
+            {
+                folder = stored,
+                to = verb == DocumentsVerb.Rename ? null : new { folder = plan.Destination, path = plan.DestinationPath },
+                done = results.Where(result => result.Outcome == "done").Select(result => result.From),
+                failed = failed.Select(result => new { from = result.From, reason = result.Reason }),
+            }),
+            ct);
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        said += " The record of what was left could not be written.";
+    }
+
+    return Results.Json(new { error = said, results }, statusCode: StatusCodes.Status409Conflict);
+}
+
 static IResult Documents(Func<IResult> action)
 {
     try
@@ -8714,6 +9008,28 @@ internal static class TellRefusals
 /// </summary>
 internal static class Describe
 {
+    /// <summary>What rename, move and copy share: the batch, the row first, the partial answer.</summary>
+    public const string DocumentsChange =
+        "A batch of at most 1000. 200 with `results`: one per item, each `{ from, to, outcome }` "
+        + "with `outcome` `done`, `skipped` or `failed` and a `reason` when it was not done; `to` is "
+        + "the final path in the destination folder.\n\n"
+        + "Appends a `documents.renamed`, `documents.moved` or `documents.copied` tenant event naming "
+        + "every source, destination and replaced path BEFORE acting, and does nothing (500) when "
+        + "that row cannot be written. A batch that partly fails answers 409 with a sentence in "
+        + "`error` saying path by path what was not done and why (permission denied, in use, on "
+        + "another drive), the full `results`, and a `-incomplete` tenant event after the first. "
+        + "What changed in a live team's folder is announced to its folder triggers, once per folder.";
+
+    /// <summary>What move and copy share: where to, and a name already taken there.</summary>
+    public const string DocumentsTransfer =
+        "A name already taken where an item goes is a CLASH. With no `onClash` on that item the "
+        + "request answers 409 with `clashes` (`{ from, to, isFolder }` each) and nothing is "
+        + "recorded or done; send it again choosing per item. `keep-both` takes the first free "
+        + "`name (copy).ext`, `name (copy 2).ext`; `replace` removes what is there first, through "
+        + "the same removal a delete uses; `skip` leaves both. A folder holding a subfolder the Host "
+        + "cannot list is not copied, or moved to another team, unchecked: that item fails with "
+        + "permission denied.\n\n";
+
     public const string Team =
         "The team's IDENTIFIER - the `name` field from `GET /api/overview`, never the `label` a "
         + "person reads. Matched case-insensitively. Addressing a team by its label reaches a team "
@@ -9375,6 +9691,37 @@ internal sealed record Tell(
         + "outcome's id, or its exact name. Only on an instruction with no causation; one that "
         + "joins a workflow is refused, and that workflow's outcome is set with the `outcome` tool.")]
     string? Outcome = null);
+
+internal sealed record DocumentsRename(
+    [property: Description("The documents to rename, each with its new leaf name. At most 1000.")]
+    IReadOnlyList<DocumentsRenameItem>? Items);
+
+internal sealed record DocumentsRenameItem(
+    [property: Description("The file or folder, relative to the team's documents root.")]
+    string? Path,
+    [property: Description("Its new name: a leaf, never a path. It stays in the same folder.")]
+    string? Name);
+
+internal sealed record DocumentsTransfer(
+    [property: Description("Where the items go.")]
+    DocumentsTransferTarget? To,
+    [property: Description("The documents to move or copy, all in this folder. At most 1000.")]
+    IReadOnlyList<DocumentsTransferItem>? Items);
+
+internal sealed record DocumentsTransferTarget(
+    [property: Description(
+        "A documents folder, as `folder` in `GET /api/documents` names it: this team's or another's.")]
+    string? Folder,
+    [property: Description("A folder in it, relative to its root. Omit it for the root itself.")]
+    string? Path);
+
+internal sealed record DocumentsTransferItem(
+    [property: Description("The file or folder, relative to this team's documents root.")]
+    string? Path,
+    [property: Description(
+        "What to do when its name is already taken where it goes: `keep-both`, `replace` or "
+        + "`skip`. Omitted, a clash answers 409 naming it and nothing is done.")]
+    string? OnClash);
 
 internal sealed record NewFolder(
     [property: Description(

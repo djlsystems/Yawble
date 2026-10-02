@@ -176,6 +176,7 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         var tools = Directory.Exists(toolsFolder) ? FilesUnder(toolsFolder) : null;
 
         CheckMembers(read, plugins, tools is not null, refusals);
+        CheckReads(manifest, plugins, refusals);
         CheckTriggers(read, plugins, tools is not null, refusals);
         CheckInputs(read, plugins, refusals);
 
@@ -377,6 +378,27 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         }
 
         return sites;
+    }
+
+    /// <summary>
+    /// A PACKAGE'S PLUGIN READS ONLY A SITE THE PACKAGE SHIPS. An install makes a new team with
+    /// exactly the package's sites, and an update runs this same check on the new version, so "the
+    /// package ships it" is also "the team has it": a version that drops a site its plugin still
+    /// reads is refused before anything changes.
+    /// </summary>
+    private static void CheckReads(SolutionManifest manifest, List<SolutionPlugin> plugins, List<SolutionRefusal> refusals)
+    {
+        foreach (var plugin in plugins)
+        {
+            for (var n = 0; n < plugin.Manifest.Reads.Count; n++)
+            {
+                var site = plugin.Manifest.Reads[n].Site;
+                if (manifest.Sites.Contains(site, StringComparer.Ordinal)) continue;
+
+                refusals.Add(new($"{PluginsFolder}/{plugin.Id}/{PluginManifest.FileName}", $"reads[{n}].site",
+                    $"'{site}' is not one of this package's `sites`; a plugin in a package reads only a site the package ships."));
+            }
+        }
     }
 
     private void CheckMembers(SolutionManifestRead read, List<SolutionPlugin> plugins, bool hasTools, List<SolutionRefusal> refusals)

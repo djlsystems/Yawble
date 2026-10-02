@@ -93,7 +93,9 @@ describe('the command bar', () => {
     }
     expect(text.toUpperCase()).toContain('ADMIN');
 
-    const documents = [...menu!.querySelectorAll('.q-item')].find((el) => el.textContent?.includes('Documents'));
+    // The last: Active Team › Documents comes first and is gated by an active team, which this
+    // spec does not set; Projects › Documents is the ungated one.
+    const documents = [...menu!.querySelectorAll('.q-item')].filter((el) => el.textContent?.includes('Documents')).at(-1);
     (documents as HTMLElement).click();
     await flushPromises();
 

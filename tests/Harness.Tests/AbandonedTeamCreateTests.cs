@@ -383,14 +383,19 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         return process.ExitCode == 0 ? stdout.Trim() : null;
     }
 
-    private static async Task EventuallyAsync(Func<Task<bool>> condition)
+    // Fails here, saying what it waited for, rather than returning and leaving the next assertion to
+    // read an empty collection with no hint of why (seen once under a loaded full suite).
+    private static async Task EventuallyAsync(Func<Task<bool>> condition, [System.Runtime.CompilerServices.CallerArgumentExpression(nameof(condition))] string? what = null)
     {
-        var deadline = DateTime.UtcNow + Patience;
+        var started = DateTime.UtcNow;
+        var deadline = started + Patience;
         while (DateTime.UtcNow < deadline)
         {
             if (await condition()) return;
             await Task.Delay(100, Ct);
         }
+
+        Assert.Fail($"Not true after {(DateTime.UtcNow - started).TotalSeconds:0.0} s: {what}");
     }
 
     private async Task<string> CreatedTeamAsync(HttpClient person, string name)
@@ -448,7 +453,20 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         if (!Directory.Exists(Path.Combine(clonePath, ".git"))) return false;
         var start = new ProcessStartInfo("git") { WorkingDirectory = clonePath, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var arg in new[] { "rev-parse", "--verify", "--quiet", "HEAD^{commit}" }) start.ArgumentList.Add(arg);
-        using var process = Process.Start(start)!;
+
+        // The clone folder can be replaced between the check above and the start (a clone made aside
+        // and moved into place): that is "no commit yet", not an error.
+        Process process;
+        try
+        {
+            process = Process.Start(start)!;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+
+        using var _ = process;
         process.StandardOutput.ReadToEnd();
         process.StandardError.ReadToEnd();
         process.WaitForExit();

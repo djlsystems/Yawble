@@ -1,0 +1,32 @@
+// THE TILE GRID. Agents, Plugins and the Documents explorer's Tiles view all lay their cards out
+// the same way: a grid of bordered cards, as many columns as fit. Written once here; a component
+// keeps its own class names beside these (its specs select by them) and only sets how narrow a
+// column may get, through `--os-tile-min`.
+.os-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--os-tile-min, 19rem), 1fr));
+  gap: 12px;
+}
+
+.os-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px 8px;
+  border: 1px solid var(--os-rule-strong);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.os-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.os-tile-line {
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}

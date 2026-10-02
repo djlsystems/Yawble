@@ -214,6 +214,18 @@ public static class TenantActions
     /// and why, so the log never claims a deletion that did not happen.</summary>
     public const string DocumentsDeleteIncomplete = "documents.delete-incomplete";
 
+    /// <summary>A person renamed, moved or copied documents. Written BEFORE the change, naming every
+    /// source, destination and replaced path; nothing changes when this row cannot be written.</summary>
+    public const string DocumentsRenamed = "documents.renamed";
+    public const string DocumentsMoved = "documents.moved";
+    public const string DocumentsCopied = "documents.copied";
+
+    /// <summary>A rename, move or copy that did not finish: written after it, naming what was done
+    /// and each item not done with why.</summary>
+    public const string DocumentsRenameIncomplete = "documents.rename-incomplete";
+    public const string DocumentsMoveIncomplete = "documents.move-incomplete";
+    public const string DocumentsCopyIncomplete = "documents.copy-incomplete";
+
     /// <summary>A person uploaded a document into a team's documents. Detail carries the team, the
     /// path and the size - never the file's contents.</summary>
     public const string DocumentUploaded = "document.uploaded";

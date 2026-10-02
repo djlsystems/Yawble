@@ -1,4 +1,5 @@
 import type { Team, TeamId, TeamWorkflowTiming, TeamWorkflows } from '../api/types'
+import { nextSort as nextTableSort, readSort, type TableSort } from './tableSort'
 import {
   RowLoudness,
   teamChip,
@@ -49,13 +50,10 @@ export interface TeamRow {
   workflows: TeamChip | null
 }
 
-export interface TeamSort {
-  // `'workflows'` (the plural projection's chip) is deliberately distinct from `'workflow'` (the
-  // Last workflow column's instant) - two different questions, two different sort keys, the same
-  // split {@link TeamRow.workflows} draws against `status`.
-  column: 'name' | 'members' | 'status' | 'workflows' | 'workflow'
-  descending: boolean
-}
+// `'workflows'` (the plural projection's chip) is deliberately distinct from `'workflow'` (the
+// Last workflow column's instant) - two different questions, two different sort keys, the same
+// split {@link TeamRow.workflows} draws against `status`.
+export type TeamSort = TableSort<'name' | 'members' | 'status' | 'workflows' | 'workflow'>
 
 /** Name ascending. A person looking for a team looks for its name. */
 export const DefaultTeamSort: TeamSort = { column: 'name', descending: false }
@@ -111,17 +109,9 @@ function instantOf(instant: string | null): number | null {
   return Number.isNaN(parsed) ? null : parsed
 }
 
-/**
- * What clicking a column heading does: the same column flips direction, a different one starts
- * ascending.
- *
- * A NEW OBJECT rather than a mutation, so a caller holding a `ref` sees the change.
- */
+/** What clicking a column heading does - `lib/tableSort`'s, typed to the Teams columns. */
 export function nextSort(current: TeamSort, column: TeamSort['column']): TeamSort {
-  return {
-    column,
-    descending: current.column === column ? !current.descending : false,
-  }
+  return nextTableSort(current, column)
 }
 
 /**
@@ -131,11 +121,6 @@ export function nextSort(current: TeamSort, column: TeamSort['column']): TeamSor
  * no arm for.
  */
 const Columns: TeamSort['column'][] = ['name', 'members', 'status', 'workflows', 'workflow']
-
-/** A narrowing read, so {@link readTeamSort} keeps no cast of its own. */
-function isColumn(value: string): value is TeamSort['column'] {
-  return (Columns as string[]).includes(value)
-}
 
 /**
  * THE RANKING, and it is the chip's own order rather than the alphabet: a column that sorted
@@ -333,18 +318,7 @@ function comparePrimary(a: TeamRow, b: TeamRow, sort: TeamSort): number {
  * ends up sorted by nothing at all.
  */
 export function readTeamSort(raw: string | null): TeamSort {
-  if (raw === null) return DefaultTeamSort
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<TeamSort>
-
-    if (typeof parsed.descending !== 'boolean') return DefaultTeamSort
-    if (typeof parsed.column !== 'string' || !isColumn(parsed.column)) return DefaultTeamSort
-
-    return { column: parsed.column, descending: parsed.descending }
-  } catch {
-    return DefaultTeamSort
-  }
+  return readSort(raw, Columns, DefaultTeamSort)
 }
 
 export function writeTeamSort(sort: TeamSort): string {

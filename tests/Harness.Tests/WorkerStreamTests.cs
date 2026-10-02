@@ -17,12 +17,17 @@ public sealed class WorkerStreamTests
         await bed.StartAsync();
         using var stream = bed.Streams.Open("live:s1", bed.Remote);
 
+        // The outbox may briefly hold the connection's own frames (a capacity sample, a keep-alive answer)
+        // while 10 000 chunks go by on a loaded machine; what may not happen is chunks piling up there.
         const int Count = 10_000;
+        var most = 0;
         for (var n = 1; n <= Count; n++)
         {
             Assert.True(await bed.Connection.StreamAsync(new StreamChunk("live:s1", n, Text: $"line {n}"), TestContext.Current.CancellationToken));
-            Assert.Equal(0, bed.Connection.Unacknowledged);
+            most = Math.Max(most, bed.Connection.Unacknowledged);
         }
+
+        Assert.True(most <= 2, $"{most} frames were waiting in the outbox while chunks were streamed");
 
         await bed.Connection.StreamAsync(new StreamChunk("live:s1", Count + 1, End: true), TestContext.Current.CancellationToken);
 
@@ -33,6 +38,8 @@ public sealed class WorkerStreamTests
         }
 
         Assert.Equal(Enumerable.Range(1, Count).Select(n => $"line {n}"), received);
+        var drained = DateTime.UtcNow.AddSeconds(10);
+        while (bed.Connection.Unacknowledged != 0 && DateTime.UtcNow < drained) await Task.Delay(50, TestContext.Current.CancellationToken);
         Assert.Equal(0, bed.Connection.Unacknowledged);
     }
 

@@ -1,5 +1,11 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Identity;
+using Harness.Messaging;
 
 namespace Harness.Tests;
 
@@ -208,4 +214,323 @@ public sealed class WorkerFrameTests
                 CredentialSource.Issued, new Dictionary<string, string> { ["ISSUED_KEY"] = Value }, ["OTHER"], ["THIRD"], true, null),
             Redaction: ValueRedactor.For([Value]),
             CredentialNames: ["ISSUED_KEY"]);
+
+    // ---- a plugin run's site data, inside the StartRun frame ----------------------------------------
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    private const long Budget = PluginMemberRunner.SiteReadBudgetBytes;
+    private const int Margin = PluginMemberRunner.EnvelopeMarginBytes;
+
+    /// <summary>How many <see cref="Heavy"/> documents a frame test stores: together they frame at
+    /// well over the 8 MiB budget.</summary>
+    private const int Heavies = 80;
+
+    /// <summary>A stored document of about 60 KB, full of what both encoders escape: quotes,
+    /// <c>&lt;</c>, <c>&gt;</c>, <c>&amp;</c>, <c>'</c>, <c>+</c>, non-ASCII and a surrogate pair,
+    /// under short keys.</summary>
+    private static string Heavy()
+    {
+        var text = string.Concat(Enumerable.Repeat("\"<>&'+é😀 ab", 20));
+        var document = new JsonObject();
+        var options = new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        for (var i = 0; Encoding.UTF8.GetByteCount(document.ToJsonString(options)) < 60_000; i++) document[$"k{i}"] = text;
+        return document.ToJsonString(options);
+    }
+
+    /// <summary>A plugin run's whole frame, in bytes, as the codec writes it at the real limit.</summary>
+    private static long FrameBytes(StartRun start, string stdin) =>
+        Encoding.UTF8.GetByteCount(new WorkerFrameCodec(Key).Write(new CommandFrame(1, start with { Process = start.Process! with { Stdin = stdin } })));
+
+    /// <summary>The request with its <c>sites</c> block replaced by <paramref name="sites"/>: the
+    /// block is the request's last property.</summary>
+    private static string WithSites(string stdin, string sites)
+    {
+        var at = stdin.LastIndexOf(",\"sites\":[", StringComparison.Ordinal);
+        Assert.True(at > 0);
+        return stdin[..at] + ",\"sites\":" + sites + "}\n";
+    }
+
+    /// <summary>The same block with every envelope's documents taken out.</summary>
+    private static string EnvelopesOnly(string stdin)
+    {
+        var sites = JsonNode.Parse(stdin)!["sites"]!.AsArray();
+        foreach (var envelope in sites) envelope!["documents"] = new JsonArray();
+        return WithSites(stdin, sites.ToJsonString());
+    }
+
+    /// <summary>What one document entry costs in the frame, measured here as the frame measures it.</summary>
+    private static long EntryBytes(SiteDocument document) =>
+        Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(new JsonObject
+        {
+            ["id"] = document.Id,
+            ["doc"] = JsonNode.Parse(document.Json),
+            ["updatedAt"] = document.UpdatedAt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture),
+            ["updatedBy"] = document.UpdatedBy,
+        }.ToJsonString(), WorkerFrameCodec.Json)) - 2;
+
+    private static string Status(Message row) =>
+        JsonDocument.Parse(row.Payload).RootElement.GetProperty("status").GetString()!;
+
+    [Fact]
+    public async Task A_run_cut_at_the_real_budget_still_fits_the_worker_frame()
+    {
+        await using var bed = await PluginReadBed.CreateAsync();
+        var heavy = Heavy();
+        for (var i = 0; i < Heavies; i++) await bed.PutAsync("items", $"h{i:00}", heavy, i);
+
+        var run = await bed.RunAsync("""[{"site":"board","collection":"items"}]""");
+
+        var stdin = run.Start.Process!.Stdin;
+        var envelope = JsonNode.Parse(stdin)!["sites"]!.AsArray().Single()!;
+        var delivered = envelope["documents"]!.AsArray().Count;
+        Assert.InRange(delivered, 1, Heavies - 1);
+        Assert.False(run.Delivery.FrameLimited);
+        Assert.Equal(
+            $"Only {delivered} of {Heavies} documents of board/items were delivered (newest first): this run's site data is limited to 8 MiB. The rest were cut.",
+            (string)envelope["cut"]!);
+        Assert.Equal([$"Site data for this run was cut: board/items {delivered} of {Heavies}. This run's site data is limited to 8 MiB."], run.Rows);
+
+        // THE FRAME, at the real limit, does not refuse it.
+        var frame = FrameBytes(run.Start, stdin);
+        Assert.True(frame <= WorkerFrameCodec.MaxBytes);
+
+        // And the runner counted exactly what the frame grew by.
+        Assert.True(run.Delivery.DocumentBytes <= Budget);
+        Assert.Equal(frame - FrameBytes(run.Start, WithSites(stdin, "[]")), run.Delivery.DocumentBytes + run.Delivery.EnvelopeBytes);
+        Assert.Equal(FrameBytes(run.Start, EnvelopesOnly(stdin)) - FrameBytes(run.Start, WithSites(stdin, "[]")), run.Delivery.EnvelopeBytes);
+    }
+
+    [Fact]
+    public async Task A_run_whose_rest_is_large_gets_the_room_left_in_the_frame_and_says_so()
+    {
+        await using var bed = await PluginReadBed.CreateAsync();
+        var heavy = Heavy();
+        for (var i = 0; i < Heavies; i++) await bed.PutAsync("items", $"h{i:00}", heavy, i);
+
+        // THE REST, escape-heavy, split across the work batch, config and a secret.
+        string Pad(int length) => string.Concat(Enumerable.Repeat("<\"é a", length / 5));
+        var work = Pad(110_000);
+        var config = Pad(650_000);
+        var secret = Pad(650_000);
+
+        var run = await bed.RunAsync("""[{"site":"board","collection":"items"}]""", work: [work, work, work], config: config, secret: secret);
+
+        var stdin = run.Start.Process!.Stdin;
+        var request = JsonNode.Parse(stdin)!;
+        Assert.Equal(3, request["work"]!.AsArray().Count);
+
+        // (a) PRECONDITIONS: the site data alone would reach a plain 8 MiB budget, and the rest
+        // leaves less than that.
+        var documents = (await bed.Store.ListDocumentsAsync("alpha", "board", "items", Ct))
+            .OrderByDescending(d => d.UpdatedAt).ThenBy(d => d.Id, StringComparer.Ordinal).ToList();
+        Assert.True(documents.Sum(EntryBytes) > Budget);
+        var rest = FrameBytes(run.Start, WithSites(stdin, "[]"));
+        Assert.True(rest > WorkerFrameCodec.MaxBytes - Budget);
+
+        // (b) EACH PART alone fits beside a full budget; together they do not.
+        long Part(string name) => Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(request[name]!.ToJsonString(), WorkerFrameCodec.Json)) - 2;
+        foreach (var part in new[] { "work", "config", "secrets" })
+        {
+            Assert.True(Part(part) <= WorkerFrameCodec.MaxBytes - Budget - Margin, part);
+        }
+
+        Assert.True(Part("work") + Part("config") + Part("secrets") > WorkerFrameCodec.MaxBytes - Budget);
+
+        // (c) ESCAPE-HEAVY: framed, the rest is more than 64 KiB over its raw size.
+        var raw = Encoding.UTF8.GetByteCount(work) * 3 + Encoding.UTF8.GetByteCount(config) + Encoding.UTF8.GetByteCount(secret);
+        Assert.True(Part("work") + Part("config") + Part("secrets") - raw > Margin);
+
+        // THE FRAME holds, at the real limit.
+        var frame = FrameBytes(run.Start, stdin);
+        Assert.True(frame <= WorkerFrameCodec.MaxBytes);
+
+        // (d) THE MAXIMAL PREFIX of what the frame left.
+        var room = WorkerFrameCodec.MaxBytes - rest - Margin;
+        var envelope = request["sites"]!.AsArray().Single()!;
+        var delivered = envelope["documents"]!.AsArray().Count;
+        var spent = frame - FrameBytes(run.Start, EnvelopesOnly(stdin));
+        Assert.True(spent <= room);
+        Assert.True(spent + EntryBytes(documents[delivered]) + (delivered > 0 ? 1 : 0) > room);
+        Assert.True(run.Delivery.FrameLimited);
+        Assert.Equal(room, run.Delivery.Budget);
+
+        Assert.Equal(
+            $"Only {delivered} of {Heavies} documents of board/items were delivered (newest first): this run's site data is limited to 8 MiB, less what the rest of the request takes; {room} bytes were left. The rest were cut.",
+            (string)envelope["cut"]!);
+        Assert.Equal(
+            [$"Site data for this run was cut: board/items {delivered} of {Heavies}. This run's site data is limited to 8 MiB, less what the rest of the request takes; {room} bytes were left."],
+            run.Rows);
+    }
+
+    [Fact]
+    public async Task A_run_whose_rest_leaves_no_room_delivers_every_envelope_and_no_document()
+    {
+        await using var bed = await PluginReadBed.CreateAsync();
+        for (var i = 0; i < 5; i++)
+        {
+            await bed.PutAsync("items", $"i{i}", $$"""{"title":"{{new string('a', 300)}}"}""", i);
+            await bed.PutAsync("notes", $"n{i}", $$"""{"title":"{{new string('b', 300)}}"}""", i);
+        }
+
+        const string Reads = """[{"site":"board","collection":"items"},{"site":"board","collection":"notes"}]""";
+
+        // CALIBRATED: one `<` in config costs 7 framed bytes, so the rest is sized just above
+        // MaxBytes - 64 KiB from a first measured run.
+        var first = await bed.RunAsync(Reads, config: new string('<', 2_000_000));
+        var measured = FrameBytes(first.Start, WithSites(first.Start.Process!.Stdin, "[]"));
+        var target = WorkerFrameCodec.MaxBytes - Margin + 16 * 1024;
+        var run = await bed.RunAsync(Reads, config: new string('<', 2_000_000 + (int)((target - measured) / 7)));
+
+        var stdin = run.Start.Process!.Stdin;
+        var rest = FrameBytes(run.Start, WithSites(stdin, "[]"));
+        Assert.True(WorkerFrameCodec.MaxBytes - Margin < rest);
+        Assert.True(rest + 4096 < WorkerFrameCodec.MaxBytes);
+
+        // Without the margin, the documents would have had room.
+        Assert.True(WorkerFrameCodec.MaxBytes - rest > 10 * 400);
+
+        Assert.True(FrameBytes(run.Start, stdin) <= WorkerFrameCodec.MaxBytes);
+
+        var sites = JsonNode.Parse(stdin)!["sites"]!.AsArray();
+        Assert.Equal(["items", "notes"], sites.Select(s => (string)s!["collection"]!));
+        foreach (var envelope in sites)
+        {
+            Assert.Empty(envelope!["documents"]!.AsArray());
+            Assert.Equal(5, (int)envelope["total"]!);
+            Assert.Equal(
+                $"Only 0 of 5 documents of board/{(string)envelope["collection"]!} were delivered (newest first): this run's site data is limited to 8 MiB, less what the rest of the request takes; 0 bytes were left. The rest were cut.",
+                (string)envelope["cut"]!);
+        }
+
+        Assert.Equal(0, run.Delivery.Budget);
+        Assert.Equal(
+            ["Site data for this run was cut: board/items 0 of 5, board/notes 0 of 5. This run's site data is limited to 8 MiB, less what the rest of the request takes; 0 bytes were left."],
+            run.Rows);
+    }
+
+    /// <summary>
+    /// A plugin member on alpha whose runner is built as the Host's DI builds it - over an
+    /// <see cref="IRunWorker"/>, with no budget passed - and whose worker keeps the
+    /// <see cref="StartRun"/> it is given before handing it to a real in-process worker.
+    /// </summary>
+    private sealed class PluginReadBed : IAsyncDisposable
+    {
+        private static readonly ContainerId Plug = new("alpha", "plug");
+        private static readonly DateTimeOffset Base = new(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
+
+        private readonly string _dataRoot = Directory.CreateTempSubdirectory("harness-frame-reads-").FullName;
+        private readonly List<IDisposable> _registrations = [];
+        private readonly List<ContainerTestBed> _beds = [];
+
+        public SqliteSiteStore Store { get; private set; } = null!;
+
+        public static async Task<PluginReadBed> CreateAsync()
+        {
+            var bed = new PluginReadBed();
+            var database = Path.Combine(bed._dataRoot, "harness.db");
+            await new SchemaMigrator(database).ApplyAsync(AuthSchema.Steps, ct: Ct);
+            bed.Store = new SqliteSiteStore(database);
+            Assert.True(await bed.Store.CreateAsync(
+                new SiteRow("alpha", "board", null, 1, DateTimeOffset.UtcNow, "person@example.test"),
+                new TriggerAudit(null, null, "site.created", "alpha/board", "board", null), Ct));
+            return bed;
+        }
+
+        /// <summary>Document <paramref name="order"/> is older the higher it is: h00 is the newest.</summary>
+        public async Task PutAsync(string collection, string id, string json, int order) =>
+            Assert.Null((await Store.PutDocumentAsync("alpha", "board", collection, id, json, "person@example.test", Base.AddMinutes(-order), Ct)).Refusal);
+
+        public sealed record Ran(StartRun Start, PluginSiteDelivery Delivery, string[] Rows);
+
+        private sealed class Recording(IRunWorker inner) : IRunWorker
+        {
+            public StartRun? Start;
+
+            public WorkerId Id => inner.Id;
+
+            public Task Closed => inner.Closed;
+
+            public Task SendAsync(ControlMessage message, CancellationToken ct = default)
+            {
+                if (message is StartRun start) Start = start;
+                return inner.SendAsync(message, ct);
+            }
+        }
+
+        private sealed class Secrets(string value) : ISecretStore
+        {
+            public string? TryGet(string logicalKey) => logicalKey == "FIXTURE_TOKEN" ? value : null;
+        }
+
+        private sealed class Settings(PluginMemberSettings settings) : IPluginMemberSettings
+        {
+            public Task<PluginMemberSettings> ForAsync(ContainerId member, CancellationToken ct = default) => Task.FromResult(settings);
+        }
+
+        public async Task<Ran> RunAsync(string reads, IReadOnlyList<string>? work = null, string config = "", string secret = "s3cr3tvalue")
+        {
+            PluginInstall.Write(_dataRoot, "fixture", manifest: PluginInstall.Manifest("fixture", edit: m =>
+            {
+                m["config"] = JsonNode.Parse("""{"pad":{"type":"string","default":""}}""");
+                m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}""");
+                m["reads"] = JsonNode.Parse(reads);
+            }));
+
+            var catalog = new PluginCatalog(PluginInstall.PluginsRoot(_dataRoot));
+            catalog.Rescan();
+            _registrations.Add(EventCatalog.Register(catalog));
+
+            var bed = new ContainerTestBed();
+            _beds.Add(bed);
+            var heartbeat = new RunHeartbeat();
+            var reports = new MemberReports(bed.Host, bed.Store, heartbeat);
+            var directory = new RunDirectory(reports);
+            var worker = new Recording(InProcessWorker.Connect(
+                WorkerId.Local,
+                events => new WorkerHost(WorkerId.Local, events, new RunLauncher(heartbeat), heartbeat),
+                directory.HandleAsync).Worker);
+            var sites = new SiteService(
+                Store, team => team == "alpha" ? "alpha" : null, new TeamPaths(_dataRoot), bed.Store);
+
+            var runner = new PluginMemberRunner(
+                catalog, reports, worker, directory, null,
+                new Settings(new PluginMemberSettings(
+                    new Dictionary<string, JsonElement> { ["pad"] = JsonSerializer.SerializeToElement(config) },
+                    new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+                new Secrets(secret),
+                null,
+                sites);
+
+            PluginSiteDelivery? delivery = null;
+            runner.SiteDataDelivered = d => delivery = d;
+
+            await bed.Host.AddAsync(
+                ContainerTestBed.Definition(Plug) with { Agent = "plugin:fixture", WorkingDirectory = _dataRoot },
+                new MemberRunnerRouter(bed.Runner, runner), Ct);
+
+            // THE BATCH, handed to the runner whole: the runtime grows a batch only from what arrives
+            // within a few milliseconds, which a test cannot hold to.
+            var batch = (work ?? ["sync"]).Select((instruction, n) => new Message(
+                n + 1, MessageTypes.InstructionFor(Plug), JsonSerializer.Serialize(new { instruction }), "alpha/manager", 1, n == 0 ? null : 1, 0,
+                DateTimeOffset.UtcNow)).ToList();
+
+            var result = await runner.RunAsync(
+                new MemberInvocation(Plug, "plugin:fixture", batch, _dataRoot, new Dictionary<string, string>(),
+                    new MemberRunContext(0, ArtifactLimits.Default, [], null, null, "")),
+                Ct);
+            Assert.True(result.Succeeded, result.Output + result.LaunchError + result.FailureReason);
+
+            return new Ran(worker.Start!, delivery!, [.. (await bed.OfTypeAsync(MessageTypes.Progress)).Select(Status)]);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            foreach (var bed in _beds) await bed.DisposeAsync();
+            foreach (var registration in _registrations) registration.Dispose();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(_dataRoot, recursive: true); }
+            catch (IOException) { }
+        }
+    }
 }
