@@ -63,6 +63,12 @@ type request struct {
 		Cut     *string `json:"cut"`
 		Missing *string `json:"missing"`
 	} `json:"sites"`
+	// SiteFiles names the files folder of each of this team's own sites: a file made for a site's
+	// page goes under Folder, and its path relative to Folder goes in the site's data.
+	SiteFiles []struct {
+		Site   string `json:"site"`
+		Folder string `json:"folder"`
+	} `json:"siteFiles"`
 }
 
 // Records are structs, not maps, so their keys come out in the order the .NET sample writes them.

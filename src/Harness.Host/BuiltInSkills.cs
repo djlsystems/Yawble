@@ -1131,6 +1131,12 @@ public static class BuiltInSkills
             site data the plugin reads - a `status` on the document - rather than in a second store
             of the plugin's own, so a run never brings back what a person removed.
 
+            Each run's request also carries `siteFiles`: every site of the plugin's own team, as
+            `{"site": "board", "folder": "<absolute path>"}`. A file the plugin makes for a site's page
+            goes under that folder; the plugin then puts the path RELATIVE to it in a document
+            (`site.put`), and the page links to it. Never write a secret or a token into a site's
+            files or data: everything there is downloadable by whoever opens the site.
+
             ## 3. Settings and secrets
 
             Settings are per member, chosen when the member is hired, and checked against the manifest
@@ -1541,8 +1547,9 @@ public static class BuiltInSkills
             within the team.
 
             A site built for a person to use on another team - with its plugin and triggers - ships
-            in a solution package under `sites/<name>/`, and the install publishes it. The Concierge
-            and the Manager load the `packaging-solutions` skill for that.
+            in a solution package under `sites/<name>/`, and the install publishes it and creates
+            its files folder. The Concierge and the Manager load the `packaging-solutions` skill for
+            that.
 
             ## 2. The site tool
 
@@ -1567,6 +1574,8 @@ public static class BuiltInSkills
               The last five versions are kept.
             - **show** answers the versions, the collections, the data size and the path a person
               opens the site at. Tell the person that path; it is also in Admin > Sites with Open.
+              `show`, `list` and `create` also answer each site's `filesFolder`: where files the
+              team makes for that site go (see "Files the team makes for a site").
             - **actions** reads the recent clicks, read only.
             - **Deleting a site is a person's action**, in Admin > Sites. Unpublish keeps the files
               and the data.
@@ -1585,9 +1594,30 @@ public static class BuiltInSkills
             | `site.data.delete(collection, id)` | `true` when there was one |
             | `site.action(name, payload)` | `{ seq }` |
             | `site.whoami()` | `{ displayName }` |
+            | `site.files.url(path)` | the link that downloads a file from the site's files folder |
 
-            Every call returns a Promise. A refusal rejects with an Error whose message is the
-            platform's sentence: show it to the person.
+            Every call but `site.files.url` returns a Promise. A refusal rejects with an Error whose
+            message is the platform's sentence: show it to the person. `site.files.url` answers a
+            string at once, for an `<a href>`, and throws that sentence for a path it would refuse.
+
+            ## Files the team makes for a site
+
+            A document, a spreadsheet or an image the team makes for a site's page goes in that
+            site's files folder in the team's documents: `<team documents>/sites/<site>/files/`.
+            `site action: show` names it as `filesFolder`; a plugin is told it on its input as
+            `siteFiles`. The platform creates it with the site, a person finds and deletes its files
+            in Documents, and they are kept when the site or the team is deleted.
+
+            1. Write the file anywhere under that folder, such as `out/report-7.txt`.
+            2. Store the path RELATIVE to the folder in the site's data:
+               `site action: data op: put ... doc: {"title":"Report","file":"out/report-7.txt"}`.
+            3. The page links to it with `a.href = site.files.url(item.doc.file)`, or a static
+               `<a href="_api/files/out/report-7.txt">`. The person's browser downloads it.
+
+            A path is names separated by `/`: no `..`, no name starting with `.`, and no `\`, `%` or
+            `:`. Nothing is listed, no link is followed, and a type a browser could run downloads as
+            a plain file. Never write a secret, a credential or a token into a site's files or data:
+            everything there is downloadable by any signed-in person who opens the site.
 
             ## 4. The security limits
 
@@ -1604,10 +1634,10 @@ public static class BuiltInSkills
             - **No `alert`, `confirm` or `prompt`**, and no popups. Ask with an input on the page.
               A link to another site (a posting at its source) is a plain `<a href>` with no
               `target="_blank"`: it opens in this tab, and Back returns to the site.
-            - **Downloads work for the site's own files.** To hand the person a document the team
-              made (a .docx, a PDF), put it in the site's folder and publish, then link it with
-              `<a href="files/name.docx" download>`. A document outside the published folder cannot
-              be reached from the page.
+            - **Downloads work for the site's files folder.** To hand the person something the team
+              made (a document, a spreadsheet, an image), put it in the site's files folder and link
+              it with `site.files.url(path)` (see "Files the team makes for a site"); it needs no
+              publish. A file in the published folder is still served by its relative URL.
             - **Forms are handled by script.** A form cannot post anywhere; listen for the click or
               `submit` and call `event.preventDefault()`.
             - **Render untrusted text with `textContent`, never `innerHTML`.** A document's fields
@@ -1698,6 +1728,13 @@ public static class BuiltInSkills
             triggers' full instruction text and its daily caps are all in the package; nothing is
             left for a person to type in except what `inputs` asks them for.
 
+            Files the installed team generates for a site - a document, a spreadsheet, an image the
+            page offers for download - go in that site's files folder,
+            `<team documents>/sites/<site>/files/`. The members store the path relative to it in the
+            site's data, and the page links with `site.files.url(path)` (see `building-sites`). The
+            package ships no files folder: the install creates it with each site, and the check
+            accepts a page that links to it.
+
             When the package's point is a schedule (a page it fills, a feed it fetches), give that
             schedule trigger `"runAtInstall": true`: the install runs it once as soon as its last
             step succeeds, then on its schedule, so the person does not look at an empty page until
@@ -1754,6 +1791,7 @@ public static class BuiltInSkills
               `Applications`, listed newest first with downloads. Name the folders the members'
               instructions and triggers actually write to - a folder nothing writes stays empty.
               Relative folder names only: no `..`, no leading `/`, no hidden folder, no wildcard.
+              A site's files folder, `sites/<site>/files`, may be one of them.
             - `settings`: the plugin settings a person changes often, each `{ "member", "setting" }`
               on a plugin member (keywords, sources). They are shown first; "All settings" reaches
               the rest, so list only the few that matter.

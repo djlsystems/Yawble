@@ -296,7 +296,6 @@ public sealed class SiteFilesTests(HostFixture host) : IClassFixture<HostFixture
     [InlineData("a.xml", "application/octet-stream")]
     [InlineData("a.js", "application/octet-stream")]
     [InlineData("a.mjs", "application/octet-stream")]
-    [InlineData("a.pdf", "application/octet-stream")]
     [InlineData("a.bin", "application/octet-stream")]
     [InlineData("noextension", "application/octet-stream")]
     public async Task Each_extension_gets_its_allow_listed_type_and_anything_a_browser_could_run_is_octet_stream(string name, string type)

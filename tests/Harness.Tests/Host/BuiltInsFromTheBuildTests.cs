@@ -277,6 +277,36 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
+    /// A site's files folder is taught where an agent writes a site's files and where a plugin learns
+    /// it: the folder, the relative path in the data, the helper's link, and never a secret there.
+    /// </summary>
+    [Fact]
+    public void The_site_skills_name_the_files_folder_and_its_link()
+    {
+        static string Flat(string name) => System.Text.RegularExpressions.Regex.Replace(BuiltInSkills.Find(name)!.Body, @"\s+", " ");
+
+        var sites = Flat("building-sites");
+        Assert.Contains("`<team documents>/sites/<site>/files/`", sites, StringComparison.Ordinal);
+        Assert.Contains("`filesFolder`", sites, StringComparison.Ordinal);
+        Assert.Contains("| `site.files.url(path)` |", sites, StringComparison.Ordinal);
+        Assert.Contains("Store the path RELATIVE to the folder in the site's data", sites, StringComparison.Ordinal);
+        Assert.Contains("Never write a secret, a credential or a token into a site's files or data", sites, StringComparison.Ordinal);
+
+        // The download bullet points at the files folder, in neutral words.
+        Assert.Contains("**Downloads work for the site's files folder.** To hand the person something the team made (a document, a spreadsheet, an image)", sites, StringComparison.Ordinal);
+        Assert.DoesNotContain("download>", sites, StringComparison.Ordinal);
+
+        var packaging = Flat("packaging-solutions");
+        Assert.Contains("`<team documents>/sites/<site>/files/`", packaging, StringComparison.Ordinal);
+        Assert.Contains("`site.files.url(path)`", packaging, StringComparison.Ordinal);
+        Assert.Contains("`sites/<site>/files`, may be one of them", packaging, StringComparison.Ordinal);
+
+        var plugins = Flat("authoring-plugins");
+        Assert.Contains("Each run's request also carries `siteFiles`", plugins, StringComparison.Ordinal);
+        Assert.Contains("Never write a secret or a token into a site's files or data", plugins, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The packaging-solutions skill is for writing a spec whose delivery is a solution package and
     /// handing the person its link, which the Concierge and the Manager do. It carries the four
     /// points, and the skills that lead to it point there.
@@ -591,6 +621,9 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
             Assert.Contains($"The team's shared folder is `{shared}`", prompt, StringComparison.Ordinal);
             Assert.DoesNotContain("{shared}", prompt, StringComparison.Ordinal);
         }
+
+        // A member is told where a site's files go, under that same folder.
+        Assert.Contains($"Files you make for one of the team's sites go in `{shared}/sites/<site>/files/`", Flat(member), StringComparison.Ordinal);
     }
 
     [Fact]

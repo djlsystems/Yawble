@@ -67,6 +67,7 @@ the entry, and everything the page does after that is authorized by a **capabili
 | `POST …/_c/<capability>/_api/data/<collection>/<id>` | The capability. | Writes the body (the document's JSON, `text/plain`). |
 | `POST …/_c/<capability>/_api/data/<collection>/<id>/delete` | The capability. | Deletes the document. |
 | `POST …/_c/<capability>/_api/actions/<name>` | The capability. | Appends one `site.action` row. |
+| `GET …/_c/<capability>/_api/files/<path>` | The capability. | One file from the site's files folder, as an attachment ([the download route](#the-download-route)). Every other method: 405. |
 | `GET …/_c/<capability>/_api/whoami` | The capability. | `{"displayName": …}`: the part of the person's email before the `@`. Never the email, never a credential. |
 | `GET /sites/_sdk/site.js` | Nobody: it is the same file for everyone and holds nothing. | The helper script. |
 
@@ -83,8 +84,8 @@ header and no cookie.
   which asks for the cookie and issues a new one.
 - It is not a credential anywhere else. As an `X-Api-Key`, a bearer token or a cookie it is an
   unknown string, and every `/api` route and `/mcp` answers 401.
-- It allows reading the site's files, reading and writing its data and posting its actions, and
-  nothing more. The site must be live: an unpublished or deleted site refuses every capability.
+- It allows reading the site's files, downloading from its files folder, reading and writing its
+  data and posting its actions, and nothing more. The site must be live: an unpublished or deleted site refuses every capability.
 
 **The cookie never authorizes site data or actions.** The capability routes never read it, and a
 signed-in person's browser presenting the cookie with no valid capability is refused. It would not
@@ -151,9 +152,12 @@ It defines `window.site`. Every call returns a Promise, and a refusal rejects wi
 | `site.data.delete(collection, id)` | `true` when there was such a document |
 | `site.action(name, payload)` | `{ seq }`, the `site.action` row's seq |
 | `site.whoami()` | `{ displayName }` |
+| `site.files.url(path)` | the link that downloads `path` from the site's files folder (a string, not a Promise) |
 
 It reads the capability from the page's own address and sends it on every call; it sends no
-credential.
+credential. `site.files.url` does no request: it builds the link for an `<a href>` from a path
+stored in the site's data, and throws the platform's sentence (with `status` 400) for a path the
+route would refuse - see [Files a team makes for a site](#files-a-team-makes-for-a-site).
 
 ### A complete small example
 
@@ -210,6 +214,86 @@ window.addEventListener('focus', render);         // no push: re-read on focus o
 A plugin that feeds the page writes `{"t":"site.put","site":"jobs","collection":"jobs","id":"j1","doc":{"title":"Engineer"}}`
 on its stdout (see [plugins.md](plugins.md)).
 
+## Files a team makes for a site
+
+A document, a spreadsheet or an image a team makes for a site's page lives in the team's documents:
+
+```
+<data>/documents/<team>/        the team's documents folder (HARNESS_SHARED)
+  sites/
+    <site>/
+      files/                    served by the download route below, and nothing else is
+        <anything, any depth>   e.g. 2026-10/report-7.txt
+```
+
+- **Why there.** It survives team deletion as documents do, a person finds and deletes it in the
+  Documents dialog like any other folder, and agents and plugins already write there. Keyed by the
+  site's slug (no escaping, no `..`); grouped under `sites/` so a team's own folders never collide with
+  a site's name; only `files/` is served, so anything else a team keeps for a site beside it (a
+  working copy of the page) is never downloadable by mistake.
+- **Created with the site** (`SiteFiles.Ensure`, best effort: the row is the site), and repaired
+  whenever an agent or a plugin is told the folder. Reading never creates it.
+- **Kept** when the site is deleted (the 409 says how many files are kept, and where) and when the
+  team is deleted. An EMPTY files folder is removed with its site (`SiteFiles.PruneIfEmpty`: one level
+  at a time, never recursive, never through a link), so a team whose sites made no files leaves no
+  documents folder. A later site of the same name in the same team reuses a kept folder; a later team
+  of the same id has the old documents folder retired, files included, as always.
+- **No rename.** Sites cannot be renamed. A rename added later must move `sites/<old>/` to
+  `sites/<new>/` in the same step; it rewrites nothing in site data, because stored paths are relative
+  to `files/`.
+- **Unpublish and rollback** do not touch it; downloads follow the live site.
+- **Who is told.** The member prompt states the rule; the `site` tool's `create`, `list` and `show`
+  answer each site's absolute `filesFolder`; a plugin run gets `siteFiles` on stdin
+  ([plugins.md](plugins.md#protocol-harnessmember1)). Each stores the path RELATIVE to `files/` in the
+  site's data.
+
+### The download route
+
+`GET /sites/{team}/{site}/_c/{capability}/_api/files/{path}` serves one file from that folder, under
+the page's capability and the [site policy](#the-site-policy) (which needs no change: `allow-downloads`
+is already in it). Each check answers and stops:
+
+| # | Check | Answer |
+|---|---|---|
+| 0 | Any method but GET (POST, PUT, DELETE, PATCH, HEAD) | 405, `Allow: GET`, no body, before the capability is read |
+| 1 | Capability invalid or expired | 401 "This page's access has expired or is not valid. Open the site again from the app." (a navigation is redirected to the entry) |
+| 2 | Capability for another site or team | 403 "This page's access is for another site." |
+| 3 | No such site | 404 "No such site." |
+| 4 | Site not published | 404 "This site is not published." |
+| 5 | Empty path, or one ending in `/` | 404 "Name one file: a site's files are not listed." |
+| 6 | Not a file path | 400 "\"{path}\" is not a path in this site's files folder. Use names separated by '/', with no '..', no name starting with '.', and no '\\', '%', ':' or control character." |
+| 7 | A link at any level, missing, a folder, or not a regular file | 404 "No such file in this site's files." |
+| 8 | The platform cannot read it | 403 "The platform cannot read this file. A site's files must be readable by the team's group." |
+| 9 | Served | 200, the bytes |
+
+- **A path** is 1-1024 characters of names separated by `/`, each 1-255 bytes; no name is `.`, `..`
+  or starts with `.`; nothing holds `\`, `%`, `:` or a control character. `%` is refused because a
+  `%` reaching the route is an encoded separator or a double encoding, so a file whose name holds `%`
+  cannot be served. `SiteRules.IsFilePath` is the rule; the helper script repeats it.
+- **No link is followed, at any level.** On Linux the team's documents folder, `sites`, the site,
+  `files` and each folder of the path are opened with `O_NOFOLLOW | O_DIRECTORY`, each relative to
+  the one held open above it, and the file with `O_NOFOLLOW | O_NONBLOCK`; a link swapped in after a
+  check changes nothing the Host reads. A link and a missing file get the same answer, so a page
+  learns nothing about what a link points at, and no answer names an absolute path.
+- **Headers.** `Content-Disposition: attachment` with the file's own name (`filename*` for a
+  non-ASCII one), `X-Content-Type-Options: nosniff`, `Cache-Control: no-store`, the site policy, and
+  no `Access-Control-Allow-Origin`: the person's browser downloads the file, and the page's script
+  cannot read its bytes.
+- **Content types** come from an allow-list, by extension: `.txt` `text/plain; charset=utf-8`,
+  `.csv` `text/csv; charset=utf-8`, `.json` `application/json`, `.png`, `.jpg`/`.jpeg`, `.gif`,
+  `.webp` as their image types, `.zip` `application/zip`. Everything else - every type a browser
+  could run (HTML, SVG, XML, script) among them - is `application/octet-stream`, under its own name.
+  Nothing is refused for its type.
+- **Not recorded** in the tenant log: a download changes nothing.
+- **Podman and Docker.** Only control serves HTTP, and control and every worker mount the one volume
+  at `/data`, so the path an agent or plugin wrote on any worker is the path control reads. Agents and
+  plugins run with umask 0007 in documents that are group `agent` and setgid, so what they write is
+  readable by the Host; a file made owner-only is answered 403 with its sentence.
+- **Never write a secret, a credential or a token** into a site's files or data: everything there is
+  downloadable by any signed-in person who opens the site. The platform writes nothing into a files
+  folder but folders; a plugin's records are redacted as always, but the content of a file is the
+  team's.
+
 ## Actions and triggers
 
 `site.action(name, payload)` appends ONE row to the team's log:
@@ -240,7 +324,7 @@ built-in skill `building-sites` teaches it. A member or Manager acts on its own 
 | `site action: create site: triage` | An empty site. |
 | `site action: publish site: triage folder: <absolute path>` | A new version from the folder, live once copied. |
 | `site action: list` | The team's sites. |
-| `site action: show site: triage` | Its versions, collections, data size and the path a person opens. |
+| `site action: show site: triage` | Its versions, collections, data size, the path a person opens, and its `filesFolder`. |
 | `site action: rollback site: triage [version: n]` | An earlier kept version made live. |
 | `site action: unpublish site: triage` | Stops serving it; keeps files and data. |
 | `site action: data op: list\|get\|put\|delete site: triage collection: items [id: t1] [doc: {...}]` | The data store. |
@@ -275,6 +359,9 @@ the same list filtered to that team.
 A plugin member writes with the `site.put` and `site.delete` records, for its own team's sites only
 (see [plugins.md](plugins.md)); another team's site, a missing one or a limit drops the record with
 one progress warning.
+
+Each run is told the files folder of every site of its own team as `siteFiles` (see
+[Files a team makes for a site](#files-a-team-makes-for-a-site)).
 
 It reads the collections its manifest declares in `reads`: each run receives them on stdin as
 `sites`, newest first, from its own team's sites only, up to 8 MiB a run (less when the work batch,
