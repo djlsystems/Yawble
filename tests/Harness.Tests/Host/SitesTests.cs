@@ -428,6 +428,36 @@ public sealed class SitesTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.False(Directory.Exists(Path.Combine(Sites.Root, host.Alpha, site)));
         Assert.NotNull(await host.Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.SiteDeleted, $"{host.Alpha}/{site}", Ct));
 
+        // Its files folder in the team's documents was empty, so it went with the site.
+        var docs = host.Services.GetRequiredService<TeamDocuments>().RootFor(host.Alpha);
+        Assert.False(Directory.Exists(Path.Combine(docs, "sites", site)));
+
+        // A site whose files folder holds a file: the person is told, through the route, that the files
+        // are kept, and they are.
+        var kept = await PublishedAsync(host.Alpha, "kept");
+        await Sites.PutDocumentAsync(host.Alpha, kept, "items", "i1", "{}", Person, Ct);
+        var file = Path.Combine(docs, "sites", kept, "files", "out", "a.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "kept");
+
+        var keptSentence =
+            "Deleting the site \"kept\" removes its files and its 1 document(s) (2 bytes) for good. Confirm to delete it, "
+            + "or unpublish it to keep them. Its 1 file(s) in the team's documents, sites/kept/files, are kept; delete them in Documents.";
+        Assert.Equal(keptSentence, (await Sites.DeleteAsync(host.Alpha, kept, confirmed: false, Person, Ct)).Refusal);
+
+        using (var person = await host.PersonAsync())
+        {
+            var askedByRoute = await person.DeleteAsync($"/api/teams/{host.Alpha}/sites/{kept}", Ct);
+            Assert.Equal(HttpStatusCode.Conflict, askedByRoute.StatusCode);
+            Assert.Equal(keptSentence, await ErrorAsync(askedByRoute));
+            Assert.NotNull(await Store.FindAsync(host.Alpha, kept, Ct));
+
+            Assert.Equal(HttpStatusCode.NoContent, (await person.DeleteAsync($"/api/teams/{host.Alpha}/sites/{kept}?confirm=true", Ct)).StatusCode);
+        }
+
+        Assert.Null(await Store.FindAsync(host.Alpha, kept, Ct));
+        Assert.Equal("kept", File.ReadAllText(file));
+
         // A team deletion takes every site of the team, with its files, its data and a row each.
         var registry = host.Services.GetRequiredService<TeamRegistry>();
         var agent = host.Services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;

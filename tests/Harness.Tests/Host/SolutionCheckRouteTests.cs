@@ -59,6 +59,22 @@ public sealed class SolutionCheckRouteTests(HostFixture host) : IClassFixture<Ho
     }
 
     [Fact]
+    public async Task A_package_whose_page_links_to_its_sites_files_passes_the_check()
+    {
+        using var person = await host.PersonAsync();
+        var folder = SolutionSamples.NeutralLinkingToFiles(
+            Path.Combine(host.Services.GetRequiredService<TeamDocuments>().EnsureFor(host.Alpha), "packages", Guid.NewGuid().ToString("N")),
+            "keeper-" + Guid.NewGuid().ToString("N")[..8]);
+
+        var response = await person.PostAsJsonAsync(Route, new { folder }, Ct);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await JsonAsync(response);
+        Assert.True(body.GetProperty("ok").GetBoolean(), body.ToString());
+        Assert.Equal(0, body.TryGetProperty("refusals", out var refusals) ? refusals.GetArrayLength() : 0);
+    }
+
+    [Fact]
     public async Task The_concierge_gets_the_refusals_of_an_invalid_package_each_naming_file_and_field()
     {
         var folder = Package();

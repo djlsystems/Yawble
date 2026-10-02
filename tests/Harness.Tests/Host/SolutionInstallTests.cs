@@ -396,6 +396,38 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
             pluginId, sites, reads, version);
 
     [Fact]
+    public async Task An_installed_packages_sites_each_get_a_files_folder()
+    {
+        var folder = SolutionSamples.NeutralLinkingToFiles(
+            Path.Combine(Get<TeamDocuments>().EnsureFor(host.Alpha), "packages", Guid.NewGuid().ToString("N")),
+            "keeper-" + Guid.NewGuid().ToString("N")[..8]);
+        var team = Done(await Get<SolutionInstaller>().InstallAsync(new SolutionInstallRequest(folder, Unique("Files")), Person, Ct)).Team;
+
+        var files = Get<SiteService>().Files.FolderFor(team, "board");
+        Assert.Equal(Path.Combine(Get<TeamDocuments>().RootFor(team), "sites", "board", "files"), files);
+        Assert.True(Directory.Exists(files));
+
+        // A file the team makes, and the page's own static link to it, resolved as a browser would.
+        Directory.CreateDirectory(Path.Combine(files, "out"));
+        File.WriteAllText(Path.Combine(files, "out", "a.txt"), "made by the team");
+
+        using var person = await host.PersonAsync(allowAutoRedirect: false);
+        var entry = await person.GetAsync($"/sites/{team}/board/", Ct);
+        Assert.Equal(HttpStatusCode.Redirect, entry.StatusCode);
+        var pageUrl = new Uri(new Uri("http://localhost"), entry.Headers.Location!.OriginalString + "index.html");
+
+        using var sandbox = host.Anonymous();
+        var page = await sandbox.GetStringAsync(pageUrl, Ct);
+        var href = System.Text.RegularExpressions.Regex.Match(page, "id=\"static\" href=\"([^\"]+)\"").Groups[1].Value;
+        Assert.Equal("_api/files/out/a.txt", href);
+
+        var download = await sandbox.GetAsync(new Uri(pageUrl, href), Ct);
+        Assert.Equal(HttpStatusCode.OK, download.StatusCode);
+        Assert.Equal("made by the team", await download.Content.ReadAsStringAsync(Ct));
+        Assert.Equal("attachment", download.Content.Headers.ContentDisposition?.DispositionType);
+    }
+
+    [Fact]
     public async Task A_package_whose_plugin_reads_a_site_it_does_not_ship_is_refused_by_the_check_route()
     {
         using var person = await host.PersonAsync();

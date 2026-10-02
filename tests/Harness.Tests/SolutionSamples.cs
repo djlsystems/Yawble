@@ -96,6 +96,30 @@ public static class SolutionSamples
         return target;
     }
 
+    /// <summary>
+    /// <see cref="Neutral"/> with one site, <c>board</c>, whose page links to a file in the site's files
+    /// folder both ways a page can: a static <c>&lt;a href="_api/files/out/a.txt"&gt;</c> and
+    /// <c>site.files.url</c> from its script.
+    /// </summary>
+    public static string NeutralLinkingToFiles(string parent, string pluginId)
+    {
+        var target = Neutral(parent, pluginId, ["board"], []);
+        var page = Path.Combine(target, "sites", "board");
+
+        File.WriteAllText(Path.Combine(page, "index.html"),
+            "<!doctype html><title>Board</title>\n"
+            + "<a id=\"static\" href=\"_api/files/out/a.txt\">A file</a>\n"
+            + "<a id=\"made\">A file</a>\n"
+            + "<script src=\"/sites/_sdk/site.js\"></script>\n<script src=\"app.js\"></script>\n");
+        File.WriteAllText(Path.Combine(page, "app.js"),
+            "document.getElementById('made').href = site.files.url('out/a.txt');\n");
+
+        // Its panel lists the site's files folder among the folders the team writes results into.
+        Edit(target, m => m["panel"] = new JsonObject { ["primarySite"] = "board", ["outputs"] = new JsonArray("sites/board/files") });
+
+        return target;
+    }
+
     /// <summary>Changes the copy's <c>solution.json</c> in place.</summary>
     public static void Edit(string package, Action<JsonObject> change) =>
         EditJson(Path.Combine(package, "solution.json"), change);

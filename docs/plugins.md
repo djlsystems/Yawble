@@ -486,6 +486,9 @@ name. The install checks the same before it writes.
   },
   "workingDirectory": "/data/teams/Mixed/workspaces/Echo",
   "worktrees": [],
+  "siteFiles": [
+    { "site": "board", "folder": "/data/documents/Mixed/sites/board/files" }
+  ],
   "sites": [
     { "site": "board", "collection": "items",
       "documents": [
@@ -507,6 +510,12 @@ name. The install checks the same before it writes.
   long. It is `{}` when the manifest declares no slot or the member has none bound; a plugin that ignores it
   is unaffected. The refresh
   token and the client secret never reach a plugin.
+- **`siteFiles`** names the files folder of every site of the member's OWN team, by name, as an
+  absolute path; `[]` when the team has none. A file the plugin makes for a site's page goes under
+  that folder, and the plugin stores the path RELATIVE to it in a document with `site.put`; the page
+  links to it with `site.files.url(path)` ([sites.md](sites.md#files-a-team-makes-for-a-site)). Every
+  site is listed, not only the ones the manifest `reads`, because writing a file needs no read. Paths
+  only: never a secret. Never write a secret or a token into a site's files or data.
 - **`sites`** holds one entry per collection the manifest [`reads`](#reading-site-data-reads), in
   declaration order; `[]` when it reads none. They are read when the run starts, as the member, from
   the member's OWN team's sites only - the same team-bound lookup `site.put` uses - and reading them
@@ -908,6 +917,9 @@ plugin declares none.
   request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side.
   `cli/internal/plugin` pins the manifest rules against the samples, the `connections` slot rules
   included.
+- **A site's files folder.** `PluginSiteFilesTests` pins `siteFiles`: own team only, every site, with or without `reads`,
+  absolute and existing, `[]` without sites, paths only; `SiteFilesEndToEndTests` pins a file a plugin
+  writes there downloading from the page by its stored path, and nothing secret in anything served.
 - **Reading site data.** `PluginSiteReadsTests` pins `reads` and its refusals, the `sites` block,
   newest first, the cut and its sentences, own team only, the tenant log and redaction;
   `WorkerFrameTests` pins that a cut run still fits the worker frame, including when the rest of the

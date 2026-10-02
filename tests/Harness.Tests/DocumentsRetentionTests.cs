@@ -109,12 +109,16 @@ public sealed class DocumentsRetentionTests : IAsyncDisposable
         var ct = TestContext.Current.CancellationToken;
         await CreateAlphaAsync(ct);
         await _documents.SaveAsync("Alpha", null, Report, new MemoryStream(Encoding.UTF8.GetBytes(Body)), ct);
+        var siteFile = Path.Combine(_documents.RootFor("Alpha"), "sites", "board", "files", "out", "a.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(siteFile)!);
+        await File.WriteAllTextAsync(siteFile, Body, ct);
         Assert.NotNull(await _deletion.DeleteAsync("Alpha", ct: ct));
 
         await CreateAlphaAsync(ct);
 
-        // The successor starts empty.
+        // The successor starts empty: a site's files are not inherited.
         Assert.Empty(_documents.List("Alpha"));
+        Assert.False(Directory.Exists(Path.Combine(_documents.RootFor("Alpha"), "sites")));
 
         // The predecessor's documents are aside, under a name no team can ever claim, still saying
         // whose they were, and still readable.
@@ -122,6 +126,7 @@ public sealed class DocumentsRetentionTests : IAsyncDisposable
         Assert.Equal("Alpha", retired.Team);
         Assert.Equal(_documents.RootFor(retired.Folder),_teams.RetiredDocumentsFor("Alpha"));
         Assert.Equal(Body, await File.ReadAllTextAsync(_documents.Resolve(retired.Folder, Report), ct));
+        Assert.Equal(Body, await File.ReadAllTextAsync(_documents.Resolve(retired.Folder, "sites/board/files/out/a.txt"), ct));
     }
 
     private Task CreateAlphaAsync(CancellationToken ct) =>

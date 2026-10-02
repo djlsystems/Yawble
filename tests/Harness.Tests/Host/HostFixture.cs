@@ -65,6 +65,10 @@ public sealed class HostFixture : IAsyncLifetime
     /// <summary>A handler into this Host's in-memory server, for code that makes its own clients.</summary>
     public HttpMessageHandler ServerHandler() => _factory.Server.CreateHandler();
 
+    /// <summary>The in-memory server itself, for a request whose path must reach the app exactly as
+    /// written - an <see cref="HttpClient"/> builds a <see cref="Uri"/>, which removes dot-segments.</summary>
+    public Microsoft.AspNetCore.TestHost.TestServer Server => _factory.Server;
+
     public HttpClient Container(string key)
     {
         var client = _factory.CreateClient();

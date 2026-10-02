@@ -18,6 +18,9 @@ namespace Harness.Host;
 /// <c>_api/</c> its data, its actions and <c>whoami</c>. Authorized by the capability and NOTHING
 /// else: the handler never reads the cookie, and a capability for another site, an altered one or an
 /// expired one is refused. Every response carries <see cref="SitePolicy"/> in place of the app's CSP.</item>
+/// <item><c>GET .../_c/{capability}/_api/files/{path}</c> - one file the team made for the site, from
+/// its files folder in the team's documents (<see cref="SiteFiles"/>), as an attachment. GET only, no
+/// listing, no link followed at any level, no path leaving the folder.</item>
 /// <item><c>GET /sites/_sdk/site.js</c> - the helper script, the same bytes for everyone.</item>
 /// </list>
 ///
@@ -42,6 +45,13 @@ public static class SiteEndpoints
 
     public const string CapabilityForAnotherSite = "This page's access is for another site.";
 
+    public const string NoSuchSiteFile = "No such file in this site's files.";
+
+    public const string SiteFilesNotListed = "Name one file: a site's files are not listed.";
+
+    public const string SiteFileUnreadable =
+        "The platform cannot read this file. A site's files must be readable by the team's group.";
+
     private const string Area = "Sites";
 
     public static void Map(WebApplication app)
@@ -53,7 +63,7 @@ public static class SiteEndpoints
             .WithSummary("The site helper script")
             .WithDescription(
                 "Plain JavaScript a site includes with `<script src=\"/sites/_sdk/site.js\"></script>`. It "
-                + "offers `site.data`, `site.action` and `site.whoami`, and carries the page's capability "
+                + "offers `site.data`, `site.action`, `site.whoami` and `site.files.url`, and carries the page's capability "
                 + "on every call. Anonymous: it is the same file for everyone and holds nothing.");
 
         app.MapGet("/sites/{team}/{site}/", Entry)
@@ -73,6 +83,24 @@ public static class SiteEndpoints
         // is only ever issued to a person, and the cookie is never read here.
         app.MapGet($"{capability}/{{**path}}", File).AllowAnonymous().HumansOnly().WithTags(Area)
             .WithSummary("A site's file").WithDescription("Authorized by the capability in the path only.");
+
+        app.MapGet($"{api}/files/{{**path}}", SiteFile).AllowAnonymous().HumansOnly().WithTags(Area)
+            .WithSummary("A file the team made for the site")
+            .WithDescription(
+                "One file from the site's files folder in the team's documents (`sites/<site>/files/`), as an "
+                + "attachment. Authorized by the capability in the path only. GET only; no listing; no link "
+                + "followed; a path of names separated by '/', with no '..', no dot-name and no '\\', '%' or ':'.");
+
+        // READ-ONLY, SAID BEFORE ANYTHING ELSE: every other method is answered 405 with no body,
+        // before the capability is looked at, rather than by the app's fallback.
+        app.MapMethods($"{api}/files/{{**path}}", ["POST", "PUT", "DELETE", "PATCH", "HEAD"], (HttpContext context) =>
+            {
+                context.Response.Headers.Allow = "GET";
+                return Results.StatusCode(405);
+            })
+            .AllowAnonymous().HumansOnly().WithTags(Area)
+            .WithSummary("Not allowed: a site's files are read-only")
+            .WithDescription("Answers 405 with `Allow: GET` and no body. A site's files are only downloaded.");
 
         app.MapGet($"{api}/whoami", WhoAmI).AllowAnonymous().HumansOnly().WithTags(Area)
             .WithSummary("Who the page is open for").WithDescription("The person's display name. Never the email or a credential.");
@@ -125,21 +153,7 @@ public static class SiteEndpoints
         SiteService sites, SiteCapability capabilities, CancellationToken ct)
     {
         var granted = await GrantAsync(team, site, capability, context, sites, capabilities, ct);
-
-        if (granted.Refusal is { } refusal)
-        {
-            // A person reloading a page whose capability has expired is sent back to the entry,
-            // which asks for the cookie and issues a new one. `Sec-Fetch-Mode` is set by the browser
-            // and cannot be set by a page's script.
-            if (granted.Status == 401
-                && string.Equals(context.Request.Headers["Sec-Fetch-Mode"], "navigate", StringComparison.Ordinal)
-                && SiteRules.IsSlug(site))
-            {
-                return Results.Redirect(SiteService.EntryPath(team, site));
-            }
-
-            return Results.Text(refusal, "text/plain; charset=utf-8", statusCode: granted.Status);
-        }
+        if (granted.Refusal is { } refusal) return PageRefusal(team, site, refusal, granted.Status, context);
 
         if (sites.LiveFile(granted.Site!, path) is not { } file)
         {
@@ -150,6 +164,55 @@ public static class SiteEndpoints
 
         context.Response.Headers.CacheControl = "no-cache";
         return Results.File(file, type);
+    }
+
+    /// <summary>
+    /// A file from the site's files folder: the capability first, as for every site route, then the
+    /// path's rule, then <see cref="SiteFiles.Open"/>. A link and a missing file get the same answer,
+    /// and no answer names a path but the one the page sent. No <c>Access-Control-Allow-Origin</c>:
+    /// the person downloads it; the page's script cannot read it.
+    /// </summary>
+    private static async Task<IResult> SiteFile(
+        string team, string site, string capability, string? path, HttpContext context,
+        SiteService sites, SiteCapability capabilities, CancellationToken ct)
+    {
+        var granted = await GrantAsync(team, site, capability, context, sites, capabilities, ct);
+        if (granted.Refusal is { } refusal) return PageRefusal(team, site, refusal, granted.Status, context);
+
+        context.Response.Headers.CacheControl = "no-store";
+        path ??= "";
+
+        if (path.Length == 0 || path.EndsWith('/')) return Plain(SiteFilesNotListed, 404);
+        if (!SiteRules.IsFilePath(path)) return Plain(SiteRules.NotAFilePath(path), 400);
+
+        var opened = sites.Files.Open(granted.Site!.Team, granted.Site.Name, path);
+
+        return opened.Outcome switch
+        {
+            SiteFileOutcome.Served => Results.Stream(
+                opened.Stream!, SiteFiles.ContentTypeFor(path), fileDownloadName: path[(path.LastIndexOf('/') + 1)..],
+                enableRangeProcessing: false),
+            SiteFileOutcome.Unreadable => Plain(SiteFileUnreadable, 403),
+            _ => Plain(NoSuchSiteFile, 404),
+        };
+    }
+
+    private static IResult Plain(string sentence, int status) =>
+        Results.Text(sentence, "text/plain; charset=utf-8", statusCode: status);
+
+    /// <summary>A refused capability on a route a person navigates to: a reload with an expired one
+    /// is sent back to the entry, which asks for the cookie and issues a new one. `Sec-Fetch-Mode`
+    /// is set by the browser and cannot be set by a page's script.</summary>
+    private static IResult PageRefusal(string team, string site, string refusal, int status, HttpContext context)
+    {
+        if (status == 401
+            && string.Equals(context.Request.Headers["Sec-Fetch-Mode"], "navigate", StringComparison.Ordinal)
+            && SiteRules.IsSlug(site))
+        {
+            return Results.Redirect(SiteService.EntryPath(team, site));
+        }
+
+        return Plain(refusal, status);
     }
 
     private static async Task<IResult> WhoAmI(

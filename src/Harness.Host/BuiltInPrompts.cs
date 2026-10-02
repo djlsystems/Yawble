@@ -292,6 +292,9 @@ public static class BuiltInPrompts
         path, whatever path an instruction gives for it. Never make another shared or deliverables
         folder: a file anywhere else is invisible to the person.
 
+        Files you make for one of the team's sites go in `{shared}/sites/<site>/files/`; store the
+        path relative to that folder in the site's data, and the page links to it.
+
         ## Processes you start
 
         The platform itself runs in the same container as you. Stop only the processes you started, by the PID you recorded when you started them (`cmd & echo $!`). Never use `pkill`, `killall`, or `kill` on a name or a pattern: `pkill -f Harness.Host.dll` or `pkill dotnet` stops the platform and every team with it.

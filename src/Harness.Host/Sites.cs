@@ -73,6 +73,9 @@ public sealed class SiteService(
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
+    /// <summary>Each site's files folder in the team's documents (<see cref="SiteFiles"/>).</summary>
+    public SiteFiles Files { get; } = new(paths);
+
     public const string NoSuchSite = "No such site.";
 
     public const string NotPublished = "This site is not published.";
@@ -144,6 +147,9 @@ public sealed class SiteService(
             return new(null, $"The team already has a site named \"{name}\".", 409);
         }
 
+        // WITH THE SITE, best effort: the row is the site, and the folder is repaired whenever an
+        // agent or a plugin is told it.
+        Files.Ensure(stored, name);
         return row;
     }
 
@@ -280,7 +286,9 @@ public sealed class SiteService(
 
     /// <summary>
     /// Deletes the site, every version and all its data. ASKS FIRST: without
-    /// <paramref name="confirmed"/> it answers 409 with what would be lost, and changes nothing.
+    /// <paramref name="confirmed"/> it answers 409 with what would be lost, and changes nothing. The
+    /// files the team made for it, in its documents, are KEPT, and the sentence says so; an empty
+    /// files folder is removed.
     /// </summary>
     public async Task<SiteResult<SiteRow>> DeleteAsync(
         string team, string name, bool confirmed, SiteActor actor, CancellationToken ct = default)
@@ -292,9 +300,13 @@ public sealed class SiteService(
 
         if (!confirmed)
         {
+            var kept = Files.CountFiles(site.Team, site.Name);
+
             return new(null,
                 $"Deleting the site \"{site.Name}\" removes its files and its {usage.Documents} document(s) "
-                + $"({usage.Bytes} bytes) for good. Confirm to delete it, or unpublish it to keep them.", 409);
+                + $"({usage.Bytes} bytes) for good. Confirm to delete it, or unpublish it to keep them."
+                + (kept == 0 ? "" : $" Its {kept} file(s) in the team's documents, {SiteFiles.SitesFolder}/{site.Name}/{SiteFiles.FilesFolder}, are kept; delete them in Documents."),
+                409);
         }
 
         if (!await store.DeleteAsync(site.Team, site.Name,
@@ -304,6 +316,7 @@ public sealed class SiteService(
         }
 
         await RemoveFolderAsync(Path.Combine(Root, site.Team, site.Name));
+        Files.PruneIfEmpty(site.Team, site.Name);
         return site;
     }
 
@@ -316,6 +329,11 @@ public sealed class SiteService(
                 JsonSerializer.Serialize(new { reason = "team deleted" })), ct);
 
         await RemoveFolderAsync(Path.Combine(Root, team));
+
+        // Files the team made for its sites are its documents and outlive it; empty folders do not
+        // keep a documents folder alive.
+        foreach (var name in names) Files.PruneIfEmpty(team, name);
+
         return names;
     }
 

@@ -134,7 +134,11 @@ public sealed class HealthAndHeadersTests(HostFixture host) : IClassFixture<Host
         var capability = page.Split('/')[5];
         using var sandbox = host.Anonymous();
 
-        foreach (var path in new[] { page, $"{page}index.html", $"{page}_api/data/jobs", $"{page}_api/whoami" })
+        var siteFile = Path.Combine(sites.Files.FolderFor(host.Alpha, "headers"), "out", "a.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(siteFile)!);
+        await File.WriteAllTextAsync(siteFile, "a file", ct);
+
+        foreach (var path in new[] { page, $"{page}index.html", $"{page}_api/data/jobs", $"{page}_api/whoami", $"{page}_api/files/out/a.txt" })
         {
             var response = await sandbox.GetAsync(path, ct);
 
@@ -157,6 +161,11 @@ public sealed class HealthAndHeadersTests(HostFixture host) : IClassFixture<Host
         Assert.DoesNotContain("allow-top-navigation", policy);
         Assert.DoesNotContain("allow-popups", policy);
         Assert.DoesNotContain("'unsafe-inline'", policy);
+
+        // A refused download keeps the app's policy: only a valid capability gets the site's.
+        var expired = await sandbox.GetAsync($"/sites/{host.Alpha}/headers/_c/not-a-capability/_api/files/out/a.txt", ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, expired.StatusCode);
+        Assert.Equal(SecurityHeaders.ContentSecurityPolicy, Header(expired, "Content-Security-Policy"));
 
         // The app itself is untouched.
         Assert.Contains("script-src 'self';", Header(await browser.GetAsync("/api/teams", ct), "Content-Security-Policy"));

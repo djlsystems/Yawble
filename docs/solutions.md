@@ -27,7 +27,13 @@ job-tracker/
   folder is named after the manifest's `id`.
 - **Skills** are the files a person would otherwise paste. A package's skills are **team skills**:
   offered only to that team's members of their roles.
-- **Sites** are published as a team publishes one ([sites.md](sites.md)).
+- **Sites** are published as a team publishes one ([sites.md](sites.md)). Files the installed team
+  generates for a site - a document, a spreadsheet, an image the page offers for download - go in
+  that site's files folder, `<team documents>/sites/<site>/files/`; the members store the path
+  relative to it in the site's data, and the page links with `site.files.url(path)` or a static
+  `<a href="_api/files/<path>">` ([sites.md](sites.md#files-a-team-makes-for-a-site)). A package ships
+  no files folder: the install creates one with each site. The check accepts a page that links to it,
+  and a `panel.outputs` entry may name `sites/<site>/files`.
 - **Tools** are copied to `<teams root>/<team>/solution/` on install, read-only to agents like other
   platform-made folders. An instruction names that folder with the token `{solution}`.
 - **Nothing is fetched.** A package holds everything it needs; the check reads only the folder.
@@ -697,6 +703,10 @@ skill `interview-prep` and ships `job-board` 0.2.0. The tests make it the same w
 
 ## Where it is pinned
 
+- A page linking to its site's files folder passes the check, and the install creates each site's
+  files folder, whose file the page's static link downloads:
+  `SolutionCheckRouteTests.A_package_whose_page_links_to_its_sites_files_passes_the_check`,
+  `SolutionInstallTests.An_installed_packages_sites_each_get_a_files_folder`.
 - Every refusal case, each naming its file and field: `SolutionCheckTests` (the five named ones as
   their own tests - `A_trigger_naming_a_member_the_package_does_not_have_is_refused`,
   `A_plugin_member_naming_a_plugin_the_package_does_not_ship_is_refused`,
