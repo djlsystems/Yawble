@@ -128,21 +128,24 @@ public sealed partial class RunMemoryLimits
     /// The limit in force for the next run. Under rlimit only a figure a person set: a computed one
     /// is never applied, and the run gets none.
     /// </summary>
-    public RunMemoryLimit Limit()
-    {
-        var limit = _limit();
-        return Mechanism == RunMemoryMechanism.Rlimit && !limit.Set ? Unset() : limit;
-    }
+    public RunMemoryLimit Limit() => Limit(_limit());
+
+    /// <summary><see cref="Limit()"/> for a figure the settings gave when a run's start was built.</summary>
+    public RunMemoryLimit Limit(RunMemoryLimit setting) =>
+        Mechanism == RunMemoryMechanism.Rlimit && !setting.Set ? Unset() : setting;
 
     /// <summary>
     /// The most a run can be raised to while it holds the heavy lease; under rlimit, each process's
     /// hard limit, and none when no figure is set - no voluntary ceiling either.
     /// </summary>
-    public RunMemoryLimit Ceiling()
-    {
-        var limit = _limit();
-        return Mechanism == RunMemoryMechanism.Rlimit && !limit.Set ? Unset() : _ceiling();
-    }
+    public RunMemoryLimit Ceiling() => Ceiling(_limit(), _ceiling());
+
+    /// <summary><see cref="Ceiling()"/> for the figures the settings gave when a run's start was built.</summary>
+    public RunMemoryLimit Ceiling(RunMemoryLimit setting, RunMemoryLimit ceiling) =>
+        Mechanism == RunMemoryMechanism.Rlimit && !setting.Set ? Unset() : ceiling;
+
+    /// <summary>The figures the settings give now, before this mechanism applies them: what a run's start carries.</summary>
+    public (RunMemoryLimit Limit, RunMemoryLimit Ceiling) Settings() => (_limit(), _ceiling());
 
     /// <summary>
     /// WHAT THE NEXT RUN GETS, as <c>GET /api/wip</c> states it in <c>runMemory</c>: the mechanism

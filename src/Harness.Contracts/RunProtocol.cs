@@ -72,7 +72,9 @@ public sealed record StartRun(
 
 /// <summary>
 /// The preset's launch as control resolved it: the command, its tokens, its isolation and the
-/// CLI's update-off, and how long it may go without progress (null: no limit).
+/// CLI's update-off, how long it may go without progress (null: no limit), and the variables the
+/// child must not inherit from the worker - the ones that must be absent, and every provider key
+/// that is not this command's own and was not handed in.
 /// </summary>
 public sealed record RunLaunch(
     string FileName,
@@ -83,7 +85,8 @@ public sealed record RunLaunch(
     bool LanguageModel,
     IReadOnlyDictionary<string, string>? IsolationEnvironment,
     IReadOnlyDictionary<string, string>? UpdateEnvironment,
-    int? TimeoutSeconds);
+    int? TimeoutSeconds,
+    IReadOnlyList<string> RemovedEnvironment);
 
 /// <summary>
 /// The preset's live view: the transcript path when it is known before launch, its format, and how
@@ -182,8 +185,11 @@ public sealed record UsageFigures(
                 : new InvocationUsage(TokensIn ?? 0, TokensOut ?? 0, Source, CachedIn, Reasoning, CacheCreation);
 }
 
-/// <summary>The run's process group as <c>/proc</c> read it: processes, resident memory, CPU ticks.</summary>
-public sealed record RunMeasured(RunId Run, int Processes, long ResidentBytes, long CpuTicks, DateTimeOffset At)
+/// <summary>
+/// One process group of a run as <c>/proc</c> read it: processes, resident memory, CPU ticks. A
+/// group the worker measures that no open run of its owns carries an empty nonce.
+/// </summary>
+public sealed record RunMeasured(RunId Run, int Group, int Processes, long ResidentBytes, long CpuTicks, DateTimeOffset At)
     : RunEvent(Run);
 
 /// <summary>A process of the run was stopped by its memory limit while the agent carried on.</summary>

@@ -124,15 +124,28 @@ public sealed class AgentEnvironment(
     public static void ScopeProviderKeys(
         IDictionary<string, string?> environment, string command, IReadOnlyDictionary<string, string> handedIn)
     {
+        foreach (var variable in ProviderKeysToRemove(command, handedIn)) environment.Remove(variable);
+    }
+
+    /// <summary>
+    /// The provider keys <see cref="ScopeProviderKeys"/> takes out for <paramref name="command"/>:
+    /// every one that is not its own and was not in <paramref name="handedIn"/>. A run's start names
+    /// them, so the worker removes them from what its child inherits.
+    /// </summary>
+    public static IReadOnlyList<string> ProviderKeysToRemove(string command, IReadOnlyDictionary<string, string> handedIn)
+    {
         var own = ProviderVariableFor(command);
+        var removed = new List<string>();
 
         foreach (var variable in ProviderVariables)
         {
             if (variable == own || handedIn.ContainsKey(variable)) continue;
             if (variable == GitHubAlias && (own == GitHubVariable || handedIn.ContainsKey(GitHubVariable))) continue;
 
-            environment.Remove(variable);
+            removed.Add(variable);
         }
+
+        return removed;
     }
 
     /// <summary>

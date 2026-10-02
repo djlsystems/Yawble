@@ -64,18 +64,14 @@ public sealed class WorkerArchitectureTests
             "git: a person's and a team's git stays in control.",
         ["GhContributor.RunAsync: " + StartsAProcess] =
             "gh: the GitHub CLI for a person's contributions stays in control.",
+        ["ProcessAgentRunner.CheckLaunchAsync: " + ReachesAWorkerLauncher] =
+            "launch check: starts a preset's free invocation through the worker's own launch, not a run; a later change sends it as a message.",
         ["HostDoctor.AgentsAsync: " + ReachesAWorkerLauncher] =
             "agent user: the doctor resolves who agent children would run as, to report it; a later change reads it from the worker.",
         ["TenantSettings..ctor: " + TouchesACgroup] =
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
 
         // Moved behind the protocol by the commits after this one, each deleting its own entries.
-        ["ProcessAgentRunner.RunLaunchAsync: " + ReachesAWorkerLauncher] = "pending: moves in this item, with the launch body.",
-        ["ProcessAgentRunner.MemberStart: " + ReachesAWorkerLauncher] = "pending: moves in this item, with the launch body.",
-        ["ProcessAgentRunner.LocateAsync: " + ReachesAWorkerLauncher] = "pending: moves in this item, with the launch body.",
-        ["ProcessAgentRunner.Follow: " + ReachesAWorkerLauncher] = "pending: moves in this item, with the launch body.",
-        ["ProcessAgentRunner.CheckLaunchAsync: " + ReachesAWorkerLauncher] = "pending: moves in this item, with the launch body.",
-        ["Watch.TranscriptAsync: " + ReachesAWorkerLauncher] = "pending: moves in this item, with the launch body.",
         ["Program.<Main>$: " + ReachesAWorkerLauncher] = "pending: moves in this item, into the worker's composition.",
         ["Program.<Main>$: " + ReadsProc] = "pending: moves in this item, into the worker's composition.",
         ["Program.<Main>$: " + TouchesACgroup] = "pending: moves in this item, into the worker's composition.",
