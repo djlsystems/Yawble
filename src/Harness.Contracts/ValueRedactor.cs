@@ -66,6 +66,9 @@ public sealed class ValueRedactor
             .Select(name => environment.TryGetValue(name, out var value) ? value : null)
             .Where(value => !string.IsNullOrEmpty(value))));
 
+    /// <summary>A set of exactly these spellings, as <see cref="Forms"/> listed them: how a set crosses a connection, sealed.</summary>
+    internal static ValueRedactor FromForms(IEnumerable<string> forms) => Ordered(forms);
+
     /// <summary>This set together with <paramref name="other"/>'s.</summary>
     public ValueRedactor With(ValueRedactor other) =>
         other.Forms.Count == 0 ? this : Forms.Count == 0 ? other : Ordered(Forms.Concat(other.Forms));
