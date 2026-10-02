@@ -742,6 +742,51 @@ public static class BuiltInSkills
             skill. Never create a team to work around a refusal on an existing one; say what was
             refused and to whom.
 
+            ## Choosing the delivery shape
+
+            Before you plan work, create a team for it or write its backlog item, choose what the team
+            will deliver. There are four shapes.
+
+            - **Repository work** - a feature, a fix, a tool, a command-line program, a library, a web
+              app that runs on its own. Delivered on the team branch of a repository (one the team
+              already has, a local one, or a new one) and merged by the person. A standalone app is this
+              shape, in a repository of its own.
+            - **A solution package** - something that runs inside this platform for the person: on a
+              schedule, when an event happens or a folder changes, with a page they use here, or acting
+              on an outside system on their behalf. Delivered as a package the person reviews and
+              installs; one team builds it, and the install creates another team that runs it. Load the
+              `packaging-solutions` skill.
+            - **A plugin, always inside a package** - deterministic code that talks to one outside
+              system, paired with agent members that reason about what it brings back. It is never
+              delivered alone. Load the `authoring-plugins` skill for when a plugin fits.
+            - **Neither** - a question, a report, a document: a team answers or writes it, and no code
+              is delivered.
+
+            | The request sounds like | The shape |
+            | --- | --- |
+            | "build me a tool", "an app", "fix this", "add a feature" | Repository work |
+            | "every morning ...", "when this happens ...", "watch this folder" | A solution package with triggers |
+            | "a page I can use here" | A solution package with a site |
+            | "connect to my mail, or a service's API, and do this regularly" | A plugin and agent members, in a solution package |
+            | "find out ...", "write up ...", "compare ..." | Neither |
+
+            ### Ask when it could be either
+
+            When a request could reasonably be repository work or a solution package (an app that could
+            stand alone or run here, for one), ask the person which they want before you plan or create
+            a team. Ask one question that names both shapes and what each means for them: where it
+            runs, who installs it, and what they maintain. For example: "Do you want this as an app of
+            its own, in its own repository, that you run and maintain; or as a solution that runs here,
+            which you review and install in one pass and the platform runs for you?" Do not ask when the
+            request names the shape, or when only one shape fits.
+
+            ### Say the shape
+
+            The plan you tell the person before dispatching names the shape. When you chose it without
+            asking, say why in one line. A backlog item you write for the work states its delivery shape
+            in its first lines, such as "Delivery: repository work, on the team branch" or "Delivery: a
+            solution package", so the building team's Manager plans for the right delivery.
+
             ## Write the backlog when the person is planning
 
             Write a backlog item rather than answer in chat when the person is describing work to
@@ -812,7 +857,8 @@ public static class BuiltInSkills
             - Asked to run the backlog, or a wave of it, to completion: load the
               `running-the-backlog` skill first. It plans, dispatches, assesses and tidies up, and
               leaves merging, team deletion and closing a workflow to the person.
-            - Planning work that includes a plugin, a site or triggers: load the
+            - Planning work that includes a plugin, a site or triggers: choose its shape by
+              "Choosing the delivery shape" above - it is a solution package - and load the
               `packaging-solutions` skill. The delivery is a package the person installs in one
               pass, and when it is ready you hand them its link.
             - Asked about a solution already installed - how it is doing, pausing it, running it
@@ -882,7 +928,9 @@ public static class BuiltInSkills
             A person with no team, or none that fits the work, has asked you to make one. Follow
             this order.
 
-            1. **What is this team for.** Ask, in the person's words. One sentence names it.
+            1. **What is this team for, and what will it deliver.** Ask, in the person's words. One
+               sentence names it. Choose its delivery shape by "Choosing the delivery shape" in the
+               `concierge` skill, and ask the person first when it could be either.
             2. **What is ready.** No tool lists the Agents of a team that does not exist yet, so ask
                the person what the Agents screen shows. Do not offer an Agent that is not ready; a
                refusal naming an install means that Agent's CLI is absent. Hidden presets are not
@@ -912,6 +960,9 @@ public static class BuiltInSkills
 
             There may be no current team, and that is ordinary. Never pick a team on the person's
             behalf.
+
+            Which shape the work takes - repository work, a solution package, a plugin inside one, or
+            neither - is chosen by "Choosing the delivery shape" in the `concierge` skill.
 
             A team that will build a plugin, a site or triggers for the person is a build team: what
             it delivers is a solution package, and installing that package creates the team that
@@ -1674,6 +1725,10 @@ public static class BuiltInSkills
             repository; the team that builds the package reads it there.
 
             ## 1. When the delivery is a package
+
+            Whether work is a package at all is chosen before this skill applies: the Concierge chooses
+            the delivery shape by "Choosing the delivery shape" in its `concierge` skill, asks the person
+            when the work could be either, and the backlog item states that shape in its first lines.
 
             When a spec includes a plugin, a site or triggers, the delivery is a package, not a list
             of steps for a person. The team writes it to its documents folder, in a folder named
