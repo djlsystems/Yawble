@@ -48,6 +48,10 @@ internal sealed class ScriptedCliWorker(string id, Func<ControlMessage, WorkerEv
     public Task AnswerAsync(WorkerEvent @event) =>
         Asks!.HandleAsync(new WorkerEnvelope(Id, Interlocked.Increment(ref _seq), @event));
 
+    /// <summary>Says <paramref name="event"/> to <paramref name="control"/> as this worker's next event: a run's end, say.</summary>
+    public Task SayAsync(Func<WorkerEnvelope, CancellationToken, Task> control, WorkerEvent @event) =>
+        control(new WorkerEnvelope(Id, Interlocked.Increment(ref _seq), @event), CancellationToken.None);
+
     public void Lose(string why)
     {
         Lost = why;

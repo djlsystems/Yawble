@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.ComponentModel;
-using System.Diagnostics;
-using Harness.Pty;
+using Harness.Contracts;
 
 namespace Harness.Host;
 
@@ -84,15 +82,34 @@ public sealed record AgentUpdates(
 
 /// <summary>
 /// THE PLATFORM'S UPDATE OF A PRESET'S CLI, when a person asks: the preset's declared
-/// <see cref="AgentUpdates.Update"/> command, run as the user agents run as through
-/// <see cref="AgentUpdateGate"/>, with the versions before and after recorded in
-/// `cli-versions.jsonl` beside the start's own lines.
+/// <see cref="AgentUpdates.Update"/> command through <see cref="AgentUpdateGate"/>, with the versions
+/// before and after recorded in `cli-versions.jsonl` beside the start's own lines.
 /// </summary>
+/// <remarks>
+/// RUN ONCE, ON ONE WORKER: when the gate has drained the runs in flight, the connected worker with
+/// the most measured headroom is picked - then, not when it was asked for - and runs, in one request,
+/// the version, the update (without the update-off: that is for launches) and the version again, as
+/// the agent. No worker then: it fails and nothing ran. The worker lost while it runs: it fails, and
+/// whether the install changed is not known. Either way the launches it held are let go.
+/// </remarks>
 public sealed class AgentCliUpdater(
-    AgentCatalog catalog, AgentUpdateGate gate, AgentLaunchUser? runAs = null, string? dataRoot = null)
+    AgentCatalog catalog, AgentUpdateGate gate, AgentLaunchUser? runAs = null, string? dataRoot = null, WorkerAsks? asks = null)
 {
     /// <summary>How long one update command may take before it is stopped.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);
+
+    /// <summary>How long a version may take.</summary>
+    private static readonly TimeSpan VersionTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>What an update reads when no worker is connected to run it.</summary>
+    public const string NoWorkerText = "No worker is connected to run the update; nothing was run.";
+
+    /// <summary>What an update reads when its worker stopped while it ran.</summary>
+    public static string LostText(WorkerId worker) =>
+        $"Worker {worker} stopped while it ran the update; whether the install changed is not known. "
+        + "Its version is measured again at the next update or container start.";
+
+    private readonly Lazy<WorkerAsks> _asks = new(() => asks ?? WorkerAsks.InProcess(runAs));
 
     /// <param name="person">The email of the person who asked, recorded on the history's line.</param>
     public async Task<AgentUpdateResult?> UpdateAsync(string agent, CancellationToken ct, string? person = null)
@@ -155,11 +172,26 @@ public sealed class AgentCliUpdater(
     {
         var (command, updates, update) = (prepared.Command, prepared.Updates, prepared.Update);
 
-        var before = await VersionAsync(command, updates, token);
-        // WITHOUT the update-off: that is for launches, and an explicit update must not read it.
-        var (exit, output) = await RunAsync(update, null, token);
-        var after = await VersionAsync(command, updates, token);
+        // The version with its update-off; the update WITHOUT it: that is for launches, and an
+        // explicit update must not read it.
+        var version = new AgentCliRun(
+            command, [.. updates?.Arguments ?? [], "--version"], updates?.Environment ?? new Dictionary<string, string>(), [],
+            (int)VersionTimeout.TotalSeconds);
+        var run = new AgentCliRun(
+            update[0], [.. update.Skip(1)], new Dictionary<string, string>(), [], (int)Timeout.TotalSeconds, WithUpdatesOn: true);
+
+        var asked = await _asks.Value.AskAsync<AgentCommandsRan>(
+            new RunAgentCommands(WorkerAsks.NewRequest(), [version, run, version]), Timeout + VersionTimeout * 2 + TimeSpan.FromSeconds(30), token);
+
+        if (asked.Answer is not { Results: [var before, var ran, var after] })
+        {
+            throw new InvalidOperationException(asked.Worker is { } worker ? LostText(worker) : NoWorkerText);
+        }
+
         var at = DateTimeOffset.UtcNow;
+        var (exit, output) = ran.Installed
+            ? (ran.ExitCode ?? -1, ran.Error is { } error ? error : ran.Stdout + ran.Stderr)
+            : (-1, $"`{update[0]}` is not an executable file on PATH.");
 
         CliVersionNow? now = null;
 
@@ -167,69 +199,25 @@ public sealed class AgentCliUpdater(
         {
             var history = CliVersionHistory.In(dataRoot);
             await history.AppendAsync(
-                new Dictionary<string, string?> { [command] = after }, "update", token, person);
+                new Dictionary<string, string?> { [command] = VersionOf(after) }, "update", token, person);
             now = CliVersionHistory.Now(command, await history.ReadAsync(CliVersionHistory.MaxTake, token));
         }
 
+        var (was, @is) = (VersionOf(before), VersionOf(after));
         return new AgentUpdateResult(
-            prepared.Agent, command, exit == 0, exit, before, after, at,
+            prepared.Agent, command, exit == 0, exit, was, @is, at,
             exit == 0
-                ? before == after ? $"`{string.Join(' ', update)}` ran; {command} is already the newest ({after})."
-                    : $"`{string.Join(' ', update)}` updated {command} from {before} to {after}."
+                ? was == @is ? $"`{string.Join(' ', update)}` ran; {command} is already the newest ({@is})."
+                    : $"`{string.Join(' ', update)}` updated {command} from {was} to {@is}."
                 : $"`{string.Join(' ', update)}` exited {exit}: {Tail(output)}",
             now);
     }
 
-    /// <summary>The first line `<paramref name="command"/> --version` prints, with its update-off.</summary>
-    public async Task<string?> VersionAsync(string command, AgentUpdates? updates, CancellationToken ct)
-    {
-        if (PathSearch.Find(command) is null) return null;
-        var (exit, output) = await RunAsync([command, .. updates?.Arguments ?? [], "--version"], updates, ct);
-        return exit == 0 ? output.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() : null;
-    }
-
-    private async Task<(int ExitCode, string Output)> RunAsync(
-        IReadOnlyList<string> argv, AgentUpdates? updates, CancellationToken ct)
-    {
-        var resolved = PathSearch.Find(argv[0]);
-        if (resolved is null) return (-1, $"`{argv[0]}` is not an executable file on PATH.");
-
-        var prefix = runAs is { Switches: true } ? runAs.Prefix : [];
-        var start = new ProcessStartInfo
-        {
-            FileName = prefix.Count > 0 ? prefix[0] : resolved,
-            WorkingDirectory = Path.GetTempPath(),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = true,
-            UseShellExecute = false,
-        };
-
-        foreach (var part in prefix.Skip(1)) start.ArgumentList.Add(part);
-        if (prefix.Count > 0) start.ArgumentList.Add(resolved);
-        foreach (var arg in argv.Skip(1)) start.ArgumentList.Add(arg);
-        foreach (var (key, value) in updates?.Environment ?? new Dictionary<string, string>()) start.Environment[key] = value;
-
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("The update did not start.");
-        process.StandardInput.Close();
-        var stdout = process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = process.StandardError.ReadToEndAsync(ct);
-
-        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        limit.CancelAfter(Timeout);
-
-        try
-        {
-            await process.WaitForExitAsync(limit.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-            throw;
-        }
-
-        return (process.ExitCode, (await stdout) + (await stderr));
-    }
+    /// <summary>The first line a `--version` printed, or null when it is not installed or did not exit 0.</summary>
+    private static string? VersionOf(AgentCliRunResult version) =>
+        version is { Installed: true, ExitCode: 0 }
+            ? version.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim()
+            : null;
 
     private static string Tail(string text)
     {

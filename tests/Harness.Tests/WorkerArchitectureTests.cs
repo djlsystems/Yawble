@@ -48,8 +48,6 @@ public sealed class WorkerArchitectureTests
             "tool pre-flight: reads the agent's tool files as the agent; a later change moves it to a worker.",
         ["ForeignToolsCheck.BesideAsync: " + ReachesAWorkerLauncher] =
             "tool pre-flight: reads the agent's tool files as the agent; a later change moves it to a worker.",
-        ["AgentCliUpdater.RunAsync: " + StartsAProcess] =
-            "CLI updates: a person's update of a shared CLI install; a later change moves it to a worker.",
         ["LiveViewEndpoints.WatchAsync: " + ReachesAWorkerLauncher] =
             "live transcript reader: follows a run's transcript as the agent for a watcher; a later change moves it to a worker.",
         ["LiveViewEndpoints.RunTranscriptAsync: " + ReachesAWorkerLauncher] =
@@ -60,8 +58,6 @@ public sealed class WorkerArchitectureTests
             "git: a person's and a team's git stays in control.",
         ["GhContributor.RunAsync: " + StartsAProcess] =
             "gh: the GitHub CLI for a person's contributions stays in control.",
-        ["ProcessAgentRunner.CheckLaunchAsync: " + ReachesAWorkerLauncher] =
-            "launch check: starts a preset's free invocation through the worker's own launch, not a run; a later change sends it as a message.",
         ["TenantSettings..ctor: " + TouchesACgroup] =
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
     };

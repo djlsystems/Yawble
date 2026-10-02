@@ -752,11 +752,13 @@ builder.Services.AddSingleton<AgentUpdateGate>();
 // a removal as the agent - and the answers, by request. Asked of the connected worker with the most
 // measured headroom; in a Host that runs its runs itself that is its own worker, over the transport.
 builder.Services.AddSingleton(sp => new WorkerAsks(() => sp.GetRequiredService<WorkerPool>().Worker(null)));
+// A person's update runs once, on one connected worker, when the gate has drained (AgentCliUpdater).
 builder.Services.AddSingleton(sp => new AgentCliUpdater(
     sp.GetRequiredService<AgentCatalog>(),
     sp.GetRequiredService<AgentUpdateGate>(),
     sp.GetRequiredService<AgentLaunchUser>(),
-    dataRoot));
+    dataRoot,
+    sp.GetRequiredService<WorkerAsks>()));
 // THE RUN WORKER, IN THIS PROCESS. Control talks to runs only through the run protocol: a run is
 // started, reported and ended by records over the in-process transport, and this worker is the one
 // place that launches, measures and limits them. ONE worker, shared by the runner, the leases, the
@@ -833,7 +835,12 @@ builder.Services.AddSingleton(sp => new ProcessAgentRunner(
             ? ProcessAgentRunner.Allowance((
                 tenantSettings.RunMemoryLimit(WorkerBounds.Of(placed.Info)), tenantSettings.RunMemoryCeiling(WorkerBounds.Of(placed.Info))))
             : null
-        : null));
+        : null,
+    // In control no worker in this process takes a run's share of its CLI's install, so the runner
+    // takes it from this control's one gate, around every run on every worker. In all the Host's own
+    // worker takes it from the same gate, as before, and the runner does not, so a run counts once.
+    control ? sp.GetRequiredService<AgentUpdateGate>() : null,
+    () => sp.GetRequiredService<IMemberReports>()));
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
     sp.GetRequiredService<IPrincipalStore>(),
@@ -2348,7 +2355,7 @@ if (control)
 {
     app.Logger.LogInformation(
         workerKeys.Configured
-            ? "Control role: runs go to workers that connect at {Route} with the worker key; none runs in this process. CLI updates are the workers' own."
+            ? "Control role: runs go to workers that connect at {Route} with the worker key; none runs in this process. CLI updates run on one connected worker, through this control's one update gate."
             : "Control role: no worker key is configured (HARNESS_WORKER_KEY), so no worker can connect and every run waits for a worker ({Route}).",
         WorkerKeyGate.ConnectRoute);
 }
