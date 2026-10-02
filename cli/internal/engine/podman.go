@@ -202,7 +202,37 @@ func (p podman) Remove(ctx context.Context, name string) error {
 }
 
 func (p podman) Exec(ctx context.Context, name string, args ...string) (Result, error) {
-	return p.run(ctx, append([]string{"exec", name}, args...)...)
+	return p.run(ctx, execArgs(nil, name, args)...)
+}
+
+// List is `podman ps -a --filter <filter> --format {{.Names}}`.
+func (p podman) List(ctx context.Context, filter string) ([]string, error) {
+	return list(ctx, p.run, filter)
+}
+
+// Health reads `.State.Health.Status`; a Podman older than 4 names it `.State.Healthcheck`, and
+// its template error on the first is the sign to ask the second. A missing container is none.
+func (p podman) Health(ctx context.Context, name string) (Health, error) {
+	var last error
+	for _, field := range []string{"{{.State.Health.Status}}", "{{.State.Healthcheck.Status}}"} {
+		res, err := p.r.Run(ctx, "podman", "container", "inspect", "--format", field, name)
+		if err != nil {
+			return HealthNone, &NotRunnable{Err: err}
+		}
+		if res.ExitCode == 0 {
+			return healthOf(res.Stdout), nil
+		}
+		if strings.Contains(strings.ToLower(res.Stderr), "no such") {
+			return HealthNone, nil
+		}
+		last = fmt.Errorf("podman container inspect %s: %s (exit %d)", name, strings.TrimSpace(res.Stderr), res.ExitCode)
+	}
+	return HealthNone, last
+}
+
+func (p podman) StopWithin(ctx context.Context, name string, grace int) error {
+	_, err := p.run(ctx, "stop", "-t", strconv.Itoa(grace), name)
+	return err
 }
 
 func (p podman) ExecTo(ctx context.Context, name string, stdout io.Writer, args ...string) (Result, error) {
@@ -219,27 +249,7 @@ func (p podman) CopyTo(ctx context.Context, name, src, dst string) error {
 }
 
 func (p podman) Run(ctx context.Context, s RunSpec) error {
-	args := []string{"run", "-d", "--name", s.Name, "--pod", s.Pod, "--restart", "unless-stopped"}
-	if s.Memory != "" {
-		args = append(args, "--memory", s.Memory)
-	}
-	if s.CPUs > 0 {
-		args = append(args, "--cpus", strconv.Itoa(s.CPUs))
-	}
-	for _, k := range sortedKeys(s.Env) {
-		args = append(args, "-e", k+"="+s.Env[k])
-	}
-	for _, k := range sortedKeys(s.Labels) {
-		args = append(args, "--label", k+"="+s.Labels[k])
-	}
-	if s.EnvFile != "" {
-		args = append(args, "--env-file", s.EnvFile)
-	}
-	for _, v := range s.Volumes {
-		args = append(args, "-v", v)
-	}
-	args = append(args, s.Image)
-	args = append(args, s.Command...)
+	args := append([]string{"run", "-d", "--name", s.Name, "--pod", s.Pod}, runArgs(s)...)
 	_, err := p.run(ctx, args...)
 	return err
 }

@@ -252,13 +252,13 @@ func TestTailscaleServesTheHostAtTheEnginesTargetAndReadsItsName(t *testing.T) {
 		engine.Result{Stdout: "running|docker.io/tailscale/tailscale:latest|\n"},
 	)
 	s.On("podman image exists", engine.Result{})
-	s.On("podman exec yawble-tunnel tailscale status --json", engine.Result{Stdout: statusJSON})
+	s.On("podman exec -e HARNESS_WORKER_KEY= yawble-tunnel tailscale status --json", engine.Result{Stdout: statusJSON})
 	ts, _ := remote.ProviderNamed("tailscale")
 	url, err := remote.Enable(context.Background(), engine.NewPodman(s), ts, remote.Credential{Token: "tskey"}, t.TempDir(), &bytes.Buffer{})
 	if err != nil || url != "https://yawble.tail1234.ts.net" {
 		t.Errorf("podman: url %q err %v", url, err)
 	}
-	if !strings.Contains(strings.Join(s.Calls, "\n"), "podman exec yawble-tunnel tailscale serve --bg http://127.0.0.1:8080") {
+	if !strings.Contains(strings.Join(s.Calls, "\n"), "podman exec -e HARNESS_WORKER_KEY= yawble-tunnel tailscale serve --bg http://127.0.0.1:8080") {
 		t.Errorf("podman calls:\n%s", strings.Join(s.Calls, "\n"))
 	}
 	// Docker: the Host by name on the shared network, and funnel when asked.
@@ -268,12 +268,12 @@ func TestTailscaleServesTheHostAtTheEnginesTargetAndReadsItsName(t *testing.T) {
 		engine.Result{Stderr: "No such container", ExitCode: 1},
 		engine.Result{Stdout: "running|docker.io/tailscale/tailscale:latest|\n"},
 	)
-	d.On("docker exec yawble-tunnel tailscale status --json", engine.Result{Stdout: statusJSON})
+	d.On("docker exec -e HARNESS_WORKER_KEY= yawble-tunnel tailscale status --json", engine.Result{Stdout: statusJSON})
 	url, err = remote.Enable(context.Background(), engine.NewDocker(d), ts, remote.Credential{Token: "tskey", Funnel: true}, t.TempDir(), &bytes.Buffer{})
 	if err != nil || url != "https://yawble.tail1234.ts.net" {
 		t.Errorf("docker: url %q err %v", url, err)
 	}
-	if !strings.Contains(strings.Join(d.Calls, "\n"), "docker exec yawble-tunnel tailscale funnel --bg http://yawble:8080") {
+	if !strings.Contains(strings.Join(d.Calls, "\n"), "docker exec -e HARNESS_WORKER_KEY= yawble-tunnel tailscale funnel --bg http://yawble:8080") {
 		t.Errorf("docker calls:\n%s", strings.Join(d.Calls, "\n"))
 	}
 }
@@ -318,5 +318,37 @@ func TestStatusReportsTheSidecarAndItsURLFallingBackToTheLastKnown(t *testing.T)
 	st, _ = remote.Status(context.Background(), engine.NewPodman(s2), cf, "https://old.trycloudflare.com")
 	if st.URL != "https://old.trycloudflare.com" || !st.URLFromRecord {
 		t.Errorf("fallback: %+v", st)
+	}
+}
+
+// With control and workers, the tunnel is unchanged: it joins the pod (Podman) or the instance's
+// network (Docker), never a worker's namespace, and targets control, which keeps the name.
+func TestTheTunnelStillJoinsThePodAndTargetsControl(t *testing.T) {
+	fast(t)
+	for _, c := range []struct {
+		program, inspect, join, target string
+		make                           func(engine.Runner) engine.Engine
+	}{
+		{"podman", "podman container inspect --format {{.State.Status}}|{{.ImageName}}|{{index .Config.Labels \"yawble.settings\"}} ", "--pod yawble", "http://127.0.0.1:8080", engine.NewPodman},
+		{"docker", "docker container inspect --format {{.State.Status}}|{{.Config.Image}}|{{index .Config.Labels \"yawble.settings\"}} ", "--network yawble", "http://yawble:8080", engine.NewDocker},
+	} {
+		s := engine.NewScripted()
+		s.On(c.inspect+"yawble", engine.Result{Stdout: "running|img|{\"role\":\"control\"}\n"})
+		s.OnSequence(c.inspect+"yawble-tunnel",
+			engine.Result{Stderr: "no such container", ExitCode: 1},
+			engine.Result{Stdout: "running|docker.io/cloudflare/cloudflared:latest|\n"},
+		)
+		s.On(c.program+" logs --tail 200 yawble-tunnel", engine.Result{Stdout: "https://quiet-owl.trycloudflare.com\n"})
+		cf, _ := remote.ProviderNamed("cloudflare")
+		if _, err := remote.Enable(context.Background(), c.make(s), cf, remote.Credential{}, t.TempDir(), &bytes.Buffer{}); err != nil {
+			t.Fatalf("%s: %v", c.program, err)
+		}
+		want := c.program + " run -d --name yawble-tunnel " + c.join + " --restart unless-stopped --label yawble.remote=cloudflare docker.io/cloudflare/cloudflared:latest tunnel --no-autoupdate --url " + c.target
+		if !strings.Contains(strings.Join(s.Calls, "\n"), want) {
+			t.Errorf("%s: missing %q in:\n%s", c.program, want, strings.Join(s.Calls, "\n"))
+		}
+		if strings.Contains(strings.Join(s.Calls, "\n"), "worker") {
+			t.Errorf("%s: the tunnel touched a worker", c.program)
+		}
 	}
 }

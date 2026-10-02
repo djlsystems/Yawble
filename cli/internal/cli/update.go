@@ -108,11 +108,18 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 		return instance.ErrNoImage
 	}
 	out := cmd.OutOrStdout()
+	if s, err = withWorkerKey(deps, s, out); err != nil {
+		return err
+	}
 	info, err := e.Inspect(cmd.Context(), instance.ContainerName)
 	if err != nil {
 		return err
 	}
-	if info.State != engine.StateAbsent && info.Image == s.Image && len(instance.Changes(info.Label, s)) == 0 {
+	current, err := workersCurrent(cmd, e, s)
+	if err != nil {
+		return err
+	}
+	if info.State != engine.StateAbsent && info.Image == s.Image && len(instance.Changes(info.Label, s)) == 0 && current {
 		fmt.Fprintf(out, "already on %s; nothing to update (yawble up starts it if it is stopped)\n", s.Image)
 		return nil
 	}
@@ -122,7 +129,28 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 	for _, n := range notes {
 		fmt.Fprintln(cmd.ErrOrStderr(), "note:", n)
 	}
+	noteRestart(cmd.Context(), e, s, out)
 	return instance.Up(cmd.Context(), e, s, healthChecker(deps.HTTP), out)
+}
+
+// workersCurrent says whether every configured worker exists with the settings now. An update
+// never refuses for size: an instance sized to the whole engine before control and workers is
+// moved, and `up` warns.
+func workersCurrent(cmd *cobra.Command, e engine.Engine, s instance.Settings) (bool, error) {
+	ref, err := s.WorkerRef()
+	if err != nil {
+		return false, err
+	}
+	for i := 1; i <= s.Workers; i++ {
+		info, err := e.Inspect(cmd.Context(), instance.WorkerName(i))
+		if err != nil {
+			return false, err
+		}
+		if info.State == engine.StateAbsent || len(instance.WorkerChanges(info.Label, s, i, ref)) > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // startStoppedMachine starts a Podman machine that exists and is stopped, as `up` and

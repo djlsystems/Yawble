@@ -119,7 +119,7 @@ func TestProbeRecheckDefaultInsideStatedRangeOnEveryPath(t *testing.T) {
 }
 
 func TestProbeRecheckASmallEnginesSavedProposalIsNotWarnedByLaterUpOrDoctor(t *testing.T) {
-	for _, e := range []struct{ mb, cpus, proposal int }{{4096, 2, 2048}, {6144, 4, 3072}, {2048, 1, 1024}} {
+	for _, e := range []struct{ mb, cpus, proposal int }{{4096, 2, 2048}, {6144, 4, 3072}, {2048, 1, 512}} {
 		info := fmt.Sprintf("%d|%d|Docker Desktop\n", e.mb<<20, e.cpus)
 		saved := fmt.Sprintf("engine = \"docker\"\nmemory = \"%dm\"\ncpus = %d\n", e.proposal, e.cpus)
 
@@ -144,7 +144,7 @@ func TestProbeRecheckASmallEnginesSavedProposalIsNotWarnedByLaterUpOrDoctor(t *t
 		d.On("docker version", engine.Result{Stdout: "29.8.0\n"})
 		d.On("docker info", engine.Result{Stdout: info})
 		d.On("docker container inspect", engine.Result{Stdout: "running|" + testImage + "|\n"})
-		d.On("docker exec yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: withWip(`{"mechanism":"none","perRunMb":null,"detail":"not set"}`)})
+		d.On("docker exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: withWip(`{"mechanism":"none","perRunMb":null,"detail":"not set"}`)})
 		dd := stubbed(d)
 		dd.GOOS, dd.LookPath = "darwin", lookPath("docker")
 		dd.ConfigDir = t.TempDir()

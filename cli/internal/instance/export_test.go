@@ -15,3 +15,10 @@ func SetPollingForTests(interval, timeout time.Duration) func() {
 	healthInterval, healthTimeout = interval, timeout
 	return func() { healthInterval, healthTimeout = oldInterval, oldTimeout }
 }
+
+// SetDrainPollingForTests shortens the drain wait so a test watches runs end without sleeping.
+func SetDrainPollingForTests(interval, timeout time.Duration) func() {
+	oldInterval, oldTimeout := drainInterval, drainTimeout
+	drainInterval, drainTimeout = interval, timeout
+	return func() { drainInterval, drainTimeout = oldInterval, oldTimeout }
+}

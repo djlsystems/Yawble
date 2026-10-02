@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,17 +27,37 @@ func label(s instance.Settings) string { return instance.SettingsLabel(s) }
 
 func healthy(string) bool { return true }
 
+const healthPrefix = "podman container inspect --format {{.State.Health.Status}} "
+
+// workerLabel is what Run stamps on worker i for these settings.
+func workerLabel(st instance.Settings, i int) string {
+	ref, _ := st.WorkerRef()
+	return instance.WorkerSettingsLabel(st, i, ref)
+}
+
+// workerAs scripts worker i as a container in state ("running", "exited") made with these
+// settings, and healthy: connected to control.
+func workerAs(s *engine.Scripted, state string, st instance.Settings, i int) {
+	ref, _ := st.WorkerRef()
+	s.On(inspect+"-worker-"+strconv.Itoa(i), engine.Result{Stdout: state + "|" + ref + "|" + workerLabel(st, i) + "\n"})
+	s.On(healthPrefix+"yawble-worker-"+strconv.Itoa(i), engine.Result{Stdout: "healthy\n"})
+}
+
 func unhealthy(string) bool { return false }
 
-func TestUpOnAFreshMachineCreatesEverythingInOrder(t *testing.T) {
+func TestUpOnAFreshPodmanMachineMakesThePodControlAndOneWorker(t *testing.T) {
 	s := engine.NewScripted()
 	s.On("podman volume exists", engine.Result{ExitCode: 1})
 	s.On("podman pod exists", engine.Result{ExitCode: 1})
 	s.On("podman container inspect", engine.Result{Stderr: "no such container", ExitCode: 125})
 	s.On("podman image exists", engine.Result{ExitCode: 1})
+	s.On(healthPrefix+"yawble-worker-1", engine.Result{Stdout: "healthy\n"})
+	st := settings()
+	st.EnvFile, st.EnvFileHash = "/c/yawble/env", "e1"
+	st.KeyFile, st.KeyHash = "/c/yawble/worker.env", "0123456789ab"
 	var out bytes.Buffer
 
-	if err := instance.Up(context.Background(), engine.NewPodman(s), settings(), healthy, &out); err != nil {
+	if err := instance.Up(context.Background(), engine.NewPodman(s), st, healthy, &out); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,9 +69,17 @@ func TestUpOnAFreshMachineCreatesEverythingInOrder(t *testing.T) {
 		inspect,
 		"podman image exists " + img,
 		"podman pull " + img,
-		"podman run -d --name yawble --pod yawble --restart unless-stopped --memory 12288m --cpus 8 -e Wip__MaxRunning=8 --label yawble.settings=" + label(settings()) + " -v yawble-data:/data " + img,
+		"podman run -d --name yawble --pod yawble --restart unless-stopped --memory 1536m --cpus 2 --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add FSETID --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --cap-add KILL -e HARNESS_ROLE=control -e Wip__MaxRunning=8 --label yawble.instance=yawble --label yawble.role=control --label yawble.settings=" + label(st) + " --env-file /c/yawble/env --env-file /c/yawble/worker.env -v yawble-data:/data " + img,
 		// While waiting: the log from this start on, for the progress lines (the time varies).
 		"podman logs --follow --since <start> yawble",
+		inspect + "-worker-1",
+		"podman image exists " + img + "-worker",
+		"podman pull " + img + "-worker",
+		"podman run -d --name yawble-worker-1 --pod yawble --restart unless-stopped --memory 12288m --cpus 8 -e HARNESS_CONTROL_URL=ws://127.0.0.1:8080 -e HARNESS_ROLE=worker -e HARNESS_WORKER_ID=worker-1 --label yawble.instance=yawble --label yawble.role=worker --label yawble.settings=" + workerLabel(st, 1) + " --label yawble.worker=1 --env-file /c/yawble/env --env-file /c/yawble/worker.env -v yawble-data:/data " + img + "-worker",
+		// Waited for: the engine's health is the worker's connection to control.
+		healthPrefix + "yawble-worker-1",
+		"podman ps -a --filter label=yawble.role=worker --format {{.Names}}",
+		"podman ps -a --filter name=^yawble-worker- --format {{.Names}}",
 		// After health: is there a tunnel sidecar to bring back? (none on a fresh machine)
 		"podman container inspect --format {{.State.Status}}|{{.ImageName}}|{{index .Config.Labels \"yawble.settings\"}} yawble-tunnel",
 	}
@@ -58,14 +87,15 @@ func TestUpOnAFreshMachineCreatesEverythingInOrder(t *testing.T) {
 	if got != strings.Join(want, "\n") {
 		t.Errorf("calls:\n%s\nwant:\n%s", got, strings.Join(want, "\n"))
 	}
-	if !strings.Contains(out.String(), "http://127.0.0.1:8080") {
-		t.Errorf("output %q lacks the URL", out.String())
+	if !strings.Contains(out.String(), "http://127.0.0.1:8080") || !strings.Contains(out.String(), "yawble-worker-1 is connected to control") {
+		t.Errorf("output %q lacks the URL or the worker", out.String())
 	}
 }
 
 func TestUpOnARunningInstanceWithTheSameSettingsChangesNothing(t *testing.T) {
 	s := engine.NewScripted()
 	s.On("podman container inspect", engine.Result{Stdout: "running|" + img + "|" + label(settings()) + "\n"})
+	workerAs(s, "running", settings(), 1)
 	var out bytes.Buffer
 	if err := instance.Up(context.Background(), engine.NewPodman(s), settings(), healthy, &out); err != nil {
 		t.Fatal(err)
@@ -83,39 +113,61 @@ func TestUpOnARunningInstanceWithTheSameSettingsChangesNothing(t *testing.T) {
 func TestUpAfterDownStartsTheExistingContainer(t *testing.T) {
 	s := engine.NewScripted()
 	s.On("podman container inspect", engine.Result{Stdout: "exited|" + img + "|" + label(settings()) + "\n"})
+	workerAs(s, "exited", settings(), 1)
 	var out bytes.Buffer
 	if err := instance.Up(context.Background(), engine.NewPodman(s), settings(), healthy, &out); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(s.Calls, "\n")
-	if !strings.Contains(joined, "podman start yawble") || strings.Contains(joined, "podman run") || strings.Contains(joined, " rm ") {
+	if !strings.Contains(joined, "podman start yawble\n") || strings.Contains(joined, "podman run") || strings.Contains(joined, " rm ") {
 		t.Errorf("calls:\n%s", joined)
+	}
+	control, worker := strings.Index(joined, "podman start yawble\n"), strings.Index(joined, "podman start yawble-worker-1")
+	if worker < control {
+		t.Errorf("control starts, then the worker:\n%s", joined)
 	}
 }
 
-// Critical 1 from the review: `config set` promises the next `up` applies it. A container made
-// with other settings is replaced, on the same volume.
+// Critical 1 from the review: `config set` promises the next `up` applies it. Memory and CPUs
+// are each worker's, so a memory change replaces the workers on the same volume and leaves
+// control running; a change control records (the running limit) replaces control.
 func TestUpRecreatesTheContainerWhenTheSettingsChanged(t *testing.T) {
 	old := settings()
 	old.Memory = "8192m"
 	s := engine.NewScripted()
-	s.On(inspect, engine.Result{Stdout: "exited|" + img + "|" + label(old) + "\n"})
+	s.On(inspect, engine.Result{Stdout: "running|" + img + "|" + label(old) + "\n"})
 	s.On(tunnelInspect, engine.Result{Stderr: "no such container", ExitCode: 125})
+	workerAs(s, "running", old, 1)
 	var out bytes.Buffer
 	if err := instance.Up(context.Background(), engine.NewPodman(s), settings(), healthy, &out); err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(s.Calls, "\n")
-	for _, want := range []string{"podman rm -f yawble", "podman run -d --name yawble"} {
+	joined := strings.Join(s.Calls, "\n") + "\n"
+	for _, want := range []string{"podman rm -f yawble-worker-1\n", "podman run -d --name yawble-worker-1 --pod yawble --restart unless-stopped --memory 12288m"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %q in:\n%s", want, joined)
 		}
 	}
-	if strings.Contains(joined, "pod rm") || strings.Contains(joined, "podman start yawble\n") {
-		t.Errorf("a memory change must not touch the pod or start the old container:\n%s", joined)
+	if strings.Contains(joined, "pod rm") || strings.Contains(joined, "podman rm -f yawble\n") || strings.Contains(joined, "podman start yawble\n") {
+		t.Errorf("a memory change must not touch the pod or control:\n%s", joined)
 	}
-	if !strings.Contains(out.String(), "settings changed") {
+	if !strings.Contains(out.String(), "settings changed (memory 8192m -> 12288m); replacing yawble-worker-1") {
 		t.Errorf("output should say why it recreated: %q", out.String())
+	}
+
+	limit := settings()
+	limit.MaxRunning = 3
+	s2 := engine.NewScripted()
+	s2.On(inspect, engine.Result{Stdout: "exited|" + img + "|" + label(settings()) + "\n"})
+	s2.On(tunnelInspect, engine.Result{Stderr: "no such container", ExitCode: 125})
+	workerAs(s2, "running", limit, 1)
+	out.Reset()
+	if err := instance.Up(context.Background(), engine.NewPodman(s2), limit, healthy, &out); err != nil {
+		t.Fatal(err)
+	}
+	joined = strings.Join(s2.Calls, "\n") + "\n"
+	if !strings.Contains(joined, "podman rm -f yawble\n") || !strings.Contains(joined, "podman run -d --name yawble --pod yawble") || strings.Contains(joined, "rm -f yawble-worker-1") {
+		t.Errorf("a running limit change replaces control only:\n%s", joined)
 	}
 }
 
@@ -331,7 +383,7 @@ func TestUninstallRemovesOnlyWhatExistsAndSaysWhatItRemoved(t *testing.T) {
 	s.On("podman image exists", engine.Result{ExitCode: 1})
 	s.On("podman volume exists", engine.Result{})
 	var out bytes.Buffer
-	if _, err := instance.Uninstall(context.Background(), engine.NewPodman(s), img, false, &out); err != nil {
+	if _, err := instance.Uninstall(context.Background(), engine.NewPodman(s), []string{img}, false, &out); err != nil {
 		t.Fatal(err)
 	}
 	c := strings.Join(s.Calls, "\n")
@@ -350,7 +402,7 @@ func TestUninstallRemovesOnlyWhatExistsAndSaysWhatItRemoved(t *testing.T) {
 func TestUninstallRefusesWhenTheEngineCannotBeAsked(t *testing.T) {
 	s := engine.NewScripted()
 	s.On("podman version", engine.Result{Stderr: "Cannot connect to Podman", ExitCode: 125})
-	_, err := instance.Uninstall(context.Background(), engine.NewPodman(s), img, true, &bytes.Buffer{})
+	_, err := instance.Uninstall(context.Background(), engine.NewPodman(s), []string{img}, true, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "Cannot connect") {
 		t.Errorf("err %v", err)
 	}
@@ -484,8 +536,8 @@ func TestASlowStartShowsItsProgressInPlaceOfTheLogsCommand(t *testing.T) {
 			t.Errorf("%q should not be shown:\n%s", noise, o)
 		}
 	}
-	if !strings.HasSuffix(strings.TrimSpace(o), "Yawble is up at http://127.0.0.1:8080") {
-		t.Errorf("the last line is the URL:\n%s", o)
+	if up := strings.Index(o, "Yawble is up at http://127.0.0.1:8080"); up < strings.Index(o, "claude is installed") || strings.Contains(o[up:], "  ") {
+		t.Errorf("control's progress ends with the URL:\n%s", o)
 	}
 }
 

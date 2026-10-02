@@ -16,10 +16,10 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/engine"
 )
 
-const repoTar = " exec yawble tar -C /data/repos -cf - -- "
+const repoTar = " exec -e HARNESS_WORKER_KEY= yawble tar -C /data/repos -cf - -- "
 
 func repoListCall(program string) string {
-	return program + " exec yawble sh -c " + cli.RepoListScript + " sh /data/repos"
+	return program + " exec -e HARNESS_WORKER_KEY= yawble sh -c " + cli.RepoListScript + " sh /data/repos"
 }
 
 // repoScript is a running instance on program whose repos root lists listing.

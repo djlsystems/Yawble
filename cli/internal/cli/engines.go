@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -200,39 +201,80 @@ func dockerMachine(ctx context.Context, r engine.Runner, goos string) instance.M
 }
 
 // noteRestart says what `up` is about to stop when it replaces a RUNNING container whose settings
-// changed (a new secret, image or limit). It does not ask: running `up` is the instruction, and a
-// question would refuse scripts and count a person's own Concierge session as a reason to wait. With no agent process running it says nothing.
+// changed (a new secret, image or limit): control, a worker, or on Docker every worker with
+// control, since they share its network. It does not ask: running `up` is the instruction, and a
+// question would refuse scripts and count a person's own Concierge session as a reason to wait.
+// With no agent process running in them it says nothing.
 func noteRestart(ctx context.Context, e engine.Engine, s instance.Settings, out io.Writer) {
-	info, err := e.Inspect(ctx, instance.ContainerName)
-	if err != nil || info.State != engine.StateRunning {
+	var replaced, reasons, listed []string
+	allWorkers := false
+	if info, err := e.Inspect(ctx, instance.ContainerName); err == nil && info.State == engine.StateRunning {
+		if changes := instance.Changes(info.Label, s); len(changes) > 0 {
+			replaced, reasons, listed = append(replaced, instance.ContainerName), append(reasons, changes...), append(listed, instance.ContainerName)
+			allWorkers = e.Name() == "docker"
+		}
+	}
+	ref, refErr := s.WorkerRef()
+	indices, _ := instance.WorkerContainers(ctx, e)
+	for _, i := range indices {
+		name := instance.WorkerName(i)
+		info, err := e.Inspect(ctx, name)
+		if err != nil || info.State != engine.StateRunning || i > s.Workers || refErr != nil {
+			continue
+		}
+		changes := instance.WorkerChanges(info.Label, s, i, ref)
+		if len(changes) > 0 || allWorkers {
+			replaced, listed = append(replaced, name), append(listed, name)
+			for _, c := range changes {
+				if !slices.Contains(reasons, c) {
+					reasons = append(reasons, c)
+				}
+			}
+		}
+	}
+	if len(replaced) == 0 {
 		return
 	}
-	changes := instance.Changes(info.Label, s)
-	if len(changes) == 0 {
-		return
-	}
-	stopped := agentProcesses(listAgentProcesses(ctx, e))
+	stopped := agentProcesses(listAgentProcessesIn(ctx, e, listed))
 	if len(stopped) == 0 {
 		return
 	}
-	fmt.Fprintf(out, "restarting %s (%s): this stops %s\n", instance.ContainerName, strings.Join(changes, ", "), strings.Join(stopped, ", "))
+	fmt.Fprintf(out, "restarting %s (%s): this stops %s\n", strings.Join(replaced, ", "), strings.Join(reasons, ", "), strings.Join(stopped, ", "))
 }
 
 // processListing prints one line per process: pid, working folder, command line, tab-separated.
 // The same listing scripts/release-functions.ps1 reads.
 const processListing = `for p in /proc/[0-9]*; do a=$(tr "\000" " " < "$p/cmdline" 2>/dev/null); [ -n "$a" ] || continue; printf "%s\t%s\t%s\n" "${p#/proc/}" "$(readlink "$p/cwd" 2>/dev/null)" "$a"; done`
 
-// listAgentProcesses runs processListing AS THE AGENT USER: root in the container cannot read the
-// working folder of another user's process (measured: empty), and the folder is what names a run.
-// An image without that user falls back to root, and the runs are then named without a folder.
+// listAgentProcesses lists the agent processes in control and in every running worker: agents
+// run on workers, and in control only on an instance from before the split.
 func listAgentProcesses(ctx context.Context, e engine.Engine) string {
-	if res, err := e.Exec(ctx, instance.ContainerName, "runuser", "-u", "agent", "--", "sh", "-c", processListing); err == nil && res.ExitCode == 0 {
-		return res.Stdout
+	names := []string{instance.ContainerName}
+	indices, _ := instance.WorkerContainers(ctx, e)
+	for _, i := range indices {
+		if state, err := e.ContainerState(ctx, instance.WorkerName(i)); err == nil && state == engine.StateRunning {
+			names = append(names, instance.WorkerName(i))
+		}
 	}
-	if res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", processListing); err == nil {
-		return res.Stdout
+	return listAgentProcessesIn(ctx, e, names)
+}
+
+// listAgentProcessesIn runs processListing in each container AS THE AGENT USER: root in the
+// container cannot read the working folder of another user's process (measured: empty), and the
+// folder is what names a run. An image without that user falls back to root, and the runs are
+// then named without a folder.
+func listAgentProcessesIn(ctx context.Context, e engine.Engine, names []string) string {
+	var all strings.Builder
+	for _, name := range names {
+		if res, err := e.Exec(ctx, name, "runuser", "-u", "agent", "--", "sh", "-c", processListing); err == nil && res.ExitCode == 0 {
+			all.WriteString(res.Stdout)
+			continue
+		}
+		if res, err := e.Exec(ctx, name, "sh", "-c", processListing); err == nil {
+			all.WriteString(res.Stdout)
+		}
 	}
-	return ""
+	return all.String()
 }
 
 var agentCLIs = map[string]bool{"claude": true, "codex": true, "copilot": true, "grok": true, "gemini": true}

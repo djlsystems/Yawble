@@ -34,14 +34,14 @@ func TestFirstUpRefusalOnAPodmanMachineSaysHowToGiveTheMachineMore(t *testing.T)
 	s.On("podman machine inspect", engine.Result{Stdout: "podman-machine-default|running|false|8192|4\n"})
 	out := refusalsOf(t, s, "darwin", "podman", "9000\n\n6\n\n")
 	for _, want := range []string{
-		"refused: 9000 MB is more than the engine has; the most is 8192 MB. " + podmanMachineMore + "\n",
+		"refused: 9000 MB is more than the engine has beside control's 1536 MB; the most is 6656 MB. " + podmanMachineMore + "\n",
 		"refused: 6 CPUs is more than the engine has; the most is 4. " + podmanMachineMore + "\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("out lacks %q:\n%s", want, out)
 		}
 	}
-	if n := strings.Count(out, "Memory in MB (4096 to 8192)"); n != 2 {
+	if n := strings.Count(out, "Memory in MB (4096 to 6656)"); n != 2 {
 		t.Errorf("memory asked %d times after a refusal, want 2:\n%s", n, out)
 	}
 }
@@ -54,7 +54,7 @@ func TestFirstUpRefusalOnDockerDesktopPointsAtItsResourcesSettings(t *testing.T)
 		s.On("docker image inspect", engine.Result{})
 		out := refusalsOf(t, s, goos, "docker", "20000\n\n12\n\n")
 		for _, want := range []string{
-			"refused: 20000 MB is more than the engine has; the most is 12288 MB. " + dockerDesktopMore + "\n",
+			"refused: 20000 MB is more than the engine has beside control's 1536 MB; the most is 10752 MB. " + dockerDesktopMore + "\n",
 			"refused: 12 CPUs is more than the engine has; the most is 10. " + dockerDesktopMore + "\n",
 		} {
 			if !strings.Contains(out, want) {
@@ -71,7 +71,7 @@ func TestFirstUpRefusalOnLinuxSaysThereIsNothingToEnlarge(t *testing.T) {
 	s.On("docker image inspect", engine.Result{})
 	out := refusalsOf(t, s, "linux", "docker", "20000\n\n12\n\n")
 	for _, want := range []string{
-		"refused: 20000 MB is more than the engine has; the most is 12288 MB. " + linuxMore + "\n",
+		"refused: 20000 MB is more than the engine has beside control's 1536 MB; the most is 10752 MB. " + linuxMore + "\n",
 		"refused: 12 CPUs is more than the engine has; the most is 10. " + linuxMore + "\n",
 	} {
 		if !strings.Contains(out, want) {
@@ -85,7 +85,7 @@ func TestDoctorSaysHowToGiveTheEngineMoreWhenASavedValueIsOverIt(t *testing.T) {
 	s.On("docker version", engine.Result{Stdout: "29.8.0\n"})
 	s.On("docker info", engine.Result{Stdout: "12884901888|10|Docker Desktop\n"})
 	s.On("docker container inspect", engine.Result{Stdout: "running|" + testImage + "|\n"})
-	s.On("docker exec yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: withWip(`{"mechanism":"none","perRunMb":null,"detail":"not set"}`)})
+	s.On("docker exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: withWip(`{"mechanism":"none","perRunMb":null,"detail":"not set"}`)})
 	deps := stubbed(s)
 	deps.GOOS, deps.LookPath = "darwin", lookPath("docker")
 	deps.ConfigDir = t.TempDir()

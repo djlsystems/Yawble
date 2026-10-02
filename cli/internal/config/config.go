@@ -24,13 +24,17 @@ type Config struct {
 	CPUs       int    `toml:"cpus" json:"cpus"`
 	MaxRunning int    `toml:"maxRunning" json:"maxRunning"`
 	Image      string `toml:"image" json:"image"`
+	// Workers is how many worker containers run beside control; 0 is not chosen, which is 1.
+	Workers int `toml:"workers,omitempty" json:"workers"`
+	// WorkerImage overrides the worker image, which is otherwise derived from Image.
+	WorkerImage string `toml:"workerImage,omitempty" json:"workerImage"`
 	// GitHubAsked records that the first `up` asked whether teams will use GitHub, so it asks
 	// once. Not a `config set` key: `yawble github` asks again whenever a person wants.
 	GitHubAsked bool `toml:"githubAsked,omitempty" json:"-"`
 }
 
 // Keys are the names `config get` and `config set` accept, in the order they are listed.
-var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image"}
+var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image", "workers", "workerImage"}
 
 const FileName = "config.toml"
 
@@ -44,12 +48,22 @@ func Path(dir string) string { return filepath.Join(dir, FileName) }
 func EnvFile(dir string) string { return filepath.Join(dir, "env") }
 
 var envNames = map[string]string{
-	"engine":     "YAWBLE_ENGINE",
-	"port":       "YAWBLE_PORT",
-	"memory":     "YAWBLE_MEMORY",
-	"cpus":       "YAWBLE_CPUS",
-	"maxRunning": "YAWBLE_MAX_RUNNING",
-	"image":      "YAWBLE_IMAGE",
+	"engine":      "YAWBLE_ENGINE",
+	"port":        "YAWBLE_PORT",
+	"memory":      "YAWBLE_MEMORY",
+	"cpus":        "YAWBLE_CPUS",
+	"maxRunning":  "YAWBLE_MAX_RUNNING",
+	"image":       "YAWBLE_IMAGE",
+	"workers":     "YAWBLE_WORKERS",
+	"workerImage": "YAWBLE_WORKER_IMAGE",
+}
+
+// WorkerCount is the number of workers the config asks for: 1 when none was chosen.
+func (c Config) WorkerCount() int {
+	if c.Workers < 1 {
+		return 1
+	}
+	return c.Workers
 }
 
 // Load reads the file if it exists, then applies YAWBLE_* overrides. A missing file is the zero
@@ -125,6 +139,10 @@ func (c Config) Get(key string) (string, error) {
 		return strconv.Itoa(c.MaxRunning), nil
 	case "image":
 		return c.Image, nil
+	case "workers":
+		return strconv.Itoa(c.WorkerCount()), nil
+	case "workerImage":
+		return c.WorkerImage, nil
 	}
 	return "", unknownKey(key)
 }
@@ -151,7 +169,7 @@ func (c *Config) Set(key, value string) error {
 		c.Port = n
 	case "memory":
 		if value != "" && !memoryShape.MatchString(value) {
-			return fmt.Errorf("memory must be a size like 8g or 12g (podman's --memory syntax), not %q", value)
+			return fmt.Errorf("memory must be a size like 8g or 12g (podman's --memory syntax), each worker's, not %q", value)
 		}
 		c.Memory = value
 	case "cpus":
@@ -171,6 +189,17 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("image must be one reference like ghcr.io/djlsystems/yawble:2026.09.24.1, not %q", value)
 		}
 		c.Image = value
+	case "workers":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			return fmt.Errorf("workers must be a whole number, 1 or more, not %q", value)
+		}
+		c.Workers = n
+	case "workerImage":
+		if strings.ContainsAny(value, " \t") {
+			return fmt.Errorf("workerImage must be one reference like ghcr.io/djlsystems/yawble:2026.09.24.1-worker, not %q", value)
+		}
+		c.WorkerImage = value
 	default:
 		return unknownKey(key)
 	}
@@ -187,6 +216,10 @@ func (c *Config) validate() error {
 		{"cpus", strconv.Itoa(c.CPUs)},
 		{"maxRunning", strconv.Itoa(c.MaxRunning)},
 		{"image", c.Image},
+		{"workerImage", c.WorkerImage},
+	}
+	if c.Workers != 0 {
+		checks = append(checks, struct{ key, value string }{"workers", strconv.Itoa(c.Workers)})
 	}
 	if c.Port != 0 {
 		checks = append(checks, struct{ key, value string }{"port", strconv.Itoa(c.Port)})

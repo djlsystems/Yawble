@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/djlsystems/yawble/cli/internal/buildinfo"
 	"github.com/djlsystems/yawble/cli/internal/config"
+	"github.com/djlsystems/yawble/cli/internal/doctor"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/instance"
 	"github.com/djlsystems/yawble/cli/internal/machine"
@@ -58,7 +60,28 @@ func settingsFor(deps Deps, c config.Config, m instance.Machine) (instance.Setti
 	if hash != "" {
 		s.EnvFile, s.EnvFileHash = envFile, hash
 	}
+	keyHash, err := config.WorkerKeyHash(deps.ConfigDir)
+	if err != nil {
+		return s, nil, err
+	}
+	if keyHash != "" {
+		s.KeyFile, s.KeyHash = config.WorkerKeyFile(deps.ConfigDir), keyHash
+	}
 	return s, notes, nil
+}
+
+// withWorkerKey makes the worker key when there is none yet, once, and puts it in the settings:
+// what every verb that runs a container does first. A key already made is kept.
+func withWorkerKey(deps Deps, s instance.Settings, out io.Writer) (instance.Settings, error) {
+	hash, made, err := config.EnsureWorkerKey(deps.ConfigDir)
+	if err != nil {
+		return s, fmt.Errorf("making the worker key in %s: %w", config.WorkerKeyFile(deps.ConfigDir), err)
+	}
+	if made {
+		fmt.Fprintf(out, "made the key control and the workers share (%s, readable by you alone)\n", config.WorkerKeyFile(deps.ConfigDir))
+	}
+	s.KeyFile, s.KeyHash = config.WorkerKeyFile(deps.ConfigDir), hash
+	return s, nil
 }
 
 // measure is what the container's default limits come from: what the engine has, asked of it
@@ -160,6 +183,9 @@ func newUpCommand(deps Deps) *cobra.Command {
 			if fresh {
 				noteReusedVolume(cmd.Context(), deps, e, cmd.OutOrStdout())
 			}
+			if s, err = withWorkerKey(deps, s, cmd.OutOrStdout()); err != nil {
+				return err
+			}
 			noteRestart(cmd.Context(), e, s, cmd.OutOrStdout())
 			if err := instance.Up(cmd.Context(), e, s, healthChecker(deps.HTTP), cmd.OutOrStdout()); err != nil {
 				return err
@@ -214,7 +240,7 @@ func newStatusCommand(deps Deps) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:     "status",
-		Short:   "Whether the instance runs, its URL, engine, image and the engine's stats of it",
+		Short:   "Whether control and each worker run, the URL, engine, image, the engine's stats and control's record of each worker",
 		Example: "  yawble status\n  yawble status --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -226,11 +252,12 @@ func newStatusCommand(deps Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stats, statsErr := containerStats(cmd.Context(), e, st.Container)
+			stats, statsErr := containerStats(cmd.Context(), e, instance.ContainerName, st.Container)
+			workers := workersOf(cmd.Context(), e, st)
 			if asJSON {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				return enc.Encode(statusJSON{Status: st, Stats: stats, StatsError: errText(statsErr)})
+				return enc.Encode(statusJSON{Status: st, Stats: stats, StatsError: errText(statsErr), Workers: workers})
 			}
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "container  %s\n", st.Container)
@@ -252,6 +279,12 @@ func newStatusCommand(deps Deps) *cobra.Command {
 			if len(st.Pending) > 0 {
 				fmt.Fprintf(w, "pending    %v (yawble up applies them)\n", st.Pending)
 			}
+			for _, wk := range workers {
+				fmt.Fprintf(w, "%-10s %s\n", wk.ID, workerLine(wk.WorkerStatus, wk.record))
+				if wk.Container == engine.StateRunning {
+					fmt.Fprintf(w, "%-10s %s\n", "", statsLine(e, wk.Stats, errorOf(wk.StatsError)))
+				}
+			}
 			return nil
 		},
 	}
@@ -265,15 +298,51 @@ type statusJSON struct {
 	instance.Status
 	Stats      *engine.Stats `json:"stats"`
 	StatsError string        `json:"statsError,omitempty"`
+	// Workers is each worker container with the engine's stats of it and control's record.
+	Workers []workerJSON `json:"workers"`
 }
 
-// containerStats asks the engine for the container's stats only when it runs: a stopped
+// workerJSON is one worker in the status document: the engine's view, its stats, and what control
+// recorded of it (null when control is not running or has no record of it).
+type workerJSON struct {
+	instance.WorkerStatus
+	Stats      *engine.Stats        `json:"stats"`
+	StatsError string               `json:"statsError,omitempty"`
+	Control    *doctor.WorkerRecord `json:"control"`
+	record     *doctor.WorkersRecord
+}
+
+// workersOf adds to each worker the engine's stats and control's record of it. Control's record
+// is asked only when control runs.
+func workersOf(ctx context.Context, e engine.Engine, st instance.Status) []workerJSON {
+	var record *doctor.WorkersRecord
+	if st.Container == engine.StateRunning {
+		if r, err := doctor.FetchHostReport(ctx, e, true); err == nil {
+			record = r.Workers
+		}
+	}
+	out := make([]workerJSON, 0, len(st.Workers))
+	for _, w := range st.Workers {
+		stats, err := containerStats(ctx, e, w.Name, w.Container)
+		out = append(out, workerJSON{WorkerStatus: w, Stats: stats, StatsError: errText(err), Control: record.Worker(w.ID), record: record})
+	}
+	return out
+}
+
+func errorOf(text string) error {
+	if text == "" {
+		return nil
+	}
+	return errors.New(text)
+}
+
+// containerStats asks the engine for a container's stats only when it runs: a stopped
 // container has none, and that is said, not asked.
-func containerStats(ctx context.Context, e engine.Engine, state engine.State) (*engine.Stats, error) {
+func containerStats(ctx context.Context, e engine.Engine, name string, state engine.State) (*engine.Stats, error) {
 	if state != engine.StateRunning {
 		return nil, nil
 	}
-	st, err := e.Stats(ctx, instance.ContainerName)
+	st, err := e.Stats(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -305,16 +374,24 @@ func newLogsCommand(deps Deps) *cobra.Command {
 	var follow bool
 	var tail int
 	cmd := &cobra.Command{
-		Use:     "logs",
-		Short:   "The instance's log",
-		Example: "  yawble logs\n  yawble logs -f",
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use:     "logs [control|worker-<n>|<n>]",
+		Short:   "Control's log, or a worker's",
+		Example: "  yawble logs\n  yawble logs -f\n  yawble logs worker-2 --tail 50\n  yawble logs 2",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			which := ""
+			if len(args) == 1 {
+				which = args[0]
+			}
+			name, err := instance.LogTarget(which)
+			if err != nil {
+				return UsageError{err.Error()}
+			}
 			e, _, _, err := prepare(deps)
 			if err != nil {
 				return err
 			}
-			return instance.Logs(cmd.Context(), e, follow, tail, cmd.OutOrStdout())
+			return instance.Logs(cmd.Context(), e, name, follow, tail, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep printing new lines")
@@ -393,5 +470,30 @@ func upReady(cmd *cobra.Command, deps Deps, yes, size bool) (engine.Engine, inst
 	for _, n := range notes {
 		fmt.Fprintln(cmd.ErrOrStderr(), "note:", n)
 	}
+	if err := checkBound(m, s, cmd.ErrOrStderr()); err != nil {
+		return nil, instance.Settings{}, err
+	}
 	return engineOf(deps, c), s, nil
+}
+
+// checkBound applies the one bound on how many workers the engine holds. Two or more workers whose
+// memory with control's does not fit are refused; a single worker is only warned about, so an
+// instance sized to the whole engine before control and workers still comes up. CPUs only warn,
+// and only for two or more workers: one worker's CPUs beside control's idle share is the layout
+// every instance has.
+func checkBound(m instance.Machine, s instance.Settings, errOut io.Writer) error {
+	if !m.Measured {
+		return nil
+	}
+	cpus, refusal := instance.Bound(m.MemoryMB(), m.CPUs, s.Workers, instance.MemoryMB(s.Memory), s.CPUs)
+	if refusal != nil {
+		if s.Workers >= 2 {
+			return fmt.Errorf("%w (%s); nothing was started", refusal, m.Source)
+		}
+		fmt.Fprintln(errOut, "warning:", refusal.Error())
+	}
+	if cpus != "" && s.Workers >= 2 {
+		fmt.Fprintln(errOut, "warning:", cpus)
+	}
+	return nil
 }

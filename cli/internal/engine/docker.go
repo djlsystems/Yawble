@@ -122,7 +122,33 @@ func (d docker) Remove(ctx context.Context, name string) error {
 }
 
 func (d docker) Exec(ctx context.Context, name string, args ...string) (Result, error) {
-	return d.run(ctx, append([]string{"exec", name}, args...)...)
+	return d.run(ctx, execArgs(nil, name, args)...)
+}
+
+// List is `docker ps -a --filter <filter> --format {{.Names}}`.
+func (d docker) List(ctx context.Context, filter string) ([]string, error) {
+	return list(ctx, d.run, filter)
+}
+
+// Health reads `.State.Health`, which Docker leaves nil for an image with no HEALTHCHECK: the
+// guard keeps that from being a template error. A missing container is none.
+func (d docker) Health(ctx context.Context, name string) (Health, error) {
+	res, err := d.r.Run(ctx, "docker", "container", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{end}}", name)
+	if err != nil {
+		return HealthNone, &NotRunnable{Err: err}
+	}
+	if res.ExitCode != 0 {
+		if missing(res.Stderr) {
+			return HealthNone, nil
+		}
+		return HealthNone, fmt.Errorf("docker container inspect %s: %s (exit %d)", name, strings.TrimSpace(res.Stderr), res.ExitCode)
+	}
+	return healthOf(res.Stdout), nil
+}
+
+func (d docker) StopWithin(ctx context.Context, name string, grace int) error {
+	_, err := d.run(ctx, "stop", "-t", strconv.Itoa(grace), name)
+	return err
 }
 
 func (d docker) ExecTo(ctx context.Context, name string, stdout io.Writer, args ...string) (Result, error) {
@@ -138,33 +164,18 @@ func (d docker) CopyTo(ctx context.Context, name, src, dst string) error {
 	return err
 }
 
+// Run joins the pod's network, or with Network another container's namespace; a container that
+// joins one publishes nothing (Docker refuses -p there), the namespace's owner does.
 func (d docker) Run(ctx context.Context, s RunSpec) error {
-	args := []string{"run", "-d", "--name", s.Name, "--network", s.Pod}
-	if s.HostPort > 0 && s.ContainerPort > 0 {
+	network := s.Pod
+	if s.Network != "" {
+		network = s.Network
+	}
+	args := []string{"run", "-d", "--name", s.Name, "--network", network}
+	if s.HostPort > 0 && s.ContainerPort > 0 && !strings.HasPrefix(network, "container:") {
 		args = append(args, "-p", fmt.Sprintf("0.0.0.0:%d:%d", s.HostPort, s.ContainerPort))
 	}
-	args = append(args, "--restart", "unless-stopped")
-	if s.Memory != "" {
-		args = append(args, "--memory", s.Memory)
-	}
-	if s.CPUs > 0 {
-		args = append(args, "--cpus", strconv.Itoa(s.CPUs))
-	}
-	for _, k := range sortedKeys(s.Env) {
-		args = append(args, "-e", k+"="+s.Env[k])
-	}
-	for _, k := range sortedKeys(s.Labels) {
-		args = append(args, "--label", k+"="+s.Labels[k])
-	}
-	if s.EnvFile != "" {
-		args = append(args, "--env-file", s.EnvFile)
-	}
-	for _, v := range s.Volumes {
-		args = append(args, "-v", v)
-	}
-	args = append(args, s.Image)
-	args = append(args, s.Command...)
-	_, err := d.run(ctx, args...)
+	_, err := d.run(ctx, append(args, runArgs(s)...)...)
 	return err
 }
 
