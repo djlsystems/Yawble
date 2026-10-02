@@ -64,7 +64,10 @@ public sealed class WorkerConnections
     /// <summary>Raised when a worker joins or goes, after the pool and the ledger have heard.</summary>
     public event Action? Changed;
 
-    /// <summary>Raised when a worker joins as a new session - not when one comes back on its own - after <see cref="Changed"/>.</summary>
+    /// <summary>
+    /// Raised when a worker joins as a new session - not when one comes back on its own - after
+    /// <see cref="Changed"/>, once its connection can be sent to.
+    /// </summary>
     public event Action<WorkerId>? Joined;
 
     /// <summary>The workers connected or dropped and within their grace.</summary>
@@ -191,13 +194,16 @@ public sealed class WorkerConnections
         _log?.LogInformation("Worker {Worker} {How} (version {Version}, session {Session}).", remote.Id, back ? "is back" : "connected", hello.Version, hello.Session);
         _wip.WorkersChanged();
         Changed?.Invoke();
-        if (!back) Joined?.Invoke(remote.Id);
 
         await StopStaleAsync(remote, hello.OpenRuns);
-        await RunToEndAsync(remote, socket, ct);
+
+        // Joined only once the socket is the worker's: a handler that asks the worker something at once
+        // (the start's CLI update, the removal retry) would otherwise be refused as not connected.
+        await RunToEndAsync(remote, socket, ct, back ? null : () => Joined?.Invoke(remote.Id));
     }
 
-    private static Task RunToEndAsync(RemoteWorker remote, WorkerSocket socket, CancellationToken ct) => remote.RunAsync(socket, ct);
+    private static Task RunToEndAsync(RemoteWorker remote, WorkerSocket socket, CancellationToken ct, Action? attached = null) =>
+        remote.RunAsync(socket, ct, attached);
 
     /// <summary>Every run the worker still holds that control no longer has open is stopped, and said.</summary>
     private async Task StopStaleAsync(RemoteWorker remote, IReadOnlyList<RunId> held)

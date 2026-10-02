@@ -604,7 +604,10 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Equal(systemBefore, File.Exists("/etc/gitconfig") ? File.ReadAllText("/etc/gitconfig") : null);
     }
 
-    /// <summary>A script run from these tests sees only what the test passes, not the runner's environment.</summary>
+    /// <summary>
+    /// A script run from these tests sees only what the test passes, not the runner's environment - and the
+    /// suite's guard against a real agent CLI update (the update stubs on PATH, npm's scratch prefix).
+    /// </summary>
     [Fact]
     public void A_script_run_by_these_tests_sees_only_the_environment_it_is_given()
     {
@@ -615,7 +618,7 @@ public sealed class PrepareVolumeTests : IDisposable
         {
             var names = Exec("/usr/bin/env", [], new Dictionary<string, string> { ["GIVEN"] = "y" }).Output
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.Split('=')[0]).Order().ToArray();
-            Assert.Equal(["GIVEN", "PATH"], names);
+            Assert.Equal(new[] { "GIVEN", "PATH" }.Concat(AgentCliIsolation.NpmPrefixVariables).Order(), names);
         }
         finally
         {
@@ -1257,6 +1260,7 @@ public sealed class PrepareVolumeTests : IDisposable
         start.Environment.Clear();
         start.Environment["PATH"] = SystemPath;
         foreach (var (key, value) in environment ?? []) start.Environment[key] = value;
+        AgentCliIsolation.Guard(start.Environment);
 
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync();

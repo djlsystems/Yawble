@@ -281,11 +281,19 @@ internal sealed class ProcessBed : IAsyncDisposable
         start.Environment.Remove("HARNESS_DATA_ROOT");
         start.Environment.Remove("DataRoot");
         start.Environment.Remove(HostRoles.Variable);
+
+        // Which image the suite runs in is not the bed's: a control that asks for the CLIs' update when
+        // a worker joins is one a test asks for by name.
+        start.Environment.Remove("HARNESS_IMAGE");
         foreach (var (key, value) in environment)
         {
             if (value is null) start.Environment.Remove(key);
             else start.Environment[key] = value;
         }
+
+        // Last, over whatever the test gave: no process of the bed, nor any child of it, runs a real
+        // agent CLI update or writes the instance's npm prefix.
+        AgentCliIsolation.Guard(start.Environment);
 
         var host = new HostProcess(name, start);
         _hosts.Add(host);

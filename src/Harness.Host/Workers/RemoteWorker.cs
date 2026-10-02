@@ -239,8 +239,10 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
     /// <summary>
     /// Runs the connection on <paramref name="socket"/> until it ends: what was kept while the worker
     /// was dropped is said again, the keep-alive starts, and the worker's frames are read.
+    /// <paramref name="attached"/> is called once the socket is this worker's, so what it asks of the
+    /// worker is sent rather than refused as not connected.
     /// </summary>
-    public async Task RunAsync(WorkerSocket socket, CancellationToken ct)
+    public async Task RunAsync(WorkerSocket socket, CancellationToken ct, Action? attached = null)
     {
         int generation;
         List<ControlMessage> again;
@@ -259,6 +261,7 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
         }
 
         foreach (var message in again) _ = SayAgainAsync(message);
+        attached?.Invoke();
 
         var events = Channel.CreateUnbounded<WorkerEnvelope>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var handling = Task.Run(() => HandleAsync(events.Reader, socket), CancellationToken.None);
