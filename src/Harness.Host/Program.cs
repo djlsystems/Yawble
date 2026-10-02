@@ -1596,10 +1596,23 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentLaunchChecks>
 
 // THE PRE-FLIGHT: what each preset's CLI would load, listed by the CLI itself as the agent user,
 // once the Host is serving and again after every catalog save. Never on the start path.
-builder.Services.AddSingleton<IListingRunner>(sp => new CliListingRunner(sp.GetRequiredService<AgentLaunchUser>()));
-builder.Services.AddSingleton(sp => new AgentToolPreflight(
-    sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<IListingRunner>(), dataRoot,
-    sp.GetRequiredService<ILogger<AgentToolPreflight>>()));
+builder.Services.AddSingleton<IListingRunner>(sp => new CliListingRunner(
+    sp.GetRequiredService<AgentLaunchUser>(), sp.GetRequiredService<MemberTempRoot>().Path));
+builder.Services.AddSingleton(sp =>
+{
+    var preflight = new AgentToolPreflight(
+        sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<IListingRunner>(), dataRoot,
+        sp.GetRequiredService<ILogger<AgentToolPreflight>>(), sp.GetRequiredService<IRunCredentials>());
+
+    // Listed again when a preset's source (through any settings write) or its command's credential
+    // changes, as after a catalog save.
+    tenantSettings.Changed += name =>
+    {
+        if (name == TenantSettings.AgentCredentialSourceName) preflight.Refresh();
+    };
+    sp.GetRequiredService<AgentCredentials>().Changed += preflight.Refresh;
+    return preflight;
+});
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentToolPreflight>());
 builder.Services.AddMcpServer()
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)

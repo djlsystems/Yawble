@@ -575,6 +575,15 @@ public sealed partial class ProcessAgentRunner(
         // An issued run's own HOME, removed in the finally below whatever happens.
         string? runHome = null;
 
+        // The transcript this run wrote. An issued run's lives in its own HOME, which the finally
+        // below removes, so it is moved beside the homes first and the terminal row names the copy
+        // that outlives it.
+        async Task<AgentTranscript?> KeptTranscriptAsync()
+        {
+            var transcript = await watchable!.TranscriptAsync();
+            return runHome is null ? transcript : await RunHome.KeepTranscriptAsync(transcript, runHome, memberTemp!, runAs);
+        }
+
         try
         {
             // Everything written for this child is handed to its group just before it
@@ -689,7 +698,7 @@ public sealed partial class ProcessAgentRunner(
             }
 
             // What it did before it was killed is still in its own transcript.
-            var killedTranscript = await watchable!.TranscriptAsync();
+            var killedTranscript = await KeptTranscriptAsync();
 
             // WHICH clock ran out, in the words a reader can act on. A timeout is a setting on
             // this Agent; a stop is the Host going down and the run being reported as failed at
@@ -835,7 +844,7 @@ public sealed partial class ProcessAgentRunner(
 
                 // Recorded on the run's terminal row; read by nothing above, so usage and
                 // output are the same whether or not there is one.
-                AgentTranscript: await watchable!.TranscriptAsync());
+                AgentTranscript: await KeptTranscriptAsync());
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1455,26 +1464,8 @@ public sealed partial class ProcessAgentRunner(
         }
 
         // AN ISSUED CREDENTIAL, after the preset's and the team's env as update-off is, so neither
-        // can outrank it: every variable the CLI would read for authentication, or that points it at
-        // a home, is REMOVED (whoever set it), then the issued one is set. Another command's declared
-        // variables go too unless the preset's or the team's env handed them in - the rule
-        // ScopeProviderKeys holds for every provider key.
-        var handedIn = environment;
-        if (credential is { Source: CredentialSource.Issued })
-        {
-            foreach (var name in credential.Displace) start.Environment.Remove(name);
-
-            foreach (var name in credential.OtherProviders)
-            {
-                if (!environment.ContainsKey(name)) start.Environment.Remove(name);
-            }
-
-            foreach (var (name, value) in credential.Environment) start.Environment[name] = value;
-
-            var merged = new Dictionary<string, string>(environment, StringComparer.Ordinal);
-            foreach (var (name, value) in credential.Environment) merged[name] = value;
-            handedIn = merged;
-        }
+        // can outrank it. See AgentEnvironment.ApplyIssued; the tool listing applies the same.
+        var handedIn = AgentEnvironment.ApplyIssued(start.Environment, credential, environment);
 
         // REMOVED, NOT CLEARED, AND THE ORDER MATTERS: after the merge above, so a caller
         // cannot reintroduce one of these by handing it in.

@@ -55,7 +55,7 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
     /// <summary>A fake CLI called <paramref name="command"/>, the presets that launch it, and the
     /// runner and store a run of them goes through.</summary>
     private async Task<(ProcessAgentRunner Runner, AgentCredentialStore Store, IRunCredentials Credentials)> SetUpAsync(
-        string command = "claude", IssuedCredential? declaration = null, int exitCode = 0)
+        string command = "claude", IssuedCredential? declaration = null, int exitCode = 0, AgentLiveView? liveView = null)
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "The fake CLI is a shell script and the login a FIFO.");
 
@@ -68,6 +68,9 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
             + $"}} > '{Seen}'\n"
             // A CLI reads its login from its home. In the shared home that is a FIFO nobody writes.
             + "if [ -e \"$HOME/.claude/.credentials.json\" ]; then cat \"$HOME/.claude/.credentials.json\" > /dev/null; fi\n"
+            // A transcript in its home, where a session id names it; a plugin listing that lists none.
+            + "if [ \"$3\" = --session-id ]; then mkdir -p \"$HOME/t\"; echo '{\"type\":\"user\"}' > \"$HOME/t/$4.jsonl\"; fi\n"
+            + "if [ \"$1\" = plugin ]; then echo '[]'; fi\n"
             + $"exit {exitCode}\n");
 
         Directory.CreateDirectory(Path.Combine(SharedHome, ".claude"));
@@ -77,8 +80,10 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
         var catalog = new AgentCatalog(
         [
             new AgentDefinition("fake-headless", AgentMode.Headless,
-                new AgentLaunch(program, ["-p", "{userPrompt}"], LanguageModel: true),
-                IssuedCredential: declaration ?? ClaudeLike),
+                new AgentLaunch(program, liveView is null ? ["-p", "{userPrompt}"] : ["-p", "{userPrompt}", "--session-id", "{sessionId}"],
+                    LanguageModel: true),
+                IssuedCredential: declaration ?? ClaudeLike,
+                LiveView: liveView),
             new AgentDefinition("fake-other", AgentMode.Headless,
                 new AgentLaunch("grok", ["-p", "{userPrompt}"]),
                 IssuedCredential: GrokLike),
@@ -89,8 +94,11 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
         var store = new AgentCredentialStore(database, new EphemeralDataProtectionProvider());
         var credentials = new RunCredentials(catalog, p => _issued.Contains(p) ? CredentialSource.Issued : CredentialSource.Home, store);
 
+        _catalog = catalog;
         return (new ProcessAgentRunner(catalog, new RunHeartbeat(), credentials: credentials), store, credentials);
     }
+
+    private AgentCatalog? _catalog;
 
     private AgentInvocation Invocation(IReadOnlyDictionary<string, string>? extra = null)
     {
@@ -327,6 +335,107 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
         Assert.Equal(Path.Combine(SharedHome, ".claude"), seen["CLAUDE_CONFIG_DIR"]);
         Assert.NotEqual(Path.Combine(seen["TMPDIR"], RunHome.CacheFolder), seen.GetValueOrDefault("XDG_CACHE_HOME"));
         Assert.Empty(Directory.EnumerateDirectories(seen["TMPDIR"], RunHome.Prefix + "*"));
+    }
+
+    [Fact]
+    public async Task An_issued_runs_transcript_is_still_readable_after_the_run_ends_and_its_home_is_removed()
+    {
+        var (runner, store, _) = await SetUpAsync(liveView: new AgentLiveView("~/t/{sessionId}.jsonl", LiveView.ClaudeJsonl));
+        await store.SetAsync("claude", ClaudeLike.Kinds[0], Key, new CredentialActor("u1", "person@example.test"), Ct);
+        _issued.Add("fake-headless");
+
+        var result = await RunAsync(runner, Invocation());
+        Assert.True(result.Succeeded, result.LaunchError);
+
+        var seen = SeenEnvironment();
+        var home = seen["HOME"];
+        Assert.False(Directory.Exists(home), $"{home} is still there after the run.");
+
+        // The terminal row names a copy beside the run homes, outside the removed one, and the
+        // finished-run view reads it as it reads any other.
+        var transcript = Assert.IsType<AgentTranscript>(result.AgentTranscript);
+        Assert.Equal(LiveView.ClaudeJsonl, transcript.Format);
+        Assert.Equal(Path.Combine(seen["TMPDIR"], RunHome.TranscriptsFolder), Path.GetDirectoryName(transcript.Path));
+        Assert.False(transcript.Path.StartsWith(home + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+
+        var read = await AgentFiles.ReadAllAsync(transcript.Path, null, Ct);
+        Assert.Equal("{\"type\":\"user\"}", read.Text?.Trim());
+    }
+
+    [Fact]
+    public async Task A_home_runs_transcript_stays_where_the_cli_wrote_it()
+    {
+        var (runner, _, _) = await SetUpAsync(liveView: new AgentLiveView("~/t/{sessionId}.jsonl", LiveView.ClaudeJsonl));
+        File.Delete(Path.Combine(SharedHome, ".claude", ".credentials.json"));
+        File.WriteAllText(Path.Combine(SharedHome, ".claude", ".credentials.json"), "{}");
+
+        var result = await RunAsync(runner, Invocation());
+        Assert.True(result.Succeeded, result.LaunchError);
+
+        var transcript = Assert.IsType<AgentTranscript>(result.AgentTranscript);
+        Assert.Equal(Path.Combine(SharedHome, "t"), Path.GetDirectoryName(transcript.Path));
+        Assert.True(File.Exists(transcript.Path));
+    }
+
+    [Fact]
+    public async Task The_tool_listing_of_an_issued_preset_runs_with_its_credential_in_a_home_of_its_own_removed_after()
+    {
+        var (_, store, credentials) = await SetUpAsync();
+        await store.SetAsync("claude", ClaudeLike.Kinds[0], Key, new CredentialActor("u1", "person@example.test"), Ct);
+        _issued.Add("fake-headless");
+
+        var homes = Directory.CreateDirectory(Path.Combine(_root, "homes")).FullName;
+
+        // The Host's own environment: the shared home, a key of its own, and another provider's.
+        using (new EnvironmentScope(
+               [
+                   new("HOME", SharedHome), new("ANTHROPIC_API_KEY", HostKey), new("ANTHROPIC_AUTH_TOKEN", "fake-host-token"),
+                   new("CLAUDE_CONFIG_DIR", Path.Combine(SharedHome, ".claude")), new("XAI_API_KEY", "fake-xai-1"),
+               ]))
+        {
+            var reports = await ListedAsync(new CliListingRunner(null, homes), credentials);
+            var report = Assert.Single(reports, r => r.Preset == "fake-headless");
+            Assert.True(report.Verdict != ToolVerdicts.NotMeasured, report.Detail);
+        }
+
+        var seen = SeenEnvironment();
+        Assert.Equal(Key, seen["ANTHROPIC_API_KEY"]);
+        Assert.False(seen.ContainsKey("ANTHROPIC_AUTH_TOKEN"));
+        Assert.False(seen.ContainsKey("CLAUDE_CONFIG_DIR"));
+        Assert.False(seen.ContainsKey("XAI_API_KEY"));
+
+        Assert.StartsWith(homes + Path.DirectorySeparatorChar + RunHome.Prefix, seen["HOME"]);
+        Assert.Empty(SeenHomeListing());
+        Assert.Empty(Directory.EnumerateDirectories(homes, RunHome.Prefix + "*"));
+    }
+
+    [Fact]
+    public async Task The_tool_listing_of_a_home_preset_runs_on_the_hosts_home_as_before()
+    {
+        var (_, store, credentials) = await SetUpAsync();
+        await store.SetAsync("claude", ClaudeLike.Kinds[0], Key, new CredentialActor("u1", "person@example.test"), Ct);
+
+        var plain = Directory.CreateDirectory(Path.Combine(_root, "plain-home")).FullName;
+        var homes = Directory.CreateDirectory(Path.Combine(_root, "homes")).FullName;
+
+        using (new EnvironmentScope([new("HOME", plain), new("ANTHROPIC_API_KEY", HostKey)]))
+        {
+            await ListedAsync(new CliListingRunner(null, homes), credentials);
+        }
+
+        var seen = SeenEnvironment();
+        Assert.Equal(plain, seen["HOME"]);
+        Assert.Equal(HostKey, seen["ANTHROPIC_API_KEY"]);
+        Assert.Empty(Directory.EnumerateDirectories(homes));
+    }
+
+    private async Task<IReadOnlyList<PresetToolReport>> ListedAsync(IListingRunner runner, IRunCredentials credentials)
+    {
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        bounded.CancelAfter(TimeSpan.FromSeconds(60));
+        // The fake CLI's preset only: the other names a real CLI on PATH, which no test runs.
+        return await AgentToolPreflight.ReportsAsync(
+            [.. _catalog!.Definitions.Where(d => d.Name == "fake-headless")], runner, bounded.Token, credentials);
     }
 
     private static void Run(string program, params string[] arguments)

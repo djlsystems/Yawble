@@ -20,6 +20,9 @@ namespace Harness.Host;
 public sealed class AgentCredentials(
     AgentCatalog catalog, AgentCredentialStore store, TenantSettings settings, AgentAuthProbe? probe = null)
 {
+    /// <summary>Raised after a command's credential or a preset's source changes. Never carries the value.</summary>
+    public event Action? Changed;
+
     /// <summary>The model presets, in catalog order, each with its command's credential.</summary>
     public async Task<IReadOnlyList<object>> ListAsync(CancellationToken ct)
     {
@@ -86,6 +89,7 @@ public sealed class AgentCredentials(
         }
 
         probe?.Forget();
+        Changed?.Invoke();
         return (200, Answer(command, status));
     }
 
@@ -107,6 +111,7 @@ public sealed class AgentCredentials(
         }
 
         probe?.Forget();
+        Changed?.Invoke();
         return (200, Answer(command, CredentialStatus.NotSet));
     }
 
@@ -158,6 +163,7 @@ public sealed class AgentCredentials(
         }
 
         probe?.Forget();
+        Changed?.Invoke();
 
         if (definition.IssuedCredential is null)
         {
