@@ -55,7 +55,7 @@ func backupScript(t *testing.T, program, state, listing string) *engine.Scripted
 	s := engine.NewScripted()
 	s.On(program+" version", engine.Result{Stdout: "6.0.2\n"})
 	s.On(program+" container inspect", engine.Result{Stdout: state + "|" + testImage + "|" + currentLabel() + "\n"})
-	s.On(program+" exec yawble runuser -u agent", engine.Result{Stdout: listing})
+	s.On(program+" exec -e HARNESS_WORKER_KEY= yawble runuser -u agent", engine.Result{Stdout: listing})
 	s.On(helper(program, "sqlite3", true), engine.Result{Stdout: "0001-initial\n0002-teams\n"})
 	s.On(helper(program, "tar", true), engine.Result{Stdout: volumeStream(t)})
 	return s

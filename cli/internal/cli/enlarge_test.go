@@ -85,7 +85,7 @@ func TestDoctorSaysHowToGiveTheEngineMoreWhenASavedValueIsOverIt(t *testing.T) {
 	s.On("docker version", engine.Result{Stdout: "29.8.0\n"})
 	s.On("docker info", engine.Result{Stdout: "12884901888|10|Docker Desktop\n"})
 	s.On("docker container inspect", engine.Result{Stdout: "running|" + testImage + "|\n"})
-	s.On("docker exec yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: withWip(`{"mechanism":"none","perRunMb":null,"detail":"not set"}`)})
+	s.On("docker exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: withWip(`{"mechanism":"none","perRunMb":null,"detail":"not set"}`)})
 	deps := stubbed(s)
 	deps.GOOS, deps.LookPath = "darwin", lookPath("docker")
 	deps.ConfigDir = t.TempDir()

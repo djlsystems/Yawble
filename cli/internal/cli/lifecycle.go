@@ -58,7 +58,28 @@ func settingsFor(deps Deps, c config.Config, m instance.Machine) (instance.Setti
 	if hash != "" {
 		s.EnvFile, s.EnvFileHash = envFile, hash
 	}
+	keyHash, err := config.WorkerKeyHash(deps.ConfigDir)
+	if err != nil {
+		return s, nil, err
+	}
+	if keyHash != "" {
+		s.KeyFile, s.KeyHash = config.WorkerKeyFile(deps.ConfigDir), keyHash
+	}
 	return s, notes, nil
+}
+
+// withWorkerKey makes the worker key when there is none yet, once, and puts it in the settings:
+// what every verb that runs a container does first. A key already made is kept.
+func withWorkerKey(deps Deps, s instance.Settings, out io.Writer) (instance.Settings, error) {
+	hash, made, err := config.EnsureWorkerKey(deps.ConfigDir)
+	if err != nil {
+		return s, fmt.Errorf("making the worker key in %s: %w", config.WorkerKeyFile(deps.ConfigDir), err)
+	}
+	if made {
+		fmt.Fprintf(out, "made the key control and the workers share (%s, readable by you alone)\n", config.WorkerKeyFile(deps.ConfigDir))
+	}
+	s.KeyFile, s.KeyHash = config.WorkerKeyFile(deps.ConfigDir), hash
+	return s, nil
 }
 
 // measure is what the container's default limits come from: what the engine has, asked of it
@@ -159,6 +180,9 @@ func newUpCommand(deps Deps) *cobra.Command {
 			}
 			if fresh {
 				noteReusedVolume(cmd.Context(), deps, e, cmd.OutOrStdout())
+			}
+			if s, err = withWorkerKey(deps, s, cmd.OutOrStdout()); err != nil {
+				return err
 			}
 			noteRestart(cmd.Context(), e, s, cmd.OutOrStdout())
 			if err := instance.Up(cmd.Context(), e, s, healthChecker(deps.HTTP), cmd.OutOrStdout()); err != nil {
@@ -305,16 +329,24 @@ func newLogsCommand(deps Deps) *cobra.Command {
 	var follow bool
 	var tail int
 	cmd := &cobra.Command{
-		Use:     "logs",
-		Short:   "The instance's log",
-		Example: "  yawble logs\n  yawble logs -f",
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use:     "logs [control|worker-<n>|<n>]",
+		Short:   "Control's log, or a worker's",
+		Example: "  yawble logs\n  yawble logs -f\n  yawble logs worker-2 --tail 50\n  yawble logs 2",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			which := ""
+			if len(args) == 1 {
+				which = args[0]
+			}
+			name, err := instance.LogTarget(which)
+			if err != nil {
+				return UsageError{err.Error()}
+			}
 			e, _, _, err := prepare(deps)
 			if err != nil {
 				return err
 			}
-			return instance.Logs(cmd.Context(), e, follow, tail, cmd.OutOrStdout())
+			return instance.Logs(cmd.Context(), e, name, follow, tail, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep printing new lines")
@@ -393,5 +425,30 @@ func upReady(cmd *cobra.Command, deps Deps, yes, size bool) (engine.Engine, inst
 	for _, n := range notes {
 		fmt.Fprintln(cmd.ErrOrStderr(), "note:", n)
 	}
+	if err := checkBound(m, s, cmd.ErrOrStderr()); err != nil {
+		return nil, instance.Settings{}, err
+	}
 	return engineOf(deps, c), s, nil
+}
+
+// checkBound applies the one bound on how many workers the engine holds. Two or more workers whose
+// memory with control's does not fit are refused; a single worker is only warned about, so an
+// instance sized to the whole engine before control and workers still comes up. CPUs only warn,
+// and only for two or more workers: one worker's CPUs beside control's idle share is the layout
+// every instance has.
+func checkBound(m instance.Machine, s instance.Settings, errOut io.Writer) error {
+	if !m.Measured {
+		return nil
+	}
+	cpus, refusal := instance.Bound(m.MemoryMB(), m.CPUs, s.Workers, instance.MemoryMB(s.Memory), s.CPUs)
+	if refusal != nil {
+		if s.Workers >= 2 {
+			return fmt.Errorf("%w (%s); nothing was started", refusal, m.Source)
+		}
+		fmt.Fprintln(errOut, "warning:", refusal.Error())
+	}
+	if cpus != "" && s.Workers >= 2 {
+		fmt.Fprintln(errOut, "warning:", cpus)
+	}
+	return nil
 }

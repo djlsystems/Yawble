@@ -252,13 +252,13 @@ func TestTailscaleServesTheHostAtTheEnginesTargetAndReadsItsName(t *testing.T) {
 		engine.Result{Stdout: "running|docker.io/tailscale/tailscale:latest|\n"},
 	)
 	s.On("podman image exists", engine.Result{})
-	s.On("podman exec yawble-tunnel tailscale status --json", engine.Result{Stdout: statusJSON})
+	s.On("podman exec -e HARNESS_WORKER_KEY= yawble-tunnel tailscale status --json", engine.Result{Stdout: statusJSON})
 	ts, _ := remote.ProviderNamed("tailscale")
 	url, err := remote.Enable(context.Background(), engine.NewPodman(s), ts, remote.Credential{Token: "tskey"}, t.TempDir(), &bytes.Buffer{})
 	if err != nil || url != "https://yawble.tail1234.ts.net" {
 		t.Errorf("podman: url %q err %v", url, err)
 	}
-	if !strings.Contains(strings.Join(s.Calls, "\n"), "podman exec yawble-tunnel tailscale serve --bg http://127.0.0.1:8080") {
+	if !strings.Contains(strings.Join(s.Calls, "\n"), "podman exec -e HARNESS_WORKER_KEY= yawble-tunnel tailscale serve --bg http://127.0.0.1:8080") {
 		t.Errorf("podman calls:\n%s", strings.Join(s.Calls, "\n"))
 	}
 	// Docker: the Host by name on the shared network, and funnel when asked.
@@ -268,12 +268,12 @@ func TestTailscaleServesTheHostAtTheEnginesTargetAndReadsItsName(t *testing.T) {
 		engine.Result{Stderr: "No such container", ExitCode: 1},
 		engine.Result{Stdout: "running|docker.io/tailscale/tailscale:latest|\n"},
 	)
-	d.On("docker exec yawble-tunnel tailscale status --json", engine.Result{Stdout: statusJSON})
+	d.On("docker exec -e HARNESS_WORKER_KEY= yawble-tunnel tailscale status --json", engine.Result{Stdout: statusJSON})
 	url, err = remote.Enable(context.Background(), engine.NewDocker(d), ts, remote.Credential{Token: "tskey", Funnel: true}, t.TempDir(), &bytes.Buffer{})
 	if err != nil || url != "https://yawble.tail1234.ts.net" {
 		t.Errorf("docker: url %q err %v", url, err)
 	}
-	if !strings.Contains(strings.Join(d.Calls, "\n"), "docker exec yawble-tunnel tailscale funnel --bg http://yawble:8080") {
+	if !strings.Contains(strings.Join(d.Calls, "\n"), "docker exec -e HARNESS_WORKER_KEY= yawble-tunnel tailscale funnel --bg http://yawble:8080") {
 		t.Errorf("docker calls:\n%s", strings.Join(d.Calls, "\n"))
 	}
 }

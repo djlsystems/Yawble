@@ -235,7 +235,7 @@ func TestCredentialRequestTravelsOnStdinNeverInExecArgs(t *testing.T) {
 	}
 	var written bool
 	for _, call := range h.Scripted.Calls {
-		if strings.HasPrefix(call, "podman exec -i yawble sh -c "+cli.CredentialRequestScript) && strings.HasSuffix(call, " sh "+cli.AgentCredentialsRoot) {
+		if strings.HasPrefix(call, "podman exec -i -e HARNESS_WORKER_KEY= yawble sh -c "+cli.CredentialRequestScript) && strings.HasSuffix(call, " sh "+cli.AgentCredentialsRoot) {
 			written = true
 		}
 	}

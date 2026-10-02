@@ -42,7 +42,7 @@ func solutionScript(t *testing.T, program string, answer engine.Result) *engine.
 		s.On("docker version", engine.Result{Stdout: "27.1.0\n"})
 		s.On("docker container inspect", engine.Result{Stdout: "running|" + testImage + "|\n"})
 	}
-	s.On(program+" exec yawble dotnet /app/Harness.Host.dll --solution-check", answer)
+	s.On(program+" exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --solution-check", answer)
 	return s
 }
 
@@ -70,10 +70,10 @@ func TestSolutionCheckCopiesThePackageInAsksTheHostPrintsThePlanAndCleansUp(t *t
 			// In order: an empty stage, the package copied into it, the Host's check of the copy, the
 			// stage removed.
 			want := []string{
-				program + " exec yawble sh -c " + cli.SolutionStageScript + " sh " + stage,
+				program + " exec -e HARNESS_WORKER_KEY= yawble sh -c " + cli.SolutionStageScript + " sh " + stage,
 				program + " cp " + folder + " yawble:" + stage + "/package",
-				program + " exec yawble dotnet /app/Harness.Host.dll --solution-check " + stage + "/package",
-				program + " exec yawble rm -rf " + stage,
+				program + " exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --solution-check " + stage + "/package",
+				program + " exec -e HARNESS_WORKER_KEY= yawble rm -rf " + stage,
 			}
 			at := 0
 			for _, c := range s.Calls {
@@ -151,7 +151,7 @@ func TestSolutionCheckFromTheInstanceCopiesNothing(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
-	if len(callsContaining(s, "podman exec yawble dotnet /app/Harness.Host.dll --solution-check /data/documents/acme/job-tracker-1.0.0")) != 1 ||
+	if len(callsContaining(s, "podman exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --solution-check /data/documents/acme/job-tracker-1.0.0")) != 1 ||
 		len(callsContaining(s, "podman cp")) != 0 || len(callsContaining(s, "rm -rf")) != 0 {
 		t.Errorf("calls:\n%s", strings.Join(s.Calls, "\n"))
 	}

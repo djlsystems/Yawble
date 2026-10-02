@@ -84,7 +84,9 @@ func TestProbeEngineKindHintPerOS(t *testing.T) {
 	}
 }
 
-func TestProbeASavedValueEqualToTheEnginesIsNotWarned(t *testing.T) {
+// One worker at the engine's whole memory leaves control's allowance on top: that is warned, never
+// refused, so an instance sized to the engine before control and workers still comes up.
+func TestProbeASavedValueEqualToTheEnginesWarnsOnlyThatControlComesOnTop(t *testing.T) {
 	_, deps := dockerUp("darwin")
 	deps.ConfigDir = t.TempDir()
 	writeConfig(t, deps.ConfigDir, "memory = \"12g\"\ncpus = 10\n")
@@ -92,8 +94,8 @@ func TestProbeASavedValueEqualToTheEnginesIsNotWarned(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
-	if strings.Contains(errOut, "warning:") {
-		t.Errorf("warned at the engine's own figure: %s", errOut)
+	if strings.Count(errOut, "warning:") != 1 || !strings.Contains(errOut, "warning: 1 worker(s) × 12288 MB + control's 1536 MB = 13824 MB, more than the 12288 MB the engine has") {
+		t.Errorf("want the one bound warning at the engine's own figure: %s", errOut)
 	}
 	if strings.Contains(out, "How much") {
 		t.Errorf("asked:\n%s", out)
@@ -162,7 +164,7 @@ func TestProbeDoctorAtTheEnginesFigureIsInfoAndOverItGivesTheEngineHint(t *testi
 		s.On("docker version", engine.Result{Stdout: "29.8.0\n"})
 		s.On("docker info", engine.Result{Stdout: "12884901888|10|" + c.os + "\n"})
 		s.On("docker container inspect", engine.Result{Stdout: "running|" + testImage + "|\n"})
-		s.On("docker exec yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: withWip(`{"mechanism":"none","perRunMb":null,"detail":"not set"}`)})
+		s.On("docker exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: withWip(`{"mechanism":"none","perRunMb":null,"detail":"not set"}`)})
 		deps := stubbed(s)
 		deps.GOOS, deps.LookPath = c.goos, lookPath("docker")
 		deps.ConfigDir = t.TempDir()

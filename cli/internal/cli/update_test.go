@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/buildinfo"
-	"github.com/djlsystems/yawble/cli/internal/config"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/instance"
 )
@@ -25,14 +24,14 @@ func pinBuild(t *testing.T) {
 }
 
 func labelFor(image string) string {
-	s, _ := instance.Defaults(config.Config{Image: image}, instance.Measure(), "")
-	return instance.SettingsLabel(s)
+	return instance.SettingsLabel(settingsForImage(image))
 }
 
 func TestUpdateOnThePinnedImageSaysSoAndChangesNothing(t *testing.T) {
 	pinBuild(t)
 	s := engine.NewScripted()
 	s.On("podman container inspect", engine.Result{Stdout: "running|" + pinned + "|" + labelFor(pinned) + "\n"})
+	scriptWorker(s, "podman", "running", settingsForImage(pinned), 1)
 	deps := stubbed(s)
 	deps.Env = func(string) string { return "" } // no YAWBLE_IMAGE: the pin is what counts
 	code, out, errOut := run(t, deps, "update")
@@ -243,6 +242,7 @@ func TestUpdateInstanceNeverLooksForARelease(t *testing.T) {
 	pinBuild(t)
 	s := engine.NewScripted()
 	s.On("podman container inspect", engine.Result{Stdout: "running|" + pinned + "|" + labelFor(pinned) + "\n"})
+	scriptWorker(s, "podman", "running", settingsForImage(pinned), 1)
 	deps := stubbed(s)
 	deps.Env = func(string) string { return "" }
 	deps.HTTP = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -353,6 +353,7 @@ func TestUpdateStartsAStoppedPodmanMachineFirst(t *testing.T) {
 	)
 	s.On("wsl -d podman-machine-default -e free -m", engine.Result{Stdout: "Mem: 15688 1 1\n"})
 	s.On("podman container inspect", engine.Result{Stdout: "running|" + pinned + "|" + labelFor(pinned) + "\n"})
+	scriptWorker(s, "podman", "running", settingsForImage(pinned), 1)
 	deps := stubbed(s)
 	deps.GOOS = "windows"
 	deps.Env = func(string) string { return "" }

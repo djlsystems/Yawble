@@ -22,7 +22,7 @@ func runningOn(t *testing.T, name string) (*engine.Scripted, func(args ...string
 	if name == "docker" {
 		s.On("docker version", engine.Result{Stdout: "29.8.0\n"})
 		s.On("docker container inspect", engine.Result{Stdout: "running|" + testImage + "|" + currentLabel() + "\n"})
-		s.On("docker exec yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: doctorStdout})
+		s.On("docker exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: doctorStdout})
 	} else {
 		s = runningScript()
 		s.On(doctorExec, engine.Result{Stdout: doctorStdout})

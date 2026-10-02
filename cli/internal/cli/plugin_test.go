@@ -16,7 +16,7 @@ import (
 
 const (
 	nonce       = "n0nce"
-	execPrefix  = "podman exec yawble sh -c "
+	execPrefix  = "podman exec -e HARNESS_WORKER_KEY= yawble sh -c "
 	prepareCall = execPrefix + cli.PluginPrepareScript + " sh /data/plugins "
 	placeCall   = execPrefix + cli.PluginPlaceScript + " sh /data/plugins "
 	requestCall = execPrefix + cli.PluginRequestScript + " sh /data/plugins " + nonce
@@ -264,8 +264,8 @@ func TestPluginInstallOnDockerCopiesWithDocker(t *testing.T) {
 	s := engine.NewScripted()
 	s.On("docker version", engine.Result{Stdout: "27.1.0\n"})
 	s.On("docker container inspect", engine.Result{Stdout: "running|" + testImage + "|\n"})
-	s.On("docker exec yawble sh -c "+cli.PluginPrepareScript, engine.Result{Stdout: "ready\n"})
-	s.On("docker exec yawble sh -c "+cli.PluginReportScript, report(echoInstalled, "", ""))
+	s.On("docker exec -e HARNESS_WORKER_KEY= yawble sh -c "+cli.PluginPrepareScript, engine.Result{Stdout: "ready\n"})
+	s.On("docker exec -e HARNESS_WORKER_KEY= yawble sh -c "+cli.PluginReportScript, report(echoInstalled, "", ""))
 	deps := stubbed(s)
 	env := map[string]string{"YAWBLE_IMAGE": testImage, "YAWBLE_ENGINE": "docker"}
 	deps.Env = func(k string) string { return env[k] }
@@ -342,7 +342,7 @@ func TestPluginRemoveAsksFirstAndYesAnswers(t *testing.T) {
 	s = pluginScript(t, report(echoInstalled, "", ""), report("", "", ""))
 	s.On(layoutCall, engine.Result{Stdout: "sample-echo\t0.1.0\t0.1.0\n"})
 	code, out, errOut = run(t, stubbed(s), "plugin", "remove", "sample-echo", "--yes")
-	if code != 0 || len(callsContaining(s, "podman exec yawble rm -rf -- /data/plugins/sample-echo")) != 1 || !strings.Contains(out, "the Host no longer lists sample-echo") {
+	if code != 0 || len(callsContaining(s, "podman exec -e HARNESS_WORKER_KEY= yawble rm -rf -- /data/plugins/sample-echo")) != 1 || !strings.Contains(out, "the Host no longer lists sample-echo") {
 		t.Errorf("--yes: exit %d %s %s\n%s", code, out, errOut, strings.Join(s.Calls, "\n"))
 	}
 }

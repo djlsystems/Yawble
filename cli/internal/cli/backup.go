@@ -101,6 +101,17 @@ func runBackup(ctx context.Context, deps Deps, e engine.Engine, s instance.Setti
 				return nil
 			}
 		}
+	}
+	// Workers write the volume too, and on Docker live in control's network: they stop first,
+	// whether control runs or not, and start again after control answers.
+	workers, err := instance.StopWorkers(ctx, e)
+	if err != nil {
+		return err
+	}
+	if len(workers) > 0 {
+		fmt.Fprintf(out, "stopped %s so the backup is consistent; started again afterwards\n", strings.Join(workers, ", "))
+	}
+	if running {
 		fmt.Fprintf(out, "stopping %s so the backup is consistent; it is started again afterwards\n", instance.ContainerName)
 		if err := e.Stop(ctx, instance.ContainerName); err != nil {
 			return err
@@ -116,6 +127,11 @@ func runBackup(ctx context.Context, deps Deps, e engine.Engine, s instance.Setti
 			return errors.Join(werr, fmt.Errorf("%s could not be started again (`yawble up` starts it): %w", instance.ContainerName, err))
 		}
 		if err := instance.WaitHealthy(ctx, e, instance.URL(instance.PortOf(info.Label, s.Port)), healthChecker(deps.HTTP), out); err != nil {
+			return errors.Join(werr, err)
+		}
+	}
+	if len(workers) > 0 {
+		if err := instance.StartWorkers(ctx, e, workers, out); err != nil {
 			return errors.Join(werr, err)
 		}
 	}
@@ -305,6 +321,15 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 			return fmt.Errorf("the backup of the current volume cannot be written to %s: %w; nothing was stopped or changed", safety, err)
 		}
 	}
+	// Every worker before the volume is touched: a worker writes it too, and on Docker lives in
+	// control's network. The `up` after the restore starts them again.
+	workers, err := instance.StopWorkers(ctx, e)
+	if err != nil {
+		return err
+	}
+	if len(workers) > 0 {
+		fmt.Fprintf(out, "stopped %s\n", strings.Join(workers, ", "))
+	}
 	if running {
 		if err := e.Stop(ctx, instance.ContainerName); err != nil {
 			return err
@@ -341,6 +366,9 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 	fmt.Fprintf(out, "restored %s into %s: %d files, %s of data, backed up %s on %s (%s)\n", path, instance.VolumeName,
 		m.Bytes.Files, humanBytes(m.Bytes.Data), m.CreatedAt.Local().Format("2006-01-02 15:04"), m.Engine, m.Processor)
 
+	if s, err = withWorkerKey(deps, s, out); err != nil {
+		return err
+	}
 	if err := instance.Up(ctx, e, s, healthChecker(deps.HTTP), out); err != nil {
 		return err
 	}
