@@ -68,9 +68,11 @@ public sealed class DoctorReportCliContractTests : IDisposable
             ["none"] = RunMemoryLimits.NotAvailable("no mechanism on this machine"),
         };
 
-        // The Host's last sign-in probe, as control records it: when, on which worker, and each answer.
+        // The Host's last sign-in probe, as control records it: when, on which worker, and each answer -
+        // every agent installed and signed in, as a worker's probe reports a status command that exited 0.
         var probedAt = new DateTimeOffset(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
-        new AgentAuthRecord(probedAt, "w1", [.. AgentAuthProbe.LoadSpecs().Keys.Select(c => new CommandSignIn(c, true, null, "measured on w1"))])
+        const string signedIn = "The status command exited 0.";
+        new AgentAuthRecord(probedAt, "w1", [.. AgentAuthProbe.LoadSpecs().Keys.Select(c => new CommandSignIn(c, true, true, signedIn))])
             .Write(_root);
 
         var fixtures = Path.Combine(FindRepoRoot(), "cli", "internal", "doctor", "testdata");
@@ -86,6 +88,8 @@ public sealed class DoctorReportCliContractTests : IDisposable
                 Assert.Equal(probedAt, agent!["measuredAt"]!.GetValue<DateTimeOffset>());
                 Assert.Equal("w1", agent["measuredOn"]!.GetValue<string>());
                 Assert.True(agent["installed"]!.GetValue<bool>());
+                Assert.True(agent["authenticated"]!.GetValue<bool>());
+                Assert.Equal(signedIn, agent["detail"]!.GetValue<string>());
             }
 
             var path = Path.Combine(fixtures, $"host-doctor-{name}.json");

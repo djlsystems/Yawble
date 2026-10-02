@@ -38,6 +38,9 @@ func TestTheHostsOwnDoctorReportDecodes(t *testing.T) {
 			if !a.IsInstalled() || a.MeasuredText() != "2026-10-02 12:00 UTC on worker w1" {
 				t.Errorf("%s: %s installed %v measured %q, want the Host's recorded probe on w1", c.file, a.Agent, a.Installed, a.MeasuredText())
 			}
+			if a.Authenticated == nil || !*a.Authenticated || a.Detail == "" {
+				t.Errorf("%s: %s authenticated %v detail %q, want signed in with the probe's detail", c.file, a.Agent, a.Authenticated, a.Detail)
+			}
 			if a.Launch == nil {
 				t.Errorf("%s: %s has no launch decoded", c.file, a.Agent)
 				continue

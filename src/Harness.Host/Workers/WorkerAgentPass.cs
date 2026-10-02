@@ -58,10 +58,15 @@ public sealed class WorkerAgentPass(WorkerAsks asks, bool always) : IAgentPass
 /// </summary>
 public static class RetryWhenAWorkerJoins
 {
+    /// <summary>What the Host logs when it wires the retry, which it does in control alone.</summary>
+    public const string WiredText = "Each worker that joins retries the unfinished removals once.";
+
     /// <summary>Wires the retry to <paramref name="connections"/> when <paramref name="control"/>; returns whether it did.</summary>
     public static bool Wire(bool control, WorkerConnections connections, Func<CancellationToken, Task> retry, ILogger? log = null)
     {
         if (!control) return false;
+
+        log?.LogInformation(WiredText);
 
         connections.Joined += worker => _ = Task.Run(async () =>
         {

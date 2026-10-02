@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -18,6 +19,9 @@ namespace Harness.Tests;
 public sealed class LiveViewOnWorkerProcessTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    /// <summary>More lines than a stopped worker can have had on their way: the fake writes one a second.</summary>
+    private const int InFlightLines = 10;
 
     [Fact]
     public async Task A_running_members_live_view_is_followed_on_its_worker()
@@ -46,10 +50,16 @@ public sealed class LiveViewOnWorkerProcessTests
             try
             {
                 // What was already on its way arrives; then nothing, while the fake still writes a line a second.
+                // Bounded, so a view that kept streaming fails here within the bed's bound, not when the fake stops.
+                var draining = Stopwatch.StartNew();
+                var drained = 0;
                 var pending = lines.ReadLineAsync(Ct).AsTask();
                 while (await Task.WhenAny(pending, Task.Delay(1500, Ct)) == pending)
                 {
                     await pending;
+                    Assert.True(
+                        ++drained <= InFlightLines && draining.Elapsed < ProcessBed.Bound,
+                        $"the live view kept streaming while its worker was stopped: {drained} lines in {draining.Elapsed.TotalSeconds:0} s");
                     pending = lines.ReadLineAsync(Ct).AsTask();
                 }
 

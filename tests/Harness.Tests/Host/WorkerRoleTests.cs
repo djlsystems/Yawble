@@ -10,6 +10,7 @@ using Harness.Host;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Harness.Tests.Host;
 
@@ -145,6 +146,104 @@ public sealed class WorkerRoleTests
     }
 
     /// <summary>
+    /// ONLY CONTROL RETRIES THE UNFINISHED REMOVALS WHEN A WORKER JOINS: the Host wires the retry in
+    /// control and not in all, where its start's own retry runs with its own worker already there.
+    /// </summary>
+    [Theory]
+    [InlineData("control", true)]
+    [InlineData("all", false)]
+    public async Task Only_control_retries_unfinished_removals_when_a_worker_joins(string role, bool wired)
+    {
+        var root = Directory.CreateTempSubdirectory($"harness-{role}-join-retry-").FullName;
+        var logged = new Captured();
+        try
+        {
+            await using var host = Host(root, role, logged);
+            _ = host.Services;
+
+            Assert.Equal(wired, logged.Messages.Contains(RetryWhenAWorkerJoins.WiredText));
+        }
+        finally
+        {
+            Clean(root);
+        }
+    }
+
+    /// <summary>
+    /// ALL'S OWN WORKER REMOVES ITS RUN HOMES WITH THE WORKER'S RULE: every run home the composed Host's
+    /// worker holds - its launcher's and its agent CLIs' - is removed by <see cref="RunHomeRemoval"/>,
+    /// never looped back through control's <see cref="FolderRemoval"/>.
+    /// </summary>
+    [Fact]
+    public async Task All_removes_its_run_homes_with_the_workers_run_home_removal()
+    {
+        var root = Directory.CreateTempSubdirectory("harness-all-run-homes-").FullName;
+        try
+        {
+            await using var all = Host(root, null);
+            var worker = all.Services.GetRequiredService<InProcessWorker>();
+
+            var homes = Reachable<RunHomes>(worker.Host);
+            // The Host hands its launcher and its agent CLIs one set of homes; every one reachable is judged.
+            Assert.NotEmpty(homes);
+            Assert.All(homes, h =>
+            {
+                var remove = typeof(RunHomes).GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Select(f => f.GetValue(h)).OfType<Func<string, string, Task>>().Single();
+                Assert.Equal(typeof(RunHomeRemoval), remove.Method.DeclaringType!.DeclaringType ?? remove.Method.DeclaringType);
+            });
+        }
+        finally
+        {
+            Clean(root);
+        }
+    }
+
+    /// <summary>Every <typeparamref name="T"/> reachable from <paramref name="from"/> through the instance fields of the Harness's own types.</summary>
+    private static List<T> Reachable<T>(object from) where T : class
+    {
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var found = new List<T>();
+        var next = new Queue<object>([from]);
+        while (next.TryDequeue(out var item))
+        {
+            if (!seen.Add(item)) continue;
+            if (item is T t) found.Add(t);
+
+            for (var type = item.GetType(); type is not null && type.Namespace?.StartsWith("Harness", StringComparison.Ordinal) == true; type = type.BaseType)
+            {
+                foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                {
+                    if (field.FieldType.IsValueType) continue;
+                    if (field.GetValue(item) is { } value && value.GetType().Namespace?.StartsWith("Harness", StringComparison.Ordinal) == true) next.Enqueue(value);
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>What the Host logs, at Information and above, whatever its configured level.</summary>
+    private sealed class Captured : ILoggerProvider
+    {
+        public System.Collections.Concurrent.ConcurrentBag<string> Messages { get; } = [];
+
+        public ILogger CreateLogger(string categoryName) => new Logger(Messages);
+
+        public void Dispose() { }
+
+        private sealed class Logger(System.Collections.Concurrent.ConcurrentBag<string> messages) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                messages.Add(formatter(state, exception));
+        }
+    }
+
+    /// <summary>
     /// A WORKER RUNS BEFORE THE HOST IS COMPILED. The role is read in a module initializer, which runs
     /// when the Host's assembly loads; Program's top-level statements are one method, and compiling it
     /// loads every assembly it names. So the initializer is the branch, and it may name nothing of a
@@ -231,11 +330,15 @@ public sealed class WorkerRoleTests
         }
     }
 
-    private static WebApplicationFactory<Program> Host(string root, string? role) =>
+    private static WebApplicationFactory<Program> Host(string root, string? role, Captured? logged = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("DataRoot", root).UseSetting("Logging:LogLevel:Default", "Warning");
             if (role is not null) builder.UseSetting("Role", role);
+            if (logged is not null)
+            {
+                builder.ConfigureLogging(logging => logging.AddProvider(logged).AddFilter<Captured>(null, LogLevel.Information));
+            }
         });
 
     private static void Clean(string root)

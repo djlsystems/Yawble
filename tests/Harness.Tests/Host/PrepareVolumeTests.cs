@@ -433,11 +433,8 @@ public sealed class PrepareVolumeTests : IDisposable
     }
 
     /// <summary>
-    /// Root finds commands in system folders only. The entrypoint's first command sets that PATH,
-    /// and the only other PATH it sets is the host's, in the exec's last lines. prepare-volume.sh sets
-    /// the same one before its first command, whatever PATH it was called with.
-    /// Before their first command both scripts also move root off agent-home: HOME=/root, no
-    /// global git config, no Python user site.
+    /// The entrypoint installs and records the agent CLIs for a worker and for all, and not for
+    /// control, which starts no agent CLI.
     /// </summary>
     [Fact]
     public void The_entrypoint_installs_agent_clis_for_a_worker_and_all_and_not_for_control()
@@ -462,6 +459,13 @@ public sealed class PrepareVolumeTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Root finds commands in system folders only. The entrypoint's first command sets that PATH,
+    /// and the only other PATH it sets is the host's, in the exec's last lines. prepare-volume.sh sets
+    /// the same one before its first command, whatever PATH it was called with.
+    /// Before their first command both scripts also move root off agent-home: HOME=/root, no
+    /// global git config, no Python user site.
+    /// </summary>
     [Fact]
     public void Root_runs_on_system_folders_only()
     {
