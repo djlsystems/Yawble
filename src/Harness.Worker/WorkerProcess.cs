@@ -69,6 +69,13 @@ public static class WorkerProcess
         var cgroupRoot = Setting("Capacity:CgroupRoot", "HARNESS_CAPACITY_CGROUP_ROOT") ?? WorkerPaths.CgroupRoot;
         var proc = Setting("Capacity:ProcRoot", "HARNESS_CAPACITY_PROC_ROOT") ?? WorkerPaths.Proc;
 
+        // The runs a previous worker of this name left running when it was killed are stopped first.
+        var orphans = WorkerOrphans.FileFor(Setting("Worker:StateDir", "HARNESS_WORKER_STATE_DIR") ?? Path.GetTempPath(), id);
+        if (WorkerOrphans.StopLeftovers(orphans) is { Count: > 0 } stopped)
+        {
+            log.LogWarning("Stopped {Count} run process group(s) a previous worker {Worker} left running: {Groups}.", stopped.Count, id, string.Join(", ", stopped));
+        }
+
         var runAs = AgentLaunchUser.Resolve(Setting("Agents:RunAs", "HARNESS_AGENT_USER"));
         log.LogInformation("Worker {Worker}, version {Version}, for control at {Control}. Agent launch: {Mode} - {Reason}",
             id, version, control, runAs.Mode, runAs.Reason);
@@ -118,6 +125,19 @@ public static class WorkerProcess
         connection.Ready = host.ReadyAsync;
         connection.Settings = welcome => settings = welcome;
 
+        // Every run's process group, kept where the next worker of this name finds it.
+        using var recording = new Timer(_ =>
+        {
+            try
+            {
+                WorkerOrphans.Record(orphans, RunProcessGroups.Shared, proc);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                log.LogWarning("Could not record this worker's run process groups in {File}: {Message}", orphans, exception.Message);
+            }
+        }, null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
+
         using var stopping = new CancellationTokenSource();
         using var term = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
         {
@@ -136,6 +156,16 @@ public static class WorkerProcess
         foreach (var run in host.OpenRuns()) await host.ApplyAsync(new CancelRun(run));
         var deadline = DateTime.UtcNow.AddSeconds(25);
         while (host.OpenRuns().Count > 0 && DateTime.UtcNow < deadline) await Task.Delay(100);
+
+        // Stopped in order: no run is left for a next worker to stop.
+        recording.Dispose();
+        try
+        {
+            File.Delete(orphans);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
 
         log.LogInformation("Worker {Worker} stopped.", id);
         return code;
