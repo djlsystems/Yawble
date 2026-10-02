@@ -36,6 +36,12 @@ $second = Get-NextReleaseVersion -Tags $tags -Date $day
 Check 'run twice on one day: first' $first '2026.09.23.1'
 Check 'run twice on one day: second' $second '2026.09.23.2'
 
+# The two images of a release
+$builds = @(Get-ImageBuilds -Image 'ghcr.io/owner/repo' -Version '2026.09.23.1')
+Check 'two images per release' $builds.Count 2
+Check 'control first, from its target' "$($builds[0].Target) $($builds[0].Ref) $($builds[0].Latest)" 'control ghcr.io/owner/repo:2026.09.23.1 ghcr.io/owner/repo:latest'
+Check 'the worker from its target, -worker on both tags' "$($builds[1].Target) $($builds[1].Ref) $($builds[1].Latest)" 'worker ghcr.io/owner/repo:2026.09.23.1-worker ghcr.io/owner/repo:latest-worker'
+
 # Owner and repository from the origin remote, lowercased
 $r = Get-GitHubRepository 'https://github.com/SomeOwner/Some-Repo'
 Check 'https remote owner' $r.Owner 'someowner'

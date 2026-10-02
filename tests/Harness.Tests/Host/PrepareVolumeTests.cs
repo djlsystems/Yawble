@@ -56,6 +56,8 @@ public sealed class PrepareVolumeTests : IDisposable
                      "agents.json.before-builtins", "agent-launch.json", "agent-launch.json.tmp", "logs", "logs/host.log",
                      "backups", "backups/old.db", "host.lock", "system-packages",
                      "connections", "connections/.connect-report.json",
+                     "agent-credentials", "agent-credentials/request-1.json", "agent-auth.json", "agent-auth.json.tmp",
+                     "agent-tools.json", "agent-launch-checks.json", "wip.json", "workers.json", "workers.json.tmp",
                  })
         {
             Assert.True(chowned.TryGetValue(Path.Combine(_data, host), out var owner), $"{host} was not handed over. {output}");
@@ -401,61 +403,95 @@ public sealed class PrepareVolumeTests : IDisposable
     public void The_entrypoint_sets_ownership_and_installs_packages_as_root_then_drops_to_harness()
     {
         var entrypoint = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
+        var branches = Branches(entrypoint);
+        var prepare = PrepareVolumeFunction(entrypoint);
 
-        var ownership = entrypoint.IndexOf("prepare-volume.sh ownership", StringComparison.Ordinal);
-        var packages = entrypoint.IndexOf("prepare-volume.sh packages", StringComparison.Ordinal);
-        var clis = entrypoint.IndexOf("ensure-agent-clis.sh", StringComparison.Ordinal);
-        var drop = entrypoint.IndexOf("exec /usr/bin/setpriv --reuid=harness", StringComparison.Ordinal);
+        // `all`: the volume, the packages, the CLIs, then the drop to harness - in that order.
+        var all = branches["all"];
+        var ownership = all.IndexOf("prepare_volume", StringComparison.Ordinal);
+        var packages = all.IndexOf("prepare-volume.sh packages", StringComparison.Ordinal);
+        var clis = all.IndexOf("ensure-agent-clis.sh", StringComparison.Ordinal);
+        var drop = all.IndexOf("exec /usr/bin/setpriv --reuid=harness", StringComparison.Ordinal);
+        Assert.True(ownership >= 0 && ownership < packages && packages < clis && clis < drop, all);
+        Assert.Matches(@"exec /usr/bin/setpriv --reuid=agent[^\n]*\n?[^\n]*ensure-agent-clis\.sh", all);
+        Assert.Contains("-- /usr/bin/dotnet /app/Harness.Host.dll", all[drop..]);
+        Assert.Contains("prepare-volume.sh ownership", prepare);
 
-        Assert.True(ownership > 0 && ownership < packages && packages < clis && clis < drop, entrypoint);
-        Assert.Matches(@"exec /usr/bin/setpriv --reuid=agent[^\n]*\n?[^\n]*ensure-agent-clis\.sh", entrypoint);
-        Assert.Contains("-- /usr/bin/dotnet /app/Harness.Host.dll", entrypoint[drop..]);
+        // control: the volume, then the drop to harness; no package and no CLI step.
+        var control = branches["control"];
+        var controlOwnership = control.IndexOf("prepare_volume", StringComparison.Ordinal);
+        var controlDrop = control.IndexOf("exec /usr/bin/setpriv --reuid=harness", StringComparison.Ordinal);
+        Assert.True(controlOwnership >= 0 && controlOwnership < controlDrop, control);
+        Assert.DoesNotContain("prepare-volume.sh packages", control);
+        Assert.DoesNotContain("ensure-agent-clis", control);
+        Assert.Contains("-- /usr/bin/dotnet /app/Harness.Host.dll", control[controlDrop..]);
+
+        // worker: packages, the CLIs, then the drop to worker; no ownership.
+        var worker = branches["worker"];
+        var workerPackages = worker.IndexOf("prepare-volume.sh packages", StringComparison.Ordinal);
+        var workerClis = worker.IndexOf("ensure-agent-clis.sh", StringComparison.Ordinal);
+        var workerDrop = worker.IndexOf("exec /usr/bin/setpriv --reuid=worker", StringComparison.Ordinal);
+        Assert.True(workerPackages >= 0 && workerPackages < workerClis && workerClis < workerDrop, worker);
+        Assert.Contains("-- /usr/bin/dotnet /app/Harness.Host.dll", worker[workerDrop..]);
         Assert.DoesNotContain("exec dotnet", entrypoint);
 
-        // What the host and both users need from root before the drop.
-        Assert.Matches(@"(?m)^umask 0007\nexec /usr/bin/setpriv --reuid=harness", entrypoint);
+        // What the host and both users need from root before the drop, in every branch.
+        foreach (var (name, branch) in branches)
+        {
+            Assert.Matches(@"(?m)^\s*umask 0007\n\s*exec /usr/bin/setpriv --reuid=(harness|worker)", branch);
+        }
         Assert.Matches(@"(?m)^\s+git config --system --add safe\.directory '\*'", entrypoint);
         Assert.Matches(@"(?m)^chmod 1777 /tmp$", entrypoint);
 
         // Nothing as root writes into the shared HOME: git settings go to the system config.
         Assert.DoesNotContain("git config --global", entrypoint);
 
-        // The agent CLIs' install step and the host see the same tool paths as the image's ENV.
+        // The agent CLIs' install step and the host see the same tool paths as the worker image's ENV.
         var path = System.Text.RegularExpressions.Regex.Match(entrypoint, @"(?m)^tool_path=""([^""]+)""").Groups[1].Value.Split(':');
         AssertSystemFoldersFirst(path);
         // Both steps that leave root run on it, with agent-home as HOME, the npm prefix, and none of
         // the root section's git and Python settings: the CLI install as agent, and the host.
         const string AgentSide = @"export PATH=""\$tool_path"" HOME=/data/agent-home NPM_CONFIG_PREFIX=/data/npm-global";
-        Assert.Matches(AgentSide + @" \\\n\s+&& unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/setpriv --reuid=agent", entrypoint);
-        Assert.Matches("(?m)^" + AgentSide + @"\nunset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE\numask 0007\nexec /usr/bin/setpriv --reuid=harness", entrypoint);
-        // And nowhere else: root's HOME is /root from the top.
-        Assert.Equal(2, entrypoint.Split('\n').Count(line => !line.TrimStart().StartsWith('#') && line.Contains("HOME=/data/agent-home", StringComparison.Ordinal)));
+        Assert.Matches(AgentSide + @" \\\n\s+&& unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/setpriv --reuid=agent", all);
+        Assert.Matches(AgentSide + @" HARNESS_UPDATE_AGENTS=0 \\\n\s+&& unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/flock ", worker);
+        foreach (var branch in new[] { all, worker })
+        {
+            Assert.Matches("(?m)^\\s*" + AgentSide + @"\n\s*unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE\n\s*umask 0007\n\s*exec /usr/bin/setpriv --reuid=", branch);
+        }
+        // Control runs no tool an agent installs: its host's PATH is the system folders alone.
+        Assert.Matches(@"(?m)^\s*export PATH=" + SystemPath + @" HOME=/data/agent-home\n\s*unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE\n\s*umask 0007\n\s*exec /usr/bin/setpriv --reuid=harness", control);
+
+        // HOME=/data/agent-home once per step that leaves root, and nowhere else: root's HOME is /root from the top.
+        static int Homes(string text) => text.Split('\n').Count(line => !line.TrimStart().StartsWith('#') && line.Contains("HOME=/data/agent-home", StringComparison.Ordinal));
+        Assert.Equal((2, 1, 2), (Homes(all), Homes(control), Homes(worker)));
+        Assert.Equal(5, Homes(entrypoint));
     }
 
     /// <summary>
     /// The entrypoint installs and records the agent CLIs for a worker and for all, and not for
-    /// control, which starts no agent CLI.
+    /// control, which starts no agent CLI. The role is read once, as the host reads it.
     /// </summary>
     [Fact]
     public void The_entrypoint_installs_agent_clis_for_a_worker_and_all_and_not_for_control()
     {
         var entrypoint = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
+        var branches = Branches(entrypoint);
 
-        // The install sits in the else branch of one role check, and the control branch says so in one line.
-        var check = System.Text.RegularExpressions.Regex.Match(
-            entrypoint,
-            @"(?m)^if (?<test>\[ ""\$\(printf '%s' ""\$\{HARNESS_ROLE:-all\}""[^\n]*\]); then\n(?<control>[^\n]*)\nelse\n(?<install>(?:.*\n)*?)fi\n");
-        Assert.True(check.Success, entrypoint);
-        Assert.Equal("  echo \"agent cli: control role, no agent CLI is installed or recorded here\"", check.Groups["control"].Value);
-        Assert.Contains("ensure-agent-clis.sh", check.Groups["install"].Value);
-        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(entrypoint, @"/opt/harness/ensure-agent-clis\.sh"));
+        Assert.Equal(["all", "control", "worker"], branches.Keys.Order(StringComparer.Ordinal));
+        Assert.Matches(@"(?m)^case ""\$role"" in$", entrypoint);
+        Assert.Contains("echo \"agent cli: control role, no agent CLI is installed or recorded here\"", branches["control"]);
+        Assert.DoesNotContain("ensure-agent-clis", branches["control"]);
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(branches["all"], @"/opt/harness/ensure-agent-clis\.sh"));
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(branches["worker"], @"/opt/harness/ensure-agent-clis\.sh"));
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(entrypoint, @"/opt/harness/ensure-agent-clis\.sh"));
 
-        // The test itself, run by sh: only control, however it is spelled, skips the install.
-        foreach (var (role, skips) in new (string?, bool)[] { ("control", true), (" Control ", true), ("worker", false), ("all", false), (null, false), ("", false) })
+        // The role line itself, run by sh: trimmed and any case; unset and empty are all.
+        var line = RoleLine(entrypoint);
+        foreach (var (role, expected) in new (string?, string)[] { ("control", "control"), (" Control ", "control"), ("worker", "worker"), ("all", "all"), (null, "all"), ("", "all") })
         {
             var variables = role is null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["HARNESS_ROLE"] = role };
-            var (code, output) = Exec("/bin/sh", ["-c", $"if {check.Groups["test"].Value}; then echo skip; else echo install; fi"], variables);
-            Assert.Equal((0, skips ? "skip" : "install"), (code, output.Trim()));
+            var (code, output) = Exec("/bin/sh", ["-c", line + "\nprintf '%s' \"$role\""], variables);
+            Assert.Equal((0, expected), (code, output));
         }
     }
 
@@ -490,11 +526,18 @@ public sealed class PrepareVolumeTests : IDisposable
             Assert.Contains(settings, line => line.StartsWith("unset XDG_CONFIG_HOME ", StringComparison.Ordinal));
         }
 
-        var entrypoint = File.ReadAllLines(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
-        var pathLines = entrypoint.Select((line, at) => (line, at)).Where(l => l.line.StartsWith("export PATH=", StringComparison.Ordinal)).ToList();
-        var exec = Array.FindIndex(entrypoint, line => line.StartsWith("exec /usr/bin/setpriv --reuid=harness", StringComparison.Ordinal));
-        Assert.Equal(2, pathLines.Count);
-        Assert.Equal(exec - 3, pathLines[1].at);
+        // Apart from the first, each PATH the entrypoint sets is a host's, three lines above that
+        // branch's exec, and each branch sets exactly one.
+        var text = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
+        Assert.Equal(4, text.Split('\n').Count(line => line.TrimStart().StartsWith("export PATH=", StringComparison.Ordinal)));
+        foreach (var (name, branch) in Branches(text))
+        {
+            var lines = branch.Split('\n').Select(line => line.Trim()).ToArray();
+            var paths = lines.Select((line, at) => (line, at)).Where(l => l.line.StartsWith("export PATH=", StringComparison.Ordinal)).ToList();
+            var exec = Array.FindIndex(lines, line => line.StartsWith("exec /usr/bin/setpriv --reuid=", StringComparison.Ordinal));
+            Assert.True(paths.Count == 1, $"{name}: {paths.Count} PATH lines");
+            Assert.Equal(exec - 3, paths[0].at);
+        }
     }
 
     /// <summary>
@@ -533,9 +576,9 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.True(File.Exists(marker), "The planted usercustomize.py was not imported even without the fix.");
         File.Delete(marker);
 
-        // The entrypoint's lines as they are, from the top to its first mkdir, then its git step.
+        // The entrypoint's lines as they are, from the top to the role line, then its git step.
         var entrypoint = File.ReadAllLines(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
-        var header = entrypoint.TakeWhile(line => !line.StartsWith("mkdir ", StringComparison.Ordinal)).ToArray();
+        var header = entrypoint.TakeWhile(line => !line.StartsWith("role=", StringComparison.Ordinal)).ToArray();
         var gitStart = Array.FindIndex(entrypoint, line => line.StartsWith("if ! git config --system", StringComparison.Ordinal));
         var gitStep = entrypoint[gitStart..(Array.IndexOf(entrypoint, "fi", gitStart) + 1)];
         var section = string.Join('\n', header.Concat(gitStep)) + "\npython3 -c pass\necho root-section-done\n";
@@ -645,26 +688,65 @@ public sealed class PrepareVolumeTests : IDisposable
     /// The host keeps SETUID, SETGID and KILL and nothing else - not in its bounding set either - and
     /// a child it starts with the switch AgentLaunchUser prefixes ends with no capability at all. Run
     /// for real when this suite runs as root: the entrypoint's own exec line, with <c>harness</c>
-    /// replaced by uid 65534 and the host by a shell that reads its capabilities.
+    /// replaced by uid 65534 and the host by a shell that reads its capabilities. Every branch's exec
+    /// line is today's, for its own user.
     /// </summary>
     [Fact]
     public void The_host_keeps_only_setuid_setgid_and_kill_and_its_agent_children_keep_nothing()
     {
-        var entrypoint = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
-        var line = entrypoint[entrypoint.IndexOf("exec /usr/bin/setpriv --reuid=harness", StringComparison.Ordinal)..]
-            .Replace("\\\n", " ", StringComparison.Ordinal).Split('\n')[0];
-        var arguments = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var branches = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")));
+        Assert.Equal(HostExec("harness"), ExecLine(branches["all"]));
+        Assert.Equal(HostExec("harness"), ExecLine(branches["control"]));
+        Assert.Equal(HostExec("worker"), ExecLine(branches["worker"]));
 
-        Assert.Equal(
-            ["exec", "/usr/bin/setpriv", "--reuid=harness", "--regid=harness", "--init-groups",
-             "--inh-caps=-all,+setuid,+setgid,+kill", "--ambient-caps=-all,+setuid,+setgid,+kill",
-             "--bounding-set=-all,+setuid,+setgid,+kill", "--", "/usr/bin/dotnet", "/app/Harness.Host.dll"],
-            arguments);
+        AssertThreeCapsForReal(ExecLine(branches["all"]), "harness");
+    }
 
+    /// <summary>The worker branch's exec line, run for real as root: the same three capabilities, and none for its agent children.</summary>
+    [Fact]
+    public void The_worker_exec_line_keeps_only_setuid_setgid_and_kill()
+    {
+        var line = ExecLine(Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))["worker"]);
+        Assert.Equal(HostExec("worker"), line);
+
+        AssertThreeCapsForReal(line, "worker");
+    }
+
+    /// <summary>
+    /// Control starts no agent CLI, but runs git and gh as the agent (Fetch, Merge, Push, a team's
+    /// local repository), so its host keeps exactly the three capabilities and setpriv is in its image.
+    /// </summary>
+    [Fact]
+    public void The_control_entrypoint_keeps_setuid_setgid_and_kill_for_git_as_the_agent()
+    {
+        var control = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))["control"];
+
+        Assert.Equal(HostExec("harness"), ExecLine(control));
+        var stages = ContainerImageTests.Stages();
+        Assert.Equal("base", stages["control"].From);
+        Assert.Contains(stages["base"].Instructions, line => line.Contains("test -x /usr/bin/setpriv", StringComparison.Ordinal));
+    }
+
+    private static string[] HostExec(string user) =>
+        ["exec", "/usr/bin/setpriv", $"--reuid={user}", $"--regid={user}", "--init-groups",
+         "--inh-caps=-all,+setuid,+setgid,+kill", "--ambient-caps=-all,+setuid,+setgid,+kill",
+         "--bounding-set=-all,+setuid,+setgid,+kill", "--", "/usr/bin/dotnet", "/app/Harness.Host.dll"];
+
+    /// <summary>A branch's exec of the host, continuation lines joined, split into words.</summary>
+    private static string[] ExecLine(string branch)
+    {
+        var at = System.Text.RegularExpressions.Regex.Match(branch, @"exec /usr/bin/setpriv --reuid=(harness|worker) ").Index;
+        Assert.True(at > 0, branch);
+        return branch[at..].Replace("\\\n", " ", StringComparison.Ordinal).Split('\n')[0]
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private static void AssertThreeCapsForReal(string[] arguments, string user)
+    {
         Assert.SkipWhen(OperatingSystem.IsWindows() || Id("-u") != "0" || Exec("sh", ["-c", "command -v setpriv"]).Code != 0,
             "Needs root and setpriv to switch users for real.");
 
-        var host = arguments[1..^2].Select(a => a.Replace("harness", "65534", StringComparison.Ordinal)).ToArray();
+        var host = arguments[1..^2].Select(a => a.Replace(user, "65534", StringComparison.Ordinal)).ToArray();
         const string Child = "setpriv --reuid=65533 --regid=65533 --clear-groups --inh-caps=-all --ambient-caps=-all -- grep ^Cap /proc/self/status";
         var result = Exec(host[0], [.. host[1..], "sh", "-c", "grep ^Cap /proc/self/status; echo child; " + Child]);
         Assert.True(result.Code == 0, result.Output);
@@ -680,6 +762,7 @@ public sealed class PrepareVolumeTests : IDisposable
     public void The_image_carries_both_users_at_fixed_ids_and_the_tools_to_switch()
     {
         var containerfile = File.ReadAllText(Path.Combine(RepoRoot(), "Containerfile"));
+        var worker = ContainerImageTests.Stages()["worker"];
 
         Assert.Contains("groupadd --gid 10001 harness", containerfile);
         Assert.Contains("groupadd --gid 10002 agent", containerfile);
@@ -689,10 +772,9 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Contains("command -v setpriv && command -v runuser", containerfile);
         Assert.Contains("scripts/prepare-volume.sh", containerfile);
 
-        // An agent's `npm -g` and the tools it installs for itself land on the volume, on PATH.
-        Assert.Contains("NPM_CONFIG_PREFIX=/data/npm-global", containerfile);
-        var path = System.Text.RegularExpressions.Regex.Match(containerfile, @"(?m)^\s+PATH=(\S+)").Groups[1].Value.Split(':');
-        AssertSystemFoldersFirst(path);
+        // An agent's `npm -g` and the tools it installs for itself land on the volume, on the worker's PATH.
+        Assert.Equal("/data/npm-global", ContainerImageTests.Env(worker, "NPM_CONFIG_PREFIX"));
+        AssertSystemFoldersFirst(ContainerImageTests.Env(worker, "PATH")!.Split(':'));
         Assert.Contains("test -x /usr/bin/setpriv && test -x /usr/bin/dotnet", containerfile);
     }
 
@@ -731,6 +813,328 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.DoesNotContain(path, entry => entry.Contains('$'));
     }
 
+    // ---- Control and workers ----
+
+    /// <summary>
+    /// Every entry the Host keeps for itself goes to harness alone, 700 or 600 all the way down, and
+    /// none to group agent - the doctor's records and the credential exchange included, which an agent
+    /// that could read or write them would turn into a credential or a lying doctor. Run as a non-root
+    /// user the recorder only proves the host side: what is handed to harness. What agent and worker
+    /// then cannot read is the root-only test below.
+    /// </summary>
+    [Fact]
+    public void Every_host_entry_is_left_to_harness_alone_and_none_to_group_agent()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        SeedExistingVolume();
+
+        var output = Run("ownership");
+
+        var chowned = ChownedPaths();
+        foreach (var file in new[]
+                 {
+                     "agent-credentials/request-1.json", "agent-auth.json", "agent-auth.json.tmp", "agent-tools.json",
+                     "agent-launch-checks.json", "wip.json", "workers.json", "workers.json.tmp",
+                 })
+        {
+            Assert.Equal(HostOwner, chowned.GetValueOrDefault(Path.Combine(_data, file)) ?? Owner(file));
+            Assert.True(Mode(file) == "600", $"{file} is {Mode(file)}. {output}");
+        }
+
+        Assert.Equal(HostOwner, chowned.GetValueOrDefault(Path.Combine(_data, "agent-credentials")) ?? Owner("agent-credentials"));
+        Assert.Equal("700", Mode("agent-credentials"));
+        Assert.DoesNotContain(chowned, entry => entry.Key.Contains("/agent-credentials", StringComparison.Ordinal) && entry.Value != HostOwner);
+    }
+
+    /// <summary>
+    /// The worker key is the first thing the entrypoint deals with: straight after the root environment
+    /// block, before any other command, it is written to a file and unset.
+    /// </summary>
+    [Fact]
+    public void The_worker_key_leaves_the_environment_before_anything_else_runs()
+    {
+        var lines = File.ReadAllLines(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
+        var commands = lines.Select(line => line.Trim())
+            .Where(text => text.Length > 0 && !text.StartsWith('#') && text is not "set -e" and not "#!/bin/sh").ToList();
+        var settings = RootEnvironmentBlock(lines).Count;
+
+        Assert.Equal(@"if [ -n ""${HARNESS_WORKER_KEY:-}"" ]; then", commands[settings]);
+        var block = KeyBlock(lines).Where(line => !line.TrimStart().StartsWith('#')).ToArray();
+        Assert.Equal("unset HARNESS_WORKER_KEY", block[^1]);
+        Assert.Equal(commands[settings + block.Length - 1], block[^1]);
+        Assert.StartsWith("role=", commands[settings + block.Length]);
+        Assert.Contains(block, line => line.Trim() == @"export HARNESS_WORKER_KEY_FILE=""$key_dir/worker-key""");
+    }
+
+    /// <summary>
+    /// The key block, run by sh with its folder and chown pointed at this test: the key lands in a file
+    /// only the container's Host user may read, and what runs after the block has the file's name and
+    /// not the key.
+    /// </summary>
+    [Fact]
+    public void The_worker_key_file_is_the_host_users_alone()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        var block = string.Join('\n', KeyBlock(File.ReadAllLines(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"))));
+        const string Key = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
+
+        foreach (var (role, user) in new[] { ("all", "harness"), ("control", "harness"), ("worker", "worker"), (" Worker ", "worker") })
+        {
+            var folder = Path.Combine(_root, $"run-{role.Trim()}-{Guid.NewGuid():N}", "harness");
+            File.Delete(_chownLog);
+            var (code, output) = Exec("/bin/sh", ["-e", "-c", block + "\nenv"], new Dictionary<string, string>
+            {
+                ["HARNESS_WORKER_KEY"] = Key, ["HARNESS_ROLE"] = role,
+                ["HARNESS_WORKER_KEY_DIR"] = folder, ["HARNESS_CHOWN"] = _chownStub,
+            });
+            Assert.True(code == 0, output);
+
+            var file = Path.Combine(folder, "worker-key");
+            Assert.Equal("700", Exec("stat", ["-c", "%a", folder]).Output.Trim());
+            Assert.Equal("400", Exec("stat", ["-c", "%a", file]).Output.Trim());
+            Assert.Equal(Key + "\n", File.ReadAllText(file));
+            Assert.Equal([$"{user}:{user} {folder} {file}"], File.ReadAllLines(_chownLog));
+
+            var environment = output.Split('\n');
+            Assert.DoesNotContain(environment, line => line.StartsWith("HARNESS_WORKER_KEY=", StringComparison.Ordinal));
+            Assert.Contains($"HARNESS_WORKER_KEY_FILE={file}", environment);
+            Assert.DoesNotContain(Key, output);
+        }
+
+        // No key, or an empty one: no file, and no name of one.
+        foreach (var variables in new[] { new Dictionary<string, string>(), new Dictionary<string, string> { ["HARNESS_WORKER_KEY"] = "" } })
+        {
+            var folder = Path.Combine(_root, $"run-none-{Guid.NewGuid():N}", "harness");
+            variables["HARNESS_WORKER_KEY_DIR"] = folder;
+            variables["HARNESS_CHOWN"] = _chownStub;
+            var (code, output) = Exec("/bin/sh", ["-e", "-c", block + "\nenv"], variables);
+            Assert.True(code == 0, output);
+            Assert.False(Directory.Exists(folder));
+            Assert.DoesNotContain(output.Split('\n'), line => line.StartsWith("HARNESS_WORKER_KEY=", StringComparison.Ordinal)
+                || line.StartsWith("HARNESS_WORKER_KEY_FILE=", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// A worker changes no ownership: it waits until control has prepared the volume (the data root
+    /// host:agent 0750, tmp and agent-home there), and after the limit starts anyway with a warning.
+    /// </summary>
+    [Fact]
+    public void The_worker_waits_for_a_prepared_volume_then_starts()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        var worker = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))["worker"];
+        var lines = worker.Split('\n');
+        var start = Array.FindIndex(lines, line => line.TrimStart().StartsWith("wait_root=", StringComparison.Ordinal));
+        var end = Array.FindIndex(lines, start, line => line.Trim() == "done");
+        var wait = string.Join('\n', lines[start..(end + 1)]);
+
+        Dictionary<string, string> Volume(string root, int limit) => new()
+        {
+            ["HARNESS_DATA_ROOT"] = root, ["HARNESS_VOLUME_WAIT_SECONDS"] = "1", ["HARNESS_VOLUME_WAIT_LIMIT"] = limit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"),
+        };
+        const string Waiting = "worker: waiting for control to prepare the volume";
+        const string Anyway = "starting anyway";
+
+        // Prepared: it goes straight on.
+        var prepared = Path.Combine(_root, "prepared");
+        Directory.CreateDirectory(Path.Combine(prepared, "tmp"));
+        Directory.CreateDirectory(Path.Combine(prepared, "agent-home"));
+        File.SetUnixFileMode(prepared, (UnixFileMode)Convert.ToInt32("750", 8));
+        var straight = Exec("/bin/sh", ["-e", "-c", wait + "\necho started"], Volume(prepared, 30));
+        Assert.Equal((0, "started"), (straight.Code, straight.Output.Trim()));
+
+        // Never prepared: it waits to the limit, says so, and starts.
+        var bare = Path.Combine(_root, "bare");
+        Directory.CreateDirectory(bare);
+        File.SetUnixFileMode(bare, (UnixFileMode)Convert.ToInt32("755", 8));
+        var never = Exec("/bin/sh", ["-e", "-c", wait + "\necho started"], Volume(bare, 2));
+        Assert.True(never.Code == 0, never.Output);
+        Assert.Equal(2, never.Output.Split('\n').Count(line => line == Waiting));
+        Assert.Contains("worker: the volume is still not prepared by control after 2 s; starting anyway", never.Output);
+        Assert.EndsWith("started", never.Output.Trim());
+
+        // Prepared while it waits: it goes on then, with no warning. The mode alone is not enough.
+        var later = Path.Combine(_root, "later");
+        Directory.CreateDirectory(later);
+        File.SetUnixFileMode(later, (UnixFileMode)Convert.ToInt32("750", 8));
+        var prepare = $"( sleep 2; mkdir -p '{later}/tmp' '{later}/agent-home' ) &\n";
+        var waited = Exec("/bin/sh", ["-e", "-c", prepare + wait + "\nwait\necho started"], Volume(later, 30));
+        Assert.True(waited.Code == 0, waited.Output);
+        Assert.Contains(Waiting, waited.Output);
+        Assert.DoesNotContain(Anyway, waited.Output);
+        Assert.EndsWith("started", waited.Output.Trim());
+    }
+
+    /// <summary>
+    /// A worker's start installs only the CLIs that are missing, one worker at a time: the CLIs are on
+    /// the shared volume, and another worker may be running members from them.
+    /// </summary>
+    [Fact]
+    public void The_worker_installs_missing_clis_only_under_the_volume_lock()
+    {
+        var worker = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))["worker"]
+            .Replace("\\\n", " ", StringComparison.Ordinal);
+        var step = Assert.Single(worker.Split('\n'), line => line.Contains("ensure-agent-clis.sh", StringComparison.Ordinal));
+        step = System.Text.RegularExpressions.Regex.Replace(step, @"\s+", " ");
+
+        Assert.Contains("HARNESS_UPDATE_AGENTS=0", step);
+        Assert.Matches(@"exec /usr/bin/flock /data/tmp/\.agent-cli-install\.lock /usr/bin/setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all --ambient-caps=-all -- /bin/sh /opt/harness/ensure-agent-clis\.sh \)", step);
+        Assert.Contains("|| echo \"agent cli: setup hit an error; starting the host anyway\"", step);
+    }
+
+    /// <summary>The worker's own state - its run process groups, health and drain files - is in the container and the worker user's alone.</summary>
+    [Fact]
+    public void The_worker_state_folder_is_the_worker_users_alone()
+    {
+        var worker = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))["worker"];
+        var lines = worker.Split('\n').Select(line => line.Trim()).ToList();
+
+        var made = lines.IndexOf("mkdir -p /var/lib/harness-worker");
+        Assert.True(made > 0, worker);
+        Assert.Equal("chown worker:worker /var/lib/harness-worker", lines[made + 1]);
+        Assert.Equal("chmod 0700 /var/lib/harness-worker", lines[made + 2]);
+        Assert.True(made < lines.FindIndex(line => line.StartsWith("exec /usr/bin/setpriv --reuid=worker", StringComparison.Ordinal)));
+        Assert.Equal("/var/lib/harness-worker", ContainerImageTests.Env(ContainerImageTests.Stages()["worker"], "HARNESS_WORKER_STATE_DIR"));
+    }
+
+    /// <summary>The control image runs control and nothing else, however the role is spelled.</summary>
+    [Fact]
+    public void The_control_image_refuses_any_role_but_control()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        var lines = File.ReadAllLines(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
+        var start = Array.FindIndex(lines, line => line.StartsWith(@"if [ ""${HARNESS_IMAGE:-}"" = control ]", StringComparison.Ordinal));
+        var check = RoleLine(lines) + "\n" + string.Join('\n', lines[start..(Array.IndexOf(lines, "fi", start) + 1)]) + "\necho runs";
+        const string Refusal = "This is the control image; it has no agent CLI, so it runs only as control (HARNESS_ROLE=control).";
+
+        foreach (var (image, role, runs) in new (string?, string?, bool)[]
+                 {
+                     ("control", "control", true), ("control", " Control ", true), ("control", "CONTROL", true),
+                     ("control", "worker", false), ("control", "Worker", false), ("control", "all", false),
+                     ("control", "", false), ("control", null, false), ("control", "controller", false),
+                     ("worker", "worker", true), ("worker", "all", true), ("worker", null, true), (null, null, true),
+                 })
+        {
+            var variables = new Dictionary<string, string>();
+            if (image is not null) variables["HARNESS_IMAGE"] = image;
+            if (role is not null) variables["HARNESS_ROLE"] = role;
+            var (code, output) = Exec("/bin/sh", ["-e", "-c", check], variables);
+            Assert.True(runs ? (code, output.Trim()) == (0, "runs") : code == 2 && output.Trim() == Refusal,
+                $"image {image ?? "(none)"} role '{role ?? "(unset)"}': exit {code}, {output}");
+        }
+    }
+
+    /// <summary>
+    /// A worker shares the volume with control and every other worker: it creates nothing on it as root
+    /// and changes no ownership there, which control's own pass does.
+    /// </summary>
+    [Fact]
+    public void The_worker_entrypoint_changes_no_ownership_and_runs_no_mkdir_on_the_volume()
+    {
+        var worker = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))["worker"];
+        var touching = new System.Text.RegularExpressions.Regex(@"^(?!\s*#).*\b(mkdir|chown|chgrp|chmod|touch|rm|mv)\b[^\n]*\s/data(\s|/|$)");
+
+        Assert.DoesNotContain("prepare_volume", worker);
+        Assert.DoesNotContain("prepare-volume.sh ownership", worker);
+        Assert.DoesNotContain(worker.Split('\n'), line => touching.IsMatch(line));
+        // The function that does is called by control and `all` only.
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")), @"(?m)^\s+prepare_volume$"));
+    }
+
+    /// <summary>The worker's host runs as `worker`, keeping setuid, setgid and kill to start and stop agents, with umask 0007.</summary>
+    [Fact]
+    public void The_worker_entrypoint_drops_to_the_worker_user_keeping_setuid_setgid_and_kill()
+    {
+        var worker = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))["worker"];
+
+        Assert.Equal(HostExec("worker"), ExecLine(worker));
+        Assert.Matches(@"(?m)^\s*umask 0007\n\s*exec /usr/bin/setpriv --reuid=worker", worker);
+        Assert.DoesNotContain("--reuid=harness", worker);
+    }
+
+    /// <summary>
+    /// What the ownership map means, for real: after a real pass over a seeded volume, the worker user
+    /// (in group agent) and the agent user cannot read the database, the key ring or any record the Host
+    /// keeps for itself - and both can still write where agents work, and the worker can read plugins,
+    /// so the refusals come from the map and not from a path they cannot reach.
+    /// </summary>
+    [Fact]
+    public void As_the_worker_and_as_the_agent_the_database_and_key_ring_cannot_be_read()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        RootOrSkip();
+        Assert.SkipWhen(Exec("sh", ["-c", "command -v setpriv"]).Code != 0, "Needs setpriv to switch users.");
+        SeedExistingVolume();
+        Directory.CreateDirectory(Path.Combine(_data, "plugins", "sample", "0.1.0"));
+        File.WriteAllText(Path.Combine(_data, "plugins", "sample", "0.1.0", "plugin.json"), "{}");
+        // Every folder above the data root can be passed through, so a refusal below is the map's.
+        File.SetUnixFileMode(_root, (UnixFileMode)Convert.ToInt32("755", 8));
+
+        var output = Run("ownership", new Dictionary<string, string> { ["HARNESS_CHOWN"] = "chown" });
+        Assert.Equal("10001:10002", Owner("."));
+
+        foreach (var uid in new[] { "10003", "10002" })
+        {
+            (int Code, string Output) As(string command) =>
+                Exec("setpriv", [$"--reuid={uid}", $"--regid={uid}", "--groups=10002", "--", "/bin/sh", "-c", command]);
+
+            foreach (var refused in new[]
+                     {
+                         "cat messages.db", "ls keys", "cat keys/key-1.xml", "cat agent-auth.json", "cat agent-tools.json",
+                         "ls agent-credentials", "cat agent-credentials/request-1.json", "cat workers.json", "cat wip.json",
+                     })
+            {
+                var (code, text) = As($"cd '{_data}' && {refused}");
+                Assert.True(code != 0 && text.Contains("Permission denied", StringComparison.Ordinal),
+                    $"uid {uid}: `{refused}` exited {code}: {text}\n{output}");
+            }
+
+            foreach (var allowed in new[] { $"touch tmp/probe-{uid}", $"touch teams/alpha/workspaces/probe-{uid}", "cat plugins/sample/0.1.0/plugin.json" })
+            {
+                var (code, text) = As($"cd '{_data}' && {allowed}");
+                Assert.True(code == 0, $"uid {uid}: `{allowed}` exited {code}: {text}");
+            }
+        }
+    }
+
+    /// <summary>The entrypoint's role branches: <c>control</c>, <c>worker</c>, and <c>all</c> for the <c>*</c> branch.</summary>
+    private static Dictionary<string, string> Branches(string entrypoint)
+    {
+        var branches = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+                     entrypoint.Replace("\r\n", "\n", StringComparison.Ordinal), @"(?ms)^  (?<name>control|worker|\*)\)\n(?<body>.*?)^    ;;$"))
+        {
+            branches.Add(match.Groups["name"].Value == "*" ? "all" : match.Groups["name"].Value, match.Groups["body"].Value);
+        }
+
+        Assert.Equal(3, branches.Count);
+        return branches;
+    }
+
+    /// <summary>The one line that reads the role.</summary>
+    private static string RoleLine(string entrypoint) => RoleLine(entrypoint.Split('\n'));
+
+    private static string RoleLine(string[] lines) => Assert.Single(lines, line => line.StartsWith("role=", StringComparison.Ordinal));
+
+    /// <summary>The worker key's block, from its <c>if</c> to the <c>unset</c> after it.</summary>
+    private static string[] KeyBlock(string[] lines)
+    {
+        var start = Array.FindIndex(lines, line => line.StartsWith(@"if [ -n ""${HARNESS_WORKER_KEY:-}"" ]; then", StringComparison.Ordinal));
+        var end = Array.IndexOf(lines, "unset HARNESS_WORKER_KEY", start);
+        Assert.True(start >= 0 && end > start, string.Join('\n', lines));
+        return lines[start..(end + 1)];
+    }
+
+    /// <summary>The function control and `all` prepare the volume with.</summary>
+    private static string PrepareVolumeFunction(string entrypoint)
+    {
+        var start = entrypoint.IndexOf("prepare_volume() {", StringComparison.Ordinal);
+        Assert.True(start >= 0, entrypoint);
+        return entrypoint[start..entrypoint.IndexOf("\n}\n", start, StringComparison.Ordinal)];
+    }
+
     // ---- The volume ----
 
     /// <summary>An existing volume holding every kind of file the ownership map sorts, as far as this
@@ -746,6 +1150,8 @@ public sealed class PrepareVolumeTests : IDisposable
                      "agent-home/.grok/bin/grok", "npm-global/bin/claude", "bin/tool",
                      "steering/user.txt", "cli-versions.jsonl", "tenant-interactive-agent-workspaces/u/AGENTS.md",
                      "connections/.connect-report.json",
+                     "agent-credentials/request-1.json", "agent-auth.json", "agent-auth.json.tmp", "agent-tools.json",
+                     "agent-launch-checks.json", "wip.json", "workers.json", "workers.json.tmp",
                  })
         {
             var path = Path.Combine(_data, file);

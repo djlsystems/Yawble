@@ -1,7 +1,7 @@
 # Bring the local instance to the latest main in one command: pull, wait for running agents,
 # rebuild and replace the container with dev-up.ps1 (yawble up), then report the version now running.
 #
-#   scripts/update.ps1          # waits while any agent CLI runs in the container
+#   scripts/update.ps1          # waits while any agent CLI runs in control or any worker container
 #   scripts/update.ps1 -Force   # does not wait; running agents are cut off by the replacement
 param(
     [switch]$Force,
@@ -23,20 +23,25 @@ Assert-CleanMain $root
 # 2. Fast-forward only: a local commit that is not on origin stops the update here.
 Invoke-Checked 'git pull --ff-only' { git pull --ff-only }
 
-# 3. Replacing the container kills every agent in it. Wait for them to finish.
+# 3. Replacing the containers kills every agent in them. Wait for them to finish. Agents run in the
+# worker containers (label yawble.role=worker); an instance from before control and workers were
+# split runs them in $Container itself, so that one is asked too.
 if ($Force) {
     Write-Host 'Not waiting for running agents (-Force).'
 } else {
     while ($true) {
         $running = @()
-        $listing = @(podman exec $Container sh -c (ConvertTo-ShArgument $AgentProcessListing))
-        if ($LASTEXITCODE -eq 0) {
-            $running = @(Get-AgentProcess -Lines $listing)
-        } else {
-            Write-Host "Container '$Container' is not answering; nothing to wait for."
+        $workers = @(& { $ErrorActionPreference = 'Continue'; podman ps --filter label=yawble.role=worker --format '{{.Names}}' 2>$null } | Where-Object { $_ })
+        foreach ($name in @($Container) + $workers) {
+            $listing = @(& { $ErrorActionPreference = 'Continue'; podman exec -e HARNESS_WORKER_KEY= $name sh -c (ConvertTo-ShArgument $AgentProcessListing) 2>$null })
+            if ($LASTEXITCODE -eq 0) {
+                $running += @(Get-AgentProcess -Lines $listing | ForEach-Object { $_ | Add-Member -NotePropertyName Container -NotePropertyValue $name -PassThru })
+            } else {
+                Write-Host "Container '$name' is not answering; nothing to wait for there."
+            }
         }
         if ($running.Count -eq 0) { break }
-        $names = @($running | ForEach-Object { "$($_.Who) ($($_.Cli), pid $($_.Pid))" })
+        $names = @($running | ForEach-Object { "$($_.Who) ($($_.Cli), pid $($_.Pid), in $($_.Container))" })
         Write-Host "$(Get-Date -Format 'HH:mm:ss') Waiting for $($running.Count) agent(s): $($names -join ', '). Checking again in $PollSeconds s; -Force skips the wait."
         Start-Sleep -Seconds $PollSeconds
     }
@@ -60,7 +65,24 @@ while ((Get-Date) -lt $deadline) {
 if (-not $healthy) {
     throw "The container did not report healthy within $HealthTimeoutMinutes minutes. Read: podman logs $Container"
 }
-Write-Host 'Healthy.'
+Write-Host 'Control is healthy.'
+
+# 6. Each worker, healthy exactly while it is connected to control (its own HEALTHCHECK). The first
+# boot installs the agent CLIs before the worker's host starts, so this shares the same deadline.
+$workers = @(& { $ErrorActionPreference = 'Continue'; podman ps --filter label=yawble.role=worker --format '{{.Names}}' 2>$null } | Where-Object { $_ })
+foreach ($name in $workers) {
+    Write-Host "Waiting for $name..."
+    $healthy = $false
+    while ((Get-Date) -lt $deadline) {
+        $state = & { $ErrorActionPreference = 'Continue'; podman inspect -f '{{.State.Health.Status}}' $name 2>$null }
+        if ("$state".Trim() -eq 'healthy') { $healthy = $true; break }
+        Start-Sleep -Seconds 5
+    }
+    if (-not $healthy) {
+        throw "$name did not report healthy (connected to control) within $HealthTimeoutMinutes minutes. Read: podman logs $name"
+    }
+}
+if ($workers.Count -gt 0) { Write-Host "$($workers.Count) worker(s) healthy." }
 
 $body = & { $ErrorActionPreference = 'Continue'; podman exec $Container curl -fsS http://127.0.0.1:8080/api/version 2>$null }
 if ($LASTEXITCODE -eq 0 -and $body) {
