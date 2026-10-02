@@ -61,6 +61,9 @@ public sealed class WorkerConnections
     /// <summary>Raised when a worker joins or goes, after the pool and the ledger have heard.</summary>
     public event Action? Changed;
 
+    /// <summary>Raised when a worker joins as a new session - not when one comes back on its own - after <see cref="Changed"/>.</summary>
+    public event Action<WorkerId>? Joined;
+
     /// <summary>The workers connected or dropped and within their grace.</summary>
     public IReadOnlyList<RemoteWorker> Workers()
     {
@@ -180,6 +183,7 @@ public sealed class WorkerConnections
         _log?.LogInformation("Worker {Worker} {How} (version {Version}, session {Session}).", remote.Id, back ? "is back" : "connected", hello.Version, hello.Session);
         _wip.WorkersChanged();
         Changed?.Invoke();
+        if (!back) Joined?.Invoke(remote.Id);
 
         await StopStaleAsync(remote, hello.OpenRuns);
         await RunToEndAsync(remote, socket, ct);

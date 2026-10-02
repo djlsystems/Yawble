@@ -1237,9 +1237,12 @@ builder.Services.AddSingleton<TeamListPush>();
 // THE ONE REMOVAL a team root, a member's workspace and a reset's folders go through: the marker
 // last, agent content removed as the agent through its launch prefix, and whatever remains recorded
 // to be retried. See FolderRemoval.
+// The agent's pass goes to a connected worker; in control always, in all only where agents run as
+// another user, as before.
 builder.Services.AddSingleton(sp => new FolderRemoval(
     sp.GetRequiredService<AgentLaunchUser>(),
-    sp.GetRequiredService<IUnfinishedRemovals>()));
+    sp.GetRequiredService<IUnfinishedRemovals>(),
+    agent: new WorkerAgentPass(sp.GetRequiredService<WorkerAsks>(), always: control)));
 
 // IMAGES A PERSON GIVES THEIR CONCIERGE. The cap and the retention are configuration rather than
 // tenant settings: they bound one route and one sweep, and nothing reads them while running.
@@ -1790,7 +1793,7 @@ app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
     app.Logger.LogInformation("Member temporary folders: {Path} - {Reason}", memberTemp.Path, memberTemp.Reason);
 
     // The homes a launch check or a listing made there and a stopped Host never removed.
-    await RunHome.SweepSharedAsync(memberTemp.Path, runAs, CancellationToken.None);
+    await RunHome.SweepSharedAsync(memberTemp.Path, runAs, CancellationToken.None, removal: app.Services.GetRequiredService<FolderRemoval>());
 }
 
 // THE ADDRESS EVERY MEMBER IS TOLD TO CALL, printed for the reason the dev server prints its proxy
@@ -2346,6 +2349,12 @@ var workerConnections = new WorkerConnections(
     diagnostics: app.Services.GetRequiredService<IDiagnosticsLog>(),
     log: app.Services.GetRequiredService<ILogger<WorkerConnections>>());
 workerConnections.Changed += () => wip.SetMax(tenantSettings.WipMaxRunning);
+// In control the start's retry of unfinished removals ran before any worker could connect: each worker
+// that joins retries them once, so what only the agent's pass can remove does not wait for a person.
+RetryWhenAWorkerJoins.Wire(
+    control, workerConnections,
+    ct => app.Services.GetRequiredService<UnfinishedRemovalRetry>().RetryAsync(ct: ct),
+    app.Services.GetRequiredService<ILogger<WorkerConnections>>());
 app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
 Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
     app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version);

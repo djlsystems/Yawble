@@ -52,8 +52,6 @@ public sealed class WorkerArchitectureTests
             "live transcript reader: follows a run's transcript as the agent for a watcher; a later change moves it to a worker.",
         ["LiveViewEndpoints.RunTranscriptAsync: " + ReachesAWorkerLauncher] =
             "live transcript reader: reads a past run's transcript as the agent; a later change moves it to a worker.",
-        ["FolderRemoval.RunAsync: " + StartsAProcess] =
-            "FolderRemoval's agent pass: removes what the agent owns, as the agent; a later change moves it to a worker.",
         ["GitRunner.ExecuteGitAsync: " + StartsAProcess] =
             "git: a person's and a team's git stays in control.",
         ["GhContributor.RunAsync: " + StartsAProcess] =

@@ -116,6 +116,12 @@ public sealed class InProcessWorker
             control);
     }
 
+    /// <summary>
+    /// The run homes of the Host's own worker, removed by the worker's own <see cref="RunHomeRemoval"/>,
+    /// the rule a worker process uses.
+    /// </summary>
+    public static RunHomes Homes(AgentLaunchUser? runAs) => new(runAs, RunHomeRemoval.For(runAs));
+
     /// <summary>Who agent children run as on this worker, decided once (<see cref="AgentLaunchUser.Resolve"/>).</summary>
     public static AgentLaunchUser LaunchUser(string? configured) => AgentLaunchUser.Resolve(configured);
 
