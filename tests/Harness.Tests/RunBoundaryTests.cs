@@ -332,6 +332,66 @@ public sealed class RunBoundaryTests : IDisposable
         Assert.Equal(bed.Seqs.Distinct().Count(), bed.Seqs.Count);
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Leases and the idle clock.
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_granted_lease_raises_the_allowance_before_the_call_answers()
+    {
+        using var bed = new Bed(_root);
+        var reports = new ProgressLines();
+        var leases = new LeaseActions(new InstanceLeases(() => 1), bed.Worker, reports);
+
+        var answer = await leases.AcquireAsync(InstanceLeases.Heavy, LeaseOwner.For(Member), Ct);
+
+        // Applied on the worker by the time the call answered: its allowances read this set.
+        Assert.Equal(LeaseOutcome.Granted, answer.Outcome);
+        Assert.Equal([Member.ToString()], bed.Host.HeavyHolders);
+        Assert.Contains(bed.Sent, m => m is ChangeRunMemoryAllowance { HeavyHolders: [var key] } && key == Member.ToString());
+
+        await leases.ReleaseAsync(InstanceLeases.Heavy, LeaseOwner.For(Member), Ct);
+
+        Assert.Empty(bed.Host.HeavyHolders);
+    }
+
+    [Fact]
+    public async Task A_queued_lease_holds_the_idle_clock_across_the_transport()
+    {
+        using var bed = new Bed(_root);
+        var holding = new ContainerId("alpha", "holder");
+        var held = new ConcurrentQueue<bool>();
+        using var clock = bed.Heartbeat.WhileRunning(Member, () => { }, paused => held.Enqueue(paused));
+        var leases = new LeaseActions(new InstanceLeases(() => 1), bed.Worker, new ProgressLines());
+
+        await leases.AcquireAsync(InstanceLeases.Heavy, LeaseOwner.For(holding), Ct);
+        var queued = await leases.AcquireAsync(InstanceLeases.Heavy, LeaseOwner.For(Member), Ct);
+        await leases.ReleaseAsync(InstanceLeases.Heavy, LeaseOwner.For(holding), Ct);
+
+        Assert.Equal(LeaseOutcome.Queued, queued.Outcome);
+        Assert.Equal([true, false], held);
+        Assert.Equal(
+            [new HoldIdleClock(Member, true), new HoldIdleClock(Member, false)],
+            bed.Sent.OfType<HoldIdleClock>().Where(h => h.Member == Member));
+    }
+
+    [Fact]
+    public async Task A_progress_report_touches_the_idle_clock_across_the_transport()
+    {
+        using var bed = new Bed(_root);
+        await using var members = new ContainerTestBed();
+        await members.AddAsync(Member);
+        var touched = 0;
+        using var clock = bed.Heartbeat.WhileRunning(Member, () => Interlocked.Increment(ref touched));
+        var reports = new MemberReports(members.Host, members.Store, bed.Worker);
+
+        var outcome = await reports.ProgressAsync(Member, "still going", Ct);
+
+        Assert.Equal(MemberReportOutcome.Ok, outcome);
+        Assert.Equal(1, Volatile.Read(ref touched));
+        Assert.Equal([new TouchIdleClock(Member)], bed.Sent.OfType<TouchIdleClock>());
+    }
+
     [Fact]
     public void Stopping_the_host_does_not_close_its_worker_so_a_run_ends_as_today_not_lost()
     {
@@ -437,6 +497,12 @@ public sealed class RunBoundaryTests : IDisposable
                     await Directory.HandleAsync(envelope, ct);
                 });
         }
+
+        /// <summary>The worker itself, for what it holds.</summary>
+        public WorkerHost Host => _worker.Host;
+
+        /// <summary>Every control message sent to the worker, in order.</summary>
+        public IReadOnlyList<ControlMessage> Sent => [.. _log.OrderBy(l => l.Order).Select(l => l.Record).OfType<ControlMessage>()];
 
         /// <summary>Every envelope's sequence number, in the order it was delivered.</summary>
         public List<long> Seqs { get; } = [];

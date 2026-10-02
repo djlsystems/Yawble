@@ -74,7 +74,6 @@ public sealed class WorkerArchitectureTests
         // Moved behind the protocol by the commits after this one, each deleting its own entries.
         ["Program.<Main>$: " + ReadsProc] = "pending: moves in this item, with the capacity sampler's readers.",
         ["Program.<Main>$: " + TouchesACgroup] = "pending: moves in this item, with the capacity sampler's readers.",
-        ["LeaseActions.MovedAsync: " + ReachesAWorkerLauncher] = "pending: moves in this item, to ChangeRunMemoryAllowance.",
         ["CapacitySampler.Sample: " + ReachesAWorkerLauncher] = "pending: moves in this item, to SampleCapacity.",
         ["PluginMemberRunner.RunPluginAsync: " + ReachesAWorkerLauncher] = "pending: moves in this item, to StartRun.",
     };

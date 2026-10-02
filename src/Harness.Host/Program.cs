@@ -688,7 +688,9 @@ builder.Services.AddSingleton<RunHeartbeat>();
 builder.Services.AddSingleton(sp =>
     new InstanceLeases(() => sp.GetRequiredService<TenantSettings>().LeasesHeavyHolders));
 builder.Services.AddSingleton<ILeaseState>(sp => sp.GetRequiredService<InstanceLeases>());
-builder.Services.AddSingleton<LeaseActions>();
+// BY FACTORY over the shared worker: a lease's moves reach the runs as protocol messages.
+builder.Services.AddSingleton(sp => new LeaseActions(
+    sp.GetRequiredService<InstanceLeases>(), sp.GetRequiredService<IRunWorker>(), sp.GetRequiredService<IMemberReports>()));
 // WRAPPED, AND THE WRAPPING IS LOAD-BEARING. `ProcessAgentRunner` spawns the process and reads what
 // it wrote; `CredentialUseRunner` answers what the SERVER saw while it ran, which is how a run that
 // did nothing is told from one that decided there was nothing to do. Unwrap this and every result
@@ -736,8 +738,7 @@ builder.Services.AddSingleton(sp => InProcessWorker.Create(
     sp.GetRequiredService<ILogger<ProcessAgentRunner>>(),
     sp.GetRequiredService<ILogger<RunAllowances>>(),
     builder.Configuration["Capacity:CgroupRoot"],
-    builder.Configuration["Capacity:ProcRoot"],
-    () => sp.GetRequiredService<InstanceLeases>().Holders(InstanceLeases.Heavy).Select(o => o.Key).ToList()));
+    builder.Configuration["Capacity:ProcRoot"]));
 builder.Services.AddSingleton<IRunWorker>(sp => sp.GetRequiredService<InProcessWorker>().Worker);
 builder.Services.AddSingleton(sp => sp.GetRequiredService<InProcessWorker>().Memory!);
 builder.Services.AddSingleton(sp => sp.GetRequiredService<InProcessWorker>().Allowances!);
@@ -759,7 +760,11 @@ builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
 
 // WHAT A MEMBER'S REPORT DOES - row, mark, card push, idle clock - written once, for the MCP routes
 // and for a plugin member's stdout alike.
-builder.Services.AddSingleton<MemberReports>();
+builder.Services.AddSingleton(sp => new MemberReports(
+    sp.GetRequiredService<ContainerHost>(),
+    sp.GetRequiredService<IMessageLog>(),
+    sp.GetRequiredService<IRunWorker>(),
+    sp.GetRequiredService<ILoggerFactory>()));
 builder.Services.AddSingleton<IMemberReports>(sp => sp.GetRequiredService<MemberReports>());
 
 // WHAT EVERY MEMBER RUNS THROUGH. The member runtime hands its work, as data, to this; the agent

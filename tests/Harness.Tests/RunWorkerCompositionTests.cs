@@ -20,6 +20,8 @@ public sealed class RunWorkerCompositionTests(HostFixture host) : IClassFixture<
         var clients = new Dictionary<string, IRunWorkerClient>
         {
             ["runner"] = Runner(),
+            ["leases"] = host.Services.GetRequiredService<LeaseActions>(),
+            ["reports"] = Assert.IsType<MemberReports>(host.Services.GetRequiredService<IMemberReports>()),
         };
 
         Assert.All(clients, client => Assert.Same(worker, client.Value.Worker));

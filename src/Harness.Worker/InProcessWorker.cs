@@ -64,8 +64,7 @@ public sealed class InProcessWorker
         ILogger? launchLog = null,
         ILogger<RunAllowances>? allowancesLog = null,
         string? cgroupRoot = null,
-        string? procRoot = null,
-        Func<IReadOnlyCollection<string>>? heavyHolders = null)
+        string? procRoot = null)
     {
         var proc = procRoot ?? WorkerPaths.Proc;
         var memory = RunMemoryLimits.Resolve(memoryLimit, WorkerPaths.CgroupRoot, WorkerPaths.ProcSelfCgroup, memoryCeiling);
@@ -74,7 +73,7 @@ public sealed class InProcessWorker
         var allowances = new RunAllowances(
             memory,
             heavyAllowance,
-            heavyHolders ?? (() => host?.HeavyHolders ?? []),
+            () => host?.HeavyHolders ?? [],
             new ProcessGroupReader(proc),
             RunProcessGroups.Shared,
             procRoot: proc,
