@@ -562,6 +562,54 @@ func TestARunPlacedBeforeTheDrainShowsIsWaitedForNotStopped(t *testing.T) {
 	}
 }
 
+// A slot control has placed on the worker but not yet sent - still starting, or held at the
+// update gate - is recorded with no run id. It is still a run: waited for, and named by the
+// --now warning.
+func TestARunRecordedWithNoRunIdYetIsWaitedForAndNamedByTheWarning(t *testing.T) {
+	defer instance.SetDrainPollingForTests(time.Millisecond, time.Minute)()
+	held := []instance.Run{{"", "acme", "Ada"}}
+	for _, e := range engines {
+		s := threeRunning(e)
+		st := keyed()
+		st.Workers = 2
+		var out bytes.Buffer
+		runsOf := recordOf(s, 0, map[string][][]instance.Run{"worker-3": {held, held, nil}})
+		if err := instance.Scale(context.Background(), e.make(s), st, runsOf, instance.ScaleOptions{}, &out); err != nil {
+			t.Fatal(err)
+		}
+		sameSteps(t, e.name, removalSteps(s, e.name), []string{
+			touch3,
+			"read worker-3: draining=true runs=1",
+			"read worker-3: draining=true runs=1",
+			"read worker-3: draining=true runs=0",
+			"stop -t 30 yawble-worker-3",
+			"rm -f yawble-worker-3",
+		})
+		if !strings.Contains(out.String(), "worker-3: 1 run still going (acme/Ada); waiting.") {
+			t.Errorf("%s out:\n%s", e.name, out.String())
+		}
+
+		s = threeRunning(e)
+		out.Reset()
+		var asked []string
+		opt := instance.ScaleOptions{Now: true, Confirm: func(q string) (bool, error) {
+			asked = append(asked, q)
+			return false, nil
+		}}
+		if err := instance.Scale(context.Background(), e.make(s), st, recordOf(s, 0, map[string][][]instance.Run{"worker-3": {held}}), opt, &out); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "this fails its 1 run as worker-lost (acme/Ada)") || len(asked) != 1 {
+			t.Errorf("%s --now out %q asked %q", e.name, out.String(), asked)
+		}
+		for _, c := range s.Calls {
+			if strings.Contains(c, " stop ") || strings.Contains(c, " rm -f yawble-worker") {
+				t.Errorf("%s stopped a worker holding a slot after a no: %q", e.name, c)
+			}
+		}
+	}
+}
+
 // A drain control's record never shows is no ground to trust a count of none: the worker is left
 // running and draining, not stopped.
 func TestAWorkerWhoseDrainNeverShowsIsNotStopped(t *testing.T) {
