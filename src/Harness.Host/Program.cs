@@ -2392,7 +2392,7 @@ RetryWhenAWorkerJoins.Wire(
     ct => app.Services.GetRequiredService<UnfinishedRemovalRetry>().RetryAsync(ct: ct),
     app.Services.GetRequiredService<ILogger<WorkerConnections>>());
 AgentUpdatesAtStart.Wire(
-    control, builder.Configuration["HARNESS_UPDATE_AGENTS"], joined => workerConnections.Joined += joined,
+    control, builder.Configuration["HARNESS_IMAGE"], builder.Configuration["HARNESS_UPDATE_AGENTS"], joined => workerConnections.Joined += joined,
     () => AgentUpdatesAtStart.OnePerCommand(app.Services.GetRequiredService<AgentCatalog>()),
     agent => app.Services.GetRequiredService<AgentCliUpdater>().Request(agent, person: null),
     app.Services.GetRequiredService<ILogger<WorkerConnections>>());

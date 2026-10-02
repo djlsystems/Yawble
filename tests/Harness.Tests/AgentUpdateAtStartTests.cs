@@ -7,7 +7,8 @@ namespace Harness.Tests;
 /// THE START'S CLI UPDATE GOES THROUGH CONTROL'S ONE UPDATE GATE. A worker's start installs only
 /// missing CLIs; the update a start used to make is asked of the gate when the first worker joins after
 /// control started, once per launched command, as a person's request from the Agents screen is.
-/// <c>HARNESS_UPDATE_AGENTS=0</c> turns it off, and a Host that runs its runs itself asks nothing here.
+/// <c>HARNESS_UPDATE_AGENTS=0</c> turns it off; a Host that runs its runs itself, or a control outside
+/// the control image (whose workers still update at their start), asks nothing here.
 /// </summary>
 public sealed class AgentUpdateAtStartTests
 {
@@ -63,11 +64,24 @@ public sealed class AgentUpdateAtStartTests
     }
 
     [Fact]
+    public void A_control_outside_the_control_image_asks_nothing_at_a_join()
+    {
+        foreach (var image in new[] { null, "", "worker" })
+        {
+            var (join, asked) = Wire(control: true, updateAgents: null, out var wired, image);
+
+            Assert.False(wired);
+            Assert.Null(join);
+            Assert.Empty(asked);
+        }
+    }
+
+    [Fact]
     public void A_request_that_throws_does_not_stop_the_others()
     {
         var asked = new List<string>();
         Action<WorkerId>? join = null;
-        AgentUpdatesAtStart.Wire(true, null, handler => join = handler, () => AgentUpdatesAtStart.OnePerCommand(Catalog), agent =>
+        AgentUpdatesAtStart.Wire(true, "control", null, handler => join = handler, () => AgentUpdatesAtStart.OnePerCommand(Catalog), agent =>
         {
             asked.Add(agent);
             if (agent == "claude") throw new InvalidOperationException("no worker");
@@ -78,12 +92,12 @@ public sealed class AgentUpdateAtStartTests
         Assert.Equal(["claude", "codex"], asked);
     }
 
-    private static (Action<WorkerId> Join, List<string> Asked) Wire(bool control, string? updateAgents, out bool wired)
+    private static (Action<WorkerId> Join, List<string> Asked) Wire(bool control, string? updateAgents, out bool wired, string? image = "control")
     {
         var asked = new List<string>();
         Action<WorkerId>? join = null;
         wired = AgentUpdatesAtStart.Wire(
-            control, updateAgents, handler => join = handler, () => AgentUpdatesAtStart.OnePerCommand(Catalog), asked.Add);
+            control, image, updateAgents, handler => join = handler, () => AgentUpdatesAtStart.OnePerCommand(Catalog), asked.Add);
         return (join!, asked);
     }
 }

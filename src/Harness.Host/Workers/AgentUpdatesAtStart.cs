@@ -9,22 +9,27 @@ namespace Harness.Host;
 /// make is asked of control's gate instead, when the first worker joins after control started - once
 /// per command, as a person's request from the Agents screen is: it waits for runs, holds launches,
 /// and runs once on one worker. <c>HARNESS_UPDATE_AGENTS=0</c> turns it off, as it does the start's.
+/// Only in the control image (<c>HARNESS_IMAGE=control</c>), whose workers are the ones that skip the
+/// update at their start; a control run any other way has workers that update as they always did.
 /// </summary>
 public static class AgentUpdatesAtStart
 {
     /// <summary>What control logs when it asks.</summary>
+    /// <summary>What the control image sets <c>HARNESS_IMAGE</c> to.</summary>
+    public const string ControlImage = "control";
+
     public const string AskedText = "A worker joined after control started: each agent CLI's update is asked of the update gate once.";
 
     /// <summary>
-    /// Wires the ask to the first join <paramref name="onJoined"/> reports, when <paramref name="control"/>
-    /// and updates are on; returns whether it did. <paramref name="agents"/> names one preset per command
+    /// Wires the ask to the first join <paramref name="onJoined"/> reports, when <paramref name="control"/>,
+    /// in the control image (<paramref name="image"/>), and with updates on; returns whether it did. <paramref name="agents"/> names one preset per command
     /// to update, and <paramref name="request"/> is the gate's request for one.
     /// </summary>
     public static bool Wire(
-        bool control, string? updateAgents, Action<Action<Contracts.WorkerId>> onJoined, Func<IReadOnlyList<string>> agents,
+        bool control, string? image, string? updateAgents, Action<Action<Contracts.WorkerId>> onJoined, Func<IReadOnlyList<string>> agents,
         Action<string> request, ILogger? log = null)
     {
-        if (!control || updateAgents?.Trim() == "0") return false;
+        if (!control || image?.Trim() != ControlImage || updateAgents?.Trim() == "0") return false;
 
         var asked = 0;
         onJoined(worker =>
