@@ -59,7 +59,6 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
     private bool _gone;
 
     // What was said while the worker was dropped, said again when it is back: the latest of each.
-    private ControlMessage? _settings;
     private ChangeRunMemoryAllowance? _heavy;
     private readonly Dictionary<ContainerId, bool> _holds = [];
     private readonly HashSet<ContainerId> _touches = [];
@@ -426,14 +425,16 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
         }
     }
 
-    /// <summary>Keeps what control says while the worker is dropped, the latest of each kind.</summary>
+    /// <summary>
+    /// Keeps what control says to the worker's runs while it is dropped, the latest of each kind.
+    /// Anything else - a start, a measurement, a request answered by an event - is refused at once:
+    /// its caller waits for the answer within a bound, and one applied after the caller gave up
+    /// would be applied for nobody.
+    /// </summary>
     private void Keep(ControlMessage message)
     {
         switch (message)
         {
-            case StartRun or SampleCapacity:
-                throw new InvalidOperationException($"Worker {Id} is not connected.");
-
             case ChangeRunMemoryAllowance heavy:
                 _heavy = heavy;
                 break;
@@ -451,21 +452,18 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
                 break;
 
             default:
-                _settings = message;
-                break;
+                throw new InvalidOperationException($"Worker {Id} is not connected.");
         }
     }
 
     private List<ControlMessage> KeptLocked()
     {
         List<ControlMessage> kept = [];
-        if (_settings is not null) kept.Add(_settings);
         if (_heavy is not null) kept.Add(_heavy);
         kept.AddRange(_holds.Select(h => new HoldIdleClock(h.Key, h.Value)));
         kept.AddRange(_touches.Select(m => new TouchIdleClock(m)));
         kept.AddRange(_cancels);
 
-        _settings = null;
         _heavy = null;
         _holds.Clear();
         _touches.Clear();
