@@ -69,13 +69,16 @@ func sizeFirstUp(deps Deps, c config.Config, m instance.Machine, yes bool, out i
 	}
 
 	floor, leastCPUs := floors(memoryMB, cpus)
+	most := workerMemoryMax(m)
 	fmt.Fprint(out, firstUpScreen(m, memoryMB, cpus, c.MaxRunning))
 	more := capitalize(instance.MoreForEngine(m.Kind))
-	memoryMB = askNumber(deps, out, fmt.Sprintf("Memory in MB (%d to %d) [%d]: ", floor, m.MemoryMB(), memoryMB), memoryMB,
+	memoryMB = askNumber(deps, out, fmt.Sprintf("Memory in MB (%d to %d) [%d]: ", floor, most, memoryMB), memoryMB,
 		parseMemoryMB, func(v int) string {
 			switch {
-			case v > m.MemoryMB():
-				return fmt.Sprintf("%d MB is more than the engine has; the most is %d MB. %s", v, m.MemoryMB(), more)
+			case v > most && most < m.MemoryMB():
+				return fmt.Sprintf("%d MB is more than the engine has beside control's %d MB; the most is %d MB. %s", v, instance.ControlMemoryMB(), most, more)
+			case v > most:
+				return fmt.Sprintf("%d MB is more than the engine has; the most is %d MB. %s", v, most, more)
 			case v < floor && floor < memoryFloorMB:
 				return fmt.Sprintf("%d MB is below the floor of %d MB, the proposal for an engine under 8 GB; the least is %d MB", v, floor, floor)
 			case v < floor:
@@ -102,6 +105,15 @@ func sizeFirstUp(deps Deps, c config.Config, m instance.Machine, yes bool, out i
 	return c, nil
 }
 
+// workerMemoryMax is the most memory a worker may ask for on the first up: the engine's, less
+// control's fixed allowance. An engine too small for that keeps its whole memory as the most.
+func workerMemoryMax(m instance.Machine) int {
+	if most := m.MemoryMB() - instance.ControlMemoryMB(); most > 0 {
+		return most
+	}
+	return m.MemoryMB()
+}
+
 // firstUpScreen is the one short screen before the questions. The running limit on it is the
 // only CLI-derived limit anywhere, and it says so: `doctor` reports the Host's own answer.
 func firstUpScreen(m instance.Machine, memoryMB, cpus, maxRunning int) string {
@@ -110,12 +122,13 @@ func firstUpScreen(m instance.Machine, memoryMB, cpus, maxRunning int) string {
 	if maxRunning > 0 {
 		limit += fmt.Sprintf("; it is set to %d there now", maxRunning)
 	}
-	return fmt.Sprintf("How much of the engine should Yawble's container get? (asked once)\n"+
+	return fmt.Sprintf("How much of the engine should Yawble's worker get? (asked once)\n"+
 		"  the engine has   %d MB memory, %d CPUs (%s)\n"+
+		"  control takes    %d MB memory, %d CPUs (fixed), so a worker may have up to %d MB\n"+
 		"  proposed         %d MB memory, %d CPUs (half the engine's memory up to 12 GB; its CPUs up to 8)\n"+
 		"  running limit    %s\n"+
 		"Press Enter to accept a value, or type another.\n",
-		m.MemoryMB(), m.CPUs, m.Source, memoryMB, cpus, limit)
+		m.MemoryMB(), m.CPUs, m.Source, instance.ControlMemoryMB(), instance.ControlCPUs, workerMemoryMax(m), memoryMB, cpus, limit)
 }
 
 // askNumber asks until the answer is accepted: Enter takes the proposal, an unreadable or

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/djlsystems/yawble/cli/internal/buildinfo"
 	"github.com/djlsystems/yawble/cli/internal/config"
+	"github.com/djlsystems/yawble/cli/internal/doctor"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/instance"
 	"github.com/djlsystems/yawble/cli/internal/machine"
@@ -238,7 +240,7 @@ func newStatusCommand(deps Deps) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:     "status",
-		Short:   "Whether the instance runs, its URL, engine, image and the engine's stats of it",
+		Short:   "Whether control and each worker run, the URL, engine, image, the engine's stats and control's record of each worker",
 		Example: "  yawble status\n  yawble status --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -250,11 +252,12 @@ func newStatusCommand(deps Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stats, statsErr := containerStats(cmd.Context(), e, st.Container)
+			stats, statsErr := containerStats(cmd.Context(), e, instance.ContainerName, st.Container)
+			workers := workersOf(cmd.Context(), e, st)
 			if asJSON {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				return enc.Encode(statusJSON{Status: st, Stats: stats, StatsError: errText(statsErr)})
+				return enc.Encode(statusJSON{Status: st, Stats: stats, StatsError: errText(statsErr), Workers: workers})
 			}
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "container  %s\n", st.Container)
@@ -276,6 +279,12 @@ func newStatusCommand(deps Deps) *cobra.Command {
 			if len(st.Pending) > 0 {
 				fmt.Fprintf(w, "pending    %v (yawble up applies them)\n", st.Pending)
 			}
+			for _, wk := range workers {
+				fmt.Fprintf(w, "%-10s %s\n", wk.ID, workerLine(wk.WorkerStatus, wk.record))
+				if wk.Container == engine.StateRunning {
+					fmt.Fprintf(w, "%-10s %s\n", "", statsLine(e, wk.Stats, errorOf(wk.StatsError)))
+				}
+			}
 			return nil
 		},
 	}
@@ -289,15 +298,51 @@ type statusJSON struct {
 	instance.Status
 	Stats      *engine.Stats `json:"stats"`
 	StatsError string        `json:"statsError,omitempty"`
+	// Workers is each worker container with the engine's stats of it and control's record.
+	Workers []workerJSON `json:"workers"`
 }
 
-// containerStats asks the engine for the container's stats only when it runs: a stopped
+// workerJSON is one worker in the status document: the engine's view, its stats, and what control
+// recorded of it (null when control is not running or has no record of it).
+type workerJSON struct {
+	instance.WorkerStatus
+	Stats      *engine.Stats        `json:"stats"`
+	StatsError string               `json:"statsError,omitempty"`
+	Control    *doctor.WorkerRecord `json:"control"`
+	record     *doctor.WorkersRecord
+}
+
+// workersOf adds to each worker the engine's stats and control's record of it. Control's record
+// is asked only when control runs.
+func workersOf(ctx context.Context, e engine.Engine, st instance.Status) []workerJSON {
+	var record *doctor.WorkersRecord
+	if st.Container == engine.StateRunning {
+		if r, err := doctor.FetchHostReport(ctx, e, true); err == nil {
+			record = r.Workers
+		}
+	}
+	out := make([]workerJSON, 0, len(st.Workers))
+	for _, w := range st.Workers {
+		stats, err := containerStats(ctx, e, w.Name, w.Container)
+		out = append(out, workerJSON{WorkerStatus: w, Stats: stats, StatsError: errText(err), Control: record.Worker(w.ID), record: record})
+	}
+	return out
+}
+
+func errorOf(text string) error {
+	if text == "" {
+		return nil
+	}
+	return errors.New(text)
+}
+
+// containerStats asks the engine for a container's stats only when it runs: a stopped
 // container has none, and that is said, not asked.
-func containerStats(ctx context.Context, e engine.Engine, state engine.State) (*engine.Stats, error) {
+func containerStats(ctx context.Context, e engine.Engine, name string, state engine.State) (*engine.Stats, error) {
 	if state != engine.StateRunning {
 		return nil, nil
 	}
-	st, err := e.Stats(ctx, instance.ContainerName)
+	st, err := e.Stats(ctx, name)
 	if err != nil {
 		return nil, err
 	}

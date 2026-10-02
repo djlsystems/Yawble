@@ -39,6 +39,9 @@ type HostReport struct {
 	// Wip is the Host's own running limit and per-run memory (hostfigures.go). Nil: an older Host,
 	// and the doctor says the figures are not known.
 	Wip *HostWip `json:"wip"`
+	// Workers is what control recorded of its workers (workers.go). Nil: the single-process
+	// form, an older Host, or nothing recorded yet.
+	Workers *WorkersRecord `json:"workers"`
 }
 
 type Schema struct {

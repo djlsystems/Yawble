@@ -37,7 +37,7 @@ func TestProbeOddAnswersAreRefusedOrReadAsSizes(t *testing.T) {
 }
 
 func TestProbeUnitsAtThePrompt(t *testing.T) {
-	for in, want := range map[string]string{"8G\n\n": "saved memory 8192m", "8192m\n\n": "saved memory 8192m", "12g\n\n": "saved memory 12288m", "13g\n\n": "refused: 13312 MB is more than the engine has"} {
+	for in, want := range map[string]string{"8G\n\n": "saved memory 8192m", "8192m\n\n": "saved memory 8192m", "10g\n\n": "saved memory 10240m", "13g\n\n": "refused: 13312 MB is more than the engine has"} {
 		out := refusalsOf(t, dockerEngine("12884901888|10|Docker Desktop\n"), "darwin", "docker", in)
 		if !strings.Contains(out, want) {
 			t.Errorf("%q: out lacks %q:\n%s", in, want, out)
@@ -78,7 +78,7 @@ func TestProbeEngineKindHintPerOS(t *testing.T) {
 		{"darwin", "Alpine Linux v3.20", "To give Docker's VM more: change it in the tool that runs that VM"},
 	} {
 		out := refusalsOf(t, dockerEngine("12884901888|10|"+c.os+"\n"), c.goos, "docker", "20000\n\n\n")
-		if !strings.Contains(out, "the most is 12288 MB. "+c.want+"\n") {
+		if !strings.Contains(out, "the most is 10752 MB. "+c.want+"\n") {
 			t.Errorf("%s/%q: out lacks %q:\n%s", c.goos, c.os, c.want, out)
 		}
 	}
@@ -103,8 +103,8 @@ func TestProbeASavedValueEqualToTheEnginesWarnsOnlyThatControlComesOnTop(t *test
 }
 
 func TestProbeTheMaxIsAcceptedAtThePrompt(t *testing.T) {
-	out := refusalsOf(t, dockerEngine("12884901888|10|Docker Desktop\n"), "darwin", "docker", "12288\n10\n")
-	if !strings.Contains(out, "saved memory 12288m and cpus 10") {
+	out := refusalsOf(t, dockerEngine("12884901888|10|Docker Desktop\n"), "darwin", "docker", "10752\n10\n")
+	if !strings.Contains(out, "saved memory 10752m and cpus 10") {
 		t.Errorf("max refused:\n%s", out)
 	}
 }

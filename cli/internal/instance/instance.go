@@ -575,12 +575,12 @@ func GetStatus(ctx context.Context, e engine.Engine, s Settings, health func(str
 		h := health(st.URL + "/healthz")
 		st.Healthy = &h
 	}
-	st.Workers, err = workerStatuses(ctx, e, s)
+	st.Workers, err = Workers(ctx, e, s)
 	return st, err
 }
 
-// workerStatuses is workers 1..the configured count, and any other worker container found.
-func workerStatuses(ctx context.Context, e engine.Engine, s Settings) ([]WorkerStatus, error) {
+// Workers is workers 1..the configured count, and any other worker container found.
+func Workers(ctx context.Context, e engine.Engine, s Settings) ([]WorkerStatus, error) {
 	existing, err := WorkerContainers(ctx, e)
 	if err != nil {
 		return nil, err
