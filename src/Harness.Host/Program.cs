@@ -764,6 +764,12 @@ builder.Services.AddSingleton(sp => new AgentCliUpdater(
 // raises the run holding the `heavy` lease to the container's limit less the Host reserve less what
 // the other runs are measured to use, and lowers it when it lets go (RunAllowances). The cgroup and
 // proc roots are configuration so a test Host reads a fixture.
+// WHAT WORKERS STREAM TO CONTROL - a terminal's output, a followed transcript, a file's text - in
+// both roles: in one process the Host's own worker hands its chunks over by direct call.
+builder.Services.AddSingleton<WorkerStreams>();
+// THE AGENT'S FILES, read on a worker as the agent: a finished run's transcript and a run's tool check.
+builder.Services.AddSingleton(sp => new WorkerReads(
+    WorkersOf(sp), sp.GetRequiredService<WorkerStreams>()));
 builder.Services.AddSingleton(sp => new RunDirectory(
     () => sp.GetRequiredService<IMemberReports>(),
     () => sp.GetRequiredService<IDiagnosticsLog>(),
@@ -786,12 +792,15 @@ builder.Services.AddSingleton(sp => InProcessWorker.Create(
         {
             await sp.GetRequiredService<CapacitySampler>().HandleAsync(envelope, ct);
         }
+
+        await sp.GetRequiredService<WorkerStreams>().HandleAsync(envelope, ct);
     },
     sp.GetRequiredService<ILogger<ProcessAgentRunner>>(),
     sp.GetRequiredService<ILogger<RunAllowances>>(),
     builder.Configuration["Capacity:CgroupRoot"],
     builder.Configuration["Capacity:ProcRoot"],
-    RunHome.Homes(sp.GetRequiredService<AgentLaunchUser>())));
+    RunHome.Homes(sp.GetRequiredService<AgentLaunchUser>()),
+    sp.GetRequiredService<WorkerStreams>().Deliver));
 builder.Services.AddSingleton<IRunWorker>(sp =>
 {
     var worker = sp.GetRequiredService<InProcessWorker>().Worker;
@@ -1382,14 +1391,20 @@ builder.Services.AddSingleton<IGitHubContributor>(sp => new GhContributor(sp.Get
 builder.Services.AddSingleton(sp => new PullRequestStateReader(
     sp.GetRequiredService<IGitHubContributor>(), sp.GetRequiredService<TeamRegistry>()));
 
-builder.Services.AddSingleton<IPtyEngine, PortaPtyEngine>();
+// A PERSON'S TERMINAL RUNS ON A WORKER, in both roles: control relays it (WorkerPtyEngine), and in one
+// process the Host's own worker spawns it over the in-process transport.
+builder.Services.AddSingleton(sp => new WorkerPtyEngine(
+    WorkersOf(sp), sp.GetRequiredService<WorkerStreams>(),
+    log: sp.GetRequiredService<ILogger<WorkerPtyEngine>>()));
+builder.Services.AddSingleton<IPtyEngine>(sp => sp.GetRequiredService<WorkerPtyEngine>());
 builder.Services.AddSingleton(sp => new ConciergeLaunchFactory(
     sp.GetRequiredService<TeamPaths>(),
     memberBaseAddress,
     sp.GetRequiredService<IPrincipalStore>(),
     sp.GetRequiredService<AgentCatalog>(),
     sp.GetRequiredService<SkillDirectory>(),
-    sp.GetRequiredService<AgentLaunchUser>(),
+    // Who the agent runs as is the worker's to decide and refuse; control alone has no agent child.
+    control ? null : sp.GetRequiredService<AgentLaunchUser>(),
     sp.GetRequiredService<AgentUpdateGate>(),
     sp.GetRequiredService<IRunCredentials>()));
 builder.Services.AddSingleton(sp =>
@@ -1399,6 +1414,7 @@ builder.Services.AddSingleton(sp =>
     // provider is already disposed, so a `sp.GetRequiredService` in there throws
     // ObjectDisposedException out of disposal and takes every live session's cleanup with it.
     var launcher = sp.GetRequiredService<ConciergeLaunchFactory>();
+    var terminals = sp.GetRequiredService<WorkerPtyEngine>();
     var teams = sp.GetRequiredService<TeamRegistry>();
     var leaseActions = sp.GetRequiredService<LeaseActions>();
 
@@ -1439,7 +1455,8 @@ builder.Services.AddSingleton(sp =>
             // pin this person to the id-named folder the migration exists to retire.
             var account = await accounts.FindByIdAsync(key.User, ct);
 
-            return await launcher.ForAsync(
+            // Resolved here, made into a terminal by the worker that runs it.
+            return terminals.Stage(await launcher.ResolveAsync(
                 stored ?? "",
                 stored is null ? "this instance" : teams.LabelFor(stored),
                 key.User,
@@ -1448,7 +1465,7 @@ builder.Services.AddSingleton(sp =>
                 teams.EnvFor(stored ?? ""),
                 SteeringFile.Read(dataRoot, key.User),
                 publicUrl,
-                ct);
+                ct));
         },
         // A Concierge's run is its session: a lease it took ends with it, through the same path
         // as a run's end, so a member the queue hands it to is un-paused and its card told.
@@ -2317,6 +2334,8 @@ var workerConnections = new WorkerConnections(
         {
             await app.Services.GetRequiredService<CapacitySampler>().HandleAsync(envelope, ct);
         }
+
+        await app.Services.GetRequiredService<WorkerStreams>().HandleAsync(envelope, ct);
     },
     worker => app.Services.GetRequiredService<RunDirectory>().OpenOn(worker),
     workerKey,
@@ -2327,7 +2346,8 @@ var workerConnections = new WorkerConnections(
         TenantSettings.HostReserveMb),
     timings: WorkerBounds.Timings(builder.Configuration),
     diagnostics: app.Services.GetRequiredService<IDiagnosticsLog>(),
-    log: app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+    log: app.Services.GetRequiredService<ILogger<WorkerConnections>>(),
+    streams: app.Services.GetRequiredService<WorkerStreams>().Deliver);
 workerConnections.Changed += () => wip.SetMax(tenantSettings.WipMaxRunning);
 app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
 Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
@@ -7739,7 +7759,7 @@ app.UseWebSockets();
 // Setting it here would be picking a team on the person's behalf.
 app.MapGet("/api/concierge/ws", async (
     int? cols, int? rows, HttpContext context,
-    ConciergeSessionStore consoles, CancellationToken ct) =>
+    ConciergeSessionStore consoles, WorkerPool workers, CancellationToken ct) =>
 {
     if (PrincipalClaims.From(context.User) is not { } caller) return Results.Unauthorized();
 
@@ -7764,6 +7784,23 @@ app.MapGet("/api/concierge/ws", async (
     }
 
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
+
+    // NO WORKER, NO TERMINAL: a Concierge starts on a worker. The person is told once and the socket
+    // waits for one to connect; nothing is minted meanwhile, so leaving now leaves nothing behind. A
+    // person with a live session reattaches to it whatever the workers do.
+    if (!consoles.Has(key) && workers.Workers.Count == 0)
+    {
+        try
+        {
+            await socket.SendAsync(
+                Encoding.UTF8.GetBytes(WorkerPtyEngine.WaitingText + "\r\n"), WebSocketMessageType.Binary, true, ct);
+            while (workers.Workers.Count == 0) await workers.ConnectedAsync(ct);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or WebSocketException)
+        {
+            return Results.Empty;
+        }
+    }
 
     ConciergeSession console;
 
@@ -8070,6 +8107,14 @@ static IReadOnlyList<TriggerAudit> MemberAuditRows(HttpContext context, MemberCh
     }
 
     return rows;
+}
+
+// The workers a terminal or a file read goes to. The run worker is resolved first: in one process
+// that is what connects the Host's own worker to the pool.
+static WorkerPool WorkersOf(IServiceProvider services)
+{
+    _ = services.GetRequiredService<IRunWorker>();
+    return services.GetRequiredService<WorkerPool>();
 }
 
 static bool TeamHasMember(TeamRegistry teams, string team, string member) =>

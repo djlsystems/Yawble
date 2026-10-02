@@ -48,6 +48,12 @@ public sealed record RunId(ContainerId Member, string Nonce)
 [JsonDerivedType(typeof(TouchIdleClock), "touchIdleClock")]
 [JsonDerivedType(typeof(SampleCapacity), "sampleCapacity")]
 [JsonDerivedType(typeof(CheckLaunch), "checkLaunch")]
+[JsonDerivedType(typeof(StartTerminal), "startTerminal")]
+[JsonDerivedType(typeof(ResizeTerminal), "resizeTerminal")]
+[JsonDerivedType(typeof(StopTerminal), "stopTerminal")]
+[JsonDerivedType(typeof(FollowTranscript), "followTranscript")]
+[JsonDerivedType(typeof(StopStream), "stopStream")]
+[JsonDerivedType(typeof(ReadAgentFile), "readAgentFile")]
 public abstract record ControlMessage;
 
 /// <summary>A command about one run.</summary>
@@ -200,6 +206,8 @@ public sealed record WorkerEnvelope(WorkerId Worker, long Seq, WorkerEvent Event
 [JsonDerivedType(typeof(RunEnded), "runEnded")]
 [JsonDerivedType(typeof(WorkerCapacitySampled), "workerCapacitySampled")]
 [JsonDerivedType(typeof(LaunchChecked), "launchChecked")]
+[JsonDerivedType(typeof(TerminalEnded), "terminalEnded")]
+[JsonDerivedType(typeof(AgentFileRead), "agentFileRead")]
 public abstract record WorkerEvent;
 
 /// <summary>An event about one run.</summary>

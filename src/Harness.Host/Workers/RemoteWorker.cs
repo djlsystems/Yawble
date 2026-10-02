@@ -35,7 +35,7 @@ public sealed record WorkerTimings(TimeSpan Grace, TimeSpan KeepAlive, TimeSpan 
 /// answered: the frame that applies it is read while the handler waits.
 /// </para>
 /// </remarks>
-public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
+public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerInput
 {
     private readonly Func<WorkerEnvelope, CancellationToken, Task> _control;
     private readonly WorkerTimings _timings;
@@ -43,6 +43,7 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
     private readonly ILogger? _log;
     private readonly Action<RemoteWorker> _onDropped;
     private readonly Action<RemoteWorker> _onGone;
+    private readonly Action<WorkerId, StreamChunk>? _streams;
 
     private readonly Lock _gate = new();
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -64,6 +65,14 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
     private readonly Dictionary<ContainerId, bool> _holds = [];
     private readonly HashSet<ContainerId> _touches = [];
     private readonly List<CancelRun> _cancels = [];
+    private readonly List<ControlMessage> _ends = [];
+
+    /// <summary>
+    /// A terminal's or a read's request, which means nothing said later: refused at once while the
+    /// worker is dropped, so its caller answers now, never replayed after the caller gave up.
+    /// </summary>
+    private static bool CannotWait(ControlMessage message) =>
+        message is StartTerminal or ResizeTerminal or FollowTranscript or ReadAgentFile;
 
     public RemoteWorker(
         WorkerInfo info,
@@ -73,7 +82,8 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
         Action<RemoteWorker> dropped,
         Action<RemoteWorker> gone,
         TimeProvider? clock = null,
-        ILogger? log = null)
+        ILogger? log = null,
+        Action<WorkerId, StreamChunk>? streams = null)
     {
         Info = info;
         Session = session;
@@ -83,6 +93,7 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
         _onGone = gone;
         _clock = clock ?? TimeProvider.System;
         _log = log;
+        _streams = streams;
     }
 
     public WorkerId Id => Info.Id;
@@ -164,6 +175,27 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
     }
 
     /// <summary>
+    /// Sends a person's keystrokes now, outside the command queue: nothing waits behind a command the
+    /// worker is still applying. While the worker is dropped they are dropped too, never kept and typed
+    /// later into a screen the person has not seen.
+    /// </summary>
+    public async ValueTask InputAsync(StreamInput input, CancellationToken ct = default)
+    {
+        WorkerSocket? socket;
+        lock (_gate) socket = _gone ? null : _socket;
+        if (socket is null) return;
+
+        try
+        {
+            await socket.SendAsync(new StreamInputFrame(input), ct);
+        }
+        catch (Exception exception) when (exception is WebSocketException or IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            // The connection is going: these keystrokes go with it.
+        }
+    }
+
+    /// <summary>
     /// Runs the connection on <paramref name="socket"/> until it ends: what was kept while the worker
     /// was dropped is said again, the keep-alive starts, and the worker's frames are read.
     /// </summary>
@@ -202,6 +234,11 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
 
                     case EventFrame @event:
                         events.Writer.TryWrite(@event.Envelope);
+                        break;
+
+                    case StreamFrame stream:
+                        // Handed over as it is read: a chunk is never behind an event the worker sent after it.
+                        _streams?.Invoke(Id, stream.Chunk);
                         break;
 
                     case PongFrame:
@@ -372,7 +409,7 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
             // A start or a sample cannot wait for the worker; anything else is kept and said again.
             foreach (var (applied, message) in _pending.Values)
             {
-                if (message is StartRun or SampleCapacity)
+                if (message is StartRun or SampleCapacity || CannotWait(message))
                 {
                     failed.Add(applied);
                 }
@@ -434,6 +471,14 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
             case StartRun or SampleCapacity:
                 throw new InvalidOperationException($"Worker {Id} is not connected.");
 
+            case var waiting when CannotWait(waiting):
+                throw new InvalidOperationException($"Worker {Id} is not connected.");
+
+            case StopTerminal or StopStream:
+                // Said again when the worker is back, so a terminal or a tail nobody wants is ended there.
+                _ends.Add(message);
+                break;
+
             case ChangeRunMemoryAllowance heavy:
                 _heavy = heavy;
                 break;
@@ -464,12 +509,14 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection
         kept.AddRange(_holds.Select(h => new HoldIdleClock(h.Key, h.Value)));
         kept.AddRange(_touches.Select(m => new TouchIdleClock(m)));
         kept.AddRange(_cancels);
+        kept.AddRange(_ends);
 
         _settings = null;
         _heavy = null;
         _holds.Clear();
         _touches.Clear();
         _cancels.Clear();
+        _ends.Clear();
         return kept;
     }
 }

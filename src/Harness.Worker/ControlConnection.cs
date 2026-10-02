@@ -27,7 +27,7 @@ public sealed class ControlRefusedException(string sentence) : Exception(sentenc
 /// has: control takes the old session's runs as lost with their worker.
 /// </para>
 /// </remarks>
-public sealed class ControlConnection : IRunEvents
+public sealed class ControlConnection : IRunEvents, IRunStreamSink
 {
     /// <summary>What a worker process exits with when control refused it.</summary>
     public const int RefusedExitCode = 3;
@@ -92,6 +92,9 @@ public sealed class ControlConnection : IRunEvents
 
     /// <summary>Says the worker takes runs, once, after the first welcome: the worker's own <c>ReadyAsync</c>.</summary>
     public Func<CancellationToken, Task> Ready { get; set; } = _ => Task.CompletedTask;
+
+    /// <summary>Takes a person's keystrokes for a terminal: the worker's own <c>Input</c>. Called as they arrive, outside the command queue.</summary>
+    public Action<StreamInput> Input { get; set; } = _ => { };
 
     /// <summary>What control's welcome said to run by.</summary>
     public Action<RunWorkerSettings> Settings { get; set; } = _ => { };
@@ -183,6 +186,30 @@ public sealed class ControlConnection : IRunEvents
         await FlushAsync();
     }
 
+    /// <summary>
+    /// Sends one stream chunk now, straight to the socket and never through the outbox: a chunk is not
+    /// kept, so a terminal's output can never fill the outbox and cost this worker its runs. False when
+    /// no welcomed connection is open, or the send failed; the caller decides what to keep.
+    /// </summary>
+    public async ValueTask<bool> StreamAsync(StreamChunk chunk, CancellationToken ct = default)
+    {
+        WorkerSocket? socket;
+        lock (_gate) socket = _socket;
+        if (socket is null) return false;
+
+        try
+        {
+            await socket.SendAsync(new StreamFrame(chunk), ct);
+            return true;
+        }
+        catch (Exception exception) when (exception is WebSocketException or IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            // Dropped: the reconnect settles the rest.
+            socket.Abort();
+            return false;
+        }
+    }
+
     /// <summary>One connection: hello, welcome or refusal, then commands in and events out until it ends.</summary>
     private async Task<(string? Refusal, bool Welcomed)> SessionAsync(WebSocket webSocket, CancellationToken ct)
     {
@@ -243,6 +270,18 @@ public sealed class ControlConnection : IRunEvents
                 {
                     case CommandFrame command:
                         commands.Writer.TryWrite(command);
+                        break;
+
+                    case StreamInputFrame input:
+                        try
+                        {
+                            Input(input.Input);
+                        }
+                        catch (Exception exception)
+                        {
+                            _log?.LogWarning("Keystrokes for {Stream} were not taken: {Message}", input.Input.Stream, exception.Message);
+                        }
+
                         break;
 
                     case PingFrame ping:

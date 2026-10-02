@@ -28,6 +28,8 @@ namespace Harness.Contracts;
 [JsonDerivedType(typeof(HandledFrame), "handled")]
 [JsonDerivedType(typeof(PingFrame), "ping")]
 [JsonDerivedType(typeof(PongFrame), "pong")]
+[JsonDerivedType(typeof(StreamFrame), "stream")]
+[JsonDerivedType(typeof(StreamInputFrame), "input")]
 public abstract record WorkerFrame;
 
 /// <summary>
@@ -71,6 +73,12 @@ public sealed record PingFrame(long N) : WorkerFrame;
 
 /// <summary>The worker is there.</summary>
 public sealed record PongFrame(long N) : WorkerFrame;
+
+/// <summary>One stream chunk, worker to control: not numbered among the events, not kept, not acknowledged.</summary>
+public sealed record StreamFrame(StreamChunk Chunk) : WorkerFrame;
+
+/// <summary>A person's keystrokes, control to worker: outside the command queue, never kept, never answered.</summary>
+public sealed record StreamInputFrame(StreamInput Input) : WorkerFrame;
 
 /// <summary>
 /// What a worker in a process of its own needs from control's settings to run runs as control's
@@ -151,6 +159,22 @@ public sealed class WorkerFrameCodec
     {
         switch (frame)
         {
+            case CommandFrame { Message: StartTerminal terminal } command when terminal.Launch.Environment.Count > 0:
+                frame = command with
+                {
+                    Message = terminal with { Launch = terminal.Launch with { Environment = new Dictionary<string, string>() } },
+                    Sealed = Seal(new Secrets(null, null, terminal.Launch.Environment)),
+                };
+                break;
+
+            case CommandFrame { Message: ReadAgentFile { Redaction: not null } read } command:
+                frame = command with
+                {
+                    Message = read with { Redaction = null },
+                    Sealed = Seal(new Secrets(null, read.Redaction)),
+                };
+                break;
+
             case CommandFrame { Message: StartRun start } command when start.Credential is not null || start.Redaction is not null:
                 frame = command with
                 {
@@ -199,6 +223,18 @@ public sealed class WorkerFrameCodec
 
         switch (frame)
         {
+            case CommandFrame { Sealed: { } blob, Message: StartTerminal terminal } command:
+                var forTerminal = Open(blob);
+                return command with
+                {
+                    Message = terminal with { Launch = terminal.Launch with { Environment = forTerminal.Environment ?? new Dictionary<string, string>() } },
+                    Sealed = null,
+                };
+
+            case CommandFrame { Sealed: { } blob, Message: ReadAgentFile read } command:
+                var forRead = Open(blob);
+                return command with { Message = read with { Redaction = forRead.Redaction }, Sealed = null };
+
             case CommandFrame { Sealed: { } blob, Message: StartRun start } command:
                 var forStart = Open(blob);
                 return command with { Message = start with { Credential = forStart.Credential, Redaction = forStart.Redaction }, Sealed = null };
@@ -265,8 +301,11 @@ public sealed class WorkerFrameCodec
         }
     }
 
-    /// <summary>A run's secrets, written by hand: neither record may ever be written as JSON by a serializer.</summary>
-    private sealed record Secrets(RunCredential? Credential, ValueRedactor? Redaction)
+    /// <summary>
+    /// A run's secrets, written by hand: neither record may ever be written as JSON by a serializer.
+    /// <see cref="Environment"/> is a terminal's whole environment, which holds its session's key.
+    /// </summary>
+    private sealed record Secrets(RunCredential? Credential, ValueRedactor? Redaction, IReadOnlyDictionary<string, string>? Environment = null)
     {
         public byte[] ToJson()
         {
@@ -289,6 +328,13 @@ public sealed class WorkerFrameCodec
                 }
 
                 if (Redaction is { } redaction) Strings(writer, "redaction", redaction.Forms);
+                if (Environment is { } environment)
+                {
+                    writer.WriteStartObject("terminalEnvironment");
+                    foreach (var (name, value) in environment) writer.WriteString(name, value);
+                    writer.WriteEndObject();
+                }
+
                 writer.WriteEndObject();
             }
 
@@ -316,7 +362,11 @@ public sealed class WorkerFrameCodec
                 ? ValueRedactor.FromForms(r.EnumerateArray().Select(e => e.GetString()!))
                 : null;
 
-            return new Secrets(credential, redaction);
+            var environment = root.TryGetProperty("terminalEnvironment", out var t)
+                ? t.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!, StringComparer.Ordinal)
+                : null;
+
+            return new Secrets(credential, redaction, environment);
         }
 
         private static void Strings(Utf8JsonWriter writer, string name, IEnumerable<string> values)

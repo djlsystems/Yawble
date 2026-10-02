@@ -27,6 +27,7 @@ public sealed class WorkerConnections
     private readonly TimeProvider _clock;
     private readonly IDiagnosticsLog? _diagnostics;
     private readonly ILogger? _log;
+    private readonly Action<WorkerId, StreamChunk>? _streams;
     private readonly Lock _gate = new();
     private readonly Dictionary<WorkerId, RemoteWorker> _workers = [];
 
@@ -42,7 +43,8 @@ public sealed class WorkerConnections
         WorkerTimings? timings = null,
         TimeProvider? clock = null,
         IDiagnosticsLog? diagnostics = null,
-        ILogger? log = null)
+        ILogger? log = null,
+        Action<WorkerId, StreamChunk>? streams = null)
     {
         _pool = pool;
         _wip = wip;
@@ -56,6 +58,7 @@ public sealed class WorkerConnections
         _clock = clock ?? TimeProvider.System;
         _diagnostics = diagnostics;
         _log = log;
+        _streams = streams;
     }
 
     /// <summary>Raised when a worker joins or goes, after the pool and the ledger have heard.</summary>
@@ -140,7 +143,7 @@ public sealed class WorkerConnections
                 replaced = existing is { Gone: false } ? existing : null;
                 remote = new RemoteWorker(
                     new WorkerInfo(hello.Worker, hello.Version, hello.Capacity.Cpus, hello.Capacity.MemoryLimitBytes, _clock.GetUtcNow()),
-                    hello.Session, _control, _timings, Dropped, Gone, _clock, _log);
+                    hello.Session, _control, _timings, Dropped, Gone, _clock, _log, _streams);
                 _workers[hello.Worker] = remote;
             }
         }

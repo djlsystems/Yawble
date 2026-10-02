@@ -119,8 +119,11 @@ public static class WorkerProcess
             },
             log: log);
 
-        host = new WorkerHost(id, connection, launcher, heartbeat, allowances, cgroup, new ProcessGroupReader(proc), RunProcessGroups.Shared, log: log);
+        host = new WorkerHost(
+            id, connection, launcher, heartbeat, allowances, cgroup, new ProcessGroupReader(proc), RunProcessGroups.Shared, log: log,
+            streaming: new WorkerStreaming(connection, new Harness.Pty.PortaPtyEngine(), runAs));
         connection.Apply = host.ApplyAsync;
+        connection.Input = host.Input;
         connection.OpenRuns = host.OpenRuns;
         connection.Ready = host.ReadyAsync;
         connection.Settings = welcome => settings = welcome;
@@ -152,7 +155,8 @@ public static class WorkerProcess
 
         var code = await connection.RunAsync(stopping.Token);
 
-        // Stopping: every run this worker has is stopped, and given a moment to say so.
+        // Stopping: every terminal this worker has ends, and every run is stopped and given a moment to say so.
+        await host.StopStreamsAsync();
         foreach (var run in host.OpenRuns()) await host.ApplyAsync(new CancelRun(run));
         var deadline = DateTime.UtcNow.AddSeconds(25);
         while (host.OpenRuns().Count > 0 && DateTime.UtcNow < deadline) await Task.Delay(100);

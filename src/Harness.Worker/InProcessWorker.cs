@@ -29,11 +29,13 @@ public sealed class InProcessWorker
     /// it is ready before this returns.
     /// </summary>
     public static InProcessWorker Connect(
-        WorkerId id, Func<IRunEvents, WorkerHost> host, Func<WorkerEnvelope, CancellationToken, Task> control)
+        WorkerId id, Func<IRunEvents, WorkerHost> host, Func<WorkerEnvelope, CancellationToken, Task> control,
+        Action<WorkerId, StreamChunk>? streams = null)
     {
         var transport = new InProcessTransport(id);
         var worker = host(transport);
         transport.Connect(worker.ApplyAsync, control);
+        transport.ConnectStreams(streams, worker.Input);
         worker.ReadyAsync().GetAwaiter().GetResult();
         return new InProcessWorker(transport, worker);
     }
@@ -51,7 +53,8 @@ public sealed class InProcessWorker
     /// heavy allowance's rule, and where to read the cgroup and <c>/proc</c> (a test Host points
     /// these at fixtures). Every path is passed explicitly from <see cref="WorkerPaths"/> here, so no
     /// default path is compiled into a control caller. <paramref name="homes"/> makes and removes the
-    /// home of a run that signs in with an issued credential.
+    /// home of a run that signs in with an issued credential. <paramref name="streams"/> takes what the
+    /// worker streams to control; <paramref name="pty"/> spawns a person's terminal (Porta.Pty by default).
     /// </summary>
     public static InProcessWorker Create(
         WorkerId id,
@@ -66,7 +69,9 @@ public sealed class InProcessWorker
         ILogger<RunAllowances>? allowancesLog = null,
         string? cgroupRoot = null,
         string? procRoot = null,
-        RunHomes? homes = null)
+        RunHomes? homes = null,
+        Action<WorkerId, StreamChunk>? streams = null,
+        Harness.Pty.IPtyEngine? pty = null)
     {
         var proc = procRoot ?? WorkerPaths.Proc;
         var memory = RunMemoryLimits.Resolve(memoryLimit, WorkerPaths.CgroupRoot, WorkerPaths.ProcSelfCgroup, memoryCeiling);
@@ -90,8 +95,10 @@ public sealed class InProcessWorker
             events => host = new WorkerHost(
                 id, events, launcher, heartbeat, allowances,
                 new CgroupReader(cgroupRoot ?? WorkerPaths.CgroupRoot), new ProcessGroupReader(proc), RunProcessGroups.Shared,
-                log: launchLog),
-            control);
+                log: launchLog,
+                streaming: new WorkerStreaming((IRunStreamSink)events, pty ?? new Harness.Pty.PortaPtyEngine(), runAs)),
+            control,
+            streams);
 
         worker.Memory = memory;
         worker.Allowances = allowances;

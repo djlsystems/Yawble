@@ -40,6 +40,18 @@ public sealed class RunProtocolTests
             "r1", new RunLaunch("cli", ["--version"], null, null, null, true, null, null, 60, []), ["--version"], ["--no-update"],
             new Dictionary<string, string> { ["A"] = "1" }, new RunMemoryAllowance(new MemoryFigure(2048, "set", true), new MemoryFigure(4096, "ceiling", false)),
             60, "/data/tmp"),
+        new StartTerminal(
+            "terminal:t1",
+            new TerminalLaunch(
+                ["claude", "--mcp-config", "{mcpConfig}"], "/data/concierge/person", new Dictionary<string, string> { ["A"] = "1" },
+                ["HARNESS_TEAM"], "You are the Concierge.", ["--system-prompt-file", "{systemPromptFile}"],
+                new TerminalMcp("http://127.0.0.1:5000", "concierge-u1")),
+            100, 30),
+        new ResizeTerminal("terminal:t1", 90, 20),
+        new StopTerminal("terminal:t1"),
+        new FollowTranscript("live:l1", Run, "/home/agent/t.jsonl", LiveViewNames.ClaudeJsonl),
+        new StopStream("live:l1"),
+        new ReadAgentFile("r2", "/home/agent/t.jsonl", ["ANTHROPIC_API_KEY"], true, AsTranscript: true),
     ];
 
     private static readonly DateTimeOffset At = new(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
@@ -68,6 +80,8 @@ public sealed class RunProtocolTests
                 5, 100, false, ["cpu.stat"]),
             [Run]),
         new LaunchChecked("r1", "ok", 0, null, "ran cli --version"),
+        new TerminalEnded("terminal:t1", 0),
+        new AgentFileRead("r2", AgentFileRead.Ok, null, 3),
     ];
 
     [Fact]

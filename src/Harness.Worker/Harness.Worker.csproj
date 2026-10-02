@@ -1,16 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- THE RUNTIME WORKER: the only code that starts an agent's process, reads /proc, touches the
-       cgroup filesystem or calls setpriv and prlimit. It references the contract and nothing else in
-       this repository, so it can never open the control's database; control reaches it through the
-       run protocol. WorkerArchitectureTests pins both halves of that. -->
+       cgroup filesystem or calls setpriv and prlimit. It references the contract, the PTY contract and
+       the PTY package a person's terminal is spawned with, and nothing else in this repository, so it
+       can never open the control's database; control reaches it through the run protocol.
+       WorkerArchitectureTests pins both halves of that. -->
 
   <ItemGroup>
     <ProjectReference Include="..\Harness.Contracts\Harness.Contracts.csproj" />
+    <ProjectReference Include="..\Harness.Pty.Abstractions\Harness.Pty.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Porta.Pty" />
   </ItemGroup>
 
   <!-- Compiled here, kept where it was reviewed: its recursive delete is on the reviewed list by this

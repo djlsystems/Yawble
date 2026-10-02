@@ -42,22 +42,12 @@ public sealed class WorkerArchitectureTests
     /// <summary>Every caller outside the worker that still does one of these things, and why.</summary>
     private static readonly Dictionary<string, string> AllowList = new(StringComparer.Ordinal)
     {
-        ["PortaPtyEngine.SpawnAsync: " + StartsAProcess] =
-            "Concierge PTY: a person's terminal session is spawned here; a later change moves it to a worker.",
         ["AgentAuthProbe.ProbeCommandAsync: " + StartsAProcess] =
             "sign-in probe: asks each CLI whether it is signed in; a later change moves it to a worker.",
         ["CliListingRunner.RunAsync: " + StartsAProcess] =
             "tool pre-flight: lists each CLI's configured tools; a later change moves it to a worker.",
-        ["ForeignToolsCheck.CheckAsync: " + ReachesAWorkerLauncher] =
-            "tool pre-flight: reads the agent's tool files as the agent; a later change moves it to a worker.",
-        ["ForeignToolsCheck.BesideAsync: " + ReachesAWorkerLauncher] =
-            "tool pre-flight: reads the agent's tool files as the agent; a later change moves it to a worker.",
         ["AgentCliUpdater.RunAsync: " + StartsAProcess] =
             "CLI updates: a person's update of a shared CLI install; a later change moves it to a worker.",
-        ["LiveViewEndpoints.WatchAsync: " + ReachesAWorkerLauncher] =
-            "live transcript reader: follows a run's transcript as the agent for a watcher; a later change moves it to a worker.",
-        ["LiveViewEndpoints.RunTranscriptAsync: " + ReachesAWorkerLauncher] =
-            "live transcript reader: reads a past run's transcript as the agent; a later change moves it to a worker.",
         ["FolderRemoval.RunAsync: " + StartsAProcess] =
             "FolderRemoval's agent pass: removes what the agent owns, as the agent; a later change moves it to a worker.",
         ["GitRunner.ExecuteGitAsync: " + StartsAProcess] =
@@ -122,16 +112,27 @@ public sealed class WorkerArchitectureTests
         });
     }
 
+    /// <summary>
+    /// What the worker references beyond the framework, exactly: the run protocol, the PTY contract, and
+    /// the PTY package a person's terminal is spawned with. Anything else - in this repository or not -
+    /// fails, named. The framework is <c>System.*</c>, <c>Microsoft.*</c> (the logging abstractions the
+    /// worker logs through among them), <c>netstandard</c> and <c>mscorlib</c>.
+    /// </summary>
     [Fact]
     public void The_worker_references_only_the_contracts()
     {
-        var harness = Worker.GetReferencedAssemblies()
+        var beyond = Worker.GetReferencedAssemblies()
             .Select(a => a.Name!)
-            .Where(name => name.StartsWith("Harness.", StringComparison.Ordinal))
+            .Where(name => !Framework(name))
+            .Order(StringComparer.Ordinal)
             .ToList();
 
-        Assert.Equal(["Harness.Contracts"], harness);
+        Assert.Equal(["Harness.Contracts", "Harness.Pty.Abstractions", "Porta.Pty"], beyond);
     }
+
+    private static bool Framework(string name) =>
+        name.StartsWith("System", StringComparison.Ordinal) || name.StartsWith("Microsoft.", StringComparison.Ordinal)
+        || name is "netstandard" or "mscorlib";
 
     [Fact]
     public void Every_project_but_the_worker_is_scanned()

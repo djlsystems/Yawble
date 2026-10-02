@@ -125,7 +125,7 @@ public sealed class ForeignToolsCheck(
     TeamRegistry teams,
     AgentCatalog catalog,
     PresetAllowedTools allowed,
-    AgentLaunchUser runAs,
+    WorkerReads reads,
     IMessageLog log,
     ITenantLog tenantLog)
 {
@@ -173,21 +173,19 @@ public sealed class ForeignToolsCheck(
         }
         else
         {
-            AgentFiles.Read read;
-            try
-            {
-                read = await AgentFiles.ReadAllAsync(path, runAs, ct);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-            {
-                read = new AgentFiles.Read(null, exception.Message);
-            }
+            // Read as the agent on a worker, unredacted: the text stays in control's memory, and only
+            // the tools it names are written.
+            var read = await reads.ReadAsync(path, [], null, ct);
 
-            if (read.Text is not { } text)
+            if (read is not { Kind: FileReadKind.Ok, Text: { } text })
             {
                 measured = "nothing: the transcript could not be read";
-                finding = new(ForeignToolsStatus.NotMeasured, [], [],
-                    read.Unreadable is { } why ? $"its transcript could not be read ({why})" : "its transcript is gone");
+                finding = new(ForeignToolsStatus.NotMeasured, [], [], read.Kind switch
+                {
+                    FileReadKind.Gone => "its transcript is gone",
+                    FileReadKind.NoWorker => "no worker is connected to read its transcript",
+                    _ => $"its transcript could not be read ({read.Why})",
+                });
             }
             else
             {
@@ -257,13 +255,7 @@ public sealed class ForeignToolsCheck(
 
         foreach (var name in TranscriptTools.Beside(format))
         {
-            try
-            {
-                if ((await AgentFiles.ReadAllAsync(Path.Combine(folder, name), runAs, ct)).Text is { } text) found[name] = text;
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-            {
-            }
+            if ((await reads.ReadAsync(Path.Combine(folder, name), [], null, ct)) is { Kind: FileReadKind.Ok, Text: { } text }) found[name] = text;
         }
 
         return found;

@@ -32,6 +32,7 @@ public sealed class WorkerPool : IRunPlacement
     private readonly Func<WorkerInfo, int?>? _bound;
     private readonly TimeProvider _clock;
     private long _joined;
+    private TaskCompletionSource _connected = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>A fixed pool: these workers, always placeable once connected, with no bound of their own.</summary>
     public WorkerPool(IReadOnlyList<(WorkerId Id, HeadroomGate Gate)> workers)
@@ -108,6 +109,7 @@ public sealed class WorkerPool : IRunPlacement
             _entries.RemoveAll(e => e.Id == worker.Id);
             var entry = new Entry(worker.Id, _newGate!(worker.Id), info, _joined++) { Worker = worker };
             _entries.Add(entry);
+            ConnectedLocked();
             return entry.Gate;
         }
     }
@@ -127,7 +129,29 @@ public sealed class WorkerPool : IRunPlacement
         lock (_gate)
         {
             if (_entries.FirstOrDefault(e => e.Id == worker) is { } entry) entry.DroppedAt = null;
+            ConnectedLocked();
         }
+    }
+
+    /// <summary>
+    /// Completes when a worker is placeable: at once when one is, otherwise when one next joins or comes
+    /// back. What a person waiting for a worker is told on. In a fixed pool, at once.
+    /// </summary>
+    public Task ConnectedAsync(CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return _fixed || _entries.Any(e => e.Worker is not null && e.DroppedAt is null)
+                ? Task.CompletedTask
+                : _connected.Task.WaitAsync(ct);
+        }
+    }
+
+    private void ConnectedLocked()
+    {
+        var waiting = _connected;
+        _connected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        waiting.TrySetResult();
     }
 
     /// <summary>The worker is gone.</summary>
