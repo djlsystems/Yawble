@@ -107,7 +107,7 @@ public static class LiveViewEndpoints
         [Description(Describe.Team)] string team,
         [Description("The member to watch, as addressed in its route.")] string member,
         HttpContext context, TeamRegistry teams, ContainerHost host, LiveRuns live, AgentLaunchUser runAs,
-        CancellationToken ct)
+        RunSecrets secrets, CancellationToken ct)
     {
         if (teams.ExistingName(team) is not { } stored)
         {
@@ -149,12 +149,15 @@ public static class LiveViewEndpoints
 
         await response.StartAsync(ct);
 
+        // THE RUN'S OWN CREDENTIAL never reaches the watcher: the CLI's file holds what the CLI wrote.
+        var redactor = secrets.For(container.Id);
+
         try
         {
             await foreach (var raw in LiveTranscriptReader.LinesAsync(transcript, runAs, run.Ended, ct))
             {
                 // Every line of one event carries that event's time, or an empty one.
-                var text = TranscriptLines.Wire(format, raw);
+                var text = Wire(redactor, format, raw);
                 if (text.Length == 0) continue;
 
                 await response.WriteAsync(text, Encoding.UTF8, ct);
@@ -231,7 +234,7 @@ public static class LiveViewEndpoints
         [Description(Describe.Team)] string team,
         [Description("The member, as addressed in its route.")] string member,
         [Description("The run's seq, as `runs` lists it.")] long seq,
-        TeamRegistry teams, IMessageLog log, AgentLaunchUser runAs, CancellationToken ct)
+        TeamRegistry teams, IMessageLog log, AgentLaunchUser runAs, ContainerHost host, RunSecrets secrets, CancellationToken ct)
     {
         if (await FindMemberAsync(teams, team, member, ct) is not { } found) return NoMember(team, member);
 
@@ -262,11 +265,22 @@ public static class LiveViewEndpoints
             return Results.Text(Gone, "text/plain; charset=utf-8", Encoding.UTF8, StatusCodes.Status410Gone);
         }
 
+        // Read with the run's set if this Host still holds it, and the set a run would get now.
+        var redactor = await secrets.ForReadAsync(id, found.Agent, host.Find(id)?.Environment, ct);
+
         var body = new StringBuilder();
-        foreach (var raw in text.Split('\n')) body.Append(TranscriptLines.Wire(format, raw));
+        foreach (var raw in text.Split('\n')) body.Append(Wire(redactor, format, raw));
 
         return Results.Text(body.ToString(), "text/plain; charset=utf-8", Encoding.UTF8);
     }
+
+    /// <summary>
+    /// One transcript line as it is served, redacted twice: the raw line, so a value in its
+    /// JSON-escaped forms is caught before parsing, and the rendered text, so a value the CLI escaped
+    /// in some other way that the parser decoded is caught too.
+    /// </summary>
+    private static string Wire(ValueRedactor redactor, string format, string raw) =>
+        redactor.Apply(TranscriptLines.Wire(format, redactor.Apply(raw)));
 
     /// <summary>How a run ended, in the words the dialog shows: a failure, then a block, then a hand-back.</summary>
     internal static string Outcome(RunRow run)

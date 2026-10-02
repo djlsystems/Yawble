@@ -50,7 +50,8 @@ public sealed class InProcessWorker
     /// agent children run as, the shared update gate, the memory figures the settings give and the
     /// heavy allowance's rule, and where to read the cgroup and <c>/proc</c> (a test Host points
     /// these at fixtures). Every path is passed explicitly from <see cref="WorkerPaths"/> here, so no
-    /// default path is compiled into a control caller.
+    /// default path is compiled into a control caller. <paramref name="homes"/> makes and removes the
+    /// home of a run that signs in with an issued credential.
     /// </summary>
     public static InProcessWorker Create(
         WorkerId id,
@@ -64,7 +65,8 @@ public sealed class InProcessWorker
         ILogger? launchLog = null,
         ILogger<RunAllowances>? allowancesLog = null,
         string? cgroupRoot = null,
-        string? procRoot = null)
+        string? procRoot = null,
+        RunHomes? homes = null)
     {
         var proc = procRoot ?? WorkerPaths.Proc;
         var memory = RunMemoryLimits.Resolve(memoryLimit, WorkerPaths.CgroupRoot, WorkerPaths.ProcSelfCgroup, memoryCeiling);
@@ -80,7 +82,8 @@ public sealed class InProcessWorker
             runAs: runAs,
             log: allowancesLog);
 
-        var launcher = new RunLauncher(heartbeat, launchLog, runAs, reports: true, updates: updates, memory: memory, allowances: allowances);
+        var launcher = new RunLauncher(
+            heartbeat, launchLog, runAs, reports: true, updates: updates, memory: memory, allowances: allowances, homes: homes);
 
         var worker = Connect(
             id,

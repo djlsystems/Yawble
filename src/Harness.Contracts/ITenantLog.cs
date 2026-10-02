@@ -190,6 +190,17 @@ public static class TenantActions
     /// <summary>The provider refused a refresh; the connection needs a person to reconnect it.</summary>
     public const string ConnectionNeedsReconnect = "connections.needs-reconnect";
 
+    /// <summary>A credential was issued for an agent CLI (a command, used by every preset launching
+    /// it whose source is `issued`) where none was set. Detail: the command, the kind and the
+    /// variable - never the value or any part of it.</summary>
+    public const string AgentCredentialSet = "agents.credential-set";
+
+    /// <summary>An agent CLI's issued credential was replaced. Detail as for a set.</summary>
+    public const string AgentCredentialReplaced = "agents.credential-replaced";
+
+    /// <summary>An agent CLI's issued credential was cleared. Detail: the command.</summary>
+    public const string AgentCredentialCleared = "agents.credential-cleared";
+
     /// <summary>A custom skill was created, changed or deleted. Built-ins are never written.</summary>
     public const string SkillCreated = "skill.created";
     public const string SkillChanged = "skill.changed";

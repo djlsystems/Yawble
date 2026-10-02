@@ -8,8 +8,8 @@ namespace Harness.Host;
 /// CONTROL'S SIDE OF THE RUNS IN FLIGHT. Starts a run on a worker and waits for its end, and
 /// handles what workers say about their runs: a progress sentence goes on the member's card, a
 /// diagnostics row into the instance's log, the live view into <see cref="LiveRuns"/> for the live
-/// route, and the output, usage and end back into the <see cref="AgentResult"/> the caller has
-/// always been given.
+/// route, the run's redaction set into <see cref="RunSecrets"/> once its credential is applied, and
+/// the output, usage and end back into the <see cref="AgentResult"/> the caller has always been given.
 /// </summary>
 /// <remarks>
 /// A LOST RUN IS AN END, NEVER A HANG. A run whose end does not arrive is ended here, as
@@ -42,19 +42,25 @@ public sealed class RunDirectory
     private readonly Func<IDiagnosticsLog?> _diagnostics;
     private readonly LiveRuns? _live;
     private readonly TimeProvider _clock;
+    private readonly RunSecrets? _secrets;
 
-    public RunDirectory(IMemberReports? reports = null, IDiagnosticsLog? diagnostics = null, LiveRuns? live = null, TimeProvider? clock = null)
-        : this(() => reports, () => diagnostics, live, clock)
+    public RunDirectory(
+        IMemberReports? reports = null, IDiagnosticsLog? diagnostics = null, LiveRuns? live = null, TimeProvider? clock = null,
+        RunSecrets? secrets = null)
+        : this(() => reports, () => diagnostics, live, clock, secrets)
     {
     }
 
     /// <summary>The reports and the diagnostics log are asked for when first needed, not at composition.</summary>
-    public RunDirectory(Func<IMemberReports?> reports, Func<IDiagnosticsLog?> diagnostics, LiveRuns? live, TimeProvider? clock = null)
+    public RunDirectory(
+        Func<IMemberReports?> reports, Func<IDiagnosticsLog?> diagnostics, LiveRuns? live, TimeProvider? clock = null,
+        RunSecrets? secrets = null)
     {
         _reports = reports;
         _diagnostics = diagnostics;
         _live = live;
         _clock = clock ?? TimeProvider.System;
+        _secrets = secrets;
     }
 
     /// <summary>
@@ -83,7 +89,7 @@ public sealed class RunDirectory
     private async Task<(RunEnded Ended, string Output, UsageFigures? Usage, bool Lost)> EndOfAsync(
         IRunWorker worker, StartRun start, Func<string, Task>? onLine, CancellationToken ct)
     {
-        var open = new Open(worker, start.Run) { OnLine = onLine };
+        var open = new Open(worker, start.Run) { OnLine = onLine, Redaction = start.Redaction };
         _runs[start.Run] = open;
         Watch(worker);
 
@@ -177,6 +183,10 @@ public sealed class RunDirectory
                 open.Since ??= envelope.Seq;
                 break;
 
+            case RunCredentialApplied:
+                _secrets?.Remember(run.Member, open.Redaction ?? ValueRedactor.Empty);
+                break;
+
             case RunProgress progress:
                 if (reports is not null) await reports.ProgressAsync(run.Member, progress.Sentence, CancellationToken.None);
                 break;
@@ -248,6 +258,9 @@ public sealed class RunDirectory
 
         /// <summary>Where a program run's lines go, as they arrive.</summary>
         public Func<string, Task>? OnLine { get; init; }
+
+        /// <summary>The run's redaction set, as its start carried it.</summary>
+        public ValueRedactor? Redaction { get; init; }
 
         public LiveRun? Live { get; set; }
 

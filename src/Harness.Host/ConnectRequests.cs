@@ -141,20 +141,23 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
 
     /// <summary>Why the folder cannot be trusted, or null: it must be a real folder (not a link), owned
     /// by the Host's own user, that no group or other user can write in.</summary>
-    public string? FolderRefusal()
+    public string? FolderRefusal() => FolderRefusal(Root);
+
+    /// <summary><see cref="FolderRefusal()"/> for any request folder the Host answers from.</summary>
+    public static string? FolderRefusal(string root)
     {
         if (OperatingSystem.IsWindows()) return null;
 
-        if (new DirectoryInfo(Root).LinkTarget is not null) return $"{Root} is a symbolic link; it must be the Host's own folder.";
+        if (new DirectoryInfo(root).LinkTarget is not null) return $"{root} is a symbolic link; it must be the Host's own folder.";
 
-        if ((File.GetUnixFileMode(Root) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+        if ((File.GetUnixFileMode(root) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
         {
-            return $"{Root} is writable by others; it must be 0700.";
+            return $"{root} is writable by others; it must be 0700.";
         }
 
-        var owner = OwnerOf(Root);
-        if (owner is null) return $"{Root}'s owner could not be read.";
-        if (owner != geteuid()) return $"{Root} is owned by uid {owner}, not the Host's uid {geteuid()}.";
+        var owner = OwnerOf(root);
+        if (owner is null) return $"{root}'s owner could not be read.";
+        if (owner != geteuid()) return $"{root} is owned by uid {owner}, not the Host's uid {geteuid()}.";
 
         return null;
     }

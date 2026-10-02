@@ -184,7 +184,16 @@ public sealed record AgentDefinition(
         + "update-off) to show the CLI can start the way a member starts it. Passed exactly as "
         + "written, with no token substituted. Null means the preset declares none, and its launch "
         + "reads `not checked`, never `ok`.")]
-    IReadOnlyList<string>? LaunchCheck = null)
+    IReadOnlyList<string>? LaunchCheck = null,
+
+    [property: Description(
+        "How this CLI takes a credential issued in Admin > Agents instead of the shared home's "
+        + "login: the kinds a person may set and the variable each goes in, every variable it reads "
+        + "for authentication (removed from an issued run), which wins when a home login also "
+        + "exists, and the CLI version that was measured. One value is stored per command, so "
+        + "presets launching the same command declare the same kinds. Null means this preset "
+        + "signs in only through the shared home, and its source cannot be `issued`.")]
+    IssuedCredential? IssuedCredential = null)
 {
     /// <summary>Whether this preset is compiled into the build. Computed from the name, never
     /// stored: a file cannot make a custom preset built-in, or a built-in custom.</summary>

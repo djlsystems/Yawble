@@ -19,6 +19,8 @@ import {
   packageNames,
   wireValue,
   tagMapOf,
+  sourceMapOf,
+  AgentCredentialSources,
   validateTags,
   canReset,
   defaultText,
@@ -291,6 +293,28 @@ describe('agents.tags', () => {
     expect(validateTags([])).toBeNull();
     expect(validateTags([''])).not.toBeNull();
     expect(validateTags(['x'.repeat(65)])).not.toBeNull();
+  });
+});
+
+describe('agents.credentialSource', () => {
+  it('reads the map as an object or a JSON string, keeping only home and issued', () => {
+    expect(sourceMapOf({ grok: 'issued', claude: 'home' })).toEqual({ grok: 'issued', claude: 'home' });
+    expect(sourceMapOf('{"grok":"issued","claude":"elsewhere"}')).toEqual({ grok: 'issued' });
+    expect(sourceMapOf('not json')).toEqual({});
+    expect(sourceMapOf(['issued'])).toEqual({});
+  });
+
+  it('is not a field of this dialog, so its object value is never drafted or saved from here', () => {
+    const read = normaliseTenantSettings({
+      settings: [
+        { name: AgentCredentialSources, kind: 'sourceMap', value: { grok: 'issued' }, default: {}, source: 'row' },
+        { name: WipMaxRunning, value: 4, default: 0, source: 'row' },
+      ],
+    });
+
+    expect(TenantSettingFields.some((field) => field.name === AgentCredentialSources)).toBe(false);
+    expect(read.settings.map((entry) => entry.name)).toContain(AgentCredentialSources);
+    expect(changedSettings(read.settings, { [WipMaxRunning]: '4' }, {})).toEqual({});
   });
 });
 

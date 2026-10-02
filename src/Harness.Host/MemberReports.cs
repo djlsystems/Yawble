@@ -14,6 +14,10 @@ namespace Harness.Host;
 /// Checks that belong to HTTP - the team exists, the caller IS the member, the words are not
 /// empty - stay on the routes. What is refused here is refused for every caller: a member that is
 /// not hosted, a batch item that is not in the run.
+///
+/// An agent member's words are redacted of its run's own credential (<see cref="RunSecrets"/>)
+/// before anything is written. A plugin member and the Concierge have no set here, so their words
+/// are written as they came; a plugin redacts its own before they arrive.
 /// </summary>
 public sealed class MemberReports : IMemberReports, IRunWorkerClient
 {
@@ -21,18 +25,22 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
     private readonly IMessageLog log;
     private readonly IRunWorker worker;
     private readonly ILoggerFactory? loggers;
+    private readonly RunSecrets? secrets;
 
     /// <summary>The Host's: a report pushes the run's idle clock out through <paramref name="worker"/>.</summary>
-    public MemberReports(ContainerHost host, IMessageLog log, IRunWorker worker, ILoggerFactory? loggers = null)
+    public MemberReports(
+        ContainerHost host, IMessageLog log, IRunWorker worker, ILoggerFactory? loggers = null, RunSecrets? secrets = null)
     {
         this.host = host;
         this.log = log;
         this.worker = worker;
         this.loggers = loggers;
+        this.secrets = secrets;
     }
 
     /// <summary>Over a worker of its own, in this process, made from <paramref name="heartbeat"/>.</summary>
-    public MemberReports(ContainerHost host, IMessageLog log, RunHeartbeat heartbeat, ILoggerFactory? loggers = null)
+    public MemberReports(
+        ContainerHost host, IMessageLog log, RunHeartbeat heartbeat, ILoggerFactory? loggers = null, RunSecrets? secrets = null)
         : this(
             host,
             log,
@@ -40,7 +48,8 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
                 WorkerId.Local,
                 events => new WorkerHost(WorkerId.Local, events, new RunLauncher(heartbeat), heartbeat),
                 (_, _) => Task.CompletedTask).Worker,
-            loggers)
+            loggers,
+            secrets)
     {
     }
 
@@ -55,7 +64,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
         // is inherited from causation at append time, so this one value puts the line in the right
         // workflow.
         var causation = container.CurrentCausation;
-        status = status.Trim();
+        status = Redacted(member, status.Trim());
 
         // A REPORT FROM A MEMBER THAT IS NOT RUNNING is a process that outlived its run - still
         // recorded, because it is a fact, and flagged on the row and in the log, because nothing
@@ -94,7 +103,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
     {
         if (host.Find(member) is not { } container) return NoSuchMember(member);
 
-        reason = reason.Trim();
+        reason = Redacted(member, reason.Trim());
 
         // ONE ITEM OF A BATCH: that delivery is closed by this row instead of by the run's terminal
         // row, and the member is not marked - the rest of its batch may still complete.
@@ -136,7 +145,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
         // NO ROW NOW, and no mark: the deferral and its reason are written on the run's own terminal
         // rows (`items`), and the item's next run is its record. A row here would wake nobody and
         // say less.
-        if (!container.TryDeferItem(item, reason.Trim(), out _, out var error))
+        if (!container.TryDeferItem(item, Redacted(member, reason.Trim()), out _, out var error))
         {
             return MemberReportOutcome.Refused(error!, 400);
         }
@@ -151,7 +160,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
     {
         if (host.Find(member) is not { } container) return NoSuchMember(member);
 
-        delivered = delivered.Trim();
+        delivered = Redacted(member, delivered.Trim());
 
         await log.AppendAsync(
             new NewMessage(
@@ -170,7 +179,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
     {
         if (host.Find(member) is not { } container) return NoSuchMember(member);
 
-        question = question.Trim();
+        question = Redacted(member, question.Trim());
 
         await log.AppendAsync(
             new NewMessage(
@@ -210,6 +219,8 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
 
         return MemberReportOutcome.Ok;
     }
+
+    private string Redacted(ContainerId member, string words) => secrets?.For(member).Apply(words) ?? words;
 
     private static MemberReportOutcome NoSuchMember(ContainerId member) =>
         MemberReportOutcome.Refused($"No member '{member.Name}'.", 404);

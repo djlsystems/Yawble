@@ -539,5 +539,22 @@ public static class AuthSchema
             """
             ALTER TABLE triggers ADD COLUMN configured_by_email TEXT NULL;
             """),
+
+        // A CREDENTIAL ISSUED TO AN AGENT CLI in Admin > Agents, one row per command (`claude`,
+        // `codex`, ...), used by every preset launching that command whose source is `issued`.
+        // `value_protected` is Data Protection ciphertext under the instance's `<dataRoot>/keys`;
+        // no column holds the value or any part of it. Beside `tenant_events`, so every set,
+        // replace and clear lands with its row in one transaction or not at all.
+        new MigrationStep(
+            "auth-019",
+            """
+            CREATE TABLE agent_credentials (
+                command         TEXT PRIMARY KEY COLLATE NOCASE,
+                kind            TEXT NOT NULL,
+                value_protected TEXT NOT NULL,
+                set_by          TEXT NOT NULL,
+                set_at          TEXT NOT NULL
+            );
+            """),
     ];
 }

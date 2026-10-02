@@ -1,3 +1,4 @@
+using System.Collections;
 using Microsoft.Extensions.Logging;
 using Harness.Contracts;
 
@@ -10,6 +11,10 @@ namespace Harness.Host;
 /// and temporary folder) into a <see cref="StartRun"/>, sends it, and turns what the worker says back
 /// into the <see cref="AgentResult"/> its callers have always been given. The launch itself is the
 /// worker's <see cref="RunLauncher"/>.
+///
+/// THE RUN'S CREDENTIAL IS RESOLVED HERE (<see cref="IRunCredentials"/>, which alone reads the store
+/// and the key ring) and travels with the start, with the values the run's text is redacted of; the
+/// worker applies both, and makes and removes an issued run's home of its own.
 /// </summary>
 /// <remarks>
 /// <paramref name="diagnostics"/> is OPTIONAL and null means a runner that records nothing, which
@@ -31,6 +36,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     private readonly Func<RunMemoryAllowance?> _memory;
     private readonly string? _tempRoot;
     private readonly Func<ContainerId, IRunWorker>? _placedOn;
+    private readonly IRunCredentials? _credentials;
 
     public ProcessAgentRunner(
         AgentCatalog catalog,
@@ -45,10 +51,13 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         RunMemoryLimits? memory = null,
         MemberTempRoot? temp = null,
         RunAllowances? allowances = null,
-        TimeSpan? oomPoll = null)
+        TimeSpan? oomPoll = null,
+        IRunCredentials? credentials = null,
+        RunSecrets? secrets = null)
     {
-        var launcher = new RunLauncher(heartbeat, log, runAs, reports is not null, lookup, updates, memory, allowances, oomPoll);
-        _directory = new RunDirectory(reports, diagnostics, live);
+        var launcher = new RunLauncher(
+            heartbeat, log, runAs, reports is not null, lookup, updates, memory, allowances, oomPoll, RunHome.Homes(runAs));
+        _directory = new RunDirectory(reports, diagnostics, live, secrets: secrets);
         var worker = InProcessWorker.Connect(
             WorkerId.Local,
             events => new WorkerHost(WorkerId.Local, events, launcher, heartbeat, allowances, log: log),
@@ -59,6 +68,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         _launcher = launcher;
         _memory = () => memory is null ? null : Allowance(memory.Settings());
         _tempRoot = temp?.Path;
+        _credentials = credentials;
     }
 
     /// <summary>
@@ -66,6 +76,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// <paramref name="memory"/> is the settings' memory figures, read when each run's start is built;
     /// <paramref name="tempRoot"/> is where members' temporary folders go. <paramref name="placedOn"/> is
     /// the worker admission placed a member's run on; without it, every run goes to <paramref name="worker"/>.
+    /// <paramref name="credentials"/> resolves a run's credential when its invocation carries none.
     /// </summary>
     public ProcessAgentRunner(
         AgentCatalog catalog,
@@ -74,7 +85,8 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         RunLauncher launcher,
         Func<RunMemoryAllowance?> memory,
         string? tempRoot,
-        Func<ContainerId, IRunWorker>? placedOn = null)
+        Func<ContainerId, IRunWorker>? placedOn = null,
+        IRunCredentials? credentials = null)
     {
         _catalog = catalog;
         _worker = worker;
@@ -83,6 +95,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         _launcher = launcher;
         _memory = memory;
         _tempRoot = tempRoot;
+        _credentials = credentials;
     }
 
     /// <summary>The worker this runner starts its runs on.</summary>
@@ -111,8 +124,8 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// a per-container binding captured when the member was created: the answer is derivable from
     /// `invocation.Agent`, which is read off the container's own definition on every wake.
     /// </summary>
-    public Task<AgentResult> RunAsync(AgentInvocation invocation, CancellationToken ct = default) =>
-        _directory.RunAsync(_placedOn?.Invoke(invocation.Container) ?? _worker, Start(invocation), ct);
+    public async Task<AgentResult> RunAsync(AgentInvocation invocation, CancellationToken ct = default) =>
+        await _directory.RunAsync(_placedOn?.Invoke(invocation.Container) ?? _worker, await StartAsync(invocation, ct), ct);
 
     /// <summary>
     /// THE LAUNCH CHECK FOR ONE PRESET: its declared free invocation (<see cref="AgentDefinition.LaunchCheck"/>)
@@ -138,21 +151,37 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
                 + "might send a prompt or spend is never run to check it.");
         }
 
+        // THE CREDENTIAL A MEMBER RUN OF THIS PRESET WOULD START WITH, from the same resolver.
         var environment = AgentToolPreflight.LaunchShape(definition).Environment;
+        var credential = _credentials is null ? RunCredential.Home : await _credentials.ResolveAsync(agent, definition, ct);
+        var launch = Launch(command, definition.TimeoutSeconds, environment, credential);
         return await _launcher.CheckLaunchAsync(
-            Launch(command, definition.TimeoutSeconds, environment),
+            launch,
             check,
             definition.Updates?.Arguments ?? [],
             environment,
             _memory(),
             ct,
-            timeout);
+            timeout,
+            credential,
+            Redaction(launch, environment, credential),
+            _tempRoot);
     }
 
     /// <summary>Everything the worker needs for this invocation, resolved now.</summary>
-    private StartRun Start(AgentInvocation invocation)
+    private async Task<StartRun> StartAsync(AgentInvocation invocation, CancellationToken ct)
     {
         var definition = _catalog.Definition(invocation.Agent);
+
+        // THE RUN'S CREDENTIAL, as resolved at run start; asked here only for an invocation built
+        // without one, so no caller can reach the shared home for a preset that signs in with an
+        // issued credential.
+        var credential = invocation.Credential
+            ?? (_credentials is null ? RunCredential.Home : await _credentials.ResolveAsync(invocation.Agent, null, ct));
+
+        var launch = _catalog.For(invocation.Agent) is { } command
+            ? Launch(command, definition?.TimeoutSeconds, invocation.Environment, credential)
+            : null;
 
         return new StartRun(
             RunId.For(invocation.Container),
@@ -163,20 +192,42 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             invocation.WorkingDirectory,
             invocation.Environment,
             invocation.UnreachableRoot,
-            _catalog.For(invocation.Agent) is { } command
-                ? Launch(command, definition?.TimeoutSeconds, invocation.Environment)
-                : null,
+            launch,
             _memory(),
             _tempRoot,
-            definition?.LiveView is { } view ? LiveView.ToRun(view) : null);
+            definition?.LiveView is { } view ? LiveView.ToRun(view) : null,
+            Credential: credential,
+            Redaction: launch is null || credential.Missing is not null
+                ? ValueRedactor.Empty
+                : Redaction(launch, invocation.Environment, credential));
+    }
+
+    /// <summary>
+    /// WHAT THE RUN'S TEXT IS REDACTED OF: its credential and every credential variable its child's
+    /// environment carries (<see cref="RunSecrets.Of"/>), read from that environment as the worker
+    /// builds it (<see cref="RunLauncher.MemberEnvironment"/>, over this process's own, which a worker
+    /// in this process inherits) - so a key the child never had is not in it, and a change to the
+    /// scoping cannot drift from what is redacted.
+    /// </summary>
+    private ValueRedactor Redaction(RunLaunch launch, IReadOnlyDictionary<string, string> environment, RunCredential credential)
+    {
+        var child = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (DictionaryEntry variable in Environment.GetEnvironmentVariables())
+        {
+            child[(string)variable.Key] = (string?)variable.Value;
+        }
+
+        RunLauncher.MemberEnvironment(child, launch, environment, credential);
+        return RunSecrets.Of(child, credential, _catalog);
     }
 
     /// <summary>
     /// The preset's launch as the protocol carries it, with what the child must not inherit: the
     /// names that must be absent, and every provider key that is not this command's own and was not
-    /// handed in with <paramref name="environment"/>.
+    /// handed in with <paramref name="environment"/> or set by the run's <paramref name="credential"/>.
     /// </summary>
-    private static RunLaunch Launch(AgentCommand command, int? timeoutSeconds, IReadOnlyDictionary<string, string> environment) =>
+    private static RunLaunch Launch(
+        AgentCommand command, int? timeoutSeconds, IReadOnlyDictionary<string, string> environment, RunCredential credential) =>
         new(
             command.FileName,
             command.Arguments,
@@ -187,7 +238,11 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             command.IsolationEnvironment,
             command.UpdateEnvironment,
             timeoutSeconds,
-            [.. AgentEnvironment.MustBeAbsent, .. AgentEnvironment.ProviderKeysToRemove(command.FileName, environment)]);
+            [.. AgentEnvironment.MustBeAbsent, .. AgentEnvironment.ProviderKeysToRemove(command.FileName, HandedIn(environment, credential))]);
+
+    /// <summary>What the run hands its child: the preset's and the team's env, then the credential's own variables.</summary>
+    private static IReadOnlyDictionary<string, string> HandedIn(IReadOnlyDictionary<string, string> environment, RunCredential credential) =>
+        credential.ApplyTo(new Dictionary<string, string?>(), environment);
 
     /// <summary>The settings' memory figures for a run's start.</summary>
     public static RunMemoryAllowance Allowance((RunMemoryLimit Limit, RunMemoryLimit Ceiling) settings) =>

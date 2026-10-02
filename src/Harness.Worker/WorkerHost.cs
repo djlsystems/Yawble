@@ -283,6 +283,8 @@ public sealed class WorkerHost
 
         public Task ProgressAsync(string sentence) => worker.PublishAsync(new RunProgress(Run, sentence));
 
+        public Task CredentialAppliedAsync() => worker.PublishAsync(new RunCredentialApplied(Run));
+
         public Task ChildStoppedAsync(string sentence, RunMemoryLimit limit) =>
             worker.PublishAsync(new RunChildStoppedByMemoryLimit(Run, sentence, new MemoryFigure(limit.Mb, limit.Source, limit.Set)));
 

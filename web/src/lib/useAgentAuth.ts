@@ -93,3 +93,18 @@ export function authProblems(list: readonly AgentAuthReport[]): string[] {
 export function useAgentAuth() {
   return { reports }
 }
+
+/**
+ * How the probe says the preset signs in, in words: "shared home" or "issued credential". Null when
+ * the server did not say - an older Host - which is never read as home.
+ */
+export function sourceLabel(report: AgentAuthReport | undefined | null): string | null {
+  switch (report?.source) {
+    case 'home':
+      return 'shared home'
+    case 'issued':
+      return 'issued credential'
+    default:
+      return null
+  }
+}

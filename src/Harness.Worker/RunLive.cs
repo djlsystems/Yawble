@@ -20,6 +20,9 @@ public interface IRunSink
 
     Task ProgressAsync(string sentence);
 
+    /// <summary>The run's credential is applied and its child's environment final; the child starts next.</summary>
+    Task CredentialAppliedAsync();
+
     Task ChildStoppedAsync(string sentence, RunMemoryLimit limit);
 
     Task DiagnosticAsync(

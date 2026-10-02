@@ -113,6 +113,12 @@ yawble secret set ANTHROPIC_API_KEY     # or OPENAI_API_KEY, XAI_API_KEY; the va
 yawble up                               # applies the change
 ```
 
+Or issue one credential per agent CLI from Admin → Agents (or `yawble agents credential set`) and
+switch a preset's source to *issued*: its runs then use that credential, each with a home of its
+own, instead of the shared login. The credential is stored once per command and shared by every
+preset that runs it; the source is chosen per preset. You are responsible for your provider's terms
+when one credential is used by many runs.
+
 Other everyday commands: `yawble status`, `yawble doctor`, `yawble agents`, `yawble update`,
 `yawble logs -f`, `yawble down`. The full reference is in [cli/README.md](cli/README.md).
 

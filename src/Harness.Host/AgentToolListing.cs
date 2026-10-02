@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Harness.Contracts;
 using Harness.Pty;
 
 namespace Harness.Host;
@@ -67,9 +68,18 @@ public interface IListingRunner
     /// <summary>Whether <paramref name="command"/> resolves, the way a launch resolves it.</summary>
     bool Installed(string command);
 
+    /// <param name="credential">A member run's credential, applied as the run applies it
+    /// (<see cref="AgentEnvironment.ApplyCredential"/>); null for the Concierge on the shared home.</param>
     Task<ListingRun> RunAsync(
         string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment,
-        CancellationToken ct);
+        CancellationToken ct, RunCredential? credential = null);
+
+    /// <summary>A home of one listing's own, as an issued member run gets (<see cref="RunHome"/>);
+    /// null when it could not be made.</summary>
+    Task<string?> MakeHomeAsync(CancellationToken ct);
+
+    /// <summary>Removes a home <see cref="MakeHomeAsync"/> made, and everything the CLI wrote in it.</summary>
+    Task RemoveHomeAsync(string home);
 }
 
 /// <summary>
@@ -78,15 +88,25 @@ public interface IListingRunner
 /// repository's own configuration is read. Never runs an agent-installed program as the Host: when
 /// the agent user exists and cannot be reached, it does not run at all.
 /// </summary>
-public sealed class CliListingRunner(AgentLaunchUser? runAs = null) : IListingRunner
+/// <param name="homes">Where a listing's own home is made: the member temporary folders' root,
+/// which the agent can write; <see cref="MemberTemp.Root"/> when null.</param>
+public sealed class CliListingRunner(AgentLaunchUser? runAs = null, string? homes = null) : IListingRunner
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(45);
 
     public bool Installed(string command) => PathSearch.Find(command) is not null;
 
+    // A parent several launches share, as the launch check's: swept only of old homes nobody owns.
+    public Task<string?> MakeHomeAsync(CancellationToken ct) =>
+        runAs is { Refuses: true }
+            ? Task.FromResult<string?>(null)
+            : RunHome.CreateAsync(homes ?? MemberTemp.Root, runAs, null, ct, memberFolder: false);
+
+    public Task RemoveHomeAsync(string home) => RunHome.RemoveAsync(home, runAs);
+
     public async Task<ListingRun> RunAsync(
         string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment,
-        CancellationToken ct)
+        CancellationToken ct, RunCredential? credential = null)
     {
         if (PathSearch.Find(command) is not { } resolved) return new ListingRun(null, "", $"'{command}' is not on PATH.");
 
@@ -120,8 +140,10 @@ public sealed class CliListingRunner(AgentLaunchUser? runAs = null) : IListingRu
             foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
             foreach (var (name, value) in environment) process.StartInfo.Environment[name] = value;
 
-            // Every provider key but this CLI's own taken out, as at a member's spawn.
-            AgentEnvironment.ScopeProviderKeys(process.StartInfo.Environment, command, environment);
+            // The credential as a member run gets it, then every provider key but this CLI's own
+            // taken out, as at a member's spawn.
+            var handedIn = AgentEnvironment.ApplyCredential(process.StartInfo.Environment, credential, environment);
+            AgentEnvironment.ScopeProviderKeys(process.StartInfo.Environment, command, handedIn);
 
             if (!process.Start()) return new ListingRun(null, "", "It could not be started.");
             process.StandardInput.Close();
@@ -188,11 +210,12 @@ public static class AgentToolListers
 
     /// <summary>
     /// What <paramref name="command"/> would load, run with <paramref name="environment"/> and, where
-    /// its listing takes them, the launch's <paramref name="isolationArguments"/>.
+    /// its listing takes them, the launch's <paramref name="isolationArguments"/>; with
+    /// <paramref name="credential"/> applied as a member run applies it, when one is issued.
     /// </summary>
     public static async Task<CliListing> ListAsync(
         string command, IReadOnlyList<string> isolationArguments, IReadOnlyDictionary<string, string> environment,
-        IListingRunner runner, CancellationToken ct)
+        IListingRunner runner, CancellationToken ct, RunCredential? credential = null)
     {
         var cli = Path.GetFileName(command);
 
@@ -214,7 +237,7 @@ public static class AgentToolListers
             ran.Add(shown);
             if (failed is not null) return;
 
-            var run = await runner.RunAsync(command, arguments, environment, ct);
+            var run = await runner.RunAsync(command, arguments, environment, ct, credential);
             if (!run.Succeeded)
             {
                 failed = $"`{shown}` did not answer: {run.Failure ?? $"it exited {run.ExitCode}."}";

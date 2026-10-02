@@ -8,7 +8,8 @@ namespace Harness.Host;
 /// </summary>
 public sealed class ConciergeLaunchFactory(
     TeamPaths paths, string baseAddress, IPrincipalStore principals, AgentCatalog agents,
-    SkillDirectory? skills = null, AgentLaunchUser? runAs = null, AgentUpdateGate? updates = null)
+    SkillDirectory? skills = null, AgentLaunchUser? runAs = null, AgentUpdateGate? updates = null,
+    IRunCredentials? credentials = null)
 {
     /// <summary>
     /// What a console's agent may cause. It is a human's door into a team, so it reads and
@@ -164,6 +165,25 @@ public sealed class ConciergeLaunchFactory(
         // THE CLI'S OWN UPDATER OFF, after the preset's and the team's env so neither can turn it
         // back on: this terminal launches from the install every member shares.
         foreach (var (key, value) in command.UpdateEnvironment ?? new Dictionary<string, string>()) environment[key] = value;
+
+        // AN ISSUED CREDENTIAL, beside update-off and for its reason. The Concierge KEEPS ITS HOME and
+        // every tool: it is the person's own session, so only the variables are changed. The PTY
+        // cannot remove a variable (it merges with the Host's environment), so each one the
+        // preset's declaration displaces is set EMPTY instead - measured, an empty key reads as
+        // absent - and its config-directory variables are left alone. Which credential the CLI then
+        // uses, when the person's login is in the home as well, is the declaration's measured
+        // loginPrecedence. One whose credential is not set opens on the person's login, as before.
+        var issued = credentials is null ? RunCredential.Home : await credentials.ResolveAsync(agent, null, ct);
+        if (issued is { Source: CredentialSource.Issued, Missing: null }
+            && agents.Definition(agent)?.IssuedCredential is { } declaration)
+        {
+            foreach (var name in issued.Displace.Intersect(declaration.Displaces, StringComparer.Ordinal))
+            {
+                environment[name] = string.Empty;
+            }
+
+            foreach (var (key, value) in issued.Environment) environment[key] = value;
+        }
 
         // NO HARNESS_TEAM, AND ITS ABSENCE IS THE MECHANISM RATHER THAN AN OMISSION.
         //

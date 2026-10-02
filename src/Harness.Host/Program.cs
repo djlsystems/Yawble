@@ -564,7 +564,25 @@ foreach (var agent in loadedCatalog)
 }
 
 // The operator's tags for a built-in are read through the setting on every use.
-builder.Services.AddSingleton(new AgentCatalog(loadedCatalog, () => tenantSettings.AgentTags));
+var agentCatalog = new AgentCatalog(loadedCatalog, () => tenantSettings.AgentTags);
+builder.Services.AddSingleton(agentCatalog);
+
+// ISSUED AGENT CREDENTIALS: one per CLI command, Data Protection ciphertext beside tenant_events
+// (AgentCredentialStore), decided for a run in one place (RunCredentials) and set by a person or
+// the operator CLI's request file (AgentCredentials, AgentCredentialRequests). A preset's source is
+// the agents.credentialSource setting, which refuses `issued` for a preset that declares nothing.
+tenantSettings.IssuedRefusal = preset =>
+    agentCatalog.Definition(preset) is { IssuedCredential: null } definition
+        ? $"'{definition.Name}' declares no issued credential, so it can only sign in through the shared home."
+        : null;
+builder.Services.AddSingleton(sp => new AgentCredentialStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
+builder.Services.AddSingleton<IRunCredentials>(sp => new RunCredentials(
+    agentCatalog, tenantSettings, sp.GetRequiredService<AgentCredentialStore>()));
+builder.Services.AddSingleton(sp => new AgentCredentials(
+    agentCatalog, sp.GetRequiredService<AgentCredentialStore>(), tenantSettings, sp.GetRequiredService<AgentAuthProbe>()));
+builder.Services.AddSingleton(sp => new AgentCredentialRequests(
+    sp.GetRequiredService<AgentCredentials>(), dataRoot, sp.GetRequiredService<ILogger<AgentCredentialRequests>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentCredentialRequests>());
 
 // SOLUTION PACKAGES are checked against this Host's own catalogs - its Agent presets, its events
 // (installed plugins' included) and its runtimes - through one service the route, the install and the
@@ -702,6 +720,9 @@ builder.Services.AddSingleton(_ => InProcessWorker.LaunchUser(
     builder.Configuration["Agents:RunAs"] ?? Environment.GetEnvironmentVariable("HARNESS_AGENT_USER")));
 // The runs in flight, for the live route. The runner records; nothing is stored.
 builder.Services.AddSingleton<LiveRuns>();
+// WHAT EACH MEMBER RUN'S OWN CREDENTIAL IS, held in memory so its reports and its transcript are
+// redacted of it as the run's output is. Nothing is stored. See RunSecrets.
+builder.Services.AddSingleton<RunSecrets>();
 // WHO MAY USE AN AGENT CLI'S SHARED INSTALL: member runs share it, a platform update has it alone,
 // and a launch that arrives during an update waits for it. One per Host, shared by the runner, the
 // Concierge's launch and the updater, or the hold holds nothing.
@@ -725,7 +746,8 @@ builder.Services.AddSingleton(sp => new AgentCliUpdater(
 builder.Services.AddSingleton(sp => new RunDirectory(
     () => sp.GetRequiredService<IMemberReports>(),
     () => sp.GetRequiredService<IDiagnosticsLog>(),
-    sp.GetRequiredService<LiveRuns>()));
+    sp.GetRequiredService<LiveRuns>(),
+    secrets: sp.GetRequiredService<RunSecrets>()));
 builder.Services.AddSingleton(sp => InProcessWorker.Create(
     WorkerId.Local,
     sp.GetRequiredService<RunHeartbeat>(),
@@ -745,7 +767,8 @@ builder.Services.AddSingleton(sp => InProcessWorker.Create(
     sp.GetRequiredService<ILogger<ProcessAgentRunner>>(),
     sp.GetRequiredService<ILogger<RunAllowances>>(),
     builder.Configuration["Capacity:CgroupRoot"],
-    builder.Configuration["Capacity:ProcRoot"]));
+    builder.Configuration["Capacity:ProcRoot"],
+    RunHome.Homes(sp.GetRequiredService<AgentLaunchUser>())));
 builder.Services.AddSingleton<IRunWorker>(sp =>
 {
     var worker = sp.GetRequiredService<InProcessWorker>().Worker;
@@ -765,7 +788,8 @@ builder.Services.AddSingleton(sp => new ProcessAgentRunner(
     sp.GetRequiredService<InProcessWorker>().Host.Launcher,
     () => ProcessAgentRunner.Allowance((tenantSettings.RunMemoryLimit(), tenantSettings.RunMemoryCeiling())),
     sp.GetRequiredService<MemberTempRoot>().Path,
-    member => sp.GetRequiredService<WorkerPool>().Worker(sp.GetRequiredService<WipLedger>().PlacedOn(member))));
+    member => sp.GetRequiredService<WorkerPool>().Worker(sp.GetRequiredService<WipLedger>().PlacedOn(member)),
+    sp.GetRequiredService<IRunCredentials>()));
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
     sp.GetRequiredService<IPrincipalStore>(),
@@ -777,7 +801,8 @@ builder.Services.AddSingleton(sp => new MemberReports(
     sp.GetRequiredService<ContainerHost>(),
     sp.GetRequiredService<IMessageLog>(),
     sp.GetRequiredService<IRunWorker>(),
-    sp.GetRequiredService<ILoggerFactory>()));
+    sp.GetRequiredService<ILoggerFactory>(),
+    sp.GetRequiredService<RunSecrets>()));
 builder.Services.AddSingleton<IMemberReports>(sp => sp.GetRequiredService<MemberReports>());
 
 // WHAT EVERY MEMBER RUNS THROUGH. The member runtime hands its work, as data, to this; the agent
@@ -788,7 +813,8 @@ builder.Services.AddSingleton<IMemberReports>(sp => sp.GetRequiredService<Member
 // choice is made here and nowhere in the pump.
 builder.Services.AddSingleton(sp => new AgentMemberRunner(
     sp.GetRequiredService<IAgentRunner>(),
-    sp.GetRequiredService<IContextBuilder>()));
+    sp.GetRequiredService<IContextBuilder>(),
+    sp.GetRequiredService<IRunCredentials>()));
 builder.Services.AddSingleton(sp => new PluginMemberRunner(
     sp.GetRequiredService<PluginCatalog>(),
     sp.GetRequiredService<IMemberReports>(),
@@ -1312,7 +1338,8 @@ builder.Services.AddSingleton(sp => new ConciergeLaunchFactory(
     sp.GetRequiredService<AgentCatalog>(),
     sp.GetRequiredService<SkillDirectory>(),
     sp.GetRequiredService<AgentLaunchUser>(),
-    sp.GetRequiredService<AgentUpdateGate>()));
+    sp.GetRequiredService<AgentUpdateGate>(),
+    sp.GetRequiredService<IRunCredentials>()));
 builder.Services.AddSingleton(sp =>
 {
     // Resolved ONCE, here, and captured - never re-resolved inside the delegates. The revoke runs
@@ -1624,10 +1651,23 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentLaunchChecks>
 
 // THE PRE-FLIGHT: what each preset's CLI would load, listed by the CLI itself as the agent user,
 // once the Host is serving and again after every catalog save. Never on the start path.
-builder.Services.AddSingleton<IListingRunner>(sp => new CliListingRunner(sp.GetRequiredService<AgentLaunchUser>()));
-builder.Services.AddSingleton(sp => new AgentToolPreflight(
-    sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<IListingRunner>(), dataRoot,
-    sp.GetRequiredService<ILogger<AgentToolPreflight>>()));
+builder.Services.AddSingleton<IListingRunner>(sp => new CliListingRunner(
+    sp.GetRequiredService<AgentLaunchUser>(), sp.GetRequiredService<MemberTempRoot>().Path));
+builder.Services.AddSingleton(sp =>
+{
+    var preflight = new AgentToolPreflight(
+        sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<IListingRunner>(), dataRoot,
+        sp.GetRequiredService<ILogger<AgentToolPreflight>>(), sp.GetRequiredService<IRunCredentials>());
+
+    // Listed again when a preset's source (through any settings write) or its command's credential
+    // changes, as after a catalog save.
+    tenantSettings.Changed += name =>
+    {
+        if (name == TenantSettings.AgentCredentialSourceName) preflight.Refresh();
+    };
+    sp.GetRequiredService<AgentCredentials>().Changed += preflight.Refresh;
+    return preflight;
+});
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentToolPreflight>());
 builder.Services.AddMcpServer()
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
@@ -1635,6 +1675,15 @@ builder.Services.AddMcpServer()
 
 var app = builder.Build();
 app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
+
+{
+    // A preset switched between home and issued reads as such at once, not after the probe's cache.
+    var probe = app.Services.GetRequiredService<AgentAuthProbe>();
+    tenantSettings.Changed += name =>
+    {
+        if (name == TenantSettings.AgentCredentialSourceName) probe.Forget();
+    };
+}
 
 {
     var runAs = app.Services.GetRequiredService<AgentLaunchUser>();
@@ -1671,6 +1720,9 @@ app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
 
     var memberTemp = app.Services.GetRequiredService<MemberTempRoot>();
     app.Logger.LogInformation("Member temporary folders: {Path} - {Reason}", memberTemp.Path, memberTemp.Reason);
+
+    // The homes a launch check or a listing made there and a stopped Host never removed.
+    await RunHome.SweepSharedAsync(memberTemp.Path, runAs, CancellationToken.None);
 }
 
 // THE ADDRESS EVERY MEMBER IS TOLD TO CALL, printed for the reason the dev server prints its proxy

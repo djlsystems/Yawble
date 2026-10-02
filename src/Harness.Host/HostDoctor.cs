@@ -33,7 +33,13 @@ public sealed record DoctorAgent(
     // WHETHER IT STARTS THE WAY A MEMBER RUN STARTS IT: the Host's last launch check
     // (AgentLaunchChecksRecord.ForCommand), the values GET /api/agents/auth carries. Null when the
     // Host has recorded none - not known, never ok.
-    AgentLaunchReport? Launch = null);
+    AgentLaunchReport? Launch = null,
+    // WHERE THIS COMMAND'S PRESETS SIGN IN FROM: `issued` when any preset launching it is set to the
+    // credential issued in Admin > Agents (agents.credentialSource), else `home`. IssuedSet is
+    // whether that credential is stored, null under home. Read from the database and agents.json,
+    // never the key ring: whether a value decrypts is the Host's to say.
+    string CredentialSource = TenantSettings.HomeSource,
+    bool? IssuedSet = null);
 
 public sealed record DoctorReport(
     DateTimeOffset At,
@@ -89,7 +95,7 @@ public static class HostDoctor
             await DatabaseAsync(database, ct),
             Backups(database, Path.Combine(dataRoot, "backups")),
             recordedAt,
-            await AgentsAsync(versions, history, launches, ct),
+            await AgentsAsync(versions, history, launches, Sources(dataRoot, database), ct),
             // Who the Host said, at its last start, agent children run as - and, when it
             // refuses them, why. Recorded by the Host, because the doctor is a different process.
             AgentLaunchRecord.Read(dataRoot),
@@ -141,7 +147,8 @@ public static class HostDoctor
     /// </summary>
     private static async Task<IReadOnlyList<DoctorAgent>> AgentsAsync(
         IReadOnlyDictionary<string, string?> versions, IReadOnlyList<CliVersionsAtStart> history,
-        AgentLaunchChecksRecord? launches, CancellationToken ct)
+        AgentLaunchChecksRecord? launches, IReadOnlyDictionary<string, (string Source, bool? Set)> sources,
+        CancellationToken ct)
     {
         var specs = AgentAuthProbe.LoadSpecs();
         var agents = new List<DoctorAgent>(specs.Count);
@@ -156,12 +163,98 @@ public static class HostDoctor
             versions.TryGetValue(command, out var version);
             var now = CliVersionHistory.Now(command, history);
 
+            var (source, issuedSet) = sources.TryGetValue(command, out var found) ? found : (TenantSettings.HomeSource, null);
+
             agents.Add(new DoctorAgent(
                 command, installed, version, authenticated, detail, specs[command].CredentialVariable,
-                now.UpdatedAt, now.Since, launches?.ForCommand(command)));
+                now.UpdatedAt, now.Since, launches?.ForCommand(command), source, issuedSet));
         }
 
         return agents;
+    }
+
+    /// <summary>
+    /// Per command, whether a preset launching it is set to an issued credential and, when one is,
+    /// whether that credential is stored. Presets are the build's plus agents.json READ, never
+    /// repaired - loading the catalog can rewrite the file, which a diagnostic must not. A database
+    /// without the setting or the table reads as every command on the home.
+    /// </summary>
+    private static IReadOnlyDictionary<string, (string Source, bool? Set)> Sources(string dataRoot, string database)
+    {
+        var answer = new Dictionary<string, (string, bool?)>(StringComparer.OrdinalIgnoreCase);
+        if (!File.Exists(database)) return answer;
+
+        try
+        {
+            using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+                new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                {
+                    DataSource = database,
+                    Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
+                    Pooling = false,
+                }.ToString());
+            connection.Open();
+
+            Dictionary<string, string> map;
+            using (var setting = connection.CreateCommand())
+            {
+                setting.CommandText = "SELECT value FROM tenant_settings WHERE name = $name";
+                setting.Parameters.AddWithValue("$name", TenantSettings.AgentCredentialSourceName);
+                map = setting.ExecuteScalar() is string stored
+                    ? new Dictionary<string, string>(
+                        JsonSerializer.Deserialize<Dictionary<string, string>>(stored) ?? [], StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var issuedCommands = Presets(dataRoot)
+                .Where(p => p.Launch is not null && map.GetValueOrDefault(p.Name) == TenantSettings.IssuedSource)
+                .Select(RunCredentials.CommandOf)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var command in issuedCommands)
+            {
+                using var stored = connection.CreateCommand();
+                stored.CommandText = "SELECT COUNT(*) FROM agent_credentials WHERE command = $command";
+                stored.Parameters.AddWithValue("$command", command);
+                answer[command] = (TenantSettings.IssuedSource, Convert.ToInt64(stored.ExecuteScalar()) > 0);
+            }
+        }
+        catch (Exception exception) when (exception is Microsoft.Data.Sqlite.SqliteException or JsonException
+                                              or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // Not readable is not issued: the schema section says what is wrong with the database.
+        }
+
+        return answer;
+    }
+
+    /// <summary>The build's presets and agents.json's, read and never rewritten.</summary>
+    private static IEnumerable<AgentDefinition> Presets(string dataRoot)
+    {
+        IReadOnlyList<AgentDefinition> custom = [];
+        var path = AgentCatalogFile.PathIn(dataRoot);
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(path));
+                var agents = document.RootElement.ValueKind == JsonValueKind.Array
+                    ? document.RootElement
+                    : document.RootElement.TryGetProperty("agents", out var list) ? list : default;
+
+                if (agents.ValueKind == JsonValueKind.Array)
+                {
+                    custom = agents.Deserialize<List<AgentDefinition>>(AgentCatalogFile.JsonOptions) ?? [];
+                }
+            }
+        }
+        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            // A file the Host could not read either: it runs on the built-ins, and so does this.
+        }
+
+        return AgentCatalogFile.BuiltIns().Concat(custom.Where(d => !AgentCatalogFile.IsBuiltIn(d.Name)));
     }
 
     public static string ToJson(DoctorReport report) => JsonSerializer.Serialize(report, Json);

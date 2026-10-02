@@ -26,6 +26,9 @@ namespace Harness.Host;
 /// <paramref name="reports"/> is whether control files a run's progress at all. Without it the
 /// launch says nothing while it waits and watches nothing for the memory limit, as a runner with
 /// no reports never did.
+///
+/// <paramref name="homes"/> makes and removes the home of a run that signs in with an issued
+/// credential. A launcher without it cannot start such a run, and says its home could not be made.
 /// </remarks>
 public sealed partial class RunLauncher(
     RunHeartbeat heartbeat,
@@ -36,7 +39,8 @@ public sealed partial class RunLauncher(
     AgentUpdateGate? updates = null,
     RunMemoryLimits? memory = null,
     RunAllowances? allowances = null,
-    TimeSpan? oomPoll = null)
+    TimeSpan? oomPoll = null,
+    RunHomes? homes = null)
 {
     /// <summary>How often a run's cgroup is read for a process the kernel OOM-killed.</summary>
     private readonly TimeSpan _oomPoll = oomPoll ?? TimeSpan.FromSeconds(2);
@@ -73,7 +77,7 @@ public sealed partial class RunLauncher(
     {
         var invocation = new AgentInvocation(
             run.Run.Member, run.SystemPrompt, run.Prompt, run.WorkingDirectory, run.Environment, run.Context, run.Agent,
-            run.UnreachableRoot);
+            run.UnreachableRoot, run.Credential);
 
         if (updates is null || run.Launch is not { } launching)
         {
@@ -193,6 +197,17 @@ public sealed partial class RunLauncher(
                 + "costs money and answers noise.");
         }
 
+        // THE RUN'S CREDENTIAL, as control resolved it at run start and sent with the start; this
+        // side never reads a store or a key ring. Home is nothing to apply. An issued credential
+        // that is not set stops the run here, before anything is written or started: it never
+        // falls back to the home.
+        var credential = invocation.Credential ?? RunCredential.Home;
+
+        if (credential.Missing is { } notSet)
+        {
+            return new AgentResult(-1, string.Empty, notSet);
+        }
+
         // RESOLVED HERE, so a miss is RECORDED and reported as a launch failure rather than
         // surfacing later as a spawn error naming a bare command. A miss is looked at again for
         // about 30 seconds first: the shared install is replaced in place while a CLI updates, and
@@ -268,6 +283,18 @@ public sealed partial class RunLauncher(
                 $"This member's temporary folder, or the link '{MemberTemp.LinkFor(invocation.WorkingDirectory)}' "
                 + "that names it, could not be created, so this member was not started. Check that its "
                 + "workspace and the Host's temp folder can be written, and that nothing else sits at that name.");
+        }
+
+        // AN ISSUED RUN'S HOME IS MADE IN ITS TMPDIR, so without one there is nowhere to put it - and
+        // the shared home is exactly what it must not run in.
+        if (credential.PerRunHome && memberTemp is null)
+        {
+            return new AgentResult(
+                -1,
+                string.Empty,
+                $"'{invocation.Agent}' signs in with an issued credential and runs in a home of its own, made in "
+                + "this member's temporary folder, and this member has none (its workspace is missing), so it "
+                + "was not started.");
         }
 
         // History first, then the instruction that woke it - the order a human would read them in,
@@ -369,7 +396,8 @@ public sealed partial class RunLauncher(
         invocation.Environment.TryGetValue("HARNESS_MEMBER", out var mcpMember);
         var mcp = McpLaunchConfig.TryWrite(
             mcpBase, mcpKey, mcpMember ?? "member",
-            log is null ? null : warning => log.LogWarning("{Warning}", warning));
+            log is null ? null : warning => log.LogWarning("{Warning}", warning),
+            homeOfItsOwn: credential.PerRunHome);
 
         // One per invocation, for every preset: `{sessionId}` is a launch token like
         // `{mcpConfig}`, so a preset that names it (claude-headless, `--session-id`) has a
@@ -436,7 +464,7 @@ public sealed partial class RunLauncher(
             start.ArgumentList.Add(substituted);
         }
 
-        MemberEnvironment(start, command, invocation.Environment);
+        MemberEnvironment(start.Environment, command, invocation.Environment, credential);
 
         if (mcp is not null)
         {
@@ -536,6 +564,22 @@ public sealed partial class RunLauncher(
         // The live view of this run, begun once the process exists and ended with the run.
         Watch? watchable = null;
 
+        // An issued run's own HOME, removed in the finally below whatever happens.
+        string? runHome = null;
+
+        // What this run's text is redacted of before it is returned, decided once the child's
+        // environment is final.
+        var redactor = ValueRedactor.Empty;
+
+        // The transcript this run wrote. An issued run's lives in its own HOME, which the finally
+        // below removes, so it is moved beside the homes first and the terminal row names the copy
+        // that outlives it.
+        async Task<AgentTranscript?> KeptTranscriptAsync()
+        {
+            var transcript = await watchable!.TranscriptAsync();
+            return runHome is null ? transcript : await homes!.KeepTranscriptAsync(transcript, runHome, memberTemp!);
+        }
+
         try
         {
             // Everything written for this child is handed to its group just before it
@@ -545,6 +589,33 @@ public sealed partial class RunLauncher(
                 if (mcp is not null) runAs.Share(Path.GetDirectoryName(mcp.JsonPath)!);
                 foreach (var file in new[] { promptFile, systemFile }) if (file is not null) runAs.Share(file);
             }
+
+            // AFTER the merge and after TMPDIR, so neither the catalog nor a team's env can point
+            // an issued run back at the shared home. Its CLIs' caches are the member's, kept across
+            // its runs beside the homes, so a fresh home does not unpack a CLI's cache every run.
+            if (credential.PerRunHome)
+            {
+                runHome = homes is null ? null : await homes.CreateAsync(memberTemp!, mcp?.GrokConfig, ct);
+
+                if (runHome is null)
+                {
+                    return new AgentResult(
+                        -1,
+                        string.Empty,
+                        $"'{invocation.Agent}' signs in with an issued credential and runs in a home of its own, "
+                        + $"which could not be made in '{memberTemp}', so this member was not started.");
+                }
+
+                start.Environment["HOME"] = runHome;
+                start.Environment["XDG_CACHE_HOME"] = Path.Combine(memberTemp!, RunHomes.CacheFolder);
+            }
+
+            // THE RUN'S OWN CREDENTIAL, as control read it from the environment the child is given
+            // (MemberEnvironment, the same rule as above) and sent with the start: applied to what
+            // this run returns from here on, and kept by control for its reports and its transcript
+            // as the live view serves it, from now.
+            redactor = run.Redaction ?? ValueRedactor.Empty;
+            await sink.CredentialAppliedAsync();
 
             // A transcript the agent names itself is the newest one written from here on.
             var launchedAt = DateTimeOffset.UtcNow;
@@ -624,7 +695,7 @@ public sealed partial class RunLauncher(
                               """);
 
             // What it did before it was killed is still in its own transcript.
-            var killedTranscript = await watchable!.TranscriptAsync();
+            var killedTranscript = await KeptTranscriptAsync();
 
             // WHICH clock ran out, in the words a reader can act on. A timeout is a setting on
             // this Agent; a stop is the Host going down and the run being reported as failed at
@@ -708,6 +779,12 @@ public sealed partial class RunLauncher(
                 output = unwrapped;
             }
 
+            // REDACTED ONLY NOW, so usage and the failure's class are read from the raw text, and
+            // BEFORE the stderr tail is cut, so a cut cannot leave half a value behind.
+            output = redactor.Apply(output);
+            errors = redactor.Apply(errors);
+            envelopeError = redactor.ApplyOrNull(envelopeError);
+
             var combined = new StringBuilder(output);
 
             if (heldOpen)
@@ -766,7 +843,7 @@ public sealed partial class RunLauncher(
 
                 // Recorded on the run's terminal row; read by nothing above, so usage and
                 // output are the same whether or not there is one.
-                AgentTranscript: await watchable!.TranscriptAsync());
+                AgentTranscript: await KeptTranscriptAsync());
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -789,7 +866,7 @@ public sealed partial class RunLauncher(
             // A command that is not on PATH is the common case, and it is a LAUNCH error rather than
             // an exit code: the process never ran, so reporting "exit -1" would read as a program
             // that ran and failed.
-            return new AgentResult(-1, string.Empty, ex.Message);
+            return new AgentResult(-1, string.Empty, redactor.Apply(ex.Message));
         }
         finally
         {
@@ -798,6 +875,8 @@ public sealed partial class RunLauncher(
             // Deleted whatever happened. A run measured in seconds leaves one of these per
             // invocation, and a container that runs all day would otherwise fill the temp directory.
             mcp?.Delete();
+
+            if (runHome is not null) await homes!.RemoveAsync(runHome);
 
             foreach (var temp in new[] { systemFile, promptFile, usageFile })
             {
@@ -1413,27 +1492,37 @@ public sealed partial class RunLauncher(
     }
 
     /// <summary>
-    /// A member launch's environment, in its order: <paramref name="environment"/> (the preset's env
-    /// and the team's), then the preset's isolation and the CLI's update-off, then the names that must
-    /// be absent removed and provider keys scoped to this command. Shared with the launch check.
+    /// A member launch's environment, in its order: <paramref name="handedIn"/> (the preset's env
+    /// and the team's), then the preset's isolation and the CLI's update-off, then the run's
+    /// <paramref name="credential"/> (other commands' declared variables removed; an issued one's
+    /// displaced variables removed and its variable set), then the names that must be absent
+    /// removed and provider keys scoped to this command. Shared with the launch check, and with
+    /// control, which reads the run's redaction set from the same environment before it sends the
+    /// start (<paramref name="environment"/> is then a copy of this process's).
     /// </summary>
-    private static void MemberEnvironment(
-        ProcessStartInfo start, RunLaunch command, IReadOnlyDictionary<string, string> environment)
+    public static void MemberEnvironment(
+        IDictionary<string, string?> environment, RunLaunch command, IReadOnlyDictionary<string, string> handedIn,
+        RunCredential? credential)
     {
-        foreach (var (name, value) in environment) start.Environment[name] = value;
+        foreach (var (name, value) in handedIn) environment[name] = value;
 
         // The preset's isolation, AFTER the invocation's environment (the preset's env and the
         // team's), so neither can switch a connector or the home's configuration back on.
         if (command.IsolationEnvironment is { } isolation)
         {
-            foreach (var (name, value) in isolation) start.Environment[name] = value;
+            foreach (var (name, value) in isolation) environment[name] = value;
         }
 
         // And the CLI's own updater off, for the same reason and in the same place.
         if (command.UpdateEnvironment is { } updateOff)
         {
-            foreach (var (name, value) in updateOff) start.Environment[name] = value;
+            foreach (var (name, value) in updateOff) environment[name] = value;
         }
+
+        // THE RUN'S CREDENTIAL, after the preset's and the team's env as update-off is, so neither
+        // can outrank it. See RunCredential.ApplyTo; the tool listing applies the same. What it
+        // hands in is already in the provider-key removal control resolved.
+        credential?.ApplyTo(environment, handedIn);
 
         // REMOVED, NOT CLEARED, AND THE ORDER MATTERS: after the merge above, so a caller
         // cannot reintroduce one of these by handing it in.
@@ -1451,7 +1540,7 @@ public sealed partial class RunLauncher(
         // And only this command's own provider key, and any the caller handed in deliberately: the
         // Host holds every provider's key and `start.Environment` inherited all of them. Control
         // names both kinds of removal in the launch it resolved.
-        foreach (var name in command.RemovedEnvironment) start.Environment.Remove(name);
+        foreach (var name in command.RemovedEnvironment) environment.Remove(name);
     }
 
     /// <summary>A memory figure from the protocol as the limit the launch applies.</summary>
@@ -1477,7 +1566,10 @@ public sealed partial class RunLauncher(
         IReadOnlyDictionary<string, string> environment,
         RunMemoryAllowance? allowance,
         CancellationToken ct,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        RunCredential? credential = null,
+        ValueRedactor? redaction = null,
+        string? homesParent = null)
     {
         if (runAs is { Refuses: true })
         {
@@ -1494,6 +1586,16 @@ public sealed partial class RunLauncher(
             return AgentLaunchReport.Unchecked($"`{command.FileName}` is not an executable file on PATH, so nothing was started.");
         }
 
+        // THE CREDENTIAL A MEMBER RUN OF THIS PRESET WOULD START WITH, as control resolved it from the
+        // same resolver: an issued preset is checked with its credential and a home of its own,
+        // exactly the shape of a real run, and one whose credential is not set fails as a member run
+        // would.
+        credential ??= RunCredential.Home;
+        if (credential.Missing is { } notSet)
+        {
+            return new AgentLaunchReport(AgentLaunchReport.Failed, null, null, notSet);
+        }
+
         using var share = updates is null ? null : await updates.EnterRunAsync(command.FileName, null, ct);
 
         var (launched, memoryLimit, _) = MemberStart(resolved, Path.GetTempPath(), allowance);
@@ -1505,8 +1607,38 @@ public sealed partial class RunLauncher(
 
         foreach (var argument in updateArguments) start.ArgumentList.Add(argument);
         foreach (var argument in check) start.ArgumentList.Add(argument);
-        MemberEnvironment(start, command, environment);
+        MemberEnvironment(start.Environment, command, environment, credential);
 
+        // In the temp root every member folder is made in, which the agent can write, and shared with
+        // other launches: swept only of old homes nobody owns. Removed in the finally below.
+        string? home = null;
+        if (credential.PerRunHome)
+        {
+            home = homes is null ? null : await homes.CreateAsync(homesParent ?? MemberTemp.Root, null, ct, memberFolder: false);
+            if (home is null)
+            {
+                return new AgentLaunchReport(AgentLaunchReport.Failed, null, null,
+                    "This preset signs in with an issued credential and runs in a home of its own, which could not be made, so a member run of it cannot start.");
+            }
+
+            start.Environment["HOME"] = home;
+            start.Environment["XDG_CACHE_HOME"] = RunHomes.CacheBeside(home);
+        }
+
+        try
+        {
+            return await CheckAsync(start, command, check, memoryLimit, timeout, redaction ?? ValueRedactor.Empty, ct);
+        }
+        finally
+        {
+            if (home is not null) await homes!.RemoveAsync(home);
+        }
+    }
+
+    private async Task<AgentLaunchReport> CheckAsync(
+        ProcessStartInfo start, RunLaunch command, IReadOnlyList<string> check, RunMemoryLimit? memoryLimit,
+        TimeSpan? timeout, ValueRedactor redactor, CancellationToken ct)
+    {
         var invocation = string.Join(' ', [command.FileName, .. check]);
         var applied = memoryLimit?.Mb is { } mb && memory is { Mechanism: not RunMemoryMechanism.None }
             ? $" under the run memory limit of {mb} MB ({(memory.Mechanism == RunMemoryMechanism.Cgroup ? "cgroup" : "rlimit")})"
@@ -1529,7 +1661,8 @@ public sealed partial class RunLauncher(
 
         ct.ThrowIfCancellationRequested();
 
-        var tail = AgentCrash.StderrTail(outcome.Stderr);
+        // Redacted of the run's own credential before the tail is cut, as a member run's is.
+        var tail = AgentCrash.StderrTail(redactor.Apply(outcome.Stderr));
         if (outcome.Killed)
         {
             return new AgentLaunchReport(AgentLaunchReport.Failed, null, tail.Length == 0 ? null : tail,

@@ -185,6 +185,47 @@ public sealed class HostDoctorTests : IDisposable
     }
 
     [Fact]
+    public async Task Each_agent_reports_its_credential_source()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        // No database: every command is on the home, and nothing is created.
+        var bare = await HostDoctor.ReportAsync(_root, ct);
+        Assert.All(bare.Agents, a => Assert.Equal("home", a.CredentialSource));
+        Assert.All(bare.Agents, a => Assert.Null(a.IssuedSet));
+        Assert.False(File.Exists(Database));
+
+        await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct);
+        await using (var connection = new SqliteConnection($"Data Source={Database};Pooling=False"))
+        {
+            await connection.OpenAsync(ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                $$"""
+                INSERT INTO tenant_settings (name, value, updated_at, updated_by)
+                VALUES ('{{TenantSettings.AgentCredentialSourceName}}', '{"claude-headless":"issued","grok-headless":"issued","codex":"home"}', '2026-10-02T00:00:00Z', 'person@example.test');
+                INSERT INTO agent_credentials (command, kind, value_protected, set_by, set_at)
+                VALUES ('claude', 'apiKey', 'not-a-value-only-ciphertext-would-be-here', 'person@example.test', '2026-10-02T00:00:00Z');
+                """;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        var report = await HostDoctor.ReportAsync(_root, ct);
+        var claude = Assert.Single(report.Agents, a => a.Agent == "claude");
+        var grok = Assert.Single(report.Agents, a => a.Agent == "grok");
+        var codex = Assert.Single(report.Agents, a => a.Agent == "codex");
+
+        Assert.Equal(("issued", (bool?)true), (claude.CredentialSource, claude.IssuedSet));
+        Assert.Equal(("issued", (bool?)false), (grok.CredentialSource, grok.IssuedSet));
+        Assert.Equal(("home", (bool?)null), (codex.CredentialSource, codex.IssuedSet));
+
+        using var json = JsonDocument.Parse(HostDoctor.ToJson(report));
+        var first = json.RootElement.GetProperty("agents").EnumerateArray().Single(a => a.GetProperty("agent").GetString() == "claude");
+        Assert.Equal("issued", first.GetProperty("credentialSource").GetString());
+        Assert.True(first.GetProperty("issuedSet").GetBoolean());
+    }
+
+    [Fact]
     public async Task The_json_is_one_line_in_camel_case()
     {
         var report = await HostDoctor.ReportAsync(_root, TestContext.Current.CancellationToken);

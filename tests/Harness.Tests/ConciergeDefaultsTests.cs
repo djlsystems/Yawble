@@ -2,6 +2,7 @@ using Harness.Contracts;
 using Harness.Host;
 using Harness.Identity;
 using Harness.Messaging;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 
 namespace Harness.Tests;
@@ -90,6 +91,97 @@ public sealed class ConciergeDefaultsTests : IDisposable
         Assert.Contains(BuiltInPrompts.AvailableSkillsHeading, written, StringComparison.Ordinal);
         Assert.Contains("- `concierge` - ", written, StringComparison.Ordinal);
         Assert.DoesNotContain("- `worktrees` - ", written, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Under_issued_the_concierge_keeps_its_home_and_tools_and_gains_the_credential()
+    {
+        const string Key = "fake-concierge-issued-key-4e2";
+        var catalog = new AgentCatalog(AgentCatalogFile.BuiltIns());
+        var declaration = catalog.Definition("claude")!.IssuedCredential!;
+
+        using var restore = new EnvironmentScope([new("HOME", _dataRoot)]);
+
+        async Task<Harness.Pty.PtySpec> OpenAsync(RunCredential credential) =>
+            await new ConciergeLaunchFactory(
+                    new TeamPaths(_dataRoot), "http://localhost:5000", new MintingPrincipals(), catalog,
+                    credentials: new Fixed(credential))
+                .ForAsync(
+                    team: "", teamLabel: "this instance", user: "user-1", login: "person@example.com",
+                    "claude", teamEnv: new Dictionary<string, string> { ["ANTHROPIC_AUTH_TOKEN"] = "from-the-team" },
+                    ct: TestContext.Current.CancellationToken);
+
+        var home = await OpenAsync(RunCredential.Home);
+        var issued = await OpenAsync(new RunCredential(
+            CredentialSource.Issued,
+            new Dictionary<string, string> { ["ANTHROPIC_API_KEY"] = Key },
+            [.. declaration.Displaces.Where(d => d != "ANTHROPIC_API_KEY"), .. declaration.HomeVariables ?? []],
+            [],
+            PerRunHome: true,
+            Missing: null));
+
+        // The credential, and every variable it would compete with set empty - the PTY cannot remove one.
+        Assert.Equal(Key, issued.Env!["ANTHROPIC_API_KEY"]);
+        Assert.Equal("", issued.Env["CLAUDE_CODE_OAUTH_TOKEN"]);
+        Assert.Equal("", issued.Env["ANTHROPIC_AUTH_TOKEN"]);
+
+        // Its own home and its tools: no HOME of its own, its config directory untouched, and the
+        // same command line as a home Concierge, with no value on it.
+        Assert.False(issued.Env.ContainsKey("HOME"));
+        Assert.False(issued.Env.ContainsKey("CLAUDE_CONFIG_DIR"));
+        Assert.Equal(home.Argv!.Count, issued.Argv!.Count);
+        Assert.Equal(home.Argv[0], issued.Argv[0]);
+        Assert.Contains("--dangerously-skip-permissions", issued.Argv);
+        Assert.DoesNotContain(issued.Argv, a => a.Contains(Key, StringComparison.Ordinal));
+        Assert.Equal(home.StartingFolder, issued.StartingFolder);
+
+        // Home is exactly as before: the team's value stands and nothing is added.
+        Assert.Equal("from-the-team", home.Env!["ANTHROPIC_AUTH_TOKEN"]);
+        Assert.False(home.Env.ContainsKey("ANTHROPIC_API_KEY"));
+
+        // Not set, it opens on the person's own login as before.
+        var notSet = await OpenAsync(RunCredential.NotSet("not set"));
+        Assert.False(notSet.Env!.ContainsKey("ANTHROPIC_API_KEY"));
+        Assert.Equal("from-the-team", notSet.Env["ANTHROPIC_AUTH_TOKEN"]);
+    }
+
+    [Fact]
+    public async Task Under_home_the_concierge_sets_none_of_the_variables_other_commands_declare()
+    {
+        var catalog = new AgentCatalog(AgentCatalogFile.BuiltIns());
+        var concierge = catalog.Definitions.First(d => d is { Mode: not AgentMode.Headless, IssuedCredential: not null });
+        var credentials = new RunCredentials(
+            catalog, _ => CredentialSource.Home,
+            new AgentCredentialStore(Path.Combine(_dataRoot, "absent.db"), new EphemeralDataProtectionProvider()));
+        var resolved = await credentials.ResolveAsync(concierge.Name, null, TestContext.Current.CancellationToken);
+        Assert.NotEmpty(resolved.OtherProviders);
+
+        using var restore = new EnvironmentScope([new("HOME", _dataRoot)]);
+        var principals = new MintingPrincipals();
+
+        async Task<Harness.Pty.PtySpec> OpenAsync(RunCredential credential) =>
+            await new ConciergeLaunchFactory(
+                    new TeamPaths(_dataRoot), "http://localhost:5000", principals, catalog,
+                    credentials: new Fixed(credential))
+                .ForAsync(
+                    team: "", teamLabel: "this instance", user: "user-1", login: "person@example.com",
+                    concierge.Name, teamEnv: new Dictionary<string, string> { ["TEAM_VAR"] = "team" },
+                    ct: TestContext.Current.CancellationToken);
+
+        var bare = await OpenAsync(RunCredential.Home);
+        var scoped = await OpenAsync(resolved);
+
+        // Its PTY cannot remove a variable, so it sets none of them - not even empty - and is the
+        // terminal it always was.
+        Assert.Empty(scoped.Env!.Keys.Intersect(resolved.OtherProviders));
+        Assert.Equal(bare.Env!.Keys.Order(StringComparer.Ordinal), scoped.Env.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(bare.Argv!.Count, scoped.Argv!.Count);
+    }
+
+    private sealed class Fixed(RunCredential credential) : IRunCredentials
+    {
+        public Task<RunCredential> ResolveAsync(string agent, AgentDefinition? definition, CancellationToken ct) =>
+            Task.FromResult(credential);
     }
 
     public void Dispose()

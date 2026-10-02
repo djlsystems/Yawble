@@ -23,6 +23,16 @@ public static class AgentEndpoints
             + "changed is refused, because built-in presets change only with the product.")]
         List<AgentDefinition>? Agents);
 
+    /// <summary>What setting an issued credential carries.</summary>
+    internal sealed record CredentialSubmission(
+        [property: System.ComponentModel.Description(
+            "`apiKey` or `token`, one the CLI's issued-credential declaration lists. May be left out "
+            + "when it lists only one.")]
+        string? Kind,
+        [property: System.ComponentModel.Description(
+            "The credential. Write-only: no answer, row, log or file ever carries it or any part of it.")]
+        string? Value);
+
     private const string PeopleOnly =
         "\n\n**A person's action.** `env` is where an outside Agent's key lives, so the full "
         + "record - including every command line - is a credential surface.";
@@ -169,6 +179,11 @@ public static class AgentEndpoints
 
             var agents = AgentCatalogFile.BuiltIns().Concat(custom).ToList();
 
+            if (AgentCredentials.DeclarationRefusal(agents) is { } undeclarable)
+            {
+                return Results.BadRequest(new { error = undeclarable });
+            }
+
             if (await ReferenceRefusalFor(agents, teams, effective, ct) is { } orphaned)
             {
                 return Results.BadRequest(new { error = orphaned });
@@ -225,6 +240,59 @@ public static class AgentEndpoints
         // without restarting: it waits for the runs of that CLI in flight, holds new ones (they
         // wait, never fail), runs the preset's declared update and lets them go. ASKED, NOT AWAITED:
         // the route answers at once and the gate keeps the update, so the row reads it back with GET.
+        // AN ISSUED CREDENTIAL PER COMMAND: set, replaced and cleared by a person only, each with its
+        // tenant row in the same transaction, and never answered back. See AgentCredentials.
+        app.MapGet("/api/agents/credentials", async (AgentCredentials credentials, CancellationToken ct) =>
+                Results.Ok(await credentials.ListAsync(ct)))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Each preset's credential source, and whether its command's issued credential is set")
+            .WithDescription(
+                "One entry per language-model preset: `agent`, `command` (the CLI it launches, which the "
+                + "credential is stored under), `sharedWith` (the other presets launching the same command, "
+                + "which use the same credential), `source` (`home` or `issued`, from the "
+                + "`agents.credentialSource` setting), `issuedCredential` (the preset's declaration - kinds "
+                + "and their variables, what an issued run displaces, which wins over a home login, the CLI "
+                + "version measured - or null) and `set`, `setBy`, `setAt` for the command's credential. "
+                + "Never the value or any part of it.");
+
+        app.MapPut("/api/agents/{name}/credential", async (
+            [System.ComponentModel.Description("A preset, or a command a preset launches. A preset's credential is its command's.")]
+            string name,
+            CredentialSubmission body, AgentCredentials credentials, HttpContext context, CancellationToken ct) =>
+            {
+                var (status, answer) = await credentials.SetAsync(name, body.Kind, body.Value, Actor(context), ct);
+                return Results.Json(answer, statusCode: status);
+            })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Set or replace the credential issued to a CLI")
+            .WithDescription(
+                "Stores the credential for the command `name` launches (or names), Data Protection "
+                + "ciphertext, with an `agents.credential-set` or `agents.credential-replaced` tenant row in "
+                + "the same transaction. Every preset of that command whose source is `issued` uses it from its "
+                + "next run. 200 `{ command, set, setBy, setAt }`. 400 when nothing launching it declares an "
+                + "issued credential, the kind is not declared, or the value is empty, multi-line or a form the "
+                + "CLI refuses; 404 for a name that is neither a preset nor a command; 500, with nothing "
+                + "stored, when the tenant row cannot be written. No answer carries the value.");
+
+        app.MapDelete("/api/agents/{name}/credential", async (
+            [System.ComponentModel.Description("A preset, or a command a preset launches.")]
+            string name,
+            AgentCredentials credentials, HttpContext context, CancellationToken ct) =>
+            {
+                var (status, answer) = await credentials.ClearAsync(name, Actor(context), ct);
+                return Results.Json(answer, statusCode: status);
+            })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Clear the credential issued to a CLI")
+            .WithDescription(
+                "Removes the command's credential with an `agents.credential-cleared` tenant row in the same "
+                + "transaction. A member run of a preset still set to `issued` then does not start. 200 "
+                + "`{ command, set: false, setBy: null, setAt: null }`, also when nothing was set (no row is "
+                + "written then); 400 and 404 as for PUT; 500, with nothing cleared, when the row cannot be written.");
+
         app.MapPost("/api/agents/{name}/update", (
             [System.ComponentModel.Description("The preset whose CLI to update. Presets that launch "
                 + "the same command share one install, so updating one updates them all.")]
@@ -372,6 +440,10 @@ public static class AgentEndpoints
     /// was handed shows the operator's - and are compared apart from the rest, so a changed tag
     /// is told where tags are changed and anything else is the built-in refusal sentence.
     /// </para>
+    private static CredentialActor Actor(HttpContext context) => new(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+        context.User.FindFirstValue(ClaimTypes.Email) ?? "unknown");
+
     private static string? BuiltInRefusalFor(IReadOnlyList<AgentDefinition> submitted, AgentCatalog catalog)
     {
         foreach (var agent in submitted)

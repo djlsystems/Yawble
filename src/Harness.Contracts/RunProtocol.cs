@@ -9,6 +9,10 @@ namespace Harness.Contracts;
 // cross the in-process transport today can travel over a connection later. Control resolves
 // everything a run needs before it is started (StartRun); the worker launches, measures and
 // reports, and holds nothing between runs.
+//
+// The two exceptions are a run's secrets on StartRun - its credential and its redaction set - which
+// refuse to be written as JSON at all: they cross the in-process transport by reference, and a
+// connection that carries them needs its own protected channel.
 
 /// <summary>A runtime worker's name. Today there is one, in the Host's own process.</summary>
 public sealed record WorkerId(string Value)
@@ -57,6 +61,12 @@ public abstract record MemberCommand(ContainerId Member) : ControlMessage;
 /// the catalog has no headless preset by that name, and the worker refuses it in today's words.
 /// <see cref="Process"/> is set instead for a member that is a program rather than an agent (a
 /// plugin): the worker starts it as given and streams what it prints.
+///
+/// <see cref="Credential"/> is the run's credential as control resolved it - the worker applies it
+/// and never reads a store or a key ring - and <see cref="Redaction"/> the values the run's text is
+/// redacted of before it leaves the worker: the credential's and every credential variable the
+/// child's environment carries. Both hold secrets and refuse to be written as JSON; null on a run
+/// that has none.
 /// </summary>
 public sealed record StartRun(
     RunId Run,
@@ -71,7 +81,9 @@ public sealed record StartRun(
     RunMemoryAllowance? Memory,
     string? TempRoot,
     RunLiveView? LiveView,
-    RunProcess? Process = null) : RunCommand(Run);
+    RunProcess? Process = null,
+    RunCredential? Credential = null,
+    ValueRedactor? Redaction = null) : RunCommand(Run);
 
 /// <summary>
 /// A member that is a program: its executable and arguments, the only variables it inherits from the
@@ -155,6 +167,7 @@ public sealed record WorkerEnvelope(WorkerId Worker, long Seq, WorkerEvent Event
 /// <summary>What a worker says.</summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "event")]
 [JsonDerivedType(typeof(WorkerReady), "workerReady")]
+[JsonDerivedType(typeof(RunCredentialApplied), "runCredentialApplied")]
 [JsonDerivedType(typeof(RunStarted), "runStarted")]
 [JsonDerivedType(typeof(RunProgress), "runProgress")]
 [JsonDerivedType(typeof(RunOutput), "runOutput")]
@@ -174,6 +187,13 @@ public abstract record RunEvent(RunId Run) : WorkerEvent;
 public sealed record WorkerReady(WorkerId Worker) : WorkerEvent;
 
 /// <summary>The run's process exists.</summary>
+/// <summary>
+/// The run's credential is applied and its child's environment is final, just before the child is
+/// started: from here control keeps the run's <see cref="StartRun.Redaction"/> as the member's, for
+/// its reports and its transcript. A run refused before this point leaves the member's set as it was.
+/// </summary>
+public sealed record RunCredentialApplied(RunId Run) : RunEvent(Run);
+
 public sealed record RunStarted(RunId Run, int ProcessId, DateTimeOffset At) : RunEvent(Run);
 
 /// <summary>A sentence the run's launch files on the member's card: a hold, a wait, a memory watch.</summary>
