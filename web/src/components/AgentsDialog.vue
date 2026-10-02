@@ -844,7 +844,10 @@ const rowBusy = computed(
                   class="text-warning"
                   data-credential-missing
                 >
-                  Not set: its member runs do not start until one is. The Concierge starts on the person's own login.
+                  Not set: its member runs do not start until one is.<span
+                    v-if="agent.mode !== 'Headless'"
+                    data-concierge-fallback
+                  > The Concierge starts on the person's own login.</span>
                 </div>
                 <div v-if="agent.mode !== 'Headless'" class="os-text-muted" data-concierge-line>
                   {{ conciergeLine(credentialOf(agent)!.issuedCredential!) }}

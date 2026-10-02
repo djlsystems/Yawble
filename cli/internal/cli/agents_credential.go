@@ -23,6 +23,9 @@ var (
 	// credentialWait is how long the Host has to answer one request before it is withdrawn.
 	credentialWait = 60 * time.Second
 	credentialPoll = 500 * time.Millisecond
+	// credentialGrace is how long a report may still take once the request is found gone: the
+	// Host deletes a request before it writes the report.
+	credentialGrace = 2 * time.Second
 )
 
 // maxCredentialBytes is the longest value the Host stores; a longer one is refused here first.
@@ -55,6 +58,7 @@ type credentialBody struct {
 	SetBy   *string `json:"setBy"`
 	SetAt   *string `json:"setAt"`
 	Error   string  `json:"error"`
+	Reason  string  `json:"reason"`
 }
 
 func newAgentsCredentialCommand(deps Deps) *cobra.Command {
@@ -78,16 +82,42 @@ func newAgentsCredentialCommand(deps Deps) *cobra.Command {
 	return cmd
 }
 
-// oneName refuses anything but a single preset or command name: a second argument, or a name
-// carrying '=', could only be a value, and a value never comes from the command line.
+// maxAgentName is the longest preset or command name sent; a longer one is far likelier a value.
+const maxAgentName = 64
+
+// plainName reports whether name can only be a preset or command name: letters, digits, '-', '_'
+// and '.', at most maxAgentName long. Anything else may be a value pasted in the wrong place.
+func plainName(name string) bool {
+	if name == "" || len(name) > maxAgentName {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// notAName refuses a name that is not plain without repeating it: it may be a credential.
+func notAName(usage string) error {
+	return UsageError{fmt.Sprintf("that is not a preset or command name (letters, digits, '-', '_' and '.', at most %d); "+
+		"nothing was read or sent, and it is not repeated here in case it was a credential. "+
+		"A credential is never taken from the command line: %s", maxAgentName, usage)}
+}
+
+// oneName refuses anything but a single plain preset or command name: a second argument, or a
+// name that is not plain, could be a value, and a value never comes from the command line.
 func oneName(verb string) cobra.PositionalArgs {
 	return func(_ *cobra.Command, args []string) error {
 		switch {
 		case len(args) == 0:
 			return UsageError{fmt.Sprintf("name the preset or command: yawble agents credential %s <preset|command>", verb)}
-		case len(args) > 1 || strings.Contains(args[0], "="):
+		case len(args) > 1:
 			return UsageError{"a credential is never taken from the command line, where it would stay in your shell's history; " +
 				"nothing was sent. Type it at the prompt or pipe it in: <command> | yawble agents credential set <preset|command>"}
+		case !plainName(args[0]):
+			return notAName("type it at the prompt or pipe it in: <command> | yawble agents credential set <preset|command>")
 		}
 		return nil
 	}
@@ -173,11 +203,19 @@ func newAgentsSourceCommand(deps Deps) *cobra.Command {
 			"set with `yawble agents credential set` for the preset's command, and a home of its own; an " +
 			"issued member run whose credential is not set does not start.",
 		Example: "  yawble agents source claude-headless issued\n  yawble agents source claude-headless home",
-		Args:    cobra.ExactArgs(2),
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				return UsageError{"name the preset and the source: yawble agents source <preset> home|issued"}
+			}
+			if !plainName(args[0]) {
+				return notAName("yawble agents source <preset> home|issued")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			preset, source := args[0], args[1]
 			if source != "home" && source != "issued" {
-				return UsageError{fmt.Sprintf("the source is home or issued, not %q", source)}
+				return UsageError{"the source is home or issued; nothing was sent"}
 			}
 			e, err := runningEngine(cmd.Context(), deps, "agents source")
 			if err != nil {
@@ -236,7 +274,8 @@ func checkCredentialValue(value string) error {
 
 // askCredentialHost hands one request to the Host on exec stdin - never in exec's arguments - and
 // waits credentialWait for the report carrying its nonce. A request no Host answered is withdrawn,
-// so a Host started later never carries it out.
+// so a Host started later never carries it out. One that is already gone was taken by the Host,
+// which deletes a request it cannot answer safely and, in a folder it cannot trust, writes nothing.
 func askCredentialHost(ctx context.Context, e engine.Engine, req credentialRequest) (credentialBody, error) {
 	req.Request = newNonce()
 	req.Value = strings.TrimSpace(req.Value)
@@ -244,40 +283,90 @@ func askCredentialHost(ctx context.Context, e engine.Engine, req credentialReque
 	if _, err := e.ExecInput(ctx, instance.ContainerName, string(body)+"\n", "sh", "-c", credentialRequestScript, "sh", agentCredentialsRoot); err != nil {
 		return credentialBody{}, err
 	}
-	withdraw := func(ctx context.Context) {
-		_, _ = e.Exec(ctx, instance.ContainerName, "sh", "-c", credentialWithdrawScript, "sh", agentCredentialsRoot, req.Request)
+	withdraw := func(ctx context.Context) string {
+		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", credentialWithdrawScript, "sh", agentCredentialsRoot, req.Request)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(res.Stdout)
 	}
-	deadline := time.Now().Add(credentialWait)
-	for {
+	// report reads the report once: its body when it answers this request, or ok false.
+	report := func() (credentialBody, bool, error) {
 		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", credentialReportScript, "sh", agentCredentialsRoot)
 		if err != nil {
+			return credentialBody{}, false, err
+		}
+		var r credentialReport
+		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) != nil || r.Request != req.Request {
+			return credentialBody{}, false, nil
+		}
+		var b credentialBody
+		_ = json.Unmarshal(r.Body, &b)
+		if r.Status < 200 || r.Status > 299 {
+			if reason := b.refusal(); reason != "" {
+				return credentialBody{}, true, errors.New(reason)
+			}
+			return credentialBody{}, true, fmt.Errorf("the Host refused the %s request (status %d)", req.Action, r.Status)
+		}
+		return b, true, nil
+	}
+	wait := func(d time.Duration) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(d):
+			return nil
+		}
+	}
+
+	deadline := time.Now().Add(credentialWait)
+	for {
+		b, ok, err := report()
+		if ok || err != nil {
+			if err != nil && !ok {
+				withdraw(context.WithoutCancel(ctx))
+			}
+			return b, err
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		if err := wait(credentialPoll); err != nil {
 			withdraw(context.WithoutCancel(ctx))
 			return credentialBody{}, err
 		}
-		var r credentialReport
-		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.Request == req.Request {
-			var b credentialBody
-			_ = json.Unmarshal(r.Body, &b)
-			if r.Status < 200 || r.Status > 299 {
-				if b.Error != "" {
-					return credentialBody{}, errors.New(b.Error)
-				}
-				return credentialBody{}, fmt.Errorf("the Host refused the %s request (status %d)", req.Action, r.Status)
-			}
-			return b, nil
+	}
+
+	switch withdraw(ctx) {
+	case "withdrawn":
+		return credentialBody{}, fmt.Errorf("the Host did not answer the %s request within %s, and the request was withdrawn. "+
+			"An image from before issued credentials does not answer; `yawble update` brings the instance current", req.Action, credentialWait)
+	case "replaced":
+		return credentialBody{}, fmt.Errorf("the Host did not answer the %s request within %s, and another request has replaced it, "+
+			"so there was nothing of it to withdraw. Run the command again once the other one has finished", req.Action, credentialWait)
+	}
+	// Gone: the Host took it. Its report, if it writes one, follows the deletion closely.
+	graceEnd := time.Now().Add(credentialGrace)
+	for {
+		if b, ok, err := report(); ok || err != nil {
+			return b, err
 		}
-		if time.Now().After(deadline) {
-			withdraw(ctx)
-			return credentialBody{}, fmt.Errorf("the Host did not answer the %s request within %s, and the request was withdrawn. "+
-				"An image from before issued credentials does not answer; `yawble update` brings the instance current", req.Action, credentialWait)
+		if time.Now().After(graceEnd) {
+			return credentialBody{}, fmt.Errorf("the Host took the %s request and deleted it without acting on it, "+
+				"so nothing was stored or changed. The Host's log says why; most often its request folder %s is not its own", req.Action, agentCredentialsRoot)
 		}
-		select {
-		case <-ctx.Done():
-			withdraw(context.WithoutCancel(ctx))
-			return credentialBody{}, ctx.Err()
-		case <-time.After(credentialPoll):
+		if err := wait(credentialPoll); err != nil {
+			return credentialBody{}, err
 		}
 	}
+}
+
+// refusal is the Host's sentence for a refused request, whichever key carries it.
+func (b credentialBody) refusal() string {
+	if b.Error != "" {
+		return b.Error
+	}
+	return b.Reason
 }
 
 func (b credentialBody) commandOr(name string) string {
@@ -311,11 +400,15 @@ chmod 0700 "$1"
 cat > "$1/.request.tmp"
 chown harness "$1/.request.tmp"
 chmod 0600 "$1/.request.tmp"
+rm -f "$1/.request-report.json"
 mv -f "$1/.request.tmp" "$1/.request"`
 
 	// $1 root.
 	credentialReportScript = `cat "$1/.request-report.json" 2>/dev/null || true`
 
-	// $1 root, $2 nonce: removes the request if it is still this one.
-	credentialWithdrawScript = `grep -qF "$2" "$1/.request" 2>/dev/null && rm -f "$1/.request"; true`
+	// $1 root, $2 nonce: removes the request if it is still this one, and says what it found:
+	// withdrawn, replaced (another request is there) or gone.
+	credentialWithdrawScript = `if grep -qF "$2" "$1/.request" 2>/dev/null; then rm -f "$1/.request"; echo withdrawn
+elif [ -e "$1/.request" ] || [ -L "$1/.request" ]; then echo replaced
+else echo gone; fi`
 )

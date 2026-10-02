@@ -24,7 +24,19 @@ type credentialHost struct {
 	commands map[string]string
 	set      map[string]bool
 	sources  map[string]string
-	silent   bool
+	// silent leaves each request on disk unanswered, as a Host that does not read them does.
+	silent bool
+	// A request in a folder the Host cannot trust is deleted unanswered. refused, when set, is the
+	// reason it reports, as it does when the folder is its own but readable by others; deleted alone
+	// is a folder it cannot write a report to safely, so nothing is reported.
+	refused string
+	deleted bool
+	// pending is the nonce of the request on disk; replaced puts another request in its place.
+	pending  string
+	replaced bool
+	// late writes the answer only once the CLI has found the request gone: the moment between
+	// the Host deleting a request and writing its report.
+	late map[string]any
 }
 
 func newCredentialHost(t *testing.T) *credentialHost {
@@ -41,7 +53,7 @@ func (h *credentialHost) answer(req map[string]any) (int, map[string]any) {
 	name, _ := req["agent"].(string)
 	command, ok := h.commands[name]
 	if !ok {
-		return 404, map[string]any{"error": "no preset or command is named " + name}
+		return 404, map[string]any{"error": "No agent preset or command by that name."}
 	}
 	switch req["action"] {
 	case "set":
@@ -83,7 +95,18 @@ func (h *credentialHost) RunInput(ctx context.Context, stdin string, name string
 		}
 		h.mu.Lock()
 		h.requests = append(h.requests, req)
-		if !h.silent {
+		h.report = ""
+		switch {
+		case h.refused != "":
+			b, _ := json.Marshal(map[string]any{"request": req["request"], "status": 503, "body": map[string]any{"error": h.refused}})
+			h.report = string(b)
+		case h.deleted:
+		case h.silent:
+			h.pending, _ = req["request"].(string)
+			if h.replaced {
+				h.pending = "someone-else"
+			}
+		default:
 			status, body := h.answer(req)
 			b, _ := json.Marshal(map[string]any{"request": req["request"], "status": status, "body": body})
 			h.report = string(b)
@@ -100,6 +123,23 @@ func (h *credentialHost) Run(ctx context.Context, name string, args ...string) (
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		return engine.Result{Stdout: h.report + "\n"}, nil
+	}
+	if strings.Contains(line, cli.CredentialWithdrawScript) {
+		h.Scripted.Calls = append(h.Scripted.Calls, line)
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		switch {
+		case h.pending == "":
+			if h.late != nil {
+				b, _ := json.Marshal(map[string]any{"request": h.requests[len(h.requests)-1]["request"], "status": 200, "body": h.late})
+				h.report = string(b)
+			}
+			return engine.Result{Stdout: "gone\n"}, nil
+		case strings.HasSuffix(line, " "+h.pending):
+			h.pending = ""
+			return engine.Result{Stdout: "withdrawn\n"}, nil
+		}
+		return engine.Result{Stdout: "replaced\n"}, nil
 	}
 	return h.Scripted.Run(ctx, name, args...)
 }
@@ -258,9 +298,9 @@ func TestCredentialSetShowsTheHostsRefusal(t *testing.T) {
 		t.Errorf("the value was printed: %q", errOut)
 	}
 	h = newCredentialHost(t)
-	code, _, errOut = run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "nobody")
-	if code != 1 || !strings.Contains(errOut, "no preset or command is named nobody") {
-		t.Errorf("exit %d stderr %q", code, errOut)
+	code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "nobody")
+	if code != 1 || !strings.Contains(errOut, "No agent preset or command by that name.") || strings.Contains(out, "is set") {
+		t.Errorf("exit %d stdout %q stderr %q", code, out, errOut)
 	}
 }
 
@@ -332,8 +372,11 @@ func TestATimedOutRequestIsWithdrawn(t *testing.T) {
 	h.silent = true
 	t.Cleanup(cli.FastCredential(50 * time.Millisecond))
 	code, _, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude")
-	if code != 1 || !strings.Contains(errOut, "withdrawn") {
+	if code != 1 || !strings.Contains(errOut, "did not answer") || !strings.Contains(errOut, "withdrawn") || strings.Contains(errOut, "deleted") {
 		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if h.pending != "" {
+		t.Errorf("the request is still there: %s", h.pending)
 	}
 	nonce := h.requests[0]["request"].(string)
 	var withdrawn bool
@@ -351,5 +394,129 @@ func TestATimedOutRequestIsWithdrawn(t *testing.T) {
 func TestTheHostIsGivenSixtySeconds(t *testing.T) {
 	if got := cli.CredentialWaitDefault(); got != 60*time.Second {
 		t.Errorf("wait %s", got)
+	}
+}
+
+// A secret pasted where the name goes is refused before a value is read or anything is sent, and
+// the refusal never repeats it.
+func TestANameThatIsNotPlainIsRefusedUnsentAndUnrepeated(t *testing.T) {
+	secrets := []string{
+		"ghu_AbCdEf/0123+xyzQ",          // characters no name has
+		secretValue + "-" + secretValue, // name characters, but longer than any name
+	}
+	for _, secret := range secrets {
+		for _, args := range [][]string{
+			{"agents", "credential", "set", secret},
+			{"agents", "credential", "set", "--token", secret},
+			{"agents", "credential", "clear", secret},
+			{"agents", "source", secret, "issued"},
+		} {
+			h := newCredentialHost(t)
+			stdin := strings.NewReader("piped-value-that-must-not-be-read\n")
+			deps := piped(h, "")
+			deps.Stdin = stdin
+			read := false
+			deps.Interactive, deps.ReadSecret = false, func(string) (string, error) { read = true; return "", nil }
+			code, out, errOut := run(t, deps, args...)
+			if code != 2 {
+				t.Errorf("%v: exit %d, want 2: %s", args[:3], code, errOut)
+			}
+			if !strings.Contains(errOut, "not a preset or command name") {
+				t.Errorf("%v: stderr %q", args[:3], errOut)
+			}
+			if len(h.requests) != 0 || len(h.Scripted.Calls) != 0 || len(h.Scripted.Inputs) != 0 {
+				t.Errorf("%v: something was sent: %+v %v", args[:3], h.requests, h.Scripted.Calls)
+			}
+			if read || stdin.Len() == 0 {
+				t.Errorf("%v: a value was read before the name was refused", args[:3])
+			}
+			if strings.Contains(out+errOut, secret[:8]) {
+				t.Errorf("%v: the output repeats the argument: %q %q", args[:3], out, errOut)
+			}
+		}
+	}
+}
+
+// The source word is not repeated either: it may be a value typed in the wrong place.
+func TestASourceThatIsNotHomeOrIssuedIsNotRepeated(t *testing.T) {
+	h := newCredentialHost(t)
+	code, out, errOut := run(t, stubbed(h), "agents", "source", "claude-headless", secretValue)
+	if code != 2 || len(h.requests) != 0 || strings.Contains(out+errOut, secretValue[:12]) {
+		t.Errorf("exit %d requests %+v output %q %q", code, h.requests, out, errOut)
+	}
+}
+
+// The Host's own folder, readable by others: it deletes the request and reports why, with the
+// request's nonce, status 503 and its fixed sentence. The CLI shows that sentence and fails.
+func TestARequestTheHostDeletesShowsTheReasonItReports(t *testing.T) {
+	const reason = "The Host did not act on this request and deleted it: its request folder can be read by other users, " +
+		"and it must be the Host's alone (mode 0700). Nothing was changed; the Host's log says what is wrong."
+	h := newCredentialHost(t)
+	h.refused = reason
+	code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude", "--api-key")
+	if code != 1 || !strings.Contains(errOut, reason) || strings.Contains(out, "is set") {
+		t.Errorf("exit %d out %q stderr %q", code, out, errOut)
+	}
+	if strings.Contains(out+errOut, secretValue[:12]) || strings.Contains(errOut, "withdrawn") {
+		t.Errorf("stderr %q", errOut)
+	}
+	if !strings.Contains(cli.CredentialRequestScript, `rm -f "$1/.request-report.json"`) {
+		t.Errorf("an older report is not removed before a request goes in:\n%s", cli.CredentialRequestScript)
+	}
+}
+
+// A folder the Host cannot trust at all: it deletes the request and writes nothing. At the
+// deadline the request is not there to withdraw, so the CLI says the Host took it and acted on
+// nothing - not that no Host answered.
+func TestARequestTheHostDeletesWithoutAReportIsSaidSo(t *testing.T) {
+	h := newCredentialHost(t)
+	h.deleted = true
+	t.Cleanup(cli.FastCredential(50 * time.Millisecond))
+	code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude", "--api-key")
+	if code != 1 || strings.Contains(out, "is set") {
+		t.Fatalf("exit %d out %q stderr %q", code, out, errOut)
+	}
+	for _, want := range []string{"took the set request and deleted it without acting on it", "nothing was stored", "The Host's log says why"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr lacks %q: %q", want, errOut)
+		}
+	}
+	if strings.Contains(errOut, "did not answer") || strings.Contains(errOut, "An image from before") || strings.Contains(errOut, secretValue[:12]) {
+		t.Errorf("stderr %q", errOut)
+	}
+}
+
+// A report that follows the deletion within the grace is still read as the answer.
+func TestAReportJustAfterTheDeadlineIsStillTheAnswer(t *testing.T) {
+	h := newCredentialHost(t)
+	h.deleted = true
+	h.late = map[string]any{"command": "claude", "set": true, "setBy": "operator", "setAt": "2026-10-02T10:00:00Z"}
+	t.Cleanup(cli.FastCredential(50 * time.Millisecond))
+	code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude", "--api-key")
+	if code != 0 || strings.Contains(errOut, "deleted") {
+		t.Errorf("exit %d out %q stderr %q", code, out, errOut)
+	}
+}
+
+// A report that names another request is never this one's answer.
+func TestAReportForAnotherRequestIsNotTheAnswer(t *testing.T) {
+	h := newCredentialHost(t)
+	h.silent = true
+	h.report = `{"request":"","status":503,"body":{"error":"planted"}}`
+	t.Cleanup(cli.FastCredential(50 * time.Millisecond))
+	code, _, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude", "--api-key")
+	if code != 1 || strings.Contains(errOut, "planted") || !strings.Contains(errOut, "withdrawn") {
+		t.Errorf("exit %d stderr %q", code, errOut)
+	}
+}
+
+// Another request in this one's place at the deadline: not withdrawn, and not called deleted.
+func TestARequestReplacedByAnotherIsNotCalledDeleted(t *testing.T) {
+	h := newCredentialHost(t)
+	h.silent, h.replaced = true, true
+	t.Cleanup(cli.FastCredential(50 * time.Millisecond))
+	code, _, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude", "--api-key")
+	if code != 1 || !strings.Contains(errOut, "another request has replaced it") || strings.Contains(errOut, "deleted") {
+		t.Errorf("exit %d stderr %q", code, errOut)
 	}
 }
