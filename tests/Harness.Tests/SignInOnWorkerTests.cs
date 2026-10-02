@@ -196,6 +196,107 @@ public sealed class SignInOnWorkerTests : IDisposable
         Assert.Equal("--no-update auth status UPDATER=off", (await File.ReadAllTextAsync(said, Ct)).Trim());
     }
 
+    [Fact]
+    public async Task The_probe_records_each_commands_install_against_the_worker_that_answered()
+    {
+        var worker = Answering("w1", (command, _) => new SignInProbeResult(command, command == "codex", null, "from w1"));
+        var installs = new WorkerInstalls(() => [new WorkerId("w1")]);
+
+        await new AgentAuthProbe(Catalog, asks: AsksOf(worker), measured: installs).ReportsAsync(Ct);
+
+        Assert.Equal([("w1", true)], installs.For("codex").Select(m => (m.Worker, m.Installed)));
+        Assert.Equal([("w1", false)], installs.For("claude").Select(m => (m.Worker, m.Installed)));
+    }
+
+    [Fact]
+    public async Task With_no_worker_the_probe_records_nothing()
+    {
+        var installs = new WorkerInstalls(() => [new WorkerId("w1")]);
+        var asks = new WorkerAsks(() => throw new InvalidOperationException("No worker is connected."));
+
+        await new AgentAuthProbe(Catalog, asks: asks, measured: installs).ReportsAsync(Ct);
+
+        Assert.Empty(installs.For("claude"));
+        Assert.Empty(installs.For("codex"));
+    }
+
+    [Fact]
+    public async Task A_worker_that_does_not_answer_in_time_records_nothing()
+    {
+        var clock = new ManualTime(DateTimeOffset.UnixEpoch.AddDays(1));
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var silent = new ScriptedCliWorker("w2");
+        silent.Received += _ => sent.TrySetResult();
+        var asks = new WorkerAsks(() => silent, clock);
+        silent.Asks = asks;
+        var installs = new WorkerInstalls(() => [new WorkerId("w2")]);
+
+        var reading = new AgentAuthProbe(Catalog, asks: asks, measured: installs).ReportsAsync(Ct);
+        await sent.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        clock.Advance(AgentAuthProbe.Bound(2) + TimeSpan.FromSeconds(1));
+        await reading.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+
+        Assert.Empty(installs.For("claude"));
+        Assert.Empty(installs.For("codex"));
+    }
+
+    /// <summary>
+    /// IN CONTROL AN ISSUED PRESET'S INSTALL IS THE WORKERS' MEASUREMENT, never control's own PATH:
+    /// `sh` is on every PATH and a worker measured it missing; the other command is on none and a worker
+    /// measured it installed; a third nobody measured is null.
+    /// </summary>
+    [Fact]
+    public async Task In_control_an_issued_presets_install_reads_the_workers_measurement()
+    {
+        Assert.NotNull(Harness.Pty.PathSearch.Find("sh"));
+        Assert.Null(Harness.Pty.PathSearch.Find(AbsentCli));
+        Assert.Null(Harness.Pty.PathSearch.Find(UnmeasuredCli));
+        var catalog = new AgentCatalog(
+        [
+            new AgentDefinition("sh-headless", AgentMode.Headless, new AgentLaunch("sh", [])),
+            new AgentDefinition("absent-headless", AgentMode.Headless, new AgentLaunch(AbsentCli, [])),
+            new AgentDefinition("unmeasured-headless", AgentMode.Headless, new AgentLaunch(UnmeasuredCli, [])),
+        ]);
+        var installs = new WorkerInstalls(() => [new WorkerId("w1")]);
+        installs.Record(new WorkerId("w1"), [("sh", false), (AbsentCli, true)]);
+        var worker = Answering("w1", (command, _) => new SignInProbeResult(command, true, true, "from w1"));
+
+        var reports = await new AgentAuthProbe(
+            catalog, credentials: new OneCredential(Issued), asks: AsksOf(worker),
+            installs: new AgentInstallProbe(workers: installs), measured: installs).ReportsAsync(Ct);
+
+        Assert.Equal(
+            [("sh-headless", (bool?)false), ("absent-headless", true), ("unmeasured-headless", null)],
+            reports.Select(r => (r.Agent, r.Installed)));
+        Assert.All(reports, r => Assert.Equal("issued", r.Source));
+        Assert.Empty(worker.Sent);
+    }
+
+    [Fact]
+    public async Task In_all_an_issued_presets_install_is_this_machines_path_as_before()
+    {
+        Assert.NotNull(Harness.Pty.PathSearch.Find("sh"));
+        Assert.Null(Harness.Pty.PathSearch.Find(AbsentCli));
+        var catalog = new AgentCatalog(
+        [
+            new AgentDefinition("sh-headless", AgentMode.Headless, new AgentLaunch("sh", [])),
+            new AgentDefinition("absent-headless", AgentMode.Headless, new AgentLaunch(AbsentCli, [])),
+        ]);
+        var worker = Answering("w1", (command, _) => new SignInProbeResult(command, true, true, "from w1"));
+
+        var reports = await new AgentAuthProbe(catalog, credentials: new OneCredential(Issued), asks: AsksOf(worker)).ReportsAsync(Ct);
+
+        Assert.Equal([("sh-headless", (bool?)true), ("absent-headless", false)], reports.Select(r => (r.Agent, r.Installed)));
+        Assert.Empty(worker.Sent);
+    }
+
+    private const string AbsentCli = "no-such-cli-7f3a9c";
+
+    private const string UnmeasuredCli = "no-such-cli-unmeasured-41d2";
+
+    private static readonly RunCredential Issued = new(
+        CredentialSource.Issued, new Dictionary<string, string> { ["SOME_API_KEY"] = "fake-issued-value" }, [], [], true, null);
+
     private static ScriptedCliWorker Answering(string id, Func<string, int, SignInProbeResult> result) =>
         new(id, message => message is ProbeSignIn probe
             ? new SignInProbed(probe.Request, [.. probe.Commands.Select((c, i) => result(c.Command, i))])

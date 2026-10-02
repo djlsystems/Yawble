@@ -30,6 +30,7 @@ public sealed class WorkerArchitectureTests
     public const string CallsSetprivOrPrlimit = "calls setpriv or prlimit";
     public const string SignalsAProcessGroup = "signals a process group";
     public const string ReachesAWorkerLauncher = "reaches a worker launcher";
+    public const string ResolvesOnThePath = "resolves a command on the PATH";
 
     /// <summary>Why an entry may stay: what control keeps for good, or what a later change moves.</summary>
     private static readonly string[] Categories = ["git", "gh", "settings default"];
@@ -50,6 +51,34 @@ public sealed class WorkerArchitectureTests
             "gh: the GitHub CLI for a person's contributions stays in control.",
         ["TenantSettings..ctor: " + TouchesACgroup] =
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
+    };
+
+    /// <summary>Why a PATH lookup outside the worker may stay.</summary>
+    private static readonly string[] PathCategories = ["the resolver", "gh", "plugin runtime", "all only"];
+
+    /// <summary>
+    /// EVERY PATH LOOKUP OUTSIDE THE WORKER, and why. An agent CLI is on a worker's PATH and never on
+    /// control's, so whether one is installed is the workers' answer (<c>WorkerInstalls</c>): a lookup
+    /// of an agent CLI here would answer from the wrong machine. Kept apart from <see cref="AllowList"/>,
+    /// whose process entries <see cref="Control_starts_no_process_but_git_and_gh"/> reads.
+    /// </summary>
+    private static readonly Dictionary<string, string> PathLookups = new(StringComparer.Ordinal)
+    {
+        ["PathSearch.Find: " + ResolvesOnThePath] =
+            "the resolver: the one walk of PATH; every caller of it is listed here.",
+        ["Program.<Main>$: " + ResolvesOnThePath] =
+            "gh: whether the GitHub CLI is on control's PATH, where control runs it.",
+        ["RepoEndpoints.Map: " + ResolvesOnThePath] =
+            "gh: whether the GitHub CLI is on control's PATH, where control runs it.",
+        ["PluginCatalog.OnPath: " + ResolvesOnThePath] =
+            "plugin runtime: a plugin manifest's required runtime, never an agent CLI.",
+        ["SolutionChecker.Check: " + ResolvesOnThePath] =
+            "plugin runtime: a solution package's required runtime, never an agent CLI.",
+        ["AgentInstallProbe.ResolvedPathOf: " + ResolvesOnThePath] =
+            "all only: control composes the probe over WorkerInstalls and never reaches it; pinned at runtime by "
+            + "AgentInstallControlRouteTests.In_control_the_answer_never_follows_controls_own_path_in_either_direction.",
+        ["WorkerListingRunner.Installed: " + ResolvesOnThePath] =
+            "all only: control composes it with pathIsTheWorkers false and never reaches the lookup.",
     };
 
     /// <summary>
@@ -117,6 +146,62 @@ public sealed class WorkerArchitectureTests
             Assert.Contains(Categories, category => entry.Value.StartsWith(category + ":", StringComparison.Ordinal));
             Assert.True(entry.Value.Length > entry.Value.IndexOf(':') + 10, $"{entry.Key} gives no reason");
         });
+    }
+
+    /// <summary>
+    /// NO AGENT CLI IS LOOKED UP ON CONTROL'S PATH. Every PATH lookup outside the worker - a call to
+    /// <c>PathSearch.Find</c>, or a walk of <c>PATH</c> written by hand - is on <see cref="PathLookups"/>
+    /// with its reason. The scan cannot tell roles apart, so the "all only" entries are pinned at
+    /// runtime too.
+    /// </summary>
+    [Fact]
+    public void No_agent_cli_is_looked_up_on_the_path_outside_the_worker_but_where_listed()
+    {
+        var unexpected = PathLookupsIn(Scanned().SelectMany(IlScan.Methods)).Where(v => !PathLookups.ContainsKey(v)).ToList();
+
+        Assert.True(unexpected.Count == 0,
+            "Outside Harness.Worker, these look a command up on the PATH. An agent CLI's install is the workers' answer "
+            + "(WorkerInstalls); anything else is listed with its reason:"
+            + Environment.NewLine + string.Join(Environment.NewLine, unexpected));
+    }
+
+    [Fact]
+    public void Every_path_lookup_entry_is_still_needed()
+    {
+        var found = PathLookupsIn(Scanned().SelectMany(IlScan.Methods)).ToHashSet(StringComparer.Ordinal);
+        var stale = PathLookups.Keys.Where(key => !found.Contains(key)).ToList();
+
+        Assert.True(stale.Count == 0,
+            "These PATH lookup entries are no longer found by the scan; remove them:"
+            + Environment.NewLine + string.Join(Environment.NewLine, stale));
+    }
+
+    [Fact]
+    public void Every_path_lookup_entry_says_why()
+    {
+        Assert.All(PathLookups, entry =>
+        {
+            Assert.EndsWith(": " + ResolvesOnThePath, entry.Key, StringComparison.Ordinal);
+            Assert.Contains(PathCategories, category => entry.Value.StartsWith(category + ":", StringComparison.Ordinal));
+            Assert.True(entry.Value.Length > entry.Value.IndexOf(':') + 10, $"{entry.Key} gives no reason");
+        });
+    }
+
+    /// <summary>A planted lookup of an agent CLI, and a walk of PATH by hand, are each found and named.</summary>
+    [Theory]
+    [InlineData(nameof(PlantsAnAgentCliPathLookup))]
+    [InlineData(nameof(PlantsAHandRolledPathWalk))]
+    public void The_path_scan_catches_a_planted_lookup(string probe)
+    {
+        Assert.Equal([$"{nameof(WorkerArchitectureTests)}.{probe}: {ResolvesOnThePath}"], PathLookupsIn(Probes(probe)));
+        // And only by this rule: the process scan does not see it.
+        Assert.Empty(Violations(Probes(probe)));
+    }
+
+    [Fact]
+    public void The_path_scan_ignores_text_that_is_not_a_lookup()
+    {
+        Assert.Empty(PathLookupsIn(Probes(nameof(HoldsTextThatIsNotAPath), nameof(NamesPathWithoutReadingIt))));
     }
 
     /// <summary>
@@ -369,6 +454,34 @@ public sealed class WorkerArchitectureTests
         return [.. found];
     }
 
+    /// <summary>
+    /// Each <c>Owner: resolves a command on the PATH</c>: a call to <c>PathSearch.Find</c>, or the string
+    /// <c>PATH</c> loaded straight into <c>Environment.GetEnvironmentVariable</c>.
+    /// </summary>
+    private static List<string> PathLookupsIn(IEnumerable<MethodBase> methods)
+    {
+        var found = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var method in methods)
+        {
+            if (method.DeclaringType?.Assembly == Worker) continue;
+
+            var instructions = IlScan.Decode(method).ToList();
+            for (var i = 0; i < instructions.Count; i++)
+            {
+                var lookup = instructions[i].Method is { Name: nameof(Harness.Pty.PathSearch.Find) } target
+                        && target.DeclaringType == typeof(Harness.Pty.PathSearch)
+                    || (instructions[i].String == "PATH" && i + 1 < instructions.Count
+                        && instructions[i + 1].Method is { Name: nameof(Environment.GetEnvironmentVariable) } read
+                        && read.DeclaringType == typeof(Environment));
+
+                if (lookup) found.Add($"{IlScan.Owner(method)}: {ResolvesOnThePath}");
+            }
+        }
+
+        return [.. found];
+    }
+
     /// <summary>The primitives one instruction is.</summary>
     private static IEnumerable<string> Rules(IlScan.Instruction instruction)
     {
@@ -500,6 +613,12 @@ public sealed class WorkerArchitectureTests
     }
 
     private sealed class PlantedWorkerException : Exception;
+
+    private static string? PlantsAnAgentCliPathLookup() => Harness.Pty.PathSearch.Find("claude");
+
+    private static string? PlantsAHandRolledPathWalk() => Environment.GetEnvironmentVariable("PATH");
+
+    private static Dictionary<string, string> NamesPathWithoutReadingIt() => new() { ["PATH"] = "/usr/bin" };
 
     private static string[] HoldsTextThatIsNotAPath() =>
         ["/processes", "/proc-like", "see the process group in /proc, every 5 s", "prlimit is a command", "/sys/fs/cgroupish"];

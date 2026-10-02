@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 using Harness.Pty;
 
 namespace Harness.Host;
@@ -85,7 +86,14 @@ public sealed record AgentInstallation(
         "Where to go to install this Agent, from the preset's own `install` - or null when the "
         + "preset carries none, in which case the client renders the same sentence with no link "
         + "and NEVER a constructed one.")]
-    AgentInstall? Install);
+    AgentInstall? Install,
+
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [property: Description(
+        "In control only: each placeable worker's answer for this command - `worker`, `installed` and "
+        + "`at` - which is where `state` and `message` come from. Empty: no such worker has answered, "
+        + "so the command is not measured. Absent: this Host answered from its own PATH.")]
+    IReadOnlyList<InstallMeasurement>? MeasuredOn = null);
 
 /// <summary>
 /// Whether the CLI a preset names is on this machine at all.
@@ -131,7 +139,8 @@ public sealed class AgentInstallProbe
     /// <param name="window">How long an answer is reused; <see cref="DefaultWindow"/> when null.</param>
     public AgentInstallProbe(
         Func<DateTimeOffset>? now = null,
-        TimeSpan? window = null)
+        TimeSpan? window = null,
+        WorkerInstalls? workers = null)
     {
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _window = window ?? DefaultWindow;
@@ -200,6 +209,12 @@ public sealed class AgentInstallProbe
             MessageFor(command, resolved is not null),
             LinkableInstall(definition.Install));
     }
+
+    /// <summary>Whether the preset's CLI is installed where its runs go.</summary>
+    public bool Installed(AgentDefinition definition) => Probe(definition).State is null;
+
+    /// <summary>Whether the preset's CLI is installed where its runs go; null: not measured.</summary>
+    public bool? Measured(AgentDefinition definition) => Resolves(definition.Launch?.FileName);
 
     /// <summary>
     /// Every preset's answer, in catalog order, including the hidden ones.

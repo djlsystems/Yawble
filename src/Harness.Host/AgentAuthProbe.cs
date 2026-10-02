@@ -69,9 +69,13 @@ public sealed class AgentAuthProbe(
     WorkerAsks? asks = null,
     string? dataRoot = null,
     ILogger<AgentAuthProbe>? log = null,
-    TimeProvider? clock = null)
+    TimeProvider? clock = null,
+    AgentInstallProbe? installs = null,
+    WorkerInstalls? measured = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    private readonly AgentInstallProbe _installs = installs ?? new AgentInstallProbe();
+    private readonly WorkerInstalls? _measured = measured;
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(8);
     private readonly object _gate = new();
     private readonly Lazy<WorkerAsks> _asks = new(() => asks ?? WorkerAsks.InProcess(runAs));
