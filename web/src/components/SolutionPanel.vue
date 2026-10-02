@@ -39,6 +39,7 @@ import {
 import { missingLine } from '../lib/solutions';
 import {
   hasNewRun,
+  instructionFirstLine,
   memberStateLine,
   nextFireLine,
   parseCap,
@@ -47,6 +48,7 @@ import {
   runKeys,
   sizeWords,
   stateBadge,
+  triggerFacts,
   whenWords,
 } from '../lib/solutionPanel';
 import { cappedLine, spentTodayLine } from '../lib/triggers';
@@ -61,16 +63,21 @@ import SolutionWizard from './SolutionWizard.vue';
  * with the person's authority, and a site is deliberately sandboxed without it.
  *
  * Four sections:
- * - **Status**: each member's state and last run, when each schedule next fires, what the team is
+ * - **Status**: each member's state and last run, when each schedule next fires, the package's sites
+ *   with Open, what the team is
  *   blocked on with the fix inline (an upload box for a missing document, a picker for a missing
  *   connection), and today's MEASURED spend against each trigger's cap - runs that reported nothing
  *   are counted as such, never estimated.
- * - **Controls**: pause and resume, Run now per schedule, each trigger's on/off and daily cap, the
+ * - **Controls**: pause and resume, Run now per schedule, each trigger's on/off and daily cap - and
+ *   its whole instruction in Details - the
  *   settings the package lists first, "All settings" for the rest (person-only included), and the
  *   connection bindings.
  * - **Results**: the package's output folders, newest first, with downloads; recent runs and their output.
  * - **Maintenance**: version and source folder, Update from a folder (the wizard's update path),
  *   and Uninstall, which asks first.
+ *
+ * Members, triggers and sites are tiles in the shared grid (`os-tiles` / `os-tile`,
+ * css/tiles.scss), as Plugins and Agents lay theirs out; the forms stay forms.
  *
  * EVERY CONTROL IS AN EXISTING ROUTE (pause, triggers, plugin settings, documents upload, the wizard):
  * this screen adds none of its own but the uninstall. And every string from the package or its site
@@ -83,6 +90,9 @@ const props = defineProps<{ team: string }>();
 const emit = defineEmits<{ launcher: []; uninstalled: [team: string] }>();
 
 type Section = 'status' | 'controls' | 'results' | 'maintenance';
+
+/** The trigger whose Details are open, or null. */
+const detailsTrigger = ref<SolutionPanelTrigger | null>(null);
 const section = ref<Section>('status');
 
 const panel = ref<SolutionPanel | null>(null);
@@ -112,6 +122,7 @@ async function load() {
 
 function reset() {
   stopWatchingRun();
+  detailsTrigger.value = null;
   section.value = 'status';
   panel.value = null;
   problem.value = '';
@@ -561,39 +572,71 @@ function closeUninstall() {
           </div>
 
           <div class="solution-heading">Members</div>
-          <q-markup-table flat bordered dense separator="horizontal" class="q-mb-md" data-panel-members>
-            <thead>
-              <tr><th class="text-left">Member</th><th class="text-left">State</th><th class="text-left">Last run</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="member in panel.members" :key="member.member" :data-member="member.member">
-                <td>{{ member.packageName }}<span v-if="member.role === 'manager'" class="os-text-muted"> (Manager)</span></td>
-                <td data-member-state>{{ memberStateLine(member) }}</td>
-                <td>
-                  <template v-if="member.lastRun">{{ whenWords(member.lastRun.at) }} · {{ member.lastRun.outcome }}</template>
-                  <span v-else class="os-text-muted">No runs yet</span>
-                </td>
-              </tr>
-            </tbody>
-          </q-markup-table>
+          <div class="os-tiles solution-member-tiles q-mb-md" data-panel-members>
+            <div v-for="member in panel.members" :key="member.member" class="os-tile solution-panel-tile" :data-member="member.member">
+              <div class="os-tile-head">
+                <q-icon :name="member.kind === 'plugin' ? 'extension' : 'smart_toy'" size="18px" class="solution-panel-icon" aria-hidden="true" />
+                <span class="text-weight-medium solution-panel-tile-name">{{ member.packageName }}</span>
+                <q-badge v-if="member.role === 'manager'" outline color="grey-7" label="Manager" />
+              </div>
+              <div class="os-tile-line"><span class="os-text-muted">State </span><span data-member-state>{{ memberStateLine(member) }}</span></div>
+              <div class="os-tile-line">
+                <span class="os-text-muted">Last run </span>
+                <template v-if="member.lastRun">{{ whenWords(member.lastRun.at) }} · {{ member.lastRun.outcome }}</template>
+                <span v-else class="os-text-muted">No runs yet</span>
+              </div>
+            </div>
+          </div>
 
           <div class="solution-heading">Triggers today</div>
           <div v-if="panel.triggers.length === 0" class="os-body os-text-muted">No triggers.</div>
-          <q-markup-table v-else flat bordered dense separator="horizontal" data-panel-schedules>
-            <thead>
-              <tr><th class="text-left">Trigger</th><th class="text-left">Next</th><th class="text-left">Spent today (measured)</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="trigger in panel.triggers" :key="trigger.id" :data-trigger="trigger.id">
-                <td>{{ trigger.packageName }} <span class="os-text-muted">· {{ memberName(trigger.container) }}</span></td>
-                <td data-next-fire>{{ nextFireLine(trigger) }}</td>
-                <td data-spend :class="{ 'text-negative': trigger.capReachedToday }">
-                  {{ spentTodayLine(trigger) ?? 'spent today not known (no cap)' }}
-                  <div v-if="cappedLine(trigger)" class="text-caption" data-capped>{{ cappedLine(trigger) }}</div>
-                </td>
-              </tr>
-            </tbody>
-          </q-markup-table>
+          <!-- Name, member, next fire and spend only: the instruction and its Details are on the
+               Controls tile. -->
+          <div v-else class="os-tiles solution-trigger-tiles q-mb-md" data-panel-schedules>
+            <div v-for="trigger in panel.triggers" :key="trigger.id" class="os-tile solution-panel-tile" :data-trigger="trigger.id">
+              <div class="os-tile-head">
+                <q-icon name="bolt" size="18px" class="solution-panel-icon" aria-hidden="true" />
+                <span class="text-weight-medium solution-panel-tile-name">{{ trigger.packageName }}</span>
+                <span class="os-text-muted">· {{ memberName(trigger.container) }}</span>
+              </div>
+              <div class="os-tile-line" data-next-fire>{{ nextFireLine(trigger) }}</div>
+              <div class="os-tile-line" data-spend :class="{ 'text-negative': trigger.capReachedToday }">
+                {{ spentTodayLine(trigger) ?? 'spent today not known (no cap)' }}
+                <div v-if="cappedLine(trigger)" class="text-caption" data-capped>{{ cappedLine(trigger) }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- THE PACKAGE'S SITES: Open is a real link in a new tab, disabled while a site is
+               unpublished, where it would 404. -->
+          <template v-if="panel.sites?.length">
+            <div class="solution-heading">Sites</div>
+            <div class="os-tiles solution-site-tiles">
+              <div v-for="site in panel.sites" :key="site.name" class="os-tile solution-panel-tile" :data-panel-site="site.name">
+                <div class="os-tile-head">
+                  <q-icon name="public" size="18px" class="solution-panel-icon" aria-hidden="true" />
+                  <span class="text-weight-medium solution-panel-tile-name">{{ site.name }}</span>
+                </div>
+                <div class="os-tile-line os-text-muted" data-site-published>{{ site.published ? 'Published' : 'Not published' }}</div>
+                <div class="solution-panel-tile-actions">
+                  <q-btn
+                    flat
+                    dense
+                    no-caps
+                    icon="open_in_new"
+                    label="Open"
+                    :href="site.published ? site.url : undefined"
+                    target="_blank"
+                    rel="noopener"
+                    :disable="!site.published"
+                    data-site-open
+                  >
+                    <q-tooltip v-if="!site.published">The site {{ site.name }} is not published.</q-tooltip>
+                  </q-btn>
+                </div>
+              </div>
+            </div>
+          </template>
         </q-card-section>
 
         <!-- CONTROLS -->
@@ -616,66 +659,76 @@ function closeUninstall() {
 
           <div class="solution-heading">Triggers</div>
           <div v-if="panel.triggers.length === 0" class="os-body os-text-muted q-mb-md">No triggers.</div>
-          <q-markup-table v-else flat bordered dense separator="horizontal" class="q-mb-md" data-control-triggers>
-            <thead>
-              <tr><th class="text-left">Trigger</th><th class="text-left">On</th><th class="text-left">Daily cap (tokens)</th><th /></tr>
-            </thead>
-            <tbody>
-              <tr v-for="trigger in panel.triggers" :key="trigger.id" :data-control-trigger="trigger.id">
-                <td>{{ trigger.packageName }}<div class="text-caption os-text-muted">{{ nextFireLine(trigger) }}</div></td>
-                <td>
-                  <q-toggle
-                    :model-value="trigger.enabled"
-                    dense
-                    :disable="busy !== ''"
-                    :aria-label="`${trigger.packageName} on`"
-                    data-trigger-enabled
-                    @update:model-value="(value: boolean) => setEnabled(trigger, value)"
-                  />
-                </td>
-                <td>
-                  <div class="row items-center no-wrap q-gutter-x-xs">
-                    <q-input
-                      :model-value="capText(trigger)"
-                      dense
-                      outlined
-                      placeholder="no cap"
-                      class="cap-input"
-                      :error="capProblem(trigger) !== '' ? true : undefined"
-                      :error-message="capProblem(trigger)"
-                      :aria-label="`${trigger.packageName} daily cap`"
-                      data-trigger-cap
-                      @update:model-value="(value) => (caps = { ...caps, [trigger.id]: value === null ? '' : String(value) })"
-                    />
-                    <q-btn
-                      flat
-                      dense
-                      no-caps
-                      label="Save"
-                      :disable="!capChanged(trigger)"
-                      :loading="busy === `cap:${trigger.id}`"
-                      data-trigger-cap-save
-                      @click="saveCap(trigger)"
-                    />
-                  </div>
-                </td>
-                <td class="text-right">
-                  <q-btn
-                    v-if="trigger.runNow"
-                    outline
-                    dense
-                    no-caps
-                    icon="play_arrow"
-                    label="Run now"
-                    :loading="busy === `run:${trigger.id}`"
-                    :disable="busy !== '' && busy !== `run:${trigger.id}`"
-                    data-run-now
-                    @click="runNow(trigger)"
-                  />
-                </td>
-              </tr>
-            </tbody>
-          </q-markup-table>
+          <div v-else class="os-tiles solution-trigger-tiles q-mb-md" data-control-triggers>
+            <div v-for="trigger in panel.triggers" :key="trigger.id" class="os-tile solution-panel-tile" :data-control-trigger="trigger.id">
+              <div class="os-tile-head">
+                <q-icon name="bolt" size="18px" class="solution-panel-icon" aria-hidden="true" />
+                <span class="text-weight-medium solution-panel-tile-name">{{ trigger.packageName }}</span>
+                <q-space />
+                <q-toggle
+                  :model-value="trigger.enabled"
+                  dense
+                  :disable="busy !== ''"
+                  :aria-label="`${trigger.packageName} on`"
+                  data-trigger-enabled
+                  @update:model-value="(value: boolean) => setEnabled(trigger, value)"
+                />
+              </div>
+              <div class="os-tile-line os-text-muted">{{ nextFireLine(trigger) }}</div>
+              <!-- The instruction's first line, clipped to two lines; the whole of it is in Details. -->
+              <div v-if="trigger.instruction" class="os-tile-line solution-trigger-instruction" data-trigger-instruction>{{ instructionFirstLine(trigger.instruction) }}</div>
+              <div class="row items-center no-wrap q-gutter-x-xs q-mt-xs">
+                <q-input
+                  :model-value="capText(trigger)"
+                  dense
+                  outlined
+                  placeholder="no cap"
+                  label="Daily cap (tokens)"
+                  class="cap-input"
+                  :error="capProblem(trigger) !== '' ? true : undefined"
+                  :error-message="capProblem(trigger)"
+                  :aria-label="`${trigger.packageName} daily cap`"
+                  data-trigger-cap
+                  @update:model-value="(value) => (caps = { ...caps, [trigger.id]: value === null ? '' : String(value) })"
+                />
+                <q-btn
+                  flat
+                  dense
+                  no-caps
+                  label="Save"
+                  :disable="!capChanged(trigger)"
+                  :loading="busy === `cap:${trigger.id}`"
+                  data-trigger-cap-save
+                  @click="saveCap(trigger)"
+                />
+              </div>
+              <div class="solution-panel-tile-actions">
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="visibility"
+                  :aria-label="`Details ${trigger.packageName}`"
+                  data-trigger-details
+                  @click="detailsTrigger = trigger"
+                >
+                  <q-tooltip>Details: its whole instruction, what fires it, its cap and its last fire</q-tooltip>
+                </q-btn>
+                <q-btn
+                  v-if="trigger.runNow"
+                  outline
+                  dense
+                  no-caps
+                  icon="play_arrow"
+                  label="Run now"
+                  :loading="busy === `run:${trigger.id}`"
+                  :disable="busy !== '' && busy !== `run:${trigger.id}`"
+                  data-run-now
+                  @click="runNow(trigger)"
+                />
+              </div>
+            </div>
+          </div>
 
           <div class="solution-heading">Settings</div>
           <div v-if="listed.length === 0" class="os-body os-text-muted q-mb-sm">This package lists no settings of its own; see All settings.</div>
@@ -915,6 +968,30 @@ function closeUninstall() {
   <HostPathPicker v-model="pickerOpen" instance-only title="Choose the folder of the newer version" @chose="(folder: string) => (wizard = { open: true, folder })" />
 
   <SolutionWizard v-model="wizard.open" :folder="wizard.folder" />
+
+  <!-- A TRIGGER'S DETAILS: its whole instruction, newlines kept, and what fires it - all text. -->
+  <q-dialog :model-value="detailsTrigger !== null" @update:model-value="(showing: boolean) => { if (!showing) detailsTrigger = null; }">
+    <q-card v-if="detailsTrigger" class="os-dialog-md" data-trigger-details-dialog>
+      <q-card-section class="row items-center no-wrap q-pb-none">
+        <div class="solution-details-title">
+          <div class="os-dialog-title">{{ detailsTrigger.packageName }}</div>
+          <div class="text-caption os-text-muted">{{ memberName(detailsTrigger.container) }}</div>
+        </div>
+        <q-space />
+        <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
+      </q-card-section>
+      <q-card-section class="solution-details-body">
+        <div class="solution-heading">Instruction</div>
+        <div class="os-body solution-trigger-instruction-whole q-mb-md" data-trigger-details-instruction>{{ detailsTrigger.instruction }}</div>
+        <dl class="solution-facts">
+          <template v-for="fact in triggerFacts(detailsTrigger)" :key="fact.label">
+            <dt>{{ fact.label }}</dt>
+            <dd :data-trigger-fact="fact.label">{{ fact.value }}</dd>
+          </template>
+        </dl>
+      </q-card-section>
+    </q-card>
+  </q-dialog>
 </template>
 
 <style scoped>
@@ -939,6 +1016,85 @@ function closeUninstall() {
 
 .cap-input {
   width: 9rem;
+}
+
+/* The grids themselves are `os-tiles` (css/tiles.scss); these only say how narrow a column may
+   get. min(): a phone narrower than one column still gets a tile that fits it. */
+.solution-member-tiles,
+.solution-site-tiles {
+  --os-tile-min: min(15rem, 100%);
+}
+
+.solution-trigger-tiles {
+  --os-tile-min: min(19rem, 100%);
+}
+
+.solution-panel-tile {
+  min-width: 0;
+}
+
+.solution-panel-icon {
+  color: var(--os-ink-muted);
+}
+
+.solution-panel-tile-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.solution-panel-tile-actions {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+/* The first line of a trigger's instruction, at most two lines on the tile; Details has it whole. */
+.solution-trigger-instruction {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The whole instruction in Details: its own newlines kept, long words wrapped, never interpreted. */
+.solution-trigger-instruction-whole {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.solution-details-title {
+  min-width: 0;
+}
+
+.solution-details-body {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.solution-facts {
+  font-size: 12px;
+  line-height: 1.45;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 16px;
+  row-gap: 4px;
+  margin: 0;
+}
+
+.solution-facts dt {
+  color: var(--os-ink-muted);
+  font-weight: 500;
+}
+
+.solution-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Run output is plain text from the plugin: kept as written, wrapped, never interpreted. */

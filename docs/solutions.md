@@ -371,19 +371,30 @@ solution, with its name, version and team, its status line, a state badge, **Ope
 site, when it has one) and **Manage** (the panel). The badge is the first of: **paused** (the team
 is paused); **blocked**, naming what the team waits for ("Upload a file to Resume/"); **running**
 (a member is running now); **capped** (a trigger's measured spend today reached its daily cap);
-**idle**. The launcher reads `GET /api/solutions/installed`.
+**idle**. The launcher reads `GET /api/solutions/installed`. A filter above the tiles narrows them
+by words of the name, team or status line, by team and by state - what is shown only. **Details**
+on a tile lists the package, version, team, folder, who installed it, its plugins, site and status.
+With nothing installed it says where a solution comes from: a package a team built, whose
+**Review and install** link appears in that team's Activity feed and on its backlog item - or
+**Install from a folder**.
 
 **The control panel** (`GET /api/teams/{team}/solution/panel`) is the platform's own screen, not a
 site: its controls act with the person's authority, which a site is deliberately without. The
 read also answers `sites`: each site the package publishes, in the package's order, with its
 address and whether it is published now - a read, with no control of its own. Its sections:
 
-- **Status**: each member's state and last run; each trigger with its next fire; anything blocked,
+- **Status**: each member's state and last run; each trigger with its next fire; each of the
+  package's sites with **Open** (disabled while unpublished); anything blocked,
   with the fix inline (an upload box for a missing document, a picker for a missing connection);
   today's spend against each trigger's daily cap - **measured only**: the Triggers dialog's own
   `spentToday`, with runs that reported no usage counted as unmeasured, never estimated.
 - **Controls**: pause and resume the team, **Run now** for each schedule, each trigger's on/off and
   daily cap, the `panel.settings` first with "All settings" for the rest, and connection bindings.
+  A trigger's tile shows the first line of its instruction; its **Details** shows the whole
+  instruction and what fires it.
+
+Members, triggers and sites are tiles, laid out as the Plugins and Agents tiles are; the settings,
+connections and maintenance stay forms.
 - **Results**: each `panel.outputs` folder newest first with download links, and recent runs with
   their output.
 - **Maintenance**: the version and the folder it was installed from, **Update from a folder** (the
