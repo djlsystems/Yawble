@@ -331,6 +331,22 @@ public interface IRunWorker
     Task Closed { get; }
 }
 
+/// <summary>
+/// A worker reached over a connection that can drop and come back. While <see cref="Dropped"/>, its
+/// runs are neither lost nor placeable: the connection's grace decides. When the worker does not come
+/// back, <see cref="IRunWorker.Closed"/> completes with <see cref="Lost"/> saying why, and every run
+/// still open on it fails <c>worker-lost</c>. A worker in the Host's own process is not one of these:
+/// its connection only closes with the Host.
+/// </summary>
+public interface IRunWorkerConnection
+{
+    /// <summary>The connection is down and may still come back within its grace.</summary>
+    bool Dropped { get; }
+
+    /// <summary>Once <see cref="IRunWorker.Closed"/> has completed: why the worker is lost, as a sentence; null when it was not.</summary>
+    string? Lost { get; }
+}
+
 /// <summary>A worker's handle on control: where its events go, in <see cref="WorkerEnvelope.Seq"/> order.</summary>
 public interface IRunEvents
 {

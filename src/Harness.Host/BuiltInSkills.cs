@@ -217,6 +217,14 @@ public static class BuiltInSkills
             the same `card`; nobody has anything to repair. Only when the same member's launch has
             already failed this way twice in this workflow, report it to the person and stop.
 
+            ## A run lost with its worker is re-sent, not escalated
+
+            A run that failed with `[worker-lost]` was cut off because the worker running it
+            stopped; nothing is wrong with the member or the instruction. Re-send the same
+            instruction to the same member, with the same `card`; it runs on a worker that is there.
+            Only when the same member's run has already been lost this way twice in this workflow,
+            report it to the person and stop.
+
             If the team stopped part-way - a failed run, a spend limit, a restart - load the
             `recovery` skill before dispatching anything. If you are asked to finalise, finish, wrap
             up or clean up a round, load the `wrap-up` skill first. Before you sign in to anything,
@@ -1365,6 +1373,7 @@ public static class BuiltInSkills
             - A dispatch workflow that is blocked on a person is raised to the person at once, with
               the team's question in its own words.
             - A launch-missing failure is re-sent once, then raised to the person.
+            - A worker-lost failure is re-sent once, then raised to the person.
 
             ## Assess, when a team's dispatch workflow completes
 

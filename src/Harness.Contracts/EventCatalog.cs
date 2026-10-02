@@ -200,7 +200,7 @@ public static class EventCatalog
                 new(PayloadFields.DeferredFromRun, EventFieldKind.Integer, "Set when this run was a deferred item delivered again: the `started` seq of the run it was deferred from."),
                 new(PayloadFields.FailureClass, EventFieldKind.String,
                     "What KIND of failure this was - quota, rate, transport, agent-fault, launch-missing, "
-                    + "out-of-memory, crashed, timeout, interrupted, or unknown. Absent on every row written before classes existed; "
+                    + "out-of-memory, crashed, timeout, interrupted, worker-lost, or unknown. Absent on every row written before classes existed; "
                     + "`unknown` is the default and is treated exactly as agent-fault."),
                 new(PayloadFields.RetryAfter, EventFieldKind.String,
                     "When the provider said to come back, as an ISO-8601 instant. Absent, not "
