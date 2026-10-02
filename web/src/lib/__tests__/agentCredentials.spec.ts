@@ -28,14 +28,17 @@ const entry = (agent: string, command: string, sharedWith: string[]): AgentCrede
   setAt: null,
 })
 
-const list = [entry('claude', 'claude', ['claude-headless']), entry('claude-headless', 'claude', ['claude']), entry('grok', 'grok', [])]
+const claude = entry('claude', 'claude', ['claude-headless'])
+const claudeHeadless = entry('claude-headless', 'claude', ['claude'])
+const grok = entry('grok', 'grok', [])
+const list = [claude, claudeHeadless, grok]
 
 describe('agent credentials', () => {
   it('lays a command\'s state over every preset that runs it, and no other', () => {
     const next = withCredentialStatus(list, { command: 'Claude', set: true, setBy: 'p@example.com', setAt: '2026-10-02T10:00:00Z' })
     expect(next.map((e) => e.set)).toEqual([true, true, false])
-    expect(next[1].setBy).toBe('p@example.com')
-    expect(list[0].set).toBe(false)
+    expect(next[1]?.setBy).toBe('p@example.com')
+    expect(claude.set).toBe(false)
   })
 
   it('moves only the one preset\'s source', () => {
@@ -44,14 +47,14 @@ describe('agent credentials', () => {
   })
 
   it('says who set it and when, or not set', () => {
-    const set = { ...list[0], set: true, setBy: 'p@example.com', setAt: '2026-10-02T10:00:00Z' }
+    const set = { ...claude, set: true, setBy: 'p@example.com', setAt: '2026-10-02T10:00:00Z' }
     expect(credentialState(set, (iso) => `<${iso}>`)).toBe('set by p@example.com at <2026-10-02T10:00:00Z>')
-    expect(credentialState(list[0])).toBe('not set')
+    expect(credentialState(claude)).toBe('not set')
   })
 
   it('names the other presets that share it', () => {
-    expect(sharedLine(list[0])).toBe('Shared by every preset that runs claude: also claude-headless.')
-    expect(sharedLine(list[2])).toBe('Shared by every preset that runs grok: also no other preset.')
+    expect(sharedLine(claude)).toBe('Shared by every preset that runs claude: also claude-headless.')
+    expect(sharedLine(grok)).toBe('Shared by every preset that runs grok: also no other preset.')
     expect(credentialFor(list, 'Claude-Headless')?.agent).toBe('claude-headless')
   })
 
