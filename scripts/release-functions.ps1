@@ -1,5 +1,5 @@
-# Shared by release.ps1 and update.ps1. Dot-source it. The first three functions touch nothing
-# outside their arguments, so scripts/tests/release-functions.tests.ps1 checks them offline.
+# Shared by release.ps1 and update.ps1. Dot-source it. Get-NextReleaseVersion, Get-GitHubRepository,
+# Get-ImageBuilds and ConvertTo-ShArgument touch nothing outside their arguments, so scripts/tests/release-functions.tests.ps1 checks them offline.
 # Written for Windows PowerShell 5.1 as well as PowerShell 7.
 
 # The next release version for a date, given the tags already on origin. A release tag is
@@ -19,6 +19,18 @@ function Get-NextReleaseVersion {
         }
     }
     return "$day.$($highest + 1)"
+}
+
+# The two images one release builds from one Containerfile: control (--target control) as
+# <image>:<version> and the worker (--target worker) as <image>:<version>-worker, in the same
+# package, with `latest` and `latest-worker` beside them. The operator CLI derives the worker's
+# reference from control's the same way (append -worker to the tag), so the pair must not drift.
+function Get-ImageBuilds {
+    param([string]$Image, [string]$Version)
+    return @(
+        [pscustomobject]@{ Target = 'control'; Ref = "${Image}:$Version"; Latest = "${Image}:latest" }
+        [pscustomobject]@{ Target = 'worker'; Ref = "${Image}:$Version-worker"; Latest = "${Image}:latest-worker" }
+    )
 }
 
 # Owner and repository of a GitHub remote URL, lowercased as ghcr.io requires. $null when the

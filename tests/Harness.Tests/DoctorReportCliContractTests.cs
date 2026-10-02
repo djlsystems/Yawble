@@ -9,7 +9,7 @@ namespace Harness.Tests;
 /// THE --doctor REPORT IS THE OPERATOR CLI'S CONTRACT, ON BOTH SIDES. The report here is the Host's
 /// own: a real launch check of a fake CLI that aborts under the run memory limit through the member
 /// launch path, leaking a credential on stderr, and the wip figures recorded from the Host's own
-/// decision under cgroup, rlimit and not enforced. Its shape must equal the fixtures under
+/// decision under cgroup, rlimit and not enforced, and control's record of its workers. Its shape must equal the fixtures under
 /// <c>cli/internal/doctor/testdata</c>, which the Go side decodes (<c>TestTheHostsOwnDoctorReportDecodes</c>),
 /// so a field renamed on either side fails a test. Set <c>HARNESS_WRITE_CLI_FIXTURES=1</c> to rewrite them.
 /// </summary>
@@ -75,6 +75,14 @@ public sealed class DoctorReportCliContractTests : IDisposable
         new AgentAuthRecord(probedAt, "w1", [.. AgentAuthProbe.LoadSpecs().Keys.Select(c => new CommandSignIn(c, true, true, signedIn))])
             .Write(_root);
 
+        // Control's record of its workers: one connected with a run, as the operator CLI shows per worker.
+        new WorkersRecord(probedAt,
+        [
+            new WorkerRecordItem("worker-1", "2026.10.02.1+abc", WorkersView.Connected, false, probedAt, null,
+                [new WorkerRecordRun("n1", "alpha", "Dev")],
+                new WorkerRecordCapacity(4, 8L * 1024 * 1024 * 1024, 123L * 1024 * 1024, 3, false)),
+        ]).Write(_root);
+
         var fixtures = Path.Combine(FindRepoRoot(), "cli", "internal", "doctor", "testdata");
         foreach (var (name, memory) in mechanisms)
         {
@@ -91,6 +99,12 @@ public sealed class DoctorReportCliContractTests : IDisposable
                 Assert.True(agent["authenticated"]!.GetValue<bool>());
                 Assert.Equal(signedIn, agent["detail"]!.GetValue<string>());
             }
+
+            var worker = JsonNode.Parse(json)!["workers"]!["items"]!.AsArray().Single()!;
+            Assert.Equal("worker-1", worker["id"]!.GetValue<string>());
+            Assert.Equal("connected", worker["state"]!.GetValue<string>());
+            Assert.Equal("Dev", worker["runs"]![0]!["member"]!.GetValue<string>());
+            Assert.Equal(3, worker["capacity"]!["bound"]!.GetValue<int>());
 
             var path = Path.Combine(fixtures, $"host-doctor-{name}.json");
             if (Environment.GetEnvironmentVariable("HARNESS_WRITE_CLI_FIXTURES") == "1")

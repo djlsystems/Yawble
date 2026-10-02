@@ -21,7 +21,7 @@ import (
 // settingsFiles are the files yawble writes into its config directory: preferences, the secrets
 // `secret set` stores, remote access, and the note of the newest backup. Uninstall removes these
 // and nothing else it cannot vouch for.
-var settingsFiles = []string{config.FileName, "env", remote.FileName, remote.EnvFileName, backup.RecordName}
+var settingsFiles = []string{config.FileName, "env", config.WorkerKeyFileName, remote.FileName, remote.EnvFileName, backup.RecordName}
 
 func newUninstallCommand(deps Deps) *cobra.Command {
 	var data, yes, keepSettings bool
@@ -29,9 +29,9 @@ func newUninstallCommand(deps Deps) *cobra.Command {
 		Use:   "uninstall",
 		Short: "Remove the instance and yawble's settings; the data volume only with --data",
 		Long: "uninstall removes what yawble set up, from every engine installed (Podman and Docker), " +
-			"naming the engine on each line: the tunnel sidecar, the container, the pod (or " +
-			"network), the image, and yawble's settings - the engine and port choices, the API keys and " +
-			"tokens saved with `secret set`, and remote-access credentials. It asks first; --yes answers " +
+			"naming the engine on each line: the tunnel sidecar, every worker container, control, the pod (or " +
+			"network), both images, and yawble's settings - the engine and port choices, the API keys and " +
+			"tokens saved with `secret set`, the worker key, and remote-access credentials. It asks first; --yes answers " +
 			"for you. --keep-settings keeps the settings, for a reinstall or a switch of engine.\n\n" +
 			"The data volume, which holds every team, account, document and saved agent login, is " +
 			"removed only with --data, and only after you type the word delete at a terminal (or pass " +
@@ -46,7 +46,7 @@ func newUninstallCommand(deps Deps) *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 
-			what := "the Yawble container, pod and image from every installed engine"
+			what := "the Yawble containers (control and every worker), pod and images from every installed engine"
 			if !keepSettings {
 				what += fmt.Sprintf(", and yawble's settings in %s (engine and port, saved API keys and tokens, remote access)", deps.ConfigDir)
 			}
@@ -83,6 +83,12 @@ func newUninstallCommand(deps Deps) *cobra.Command {
 			// Every installed engine is asked: the engine saved in the settings, or the one picked
 			// when none is, need not be the one holding the instance, and once the settings are
 			// gone nothing says which that was.
+			// Both images: control's and the workers'. A worker image that cannot be derived (a
+			// digest with no workerImage) was never pulled by this yawble.
+			images := []string{s.Image}
+			if ref, err := s.WorkerRef(); err == nil && s.Image != "" {
+				images = append(images, ref)
+			}
 			engines := installedEngines(deps)
 			if len(engines) == 0 {
 				fmt.Fprintln(out, "no container engine is installed, so there is no container, image or volume to remove")
@@ -98,7 +104,7 @@ func newUninstallCommand(deps Deps) *cobra.Command {
 						continue
 					}
 				}
-				r, err := instance.Uninstall(cmd.Context(), engine.NewFor(name, runnerOf(deps), goosOf(deps)), s.Image, removeData, out)
+				r, err := instance.Uninstall(cmd.Context(), engine.NewFor(name, runnerOf(deps), goosOf(deps)), images, removeData, out)
 				volumeFound = volumeFound || r.Volume
 				if err != nil {
 					failures = append(failures, err.Error())

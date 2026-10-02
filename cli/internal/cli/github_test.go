@@ -147,7 +147,7 @@ func driftedRunningInstance(listing string) *engine.Scripted {
 	// An image other than the one these tests pin (testImage), so the settings have changed.
 	old := "ghcr.io/djlsystems/yawble:2026.09.20.1"
 	s.On("podman container inspect", engine.Result{Stdout: "running|" + old + "|" + labelFor(old) + "\n"})
-	s.On("podman exec yawble runuser -u agent", engine.Result{Stdout: listing})
+	s.On("podman exec -e HARNESS_WORKER_KEY= yawble runuser -u agent", engine.Result{Stdout: listing})
 	return s
 }
 

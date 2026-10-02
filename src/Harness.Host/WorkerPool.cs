@@ -20,7 +20,8 @@ namespace Harness.Host;
 /// <see cref="Workers"/> lists the workers a run may be placed on now, in the order they are tried:
 /// most measured memory headroom first; then workers with no headroom figure (no sample yet, or no
 /// memory limit), which hold nothing back and are never taken for 0 or unlimited; ties to the worker
-/// with fewer runs placed, then to the one that connected first. A dropped worker is never listed.
+/// with fewer runs placed, then to the one that connected first. A dropped worker is never listed, nor
+/// one that is draining (its operator is about to stop it): its runs go on, and nothing new goes to it.
 /// </para>
 /// </remarks>
 public sealed class WorkerPool : IRunPlacement
@@ -65,7 +66,7 @@ public sealed class WorkerPool : IRunPlacement
             lock (_gate)
             {
                 if (_fixed) return [.. _entries.Select(e => e.Id)];
-                placeable = [.. _entries.Where(e => e.Worker is not null && e.DroppedAt is null)];
+                placeable = [.. _entries.Where(e => e.Worker is not null && e.DroppedAt is null && !e.Draining)];
             }
 
             // Outside the pool's lock: the ledger asks this under its own, and the count is the ledger's.
@@ -124,6 +125,21 @@ public sealed class WorkerPool : IRunPlacement
     }
 
     /// <summary>The worker's connection is back.</summary>
+    /// <summary>Takes a worker out of placement while it drains, or back in after.</summary>
+    public void Drain(WorkerId worker, bool draining)
+    {
+        lock (_gate)
+        {
+            if (_entries.FirstOrDefault(e => e.Id == worker) is { } entry) entry.Draining = draining;
+        }
+    }
+
+    /// <summary>Whether a worker is draining.</summary>
+    public bool IsDraining(WorkerId worker)
+    {
+        lock (_gate) return _entries.FirstOrDefault(e => e.Id == worker)?.Draining ?? false;
+    }
+
     public void Back(WorkerId worker)
     {
         lock (_gate)
@@ -217,6 +233,8 @@ public sealed class WorkerPool : IRunPlacement
         public IRunWorker? Worker { get; set; }
 
         public DateTimeOffset? DroppedAt { get; set; }
+
+        public bool Draining { get; set; }
     }
 }
 

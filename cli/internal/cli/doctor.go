@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +29,9 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 		Long: "Every check is ok, warn, FAIL or skip. skip means it could not be measured (a stopped " +
 			"instance has no health to check), and skip is not failure. Exit 1 when anything FAILs.\n" +
 			"--fix repairs only what is safe and idempotent: it creates a missing data volume and starts " +
-			"a stopped container, then waits for it to answer. It never removes anything.",
+			"a stopped container, then waits for it to answer, then starts stopped workers. It never removes anything.\n" +
+			"Each worker has a row: control's record of it (connected, version, runs) and the Host's " +
+			"measured figures beside the engine's own stats.",
 		Example: "  yawble doctor\n  yawble doctor --fix\n  yawble doctor --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -70,6 +73,9 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 			}
 			checks = append(checks, doctor.InstanceChecks(report, reportErr, deps.Now())...)
 			checks = append(checks, doctor.CapacityCheck(capacity, s, report))
+			if observed.EngineErr == nil && observed.ContainerKnown {
+				checks = append(checks, workerChecks(cmd.Context(), e, s, report)...)
+			}
 			checks = append(checks, doctor.AgentToolsCheck(report, reportErr))
 			checks = append(checks, doctor.BackupCheck(deps.ConfigDir, deps.Now()))
 			if other := otherEngine(deps, e.Name()); other != nil {
@@ -139,5 +145,44 @@ func repair(cmd *cobra.Command, e engine.Engine, s instance.Settings, o doctor.O
 			return fixed, err
 		}
 	}
+	// Workers after control, which they connect to. Only a stopped one is started: one that is
+	// missing or differs is `up`'s to make.
+	if o.ContainerKnown && o.Container != engine.StateAbsent {
+		workers, err := instance.Workers(cmd.Context(), e, s)
+		if err != nil {
+			return fixed, err
+		}
+		var stopped []string
+		for _, w := range workers {
+			if w.Container == engine.StateStopped {
+				stopped = append(stopped, w.Name)
+			}
+		}
+		if len(stopped) > 0 {
+			if err := instance.StartWorkers(cmd.Context(), e, stopped, progress); err != nil {
+				return fixed, err
+			}
+			for _, name := range stopped {
+				say("started " + name)
+			}
+		}
+	}
 	return fixed, nil
+}
+
+// workerChecks observes each worker container, with the engine's stats of a running one, and
+// judges them against control's record.
+func workerChecks(ctx context.Context, e engine.Engine, s instance.Settings, report *doctor.HostReport) []doctor.Check {
+	workers, err := instance.Workers(ctx, e, s)
+	if err != nil {
+		return []doctor.Check{{Name: "workers", Verdict: doctor.Skip, Detail: "not measured: " + err.Error()}}
+	}
+	observed := make([]doctor.WorkerObserved, 0, len(workers))
+	for _, w := range workers {
+		o := doctor.WorkerObserved{WorkerStatus: w}
+		o.Stats, o.StatsErr = containerStats(ctx, e, w.Name, w.Container)
+		observed = append(observed, o)
+	}
+	ref, _ := s.WorkerRef()
+	return doctor.WorkerChecks(observed, report, s.Workers, ref)
 }

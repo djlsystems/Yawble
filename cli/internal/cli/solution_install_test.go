@@ -64,7 +64,7 @@ func installScript(t *testing.T, program string, reports ...engine.Result) *engi
 	if len(reports) == 0 {
 		reports = []engine.Result{{}}
 	}
-	s.OnSequence(program+" exec yawble sh -c "+cli.SolutionReportScript+" sh /data/plugins", reports...)
+	s.OnSequence(program+" exec -e HARNESS_WORKER_KEY= yawble sh -c "+cli.SolutionReportScript+" sh /data/plugins", reports...)
 	return s
 }
 
@@ -89,7 +89,7 @@ type sentRequest struct {
 // requests are the .solution requests written, in order, parsed back from the script's argument.
 func requests(t *testing.T, s *engine.Scripted, program string) []sentRequest {
 	t.Helper()
-	prefix := program + " exec yawble sh -c " + cli.SolutionRequestScript + " sh /data/plugins "
+	prefix := program + " exec -e HARNESS_WORKER_KEY= yawble sh -c " + cli.SolutionRequestScript + " sh /data/plugins "
 	var got []sentRequest
 	for _, c := range s.Calls {
 		if rest, ok := strings.CutPrefix(c, prefix); ok {
@@ -149,7 +149,7 @@ func TestSolutionInstallOfANewTeamAsksEveryQuestionStagesInstallsAndCleansUp(t *
 				t.Fatalf("exit %d: %s %s\n%s", code, out, errOut, strings.Join(s.Calls, "\n"))
 			}
 
-			exec := program + " exec yawble "
+			exec := program + " exec -e HARNESS_WORKER_KEY= yawble "
 			inOrder(t, s,
 				exec+"sh -c "+cli.SolutionInstallStageScript+" sh /data/plugins n1",
 				program+" cp "+folder+" yawble:"+installInside,
@@ -440,7 +440,7 @@ func TestSolutionInstallOnAnImageThatNeverAnswersWithdrawsAndSaysToUpdate(t *tes
 			if code != 1 || !strings.Contains(errOut, "too old") || !strings.Contains(errOut, "yawble update") || !strings.Contains(errOut, "withdrawn") {
 				t.Errorf("exit %d stderr %q", code, errOut)
 			}
-			if len(callsContaining(s, program+" exec yawble sh -c "+cli.SolutionWithdrawScript+" sh /data/plugins n2")) != 1 {
+			if len(callsContaining(s, program+" exec -e HARNESS_WORKER_KEY= yawble sh -c "+cli.SolutionWithdrawScript+" sh /data/plugins n2")) != 1 {
 				t.Errorf("the request was not withdrawn:\n%s", strings.Join(s.Calls, "\n"))
 			}
 			if len(callsContaining(s, "rm -rf "+installStage)) != 1 {

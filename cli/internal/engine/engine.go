@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,11 +30,20 @@ type RunSpec struct {
 	Volumes          []string
 	Env              map[string]string
 	Labels           map[string]string
-	EnvFile          string
-	Memory           string
-	CPUs             int
-	HostPort         int
-	ContainerPort    int
+	// EnvFiles are handed to the engine in order, each as its own --env-file: never as -e, so a
+	// value in one (a provider key, the worker key) is not on the command line.
+	EnvFiles      []string
+	Memory        string
+	CPUs          int
+	HostPort      int
+	ContainerPort int
+	// CapDrop and CapAdd are the container's capabilities, one flag each, drops first. Empty is
+	// the engine's default set.
+	CapDrop, CapAdd []string
+	// Network, on Docker, replaces the pod's network: "container:<name>" joins that container's
+	// network namespace, so 127.0.0.1 is shared with it, and nothing is published. Podman's pod
+	// already shares one namespace, so Podman ignores it.
+	Network string
 	// Command is passed after the image, each element its own argument: what a sidecar's
 	// entrypoint is told to do. Empty for the Host image, whose entrypoint needs nothing.
 	Command []string
@@ -46,6 +56,22 @@ type ContainerInfo struct {
 	Image string
 	Label string
 }
+
+// KeyVariable is the worker key's variable. Every exec into an instance container sets it empty:
+// an exec starts from the container's configured environment, the env file included, and a
+// shell run that way must never hold the key.
+const KeyVariable = "HARNESS_WORKER_KEY"
+
+// Health is a container's health as the engine judges it from the image's HEALTHCHECK:
+// healthy, unhealthy, starting, or none for an image without one.
+type Health string
+
+const (
+	HealthHealthy   Health = "healthy"
+	HealthUnhealthy Health = "unhealthy"
+	HealthStarting  Health = "starting"
+	HealthNone      Health = "none"
+)
 
 // SettingsLabel is the label key under which `up` records the settings a container was made
 // with, so a later `up` can tell whether they changed by asking the engine, not a file.
@@ -76,6 +102,14 @@ type Engine interface {
 	// A container that is not running is Stats.NotRunning, not an error.
 	Stats(ctx context.Context, name string) (Stats, error)
 	Remove(ctx context.Context, name string) error
+	// List names every container, running or not, that matches one engine filter:
+	// "label=<key>=<value>" or "name=<pattern>". None is an empty list, not an error.
+	List(ctx context.Context, filter string) ([]string, error)
+	// Health is the engine's verdict from the image's HEALTHCHECK. A container with none, or a
+	// missing container, is HealthNone: never read as healthy.
+	Health(ctx context.Context, name string) (Health, error)
+	// StopWithin stops a container, giving its process grace seconds before it is killed.
+	StopWithin(ctx context.Context, name string, grace int) error
 	// Exec runs a program inside a running container and answers its output. A non-zero exit
 	// is an error carrying stderr, as for every other verb.
 	Exec(ctx context.Context, name string, args ...string) (Result, error)
@@ -172,7 +206,7 @@ func execTo(ctx context.Context, r Runner, program, name string, stdout io.Write
 	if !ok {
 		return Result{}, errors.New("this runner cannot stream from a container")
 	}
-	res, err := pipe.RunPipe(ctx, nil, stdout, program, append([]string{"exec", name}, args...)...)
+	res, err := pipe.RunPipe(ctx, nil, stdout, program, execArgs(nil, name, args)...)
 	if err != nil {
 		return res, &NotRunnable{Err: err}
 	}
@@ -187,7 +221,7 @@ func execInput(ctx context.Context, r Runner, program, name, stdin string, args 
 	if !ok {
 		return Result{}, errors.New("this runner cannot hand a container input")
 	}
-	res, err := in.RunInput(ctx, stdin, program, append([]string{"exec", "-i", name}, args...)...)
+	res, err := in.RunInput(ctx, stdin, program, execArgs([]string{"-i"}, name, args)...)
 	if err != nil {
 		return res, &NotRunnable{Err: err}
 	}
@@ -195,6 +229,73 @@ func execInput(ctx context.Context, r Runner, program, name, stdin string, args 
 		return res, fmt.Errorf("%s exec %s: %s (exit %d)", program, name, strings.TrimSpace(res.Stderr), res.ExitCode)
 	}
 	return res, nil
+}
+
+// execArgs is every exec's line on both engines: the flags, the worker key set empty, the
+// container, the program.
+func execArgs(flags []string, name string, args []string) []string {
+	line := append([]string{"exec"}, flags...)
+	line = append(line, "-e", KeyVariable+"=", name)
+	return append(line, args...)
+}
+
+// runArgs is the part of `run` both engines spell the same, after the name and the network:
+// restart, limits, capabilities, environment, labels, env files, volumes, the image and its
+// command.
+func runArgs(s RunSpec) []string {
+	args := []string{"--restart", "unless-stopped"}
+	if s.Memory != "" {
+		args = append(args, "--memory", s.Memory)
+	}
+	if s.CPUs > 0 {
+		args = append(args, "--cpus", strconv.Itoa(s.CPUs))
+	}
+	for _, c := range s.CapDrop {
+		args = append(args, "--cap-drop", c)
+	}
+	for _, c := range s.CapAdd {
+		args = append(args, "--cap-add", c)
+	}
+	for _, k := range sortedKeys(s.Env) {
+		args = append(args, "-e", k+"="+s.Env[k])
+	}
+	for _, k := range sortedKeys(s.Labels) {
+		args = append(args, "--label", k+"="+s.Labels[k])
+	}
+	for _, f := range s.EnvFiles {
+		if f != "" {
+			args = append(args, "--env-file", f)
+		}
+	}
+	for _, v := range s.Volumes {
+		args = append(args, "-v", v)
+	}
+	args = append(args, s.Image)
+	return append(args, s.Command...)
+}
+
+// list is List for both engines: `ps -a` takes the same filter and format on each.
+func list(ctx context.Context, run func(context.Context, ...string) (Result, error), filter string) ([]string, error) {
+	res, err := run(ctx, "ps", "-a", "--filter", filter, "--format", "{{.Names}}")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+// healthOf reads one inspect answer as a Health; an empty answer is none.
+func healthOf(stdout string) Health {
+	switch h := Health(strings.TrimSpace(stdout)); h {
+	case HealthHealthy, HealthUnhealthy, HealthStarting:
+		return h
+	}
+	return HealthNone
 }
 
 // createdDate is the day of a CreatedAt answer. Podman says "2026-09-30 10:00:00.1 +0200 CEST" or

@@ -43,8 +43,8 @@ func TestRunBuildsTheWholeCommandLineInAFixedOrder(t *testing.T) {
 	err := p.Run(context.Background(), engine.RunSpec{
 		Name: "yawble", Pod: "yawble", Image: "ghcr.io/djlsystems/yawble:2026.09.24.1",
 		Volumes: []string{"yawble-data:/data"}, Env: map[string]string{"Wip__MaxRunning": "8"},
-		Labels:  map[string]string{"yawble.settings": `{"port":8080}`},
-		EnvFile: "/home/d/.config/yawble/env", Memory: "12288m", CPUs: 8,
+		Labels:   map[string]string{"yawble.settings": `{"port":8080}`},
+		EnvFiles: []string{"/home/d/.config/yawble/env"}, Memory: "12288m", CPUs: 8,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -65,12 +65,12 @@ func TestRunOmitsLimitsThatAreNotSet(t *testing.T) {
 
 func TestExecRunsInsideTheNamedContainerAndAnswersStdout(t *testing.T) {
 	s := engine.NewScripted()
-	s.On("podman exec yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: "prose\n{\"at\":\"x\"}\n"})
+	s.On("podman exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --doctor", engine.Result{Stdout: "prose\n{\"at\":\"x\"}\n"})
 	res, err := engine.NewPodman(s).Exec(context.Background(), "yawble", "dotnet", "/app/Harness.Host.dll", "--doctor")
 	if err != nil || res.Stdout != "prose\n{\"at\":\"x\"}\n" {
 		t.Errorf("res %+v err %v", res, err)
 	}
-	s.On("podman exec gone", engine.Result{Stderr: "Error: no container with name or ID \"gone\" found", ExitCode: 125})
+	s.On("podman exec -e HARNESS_WORKER_KEY= gone", engine.Result{Stderr: "Error: no container with name or ID \"gone\" found", ExitCode: 125})
 	if _, err := engine.NewPodman(s).Exec(context.Background(), "gone", "true"); err == nil || !strings.Contains(err.Error(), "no container") {
 		t.Errorf("err %v", err)
 	}
@@ -264,8 +264,8 @@ func TestCopyToCopiesAFolderIntoTheContainer(t *testing.T) {
 
 func TestExecToStreamsTheProgramsOutputOnBothEngines(t *testing.T) {
 	s := engine.NewScripted()
-	s.On("podman exec yawble tar", engine.Result{Stdout: "tar bytes"})
-	s.On("docker exec yawble tar", engine.Result{Stdout: "docker tar bytes"})
+	s.On("podman exec -e HARNESS_WORKER_KEY= yawble tar", engine.Result{Stdout: "tar bytes"})
+	s.On("docker exec -e HARNESS_WORKER_KEY= yawble tar", engine.Result{Stdout: "docker tar bytes"})
 	var p, d strings.Builder
 	if _, err := engine.NewPodman(s).ExecTo(context.Background(), "yawble", &p, "tar", "-C", "/data/repos", "-cf", "-", "x.git"); err != nil {
 		t.Fatal(err)
@@ -274,13 +274,13 @@ func TestExecToStreamsTheProgramsOutputOnBothEngines(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"podman exec yawble tar -C /data/repos -cf - x.git",
-		"docker exec yawble tar -C /data/repos -cf - x.git",
+		"podman exec -e HARNESS_WORKER_KEY= yawble tar -C /data/repos -cf - x.git",
+		"docker exec -e HARNESS_WORKER_KEY= yawble tar -C /data/repos -cf - x.git",
 	}
 	if strings.Join(s.Calls, "\n") != strings.Join(want, "\n") || p.String() != "tar bytes" || d.String() != "docker tar bytes" {
 		t.Errorf("calls %q, podman %q, docker %q", s.Calls, p.String(), d.String())
 	}
-	s.On("podman exec gone", engine.Result{Stderr: "Error: no container with name or ID \"gone\" found", ExitCode: 125})
+	s.On("podman exec -e HARNESS_WORKER_KEY= gone", engine.Result{Stderr: "Error: no container with name or ID \"gone\" found", ExitCode: 125})
 	if _, err := engine.NewPodman(s).ExecTo(context.Background(), "gone", &p, "true"); err == nil || !strings.Contains(err.Error(), "no container") {
 		t.Errorf("err %v", err)
 	}
@@ -304,6 +304,107 @@ func TestVolumeCreatedIsTheDayOnBothEngines(t *testing.T) {
 			if line := name + " volume inspect --format {{.CreatedAt}} yawble-data"; s.Calls[0] != line {
 				t.Errorf("%s: %q, want %q", name, s.Calls[0], line)
 			}
+		}
+	}
+}
+
+func TestListByLabel(t *testing.T) {
+	s := engine.NewScripted()
+	s.On("podman ps -a --filter label=yawble.role=worker --format {{.Names}}", engine.Result{Stdout: "yawble-worker-2\nyawble-worker-1\n\n"})
+	names, err := engine.NewPodman(s).List(context.Background(), "label=yawble.role=worker")
+	if err != nil || strings.Join(names, ",") != "yawble-worker-2,yawble-worker-1" {
+		t.Errorf("names %q err %v", names, err)
+	}
+	s.On("podman ps -a --filter label=none", engine.Result{})
+	if names, err := engine.NewPodman(s).List(context.Background(), "label=none"); err != nil || len(names) != 0 {
+		t.Errorf("none: %q %v", names, err)
+	}
+	if s.Calls[0] != "podman ps -a --filter label=yawble.role=worker --format {{.Names}}" {
+		t.Errorf("call %q", s.Calls[0])
+	}
+}
+
+// Podman 4 and later name the health `.State.Health`; an older one only `.State.Healthcheck`,
+// and its template error on the first is what makes the second be asked.
+func TestHealthReadsHealthStatusAndFallsBackToHealthcheck(t *testing.T) {
+	const current = "podman container inspect --format {{.State.Health.Status}} "
+	const older = "podman container inspect --format {{.State.Healthcheck.Status}} "
+	s := engine.NewScripted()
+	s.On(current+"yawble-worker-1", engine.Result{Stdout: "healthy\n"})
+	s.On(current+"yawble-worker-2", engine.Result{Stderr: `template: inspect:1:8: executing "inspect" at <.State.Health.Status>: can't evaluate field Health`, ExitCode: 125})
+	s.On(older+"yawble-worker-2", engine.Result{Stdout: "starting\n"})
+	s.On(current+"plain", engine.Result{Stdout: "\n"})
+	s.On(current+"gone", engine.Result{Stderr: "Error: no such container gone", ExitCode: 125})
+	p := engine.NewPodman(s)
+	ctx := context.Background()
+	for name, want := range map[string]engine.Health{"yawble-worker-1": engine.HealthHealthy, "yawble-worker-2": engine.HealthStarting, "plain": engine.HealthNone, "gone": engine.HealthNone} {
+		if got, err := p.Health(ctx, name); err != nil || got != want {
+			t.Errorf("%s: %q %v, want %q", name, got, err, want)
+		}
+	}
+	if !strings.Contains(strings.Join(s.Calls, "\n"), older+"yawble-worker-2") {
+		t.Errorf("the older field was not asked:\n%s", strings.Join(s.Calls, "\n"))
+	}
+}
+
+func TestStopWithinGivesTheGraceOnTheLine(t *testing.T) {
+	s := engine.NewScripted()
+	if err := engine.NewPodman(s).StopWithin(context.Background(), "yawble-worker-3", 30); err != nil {
+		t.Fatal(err)
+	}
+	if s.Calls[0] != "podman stop -t 30 yawble-worker-3" {
+		t.Errorf("got %q", s.Calls[0])
+	}
+}
+
+func TestRunCarriesCapDropAndCapAdd(t *testing.T) {
+	s := engine.NewScripted()
+	_ = engine.NewPodman(s).Run(context.Background(), engine.RunSpec{Name: "y", Pod: "y", Image: "img", CapDrop: []string{"ALL"}, CapAdd: []string{"CHOWN", "KILL"}})
+	if s.Calls[0] != "podman run -d --name y --pod y --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add KILL img" {
+		t.Errorf("got %q", s.Calls[0])
+	}
+}
+
+func TestRunPassesEveryEnvFileInOrder(t *testing.T) {
+	s := engine.NewScripted()
+	_ = engine.NewPodman(s).Run(context.Background(), engine.RunSpec{Name: "y", Pod: "y", Image: "img", EnvFiles: []string{"/c/env", "", "/c/worker.env"}})
+	if s.Calls[0] != "podman run -d --name y --pod y --restart unless-stopped --env-file /c/env --env-file /c/worker.env img" {
+		t.Errorf("got %q", s.Calls[0])
+	}
+}
+
+// Podman's pod already shares one network namespace; a Docker-only Network never reaches its line.
+func TestPodmanWorkerRunJoinsThePodAndIgnoresNetwork(t *testing.T) {
+	s := engine.NewScripted()
+	_ = engine.NewPodman(s).Run(context.Background(), engine.RunSpec{Name: "yawble-worker-1", Pod: "yawble", Network: "container:yawble", Image: "img"})
+	if s.Calls[0] != "podman run -d --name yawble-worker-1 --pod yawble --restart unless-stopped img" {
+		t.Errorf("got %q", s.Calls[0])
+	}
+}
+
+func TestExecBlanksTheWorkerKey(t *testing.T) {
+	for _, e := range []struct {
+		name string
+		make func(engine.Runner) engine.Engine
+	}{{"podman", engine.NewPodman}, {"docker", engine.NewDocker}} {
+		s := engine.NewScripted()
+		en := e.make(s)
+		ctx := context.Background()
+		_, _ = en.Exec(ctx, "yawble-worker-1", "sh", "-c", "true")
+		_, _ = en.ExecTo(ctx, "yawble", &bytes.Buffer{}, "tar", "-cf", "-")
+		_, _ = en.ExecInput(ctx, "yawble", "code", "sh", "-c", "cat")
+		want := []string{
+			e.name + " exec -e HARNESS_WORKER_KEY= yawble-worker-1 sh -c true",
+			e.name + " exec -e HARNESS_WORKER_KEY= yawble tar -cf -",
+			e.name + " exec -i -e HARNESS_WORKER_KEY= yawble sh -c cat",
+		}
+		if strings.Join(s.Calls, "\n") != strings.Join(want, "\n") {
+			t.Errorf("%s calls:\n%s\nwant:\n%s", e.name, strings.Join(s.Calls, "\n"), strings.Join(want, "\n"))
+		}
+		// The backup helper is no instance container: it is given no env file at all.
+		_, _ = en.RunHelper(ctx, engine.HelperSpec{Image: "img", Volume: "yawble-data", Target: "/data", Entrypoint: "tar"})
+		if helper := s.Calls[len(s.Calls)-1]; strings.Contains(helper, "--env-file") || strings.Contains(helper, "HARNESS_WORKER_KEY") {
+			t.Errorf("%s helper line %q", e.name, helper)
 		}
 	}
 }

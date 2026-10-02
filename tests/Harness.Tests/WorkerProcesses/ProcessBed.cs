@@ -78,12 +78,17 @@ internal sealed class ProcessBed : IAsyncDisposable
 
     /// <summary>
     /// Control on a free loopback port, bootstrapped with one person signed in; under a prefix (another
-    /// user, which must be able to write <see cref="Root"/>) and with more environment, when given.
+    /// user, which must be able to write <see cref="Root"/>) and with more environment, when given. With
+    /// <paramref name="keyFile"/> the worker key is not on the command line: control reads it from that
+    /// file (HARNESS_WORKER_KEY_FILE), as it does in an image.
     /// </summary>
     public async Task StartControlAsync(
-        int graceSeconds = 2, int keepAliveSeconds = 1, IReadOnlyList<string>? prefix = null, IReadOnlyDictionary<string, string>? more = null)
+        int graceSeconds = 2, int keepAliveSeconds = 1, IReadOnlyList<string>? prefix = null, IReadOnlyDictionary<string, string>? more = null,
+        string? keyFile = null)
     {
         var environment = (more ?? new Dictionary<string, string>()).ToDictionary(p => p.Key, string? (p) => p.Value);
+        if (keyFile is not null) environment[WorkerKeyFile.FileVariable] = keyFile;
+        string[] key = keyFile is null ? ["--Workers:Key", Key] : [];
 
         for (var attempt = 0; ; attempt++)
         {
@@ -91,7 +96,7 @@ internal sealed class ProcessBed : IAsyncDisposable
             Url = new Uri($"http://127.0.0.1:{port}");
             Control = Start("control", [
                 .. prefix ?? [], "dotnet", Dll, "--Role", "control", "--DataRoot", Root, "--urls", Url.ToString().TrimEnd('/'),
-                "--Workers:Key", Key, "--Workers:GraceSeconds", $"{graceSeconds}", "--Workers:KeepAliveSeconds", $"{keepAliveSeconds}",
+                .. key, "--Workers:GraceSeconds", $"{graceSeconds}", "--Workers:KeepAliveSeconds", $"{keepAliveSeconds}",
 
                 // Its own lines, not the request log of the bed's polling, are what a failure shows.
                 "--Logging:LogLevel:Microsoft.AspNetCore", "Warning",
@@ -112,7 +117,7 @@ internal sealed class ProcessBed : IAsyncDisposable
     {
         var environment = new Dictionary<string, string?>
         {
-            ["HARNESS_CONTROL_URL"] = Url.ToString().TrimEnd('/'),
+            ["HARNESS_CONTROL_URL"] = Url?.ToString().TrimEnd('/'),
             ["HARNESS_WORKER_KEY"] = key ?? Key,
             ["HARNESS_WORKER_ID"] = id,
 
@@ -276,11 +281,19 @@ internal sealed class ProcessBed : IAsyncDisposable
         start.Environment.Remove("HARNESS_DATA_ROOT");
         start.Environment.Remove("DataRoot");
         start.Environment.Remove(HostRoles.Variable);
+
+        // Which image the suite runs in is not the bed's: a control that asks for the CLIs' update when
+        // a worker joins is one a test asks for by name.
+        start.Environment.Remove("HARNESS_IMAGE");
         foreach (var (key, value) in environment)
         {
             if (value is null) start.Environment.Remove(key);
             else start.Environment[key] = value;
         }
+
+        // Last, over whatever the test gave: no process of the bed, nor any child of it, runs a real
+        // agent CLI update or writes the instance's npm prefix.
+        AgentCliIsolation.Guard(start.Environment);
 
         var host = new HostProcess(name, start);
         _hosts.Add(host);

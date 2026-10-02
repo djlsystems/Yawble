@@ -19,6 +19,7 @@ func run(t *testing.T, deps cli.Deps, args ...string) (int, string, string) {
 	}
 	if deps.ConfigDir == "" {
 		deps.ConfigDir = t.TempDir()
+		seedWorkerKey(t, deps.ConfigDir)
 	}
 	code := cli.Execute(cli.NewRoot(deps), args)
 	return code, out.String(), errb.String()

@@ -94,7 +94,7 @@ func TestDockerVersionExecAndLogsUseTheDockerVerbs(t *testing.T) {
 	if v != "27.1.0" || d.Name() != "docker" {
 		t.Errorf("version %q name %q", v, d.Name())
 	}
-	want := "docker version --format {{.Client.Version}}\ndocker exec yawble true\ndocker logs --follow --tail 10 yawble\ndocker start yawble\ndocker stop yawble\ndocker rm -f yawble"
+	want := "docker version --format {{.Client.Version}}\ndocker exec -e HARNESS_WORKER_KEY= yawble true\ndocker logs --follow --tail 10 yawble\ndocker start yawble\ndocker stop yawble\ndocker rm -f yawble"
 	if strings.Join(s.Calls, "\n") != want {
 		t.Errorf("calls:\n%s", strings.Join(s.Calls, "\n"))
 	}
@@ -105,5 +105,73 @@ func TestPodmanIgnoresThePublishedPortBecauseThePodHoldsIt(t *testing.T) {
 	_ = engine.NewPodman(s).Run(context.Background(), engine.RunSpec{Name: "y", Pod: "y", Image: "img", HostPort: 18080, ContainerPort: 8080})
 	if strings.Contains(s.Calls[0], "-p ") {
 		t.Errorf("podman run must not publish; the pod does: %q", s.Calls[0])
+	}
+}
+
+func TestDockerListByLabel(t *testing.T) {
+	s := engine.NewScripted()
+	s.On("docker ps -a --filter label=yawble.instance=yawble --format {{.Names}}", engine.Result{Stdout: "yawble-worker-1\nyawble\n"})
+	names, err := engine.NewDocker(s).List(context.Background(), "label=yawble.instance=yawble")
+	if err != nil || strings.Join(names, ",") != "yawble-worker-1,yawble" {
+		t.Errorf("names %q err %v", names, err)
+	}
+	if s.Calls[0] != "docker ps -a --filter label=yawble.instance=yawble --format {{.Names}}" {
+		t.Errorf("call %q", s.Calls[0])
+	}
+}
+
+// Docker leaves .State.Health nil without a HEALTHCHECK; the guard keeps that "none", not an error
+// and never healthy.
+func TestDockerHealthReadsStateHealthAndNoneWithoutOne(t *testing.T) {
+	const format = "docker container inspect --format {{if .State.Health}}{{.State.Health.Status}}{{end}} "
+	s := engine.NewScripted()
+	s.On(format+"yawble-worker-1", engine.Result{Stdout: "healthy\n"})
+	s.On(format+"yawble-worker-2", engine.Result{Stdout: "unhealthy\n"})
+	s.On(format+"plain", engine.Result{Stdout: "\n"})
+	s.On(format+"gone", engine.Result{Stderr: "Error response from daemon: No such container: gone", ExitCode: 1})
+	d := engine.NewDocker(s)
+	for name, want := range map[string]engine.Health{"yawble-worker-1": engine.HealthHealthy, "yawble-worker-2": engine.HealthUnhealthy, "plain": engine.HealthNone, "gone": engine.HealthNone} {
+		if got, err := d.Health(context.Background(), name); err != nil || got != want {
+			t.Errorf("%s: %q %v, want %q", name, got, err, want)
+		}
+	}
+}
+
+func TestDockerStopWithinGivesTheGraceOnTheLine(t *testing.T) {
+	s := engine.NewScripted()
+	_ = engine.NewDocker(s).StopWithin(context.Background(), "yawble-worker-3", 30)
+	if s.Calls[0] != "docker stop -t 30 yawble-worker-3" {
+		t.Errorf("got %q", s.Calls[0])
+	}
+}
+
+func TestDockerRunCarriesCapDropCapAddAndEveryEnvFileInOrder(t *testing.T) {
+	s := engine.NewScripted()
+	_ = engine.NewDocker(s).Run(context.Background(), engine.RunSpec{
+		Name: "yawble", Pod: "yawble", Image: "img", HostPort: 8080, ContainerPort: 8080,
+		CapDrop: []string{"ALL"}, CapAdd: []string{"CHOWN", "KILL"}, EnvFiles: []string{"/c/env", "/c/worker.env"},
+	})
+	want := "docker run -d --name yawble --network yawble -p 0.0.0.0:8080:8080 --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add KILL --env-file /c/env --env-file /c/worker.env img"
+	if s.Calls[0] != want {
+		t.Errorf("got  %q\nwant %q", s.Calls[0], want)
+	}
+}
+
+// Docker refuses -p, --hostname and --dns on a container that joins another's namespace, and
+// the namespace is control's: a worker reaches it on 127.0.0.1.
+func TestWorkerRunJoinsControlsNamespaceWithNoPublishOrHostname(t *testing.T) {
+	s := engine.NewScripted()
+	_ = engine.NewDocker(s).Run(context.Background(), engine.RunSpec{
+		Name: "yawble-worker-1", Pod: "yawble", Network: "container:yawble", Image: "img-worker",
+		HostPort: 8080, ContainerPort: 8080,
+	})
+	line := s.Calls[0]
+	if !strings.HasPrefix(line, "docker run -d --name yawble-worker-1 --network container:yawble --restart unless-stopped") {
+		t.Errorf("got %q", line)
+	}
+	for _, refused := range []string{" -p ", "--publish", "--hostname", "--dns", "--network yawble"} {
+		if strings.Contains(line, refused) {
+			t.Errorf("%q carries %q", line, refused)
+		}
 	}
 }

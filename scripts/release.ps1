@@ -7,8 +7,9 @@
 #   scripts/release.ps1           # the same, then tag, push the tag, image to ghcr.io, CLI build, GitHub Release
 #
 # The version is yyyy.mm.dd.N, the tag v<version>. N counts that day's release tags on origin.
-# The image goes to ghcr.io/<owner>/<repo> as :<version> and :latest, both taken from the
-# origin remote and lowercased. Pushing needs a gh token with write:packages:
+# Two images go to ghcr.io/<owner>/<repo>, both built from the one Containerfile: control as
+# :<version> and :latest, the worker as :<version>-worker and :latest-worker (Get-ImageBuilds). The
+# name is taken from the origin remote and lowercased. Pushing needs a gh token with write:packages:
 #   gh auth refresh -s write:packages
 param(
     [switch]$DryRun,
@@ -143,9 +144,11 @@ if ($DryRun) {
     Write-Host ''
     Write-Host "Dry run. Both suites passed. Next version: $version"
     Write-Host "Would tag      $tag on $head and push it to origin"
-    Write-Host "Would build    the image at $tag for $platforms with --build-arg HARNESS_VERSION=$version HARNESS_COMMIT=$head"
-    Write-Host "Would push     ${image}:$version (one manifest, both platforms)"
-    Write-Host "Would push     ${image}:latest"
+    foreach ($b in Get-ImageBuilds -Image $image -Version $version) {
+        Write-Host "Would build    --target $($b.Target) at $tag for $platforms with --build-arg HARNESS_VERSION=$version HARNESS_COMMIT=$head"
+        Write-Host "Would push     $($b.Ref) (one manifest, both platforms)"
+    }
+    foreach ($b in Get-ImageBuilds -Image $image -Version $version) { Write-Host "Would push     $($b.Latest)" }
     Write-Host "Would run      cli/scripts/release.sh ${tag}$(if ($Prerelease) { ' --prerelease' }): build the CLI pinned to $version, gh release create $tag with its archives$(if ($Prerelease) { ', as a pre-release' })"
     return
 }
@@ -164,18 +167,23 @@ try {
     # an amd64 and an arm64 image, and `latest` is the same list pushed under a second name
     # below, so the two tags can never point at different builds. A manifest left by an earlier
     # attempt would collect a third image, so it is removed first.
-    & { $ErrorActionPreference = 'Continue'; podman manifest rm "${image}:$version" 2>$null } | Out-Null
-    $build = @(
-        'build', '--format', 'docker',
-        '--platform', $platforms,
-        $(if ($NoCache) { @('--no-cache', '--pull=always') } else { @() }),
-        '--manifest', "${image}:$version",
-        '--build-arg', "HARNESS_VERSION=$version",
-        '--build-arg', "HARNESS_COMMIT=$head",
-        '--label', "org.opencontainers.image.source=https://github.com/$($remote.Owner)/$($remote.Repo)",
-        '-f', (Join-Path $tree 'Containerfile'), $tree
-    )
-    Invoke-Checked 'podman build' { podman @build }
+    # TWO TARGETS, ONE COMPILE: both builds share every layer up to their own stage, so the second
+    # reuses the first's web and .NET build, and both carry the one version.
+    foreach ($b in Get-ImageBuilds -Image $image -Version $version) {
+        & { $ErrorActionPreference = 'Continue'; podman manifest rm $b.Ref 2>$null } | Out-Null
+        $build = @(
+            'build', '--format', 'docker',
+            '--target', $b.Target,
+            '--platform', $platforms,
+            $(if ($NoCache) { @('--no-cache', '--pull=always') } else { @() }),
+            '--manifest', $b.Ref,
+            '--build-arg', "HARNESS_VERSION=$version",
+            '--build-arg', "HARNESS_COMMIT=$head",
+            '--label', "org.opencontainers.image.source=https://github.com/$($remote.Owner)/$($remote.Repo)",
+            '-f', (Join-Path $tree 'Containerfile'), $tree
+        )
+        Invoke-Checked "podman build --target $($b.Target)" { podman @build }
+    }
 } catch {
     git tag -d $tag | Out-Null
     throw
@@ -187,10 +195,15 @@ Invoke-Checked 'git push (tag)' { git push origin "refs/tags/$tag" }
 
 $user = (gh api user --jq .login).Trim()
 Invoke-Checked 'podman login ghcr.io' { gh auth token | podman login ghcr.io -u $user --password-stdin }
-# --all pushes both platform images and the list that names them. The version first: a failed
-# version push must never move `latest`.
-Invoke-Checked "podman manifest push ${image}:$version" { podman manifest push --all "${image}:$version" "docker://${image}:$version" }
-Invoke-Checked "podman manifest push ${image}:latest" { podman manifest push --all "${image}:$version" "docker://${image}:latest" }
+# --all pushes both platform images and the list that names them. Every version tag first: a failed
+# version push must never move `latest` or `latest-worker`.
+$builds = Get-ImageBuilds -Image $image -Version $version
+foreach ($b in $builds) {
+    Invoke-Checked "podman manifest push $($b.Ref)" { podman manifest push --all $b.Ref "docker://$($b.Ref)" }
+}
+foreach ($b in $builds) {
+    Invoke-Checked "podman manifest push $($b.Latest)" { podman manifest push --all $b.Ref "docker://$($b.Latest)" }
+}
 
 # 6. The CLI, at the same tag, pinned to the image just pushed, and the GitHub Release with its
 # archives. Built from a checkout OF THE TAG, not from this one: release.sh insists HEAD is the
@@ -219,6 +232,6 @@ try {
 Write-Host ''
 Write-Host "Released $version."
 Write-Host "  Tag:     $tag on $head"
-Write-Host "  Image:   ${image}:$version and ${image}:latest"
+Write-Host "  Images:  ${image}:$version and ${image}:$version-worker (and :latest, :latest-worker)"
 if (-not $cliDone) { exit 1 }
 Write-Host "  Release: https://github.com/$($remote.Owner)/$($remote.Repo)/releases/tag/$tag (notes and CLI archives)"

@@ -111,6 +111,51 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
     /// <summary>Pings sent since the worker last answered one.</summary>
     public int MissedPings => Volatile.Read(ref _missed);
 
+    /// <summary>Whether the worker said it takes no new run: in its hello, or in a frame since.</summary>
+    public bool Draining
+    {
+        get
+        {
+            lock (_gate) return _draining;
+        }
+        set
+        {
+            lock (_gate)
+            {
+                if (_draining == value) return;
+                _draining = value;
+            }
+
+            DrainingChanged?.Invoke(this);
+        }
+    }
+
+    private bool _draining;
+
+    /// <summary>Raised when <see cref="Draining"/> changes.</summary>
+    public event Action<RemoteWorker>? DrainingChanged;
+
+    /// <summary>
+    /// Tells a connected worker the figures it runs by changed. False when it is not connected now:
+    /// its next welcome carries them.
+    /// </summary>
+    public async Task<bool> SendSettingsAsync(RunWorkerSettings settings)
+    {
+        WorkerSocket? socket;
+        lock (_gate) socket = _gone ? null : _socket;
+        if (socket is null) return false;
+
+        try
+        {
+            await socket.SendAsync(new WorkerSettingsFrame(settings));
+            return true;
+        }
+        catch (Exception exception) when (exception is WebSocketException or IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
     public bool Dropped
     {
         get
@@ -194,8 +239,10 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
     /// <summary>
     /// Runs the connection on <paramref name="socket"/> until it ends: what was kept while the worker
     /// was dropped is said again, the keep-alive starts, and the worker's frames are read.
+    /// <paramref name="attached"/> is called once the socket is this worker's, so what it asks of the
+    /// worker is sent rather than refused as not connected.
     /// </summary>
-    public async Task RunAsync(WorkerSocket socket, CancellationToken ct)
+    public async Task RunAsync(WorkerSocket socket, CancellationToken ct, Action? attached = null)
     {
         int generation;
         List<ControlMessage> again;
@@ -214,6 +261,7 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
         }
 
         foreach (var message in again) _ = SayAgainAsync(message);
+        attached?.Invoke();
 
         var events = Channel.CreateUnbounded<WorkerEnvelope>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var handling = Task.Run(() => HandleAsync(events.Reader, socket), CancellationToken.None);
@@ -239,6 +287,10 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
 
                     case PongFrame:
                         Interlocked.Exchange(ref _missed, 0);
+                        break;
+
+                    case WorkerDraining draining:
+                        Draining = draining.Draining;
                         break;
                 }
             }

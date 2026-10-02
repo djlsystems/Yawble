@@ -12,14 +12,13 @@ import (
 	"testing"
 
 	"github.com/djlsystems/yawble/cli/internal/cli"
-	"github.com/djlsystems/yawble/cli/internal/config"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/instance"
 )
 
 const (
 	testImage    = "ghcr.io/djlsystems/yawble:2026.09.24.1"
-	doctorExec   = "podman exec yawble dotnet /app/Harness.Host.dll --doctor"
+	doctorExec   = "podman exec -e HARNESS_WORKER_KEY= yawble dotnet /app/Harness.Host.dll --doctor"
 	doctorStdout = "Host log: /data/logs/x\n{\"at\":\"2026-09-23T21:04:19+00:00\",\"dataRoot\":{\"path\":\"/data\",\"writable\":true,\"freeBytes\":1000000000000},\"database\":{\"path\":\"/data/messages.db\",\"exists\":true,\"schema\":{\"applied\":[\"a\",\"b\"],\"pending\":[],\"unknown\":[],\"accepted\":true},\"error\":null},\"backups\":{\"directory\":\"/data/backups\",\"dailyCount\":1,\"newestDailyAt\":\"2026-09-23T18:47:24+00:00\"},\"versionsRecordedAt\":null,\"agents\":[{\"agent\":\"claude\",\"installed\":true,\"version\":\"2.1.280\",\"authenticated\":true,\"detail\":\"saved login\",\"credentialVariable\":\"ANTHROPIC_API_KEY\"},{\"agent\":\"codex\",\"installed\":true,\"version\":null,\"authenticated\":false,\"detail\":\"exit 1\",\"credentialVariable\":\"OPENAI_API_KEY\"}]}\n"
 )
 
@@ -63,8 +62,7 @@ func stubbed(runner engine.Runner, codes ...int) cli.Deps {
 // currentLabel is what a real `up` on this machine would have stamped: the same derivation
 // prepare() makes, so the scripted container reads as "made by this config".
 func currentLabel() string {
-	s, _ := instance.Defaults(config.Config{Image: testImage}, instance.Measure(), "")
-	return instance.SettingsLabel(s)
+	return instance.SettingsLabel(settingsForImage(testImage))
 }
 
 func runningScript() *engine.Scripted {
@@ -74,6 +72,7 @@ func runningScript() *engine.Scripted {
 	s.On("podman volume exists", engine.Result{})
 	s.On("podman pod exists", engine.Result{})
 	s.On("podman container inspect", engine.Result{Stdout: "running|" + testImage + "|" + currentLabel() + "\n"})
+	scriptWorker(s, "podman", "running", settingsForImage(testImage), 1)
 	return s
 }
 

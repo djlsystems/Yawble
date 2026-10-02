@@ -336,10 +336,19 @@ var principals = new SqlitePrincipalStore(database);
 builder.Services.AddSingleton<IUserStore>(users);
 builder.Services.AddSingleton<IPrincipalStore>(principals);
 
-// THE WORKER KEY: what a worker process connects to control with (Workers:Key, or HARNESS_WORKER_KEY).
+// THE WORKER KEY: what a worker process connects to control with (Workers:Key, or HARNESS_WORKER_KEY;
+// in an image, the file the entrypoint moved it to, Workers:KeyFile or HARNESS_WORKER_KEY_FILE).
 // Stored hashed as a principal with no permit, or removed when none is configured, so a key a
 // previous start stored never outlives its configuration. Taken on the worker connection alone.
-var workerKey = builder.Configuration["Workers:Key"] ?? builder.Configuration["HARNESS_WORKER_KEY"];
+var (workerKey, workerKeyRefusal) = WorkerKeyFile.Read(
+    builder.Configuration["Workers:Key"] ?? builder.Configuration["HARNESS_WORKER_KEY"],
+    builder.Configuration["Workers:KeyFile"] ?? builder.Configuration[WorkerKeyFile.FileVariable]);
+if (workerKeyRefusal is not null)
+{
+    Console.Error.WriteLine(workerKeyRefusal);
+    Environment.ExitCode = 2;
+    return;
+}
 WorkerKeyGate.SetAsync(principals, workerKey).GetAwaiter().GetResult();
 var workerKeys = new WorkerKeyGate(workerKey);
 builder.Services.AddSingleton(workerKeys);
@@ -2369,13 +2378,36 @@ var workerConnections = new WorkerConnections(
     log: app.Services.GetRequiredService<ILogger<WorkerConnections>>(),
     streams: app.Services.GetRequiredService<WorkerStreams>().Deliver);
 workerConnections.Changed += () => wip.SetMax(tenantSettings.WipMaxRunning);
+// A setting the figures a worker runs by are built from may have changed: every connected worker is
+// told now, not at its next welcome. Any change is said, since the figures are cheap to send and a
+// list of the settings they read would drift from the code that reads them.
+if (control)
+{
+    tenantSettings.Changed += setting => _ = workerConnections.SettingsChangedAsync();
+}
 // In control the start's retry of unfinished removals ran before any worker could connect: each worker
 // that joins retries them once, so what only the agent's pass can remove does not wait for a person.
 RetryWhenAWorkerJoins.Wire(
     control, workerConnections,
     ct => app.Services.GetRequiredService<UnfinishedRemovalRetry>().RetryAsync(ct: ct),
     app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+AgentUpdatesAtStart.Wire(
+    control, builder.Configuration["HARNESS_IMAGE"], builder.Configuration["HARNESS_UPDATE_AGENTS"], joined => workerConnections.Joined += joined,
+    () => AgentUpdatesAtStart.OnePerCommand(app.Services.GetRequiredService<AgentCatalog>()),
+    agent => app.Services.GetRequiredService<AgentCliUpdater>().Request(agent, person: null),
+    app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+// Control's workers, recorded for --doctor (another process) on every change and every few seconds.
+System.Threading.Timer? workersRecording = null;
+if (control)
+{
+    void RecordWorkers() => WorkersRecord.Of(
+        app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(),
+        worker => app.Services.GetRequiredService<RunDirectory>().OpenOn(worker), BuildVersion.Current.Version).Write(dataRoot, app.Logger);
+    workerConnections.Changed += RecordWorkers;
+    workersRecording = new System.Threading.Timer(_ => RecordWorkers(), null, TimeSpan.Zero, WorkersRecord.Every);
+}
 app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
+app.Lifetime.ApplicationStopping.Register(() => workersRecording?.Dispose());
 Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
     app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version);
 WorkerEndpoints.MapList(app, workersNow);

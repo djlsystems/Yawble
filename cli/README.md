@@ -36,24 +36,35 @@ yawble up
 
 `up` installs no container engine. It uses what is installed: Podman or Docker, asking which when both are (Podman is recommended; the answer is saved as `engine` in yawble's config, and `yawble config set engine` changes it; `--yes` takes Podman). Before it creates anything it checks the port: when another program holds it (8080 by default), `up` offers the next free one and saves your answer as `port`. With neither, it stops and says where to get one: Podman Desktop (recommended, free for everyone) or Docker Desktop on macOS and Windows, Podman or Docker Engine on Linux, then run `yawble up` again; the install scripts end with the same advice. Podman on Windows needs WSL, and `up` says how to install it (at the computer, then restart) before creating the machine. macOS is Apple silicon only for now (Intel Macs are not tested yet); on a Mac, `install.sh` adds `~/.local/bin` to `~/.zprofile`. On macOS and Windows it creates the Podman machine (rootless) if there is none, starts it if it is stopped, and offers to make a rootful one rootless, because a rootful machine on Windows never answers on localhost: on Windows a no stops `up` before anything is created, on macOS it carries on with a note. `--yes` answers every question; without a terminal and without `--yes`, a question is a refusal that names the flag. On Windows, if the WSL virtual machine has less memory than the container limit, `up` says what to put in `.wslconfig` and continues. First installs have been run end to end on Linux (Ubuntu 24.04), on Windows 11 with Podman, and on macOS with both Podman and Docker. A new Mac machine is created with half the Mac's RAM, capped at 12 GB.
 
-### What the first `up` asks: the container's memory and CPUs
+### Control and workers
 
-The container's size comes from what the engine has, asked of the engine itself: `docker info` (`MemTotal`, `NCPU`) under Docker on every OS, which is Docker Desktop's VM on macOS and Windows; the Podman machine on macOS and Windows; this computer under Podman on Linux. One rule everywhere: memory is half of the engine's, capped at 12 GB, and CPUs are the engine's, capped at 8. When the engine cannot answer, nothing is estimated: `up` says the memory and CPUs were not measured and uses 8192m and 4 CPUs until you choose (`yawble config set memory|cpus`), and saves nothing.
+An instance is one **control** container, `yawble`, which serves the board on the published port and keeps the database, and one or more **worker** containers, `yawble-worker-1` … `yawble-worker-N`, which run the agents. All of them mount the same data volume. On Podman they share one pod; on Docker each worker joins control's network namespace (`--network container:yawble`), so control is `127.0.0.1:8080` in every container. Control runs the release's image (`…/yawble:<version>`); workers run its worker image (`…/yawble:<version>-worker`), or `workerImage` in yawble's config. A key that control and the workers share is made once by the first `up`, kept owner-only in `worker.env` beside yawble's config, handed to the containers only as an env file, and removed by `uninstall`.
+
+`yawble workers <n>` sets the number of workers and applies it at once, touching only worker containers: a new worker is started and waited for until it connects to control. A worker that is removed (the highest first) is told to take no new run and stopped once its runs end; `--now` stops it at once, naming the runs that then fail as worker-lost (the Manager re-sends each once), after a question `--yes` answers. `yawble workers` with no number prints each worker's state. `status` and `doctor` show each worker with control's record of it, and `yawble logs worker-2` (or `logs 2`) reads a worker's log.
+
+An instance from before control and workers is moved by `yawble update` (or `up`): its container becomes control and worker 1 joins it, on the same volume, with no new sign-in and no change to its data or settings.
+
+### What the first `up` asks: each worker's memory and CPUs
+
+`memory` and `cpus` are each worker's. Control has its own fixed allowance beside them (1536 MB and 2 CPUs), so a worker may have at most the engine's memory less control's. `up` and `yawble workers <n>` refuse two or more workers whose memory with control's is more than the engine has, naming the three figures; with one worker (and on an upgrade) that is a warning, never a refusal. CPUs over the engine are only warned about: a CPU limit is a ceiling the containers share.
+
+A worker's size comes from what the engine has, asked of the engine itself: `docker info` (`MemTotal`, `NCPU`) under Docker on every OS, which is Docker Desktop's VM on macOS and Windows; the Podman machine on macOS and Windows; this computer under Podman on Linux. One rule everywhere: memory is half of the engine's, capped at 12 GB and at what is left beside control, and CPUs are the engine's, capped at 8. When the engine cannot answer, nothing is estimated: `up` says the memory and CPUs were not measured and uses 8192m and 4 CPUs until you choose (`yawble config set memory|cpus`), and saves nothing.
 
 When yawble's config holds neither `memory` nor `cpus`, the first `up` at a terminal shows one short screen and asks for each, Enter accepting the proposal:
 
 ```
-How much of the engine should Yawble's container get? (asked once)
+How much of the engine should Yawble's worker get? (asked once)
   the engine has   12288 MB memory, 10 CPUs (docker info)
+  control takes    1536 MB memory, 2 CPUs (fixed), so a worker may have up to 10752 MB
   proposed         6144 MB memory, 8 CPUs (half the engine's memory up to 12 GB; its CPUs up to 8)
   running limit    3 at once, derived from the Host's rule: the smaller of CPUs - 1 and memory / wip.memoryPerRunMb (the Host's default, 2048 MB). Not asked; yawble config set maxRunning overrides it
 Press Enter to accept a value, or type another.
-Memory in MB (4096 to 12288) [6144]:
+Memory in MB (4096 to 10752) [6144]:
 CPUs (1 to 10) [8]:
 saved memory 6144m and cpus 8 in yawble's config; the Host's rule derives a running limit of 3 from them (yawble config set memory <size> and yawble config set cpus <n> change them, then yawble up)
 ```
 
-Memory takes megabytes (`8192`) or a size (`8g`). A value above what the engine has is refused with the maximum named, and so is memory below the 4 GB floor (the Host's own share beside one run) and fewer than 1 CPU. An engine under 8 GB proposes less than 4 GB, and then the floor is that proposal, so the default in brackets is always inside the range the prompt states; then it asks again. A refusal for being above the engine's figure also says how to give that engine more:
+Memory takes megabytes (`8192`) or a size (`8g`). A value above what the engine has beside control is refused with the maximum named, and so is memory below the 4 GB floor (the Host's own share beside one run) and fewer than 1 CPU. An engine under 8 GB proposes less than 4 GB, and then the floor is that proposal, so the default in brackets is always inside the range the prompt states; then it asks again. A refusal for being above the engine's figure also says how to give that engine more:
 
 - Podman machine (macOS, Windows): `To give the Podman machine more: podman machine stop, then podman machine set --memory <MB> --cpus <n>, then podman machine start`
 - Docker Desktop: `To give Docker Desktop more: Docker Desktop's Settings > Resources`
@@ -74,19 +85,20 @@ A source build says `no image pinned` in `yawble version`: a release pins the ex
 ## Commands
 
 ```
-yawble up                 check the engine, machine and port, pull the image, create the volume, start. Idempotent.
-yawble down               stop the instance and free its port. The volume is kept.
-yawble status             running or not, URL, versions, tunnel URL, one line per agent
+yawble up                 check the engine, machine and port, pull the images, create the volume, start control and the workers. Idempotent.
+yawble down               stop the workers and control and free the port. The volume is kept.
+yawble status             running or not, URL, versions, tunnel URL, one line per worker with control's record of it
+yawble workers [<n>] [--now] [--yes]   the number of worker containers; with a number, set it and apply it
 yawble doctor [--fix]     every check, pass or fail with the fix spelled out. Exit 1 on any failure.
 yawble update             a newer yawble when there is one, then the instance onto its image. --cli / --instance do one half.
-yawble logs [-f]          the container log
+yawble logs [control|worker-<n>|<n>] [-f]   control's log, or a worker's
 yawble backup [--output <file>] [--full] [--yes]   the instance's data in one .tar.gz on this computer, to restore here or elsewhere
 yawble restore <file> [--replace] [--yes]         a backup into this computer's instance, on either engine, then start it
 yawble agents             per agent: installed, signed in, launches, its credential source, and how to sign in if not
 yawble agents credential set <preset|command> [--api-key|--token] | clear <preset|command>   the issued credential of a CLI command; see below
 yawble agents source <preset> home|issued   whether a preset signs in through the shared home or its command's issued credential
 yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
-yawble config get|set     port, engine, memory, cpus, running limit, image
+yawble config get|set     port, engine, memory and cpus (each worker's), running limit, image, workers, workerImage
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
 yawble plugin install <folder> | --from-instance <path> [--force] | list | remove <id> [--version <v>]   plugins members can be hired on; see below
 yawble solution check <folder> | --from-instance <path> [--json]   what installing a solution package would create, or its problems; see below

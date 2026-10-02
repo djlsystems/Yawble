@@ -75,12 +75,12 @@ func Enable(ctx context.Context, e engine.Engine, p Provider, cred Credential, d
 		return "", err
 	}
 	spec := engine.RunSpec{
-		Name:    SidecarName,
-		Pod:     instance.PodName,
-		Image:   p.Image(),
-		EnvFile: envFile,
-		Labels:  map[string]string{Label: p.Name()},
-		Command: p.Args(Target(e), cred),
+		Name:     SidecarName,
+		Pod:      instance.PodName,
+		Image:    p.Image(),
+		EnvFiles: []string{envFile},
+		Labels:   map[string]string{Label: p.Name()},
+		Command:  p.Args(Target(e), cred),
 	}
 	if p.Name() == "tailscale" {
 		spec.Volumes = []string{"yawble-tailscale:/var/lib/tailscale"}

@@ -20,7 +20,8 @@ const (
 
 // Settings is what one run uses, every default already applied. EnvFileHash is a digest of the
 // env file's content (never the content), so a changed key is a changed setting without the
-// keys themselves ever landing in a label or a log.
+// keys themselves ever landing in a label or a log. Memory and CPUs are each worker's; control
+// has its own fixed allowance (ControlMemory, ControlCPUs).
 type Settings struct {
 	Port        int
 	Memory      string
@@ -29,6 +30,25 @@ type Settings struct {
 	Image       string
 	EnvFile     string
 	EnvFileHash string
+	// Workers is how many worker containers run beside control, 1 or more.
+	Workers int
+	// WorkerImage is the config's override of the worker image; "" derives it from Image.
+	WorkerImage string
+	// KeyFile is the worker key's env file and KeyHash a digest of the key (never the key), so a
+	// new key replaces the containers. Empty until `up` has made the key.
+	KeyFile, KeyHash string
+}
+
+// EnvFiles are the env files every instance container is given, in order: the env file, then
+// the worker key's.
+func (s Settings) EnvFiles() []string {
+	var files []string
+	for _, f := range []string{s.EnvFile, s.KeyFile} {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
 }
 
 // Machine is what the engine the container runs in has: Docker's VM or host, the Podman
@@ -60,7 +80,7 @@ const (
 // because a number that looks measured and was not is the thing this product refuses to do.
 func Defaults(c config.Config, m Machine, pinned string) (Settings, []string) {
 	var notes []string
-	s := Settings{Port: config.DefaultPort, Memory: c.Memory, CPUs: c.CPUs, MaxRunning: c.MaxRunning, Image: c.Image}
+	s := Settings{Port: config.DefaultPort, Memory: c.Memory, CPUs: c.CPUs, MaxRunning: c.MaxRunning, Image: c.Image, Workers: c.WorkerCount(), WorkerImage: c.WorkerImage}
 	if c.Port != 0 {
 		s.Port = c.Port
 	}
@@ -89,8 +109,10 @@ func Defaults(c config.Config, m Machine, pinned string) (Settings, []string) {
 	return s, notes
 }
 
-// Proposed is the one rule for every engine: half the engine's memory, capped at 12 GB, and
-// the engine's CPUs, capped at 8. Zero for a machine that was not measured.
+// Proposed is the one rule for every engine, for each worker: half the engine's memory, capped
+// at 12 GB and at what is left beside control's allowance, and the engine's CPUs, capped at 8.
+// An engine too small to hold control beside anything keeps the half. Zero for a machine that
+// was not measured.
 func Proposed(m Machine) (memoryMB, cpus int) {
 	if !m.Measured {
 		return 0, 0
@@ -98,6 +120,9 @@ func Proposed(m Machine) (memoryMB, cpus int) {
 	half := m.MemoryBytes / 2
 	if half > memoryCapBytes {
 		half = memoryCapBytes
+	}
+	if left := m.MemoryBytes - int64(ControlMemoryMB())<<20; left > 0 && left < half {
+		half = left
 	}
 	cpus = m.CPUs
 	if cpus > cpuCap {
