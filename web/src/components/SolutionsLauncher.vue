@@ -1,22 +1,27 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { solutionsInstalled } from '../api/client';
-import type { InstalledSolution } from '../api/types';
-import { stateBadge } from '../lib/solutionPanel';
+import type { InstalledSolution, SolutionStateKind } from '../api/types';
+import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
+import FilterText from './FilterText.vue';
 import HostPathPicker from './HostPathPicker.vue';
 import SolutionWizard from './SolutionWizard.vue';
 
 /**
  * THE SOLUTIONS LAUNCHER: one tile per team installed from a solution package - its name and
  * version, its team, its status line and a state badge - with Open (the package's primary site, in
- * a new tab, only when it has one) and Manage (the control panel).
+ * a new tab, only when it has one), Details (everything the row says, read-only) and Manage (the
+ * control panel). The tiles are the shared grid (`os-tiles` / `os-tile`, css/tiles.scss), as
+ * Plugins and Agents lay theirs out, and the filter above them is the shared box: words, a team and
+ * a state, narrowing what is SHOWN only.
  *
  * EVERYTHING ON A TILE THAT CAME FROM A PACKAGE IS TEXT: names, the status line and a blocked
  * reason are interpolated, never bound as HTML, so a status value that looks like markup reads as
  * the characters it is.
  *
- * With nothing installed it says how solutions arrive: ask the Concierge, or install from a folder -
- * which is offered here as well, through the same wizard Admin -> Plugins opens.
+ * With nothing installed it says how solutions arrive: a package a team built, whose Review and
+ * install link appears in that team's Activity feed and on its backlog item - or install from a
+ * folder, which is offered here as well, through the same wizard Admin -> Plugins opens.
  */
 const open = defineModel<boolean>({ required: true });
 
@@ -41,6 +46,19 @@ async function load() {
 watch(open, (showing) => {
   if (showing) void load();
 }, { immediate: true });
+
+// --- The filter: what is shown, never what is loaded ----------------------------------------------
+
+const filterText = ref('');
+const filterTeam = ref<string | null>(null);
+const filterState = ref<SolutionStateKind | null>(null);
+
+const shownRows = computed(() =>
+  rows.value.filter((row) => solutionMatches(row, { text: filterText.value, team: filterTeam.value, state: filterState.value })));
+
+// --- Details: one solution, read-only -------------------------------------------------------------
+
+const detailsRow = ref<InstalledSolution | null>(null);
 
 // --- Install from a folder: the wizard, as Admin -> Plugins opens it ------------------------------
 
@@ -84,77 +102,185 @@ watch(() => wizard.value.open, (showing, was) => {
         <div v-else-if="!loading && rows.length === 0" class="os-body os-text-muted" data-solutions-empty>
           <p class="q-mb-sm">No solutions are installed yet.</p>
           <p class="q-mb-sm">
-            A solution is a whole team from one package: its members, schedules, skills and a site to use it from.
+            A solution is a package a team built: a whole team in one package, with its members, schedules, skills and a site to use it from.
             There are two ways to get one:
           </p>
           <ul class="q-my-none">
-            <li><strong>Ask the Concierge</strong> for one - it can build a package and hand you the link to install it.</li>
+            <li>
+              <strong>Ask the Concierge</strong>, or a team, to build one. When the package passes its check, the team's
+              <strong>Activity feed</strong> and its <strong>backlog item</strong> say it is ready, with a
+              <strong>Review and install</strong> link that opens the install wizard here.
+            </li>
             <li><strong>Install from a folder</strong> that holds a <code>solution.json</code>, with the button above.</li>
           </ul>
         </div>
 
-        <div v-else class="solutions-grid">
-          <q-card
-            v-for="row in rows"
-            :key="row.team"
-            flat
-            bordered
-            class="solution-tile column no-wrap"
-            :data-solution-tile="row.team"
-          >
-            <q-card-section class="q-pb-xs">
-              <div class="row items-baseline no-wrap q-gutter-x-sm solution-tile-title">
-                <div class="text-subtitle1 text-weight-medium ellipsis solution-tile-name" :title="row.name" data-tile-name>{{ row.name }}</div>
-                <div class="text-caption os-text-muted solution-tile-version" data-tile-version>{{ row.version }}</div>
+        <template v-else>
+          <!-- THE FILTER: words over name, package id, version, team and status line; one team; one
+               state. It narrows what is SHOWN only: nothing is fetched or sent again. -->
+          <div class="solutions-filters q-mb-md" data-solutions-filters>
+            <FilterText
+              v-model="filterText"
+              class="solutions-filter-text"
+              placeholder="Filter: name, team or status"
+              aria-label="Filter solutions"
+              data-solutions-filter
+            />
+            <q-select
+              v-model="filterTeam"
+              :options="teamChoices(rows)"
+              emit-value
+              map-options
+              dense
+              outlined
+              clearable
+              label="Team"
+              class="solutions-filter-select"
+              data-solutions-filter-team
+            />
+            <q-select
+              v-model="filterState"
+              :options="stateChoices(rows)"
+              emit-value
+              map-options
+              dense
+              outlined
+              clearable
+              label="State"
+              class="solutions-filter-select"
+              data-solutions-filter-state
+            />
+          </div>
+
+          <div v-if="shownRows.length === 0" class="os-body os-text-muted" data-solutions-none-match>
+            No solution matches the filter.
+          </div>
+
+          <div v-else class="os-tiles solutions-tiles">
+            <div
+              v-for="row in shownRows"
+              :key="row.team"
+              class="os-tile solution-tile"
+              :data-solution-tile="row.team"
+            >
+              <!-- THE TITLE ROW DOES NOT WRAP: the shared head wraps, and on a wrapping line the name
+                   would be as wide as its text and never cut. -->
+              <div class="os-tile-head">
+                <q-icon name="apps" size="18px" class="solution-tile-icon" aria-hidden="true" />
+                <div class="row items-baseline no-wrap q-gutter-x-sm solution-tile-title">
+                  <div class="text-subtitle1 text-weight-medium ellipsis solution-tile-name" :title="row.name" data-tile-name>{{ row.name }}</div>
+                  <div class="text-caption os-text-muted solution-tile-version" data-tile-version>{{ row.version }}</div>
+                </div>
               </div>
-              <div class="text-caption os-text-muted ellipsis" :title="row.teamName" data-tile-team>Team {{ row.teamName }}</div>
-            </q-card-section>
+              <div class="os-tile-line os-text-muted ellipsis" :title="row.teamName" data-tile-team>Team {{ row.teamName }}</div>
+              <div class="os-tile-line">
+                <q-badge
+                  v-if="stateBadge(row.state)"
+                  :color="stateBadge(row.state)?.color"
+                  :text-color="stateBadge(row.state)?.textColor"
+                  class="solution-badge"
+                  :data-tile-state="row.state?.kind"
+                >
+                  <q-icon :name="stateBadge(row.state)?.icon" size="14px" class="q-mr-xs" />
+                  <span class="solution-badge-text">{{ stateBadge(row.state)?.text }}</span>
+                </q-badge>
+              </div>
+              <div v-if="row.status" class="os-tile-line solution-tile-status" data-tile-status>{{ row.status }}</div>
 
-            <q-card-section class="q-py-xs col">
-              <q-badge
-                v-if="stateBadge(row.state)"
-                :color="stateBadge(row.state)?.color"
-                :text-color="stateBadge(row.state)?.textColor"
-                class="solution-badge"
-                :data-tile-state="row.state?.kind"
-              >
-                <q-icon :name="stateBadge(row.state)?.icon" size="14px" class="q-mr-xs" />
-                <span class="solution-badge-text">{{ stateBadge(row.state)?.text }}</span>
-              </q-badge>
-              <div v-if="row.status" class="os-body q-mt-xs solution-tile-status" data-tile-status>{{ row.status }}</div>
-            </q-card-section>
+              <div class="solution-tile-actions">
+                <!-- A REAL LINK, in a new tab: the site is the solution's app. Shown only when the
+                     package names one; disabled while it is unpublished, where it would 404. -->
+                <q-btn
+                  v-if="row.primarySite"
+                  flat
+                  dense
+                  no-caps
+                  icon="open_in_new"
+                  label="Open"
+                  :href="row.primarySite.published ? row.primarySite.url : undefined"
+                  target="_blank"
+                  rel="noopener"
+                  :disable="!row.primarySite.published"
+                  data-tile-open
+                >
+                  <q-tooltip v-if="!row.primarySite.published">The site {{ row.primarySite.name }} is not published.</q-tooltip>
+                </q-btn>
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="visibility"
+                  :aria-label="`Details ${row.name}`"
+                  data-tile-details
+                  @click="detailsRow = row"
+                >
+                  <q-tooltip>Details: its package, folder, who installed it and its plugins</q-tooltip>
+                </q-btn>
+                <q-btn
+                  unelevated
+                  dense
+                  no-caps
+                  color="primary"
+                  icon="tune"
+                  label="Manage"
+                  data-tile-manage
+                  @click="emit('manage', row.team)"
+                />
+              </div>
+            </div>
+          </div>
+        </template>
+      </q-card-section>
+    </q-card>
+  </q-dialog>
 
-            <q-card-actions align="right">
-              <!-- A REAL LINK, in a new tab: the site is the solution's app. Shown only when the
-                   package names one; disabled while it is unpublished, where it would 404. -->
-              <q-btn
-                v-if="row.primarySite"
-                flat
-                dense
-                no-caps
-                icon="open_in_new"
-                label="Open"
-                :href="row.primarySite.published ? row.primarySite.url : undefined"
-                target="_blank"
-                rel="noopener"
-                :disable="!row.primarySite.published"
-                data-tile-open
-              >
-                <q-tooltip v-if="!row.primarySite.published">The site {{ row.primarySite.name }} is not published.</q-tooltip>
-              </q-btn>
-              <q-btn
-                unelevated
-                dense
-                no-caps
-                color="primary"
-                icon="tune"
-                label="Manage"
-                data-tile-manage
-                @click="emit('manage', row.team)"
-              />
-            </q-card-actions>
-          </q-card>
+  <!-- DETAILS: everything the row says about one solution, read-only and as text. -->
+  <q-dialog :model-value="detailsRow !== null" @update:model-value="(showing: boolean) => { if (!showing) detailsRow = null; }">
+    <q-card v-if="detailsRow" class="os-dialog-md" data-solution-details>
+      <q-card-section class="row items-center no-wrap q-pb-none">
+        <div class="solution-details-title">
+          <div class="os-dialog-title ellipsis">{{ detailsRow.name }}</div>
+          <div class="text-caption os-text-muted mono">{{ detailsRow.id }} {{ detailsRow.version }}</div>
         </div>
+        <q-space />
+        <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
+      </q-card-section>
+      <q-card-section class="solution-details-body">
+        <dl class="solution-facts">
+          <dt>Package</dt>
+          <dd class="mono" data-detail="package">{{ detailsRow.id }}</dd>
+          <dt>Version</dt>
+          <dd data-detail="version">{{ detailsRow.version }}</dd>
+          <dt>Team</dt>
+          <dd data-detail="team">{{ detailsRow.teamName }}</dd>
+          <dt>Installed</dt>
+          <dd data-detail="installed">{{ whenWords(detailsRow.installedAt) }} by <span data-detail="installed-by">{{ detailsRow.installedBy }}</span></dd>
+          <template v-if="detailsRow.updatedAt">
+            <dt>Updated</dt>
+            <dd data-detail="updated">{{ whenWords(detailsRow.updatedAt) }}</dd>
+          </template>
+          <template v-if="detailsRow.folder">
+            <dt>Folder</dt>
+            <dd class="mono" data-detail="folder">{{ detailsRow.folder }}</dd>
+          </template>
+          <dt>Plugins</dt>
+          <dd data-detail="plugins">{{ detailsRow.plugins.length ? detailsRow.plugins.join(', ') : 'None' }}</dd>
+          <dt>Site</dt>
+          <dd data-detail="site">
+            <template v-if="detailsRow.primarySite">
+              {{ detailsRow.primarySite.name }} · {{ detailsRow.primarySite.published ? 'published' : 'not published' }}
+            </template>
+            <template v-else>None</template>
+          </dd>
+          <template v-if="stateBadge(detailsRow.state)">
+            <dt>State</dt>
+            <dd data-detail="state">{{ stateBadge(detailsRow.state)?.text }}</dd>
+          </template>
+          <template v-if="detailsRow.status">
+            <dt>Status</dt>
+            <dd data-detail="status">{{ detailsRow.status }}</dd>
+          </template>
+        </dl>
       </q-card-section>
     </q-card>
   </q-dialog>
@@ -170,21 +296,28 @@ watch(() => wizard.value.open, (showing, was) => {
 </template>
 
 <style scoped>
-.solutions-grid {
-  display: grid;
-  /* min(): a phone narrower than one column still gets a tile that fits it. */
-  grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr));
-  gap: 12px;
+/* The grid itself is `os-tiles` (css/tiles.scss); this only says how narrow a column may get.
+   min(): a phone narrower than one column still gets a tile that fits it. */
+.solutions-tiles {
+  --os-tile-min: min(18rem, 100%);
 }
 
 /* A LONG NAME IS CUT INSIDE THE TILE, never pushing Open and Manage out of it: a grid item and a
-   flex item both refuse to shrink below their content unless told `min-width: 0`, and the tile's
-   column must not wrap (`no-wrap` in the template): a wrapping column's line is as wide as its
-   widest child, so the name would never shrink. */
+   flex item both refuse to shrink below their content unless told `min-width: 0`, and the title
+   row must not wrap (`no-wrap` in the template): a wrapping line is as wide as its widest child,
+   so the name would never shrink. */
 .solution-tile {
-  min-height: 11rem;
   min-width: 0;
   overflow: hidden;
+}
+
+.solution-tile-icon {
+  color: var(--os-ink-muted);
+}
+
+.solution-tile-title {
+  min-width: 0;
+  flex: 1 1 0;
 }
 
 .solution-tile-name {
@@ -200,6 +333,16 @@ watch(() => wizard.value.open, (showing, was) => {
   overflow-wrap: anywhere;
 }
 
+.solution-tile-actions {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
 /* A blocked reason can be a sentence: the badge wraps rather than running off the tile. */
 .solution-badge {
   white-space: normal;
@@ -208,6 +351,53 @@ watch(() => wizard.value.open, (showing, was) => {
 }
 
 .solution-badge-text {
+  overflow-wrap: anywhere;
+}
+
+.solutions-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.solutions-filter-text {
+  flex: 1 1 16rem;
+  max-width: 28rem;
+}
+
+.solutions-filter-select {
+  flex: 0 1 12rem;
+  min-width: 9rem;
+}
+
+.solution-details-title {
+  min-width: 0;
+}
+
+.solution-details-body {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.solution-facts {
+  font-size: 12px;
+  line-height: 1.45;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 16px;
+  row-gap: 4px;
+  margin: 0;
+}
+
+.solution-facts dt {
+  color: var(--os-ink-muted);
+  font-weight: 500;
+}
+
+.solution-facts dd {
+  margin: 0;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 </style>

@@ -111,6 +111,7 @@ public sealed class SolutionPanels(
             state = live.State,
             status = live.Status,
             primarySite = live.PrimarySite,
+            sites = await SitesAsync(stored, manifest, ct),
             members = live.Members,
             triggers = live.Triggers,
             blocked = live.Blocked,
@@ -242,6 +243,22 @@ public sealed class SolutionPanels(
         if (found.Value is not { } site) return null;
 
         return new SolutionPrimarySite(site.Name, SiteService.EntryPath(site.Team, site.Name), site.LiveVersion is not null);
+    }
+
+    /// <summary>The sites the package publishes, in its order, each with its Open and whether it is
+    /// published. A site the team has since deleted is left out. A read: no control comes with it.</summary>
+    private async Task<IReadOnlyList<SolutionPrimarySite>> SitesAsync(string team, SolutionManifest? manifest, CancellationToken ct)
+    {
+        if (manifest is null) return [];
+
+        var list = new List<SolutionPrimarySite>();
+        foreach (var name in manifest.Sites)
+        {
+            if ((await sites.FindAsync(team, name, null, ct)).Value is not { } site) continue;
+            list.Add(new SolutionPrimarySite(site.Name, SiteService.EntryPath(site.Team, site.Name), site.LiveVersion is not null));
+        }
+
+        return list;
     }
 
     private SolutionBlocked BlockedOf(string team, TeamSolutionRow row, SolutionMissing missing)
@@ -391,8 +408,8 @@ public sealed class SolutionPanels(
 /// <summary>A solution's state badge: running, idle, blocked (with why), paused, or capped today (with which).</summary>
 public sealed record SolutionState(string Kind, string? Reason);
 
-/// <summary>The package's primary site: the tile's Open. <paramref name="Published"/> false while it
-/// is unpublished, when Open would find nothing.</summary>
+/// <summary>The package's primary site, the tile's Open; also each of the panel's sites. <paramref
+/// name="Published"/> false while it is unpublished, when Open would find nothing.</summary>
 public sealed record SolutionPrimarySite(string Name, string Url, bool Published);
 
 /// <summary>One launcher tile.</summary>

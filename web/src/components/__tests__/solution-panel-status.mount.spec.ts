@@ -4,6 +4,8 @@
 // next fires, what the team is blocked on with the fix inline - an upload box into the missing folder,
 // a connection picker that binds the slot through the member's own settings route - and today's
 // MEASURED spend against each cap, unmeasured runs counted as such. Package text stays text.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QFile, QSelect } from 'quasar';
 
@@ -11,7 +13,7 @@ import SolutionPanel from '../SolutionPanel.vue';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { settle } from '../../test/formProbe';
 import { fakeHost, reply, sent, type Call, type Route } from '../../test/solutionFixtures';
-import { HtmlLooking, panelRead, panelRoutes } from '../../test/solutionPanelFixtures';
+import { HtmlLooking, panelRead, panelRoutes, panelTrigger } from '../../test/solutionPanelFixtures';
 import type { SolutionPanel as PanelShape } from '../../api/types';
 
 let calls: Call[] = [];
@@ -161,6 +163,93 @@ describe('the control panel: Status', () => {
     expect(bodyFind('[data-panel-description]')?.textContent).toBe('<b>bold</b>');
     expect(bodyFind('[data-solution-panel] img')).toBeNull();
     expect(bodyFind('[data-panel-description] b')).toBeNull();
+  });
+
+  it('lays members, triggers and sites out as tiles on the shared grid, one per item', async () => {
+    read = panelRead({
+      sites: [
+        { name: 'tracker', url: '/sites/job-tracker/tracker/', published: true },
+        { name: 'admin', url: '/sites/job-tracker/admin/', published: false },
+      ],
+    });
+    await panel();
+
+    const tilesOf = (grid: string) => {
+      const el = bodyFind(grid)!;
+      expect(el.classList).toContain('os-tiles');
+      return [...el.children].map((child) => {
+        expect(child.classList).toContain('os-tile');
+        return child;
+      });
+    };
+    expect(tilesOf('[data-panel-members]').map((el) => el.getAttribute('data-member'))).toEqual(['Manager', 'scout']);
+    expect(tilesOf('[data-panel-schedules]').map((el) => el.getAttribute('data-trigger'))).toEqual(['trg_scan', 'trg_apply']);
+    expect(tilesOf('.solution-site-tiles').map((el) => el.getAttribute('data-panel-site'))).toEqual(['tracker', 'admin']);
+    expect(bodyFind('[data-member="Manager"] .os-tile-head')?.textContent).toContain('Manager');
+
+    // Each grid caps its least column width at its own, so a phone gets one column that fits.
+    const source = readFileSync(join(import.meta.dirname, '../SolutionPanel.vue'), 'utf8');
+    for (const grid of ['solution-member-tiles', 'solution-trigger-tiles', 'solution-site-tiles']) {
+      expect(new RegExp(`\\.${grid}[^{]*\\{[^}]*--os-tile-min:\\s*min\\(\\d+rem, 100%\\)`).test(source), grid).toBe(true);
+    }
+  });
+
+  it('keeps a trigger tile on Status to its name, member, next fire and spend: no instruction, no Details', async () => {
+    const tail = 'A SENTENCE ONLY THE INSTRUCTION HAS.';
+    read = panelRead({
+      triggers: [panelTrigger({ id: 'trg_scan', packageName: 'Scan for postings', packageKind: 'schedule', instruction: `Scan the boards.\n${tail}` })],
+    });
+    await panel();
+
+    const tile = bodyFind('[data-trigger="trg_scan"]')!;
+    expect(tile.textContent).toContain('Scan for postings');
+    expect(tile.textContent).not.toContain('Scan the boards.');
+    expect(tile.textContent).not.toContain(tail);
+    expect(tile.querySelector('[data-trigger-instruction]')).toBeNull();
+    expect(tile.querySelector('[data-trigger-details]')).toBeNull();
+  });
+
+  it("opens a published site in a new tab, and disables Open for an unpublished one", async () => {
+    read = panelRead({
+      sites: [
+        { name: 'tracker', url: '/sites/job-tracker/tracker/', published: true },
+        { name: 'admin', url: '/sites/job-tracker/admin/', published: false },
+      ],
+    });
+    await panel();
+
+    const published = bodyFind('[data-panel-site="tracker"]')!;
+    const open = published.querySelector<HTMLAnchorElement>('a[data-site-open]')!;
+    expect(open.getAttribute('href')).toBe('/sites/job-tracker/tracker/');
+    expect(open.getAttribute('target')).toBe('_blank');
+    expect(open.getAttribute('rel')).toContain('noopener');
+    expect(published.querySelector('[data-site-published]')?.textContent).toBe('Published');
+
+    const unpublished = bodyFind('[data-panel-site="admin"]')!;
+    const closed = unpublished.querySelector('[data-site-open]')!;
+    expect(closed.getAttribute('href')).toBeNull();
+    expect(closed.classList.contains('disabled') || closed.hasAttribute('disabled') || closed.getAttribute('aria-disabled') === 'true').toBe(true);
+    expect(unpublished.querySelector('[data-site-published]')?.textContent).toBe('Not published');
+  });
+
+  it('shows no Sites heading and no grid for a package with no sites', async () => {
+    read = panelRead({ sites: [] });
+    await panel();
+
+    expect(bodyFind('[data-panel-site]')).toBeNull();
+    expect(bodyFind('.solution-site-tiles')).toBeNull();
+    const headings = [...document.body.querySelectorAll('.solution-heading')].map((el) => el.textContent?.trim());
+    expect(headings).not.toContain('Sites');
+  });
+
+  it('keeps the member state and spend lines to their own words: any label sits outside them', async () => {
+    await panel();
+
+    const state = bodyFind('[data-member="scout"] [data-member-state]')!;
+    expect(state.textContent).toBe('idle');
+    expect(state.children).toHaveLength(0);
+    const spend = bodyFind('[data-trigger="trg_apply"] [data-spend]')!;
+    expect(spend.textContent?.trim()).toBe('spent today 0 tokens (no cap)');
   });
 
   it("says the Host's sentence for a team not installed from a package", async () => {

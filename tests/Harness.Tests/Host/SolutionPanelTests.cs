@@ -190,6 +190,27 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
     }
 
     [Fact]
+    public async Task The_panel_lists_the_package_sites_with_their_address_and_whether_each_is_published()
+    {
+        var team = await InstallAsync(Package(), "Sites");
+        using var person = await host.PersonAsync();
+
+        var site = Assert.Single((await JsonAsync(await person.GetAsync($"/api/teams/{team}/solution/panel", Ct)))
+            .GetProperty("sites").EnumerateArray());
+        Assert.Equal("tracker", site.GetProperty("name").GetString());
+        Assert.Equal($"/sites/{Uri.EscapeDataString(team)}/tracker/", site.GetProperty("url").GetString());
+        Assert.True(site.GetProperty("published").GetBoolean());
+
+        // Unpublished, it stays listed with the same address, and says so.
+        await Get<SiteService>().UnpublishAsync(team, "tracker", SiteActor.Person("person-id", "person@example.test"), Ct);
+        var after = Assert.Single((await JsonAsync(await person.GetAsync($"/api/teams/{team}/solution/panel", Ct)))
+            .GetProperty("sites").EnumerateArray());
+        Assert.Equal(("tracker", $"/sites/{Uri.EscapeDataString(team)}/tracker/"),
+            (after.GetProperty("name").GetString(), after.GetProperty("url").GetString()));
+        Assert.False(after.GetProperty("published").GetBoolean());
+    }
+
+    [Fact]
     public async Task A_trigger_cap_changed_through_its_existing_route_shows_at_once()
     {
         var team = await InstallAsync(Package(), "Cap");

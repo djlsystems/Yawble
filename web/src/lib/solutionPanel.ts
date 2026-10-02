@@ -1,4 +1,14 @@
-import type { SolutionPanelMember, SolutionPanelRun, SolutionPanelTrigger, SolutionState } from '../api/types';
+import type {
+  InstalledSolution,
+  SolutionPanelMember,
+  SolutionPanelRun,
+  SolutionPanelTrigger,
+  SolutionState,
+  SolutionStateKind,
+} from '../api/types';
+import { filterWords, matchesWords } from './filterWords';
+import { capWords } from './solutions';
+import { triggerSentence } from './triggers';
 
 /**
  * THE WORDS OF THE SOLUTIONS LAUNCHER AND CONTROL PANEL, kept out of the components so each can be
@@ -116,3 +126,70 @@ export const runKeys = (runs: readonly Pick<SolutionPanelRun, 'member' | 'seq'>[
 /** True once `runs` holds a run that is not in `seen`. */
 export const hasNewRun = (seen: ReadonlySet<string>, runs: readonly Pick<SolutionPanelRun, 'member' | 'seq'>[]) =>
   runs.some((run) => !seen.has(`${run.member}/${run.seq}`));
+
+// --- The launcher's filter ------------------------------------------------------------------------
+
+/** What the launcher's filter holds: free words, one team (or all), one state (or all). */
+export interface SolutionFilter {
+  text: string | null;
+  team: string | null;
+  state: SolutionStateKind | null;
+}
+
+/**
+ * Whether a tile is shown: every word found in its name, package id, version, team name or status
+ * line, and its team and state the chosen ones when chosen. It only decides what is shown; the rows
+ * themselves are never changed.
+ */
+export function solutionMatches(row: InstalledSolution, filter: SolutionFilter): boolean {
+  if (filter.team && row.team !== filter.team) return false;
+  if (filter.state && row.state?.kind !== filter.state) return false;
+  return matchesWords(filterWords(filter.text), row.name, row.id, row.version, row.teamName, row.status);
+}
+
+/** The Team choices: each team that has a tile, by its name. */
+export function teamChoices(rows: readonly InstalledSolution[]): { label: string; value: string }[] {
+  return rows
+    .map((row) => ({ label: row.teamName, value: row.team }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** The State choices: only the states some tile is in, in the badge's order, each in the badge's words. */
+export function stateChoices(rows: readonly InstalledSolution[]): { label: string; value: SolutionStateKind }[] {
+  const order: SolutionStateKind[] = ['running', 'idle', 'blocked', 'paused', 'capped'];
+  const present = new Set(rows.map((row) => row.state?.kind).filter((kind) => kind !== undefined));
+  return order
+    .filter((kind) => present.has(kind))
+    .map((kind) => ({ label: stateBadge({ kind, reason: null })!.text, value: kind }));
+}
+
+// --- A trigger's Details ----------------------------------------------------------------------------
+
+/** What a trigger's tile shows of its instruction: the text before the first line break, unchanged. */
+export function instructionFirstLine(instruction: string | null | undefined): string {
+  const text = instruction ?? '';
+  const end = text.search(/\r?\n/);
+  return end < 0 ? text : text.slice(0, end);
+}
+
+export interface TriggerFact {
+  label: string;
+  value: string;
+}
+
+/**
+ * The facts a trigger's Details lists under its whole instruction, each a label and its text: what
+ * fires it, its event filter as written, its timezone, on or off, its daily cap, when it last fired and how that went, and how
+ * many fires it missed.
+ */
+export function triggerFacts(trigger: SolutionPanelTrigger, now = new Date()): TriggerFact[] {
+  const facts: TriggerFact[] = [{ label: 'Fires', value: triggerSentence(trigger) }];
+  if (trigger.filter) facts.push({ label: 'Filter', value: trigger.filter });
+  if (trigger.timezone) facts.push({ label: 'Timezone', value: trigger.timezone });
+  facts.push({ label: 'On', value: trigger.enabled ? 'Yes' : 'No, it is off' });
+  facts.push({ label: 'Daily cap', value: capWords(trigger.dailyTokenCap ?? null) });
+  facts.push({ label: 'Last fired', value: trigger.lastFiredAt ? whenWords(trigger.lastFiredAt, now) : 'Never' });
+  if (trigger.lastOutcome) facts.push({ label: 'Last outcome', value: trigger.lastOutcome });
+  if (trigger.missedCount > 0) facts.push({ label: 'Missed', value: `${trigger.missedCount}` });
+  return facts;
+}

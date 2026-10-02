@@ -3,13 +3,15 @@
 // THE CONTROL PANEL'S CONTROLS SECTION, each through an EXISTING route: pause and resume the
 // team, Run now per schedule (and only a schedule), each trigger's on/off and daily cap, the settings
 // the package lists first, "All settings" with the person-only ones, and the connection bindings.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SolutionPanel from '../SolutionPanel.vue';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { settle } from '../../test/formProbe';
 import { fakeHost, reply, sent, type Call, type Route } from '../../test/solutionFixtures';
-import { openSection, panelRead, panelRoutes } from '../../test/solutionPanelFixtures';
+import { HtmlLooking, openSection, panelRead, panelRoutes, panelTrigger } from '../../test/solutionPanelFixtures';
 import type { SolutionPanel as PanelShape } from '../../api/types';
 
 // The re-read after Run now waits a few milliseconds here instead of seconds, and gives up sooner.
@@ -248,6 +250,78 @@ describe('the control panel: Controls', () => {
     expect(slots.textContent).toContain('Scout');
     expect(slots.querySelector('.q-select')).not.toBeNull();
     expect(slots.querySelector('[data-setting]')).toBeNull();
+  });
+
+  it('lays the triggers out as tiles on the shared grid, each control inside its own tile', async () => {
+    await controls();
+
+    const grid = bodyFind('[data-control-triggers]')!;
+    expect(grid.classList).toContain('os-tiles');
+    expect([...grid.children].map((el) => el.getAttribute('data-control-trigger'))).toEqual(['trg_scan', 'trg_apply']);
+    for (const el of grid.children) expect(el.classList).toContain('os-tile');
+
+    const scan = bodyFind('[data-control-trigger="trg_scan"]')!;
+    for (const control of ['[data-trigger-enabled]', 'input[data-trigger-cap]', '[data-trigger-cap-save]', '[data-run-now]', '[data-trigger-details]']) {
+      const el = scan.querySelector(control);
+      expect(el, control).not.toBeNull();
+      expect(el!.closest('[data-control-trigger]')).toBe(scan);
+    }
+
+    const source = readFileSync(join(import.meta.dirname, '../SolutionPanel.vue'), 'utf8');
+    expect(/\.solution-trigger-tiles[^{]*\{[^}]*--os-tile-min:\s*min\(\d+rem, 100%\)/.test(source)).toBe(true);
+  });
+
+  it("shows a long instruction's first line on its tile, and the whole of it in Details", async () => {
+    const tail = 'A SENTENCE ONLY DETAILS SHOWS.';
+    const instruction = `Scan the job boards for new postings.\n${tail}`;
+    read = panelRead({
+      triggers: [panelTrigger({ id: 'trg_scan', packageName: 'Scan for postings', packageKind: 'schedule', instruction, runNow: true, filter: 'payload.kind == "apply"' })],
+    });
+    await controls();
+
+    const line = bodyFind('[data-control-trigger="trg_scan"] [data-trigger-instruction]')!;
+    expect(line.textContent).toBe('Scan the job boards for new postings.');
+    expect(bodyFind('[data-control-trigger="trg_scan"]')!.textContent).not.toContain(tail);
+
+    await click('[data-control-trigger="trg_scan"] [data-trigger-details]');
+    const details = bodyFind('[data-trigger-details-dialog]')!;
+    expect(details.classList).toContain('os-dialog-md');
+    expect(details.querySelector('[data-trigger-details-instruction]')?.textContent).toBe(instruction);
+    expect(details.querySelector('[data-trigger-fact="Filter"]')?.textContent).toBe('payload.kind == "apply"');
+    expect(details.querySelector('[data-trigger-fact="Fires"]')).not.toBeNull();
+  });
+
+  it('clips a long one-line instruction on the tile with CSS, and keeps newlines in Details', async () => {
+    const long = 'Read every posting on the board and '.repeat(12).trim();
+    read = panelRead({
+      triggers: [panelTrigger({ id: 'trg_scan', packageName: 'Scan for postings', packageKind: 'schedule', instruction: long })],
+    });
+    await controls();
+
+    const line = bodyFind('[data-control-trigger="trg_scan"] [data-trigger-instruction]')!;
+    // The string is never cut: the clip is the stylesheet's.
+    expect(line.textContent).toBe(long);
+    expect(line.classList).toContain('solution-trigger-instruction');
+
+    const source = readFileSync(join(import.meta.dirname, '../SolutionPanel.vue'), 'utf8');
+    const rule = (selector: string) => new RegExp(`\\${selector}\\s*\\{[^}]*\\}`).exec(source)?.[0] ?? '';
+    expect(rule('.solution-trigger-instruction')).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(rule('.solution-trigger-instruction')).toMatch(/(^|[^-])line-clamp:\s*2/m);
+    expect(rule('.solution-trigger-instruction')).toMatch(/overflow:\s*hidden/);
+    expect(rule('.solution-trigger-instruction-whole')).toMatch(/white-space:\s*pre-wrap/);
+  });
+
+  it("renders an instruction that looks like HTML as its characters in Details", async () => {
+    read = panelRead({
+      triggers: [panelTrigger({ id: 'trg_scan', packageName: 'Scan for postings', packageKind: 'schedule', instruction: HtmlLooking })],
+    });
+    await controls();
+    await click('[data-control-trigger="trg_scan"] [data-trigger-details]');
+
+    const details = bodyFind('[data-trigger-details-dialog]')!;
+    expect(details.querySelector('[data-trigger-details-instruction]')?.textContent).toBe(HtmlLooking);
+    expect(details.querySelector('img')).toBeNull();
+    expect(details.querySelector('b')).toBeNull();
   });
 
   it('says a refused control in its own words', async () => {
