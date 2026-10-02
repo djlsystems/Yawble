@@ -1,5 +1,6 @@
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Host.Capacity;
 using Harness.Tests.Host;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -22,6 +23,7 @@ public sealed class RunWorkerCompositionTests(HostFixture host) : IClassFixture<
             ["runner"] = Runner(),
             ["leases"] = host.Services.GetRequiredService<LeaseActions>(),
             ["reports"] = Assert.IsType<MemberReports>(host.Services.GetRequiredService<IMemberReports>()),
+            ["capacity"] = host.Services.GetRequiredService<CapacitySampler>(),
         };
 
         Assert.All(clients, client => Assert.Same(worker, client.Value.Worker));

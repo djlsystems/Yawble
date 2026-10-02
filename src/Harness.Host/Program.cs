@@ -734,12 +734,24 @@ builder.Services.AddSingleton(sp => InProcessWorker.Create(
     tenantSettings.RunMemoryLimit,
     tenantSettings.RunMemoryCeiling,
     tenantSettings.HeavyRunMemoryLimit,
-    sp.GetRequiredService<RunDirectory>().HandleAsync,
+    async (envelope, ct) =>
+    {
+        await sp.GetRequiredService<RunDirectory>().HandleAsync(envelope, ct);
+        if (envelope.Event is RunMeasured or WorkerCapacitySampled)
+        {
+            await sp.GetRequiredService<CapacitySampler>().HandleAsync(envelope, ct);
+        }
+    },
     sp.GetRequiredService<ILogger<ProcessAgentRunner>>(),
     sp.GetRequiredService<ILogger<RunAllowances>>(),
     builder.Configuration["Capacity:CgroupRoot"],
     builder.Configuration["Capacity:ProcRoot"]));
-builder.Services.AddSingleton<IRunWorker>(sp => sp.GetRequiredService<InProcessWorker>().Worker);
+builder.Services.AddSingleton<IRunWorker>(sp =>
+{
+    var worker = sp.GetRequiredService<InProcessWorker>().Worker;
+    sp.GetRequiredService<WorkerPool>().Connect(worker);
+    return worker;
+});
 builder.Services.AddSingleton(sp => sp.GetRequiredService<InProcessWorker>().Memory!);
 builder.Services.AddSingleton(sp => sp.GetRequiredService<InProcessWorker>().Allowances!);
 // Member TMPDIRs on the data volume, never a /tmp the engine may hold in memory (MemberTemp).
@@ -752,7 +764,8 @@ builder.Services.AddSingleton(sp => new ProcessAgentRunner(
     sp.GetRequiredService<RunDirectory>(),
     sp.GetRequiredService<InProcessWorker>().Host.Launcher,
     () => ProcessAgentRunner.Allowance((tenantSettings.RunMemoryLimit(), tenantSettings.RunMemoryCeiling())),
-    sp.GetRequiredService<MemberTempRoot>().Path));
+    sp.GetRequiredService<MemberTempRoot>().Path,
+    member => sp.GetRequiredService<WorkerPool>().Worker(sp.GetRequiredService<WipLedger>().PlacedOn(member))));
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
     sp.GetRequiredService<IPrincipalStore>(),
@@ -836,20 +849,25 @@ var workflowSpendLimit = tenantSettings.WorkflowSpendLimit;
 // pressure is over its `admission.*` threshold, read through delegates from the capacity sampler's
 // last measurement (`HeadroomGate`). Not measured falls back to the limit alone. The cgroup and proc
 // roots are configuration so a test Host reads a fixture, never the machine it runs on.
+//
+// AND A WORKER: admission places each run on a worker with room, and the headroom it reads is that
+// worker's, fed by its own capacity samples. One worker today, the Host's own (WorkerPool).
 var headroom = new HeadroomGate(
     () => tenantSettings.AdmissionMemoryPercent, () => tenantSettings.AdmissionMemoryPressurePercent);
-var wip = new WipLedger(tenantSettings.WipMaxRunning, headroom.Reason);
+var workers = new WorkerPool([(WorkerId.Local, headroom)]);
+var wip = new WipLedger(tenantSettings.WipMaxRunning, workers);
 builder.Services.AddSingleton(headroom);
+builder.Services.AddSingleton(workers);
 
 // The `heavy` lease's holders and queue, read from the instance's leases on every sample; the
 // capacity sample and its push carry them.
 builder.Services.AddSingleton<IHeavyLeaseView>(sp => new HeavyLeaseFromLeases(sp.GetRequiredService<ILeaseState>()));
+// The worker measures - its cgroup and each run's process group, on SampleCapacity - and this
+// sampler composes the sample from what it says.
 builder.Services.AddSingleton(sp => new CapacitySampler(
-    new CgroupReader(builder.Configuration["Capacity:CgroupRoot"] ?? CgroupReader.DefaultRoot),
-    new ProcessGroupReader(builder.Configuration["Capacity:ProcRoot"] ?? "/proc"),
-    RunProcessGroups.Shared,
+    sp.GetRequiredService<IRunWorker>(),
     wip,
-    headroom,
+    workers.Gate(WorkerId.Local),
     sp.GetRequiredService<IHeavyLeaseView>(),
     () => tenantSettings.AdmissionMemoryPercent,
     () => tenantSettings.AdmissionMemoryPressurePercent,

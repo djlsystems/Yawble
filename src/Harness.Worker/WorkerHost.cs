@@ -202,7 +202,9 @@ public sealed class WorkerHost
         await _publish.WaitAsync(ct);
         try
         {
+            // The cgroup first, then the process groups: the order the capacity sample always read them in.
             var at = _clock.GetUtcNow();
+            var cgroup = _cgroup?.Read() ?? WorkerCapacity.NotMeasured;
             Dictionary<ContainerId, RunId> byMember;
             lock (_runsGate) byMember = _runs.Keys.GroupBy(r => r.Member).ToDictionary(g => g.Key, g => g.First());
             IReadOnlyList<RunId> open = [.. byMember.Values];
@@ -221,7 +223,6 @@ public sealed class WorkerHost
                 }
             }
 
-            var cgroup = _cgroup?.Read() ?? WorkerCapacity.NotMeasured;
             await DeliverLockedAsync(new WorkerCapacitySampled(at, WorkerCapacity.ToFigures(cgroup), open));
         }
         finally

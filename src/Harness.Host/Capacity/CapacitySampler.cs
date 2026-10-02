@@ -1,4 +1,5 @@
 using Harness.Containers;
+using Harness.Contracts;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -9,28 +10,98 @@ namespace Harness.Host.Capacity;
 /// the admission gate, and pushes each sample to the people watching.
 ///
 /// <para>
-/// One sample is the container's cgroup (<see cref="CgroupReader"/>), every registered run's process
-/// group (<see cref="ProcessGroupReader"/> over <see cref="RunProcessGroups"/>), the run limit's view
-/// (<see cref="WipLedger"/>) and the <c>heavy</c> lease (<see cref="IHeavyLeaseView"/>). Rates (CPUs in
-/// use, a run's CPU share) are the difference between two measurements and are null on the first.
-/// The history lives in memory only; a restart starts it again.
+/// One sample is the worker's own: its cgroup and every registered run's process group, measured on
+/// the worker when it is sent <see cref="SampleCapacity"/> and reported as
+/// <see cref="RunMeasured"/> and <see cref="WorkerCapacitySampled"/>. To that this adds the run
+/// limit's view (<see cref="WipLedger"/>) and the <c>heavy</c> lease (<see cref="IHeavyLeaseView"/>).
+/// Rates (CPUs in use, a run's CPU share) are the difference between two measurements and are null
+/// on the first. The history lives in memory only; a restart starts it again.
 /// </para>
 /// </summary>
-public sealed class CapacitySampler(
-    CgroupReader cgroup,
-    ProcessGroupReader processes,
-    RunProcessGroups groups,
-    WipLedger wip,
-    HeadroomGate gate,
-    IHeavyLeaseView lease,
-    Func<int> memoryPercent,
-    Func<int> pressurePercent,
-    Func<CapacitySample, Task>? push = null,
-    ILogger<CapacitySampler>? logger = null,
-    TimeProvider? clock = null,
-    TimeSpan? interval = null,
-    int ticksPerSecond = 100) : BackgroundService
+public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
 {
+    private readonly IRunWorker worker;
+    private readonly WipLedger wip;
+    private readonly HeadroomGate gate;
+    private readonly IHeavyLeaseView lease;
+    private readonly Func<int> memoryPercent;
+    private readonly Func<int> pressurePercent;
+    private readonly Func<CapacitySample, Task>? push;
+    private readonly ILogger<CapacitySampler>? logger;
+    private readonly int ticksPerSecond;
+
+    /// <summary>
+    /// The Host's: <paramref name="worker"/> measures, and <paramref name="gate"/> is that worker's
+    /// headroom. The worker's events reach this through <see cref="HandleAsync"/>.
+    /// </summary>
+    public CapacitySampler(
+        IRunWorker worker,
+        WipLedger wip,
+        HeadroomGate gate,
+        IHeavyLeaseView lease,
+        Func<int> memoryPercent,
+        Func<int> pressurePercent,
+        Func<CapacitySample, Task>? push = null,
+        ILogger<CapacitySampler>? logger = null,
+        TimeProvider? clock = null,
+        TimeSpan? interval = null,
+        int ticksPerSecond = 100)
+    {
+        this.worker = worker;
+        this.wip = wip;
+        this.gate = gate;
+        this.lease = lease;
+        this.memoryPercent = memoryPercent;
+        this.pressurePercent = pressurePercent;
+        this.push = push;
+        this.logger = logger;
+        this.ticksPerSecond = ticksPerSecond;
+        _clock = clock ?? TimeProvider.System;
+        Interval = interval ?? DefaultInterval;
+    }
+
+    /// <summary>
+    /// Over a worker of its own, in this process, that measures with <paramref name="cgroup"/> and
+    /// <paramref name="processes"/> over <paramref name="groups"/>: the sample crosses the protocol
+    /// all the same.
+    /// </summary>
+    public CapacitySampler(
+        CgroupReader cgroup,
+        ProcessGroupReader processes,
+        RunProcessGroups groups,
+        WipLedger wip,
+        HeadroomGate gate,
+        IHeavyLeaseView lease,
+        Func<int> memoryPercent,
+        Func<int> pressurePercent,
+        Func<CapacitySample, Task>? push = null,
+        ILogger<CapacitySampler>? logger = null,
+        TimeProvider? clock = null,
+        TimeSpan? interval = null,
+        int ticksPerSecond = 100)
+    {
+        var heartbeat = new RunHeartbeat();
+        this.worker = InProcessWorker.Connect(
+            WorkerId.Local,
+            events => new WorkerHost(
+                WorkerId.Local, events, new RunLauncher(heartbeat), heartbeat, cgroup: cgroup, processes: processes, groups: groups,
+                clock: clock),
+            HandleAsync).Worker;
+        this.wip = wip;
+        this.gate = gate;
+        this.lease = lease;
+        this.memoryPercent = memoryPercent;
+        this.pressurePercent = pressurePercent;
+        this.push = push;
+        this.logger = logger;
+        this.ticksPerSecond = ticksPerSecond;
+        _clock = clock ?? TimeProvider.System;
+        Interval = interval ?? DefaultInterval;
+    }
+
+    /// <summary>The worker this samples.</summary>
+    public IRunWorker Worker => worker;
+
     /// <summary>How often a sample is taken.</summary>
     public static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(5);
 
@@ -40,12 +111,15 @@ public sealed class CapacitySampler(
     /// <summary>How many runs each top list names.</summary>
     public const int TopRuns = 5;
 
-    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    private readonly TimeProvider _clock;
     private readonly object _gate = new();
+    private readonly object _sampling = new();
+    private readonly List<RunMeasured> _measured = [];
+    private WorkerCapacitySampled? _sampled;
     private readonly Queue<CapacitySample> _history = new();
     private Previous? _previous;
 
-    public TimeSpan Interval { get; } = interval ?? DefaultInterval;
+    public TimeSpan Interval { get; }
 
     /// <summary>The newest sample, or null before the first.</summary>
     public CapacitySample? Latest
@@ -63,12 +137,48 @@ public sealed class CapacitySampler(
     }
 
     /// <summary>Takes one sample now, keeps it, hands it to the gate and the ledger, and returns it.</summary>
+    /// <summary>What the worker measured for the sample in progress.</summary>
+    public Task HandleAsync(WorkerEnvelope envelope, CancellationToken ct = default)
+    {
+        lock (_measured)
+        {
+            if (envelope.Event is RunMeasured measured) _measured.Add(measured);
+            else if (envelope.Event is WorkerCapacitySampled sampled) _sampled = sampled;
+        }
+
+        return Task.CompletedTask;
+    }
+
     public CapacitySample Sample()
     {
+        lock (_sampling)
+        {
+            return SampleLocked();
+        }
+    }
+
+    private CapacitySample SampleLocked()
+    {
         var at = _clock.GetUtcNow();
-        var figures = cgroup.Read();
-        var registered = groups.Snapshot();
-        var runFigures = processes.Read(registered.Keys.ToArray());
+
+        IReadOnlyList<RunMeasured> measuredRuns;
+        WorkerCapacitySampled sampled;
+        lock (_measured)
+        {
+            _measured.Clear();
+            _sampled = null;
+        }
+
+        // In process the worker has measured, and said so, by the time the send completes.
+        worker.SendAsync(new SampleCapacity()).GetAwaiter().GetResult();
+
+        lock (_measured)
+        {
+            measuredRuns = [.. _measured];
+            sampled = _sampled ?? throw new InvalidOperationException($"Worker {worker.Id} sent no capacity sample.");
+        }
+
+        var figures = WorkerCapacity.ToCgroup(sampled.Figures);
         var view = wip.View();
 
         // The gate answers from this measurement from here on; the sample says what it answers.
@@ -88,9 +198,10 @@ public sealed class CapacitySampler(
 
             var runs = new List<RunFigures>();
             var ticks = new Dictionary<int, long>();
-            foreach (var (group, run) in registered)
+            foreach (var measured in measuredRuns)
             {
-                if (runFigures.GetValueOrDefault(group) is not { } measured) continue;
+                var group = measured.Group;
+                var run = measured.Run.Member;
 
                 ticks[group] = measured.CpuTicks;
                 double? cpuPercent = previous is not null && seconds > 0

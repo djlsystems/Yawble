@@ -45,6 +45,15 @@ public sealed record WipView(int Max, IReadOnlyList<WipHold> Running, IReadOnlyL
 /// </para>
 ///
 /// <para>
+/// <b>AND A WORKER.</b> An admitted run is placed on the first worker (<see cref="IRunPlacement"/>)
+/// whose headroom has no reason to hold it, and <see cref="PlacedOn"/> says which until its slot is
+/// released. The gate above is per worker: a run waits with the first worker's reason only when none
+/// has room. A Manager goes on the first worker unchecked. There is one worker today, the Host's own,
+/// so this decides nothing new; the run limit, the reserved slot, the queue and the reasons stay
+/// instance-wide here.
+/// </para>
+///
+/// <para>
 /// <b>THE LIMIT IS SETTABLE AT RUNTIME</b> (<see cref="SetMax"/>, from <c>wip.maxRunning</c>). Lowering
 /// it below the running count evicts nothing: running work finishes, and the next start waits until
 /// the count is back under the new limit.
@@ -64,7 +73,8 @@ public sealed class WipLedger
     private readonly Dictionary<string, WipHold> _waiting = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _queue = [];
     private readonly HashSet<string> _heldForHeadroom = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Func<string?>? _headroom;
+    private readonly Dictionary<string, WorkerId> _placed = new(StringComparer.OrdinalIgnoreCase);
+    private readonly IRunPlacement _placement;
     private int _max;
     private TaskCompletionSource _changed = NewSignal();
 
@@ -73,9 +83,18 @@ public sealed class WipLedger
     /// it waits. Read under the ledger's lock on every claim the limit would admit, so it must answer
     /// from figures already measured and never do I/O. Absent, only the run limit admits.</param>
     public WipLedger(int maxRunning, Func<string?>? headroom = null)
+        : this(maxRunning, new OneWorker(headroom))
+    {
+    }
+
+    /// <param name="maxRunning">The run limit; 0 or less is unlimited.</param>
+    /// <param name="placement">The workers a run may go on and each one's headroom, read under the
+    /// ledger's lock on every claim the limit would admit: answered from figures already measured,
+    /// never by I/O.</param>
+    public WipLedger(int maxRunning, IRunPlacement placement)
     {
         _max = maxRunning;
-        _headroom = headroom;
+        _placement = placement;
     }
 
     public int Max
@@ -141,9 +160,10 @@ public sealed class WipLedger
                 return null;
             }
 
-            // The limit has room: measured headroom decides, for members. Still a wait, never a
-            // refusal. A Manager skips it - it is the run that would free the memory.
-            if (!IsManager(id) && _headroom?.Invoke() is { } reason)
+            // The limit has room: a worker's measured headroom decides where, for members. Still a
+            // wait, never a refusal. A Manager skips it - it is the run that would free the memory.
+            var (worker, reason) = PlaceLocked(IsManager(id));
+            if (reason is not null)
             {
                 WaitLocked(id, key, reason, headroom: true);
                 return null;
@@ -151,6 +171,7 @@ public sealed class WipLedger
 
             RemoveWaiterLocked(key);
             _running[key] = new WipHold(id.Team, id.Name, DateTimeOffset.UtcNow);
+            if (worker is not null) _placed[key] = worker;
             return new Release(this, key);
         }
     }
@@ -165,7 +186,7 @@ public sealed class WipLedger
         {
             if (_heldForHeadroom.Count == 0) return;
 
-            if (_headroom?.Invoke() is not { } reason)
+            if (PlaceLocked(manager: false).Reason is not { } reason)
             {
                 _heldForHeadroom.Clear();
                 PulseLocked();
@@ -207,6 +228,30 @@ public sealed class WipLedger
     /// waiter take a slot first if one would be open to it, so a slot freed by a release belongs to
     /// the head and a later waiter asking first is still refused. A Manager's limit is one higher.
     /// </summary>
+    /// <summary>The worker a running member was placed on, or null when it holds no slot.</summary>
+    public WorkerId? PlacedOn(ContainerId id)
+    {
+        lock (_gate) return _placed.GetValueOrDefault(id.ToString());
+    }
+
+    /// <summary>
+    /// The first worker with room, or, when none has, the first worker's reason. A Manager takes the
+    /// first worker without asking.
+    /// </summary>
+    private (WorkerId? Worker, string? Reason) PlaceLocked(bool manager)
+    {
+        string? first = null;
+
+        foreach (var worker in _placement.Workers)
+        {
+            if (manager) return (worker, null);
+            if (_placement.HeadroomReason(worker) is not { } reason) return (worker, null);
+            first ??= reason;
+        }
+
+        return (null, first);
+    }
+
     private bool AdmitsLocked(string key, bool manager)
     {
         if (_max <= 0) return true;
@@ -264,8 +309,17 @@ public sealed class WipLedger
     {
         lock (_gate)
         {
+            _placed.Remove(key);
             if (_running.Remove(key)) PulseLocked();
         }
+    }
+
+    /// <summary>The Host's one worker, its headroom read through a delegate.</summary>
+    private sealed class OneWorker(Func<string?>? headroom) : IRunPlacement
+    {
+        public IReadOnlyList<WorkerId> Workers { get; } = [WorkerId.Local];
+
+        public string? HeadroomReason(WorkerId worker) => headroom?.Invoke();
     }
 
     private sealed class Release(WipLedger ledger, string key) : IDisposable
@@ -286,4 +340,15 @@ public sealed class WipLedger
         {
         }
     }
+}
+
+/// <summary>
+/// The workers a run may be placed on, in the order they are tried, and why each would hold a run
+/// now (null: it has room). Admission asks it; its answers come from each worker's capacity samples.
+/// </summary>
+public interface IRunPlacement
+{
+    IReadOnlyList<WorkerId> Workers { get; }
+
+    string? HeadroomReason(WorkerId worker);
 }

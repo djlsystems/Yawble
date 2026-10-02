@@ -30,6 +30,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     private readonly RunLauncher _launcher;
     private readonly Func<RunMemoryAllowance?> _memory;
     private readonly string? _tempRoot;
+    private readonly Func<ContainerId, IRunWorker>? _placedOn;
 
     public ProcessAgentRunner(
         AgentCatalog catalog,
@@ -63,7 +64,8 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// <summary>
     /// The Host's runner, over a worker it shares with the leases, the reports and the capacity sample.
     /// <paramref name="memory"/> is the settings' memory figures, read when each run's start is built;
-    /// <paramref name="tempRoot"/> is where members' temporary folders go.
+    /// <paramref name="tempRoot"/> is where members' temporary folders go. <paramref name="placedOn"/> is
+    /// the worker admission placed a member's run on; without it, every run goes to <paramref name="worker"/>.
     /// </summary>
     public ProcessAgentRunner(
         AgentCatalog catalog,
@@ -71,10 +73,12 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         RunDirectory directory,
         RunLauncher launcher,
         Func<RunMemoryAllowance?> memory,
-        string? tempRoot)
+        string? tempRoot,
+        Func<ContainerId, IRunWorker>? placedOn = null)
     {
         _catalog = catalog;
         _worker = worker;
+        _placedOn = placedOn;
         _directory = directory;
         _launcher = launcher;
         _memory = memory;
@@ -108,7 +112,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// `invocation.Agent`, which is read off the container's own definition on every wake.
     /// </summary>
     public Task<AgentResult> RunAsync(AgentInvocation invocation, CancellationToken ct = default) =>
-        _directory.RunAsync(_worker, Start(invocation), ct);
+        _directory.RunAsync(_placedOn?.Invoke(invocation.Container) ?? _worker, Start(invocation), ct);
 
     /// <summary>
     /// THE LAUNCH CHECK FOR ONE PRESET: its declared free invocation (<see cref="AgentDefinition.LaunchCheck"/>)
