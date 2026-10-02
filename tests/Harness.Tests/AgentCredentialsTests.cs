@@ -345,7 +345,9 @@ public sealed class AgentCredentialsTests : IAsyncLifetime
         var program = Path.Combine(bin, "claude");
         await TestExecutable.WriteAsync(program,
             "#!/bin/sh\n"
-            + $"env > '{Path.Combine(_outside, "seen.txt")}'\n"
+            // Only the run (`-p`) records: a launch check (`--version`) or sign-in probe the catalog change
+            // starts in the background must not overwrite what the run was handed.
+            + $"[ \"$1\" = -p ] && env > '{Path.Combine(_outside, "seen.txt")}'\n"
             + "echo \"key: $ANTHROPIC_API_KEY\"; echo \"key: $ANTHROPIC_API_KEY\" >&2\n");
 
         var catalog = Services.GetRequiredService<AgentCatalog>();
