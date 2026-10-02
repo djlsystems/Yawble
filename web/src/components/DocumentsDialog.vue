@@ -98,7 +98,7 @@ const props = defineProps<{
 const $q = useQuasar();
 const clipboard = useDocumentsClipboardStore();
 
-const phone = computed(() => !!$q.screen?.lt?.sm);
+const narrow = computed(() => !!$q.screen?.lt?.sm);
 const isMac = () => !!$q.platform?.is?.mac;
 
 // ---- where the person is ------------------------------------------------------------------
@@ -140,7 +140,7 @@ function sortBy(column: DocumentsSortColumn) {
 }
 
 function toggleTree() {
-  if (phone.value) {
+  if (narrow.value) {
     treeSlide.value = !treeSlide.value;
     return;
   }
@@ -178,7 +178,7 @@ function remember() {
   if (placed.value) writeDocumentsWindow({ ...placed.value, maximised: maximised.value });
 }
 
-const windowed = computed(() => !phone.value && !maximised.value);
+const windowed = computed(() => !narrow.value && !maximised.value);
 
 const frame = useWindowFrame({
   geometry: () => placed.value,
@@ -845,7 +845,7 @@ const band = ref<{ x: number; y: number; left: number; top: number; width: numbe
 let bandStart: { x: number; y: number; additive: boolean; before: string[] } | null = null;
 
 function onPanePointerDown(event: PointerEvent) {
-  if (event.button !== 0 || phone.value) return;
+  if (event.button !== 0 || narrow.value) return;
   if ((event.target as Element | null)?.closest?.('[data-key], button, input, th')) return;
 
   bandStart = { x: event.clientX, y: event.clientY, additive: event.ctrlKey || event.metaKey, before: selection.value.keys };
@@ -996,7 +996,7 @@ const viewProps = computed(() => ({
   focus: selection.value.focus,
   renaming: renaming.value,
   renameError: renameError.value,
-  phone: phone.value,
+  narrow: narrow.value,
   atRoot: atRoot.value,
   sort: sort.value,
 }));
@@ -1037,7 +1037,7 @@ onBeforeUnmount(() => drag.end());
 </script>
 
 <template>
-  <q-dialog v-model="open" :maximized="phone || maximised" no-esc-dismiss>
+  <q-dialog v-model="open" :maximized="narrow || maximised" no-esc-dismiss>
     <q-card
       class="documents-window os-dialog-lg column no-wrap"
       :class="{ 'documents-window-placed': windowed && placed !== null, 'documents-window-full': !windowed }"
@@ -1053,7 +1053,7 @@ onBeforeUnmount(() => drag.end());
         <q-btn flat dense round size="sm" icon="arrow_upward" aria-label="Up" :disable="atRoot" @click="goUp" />
         <DocumentsBreadcrumb class="col q-mx-xs" :crumbs="crumbs" @go="goCrumb" />
         <q-btn-toggle
-          v-if="!phone"
+          v-if="!narrow"
           :model-value="view"
           flat
           dense
@@ -1063,7 +1063,7 @@ onBeforeUnmount(() => drag.end());
           @update:model-value="setView"
         />
         <q-btn
-          v-if="!phone"
+          v-if="!narrow"
           flat
           dense
           round
@@ -1076,7 +1076,7 @@ onBeforeUnmount(() => drag.end());
       </div>
 
       <!-- At phone width, with something selected, the selection bar replaces the toolbar. -->
-      <div v-if="phone && selectedItems.length > 0" class="documents-toolbar documents-selection-bar row items-center no-wrap q-px-sm">
+      <div v-if="narrow && selectedItems.length > 0" class="documents-toolbar documents-selection-bar row items-center no-wrap q-px-sm">
         <span class="text-caption q-mr-sm">{{ selectedItems.length }} selected</span>
         <q-btn
           v-for="button in selectionBar"
@@ -1106,7 +1106,7 @@ onBeforeUnmount(() => drag.end());
       </div>
 
       <div v-else class="documents-toolbar row items-center no-wrap q-px-sm">
-        <q-btn flat dense round size="sm" :icon="phone ? 'account_tree' : tree.open ? 'left_panel_close' : 'left_panel_open'" aria-label="Folders" data-action="tree" @click="toggleTree" />
+        <q-btn flat dense round size="sm" :icon="narrow ? 'account_tree' : tree.open ? 'left_panel_close' : 'left_panel_open'" aria-label="Folders" data-action="tree" @click="toggleTree" />
         <q-separator vertical class="q-mx-xs" />
         <template v-for="button in toolbar" :key="button.action">
           <q-btn
@@ -1125,7 +1125,7 @@ onBeforeUnmount(() => drag.end());
         </template>
         <q-space />
         <q-btn-toggle
-          v-if="phone"
+          v-if="narrow"
           :model-value="view"
           flat
           dense
@@ -1158,7 +1158,7 @@ onBeforeUnmount(() => drag.end());
 
       <div class="documents-body col row no-wrap">
         <!-- THE TREE: a pane on a desk, a slide-over on a phone. -->
-        <template v-if="!phone && tree.open">
+        <template v-if="!narrow && tree.open">
           <DocumentsTree class="documents-tree-pane" :style="{ flexBasis: `${tree.width}px` }" :folders="folders" :location="location" @open="navigate" @menu="onTreeMenu" />
           <div
             class="documents-tree-grip"
@@ -1171,7 +1171,7 @@ onBeforeUnmount(() => drag.end());
             @pointercancel="onTreeGripUp"
           />
         </template>
-        <div v-if="phone && treeSlide" class="documents-tree-slide" data-tree-slide>
+        <div v-if="narrow && treeSlide" class="documents-tree-slide" data-tree-slide>
           <DocumentsTree :folders="folders" :location="location" @open="navigate" @menu="onTreeMenu" />
         </div>
 

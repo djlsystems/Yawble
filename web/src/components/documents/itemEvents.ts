@@ -14,7 +14,7 @@ export interface DocumentsViewProps {
   renaming: string | null;
   renameError: string;
   /** Phone width: no drag, a ⋮ button on each row. */
-  phone: boolean;
+  narrow: boolean;
   atRoot: boolean;
   sort: DocumentsSort;
 }
@@ -52,7 +52,7 @@ export function useItemEvents(props: DocumentsViewProps, emit: DocumentsViewEmit
       'aria-selected': props.selected.includes(item.key),
       // NO DRAG AT PHONE WIDTH: a long-press opens the menu there, and HTML drag on touch is
       // unreliable. A team's folder at the root is never dragged either: it is not moved.
-      draggable: !props.phone && !item.team && props.renaming !== item.key ? ('true' as const) : undefined,
+      draggable: !props.narrow && !item.team && props.renaming !== item.key ? ('true' as const) : undefined,
       class: {
         'documents-item-selected': props.selected.includes(item.key),
         'documents-item-focus': props.focus === item.key,
@@ -73,7 +73,7 @@ export function useItemEvents(props: DocumentsViewProps, emit: DocumentsViewEmit
       },
       pointerdown: (event) => {
         const pointer = event as PointerEvent;
-        if (pointer.pointerType !== 'touch' && !props.phone) return;
+        if (pointer.pointerType !== 'touch' && !props.narrow) return;
 
         cancelPress();
         pressTimer = setTimeout(() => {
@@ -86,7 +86,7 @@ export function useItemEvents(props: DocumentsViewProps, emit: DocumentsViewEmit
       pointermove: cancelPress,
     };
 
-    if (drag && !props.phone && !item.team) {
+    if (drag && !props.narrow && !item.team) {
       listeners.dragstart = (event) => drag.start(event as DragEvent, item);
       listeners.dragend = () => drag.end();
     }

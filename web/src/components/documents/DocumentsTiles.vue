@@ -25,7 +25,7 @@ const { attrs, on } = useItemEvents(props, emit);
       <div class="os-tile-head documents-tile-head">
         <q-icon :name="item.icon" size="40px" class="documents-tile-icon" />
         <q-space />
-        <q-btn v-if="phone" flat dense round size="sm" icon="more_vert" aria-label="More" @click.stop="emit('menu', item, $event as MouseEvent)" />
+        <q-btn v-if="narrow" flat dense round size="sm" icon="more_vert" aria-label="More" @click.stop="emit('menu', item, $event as MouseEvent)" />
       </div>
       <div v-if="renaming === item.key" class="os-tile-line">
         <DocumentsName :item="item" renaming :error="renameError" @commit="emit('rename', item, $event)" @cancel="emit('renameCancel')" />

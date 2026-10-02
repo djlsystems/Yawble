@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import type { ExplorerItem } from '../../lib/documentsExplorer';
 
 /**
@@ -15,17 +15,22 @@ const emit = defineEmits<{ commit: [name: string]; cancel: [] }>();
 const draft = ref(props.item.name);
 const input = ref<HTMLInputElement | null>(null);
 
-onMounted(async () => {
-  if (!props.renaming) return;
+watch(
+  () => props.renaming,
+  async (renaming) => {
+    if (!renaming) return;
 
-  await nextTick();
-  const box = input.value;
-  if (!box) return;
+    draft.value = props.item.name;
+    await nextTick();
+    const box = input.value;
+    if (!box) return;
 
-  box.focus();
-  const dot = props.item.isFolder ? -1 : props.item.name.lastIndexOf('.');
-  box.setSelectionRange(0, dot > 0 ? dot : props.item.name.length);
-});
+    box.focus();
+    const dot = props.item.isFolder ? -1 : props.item.name.lastIndexOf('.');
+    box.setSelectionRange(0, dot > 0 ? dot : props.item.name.length);
+  },
+  { immediate: true },
+);
 
 function onKeydown(event: KeyboardEvent) {
   event.stopPropagation();

@@ -28,7 +28,7 @@ const { attrs, on } = useItemEvents(props, emit);
         @commit="emit('rename', item, $event)"
         @cancel="emit('renameCancel')"
       />
-      <q-btn v-if="phone" flat dense round size="sm" icon="more_vert" aria-label="More" @click.stop="emit('menu', item, $event as MouseEvent)" />
+      <q-btn v-if="narrow" flat dense round size="sm" icon="more_vert" aria-label="More" @click.stop="emit('menu', item, $event as MouseEvent)" />
     </div>
   </div>
 </template>

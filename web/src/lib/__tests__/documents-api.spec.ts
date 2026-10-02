@@ -181,3 +181,104 @@ describe('the documents client addresses the routes the Host serves', () => {
     expect(() => api.documentUrl(team, 'x')).not.toThrow()
   })
 })
+
+/**
+ * RENAME, MOVE, COPY AND UPLOAD'S `onClash`: the routes they address, the bodies they send, and
+ * the 409s handed back as data. Matched on the status plus `clashes` or `results`, never on the
+ * sentence, which is shown verbatim.
+ */
+describe('the change routes', () => {
+  let fetching: ReturnType<typeof vi.fn>
+  const alpha = asDocumentsFolderKey('alpha')
+  const beta = asDocumentsFolderKey('beta')
+
+  const answer = (status: number, body: unknown) => ({
+    ok: status < 400,
+    status,
+    statusText: '',
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  })
+
+  beforeEach(() => {
+    fetching = vi.fn().mockResolvedValue(answer(200, { results: [] }))
+    vi.stubGlobal('fetch', fetching)
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  const call = () => ({
+    url: String(fetching.mock.calls[0]?.[0]),
+    init: fetching.mock.calls[0]?.[1] as RequestInit,
+  })
+
+  it('posts rename, move and copy to their routes under the source folder', async () => {
+    await api.renameDocuments(alpha, [{ path: 'a.md', name: 'b.md' }])
+    await api.moveDocuments(alpha, { to: { folder: beta, path: 'in' }, items: [{ path: 'a.md' }] })
+    await api.copyDocuments(alpha, { to: { folder: beta, path: '' }, items: [{ path: 'a.md', onClash: 'keep-both' }] })
+
+    const urls = fetching.mock.calls.map(([url]) => String(url))
+    expect(urls).toEqual([
+      '/api/teams/alpha/documents/rename',
+      '/api/teams/alpha/documents/move',
+      '/api/teams/alpha/documents/copy',
+    ])
+    const bodies = fetching.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)))
+    expect(bodies[0]).toEqual({ items: [{ path: 'a.md', name: 'b.md' }] })
+    expect(bodies[1]).toEqual({ to: { folder: 'beta', path: 'in' }, items: [{ path: 'a.md' }] })
+    expect(bodies[2].items[0]).toEqual({ path: 'a.md', onClash: 'keep-both' })
+  })
+
+  it('hands back every outcome on 200', async () => {
+    const results = [{ from: 'a.md', to: 'in/a (copy).md', outcome: 'done' }]
+    fetching.mockResolvedValue(answer(200, { results }))
+
+    expect(await api.copyDocuments(alpha, { to: { folder: beta, path: 'in' }, items: [{ path: 'a.md' }] }))
+      .toEqual({ kind: 'ok', results })
+  })
+
+  it('hands back a clash with no choice as data', async () => {
+    const clashes = [{ from: 'a.md', to: 'in/a.md', isFolder: false }]
+    fetching.mockResolvedValue(answer(409, { error: '1 of these is already in in: a.md.', clashes }))
+
+    expect(await api.moveDocuments(alpha, { to: { folder: beta, path: 'in' }, items: [{ path: 'a.md' }] }))
+      .toEqual({ kind: 'clash', error: '1 of these is already in in: a.md.', clashes })
+  })
+
+  it('hands back a partial result as data', async () => {
+    const results = [{ from: 'a.md', to: 'in/a.md', outcome: 'failed', reason: 'permission denied' }]
+    fetching.mockResolvedValue(answer(409, { error: 'Nothing was moved.', results }))
+
+    expect(await api.moveDocuments(alpha, { to: { folder: beta, path: 'in' }, items: [{ path: 'a.md' }] }))
+      .toEqual({ kind: 'partial', error: 'Nothing was moved.', results })
+  })
+
+  it('throws any other refusal with the server sentence', async () => {
+    fetching.mockResolvedValue(answer(409, { error: 'a is a link. A link is never followed, moved or copied.' }))
+
+    await expect(api.moveDocuments(alpha, { to: { folder: beta, path: '' }, items: [{ path: 'a' }] }))
+      .rejects.toThrow('a is a link. A link is never followed, moved or copied.')
+  })
+
+  it('sends onClash on an upload only when given, and reads clash and skipped as data', async () => {
+    const file = new File(['x'], 'a.md')
+    fetching.mockResolvedValue(answer(200, { name: 'a.md', path: 'a.md', isFolder: false, size: 1, modifiedAt: '', children: 0 }))
+
+    await api.uploadDocument(alpha, file, 'in')
+    expect((call().init.body as FormData).has('onClash')).toBe(false)
+
+    fetching.mockClear()
+    fetching.mockResolvedValue(answer(409, { error: 'a.md is already in in.', clashes: [{ from: 'a.md', to: 'in/a.md', isFolder: false }] }))
+    expect(await api.uploadDocument(alpha, file, 'in', 'ask')).toMatchObject({ kind: 'clash' })
+    expect((call().init.body as FormData).get('onClash')).toBe('ask')
+
+    fetching.mockResolvedValue(answer(200, { skipped: true, path: 'in/a.md' }))
+    expect(await api.uploadDocument(alpha, file, 'in', 'skip')).toEqual({ kind: 'skipped', path: 'in/a.md' })
+  })
+
+  it('reads the documents root beside the folders', async () => {
+    fetching.mockResolvedValue(answer(200, { folders: [], root: '/data/documents' }))
+
+    expect(await api.listDocumentsRoot()).toEqual({ folders: [], root: '/data/documents' })
+  })
+})

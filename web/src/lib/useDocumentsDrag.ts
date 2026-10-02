@@ -204,14 +204,21 @@ export function useDocumentsDrag(options: DocumentsDragOptions): DocumentsDragSt
     const answer = verdictFor(target);
     end();
 
-    if (dropped && dropped.folders.length > 0) {
-      options.notice(`Folders cannot be uploaded by dropping; drop the files inside them. Left out: ${dropped.folders.join(', ')}.`);
-    }
+    // Said AFTER the upload, whose own outcome would otherwise replace it.
+    const leftOut = () => {
+      if (dropped && dropped.folders.length > 0) {
+        options.notice(`Folders cannot be uploaded by dropping; drop the files inside them. Left out: ${dropped.folders.join(', ')}.`);
+      }
+    };
 
-    if (!answer.ok || target.folder === null) return;
+    if (!answer.ok || target.folder === null) {
+      leftOut();
+      return;
+    }
 
     if (dropped) {
       if (dropped.files.length > 0) await options.transfer.uploadInto(target.folder, target.path, dropped.files);
+      leftOut();
 
       return;
     }

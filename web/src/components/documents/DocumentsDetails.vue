@@ -23,7 +23,7 @@ const columns = computed(() => {
     { key: 'modified', label: 'Modified' },
   ];
 
-  return props.phone ? all.filter((column) => column.key === 'name' || column.key === 'size') : all;
+  return props.narrow ? all.filter((column) => column.key === 'name' || column.key === 'size') : all;
 });
 </script>
 
@@ -47,7 +47,7 @@ const columns = computed(() => {
             />
           </q-btn>
         </th>
-        <th v-if="phone" class="documents-more-col" aria-label="Actions" />
+        <th v-if="narrow" class="documents-more-col" aria-label="Actions" />
       </tr>
     </thead>
     <tbody>
@@ -62,10 +62,10 @@ const columns = computed(() => {
           />
         </td>
         <!-- Kind, or at the root whether the team is live, gone or superseded. -->
-        <td v-if="!phone" class="os-text-muted">{{ item.kind }}</td>
+        <td v-if="!narrow" class="os-text-muted">{{ item.kind }}</td>
         <td class="os-text-muted">{{ sizeText(item) }}</td>
-        <td v-if="!phone" class="os-text-muted">{{ modifiedText(item.modifiedAt) }}</td>
-        <td v-if="phone" class="documents-more-col">
+        <td v-if="!narrow" class="os-text-muted">{{ modifiedText(item.modifiedAt) }}</td>
+        <td v-if="narrow" class="documents-more-col">
           <q-btn flat dense round size="sm" icon="more_vert" aria-label="More" @click.stop="emit('menu', item, $event as MouseEvent)" />
         </td>
       </tr>
