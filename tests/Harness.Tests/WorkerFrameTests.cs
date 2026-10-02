@@ -29,6 +29,27 @@ public sealed class WorkerFrameTests
     ];
 
     [Fact]
+    public void A_command_list_never_holds_its_credential_in_clear_and_it_opens_on_the_other_end()
+    {
+        var codec = new WorkerFrameCodec(Key);
+        var commands = new RunAgentCommands(
+            "r1", [new AgentCliRun("claude", ["mcp", "list"], new Dictionary<string, string>(), [], 45, Scratch: true)], Start().Credential);
+
+        var text = codec.Write(new CommandFrame(3, commands));
+
+        foreach (var form in ValueRedactor.For([Value]).Forms) Assert.DoesNotContain(form, text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Qz8p", text, StringComparison.Ordinal);
+
+        var back = (RunAgentCommands)((CommandFrame)codec.Read(text)).Message;
+        Assert.Equal(Value, back.Credential!.Environment["ISSUED_KEY"]);
+        Assert.Equal(["mcp", "list"], back.Commands.Single().Arguments);
+
+        // None to seal: the frame is plain, and no key is needed.
+        var plain = new WorkerFrameCodec(null).Write(new CommandFrame(4, commands with { Credential = null }));
+        Assert.Null(((RunAgentCommands)((CommandFrame)codec.Read(plain)).Message).Credential);
+    }
+
+    [Fact]
     public void Every_frame_round_trips_through_json_unchanged()
     {
         var codec = new WorkerFrameCodec(Key);

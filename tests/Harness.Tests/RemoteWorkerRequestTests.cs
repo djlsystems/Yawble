@@ -29,6 +29,9 @@ public sealed class RemoteWorkerRequestTests
         ["CheckLaunch"] = new CheckLaunch(
             "r1", new RunLaunch("cli", ["--version"], null, null, null, true, null, null, 60, []), ["--version"], [],
             new Dictionary<string, string>(), null, 60, null),
+        ["ProbeSignIn"] = new ProbeSignIn("r2", [new SignInProbeSpec("claude", null, null, ["auth", "status"], null, null)]),
+        ["RunAgentCommands"] = new RunAgentCommands("r3", [new AgentCliRun("claude", ["--version"], new Dictionary<string, string>(), [], 30)]),
+        ["RemoveAsAgent"] = new RemoveAsAgent("r4", "/data/teams/t", ["/data/teams/t/workspaces/a"]),
     };
 
     [Theory]

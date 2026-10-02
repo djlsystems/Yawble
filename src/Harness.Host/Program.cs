@@ -748,6 +748,10 @@ builder.Services.AddSingleton<RunSecrets>();
 // and a launch that arrives during an update waits for it. One per Host, shared by the runner, the
 // Concierge's launch and the updater, or the hold holds nothing.
 builder.Services.AddSingleton<AgentUpdateGate>();
+// WHAT CONTROL ASKS A WORKER ABOUT ITS AGENT CLIS - a sign-in probe, a listing, a version, an update,
+// a removal as the agent - and the answers, by request. Asked of the connected worker with the most
+// measured headroom; in a Host that runs its runs itself that is its own worker, over the transport.
+builder.Services.AddSingleton(sp => new WorkerAsks(() => sp.GetRequiredService<WorkerPool>().Worker(null)));
 builder.Services.AddSingleton(sp => new AgentCliUpdater(
     sp.GetRequiredService<AgentCatalog>(),
     sp.GetRequiredService<AgentUpdateGate>(),
@@ -781,6 +785,7 @@ builder.Services.AddSingleton(sp => InProcessWorker.Create(
     tenantSettings.HeavyRunMemoryLimit,
     async (envelope, ct) =>
     {
+        await sp.GetRequiredService<WorkerAsks>().HandleAsync(envelope, ct);
         await sp.GetRequiredService<RunDirectory>().HandleAsync(envelope, ct);
         if (envelope.Event is RunMeasured or WorkerCapacitySampled)
         {
@@ -2312,6 +2317,7 @@ var workerConnections = new WorkerConnections(
     app.Services.GetRequiredService<WipLedger>(),
     async (envelope, ct) =>
     {
+        await app.Services.GetRequiredService<WorkerAsks>().HandleAsync(envelope, ct);
         await app.Services.GetRequiredService<RunDirectory>().HandleAsync(envelope, ct);
         if (envelope.Event is RunMeasured or WorkerCapacitySampled)
         {

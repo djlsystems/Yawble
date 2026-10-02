@@ -36,6 +36,7 @@ public sealed class WorkerHost
     private readonly ProcessGroupReader? _processes;
     private readonly RunProcessGroups _groups;
     private readonly TimeProvider _clock;
+    private readonly WorkerAgentCli? _cli;
     private readonly ILogger? _log;
 
     private readonly SemaphoreSlim _publish = new(1, 1);
@@ -55,6 +56,7 @@ public sealed class WorkerHost
         ProcessGroupReader? processes = null,
         RunProcessGroups? groups = null,
         TimeProvider? clock = null,
+        WorkerAgentCli? cli = null,
         ILogger? log = null)
     {
         _id = id;
@@ -66,6 +68,7 @@ public sealed class WorkerHost
         _processes = processes;
         _groups = groups ?? RunProcessGroups.Shared;
         _clock = clock ?? TimeProvider.System;
+        _cli = cli;
         _log = log;
     }
 
@@ -91,6 +94,12 @@ public sealed class WorkerHost
     {
         switch (message)
         {
+            case AgentCliCommand request:
+                // On its own task, as a launch check is: the answer is an event, under the request's id.
+                (_cli ?? throw new NotSupportedException($"Worker {_id} answers no {request.GetType().Name}."))
+                    .Apply(request, answer => PublishAsync(answer));
+                break;
+
             case StartRun start:
                 Start(start);
                 break;

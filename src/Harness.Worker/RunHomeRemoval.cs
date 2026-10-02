@@ -110,7 +110,7 @@ public static class RunHomeRemoval
     private static bool Exists(string path) =>
         Directory.Exists(path) || new FileInfo(path) is { } file && (file.Exists || file.LinkTarget is not null);
 
-    private static async Task RunAsync(IReadOnlyList<string> command, CancellationToken ct)
+    internal static async Task RunAsync(IReadOnlyList<string> command, CancellationToken ct)
     {
         var start = new ProcessStartInfo(command[0])
         {

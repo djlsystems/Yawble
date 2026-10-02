@@ -31,6 +31,12 @@ public sealed class RunProtocolTests
             "/data/tmp",
             new RunLiveView(null, LiveViewNames.CodexRollout, new AgentLiveViewFind("~/s", "*/x.jsonl", LiveViewNames.CwdFromFirstLine)),
             new RunProcess("/plugins/p/run", ["--once"], ["PATH", "HOME"], new Dictionary<string, string> { ["C"] = "7" }, "{}", 30, "/plugins/p")),
+        new ProbeSignIn("r2", [new SignInProbeSpec(
+            "claude", "ANTHROPIC_API_KEY", [".claude/.credentials.json"], ["auth", "status"],
+            new Dictionary<string, string> { ["DISABLE_AUTOUPDATER"] = "1" }, ["--no-update"])]),
+        new RunAgentCommands("r3", [new AgentCliRun(
+            "claude", ["mcp", "list"], new Dictionary<string, string> { ["A"] = "1" }, ["OPENAI_API_KEY"], 45, true, "/data/tmp", false)]),
+        new RemoveAsAgent("r4", "/data/teams/t", ["/data/teams/t/workspaces/a"]),
         new CancelRun(Run),
         new ChangeRunMemoryAllowance(["alpha/worker", "beta/other"]),
         new HoldIdleClock(Run.Member, true),
@@ -47,6 +53,9 @@ public sealed class RunProtocolTests
     private static IReadOnlyList<WorkerEvent> EveryWorkerEvent() =>
     [
         new WorkerReady(WorkerId.Local),
+        new SignInProbed("r2", [new SignInProbeResult("claude", true, null, "The status command did not finish in time.")]),
+        new AgentCommandsRan("r3", [new AgentCliRunResult(true, 0, false, "out", "err", true, null)]),
+        new RemovedAsAgent("r4", "Refused: /x is not inside /data/teams/t."),
         new RunCredentialApplied(Run),
         new RunStarted(Run, 42, At),
         new RunProgress(Run, "held"),

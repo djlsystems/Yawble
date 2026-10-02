@@ -90,6 +90,7 @@ public sealed class InProcessWorker
             events => host = new WorkerHost(
                 id, events, launcher, heartbeat, allowances,
                 new CgroupReader(cgroupRoot ?? WorkerPaths.CgroupRoot), new ProcessGroupReader(proc), RunProcessGroups.Shared,
+                cli: new WorkerAgentCli(id, runAs, homes ?? new RunHomes(runAs, RunHomeRemoval.For(runAs)), launchLog),
                 log: launchLog),
             control);
 
