@@ -36,7 +36,6 @@ public sealed class WorkerArchitectureTests
     [
         "Concierge PTY", "sign-in probe", "tool pre-flight", "launch check", "CLI updates",
         "live transcript reader", "FolderRemoval's agent pass", "git", "gh", "agent user", "settings default",
-        "pending",
     ];
 
     /// <summary>Every caller outside the worker that still does one of these things, and why.</summary>
@@ -70,8 +69,6 @@ public sealed class WorkerArchitectureTests
             "agent user: the doctor resolves who agent children would run as, to report it; a later change reads it from the worker.",
         ["TenantSettings..ctor: " + TouchesACgroup] =
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
-
-        // Moved behind the protocol by the commits after this one, each deleting its own entries.
     };
 
     /// <summary>The worker types control may compose and talk to: the protocol's in-process ends.</summary>
