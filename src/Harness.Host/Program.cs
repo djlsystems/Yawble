@@ -1711,8 +1711,9 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentLaunchChecks>
 
 // THE PRE-FLIGHT: what each preset's CLI would load, listed by the CLI itself as the agent user,
 // once the Host is serving and again after every catalog save. Never on the start path.
-builder.Services.AddSingleton<IListingRunner>(sp => new CliListingRunner(
-    sp.GetRequiredService<AgentLaunchUser>(), sp.GetRequiredService<MemberTempRoot>().Path));
+// Each listing runs on the connected worker with the most headroom (WorkerListingRunner).
+builder.Services.AddSingleton<IListingRunner>(sp => new WorkerListingRunner(
+    sp.GetRequiredService<WorkerAsks>(), sp.GetRequiredService<MemberTempRoot>().Path, pathIsTheWorkers: !control));
 builder.Services.AddSingleton(sp =>
 {
     var preflight = new AgentToolPreflight(

@@ -112,11 +112,11 @@ public sealed class AgentCommands(AgentLaunchUser? runAs, RunHomes homes)
         {
             if (home is not null) await homes.RemoveAsync(home);
 
-            // RECURSIVE DELETE REVIEWED: agents cannot write here. The worker made the scratch folder
-            // owner-only and AgentLaunchUser.Share gives the agent's group read and traverse, never
-            // write; the CLI runs in it but cannot create anything in it.
+            // The worker made the scratch folder owner-only and AgentLaunchUser.Share gives the agent's
+            // group read and traverse, never write; the CLI runs in it but cannot create anything in it.
             if (scratch is not null)
             {
+                // RECURSIVE DELETE REVIEWED: agents cannot write here (above).
                 try { Directory.Delete(scratch, recursive: true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             }
         }

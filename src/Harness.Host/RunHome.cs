@@ -9,8 +9,8 @@ namespace Harness.Host;
 /// never reads the shared agent home's sign-in files, and anything it writes for itself goes with it.
 ///
 /// <para>
-/// THE WORKER MAKES AND REMOVES IT (<see cref="RunHomes"/>), for the runs it launches and the launch
-/// check. This is control's way to the same homes - the tool listing's, the sweep at Host start -
+/// THE WORKER MAKES AND REMOVES IT (<see cref="RunHomes"/>), for the runs it launches, the launch
+/// check and a tool listing. This is control's way to the same homes - the sweep at Host start -
 /// removed through <see cref="FolderRemoval"/>, because the agent writes inside it: the Host's pass,
 /// then the agent's, links removed and never followed.
 /// </para>
@@ -41,16 +41,6 @@ public static class RunHome
 
     /// <summary>The grok config file inside a home, as grok looks for it.</summary>
     public static string GrokConfigIn(string home) => RunHomes.GrokConfigIn(home);
-
-    /// <summary>A new home in <paramref name="parent"/>; see <see cref="RunHomes.CreateAsync"/>.</summary>
-    public static Task<string?> CreateAsync(
-        string parent, AgentLaunchUser? runAs, string? grokConfig, CancellationToken ct, bool memberFolder = true) =>
-        Homes(runAs).CreateAsync(parent, grokConfig, ct, memberFolder);
-
-    /// <summary><paramref name="transcript"/> moved out of <paramref name="home"/>; see <see cref="RunHomes.KeepTranscriptAsync"/>.</summary>
-    public static Task<AgentTranscript?> KeepTranscriptAsync(
-        AgentTranscript? transcript, string home, string memberTemp, AgentLaunchUser? runAs) =>
-        Homes(runAs).KeepTranscriptAsync(transcript, home, memberTemp);
 
     /// <summary>Removes <paramref name="home"/> and everything the run wrote in it. Never throws.</summary>
     public static Task RemoveAsync(string home, AgentLaunchUser? runAs) => Homes(runAs).RemoveAsync(home);

@@ -44,8 +44,6 @@ public sealed class WorkerArchitectureTests
     {
         ["PortaPtyEngine.SpawnAsync: " + StartsAProcess] =
             "Concierge PTY: a person's terminal session is spawned here; a later change moves it to a worker.",
-        ["CliListingRunner.RunAsync: " + StartsAProcess] =
-            "tool pre-flight: lists each CLI's configured tools; a later change moves it to a worker.",
         ["ForeignToolsCheck.CheckAsync: " + ReachesAWorkerLauncher] =
             "tool pre-flight: reads the agent's tool files as the agent; a later change moves it to a worker.",
         ["ForeignToolsCheck.BesideAsync: " + ReachesAWorkerLauncher] =
@@ -64,10 +62,6 @@ public sealed class WorkerArchitectureTests
             "gh: the GitHub CLI for a person's contributions stays in control.",
         ["ProcessAgentRunner.CheckLaunchAsync: " + ReachesAWorkerLauncher] =
             "launch check: starts a preset's free invocation through the worker's own launch, not a run; a later change sends it as a message.",
-        ["RunHome.CreateAsync: " + ReachesAWorkerLauncher] =
-            "tool pre-flight: a tool listing of a preset that signs in with an issued credential runs in a home the worker's RunHomes makes as the agent; a later change moves the listing to a worker.",
-        ["RunHome.KeepTranscriptAsync: " + ReachesAWorkerLauncher] =
-            "run home: control's door to the worker's RunHomes, with no production caller - a run's transcript is kept by the worker that ran it; it goes when the listing moves.",
         ["TenantSettings..ctor: " + TouchesACgroup] =
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
     };
