@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Harness.Contracts;
 using Harness.Identity;
 using Harness.Kanban;
 
@@ -27,6 +28,10 @@ public enum TenantSettingKind
 
     /// <summary>A JSON object mapping a name to a list of tags (strings). <c>agents.tags</c>.</summary>
     TagMap,
+
+    /// <summary>A JSON object mapping a preset name to where it signs in from, <c>home</c> or
+    /// <c>issued</c>. <c>agents.credentialSource</c>.</summary>
+    SourceMap,
 }
 
 /// <summary>One setting the Tenant Settings dialog can change.</summary>
@@ -79,6 +84,7 @@ public sealed class TenantSettings
     public const string ThemeDefaultName = "theme.default";
     public const string SystemPackagesName = "system.packages";
     public const string AgentTagsName = "agents.tags";
+    public const string AgentCredentialSourceName = "agents.credentialSource";
     public const string OutcomesRequireForCompletionName = "outcomes.requireForCompletion";
     public const string LeasesHeavyHoldersName = "leases.heavy.holders";
 
@@ -207,6 +213,14 @@ public sealed class TenantSettings
                 + "entry naming no built-in preset is ignored, and GET /api/agents lists it under "
                 + "ignoredTagOverrides. Applies to the next hire.",
                 Max: 64),
+            new(AgentCredentialSourceName, TenantSettingKind.SourceMap, "{}", null,
+                "Where each Agent preset signs in from, preset name to `home` or `issued`. `home` (the "
+                + "default, and every preset absent from the map) launches exactly as before, on the "
+                + "shared agent home's login. `issued` gives each member run the credential set for the "
+                + "preset's command in Admin > Agents, and a home of its own; a member run whose "
+                + "credential is not set does not start. Only a preset that declares an issued "
+                + "credential can be `issued`. An entry naming no preset is ignored. Applies to the next run.",
+                Choices: [HomeSource, IssuedSource]),
             new(OutcomesRequireForCompletionName, TenantSettingKind.Choice, "off", "Outcomes:RequireForCompletion",
                 "Whether an agent's declaration that a workflow is complete is refused while the workflow "
                 + "has no outcome. `off` (the default) refuses nothing: unlinked work is counted as "
@@ -454,6 +468,29 @@ public sealed class TenantSettings
             ? map.ToDictionary(e => e.Key, e => (IReadOnlyList<string>)e.Value, StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
 
+    public const string HomeSource = "home";
+    public const string IssuedSource = "issued";
+
+    /// <summary><c>agents.credentialSource</c>: where <paramref name="preset"/> signs in from.
+    /// A preset absent from the map is <see cref="CredentialSource.Home"/>.</summary>
+    public CredentialSource CredentialSourceOf(string preset) =>
+        AgentCredentialSources.TryGetValue(preset, out var source) && source == IssuedSource
+            ? CredentialSource.Issued
+            : CredentialSource.Home;
+
+    /// <summary><c>agents.credentialSource</c> as stored, by preset name (case-insensitive).</summary>
+    public IReadOnlyDictionary<string, string> AgentCredentialSources =>
+        JsonSerializer.Deserialize<Dictionary<string, string>>(Current(AgentCredentialSourceName)) is { } map
+            ? new Dictionary<string, string>(map, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Why <paramref name="preset"/> cannot be switched to <c>issued</c>, or null when it can or is
+    /// no preset at all. Set by the Host once its catalog exists: a preset with no issued-credential
+    /// declaration has no variable to place a credential in.
+    /// </summary>
+    public Func<string, string?>? IssuedRefusal { get; set; }
+
     /// <summary>The limit a kanban lane shows: <c>wip.maxRunning</c> for the lane that holds
     /// running work (null when unlimited), else <c>kanban.wipLimits</c>, else none.</summary>
     public int? LaneLimit(string laneId)
@@ -501,7 +538,8 @@ public sealed class TenantSettings
     public JsonNode? ToJson(string name, string canonical) => _definitions[name].Kind switch
     {
         TenantSettingKind.Integer => JsonValue.Create(long.Parse(canonical, CultureInfo.InvariantCulture)),
-        TenantSettingKind.LaneLimits or TenantSettingKind.PackageList or TenantSettingKind.TagMap =>
+        TenantSettingKind.LaneLimits or TenantSettingKind.PackageList or TenantSettingKind.TagMap
+            or TenantSettingKind.SourceMap =>
             JsonNode.Parse(canonical),
         _ => JsonValue.Create(canonical),
     };
@@ -525,7 +563,21 @@ public sealed class TenantSettings
                 throw new TenantSettingRejected(name, $"'{name}' is not a setting that can be changed here.");
             }
 
-            parsed.Add((name, element.ValueKind == JsonValueKind.Null ? null : Validate(definition, element)));
+            var value = element.ValueKind == JsonValueKind.Null ? null : Validate(definition, element);
+
+            if (definition.Kind == TenantSettingKind.SourceMap && value is not null && IssuedRefusal is { } refusal)
+            {
+                var previous = AgentCredentialSources;
+                foreach (var (preset, source) in JsonSerializer.Deserialize<Dictionary<string, string>>(value)!)
+                {
+                    // Only a preset newly switched to issued is asked: one already issued stays
+                    // writable, so a map can always be saved back as it was read.
+                    if (source != IssuedSource || previous.GetValueOrDefault(preset) == IssuedSource) continue;
+                    if (refusal(preset) is { } why) throw new TenantSettingRejected(name, $"{name}: {why}");
+                }
+            }
+
+            parsed.Add((name, value));
         }
 
         await _writes.WaitAsync(ct);
@@ -745,6 +797,44 @@ public sealed class TenantSettings
 
                 return JsonSerializer.Serialize(map);
 
+            case TenantSettingKind.SourceMap:
+                if (element.ValueKind != JsonValueKind.Object)
+                {
+                    throw new TenantSettingRejected(name, $"{name} must be an object of preset name to `home` or `issued`.");
+                }
+
+                // Keys are not checked against the catalog here, for agents.tags' reason: an entry for
+                // a preset that is not there is ignored where it is read. Sorted, so an unchanged map
+                // compares equal and writes nothing.
+                var sources = new SortedDictionary<string, string>(StringComparer.Ordinal);
+
+                foreach (var entry in element.EnumerateObject())
+                {
+                    var key = entry.Name.Trim();
+
+                    if (key.Length == 0)
+                    {
+                        throw new TenantSettingRejected(name, $"{name} has an empty preset name.");
+                    }
+
+                    if (sources.Keys.Any(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        throw new TenantSettingRejected(name, $"{name} names '{key}' twice.");
+                    }
+
+                    var source = entry.Value.ValueKind == JsonValueKind.String ? entry.Value.GetString()?.Trim().ToLowerInvariant() : null;
+
+                    if (source is null || definition.Choices?.Contains(source) != true)
+                    {
+                        throw new TenantSettingRejected(name,
+                            $"{name}: the source for '{key}' must be one of {string.Join(", ", definition.Choices ?? [])}.");
+                    }
+
+                    sources[key] = source;
+                }
+
+                return JsonSerializer.Serialize(sources);
+
             default:
                 throw new TenantSettingRejected(name, $"{name} cannot be set.");
         }
@@ -762,6 +852,7 @@ public sealed class TenantSettings
                 TenantSettingKind.LaneLimits => JsonDocument.Parse(stored),
                 TenantSettingKind.PackageList => JsonDocument.Parse(stored),
                 TenantSettingKind.TagMap => JsonDocument.Parse(stored),
+                TenantSettingKind.SourceMap => JsonDocument.Parse(stored),
                 _ => JsonDocument.Parse(JsonSerializer.Serialize(stored)),
             };
 

@@ -728,7 +728,14 @@ public sealed record AgentInvocation(
     /// <see cref="WorkingDirectory"/> that does not exist, which it treats as "run somewhere else"
     /// - and somewhere else is the Host's own current directory.
     /// </summary>
-    string? UnreachableRoot = null);
+    string? UnreachableRoot = null,
+
+    /// <summary>
+    /// The credential this run starts with, resolved at run start (<c>RunCredentials.ResolveAsync</c>).
+    /// Null when the caller resolved none: the runner then asks the same resolver itself, so an
+    /// invocation built without one never falls back to the shared home for an issued preset.
+    /// </summary>
+    RunCredential? Credential = null);
 
 /// <param name="ReachedThePlatform">
 /// Whether this run's agent authenticated ANY request with the member's own credential.
