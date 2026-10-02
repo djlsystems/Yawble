@@ -42,7 +42,8 @@ public sealed partial class ProcessAgentRunner(
     MemberTempRoot? temp = null,
     RunAllowances? allowances = null,
     TimeSpan? oomPoll = null,
-    IRunCredentials? credentials = null) : IAgentRunner
+    IRunCredentials? credentials = null,
+    RunSecrets? secrets = null) : IAgentRunner
 {
     /// <summary>How often a run's cgroup is read for a process the kernel OOM-killed.</summary>
     private readonly TimeSpan _oomPoll = oomPoll ?? TimeSpan.FromSeconds(2);
@@ -575,6 +576,10 @@ public sealed partial class ProcessAgentRunner(
         // An issued run's own HOME, removed in the finally below whatever happens.
         string? runHome = null;
 
+        // What this run's text is redacted of before it is returned, decided once the child's
+        // environment is final.
+        var redactor = ValueRedactor.Empty;
+
         // The transcript this run wrote. An issued run's lives in its own HOME, which the finally
         // below removes, so it is moved beside the homes first and the terminal row names the copy
         // that outlives it.
@@ -613,6 +618,12 @@ public sealed partial class ProcessAgentRunner(
                 start.Environment["HOME"] = runHome;
                 start.Environment["XDG_CACHE_HOME"] = Path.Combine(memberTemp!, RunHome.CacheFolder);
             }
+
+            // THE RUN'S OWN CREDENTIAL, read from the environment the child is given - after the
+            // credential is applied, other providers' keys are scoped out and the home is set - and
+            // kept for its reports and its transcript as the live view serves it.
+            redactor = RunSecrets.Of(start.Environment, credential, catalog);
+            secrets?.Remember(invocation.Container, redactor);
 
             // A transcript the agent names itself is the newest one written from here on.
             var launchedAt = DateTimeOffset.UtcNow;
@@ -782,6 +793,12 @@ public sealed partial class ProcessAgentRunner(
                 output = unwrapped;
             }
 
+            // REDACTED ONLY NOW, so usage and the failure's class are read from the raw text, and
+            // BEFORE the stderr tail is cut, so a cut cannot leave half a value behind.
+            output = redactor.Apply(output);
+            errors = redactor.Apply(errors);
+            envelopeError = redactor.ApplyOrNull(envelopeError);
+
             var combined = new StringBuilder(output);
 
             if (heldOpen)
@@ -871,7 +888,7 @@ public sealed partial class ProcessAgentRunner(
             // A command that is not on PATH is the common case, and it is a LAUNCH error rather than
             // an exit code: the process never ran, so reporting "exit -1" would read as a program
             // that ran and failed.
-            return new AgentResult(-1, string.Empty, ex.Message);
+            return new AgentResult(-1, string.Empty, redactor.Apply(ex.Message));
         }
         finally
         {
@@ -1572,7 +1589,7 @@ public sealed partial class ProcessAgentRunner(
 
         try
         {
-            return await CheckAsync(start, command, check, memoryLimit, timeout, ct);
+            return await CheckAsync(start, command, check, memoryLimit, timeout, RunSecrets.Of(start.Environment, credential, catalog), ct);
         }
         finally
         {
@@ -1582,7 +1599,7 @@ public sealed partial class ProcessAgentRunner(
 
     private async Task<AgentLaunchReport> CheckAsync(
         ProcessStartInfo start, AgentCommand command, IReadOnlyList<string> check, RunMemoryLimit? memoryLimit,
-        TimeSpan? timeout, CancellationToken ct)
+        TimeSpan? timeout, ValueRedactor redactor, CancellationToken ct)
     {
         var invocation = string.Join(' ', [command.FileName, .. check]);
         var applied = memoryLimit?.Mb is { } mb && memory is { Mechanism: not RunMemoryMechanism.None }
@@ -1606,7 +1623,8 @@ public sealed partial class ProcessAgentRunner(
 
         ct.ThrowIfCancellationRequested();
 
-        var tail = AgentCrash.StderrTail(outcome.Stderr);
+        // Redacted of the run's own credential before the tail is cut, as a member run's is.
+        var tail = AgentCrash.StderrTail(redactor.Apply(outcome.Stderr));
         if (outcome.Killed)
         {
             return new AgentLaunchReport(AgentLaunchReport.Failed, null, tail.Length == 0 ? null : tail,

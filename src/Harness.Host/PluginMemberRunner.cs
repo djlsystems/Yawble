@@ -52,7 +52,7 @@ public sealed class PluginMemberRunner(
     /// destroying the text around it - so it is REFUSED, at hire when it is already set and on every
     /// run, rather than passed through unredacted.
     /// </summary>
-    public const int MinimumSecretLength = 4;
+    public const int MinimumSecretLength = ValueRedactor.MinimumLength;
 
     /// <summary>
     /// A PLUGIN RUNS NO MODEL, so every result it comes to - a success, a failure, a run that did not
@@ -786,48 +786,16 @@ public sealed class PluginMemberRunner(
 
     /// <summary>
     /// EVERY TEXT A PLUGIN WRITES passes here before it is stored or reported: each bound secret value
-    /// replaced (none is shorter than <see cref="MinimumSecretLength"/>; see there), then
+    /// replaced by <see cref="ValueRedactor"/> (in any case, in its JSON-escaped forms, longest first;
+    /// none is shorter than <see cref="MinimumSecretLength"/>; see there), then
     /// <see cref="DiagnosticRedaction"/>'s named-value and credential-shape rules, unbounded, since
-    /// this is output and not a diagnostic. Three rules make the replacement a better net:
-    /// <list type="bullet">
-    /// <item>each value is matched in ANY CASE, so an upper-cased copy is caught;</item>
-    /// <item>each value's JSON-ESCAPED forms are matched too, because a raw line keeps a value the
-    /// way the plugin serialised it (the default encoder escapes <c>+</c>, <c>&lt;</c>, quotes; other
-    /// encoders - PHP, some Java ones - also write <c>/</c> as <c>\/</c>);</item>
-    /// <item>the LONGEST form is replaced first, so a value that is a prefix of another cannot
-    /// leave the other's tail behind.</item>
-    /// </list>
-    /// A plugin that transforms a secret otherwise before writing it - reversed, base64 - defeats
-    /// this; that is the plugin's defect and not one this can see.
+    /// this is output and not a diagnostic.
     /// </summary>
-    internal static string Redact(string text, IEnumerable<string> values)
-    {
-        foreach (var form in RedactedForms(values))
-        {
-            text = text.Replace(form, DiagnosticRedaction.Placeholder, StringComparison.OrdinalIgnoreCase);
-        }
-
-        return DiagnosticRedaction.RedactWithoutLimit(text) ?? text;
-    }
-
-    private static readonly JsonSerializerOptions Relaxed = new()
-    {
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
+    internal static string Redact(string text, IEnumerable<string> values) =>
+        DiagnosticRedaction.RedactWithoutLimit(ValueRedactor.For(values).Apply(text)) ?? text;
 
     /// <summary>Every spelling of the bound values that <see cref="Redact"/> replaces, longest first.</summary>
-    internal static IReadOnlyList<string> RedactedForms(IEnumerable<string> values) =>
-        values
-            .Where(v => v.Length >= MinimumSecretLength)
-            .SelectMany(v => new[] { v, JsonBody(v, null), JsonBody(v, Relaxed), JsonBody(v, Relaxed).Replace("/", "\\/", StringComparison.Ordinal) })
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(f => f.Length)
-            .ThenBy(f => f, StringComparer.Ordinal)
-            .ToList();
-
-    /// <summary>A value as it appears between the quotes of a JSON string.</summary>
-    private static string JsonBody(string value, JsonSerializerOptions? options) =>
-        JsonSerializer.Serialize(value, options)[1..^1];
+    internal static IReadOnlyList<string> RedactedForms(IEnumerable<string> values) => ValueRedactor.For(values).Forms;
 
     private sealed class Gathered
     {
