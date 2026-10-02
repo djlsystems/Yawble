@@ -46,17 +46,22 @@ public sealed class SiteFilesTests(HostFixture host) : IClassFixture<HostFixture
     /// <summary>A published site with <c>out/a.txt</c> in its files folder holding a fresh marker.</summary>
     private async Task<(string Site, string Marker)> SiteWithFileAsync(string team, string? name = null)
     {
-        var site = name ?? Unique("board");
+        var site = await PublishedSiteAsync(team, name ?? Unique("board"));
+        var marker = Marker();
+        Write(FilesOf(team, site), "out/a.txt", marker);
+        return (site, marker);
+    }
+
+    /// <summary>Creates and publishes a one-page site, writing nothing into its files folder.</summary>
+    private async Task<string> PublishedSiteAsync(string team, string site)
+    {
         Assert.True((await Sites.CreateAsync(team, site, Person, Ct)).Ok);
 
         var source = Path.Combine(Docs(team), "site-src", Guid.NewGuid().ToString("N"));
         Write(source, "index.html", "<p>page</p>");
         var published = await Sites.PublishAsync(team, site, source, Person, Ct);
         Assert.True(published.Ok, published.Refusal);
-
-        var marker = Marker();
-        Write(FilesOf(team, site), "out/a.txt", marker);
-        return (site, marker);
+        return site;
     }
 
     /// <summary>A person opens the site; answers the capability path the entry redirected to.</summary>
@@ -192,18 +197,19 @@ public sealed class SiteFilesTests(HostFixture host) : IClassFixture<HostFixture
     {
         var (site, marker) = await SiteWithFileAsync(host.Alpha);
         var folder = FilesOf(host.Alpha, site);
+        var before = await OpenAsync(host.Alpha, site);
 
         using var person = await host.PersonAsync();
         Assert.Equal(HttpStatusCode.NoContent, (await person.DeleteAsync($"/api/teams/{host.Alpha}/sites/{site}?confirm=true", Ct)).StatusCode);
         Assert.True(File.Exists(Path.Combine(folder, "out", "a.txt")));
 
-        var again = await SiteWithFileAsync(host.Alpha, site);
-        File.WriteAllText(Path.Combine(folder, "out", "a.txt"), marker);
+        Assert.Equal(site, await PublishedSiteAsync(host.Alpha, site));
 
         var shown = await Tools(host.Alpha).Site("show", site: site, cancellationToken: Ct);
         Assert.Contains($"\"filesFolder\":{JsonSerializer.Serialize(folder)}", shown, StringComparison.Ordinal);
 
-        var page = await OpenAsync(host.Alpha, again.Site);
+        var page = await OpenAsync(host.Alpha, site);
+        Assert.NotEqual(CapabilityOf(before), CapabilityOf(page));
         Assert.Equal((HttpStatusCode.OK, marker), await GetAsync($"{page}_api/files/out/a.txt"));
     }
 
