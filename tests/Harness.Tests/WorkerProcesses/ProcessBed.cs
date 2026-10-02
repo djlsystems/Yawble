@@ -130,7 +130,9 @@ internal sealed class ProcessBed : IAsyncDisposable
     /// <summary>A team on the fake CLI, its Manager and these members.</summary>
     public async Task<string> TeamAsync(string name, params string[] members)
     {
-        var created = await Person.PostAsJsonAsync("/api/teams", new { name, agent = "fake", memberAgent = "fake" });
+        // No local repository: these tests need a workspace, not a clone, and making one runs control's
+        // git as the agent, which a control started under another user without capabilities cannot do.
+        var created = await Person.PostAsJsonAsync("/api/teams", new { name, agent = "fake", memberAgent = "fake", localRepository = false });
         created.EnsureSuccessStatusCode();
         var team = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
 

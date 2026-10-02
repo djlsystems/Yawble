@@ -115,7 +115,7 @@ public sealed class RemovalOnWorkerProcessTests
         }
 
         var dll = Path.Combine(AppContext.BaseDirectory, "Harness.Host.dll");
-        var (runs, why) = await RunAsync([.. control.Prefix, "sh", "-c", $"dotnet --list-runtimes >/dev/null && test -r '{dll}'"]);
+        var (runs, why) = await RunAsync([.. control.Prefix, "sh", "-c", $"dotnet --list-runtimes >/dev/null && test -r '{dll}' && test -z \"$(find '{AppContext.BaseDirectory}' -type f ! -readable -print -quit)\""]);
         if (runs != 0)
         {
             Assert.Skip($"'{ControlUser}' cannot run dotnet or read {dll} from this test's folder: {why}");

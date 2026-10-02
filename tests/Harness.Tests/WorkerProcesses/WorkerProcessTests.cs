@@ -284,7 +284,7 @@ public sealed class WorkerProcessTests
         // Preconditions, before the worker starts. The other user can start this build's Host at all;
         // if it cannot, that is this machine's layout, not the worker's behaviour.
         var dll = Path.Combine(AppContext.BaseDirectory, "Harness.Host.dll");
-        var (runs, why) = await RunAsync([.. nobody.Prefix, "sh", "-c", $"dotnet --list-runtimes >/dev/null && test -r '{dll}'"]);
+        var (runs, why) = await RunAsync([.. nobody.Prefix, "sh", "-c", $"dotnet --list-runtimes >/dev/null && test -r '{dll}' && test -z \"$(find '{AppContext.BaseDirectory}' -type f ! -readable -print -quit)\""]);
         if (runs != 0)
         {
             Assert.Skip($"The other user cannot run dotnet or read {dll} from this test's folder: {why}");
