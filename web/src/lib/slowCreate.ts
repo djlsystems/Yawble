@@ -26,12 +26,13 @@ export function carriesOnMessage(name: string): string {
 }
 
 /**
- * WHETHER THE WAIT WAS CUT OFF rather than answered. A refusal carries the HTTP status it came with
- * (see `send` in `api/client.ts`); a lost connection or an aborted request has none. A gateway that
- * gave up waiting (504) did not stop the Host either.
+ * WHETHER THE WAIT WAS CUT OFF rather than answered. Only what `fetch` itself throws counts: a
+ * `TypeError` for a lost connection, an `AbortError` for an aborted request. A gateway that gave up
+ * waiting (504) did not stop the Host either. Anything else is a refusal and is shown as one, with
+ * or without a status.
  */
 export function waitWasCutOff(cause: unknown): boolean {
   if (cause instanceof Unauthorized) return false
-  const status = (cause as { status?: unknown } | null)?.status
-  return typeof status !== 'number' || status === 504
+  if ((cause as { status?: unknown } | null)?.status === 504) return true
+  return cause instanceof TypeError || (cause as { name?: unknown } | null)?.name === 'AbortError'
 }
