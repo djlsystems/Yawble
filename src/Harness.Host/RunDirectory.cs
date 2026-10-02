@@ -185,6 +185,10 @@ public sealed class RunDirectory
         }
     }
 
+    /// <summary>The worker <paramref name="member"/>'s open run is on, and the run; null when it has none open here.</summary>
+    public (IRunWorker Worker, RunId Run)? WorkerOf(ContainerId member) =>
+        _runs.Values.FirstOrDefault(open => open.Run.Member == member) is { } found ? (found.Worker, found.Run) : null;
+
     /// <summary>The runs open here on <paramref name="worker"/>: what a worker that comes back is compared with.</summary>
     public IReadOnlyCollection<RunId> OpenOn(WorkerId worker) =>
         [.. _runs.Values.Where(open => open.Worker.Id == worker).Select(open => open.Run)];

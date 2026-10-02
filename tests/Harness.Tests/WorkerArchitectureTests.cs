@@ -31,47 +31,23 @@ public sealed class WorkerArchitectureTests
     public const string SignalsAProcessGroup = "signals a process group";
     public const string ReachesAWorkerLauncher = "reaches a worker launcher";
 
-    /// <summary>Why an entry may stay: what a later change moves, or what control keeps for good.</summary>
-    private static readonly string[] Categories =
+    /// <summary>Why an entry may stay: what control keeps for good, or what a later change moves.</summary>
+    private static readonly string[] Categories = ["git", "gh", "settings default"];
+
+    /// <summary>The only processes control starts itself: a person's and a team's git, and the GitHub CLI.</summary>
+    private static readonly string[] ControlStarts =
     [
-        "Concierge PTY", "sign-in probe", "tool pre-flight", "launch check", "CLI updates",
-        "live transcript reader", "FolderRemoval's agent pass", "git", "gh", "agent user", "settings default",
-        "run home",
+        "GhContributor.RunAsync: " + StartsAProcess,
+        "GitRunner.ExecuteGitAsync: " + StartsAProcess,
     ];
 
     /// <summary>Every caller outside the worker that still does one of these things, and why.</summary>
     private static readonly Dictionary<string, string> AllowList = new(StringComparer.Ordinal)
     {
-        ["PortaPtyEngine.SpawnAsync: " + StartsAProcess] =
-            "Concierge PTY: a person's terminal session is spawned here; a later change moves it to a worker.",
-        ["AgentAuthProbe.ProbeCommandAsync: " + StartsAProcess] =
-            "sign-in probe: asks each CLI whether it is signed in; a later change moves it to a worker.",
-        ["CliListingRunner.RunAsync: " + StartsAProcess] =
-            "tool pre-flight: lists each CLI's configured tools; a later change moves it to a worker.",
-        ["ForeignToolsCheck.CheckAsync: " + ReachesAWorkerLauncher] =
-            "tool pre-flight: reads the agent's tool files as the agent; a later change moves it to a worker.",
-        ["ForeignToolsCheck.BesideAsync: " + ReachesAWorkerLauncher] =
-            "tool pre-flight: reads the agent's tool files as the agent; a later change moves it to a worker.",
-        ["AgentCliUpdater.RunAsync: " + StartsAProcess] =
-            "CLI updates: a person's update of a shared CLI install; a later change moves it to a worker.",
-        ["LiveViewEndpoints.WatchAsync: " + ReachesAWorkerLauncher] =
-            "live transcript reader: follows a run's transcript as the agent for a watcher; a later change moves it to a worker.",
-        ["LiveViewEndpoints.RunTranscriptAsync: " + ReachesAWorkerLauncher] =
-            "live transcript reader: reads a past run's transcript as the agent; a later change moves it to a worker.",
-        ["FolderRemoval.RunAsync: " + StartsAProcess] =
-            "FolderRemoval's agent pass: removes what the agent owns, as the agent; a later change moves it to a worker.",
         ["GitRunner.ExecuteGitAsync: " + StartsAProcess] =
             "git: a person's and a team's git stays in control.",
         ["GhContributor.RunAsync: " + StartsAProcess] =
             "gh: the GitHub CLI for a person's contributions stays in control.",
-        ["ProcessAgentRunner.CheckLaunchAsync: " + ReachesAWorkerLauncher] =
-            "launch check: starts a preset's free invocation through the worker's own launch, not a run; a later change sends it as a message.",
-        ["HostDoctor.AgentsAsync: " + ReachesAWorkerLauncher] =
-            "agent user: the doctor resolves who agent children would run as, to report it; a later change reads it from the worker.",
-        ["RunHome.CreateAsync: " + ReachesAWorkerLauncher] =
-            "tool pre-flight: a tool listing of a preset that signs in with an issued credential runs in a home the worker's RunHomes makes as the agent; a later change moves the listing to a worker.",
-        ["RunHome.KeepTranscriptAsync: " + ReachesAWorkerLauncher] =
-            "run home: control's door to the worker's RunHomes, with no production caller - a run's transcript is kept by the worker that ran it; it goes when the listing moves.",
         ["TenantSettings..ctor: " + TouchesACgroup] =
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
     };
@@ -100,6 +76,27 @@ public sealed class WorkerArchitectureTests
             + Environment.NewLine + string.Join(Environment.NewLine, unexpected));
     }
 
+    /// <summary>
+    /// THE CONTROL ROLE STARTS NOTHING BUT GIT AND GH. Every agent CLI, a person's terminal, a probe, a
+    /// listing, an update and a removal's agent pass run on a worker, reached through the run protocol -
+    /// in <c>all</c> too, through the in-process connection, since this scan cannot tell roles apart.
+    /// So outside the worker exactly two methods start a process, none signals one, calls setpriv or
+    /// prlimit, or calls a worker method that does; allow-listing another start fails here.
+    /// </summary>
+    [Fact]
+    public void Control_starts_no_process_but_git_and_gh()
+    {
+        string[] processRules = [StartsAProcess, SignalsAProcessGroup, CallsSetprivOrPrlimit, ReachesAWorkerLauncher];
+        var starts = Violations(Scanned())
+            .Where(v => processRules.Any(rule => v.EndsWith(": " + rule, StringComparison.Ordinal)))
+            .ToList();
+
+        Assert.Equal(ControlStarts, starts);
+        Assert.Equal(
+            ControlStarts,
+            AllowList.Keys.Where(key => processRules.Any(rule => key.EndsWith(": " + rule, StringComparison.Ordinal))).Order(StringComparer.Ordinal));
+    }
+
     [Fact]
     public void Every_allow_list_entry_is_still_needed()
     {
@@ -122,16 +119,27 @@ public sealed class WorkerArchitectureTests
         });
     }
 
+    /// <summary>
+    /// What the worker references beyond the framework, exactly: the run protocol, the PTY contract, and
+    /// the PTY package a person's terminal is spawned with. Anything else - in this repository or not -
+    /// fails, named. The framework is <c>System.*</c>, <c>Microsoft.*</c> (the logging abstractions the
+    /// worker logs through among them), <c>netstandard</c> and <c>mscorlib</c>.
+    /// </summary>
     [Fact]
     public void The_worker_references_only_the_contracts()
     {
-        var harness = Worker.GetReferencedAssemblies()
+        var beyond = Worker.GetReferencedAssemblies()
             .Select(a => a.Name!)
-            .Where(name => name.StartsWith("Harness.", StringComparison.Ordinal))
+            .Where(name => !Framework(name))
+            .Order(StringComparer.Ordinal)
             .ToList();
 
-        Assert.Equal(["Harness.Contracts"], harness);
+        Assert.Equal(["Harness.Contracts", "Harness.Pty.Abstractions", "Porta.Pty"], beyond);
     }
+
+    private static bool Framework(string name) =>
+        name.StartsWith("System", StringComparison.Ordinal) || name.StartsWith("Microsoft.", StringComparison.Ordinal)
+        || name is "netstandard" or "mscorlib";
 
     [Fact]
     public void Every_project_but_the_worker_is_scanned()

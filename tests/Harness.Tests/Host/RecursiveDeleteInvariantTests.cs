@@ -25,8 +25,8 @@ public sealed class RecursiveDeleteInvariantTests
     [
         new("src/Harness.Host/McpLaunchConfig.cs",
             "A launch's MCP directory: the Host makes it owner-only and AgentLaunchUser.Share gives the agent's group read and traverse, never write."),
-        new("src/Harness.Host/AgentToolListing.cs",
-            "A tool listing's scratch folder: the Host makes it owner-only and AgentLaunchUser.Share gives the agent's group read and traverse, never write."),
+        new("src/Harness.Worker/AgentCommands.cs",
+            "A tool listing's scratch folder: the worker makes it owner-only and AgentLaunchUser.Share gives the agent's group read and traverse, never write."),
         new("src/Harness.Host/PluginInstaller.cs",
             "A stage or outgoing folder inside the plugins folder, which is the Host's (harness:agent, directories 0750, no group write) by prepare-volume.sh."),
         new("src/Harness.Host/PluginRemover.cs",

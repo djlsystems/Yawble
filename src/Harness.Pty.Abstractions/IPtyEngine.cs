@@ -1,8 +1,8 @@
 namespace Harness.Pty;
 
 /// <summary>
-/// Spawns a child attached to a pseudo-terminal. The implementation lives in Harness.Pty, which
-/// carries the Porta.Pty package; this project stays interfaces plus two records so that anything
+/// Spawns a child attached to a pseudo-terminal. The implementation lives in Harness.Worker, which
+/// carries the Porta.Pty package and is where a terminal is spawned; this project stays interfaces plus two records so that anything
 /// wanting the contract - including Harness.Core, which must stay package-free - can reference it
 /// without taking a package dependency.
 /// </summary>

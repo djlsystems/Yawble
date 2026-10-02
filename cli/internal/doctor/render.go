@@ -25,7 +25,9 @@ func RenderAgents(w io.Writer, agents []Agent) {
 		}
 		fmt.Fprintln(w, a.Agent)
 		switch {
-		case !a.Installed:
+		case a.Installed == nil:
+			fmt.Fprintln(w, "  installed   not measured")
+		case !*a.Installed:
 			fmt.Fprintln(w, "  installed   no")
 		case a.Version != nil && *a.Version != "":
 			fmt.Fprintf(w, "  installed   yes, %s\n", a.UpdatedText())
@@ -33,7 +35,7 @@ func RenderAgents(w io.Writer, agents []Agent) {
 			fmt.Fprintln(w, "  installed   yes")
 		}
 		switch {
-		case !a.Installed:
+		case a.NotInstalled():
 		case a.Authenticated == nil:
 			fmt.Fprintln(w, "  signed in   not measured")
 		case *a.Authenticated:
@@ -44,7 +46,10 @@ func RenderAgents(w io.Writer, agents []Agent) {
 		if source := a.SourceText(); source != "" {
 			fmt.Fprintf(w, "  source      %s\n", source)
 		}
-		if a.Installed {
+		if measured := a.MeasuredText(); measured != "" {
+			fmt.Fprintf(w, "  measured    %s\n", measured)
+		}
+		if a.IsInstalled() {
 			fmt.Fprintf(w, "  launch      %s\n", a.LaunchText())
 			if l := a.Launch; l != nil {
 				if l.Detail != nil && *l.Detail != "" {

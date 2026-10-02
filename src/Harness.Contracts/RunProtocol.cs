@@ -41,6 +41,9 @@ public sealed record RunId(ContainerId Member, string Nonce)
 
 /// <summary>What control sends a worker. A send completes once the worker has applied it.</summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "message")]
+[JsonDerivedType(typeof(ProbeSignIn), "probeSignIn")]
+[JsonDerivedType(typeof(RunAgentCommands), "runAgentCommands")]
+[JsonDerivedType(typeof(RemoveAsAgent), "removeAsAgent")]
 [JsonDerivedType(typeof(StartRun), "startRun")]
 [JsonDerivedType(typeof(CancelRun), "cancelRun")]
 [JsonDerivedType(typeof(ChangeRunMemoryAllowance), "changeRunMemoryAllowance")]
@@ -48,6 +51,12 @@ public sealed record RunId(ContainerId Member, string Nonce)
 [JsonDerivedType(typeof(TouchIdleClock), "touchIdleClock")]
 [JsonDerivedType(typeof(SampleCapacity), "sampleCapacity")]
 [JsonDerivedType(typeof(CheckLaunch), "checkLaunch")]
+[JsonDerivedType(typeof(StartTerminal), "startTerminal")]
+[JsonDerivedType(typeof(ResizeTerminal), "resizeTerminal")]
+[JsonDerivedType(typeof(StopTerminal), "stopTerminal")]
+[JsonDerivedType(typeof(FollowTranscript), "followTranscript")]
+[JsonDerivedType(typeof(StopStream), "stopStream")]
+[JsonDerivedType(typeof(ReadAgentFile), "readAgentFile")]
 public abstract record ControlMessage;
 
 /// <summary>A command about one run.</summary>
@@ -187,6 +196,9 @@ public sealed record WorkerEnvelope(WorkerId Worker, long Seq, WorkerEvent Event
 
 /// <summary>What a worker says.</summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "event")]
+[JsonDerivedType(typeof(SignInProbed), "signInProbed")]
+[JsonDerivedType(typeof(AgentCommandsRan), "agentCommandsRan")]
+[JsonDerivedType(typeof(RemovedAsAgent), "removedAsAgent")]
 [JsonDerivedType(typeof(WorkerReady), "workerReady")]
 [JsonDerivedType(typeof(RunCredentialApplied), "runCredentialApplied")]
 [JsonDerivedType(typeof(RunStarted), "runStarted")]
@@ -200,6 +212,8 @@ public sealed record WorkerEnvelope(WorkerId Worker, long Seq, WorkerEvent Event
 [JsonDerivedType(typeof(RunEnded), "runEnded")]
 [JsonDerivedType(typeof(WorkerCapacitySampled), "workerCapacitySampled")]
 [JsonDerivedType(typeof(LaunchChecked), "launchChecked")]
+[JsonDerivedType(typeof(TerminalEnded), "terminalEnded")]
+[JsonDerivedType(typeof(AgentFileRead), "agentFileRead")]
 public abstract record WorkerEvent;
 
 /// <summary>An event about one run.</summary>

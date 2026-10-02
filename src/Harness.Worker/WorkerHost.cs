@@ -1,5 +1,6 @@
 using Harness.Contracts;
 using Harness.Host.Capacity;
+using Harness.Pty;
 using Microsoft.Extensions.Logging;
 
 namespace Harness.Host;
@@ -36,7 +37,10 @@ public sealed class WorkerHost
     private readonly ProcessGroupReader? _processes;
     private readonly RunProcessGroups _groups;
     private readonly TimeProvider _clock;
+    private readonly WorkerAgentCli? _cli;
     private readonly ILogger? _log;
+    private readonly WorkerTerminals? _terminals;
+    private readonly WorkerTranscripts? _transcripts;
 
     private readonly SemaphoreSlim _publish = new(1, 1);
     private long _seq;
@@ -55,7 +59,9 @@ public sealed class WorkerHost
         ProcessGroupReader? processes = null,
         RunProcessGroups? groups = null,
         TimeProvider? clock = null,
-        ILogger? log = null)
+        WorkerAgentCli? cli = null,
+        ILogger? log = null,
+        WorkerStreaming? streaming = null)
     {
         _id = id;
         _events = events;
@@ -66,7 +72,15 @@ public sealed class WorkerHost
         _processes = processes;
         _groups = groups ?? RunProcessGroups.Shared;
         _clock = clock ?? TimeProvider.System;
+        _cli = cli;
         _log = log;
+
+        if (streaming is not null)
+        {
+            _terminals = new WorkerTerminals(streaming.Sink, streaming.Pty, streaming.RunAs, e => PublishAsync(e), log, _clock);
+            _transcripts = new WorkerTranscripts(
+                streaming.Sink, streaming.RunAs, e => PublishAsync(e), RunEnded, streaming.Environment, log, _clock);
+        }
     }
 
     public WorkerId Id => _id;
@@ -91,6 +105,12 @@ public sealed class WorkerHost
     {
         switch (message)
         {
+            case AgentCliCommand request:
+                // On its own task, as a launch check is: the answer is an event, under the request's id.
+                (_cli ?? throw new NotSupportedException($"Worker {_id} answers no {request.GetType().Name}."))
+                    .Apply(request, answer => PublishAsync(answer));
+                break;
+
             case StartRun start:
                 Start(start);
                 break;
@@ -123,9 +143,77 @@ public sealed class WorkerHost
                 _ = Task.Run(() => CheckAsync(check), CancellationToken.None);
                 break;
 
+            case TerminalCommand command:
+                await ApplyAsync(command);
+                break;
+
             default:
                 throw new NotSupportedException($"A worker does not take {message.GetType().Name}.");
         }
+    }
+
+    /// <summary>
+    /// A terminal's or a file's command. A start spawns at once and throws when it cannot; a follow, a
+    /// read and a stop run on their own task, so nothing behind them waits.
+    /// </summary>
+    private async Task ApplyAsync(TerminalCommand command)
+    {
+        if (_terminals is null || _transcripts is null)
+        {
+            throw new NotSupportedException($"This worker has no terminals and reads no files ({command.GetType().Name}).");
+        }
+
+        switch (command)
+        {
+            case StartTerminal start:
+                await _terminals.StartAsync(start);
+                break;
+
+            case ResizeTerminal resize:
+                _terminals.Resize(resize);
+                break;
+
+            case StopTerminal stop:
+                _ = Task.Run(() => _terminals.StopAsync(stop.Session), CancellationToken.None);
+                break;
+
+            case FollowTranscript follow:
+                _transcripts.Follow(follow);
+                break;
+
+            case StopStream stop:
+                _transcripts.Stop(stop.Stream, stop.RunEnded);
+                break;
+
+            case ReadAgentFile read:
+                _transcripts.Read(read);
+                break;
+
+            default:
+                throw new NotSupportedException($"A worker does not take {command.GetType().Name}.");
+        }
+    }
+
+    /// <summary>A person's keystrokes for a terminal on this worker, typed as they arrive.</summary>
+    public void Input(StreamInput input) => _terminals?.Input(input);
+
+    /// <summary>The terminals open on this worker.</summary>
+    public IReadOnlyCollection<string> Terminals => _terminals?.Sessions ?? [];
+
+    /// <summary>Ends every terminal and every follow: the worker is stopping.</summary>
+    public async Task StopStreamsAsync()
+    {
+        _transcripts?.StopAll();
+        if (_terminals is not null) await _terminals.StopAllAsync();
+    }
+
+    /// <summary>
+    /// Fires when <paramref name="run"/> ends on this worker. A run this worker does not have open never
+    /// fires here: control says when it ended.
+    /// </summary>
+    private CancellationToken RunEnded(RunId run)
+    {
+        lock (_runsGate) return _runs.GetValueOrDefault(run)?.Ended.Token ?? CancellationToken.None;
     }
 
     private void Start(StartRun start)
@@ -232,6 +320,7 @@ public sealed class WorkerHost
             }
 
             lock (_runsGate) _runs.Remove(run);
+            open.Ended.Cancel();
             await DeliverLockedAsync(ended);
         }
         finally
@@ -300,6 +389,9 @@ public sealed class WorkerHost
 
         public CancellationTokenSource Stop { get; } = new();
 
+        /// <summary>Fired when the run has left the open set: what a followed transcript stops on.</summary>
+        public CancellationTokenSource Ended { get; } = new();
+
         public string? StderrTail { get; private set; }
 
         private RunId Run => start.Run;
@@ -330,3 +422,11 @@ public sealed class WorkerHost
         public Task OutputLineAsync(string line) => worker.PublishAsync(new RunOutput(Run, line));
     }
 }
+
+/// <summary>
+/// What a worker needs for terminals and the agent's files: where its stream chunks go, the engine a
+/// terminal is spawned with, who the agent runs as, and (for a test) the environment its own
+/// credential variables are read from.
+/// </summary>
+public sealed record WorkerStreaming(
+    IRunStreamSink Sink, IPtyEngine Pty, AgentLaunchUser? RunAs, Func<IDictionary<string, string?>>? Environment = null);

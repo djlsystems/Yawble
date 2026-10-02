@@ -92,6 +92,26 @@ public sealed class ConciergeLaunchFactory(
     /// composed it - the identifier here, the label on a member's - is exactly the drift a shared
     /// token vocabulary exists to prevent.</param>
     public async Task<PtySpec> ForAsync(
+        string team, string teamLabel, string user, string login, string agent,
+        IReadOnlyDictionary<string, string> teamEnv,
+        string? steeringCausation = null,
+        string? publicUrl = null,
+        CancellationToken ct = default) =>
+        // THE ONE-PROCESS COMPOSITION of the two halves: what control resolves, made into a terminal
+        // as a worker makes it. Production resolves here and hands the launch to a worker
+        // (WorkerPtyEngine); this composition is kept so the launch's tests read one finished spec.
+        ConciergeTerminal.Materialize(
+            await ResolveAsync(team, teamLabel, user, login, agent, teamEnv, steeringCausation, publicUrl, ct), runAs).Spec;
+
+    /// <summary>
+    /// Everything about one person's Concierge launch that control decides: the refusal when agents
+    /// cannot be run as their user, the CLI, the wait for its update, the minted credential, the
+    /// environment in its order, the system prompt, and the workspace with its files. What is written
+    /// to a machine's temp folder - the MCP config and the system-prompt file - and the wrapping that
+    /// runs the CLI as the agent are the worker's (<see cref="ConciergeTerminal.Materialize"/>), on the
+    /// worker that runs it.
+    /// </summary>
+    public async Task<TerminalLaunch> ResolveAsync(
         // NO DEFAULT for the Agent. A default would be a catalog entry a person may rename or
         // remove - and the one production caller reads the stored value and passes it, so a
         // default would only ever cover a caller that had not looked.
@@ -208,15 +228,8 @@ public sealed class ConciergeLaunchFactory(
             environment["HARNESS_CAUSATION"] = steeringCausation;
         }
 
-        var mcp = McpLaunchConfig.TryWrite(baseAddress, credential, "concierge-" + user);
-        if (mcp is not null)
-        {
-            environment["HARNESS_MCP_CONFIG"] = mcp.JsonPath;
-            environment["HARNESS_MCP_CONFIG_TOML"] = mcp.TomlPath;
-        }
-
-        List<string>? tempFiles = null;
-
+        // THE MCP CONFIG IS THE WORKER'S to write, in its own temp folder, so its paths are not known
+        // here: a prompt token naming HARNESS_MCP_CONFIG is left as written.
         // Tenant-wide Concierge prompts do not resolve team-scoped tokens. Leaving unresolved
         // tokens verbatim is the intentional and visible failure mode.
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -243,11 +256,6 @@ public sealed class ConciergeLaunchFactory(
         // Claude launch after a grok one, or after Claude's own session store moved - ending the
         // Concierge with "No conversation found to continue".
         List<string> argv = [command.FileName, .. command.Arguments];
-
-        if (mcp is not null)
-        {
-            argv = argv.Select(argument => McpLaunchConfig.Apply(argument, mcp)).ToList();
-        }
 
         try
         {
@@ -307,42 +315,16 @@ public sealed class ConciergeLaunchFactory(
             }
         }
 
-        if (command.SystemPromptArguments is { Count: > 0 } systemArguments)
-        {
-            var promptFile = Path.Combine(Path.GetTempPath(), $"os-concierge-{Guid.NewGuid():N}.system.txt");
-
-            File.WriteAllText(promptFile, systemPrompt);
-            tempFiles = [promptFile];
-
-            // Substituted inside an already-tokenized element, never by re-splitting a joined command
-            // line: a quote or a space inside the prompt path must not become an argument boundary.
-            argv.AddRange(systemArguments.Select(
-                // Both spellings, for the reason ProcessAgentRunner states: `{systemFile}` is a
-                // permanent alias that existing catalogs carry, and an unsubstituted one is handed to
-                // the CLI as a literal path rather than refused.
-                a => a
-                    .Replace("{systemPromptFile}", promptFile, StringComparison.Ordinal)
-                    .Replace("{systemFile}", promptFile, StringComparison.Ordinal)));
-        }
-
-        // The Concierge runs as `agent` too, when the Host can switch: its MCP directory
-        // and prompt file are handed to that user's group, and setpriv goes in front of the argv.
-        if (runAs is not null)
-        {
-            if (mcp is not null) runAs.Share(Path.GetDirectoryName(mcp.JsonPath)!);
-            foreach (var file in tempFiles ?? []) runAs.Share(file);
-            argv = [.. runAs.Wrap(argv)];
-        }
-
-        return new PtySpec(
-            command.FileName,
+        return new TerminalLaunch(
+            argv,
             workspace,
-            Env: environment,
-            Argv: argv,
-            TempFiles: tempFiles,
-            ClearEnvironment: steeringCausation is null
+            environment,
+            steeringCausation is null
                 ? ["HARNESS_TEAM", "HARNESS_SHARED", "HARNESS_MEMBER", "HARNESS_CAUSATION"]
-                : ["HARNESS_TEAM", "HARNESS_SHARED", "HARNESS_MEMBER"]);
+                : ["HARNESS_TEAM", "HARNESS_SHARED", "HARNESS_MEMBER"],
+            command.SystemPromptArguments is { Count: > 0 } ? systemPrompt : null,
+            command.SystemPromptArguments is { Count: > 0 } systemArguments ? [.. systemArguments] : null,
+            new TerminalMcp(baseAddress, "concierge-" + user));
     }
 
     /// <summary>

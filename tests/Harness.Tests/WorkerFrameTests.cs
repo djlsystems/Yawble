@@ -26,7 +26,30 @@ public sealed class WorkerFrameTests
         new HandledFrame(42),
         new PingFrame(3),
         new PongFrame(3),
+        new StreamFrame(new StreamChunk("terminal:t1", 1, [27, 91, 72], Gap: "Output was lost.")),
+        new StreamInputFrame(new StreamInput("terminal:t1", "hello\r"u8.ToArray())),
     ];
+
+    [Fact]
+    public void A_command_list_never_holds_its_credential_in_clear_and_it_opens_on_the_other_end()
+    {
+        var codec = new WorkerFrameCodec(Key);
+        var commands = new RunAgentCommands(
+            "r1", [new AgentCliRun("claude", ["mcp", "list"], new Dictionary<string, string>(), [], 45, Scratch: true)], Start().Credential);
+
+        var text = codec.Write(new CommandFrame(3, commands));
+
+        foreach (var form in ValueRedactor.For([Value]).Forms) Assert.DoesNotContain(form, text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Qz8p", text, StringComparison.Ordinal);
+
+        var back = (RunAgentCommands)((CommandFrame)codec.Read(text)).Message;
+        Assert.Equal(Value, back.Credential!.Environment["ISSUED_KEY"]);
+        Assert.Equal(["mcp", "list"], back.Commands.Single().Arguments);
+
+        // None to seal: the frame is plain, and no key is needed.
+        var plain = new WorkerFrameCodec(null).Write(new CommandFrame(4, commands with { Credential = null }));
+        Assert.Null(((RunAgentCommands)((CommandFrame)codec.Read(plain)).Message).Credential);
+    }
 
     [Fact]
     public void Every_frame_round_trips_through_json_unchanged()
@@ -147,6 +170,33 @@ public sealed class WorkerFrameTests
 
         var read = Assert.Throws<InvalidDataException>(() => codec.Read(huge));
         Assert.Equal(WorkerFrameCodec.TooLargeText, read.Message);
+    }
+
+    [Fact]
+    public void A_terminal_launch_and_a_read_never_hold_a_secret_in_clear_and_open_on_the_other_end()
+    {
+        var codec = new WorkerFrameCodec(Key);
+        var launch = new TerminalLaunch(
+            ["claude"], "/work", new Dictionary<string, string> { ["HARNESS_KEY"] = Value, ["ISSUED_KEY"] = Value + "-2" },
+            [], null, null, new TerminalMcp("http://127.0.0.1:5000", "concierge-u1"));
+        var texts = new[]
+        {
+            codec.Write(new CommandFrame(1, new StartTerminal("terminal:t1", launch, 100, 30))),
+            codec.Write(new CommandFrame(2, new ReadAgentFile("r1", "/t.jsonl", ["ISSUED_KEY"], true, ValueRedactor.For([Value])))),
+        };
+
+        foreach (var text in texts) Assert.DoesNotContain("Qz8p", text, StringComparison.Ordinal);
+
+        var start = (StartTerminal)((CommandFrame)codec.Read(texts[0])).Message;
+        Assert.Equal(Value, start.Launch.Environment["HARNESS_KEY"]);
+        Assert.Equal(Value + "-2", start.Launch.Environment["ISSUED_KEY"]);
+        Assert.Equal("http://127.0.0.1:5000", start.Launch.Mcp!.BaseUrl);
+
+        var read = (ReadAgentFile)((CommandFrame)codec.Read(texts[1])).Message;
+        Assert.Equal(ValueRedactor.For([Value]).Forms, read.Redaction!.Forms);
+
+        // With no key, a terminal's environment does not cross at all.
+        Assert.Throws<InvalidOperationException>(() => new WorkerFrameCodec(null).Write(new CommandFrame(1, new StartTerminal("t", launch, 1, 1))));
     }
 
     private static StartRun Start() =>

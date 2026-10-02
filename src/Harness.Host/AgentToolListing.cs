@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Harness.Contracts;
@@ -83,101 +82,25 @@ public interface IListingRunner
 }
 
 /// <summary>
-/// Runs a listing command the way a member's CLI is started: AS THE AGENT USER (the launch prefix),
-/// with the Host's environment plus the launch's overlay, from an empty scratch folder so no
-/// repository's own configuration is read. Never runs an agent-installed program as the Host: when
-/// the agent user exists and cannot be reached, it does not run at all.
+/// A listing run on a worker of this process's own (<see cref="WorkerAsks.InProcess"/>): the
+/// one-process composition of <see cref="WorkerListingRunner"/>, for a caller with no connected worker.
 /// </summary>
 /// <param name="homes">Where a listing's own home is made: the member temporary folders' root,
 /// which the agent can write; <see cref="MemberTemp.Root"/> when null.</param>
 public sealed class CliListingRunner(AgentLaunchUser? runAs = null, string? homes = null) : IListingRunner
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(45);
+    private readonly WorkerListingRunner _runner = new(WorkerAsks.InProcess(runAs), homes ?? MemberTemp.Root, pathIsTheWorkers: true);
 
-    public bool Installed(string command) => PathSearch.Find(command) is not null;
+    public bool Installed(string command) => _runner.Installed(command);
 
-    // A parent several launches share, as the launch check's: swept only of old homes nobody owns.
-    public Task<string?> MakeHomeAsync(CancellationToken ct) =>
-        runAs is { Refuses: true }
-            ? Task.FromResult<string?>(null)
-            : RunHome.CreateAsync(homes ?? MemberTemp.Root, runAs, null, ct, memberFolder: false);
-
-    public Task RemoveHomeAsync(string home) => RunHome.RemoveAsync(home, runAs);
-
-    public async Task<ListingRun> RunAsync(
+    public Task<ListingRun> RunAsync(
         string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment,
-        CancellationToken ct, RunCredential? credential = null)
-    {
-        if (PathSearch.Find(command) is not { } resolved) return new ListingRun(null, "", $"'{command}' is not on PATH.");
+        CancellationToken ct, RunCredential? credential = null) =>
+        _runner.RunAsync(command, arguments, environment, ct, credential);
 
-        if (runAs is { Refuses: true }) return new ListingRun(null, "", runAs.Refusal($"'{command}'"));
+    public Task<string?> MakeHomeAsync(CancellationToken ct) => _runner.MakeHomeAsync(ct);
 
-        var scratch = Directory.CreateTempSubdirectory("harness-tool-listing-").FullName;
-        runAs?.Share(scratch);
-
-        try
-        {
-            var prefix = runAs?.Prefix ?? [];
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = prefix.Count > 0 ? prefix[0] : resolved,
-                    WorkingDirectory = scratch,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    RedirectStandardInput = true,
-                    UseShellExecute = false,
-                },
-            };
-
-            if (prefix.Count > 0)
-            {
-                foreach (var part in prefix.Skip(1)) process.StartInfo.ArgumentList.Add(part);
-                process.StartInfo.ArgumentList.Add(resolved);
-            }
-
-            foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
-            foreach (var (name, value) in environment) process.StartInfo.Environment[name] = value;
-
-            // The credential as a member run gets it, then every provider key but this CLI's own
-            // taken out, as at a member's spawn.
-            var handedIn = AgentEnvironment.ApplyCredential(process.StartInfo.Environment, credential, environment);
-            AgentEnvironment.ScopeProviderKeys(process.StartInfo.Environment, command, handedIn);
-
-            if (!process.Start()) return new ListingRun(null, "", "It could not be started.");
-            process.StandardInput.Close();
-
-            var stdout = process.StandardOutput.ReadToEndAsync(ct);
-            var stderr = process.StandardError.ReadToEndAsync(ct);
-
-            try
-            {
-                await process.WaitForExitAsync(ct).WaitAsync(Timeout, ct);
-            }
-            catch (TimeoutException)
-            {
-                try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-                return new ListingRun(null, "", $"It did not finish in {Timeout.TotalSeconds:0} seconds.");
-            }
-
-            var output = await stdout;
-            await stderr;
-
-            return new ListingRun(process.ExitCode, output);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return new ListingRun(null, "", exception.Message);
-        }
-        finally
-        {
-            // RECURSIVE DELETE REVIEWED: agents cannot write here. The Host made the scratch folder
-            // owner-only and AgentLaunchUser.Share gives the agent's group read and traverse, never
-            // write; the CLI runs in it but cannot create anything in it.
-            try { Directory.Delete(scratch, recursive: true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        }
-    }
+    public Task RemoveHomeAsync(string home) => _runner.RemoveHomeAsync(home);
 }
 
 /// <summary>

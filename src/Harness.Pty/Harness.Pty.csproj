@@ -5,7 +5,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Porta.Pty" />
     <ProjectReference Include="..\Harness.Pty.Abstractions\Harness.Pty.Abstractions.csproj" />
     <ProjectReference Include="..\Harness.Streaming\Harness.Streaming.csproj" />
   </ItemGroup>

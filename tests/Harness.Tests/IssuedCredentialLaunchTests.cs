@@ -308,11 +308,11 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
         // Cancelled once the folder is made.
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => RunHome.CreateAsync(parent, null, null, cancelled.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => RunHome.Homes(null).CreateAsync(parent, null, cancelled.Token));
         Assert.Empty(Directory.EnumerateDirectories(parent, RunHome.Prefix + "*"));
 
         // Failed after the folder is made: the grok entry to copy in is not there.
-        Assert.Null(await RunHome.CreateAsync(parent, null, Path.Combine(_root, "no-such-config.toml"), Ct));
+        Assert.Null(await RunHome.Homes(null).CreateAsync(parent, Path.Combine(_root, "no-such-config.toml"), Ct));
         Assert.Empty(Directory.EnumerateDirectories(parent, RunHome.Prefix + "*"));
     }
 
@@ -328,7 +328,7 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
         var recent = Directory.CreateDirectory(Path.Combine(shared, RunHome.Prefix + "recent000000")).FullName;
 
         // Before a new one is made: the old leftover goes, the recent one stays.
-        var live = await RunHome.CreateAsync(shared, null, null, Ct, memberFolder: false);
+        var live = await RunHome.Homes(null).CreateAsync(shared, null, Ct, memberFolder: false);
         Assert.NotNull(live);
         Assert.False(Directory.Exists(old));
         Assert.True(Directory.Exists(recent));
@@ -357,12 +357,12 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
         File.WriteAllText(recent, "{}");
         File.SetLastWriteTimeUtc(recent, DateTime.UtcNow - TimeSpan.FromDays(1));
 
-        var home = await RunHome.CreateAsync(temp, null, null, Ct);
+        var home = await RunHome.Homes(null).CreateAsync(temp, null, Ct);
         Assert.NotNull(home);
         var written = Path.Combine(Directory.CreateDirectory(Path.Combine(home, "t")).FullName, "s.jsonl");
         File.WriteAllText(written, "{\"type\":\"user\"}");
 
-        var moved = await RunHome.KeepTranscriptAsync(new AgentTranscript(written, LiveView.ClaudeJsonl), home, temp, null);
+        var moved = await RunHome.Homes(null).KeepTranscriptAsync(new AgentTranscript(written, LiveView.ClaudeJsonl), home, temp);
         await RunHome.RemoveAsync(home, null);
 
         Assert.True(File.Exists(moved!.Path));

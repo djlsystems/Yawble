@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text;
+using System.Threading.Channels;
 using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host.Auth;
@@ -34,7 +35,8 @@ public static class LiveViewEndpoints
                 + "text, a tool result's first line and size (`<first line> (<n> bytes)`), "
                 + "`User: <first line>` and `Attachment: <name or first line>`. A line that does "
                 + "not parse is shown raw.\n\n"
-                + "404 with a sentence when the member is not running. 200 with "
+                + "404 with a sentence when the member is not running. 503 with a sentence when the "
+                + "worker running it is not connected. 200 with "
                 + "`{ \"live\": false, \"reason\": \"...\" }` as JSON when its agent has no live "
                 + "view, or its transcript was not found within 30 seconds of launch. For an agent "
                 + "whose transcript is found after launch, the response starts once it is found; "
@@ -89,7 +91,8 @@ public static class LiveViewEndpoints
                 + "per step, from the start of the file to its end. It is read once, not followed.\n\n"
                 + $"410 with `{Gone}` when the file is no longer on disk. 500 with a sentence saying "
                 + "why when it is there but cannot be read (e.g. permission denied). 404 when `seq` is not one "
-                + "of this member's runs.\n\n"
+                + "of this member's runs. 503 with a sentence when no worker is connected to read it as the "
+                + "agent, or the read did not all arrive.\n\n"
                 + "Writes nothing.\n\n"
                 + "**A person's action; no machine principal.**");
     }
@@ -106,8 +109,8 @@ public static class LiveViewEndpoints
     private static async Task<IResult> WatchAsync(
         [Description(Describe.Team)] string team,
         [Description("The member to watch, as addressed in its route.")] string member,
-        HttpContext context, TeamRegistry teams, ContainerHost host, LiveRuns live, AgentLaunchUser runAs,
-        RunSecrets secrets, CancellationToken ct)
+        HttpContext context, TeamRegistry teams, ContainerHost host, LiveRuns live, RunDirectory directory,
+        WorkerReads reads, WorkerStreams streams, RunSecrets secrets, CancellationToken ct)
     {
         if (teams.ExistingName(team) is not { } stored)
         {
@@ -136,40 +139,148 @@ public static class LiveViewEndpoints
 
         var format = run.Format ?? LiveView.ClaudeJsonl;
 
-        if (LiveTranscriptReader.Refusal(runAs) is { } refusal)
-        {
-            return Results.Ok(new { live = false, reason = refusal });
-        }
+        if (Place(directory, reads.Workers, container.Id, out var placed) is { } refused) return refused;
 
-        var response = context.Response;
-        response.StatusCode = StatusCodes.Status200OK;
-        response.ContentType = "text/plain; charset=utf-8";
-        response.Headers.CacheControl = "no-store";
-        response.Headers["X-Accel-Buffering"] = "no";
-
-        await response.StartAsync(ct);
-
-        // THE RUN'S OWN CREDENTIAL never reaches the watcher: the CLI's file holds what the CLI wrote.
-        var redactor = secrets.For(container.Id);
+        var id = "live:" + Guid.NewGuid().ToString("N");
+        using var stream = streams.Open(id, placed.Worker);
+        var stopped = false;
 
         try
         {
-            await foreach (var raw in LiveTranscriptReader.LinesAsync(transcript, runAs, run.Ended, ct))
+            try
             {
-                // Every line of one event carries that event's time, or an empty one.
-                var text = Wire(redactor, format, raw);
-                if (text.Length == 0) continue;
+                await placed.Worker.SendAsync(new FollowTranscript(id, placed.Run, transcript, format), ct);
+            }
+            catch (InvalidOperationException)
+            {
+                return NotConnected(placed.Worker.Id);
+            }
 
-                await response.WriteAsync(text, Encoding.UTF8, ct);
-                await response.Body.FlushAsync(ct);
+            // The run ending is said to the worker, which reads what the agent wrote last and ends.
+            using var ended = run.Ended.Register(() => _ = StopAsync(placed.Worker, id, runEnded: true));
+
+            // The worker's first chunk says whether it follows: a follow that began has no text, and a
+            // worker that cannot read the agent's files ends at once with why.
+            StreamChunk first;
+            try
+            {
+                first = await stream.Reader.ReadAsync(ct);
+            }
+            catch (ChannelClosedException)
+            {
+                return NotConnected(placed.Worker.Id);
+            }
+
+            if (first.End && first.N > 0 && first.Gap is { } refusal)
+            {
+                stopped = true;
+                return Results.Ok(new { live = false, reason = refusal });
+            }
+
+            var response = context.Response;
+            response.StatusCode = StatusCodes.Status200OK;
+            response.ContentType = "text/plain; charset=utf-8";
+            response.Headers.CacheControl = "no-store";
+            response.Headers["X-Accel-Buffering"] = "no";
+
+            await response.StartAsync(ct);
+
+            // THE RUN'S OWN CREDENTIAL never reaches the watcher: the CLI's file holds what the CLI wrote.
+            var redactor = secrets.For(container.Id);
+
+            var chunk = first;
+            while (true)
+            {
+                if (chunk.Text is { } raw)
+                {
+                    // Every line of one event carries that event's time, or an empty one.
+                    var text = Wire(redactor, format, raw);
+                    if (text.Length > 0)
+                    {
+                        await response.WriteAsync(text, Encoding.UTF8, ct);
+                        await response.Body.FlushAsync(ct);
+                    }
+                }
+
+                if (chunk.End)
+                {
+                    stopped = chunk.N > 0;
+
+                    // Ended early - its worker lost, a line lost on the way: the last line says so.
+                    if (chunk.Gap is { } why)
+                    {
+                        await response.WriteAsync($"\t{why}\n", Encoding.UTF8, ct);
+                        await response.Body.FlushAsync(ct);
+                    }
+
+                    break;
+                }
+
+                chunk = await stream.Reader.ReadAsync(ct);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // The watcher left. Nothing to say to nobody.
         }
+        catch (ChannelClosedException)
+        {
+            // Ended without a last chunk: nothing more to say.
+        }
+        finally
+        {
+            // The watcher left before the run ended: the worker stops its tail.
+            if (!stopped) _ = StopAsync(placed.Worker, id);
+        }
 
         return Results.Empty;
+    }
+
+    /// <summary>
+    /// FOLLOWED ON THE WORKER THE RUN IS ON, as the agent: control reads no agent's file itself. A run
+    /// control has no open start for is followed on any connected worker: the file is on the shared
+    /// volume, and this run's end is control's to say. Answers the 503 to send instead when there is no
+    /// worker to ask, or the run's own worker is dropped.
+    /// </summary>
+    public static IResult? Place(RunDirectory directory, WorkerPool workers, ContainerId member, out (IRunWorker Worker, RunId Run) placed)
+    {
+        if (directory.WorkerOf(member) is { } open)
+        {
+            placed = open;
+        }
+        else
+        {
+            try
+            {
+                placed = (workers.Worker(null), new RunId(member, string.Empty));
+            }
+            catch (InvalidOperationException)
+            {
+                placed = default;
+                return Results.Problem(WorkerReads.NoWorkerText, statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        }
+
+        return placed.Worker is IRunWorkerConnection { Dropped: true } ? NotConnected(placed.Worker.Id) : null;
+    }
+
+    /// <summary>What a live view of a run whose worker is not connected answers.</summary>
+    public static string NotConnectedText(WorkerId worker) =>
+        $"The worker running this run ({worker}) is not connected, so its live view cannot be read; it comes back if the worker reconnects within its grace.";
+
+    private static IResult NotConnected(WorkerId worker) =>
+        Results.Problem(NotConnectedText(worker), statusCode: StatusCodes.Status503ServiceUnavailable);
+
+    private static async Task StopAsync(IRunWorker worker, string stream, bool runEnded = false)
+    {
+        try
+        {
+            await worker.SendAsync(new StopStream(stream, runEnded));
+        }
+        catch (InvalidOperationException)
+        {
+            // Gone: its tail went with it.
+        }
     }
 
     private static async Task<IResult> RunsAsync(
@@ -234,7 +345,8 @@ public static class LiveViewEndpoints
         [Description(Describe.Team)] string team,
         [Description("The member, as addressed in its route.")] string member,
         [Description("The run's seq, as `runs` lists it.")] long seq,
-        TeamRegistry teams, IMessageLog log, AgentLaunchUser runAs, ContainerHost host, RunSecrets secrets, CancellationToken ct)
+        TeamRegistry teams, IMessageLog log, ContainerHost host, RunSecrets secrets, AgentCatalog catalog, WorkerReads reads,
+        CancellationToken ct)
     {
         if (await FindMemberAsync(teams, team, member, ct) is not { } found) return NoMember(team, member);
 
@@ -249,24 +361,24 @@ public static class LiveViewEndpoints
 
         var format = Field(run.Terminal.Payload, PayloadFields.AgentTranscriptFormat) ?? LiveView.ClaudeJsonl;
 
-        if (LiveTranscriptReader.Refusal(runAs) is { } refusal)
-        {
-            return Results.Problem(refusal, statusCode: StatusCodes.Status503ServiceUnavailable);
-        }
-
-        var read = await AgentFiles.ReadAllAsync(path, runAs, ct);
-        if (read.Unreadable is { } why)
-        {
-            return Results.Text(Unreadable(why), "text/plain; charset=utf-8", Encoding.UTF8, StatusCodes.Status500InternalServerError);
-        }
-
-        if (read.Text is not { } text)
-        {
-            return Results.Text(Gone, "text/plain; charset=utf-8", Encoding.UTF8, StatusCodes.Status410Gone);
-        }
-
-        // Read with the run's set if this Host still holds it, and the set a run would get now.
+        // Read with the run's set if this Host still holds it, and the set a run would get now. The
+        // worker reads it as the agent and redacts it of that set and of what its own environment holds.
         var redactor = await secrets.ForReadAsync(id, found.Agent, host.Find(id)?.Environment, ct);
+        var read = await reads.ReadAsync(path, [.. RunSecrets.CredentialNames(catalog)], redactor, ct, transcript: true);
+
+        switch (read.Kind)
+        {
+            case FileReadKind.Refused or FileReadKind.NoWorker or FileReadKind.Incomplete:
+                return Results.Problem(read.Why, statusCode: StatusCodes.Status503ServiceUnavailable);
+
+            case FileReadKind.Unreadable:
+                return Results.Text(Unreadable(read.Why!), "text/plain; charset=utf-8", Encoding.UTF8, StatusCodes.Status500InternalServerError);
+
+            case FileReadKind.Gone:
+                return Results.Text(Gone, "text/plain; charset=utf-8", Encoding.UTF8, StatusCodes.Status410Gone);
+        }
+
+        var text = read.Text!;
 
         var body = new StringBuilder();
         foreach (var raw in text.Split('\n')) body.Append(Wire(redactor, format, raw));

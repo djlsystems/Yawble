@@ -48,10 +48,12 @@ type Schema struct {
 	Accepted bool     `json:"accepted"`
 }
 
-// Agent is one command from the Host's auth-probes.json. Authenticated nil is "not measured".
+// Agent is one command from the Host's auth-probes.json. Installed and Authenticated nil are "not
+// measured": the Host's last sign-in probe had no worker answer for it, or there has been none.
+// Not measured is never "not installed" and fails no check.
 type Agent struct {
 	Agent              string  `json:"agent"`
-	Installed          bool    `json:"installed"`
+	Installed          *bool   `json:"installed"`
 	Version            *string `json:"version"`
 	Authenticated      *bool   `json:"authenticated"`
 	Detail             string  `json:"detail"`
@@ -75,6 +77,31 @@ type Agent struct {
 	CredentialSource *string `json:"credentialSource"`
 	// IssuedSet is whether its command's issued credential is set; nil under home.
 	IssuedSet *bool `json:"issuedSet"`
+	// MeasuredAt is when the Host's sign-in probe that Installed and Authenticated come from ran,
+	// and MeasuredOn the worker that answered it; nil when nothing was measured, or an older Host.
+	MeasuredAt *string `json:"measuredAt"`
+	MeasuredOn *string `json:"measuredOn"`
+}
+
+// IsInstalled is whether the Host measured the command as installed. Not measured is not.
+func (a Agent) IsInstalled() bool { return a.Installed != nil && *a.Installed }
+
+// NotInstalled is whether the Host measured the command as missing. Not measured is not.
+func (a Agent) NotInstalled() bool { return a.Installed != nil && !*a.Installed }
+
+// MeasuredText says when the sign-in was measured and on which worker, "" when it was not.
+func (a Agent) MeasuredText() string {
+	if a.MeasuredAt == nil || *a.MeasuredAt == "" {
+		return ""
+	}
+	at := *a.MeasuredAt
+	if t, err := time.Parse(time.RFC3339Nano, at); err == nil {
+		at = t.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	if a.MeasuredOn == nil || *a.MeasuredOn == "" {
+		return at
+	}
+	return at + " on worker " + *a.MeasuredOn
 }
 
 // Issued says whether the agent signs in through its command's issued credential.

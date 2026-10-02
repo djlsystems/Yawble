@@ -433,6 +433,33 @@ public sealed class PrepareVolumeTests : IDisposable
     }
 
     /// <summary>
+    /// The entrypoint installs and records the agent CLIs for a worker and for all, and not for
+    /// control, which starts no agent CLI.
+    /// </summary>
+    [Fact]
+    public void The_entrypoint_installs_agent_clis_for_a_worker_and_all_and_not_for_control()
+    {
+        var entrypoint = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
+
+        // The install sits in the else branch of one role check, and the control branch says so in one line.
+        var check = System.Text.RegularExpressions.Regex.Match(
+            entrypoint,
+            @"(?m)^if (?<test>\[ ""\$\(printf '%s' ""\$\{HARNESS_ROLE:-all\}""[^\n]*\]); then\n(?<control>[^\n]*)\nelse\n(?<install>(?:.*\n)*?)fi\n");
+        Assert.True(check.Success, entrypoint);
+        Assert.Equal("  echo \"agent cli: control role, no agent CLI is installed or recorded here\"", check.Groups["control"].Value);
+        Assert.Contains("ensure-agent-clis.sh", check.Groups["install"].Value);
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(entrypoint, @"/opt/harness/ensure-agent-clis\.sh"));
+
+        // The test itself, run by sh: only control, however it is spelled, skips the install.
+        foreach (var (role, skips) in new (string?, bool)[] { ("control", true), (" Control ", true), ("worker", false), ("all", false), (null, false), ("", false) })
+        {
+            var variables = role is null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["HARNESS_ROLE"] = role };
+            var (code, output) = Exec("/bin/sh", ["-c", $"if {check.Groups["test"].Value}; then echo skip; else echo install; fi"], variables);
+            Assert.Equal((0, skips ? "skip" : "install"), (code, output.Trim()));
+        }
+    }
+
+    /// <summary>
     /// Root finds commands in system folders only. The entrypoint's first command sets that PATH,
     /// and the only other PATH it sets is the host's, in the exec's last lines. prepare-volume.sh sets
     /// the same one before its first command, whatever PATH it was called with.

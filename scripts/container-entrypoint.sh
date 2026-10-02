@@ -66,10 +66,15 @@ rm -rf /var/lib/apt/lists/*
 # agent-home as HOME and without the root section's git and Python settings. umask 002
 # keeps what it writes group-writable for the host, as the ownership step left the rest.
 # Not the host's 0007: installed CLIs hold no secrets, so they stay runnable by users in neither group.
+# A control container starts no agent CLI - every one runs on a worker - so it installs and records none.
+if [ "$(printf '%s' "${HARNESS_ROLE:-all}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" = control ]; then
+  echo "agent cli: control role, no agent CLI is installed or recorded here"
+else
 ( umask 002 && export PATH="$tool_path" HOME=/data/agent-home NPM_CONFIG_PREFIX=/data/npm-global \
     && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all --ambient-caps=-all \
     -- /bin/sh /opt/harness/ensure-agent-clis.sh ) \
   || echo "agent cli: setup hit an error; starting the host anyway"
+fi
 
 # THE HOST RUNS AS `harness`, keeping exactly three capabilities, in the bounding set too, so
 # nothing it starts can gain another: SETUID and SETGID to start each agent child and the Concierge
