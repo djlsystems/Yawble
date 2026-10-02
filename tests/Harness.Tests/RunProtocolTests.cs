@@ -43,6 +43,7 @@ public sealed class RunProtocolTests
     private static IReadOnlyList<WorkerEvent> EveryWorkerEvent() =>
     [
         new WorkerReady(WorkerId.Local),
+        new RunCredentialApplied(Run),
         new RunStarted(Run, 42, At),
         new RunProgress(Run, "held"),
         new RunOutput(Run, "out"),
@@ -93,6 +94,24 @@ public sealed class RunProtocolTests
             Assert.Equal(7, back.Seq);
             Assert.Equal(json, JsonSerializer.Serialize(back, Json));
         }
+    }
+
+    /// <summary>A run's credential and its redaction set travel with its start, and never as JSON.</summary>
+    [Fact]
+    public void A_start_carrying_a_credential_or_a_redaction_set_is_never_written_as_json()
+    {
+        const string Value = "fake-issued-value-Qz8p";
+        var start = (StartRun)EveryControlMessage()[0];
+        var credential = new RunCredential(
+            CredentialSource.Issued, new Dictionary<string, string> { ["ISSUED_KEY"] = Value }, [], [], true, null);
+
+        var withCredential = Assert.Throws<NotSupportedException>(
+            () => JsonSerializer.Serialize<ControlMessage>(start with { Credential = credential }, Json));
+        var withRedaction = Assert.Throws<NotSupportedException>(
+            () => JsonSerializer.Serialize<ControlMessage>(start with { Redaction = ValueRedactor.For([Value]) }, Json));
+
+        Assert.DoesNotContain(Value, withCredential.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Value, withRedaction.Message, StringComparison.Ordinal);
     }
 
     [Fact]

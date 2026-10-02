@@ -66,8 +66,9 @@ public sealed class RunBoundaryTests : IDisposable
         var order = bed.Order(start.Run);
         Assert.Equal(
             [
-                nameof(StartRun), nameof(RunProgress), nameof(RunStarted), nameof(RunLiveViewChanged), nameof(SampleCapacity),
-                nameof(RunMeasured), nameof(WorkerCapacitySampled), nameof(RunOutput), nameof(RunUsage), nameof(RunEnded),
+                nameof(StartRun), nameof(RunProgress), nameof(RunCredentialApplied), nameof(RunStarted), nameof(RunLiveViewChanged),
+                nameof(SampleCapacity), nameof(RunMeasured), nameof(WorkerCapacitySampled), nameof(RunOutput), nameof(RunUsage),
+                nameof(RunEnded),
             ],
             order);
 

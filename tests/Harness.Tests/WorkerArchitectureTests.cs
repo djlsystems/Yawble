@@ -36,6 +36,7 @@ public sealed class WorkerArchitectureTests
     [
         "Concierge PTY", "sign-in probe", "tool pre-flight", "launch check", "CLI updates",
         "live transcript reader", "FolderRemoval's agent pass", "git", "gh", "agent user", "settings default",
+        "run home",
     ];
 
     /// <summary>Every caller outside the worker that still does one of these things, and why.</summary>
@@ -67,6 +68,10 @@ public sealed class WorkerArchitectureTests
             "launch check: starts a preset's free invocation through the worker's own launch, not a run; a later change sends it as a message.",
         ["HostDoctor.AgentsAsync: " + ReachesAWorkerLauncher] =
             "agent user: the doctor resolves who agent children would run as, to report it; a later change reads it from the worker.",
+        ["RunHome.CreateAsync: " + ReachesAWorkerLauncher] =
+            "tool pre-flight: a tool listing of a preset that signs in with an issued credential runs in a home the worker's RunHomes makes as the agent; a later change moves the listing to a worker.",
+        ["RunHome.KeepTranscriptAsync: " + ReachesAWorkerLauncher] =
+            "run home: control's door to the worker's RunHomes, with no production caller - a run's transcript is kept by the worker that ran it; it goes when the listing moves.",
         ["TenantSettings..ctor: " + TouchesACgroup] =
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
     };
@@ -155,6 +160,34 @@ public sealed class WorkerArchitectureTests
         Assert.Equal([$"{nameof(WorkerArchitectureTests)}.{probe}: {rule}"], violations);
     }
 
+    /// <summary>
+    /// A WORKER NEVER READS THE STORE OR THE KEY RING: a run's credential is resolved by control and
+    /// arrives with its start. Neither the worker nor the contracts it references can load SQLite,
+    /// Data Protection or a control assembly, and no worker method names the key ring's folder or a
+    /// database file.
+    /// </summary>
+    [Fact]
+    public void The_worker_reads_neither_the_database_nor_the_key_ring()
+    {
+        var reachable = new[] { Worker, typeof(Harness.Contracts.RunCredential).Assembly };
+        var loads = reachable
+            .SelectMany(a => a.GetReferencedAssemblies())
+            .Select(a => a.Name!)
+            .Where(name => StoreAssemblies.Any(store => name.StartsWith(store, StringComparison.Ordinal)))
+            .ToList();
+
+        Assert.Empty(loads);
+        Assert.Empty(StoreReads(IlScan.Methods(Worker)));
+    }
+
+    [Fact]
+    public void The_store_scan_catches_a_planted_key_ring_path_and_database_file()
+    {
+        Assert.Equal(
+            [$"{nameof(WorkerArchitectureTests)}.{nameof(PlantsADatabaseRead)}", $"{nameof(WorkerArchitectureTests)}.{nameof(PlantsAKeyRingRead)}"],
+            StoreReads(Probes(nameof(PlantsAKeyRingRead), nameof(PlantsADatabaseRead))));
+    }
+
     /// <summary>A defaulted path is the caller's: the method that declares the default loads nothing.</summary>
     [Fact]
     public void A_defaulted_path_counts_against_its_caller_not_the_method_declaring_it()
@@ -171,6 +204,22 @@ public sealed class WorkerArchitectureTests
     // ---------------------------------------------------------------------------------------------
     // The scan.
     // ---------------------------------------------------------------------------------------------
+
+    /// <summary>What reads control's database or its key ring.</summary>
+    private static readonly string[] StoreAssemblies =
+    [
+        "Microsoft.Data.Sqlite", "SQLitePCLRaw", "Microsoft.AspNetCore.DataProtection", "Harness.Identity", "Harness.Host",
+    ];
+
+    /// <summary>Each method, by owner, that names the key ring's folder or a database file.</summary>
+    private static List<string> StoreReads(IEnumerable<MethodBase> methods) =>
+        [.. methods
+            .Where(method => IlScan.Decode(method).Any(instruction => instruction.String is { } text
+                && (text == "keys" || text.EndsWith("/keys", StringComparison.Ordinal)
+                    || text.Contains("/keys/", StringComparison.Ordinal) || text.EndsWith(".db", StringComparison.Ordinal))))
+            .Select(IlScan.Owner)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)];
 
     /// <summary>Every assembly built from <c>src/</c> except the worker.</summary>
     private static IReadOnlyList<Assembly> Scanned() =>
@@ -320,6 +369,10 @@ public sealed class WorkerArchitectureTests
 
     [DllImport("libc", SetLastError = true)]
     private static extern int kill(int pid, int signal);
+
+    private static string PlantsAKeyRingRead() => File.ReadAllText(Path.Combine("/data", "keys", "key.xml"));
+
+    private static bool PlantsADatabaseRead() => File.Exists("/data/messages.db");
 
     private static string[] HoldsTextThatIsNotAPath() =>
         ["/processes", "/proc-like", "see the process group in /proc, every 5 s", "prlimit is a command", "/sys/fs/cgroupish"];
