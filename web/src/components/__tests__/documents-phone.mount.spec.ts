@@ -104,6 +104,22 @@ describe('the explorer at phone width', () => {
       .toEqual(['rename', 'copyPath']);
   });
 
+  it('tells the shell it fills the screen, so the Concierge bubble does not cover its last row', async () => {
+    const wrapper = await openExplorer('alpha');
+
+    expect(wrapper.emitted('update:fullScreen')?.at(-1)).toEqual([true]);
+  });
+
+  it('keeps the status bar to the counts, with no sentence to wrap under them', async () => {
+    await openExplorer('alpha');
+
+    const bar = document.body.querySelector('.documents-status')!;
+    expect(bar.classList.contains('no-wrap')).toBe(true);
+    expect(bar.querySelector('[data-status]')!.textContent).toMatch(/items?$/);
+    expect(bar.querySelector('[data-status-note]')).toBeNull();
+    expect(bar.textContent).not.toContain('Documents live in one place');
+  });
+
   it('rows are not draggable', async () => {
     await openExplorer('alpha');
 

@@ -188,6 +188,19 @@ describe('maximise', () => {
     expect(card().style.left).toBe('100px');
     expect(stored()).toMatchObject({ maximised: false });
   });
+
+  it('tells the shell while it fills the screen, so the Concierge bubble is not drawn over it', async () => {
+    const wrapper = await openExplorer();
+    const told = () => wrapper.emitted('update:fullScreen')?.at(-1)?.[0];
+
+    expect(told() ?? false).toBe(false);
+
+    await click(buttonLabelled('Maximise')!);
+    expect(told()).toBe(true);
+
+    await click(buttonLabelled('Restore')!);
+    expect(told()).toBe(false);
+  });
 });
 
 describe('at phone width', () => {

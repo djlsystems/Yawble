@@ -244,6 +244,35 @@ describe('the Concierge bubble is a toggle', () => {
   });
 });
 
+describe('the Concierge bubble beside the documents explorer', () => {
+  const dock = () => document.body.querySelector('.concierge-fab-dock') as HTMLElement | null;
+
+  it('is hidden while the explorer fills the screen, and back when it is a window or closed', async () => {
+    const wrapper = await mountShell([team], team.id);
+    const documents = wrapper.findComponent({ name: 'DocumentsDialog' });
+
+    wrapper.findComponent(RibbonBar).vm.$emit('action', 'documents-manage');
+    await flushPromises();
+    expect(documents.props('modelValue')).toBe(true);
+    expect(dock()?.style.display).not.toBe('none');
+
+    documents.vm.$emit('update:fullScreen', true);
+    await flushPromises();
+    expect(dock()?.style.display).toBe('none');
+
+    documents.vm.$emit('update:fullScreen', false);
+    await flushPromises();
+    expect(dock()?.style.display).not.toBe('none');
+
+    documents.vm.$emit('update:fullScreen', true);
+    documents.vm.$emit('update:modelValue', false);
+    await flushPromises();
+    expect(dock()?.style.display).not.toBe('none');
+
+    wrapper.unmount();
+  });
+});
+
 describe('the Concierge entry point, with and without a team', () => {
   /** The Concierge serves the instance, so the bubble exists before there is a team to open. */
   it.each([

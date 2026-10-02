@@ -196,7 +196,12 @@ function toggleConcierge() {
  */
 const terminalDisplay = useTerminalDisplayStore();
 const conciergeFullScreen = computed(() => terminalDisplay.maximised || $q.screen.lt.sm);
-const conciergeFabShown = computed(() => !(conciergeOpen.value && conciergeFullScreen.value));
+/** The documents explorer full screen (maximised, or a phone) covers the corner too, and the
+ *  bubble over it hid the end of its status bar and the last row's menu. It has its own close. */
+const documentsFullScreen = ref(false);
+const conciergeFabShown = computed(
+  () => !(conciergeOpen.value && conciergeFullScreen.value) && !(documentsOpen.value && documentsFullScreen.value),
+);
 
 watch(conciergeOpen, (isOpen) => {
   if (isOpen) {
@@ -552,7 +557,7 @@ async function signOut() {
       :team-id="board.activeWorkTeam.id"
       :any-member-running="board.activeWorkTeam.containers.some((c) => c.state === 'Running')"
     />
-    <DocumentsDialog v-model="documentsOpen" :start="documentsStart" />
+    <DocumentsDialog v-model="documentsOpen" v-model:full-screen="documentsFullScreen" :start="documentsStart" />
     <UsersDialog v-model="usersOpen" />
     <AgentsDialog v-model="agentsOpen" />
     <TenantSettingsDialog
