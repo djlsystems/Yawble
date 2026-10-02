@@ -106,6 +106,24 @@ public sealed class RunBoundaryTests : IDisposable
     }
 
     [Fact]
+    public async Task Diagnostics_rows_are_written_by_control_not_the_worker()
+    {
+        var rows = new Rows();
+        using var bed = new Bed(_root, diagnostics: rows);
+
+        var start = bed.Start(Launch("harness-no-such-command-anywhere", []));
+        var result = await bed.Directory.RunAsync(bed.Worker, start, Ct).WaitAsync(Bound, Ct);
+
+        // The worker said it; control wrote it, word for word, and the run failed as it always has.
+        Assert.Single(bed.Order(start.Run), nameof(RunDiagnostic).Equals);
+        var row = Assert.Single(rows.Written);
+        Assert.Equal((DiagnosticSeverity.Warning, DiagnosticKinds.ProcessExecutableNotFound, DiagnosticSources.Process), (row.Severity, row.Kind, row.Source));
+        Assert.Equal("harness-no-such-command-anywhere", row.Message);
+        Assert.Contains("\"container\":\"alpha/worker\"", row.Detail, StringComparison.Ordinal);
+        Assert.Equal(FailureClasses.LaunchMissing, result.FailureClass);
+    }
+
+    [Fact]
     public async Task A_stop_crosses_as_cancel_and_ends_as_today()
     {
         using var bed = new Bed(_root);
@@ -553,11 +571,11 @@ public sealed class RunBoundaryTests : IDisposable
         private readonly List<(Func<object, bool> Matches, TaskCompletionSource<object> Found)> _waiters = [];
         private long _counter;
 
-        public Bed(string root, bool reports = true, Func<WorkerEvent, bool>? drop = null)
+        public Bed(string root, bool reports = true, Func<WorkerEvent, bool>? drop = null, IDiagnosticsLog? diagnostics = null)
         {
             _root = root;
             Reports = new ProgressLines();
-            Directory = new RunDirectory(Reports, live: Live);
+            Directory = new RunDirectory(Reports, diagnostics, Live);
             Launcher = new RunLauncher(Heartbeat, reports: reports, lookup: LaunchLookup.Once, updates: Updates);
             _worker = InProcessWorker.Connect(
                 WorkerId.Local,
@@ -659,6 +677,27 @@ public sealed class RunBoundaryTests : IDisposable
         }
 
         public void Dispose() => _worker.Close();
+    }
+
+    /// <summary>The instance's diagnostics log, as rows written.</summary>
+    private sealed class Rows : IDiagnosticsLog
+    {
+        public ConcurrentQueue<(DiagnosticSeverity Severity, string Kind, string? Source, string? Message, string? Detail)> Written { get; } = new();
+
+        public Task WriteAsync(
+            DiagnosticSeverity severity, string kind, string? source = null, string? route = null, int? status = null,
+            string? exceptionType = null, string? message = null, string? detail = null, CancellationToken ct = default)
+        {
+            Written.Enqueue((severity, kind, source, message, detail));
+            return Task.CompletedTask;
+        }
+
+        public Task<DiagnosticsPage> ReadAsync(DiagnosticsFilter? filter = null, long? before = null, int take = 50, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool?> HasAnyAsync(CancellationToken ct = default) => Task.FromResult<bool?>(!Written.IsEmpty);
+
+        public Task TrimAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class ProgressLines : IMemberReports
