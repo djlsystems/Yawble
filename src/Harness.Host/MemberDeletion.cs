@@ -201,7 +201,8 @@ public sealed class MemberDeletion(
                 remaining.AddRange(report.Remaining);
                 failures.Add(
                     $"{workspace}: removal unfinished, {report.Remaining.Count} path(s) remain; it is "
-                    + "retried at the next start or on request: " + string.Join(", ", report.Remaining));
+                    + "retried at the next start or on request: " + string.Join(", ", report.Remaining)
+                    + Why(report));
             }
         }
 
@@ -231,6 +232,12 @@ public sealed class MemberDeletion(
 
         return new MemberDeleted(stored, id.Name, snapshot.Name, swept, removedSchedules, removed, failures, remaining);
     }
+
+    /// <summary>Why what remains is still there, when the removal said (no worker for the agent's pass), as one more sentence.</summary>
+    private static string Why(FolderRemovalReport report) =>
+        report.Reasons?.Values.Distinct(StringComparer.Ordinal).ToList() is { Count: > 0 } reasons
+            ? ". " + string.Join(" ", reasons)
+            : "";
 }
 
 /// <summary>

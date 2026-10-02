@@ -81,6 +81,9 @@ public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, RunHomes
             if (SystemCommand.Find("rm") is not { } rm) return $"No rm in a system directory on worker {id}; nothing was removed as the agent.";
             if (runAs is not { Switches: true } agent) return $"Worker {id} does not start children as another user, so it removes nothing as the agent.";
 
+            // The line that says this worker, not control, was asked.
+            log?.LogInformation("Worker {Worker} removes {Count} path(s) inside {Boundary} as the agent.", id, targets.Count, remove.Boundary);
+
             foreach (var chunk in targets.Chunk(100))
             {
                 await RunHomeRemoval.RunAsync([.. agent.Prefix, rm, "-rf", "--one-file-system", "--", .. chunk], ct);
