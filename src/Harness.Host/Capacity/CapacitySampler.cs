@@ -322,7 +322,7 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
                     view.Max > 0 ? 1 : 0,
                     view.Running.Count,
                     view.Waiting.Count,
-                    view.Running.Select(hold => new RunHold(hold.Team, hold.Member, hold.Since, null)).ToArray(),
+                    view.Running.Select(hold => new RunHold(hold.Team, hold.Member, hold.Since, hold.Reason)).ToArray(),
                     view.Waiting.Select(hold => new RunHold(hold.Team, hold.Member, hold.Since, hold.Reason)).ToArray()),
                 new AdmissionSample(memoryPercent(), pressurePercent(), holding),
                 runs.OrderByDescending(run => run.ResidentBytes).Take(TopRuns).ToArray(),
@@ -448,7 +448,8 @@ public sealed record RunsSample(
     int Limit, int ManagerReserved, int RunningCount, int WaitingCount,
     IReadOnlyList<RunHold> Running, IReadOnlyList<RunHold> Waiting);
 
-/// <param name="Reason">What a waiting run waits for ("waiting for a slot", "waiting for memory: …").</param>
+/// <param name="Reason">What a waiting run waits for ("waiting for a slot", "waiting for memory: …"); on
+/// a running one, null, except a Manager placed over a worker's bound, which says so.</param>
 public sealed record RunHold(string Team, string Member, DateTimeOffset Since, string? Reason);
 
 /// <param name="Holding">Null when a run asking now would be admitted on headroom; otherwise its reason.</param>

@@ -947,15 +947,18 @@ var workflowSpendLimit = tenantSettings.WorkflowSpendLimit;
 // roots are configuration so a test Host reads a fixture, never the machine it runs on.
 //
 // AND A WORKER: admission places each run on a worker with room, and the headroom it reads is that
-// worker's, fed by its own capacity samples. One worker today, the Host's own (WorkerPool).
+// worker's, fed by its own capacity samples. In `all`, one: the Host's own (WorkerPool).
 var headroom = new HeadroomGate(
     () => tenantSettings.AdmissionMemoryPercent, () => tenantSettings.AdmissionMemoryPressurePercent);
 // In control the pool starts empty and fills as workers connect, each with a gate of its own and,
 // under the default run limit, its own bound; the default limit is then the sum of their bounds.
+// Workers are ranked by headroom less wip.memoryPerRunMb for each run placed since their last
+// sample, so a burst spreads.
 var workers = control
     ? new WorkerPool(
         _ => new HeadroomGate(() => tenantSettings.AdmissionMemoryPercent, () => tenantSettings.AdmissionMemoryPressurePercent),
-        info => tenantSettings.WorkerBound(WorkerBounds.Of(info)))
+        info => tenantSettings.WorkerBound(WorkerBounds.Of(info)),
+        memoryPerRunMb: () => tenantSettings.WipMemoryPerRunMb)
     : new WorkerPool([(WorkerId.Local, headroom)]);
 if (control)
 {

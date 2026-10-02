@@ -4,7 +4,8 @@ namespace Harness.Containers;
 
 /// <summary>One run holding or waiting on an instance-wide slot. A waiter's <c>Reason</c> says what it
 /// waits for - <see cref="WipLedger.SlotReason"/>, or the headroom gate's sentence ("waiting for
-/// memory: 11.2 of 12.9 GB in use"); a running hold has none.</summary>
+/// memory: 11.2 of 12.9 GB in use"); a running hold has none, except a Manager placed over a worker's
+/// bound, which says so (<see cref="WipLedger.OverBoundReason"/>).</summary>
 public sealed record WipHold(string Team, string Member, DateTimeOffset Since, string? Reason = null);
 
 /// <summary>What <c>GET /api/wip</c> returns. Held work is visible, and attributed to a team and member.
@@ -48,8 +49,11 @@ public sealed record WipView(int Max, IReadOnlyList<WipHold> Running, IReadOnlyL
 /// <b>AND A WORKER.</b> An admitted run is placed on the first worker (<see cref="IRunPlacement"/>)
 /// whose headroom has no reason to hold it and which has not reached its own bound
 /// (<see cref="IRunPlacement.Bound"/>), and <see cref="PlacedOn"/> says which until its slot is
-/// released. The gate above is per worker: a run waits with the first worker's reason only when none
-/// has room. A Manager goes on the first worker unchecked. With no worker connected, every run the
+/// released; <see cref="IRunPlacement.RunPlaced"/> is told, so the next run is ranked with it counted.
+/// The gate above is per worker: a run waits with the first worker's reason only when none has room.
+/// A Manager is never held: it takes the first worker a member could, else the first under its bound
+/// whatever its memory, and only when every worker is at its bound goes over one - the least loaded -
+/// with its running hold saying so. With no worker connected, every run the
 /// limit admits - a Manager's too - waits in the same queue with <see cref="WorkerReason"/>, and is
 /// never refused; <see cref="WorkersChanged"/> wakes the waiters when one connects. The run limit,
 /// the reserved slot, the queue and the reasons stay instance-wide here.
@@ -72,6 +76,10 @@ public sealed class WipLedger
 
     /// <summary>What a run the limit has room for waits for while no worker is connected to run it on.</summary>
     public const string WorkerReason = "waiting for a worker";
+
+    /// <summary>How a Manager's running hold ends when it was placed over a worker's bound: "over w1's
+    /// bound of 1: every worker is at its own bound".</summary>
+    public const string OverBoundReason = "every worker is at its own bound";
 
     private readonly object _gate = new();
     private readonly Dictionary<string, WipHold> _running = new(StringComparer.OrdinalIgnoreCase);
@@ -167,7 +175,7 @@ public sealed class WipLedger
 
             // The limit has room: a worker's measured headroom decides where, for members. Still a
             // wait, never a refusal. A Manager skips it - it is the run that would free the memory.
-            var (worker, reason) = PlaceLocked(IsManager(id));
+            var (worker, reason, overBound) = PlaceLocked(IsManager(id));
             if (reason is not null)
             {
                 WaitLocked(id, key, reason, headroom: true);
@@ -175,8 +183,13 @@ public sealed class WipLedger
             }
 
             RemoveWaiterLocked(key);
-            _running[key] = new WipHold(id.Team, id.Name, DateTimeOffset.UtcNow);
-            if (worker is not null) _placed[key] = worker;
+            _running[key] = new WipHold(id.Team, id.Name, DateTimeOffset.UtcNow, overBound);
+            if (worker is not null)
+            {
+                _placed[key] = worker;
+                _placement.RunPlaced(worker);
+            }
+
             return new Release(this, key);
         }
     }
@@ -275,36 +288,52 @@ public sealed class WipLedger
 
     /// <summary>
     /// The first worker with room and under its own bound, or, when none has, the first worker's
-    /// reason. A Manager takes the first worker without asking. No worker at all is
-    /// <see cref="WorkerReason"/>.
+    /// reason. No worker at all is <see cref="WorkerReason"/>. A Manager is never held: failing that
+    /// worker, it takes the first under its bound whatever its memory, and failing that - every worker
+    /// at its bound - the least loaded (lowest runs placed against its bound, then fewest placed, both
+    /// the ledger's whole count, then the order tried), with <c>OverBound</c> saying so for its hold.
+    /// Asking places nothing: only <see cref="TryEnter"/> tells the placement a run went.
     /// </summary>
-    private (WorkerId? Worker, string? Reason) PlaceLocked(bool manager)
+    private (WorkerId? Worker, string? Reason, string? OverBound) PlaceLocked(bool manager)
     {
         string? first = null;
         var workers = _placement.Workers;
-        if (workers.Count == 0) return (null, WorkerReason);
+        if (workers.Count == 0) return (null, WorkerReason, null);
 
         foreach (var worker in workers)
         {
-            if (manager) return (worker, null);
             if (_placement.HeadroomReason(worker) is { } reason)
             {
                 first ??= reason;
                 continue;
             }
 
-            // At its own bound: as full as the run limit would be.
-            if (_placement.Bound(worker) is { } bound && _placed.Values.Count(placed => placed == worker) >= bound)
+            if (AtBoundLocked(worker))
             {
                 first ??= SlotReason;
                 continue;
             }
 
-            return (worker, null);
+            return (worker, null, null);
         }
 
-        return (null, first);
+        if (!manager) return (null, first, null);
+
+        if (workers.FirstOrDefault(worker => !AtBoundLocked(worker)) is { } under) return (under, null, null);
+
+        var least = workers
+            .Select((worker, rank) => (Worker: worker, Rank: rank, Bound: _placement.Bound(worker)!.Value, Placed: PlacedLocked(worker)))
+            .OrderBy(w => w.Placed / (double)Math.Max(w.Bound, 1))
+            .ThenBy(w => w.Placed)
+            .ThenBy(w => w.Rank)
+            .First();
+        return (least.Worker, null, $"over {least.Worker}'s bound of {least.Bound}: {OverBoundReason}");
     }
+
+    /// <summary>At its own bound: as full as the run limit would be.</summary>
+    private bool AtBoundLocked(WorkerId worker) => _placement.Bound(worker) is { } bound && PlacedLocked(worker) >= bound;
+
+    private int PlacedLocked(WorkerId worker) => _placed.Values.Count(placed => placed == worker);
 
     private bool AdmitsLocked(string key, bool manager)
     {
@@ -408,4 +437,9 @@ public interface IRunPlacement
 
     /// <summary>How many runs <paramref name="worker"/> may hold at once; null for no cap of its own.</summary>
     int? Bound(WorkerId worker) => null;
+
+    /// <summary>A run was just placed on <paramref name="worker"/>, under the ledger's lock.</summary>
+    void RunPlaced(WorkerId worker)
+    {
+    }
 }

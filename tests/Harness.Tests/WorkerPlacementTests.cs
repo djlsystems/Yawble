@@ -242,15 +242,293 @@ public sealed class WorkerPlacementTests
         }
     }
 
+    [Fact]
+    public void Three_managers_told_at_once_on_three_workers_land_on_three_workers()
+    {
+        var bed = new Bed(max: 6, bound: _ => 2, memoryPerRunMb: 2048);
+        bed.Join("w1", limit: 4 * Gb, inUse: 1.2 * Gb);
+        bed.Join("w2", limit: 4 * Gb, inUse: 1.1 * Gb);
+        bed.Join("w3", limit: 4 * Gb, inUse: 1.0 * Gb);
+        Assert.Equal([new WorkerId("w3"), new WorkerId("w2"), new WorkerId("w1")], bed.Pool.Workers);
+
+        // No new sample between them: each placement alone must move the next one on.
+        var alpha = new ContainerId("Alpha", WipLedger.ManagerName);
+        var beta = new ContainerId("Beta", WipLedger.ManagerName);
+        var gamma = new ContainerId("Gamma", WipLedger.ManagerName);
+        using var a = bed.Wip.TryEnter(alpha);
+        Assert.Equal(new WorkerId("w3"), bed.Wip.PlacedOn(alpha));
+        using var b = bed.Wip.TryEnter(beta);
+        Assert.Equal(new WorkerId("w2"), bed.Wip.PlacedOn(beta));
+        using var c = bed.Wip.TryEnter(gamma);
+        Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(gamma));
+
+        Assert.All(["w1", "w2", "w3"], w => Assert.Equal(1, bed.Wip.PlacedCount(new WorkerId(w))));
+        Assert.All(bed.Wip.View().Running, hold => Assert.Null(hold.Reason));
+    }
+
+    [Fact]
+    public void A_burst_of_members_spreads_across_workers_before_any_worker_reaches_its_bound()
+    {
+        var bed = new Bed(max: 18, bound: _ => 6, memoryPerRunMb: 2048);
+        bed.Join("w1", limit: 12 * Gb, inUse: 1.0 * Gb);
+        bed.Join("w2", limit: 12 * Gb, inUse: 1.1 * Gb);
+        bed.Join("w3", limit: 12 * Gb, inUse: 1.2 * Gb);
+
+        string[] expected = ["w1", "w2", "w3", "w1", "w2", "w3"];
+        var slots = new List<IDisposable>();
+        for (var i = 0; i < expected.Length; i++)
+        {
+            var member = Member($"M{i}");
+            slots.Add(Assert.IsAssignableFrom<IDisposable>(bed.Wip.TryEnter(member)));
+            Assert.Equal(new WorkerId(expected[i]), bed.Wip.PlacedOn(member));
+        }
+
+        Assert.All(["w1", "w2", "w3"], w => Assert.Equal(2, bed.Wip.PlacedCount(new WorkerId(w))));
+        Assert.All(["w1", "w2", "w3"], w => Assert.True(bed.Wip.PlacedCount(new WorkerId(w)) < bed.Pool.Bound(new WorkerId(w))));
+        slots.ForEach(slot => slot.Dispose());
+    }
+
+    [Fact]
+    public void Runs_placed_since_a_workers_last_sample_count_against_it_until_its_next_sample()
+    {
+        var bed = new Bed(max: 5, bound: _ => null, memoryPerRunMb: 2048);
+        bed.Join("w1", limit: 4 * Gb, inUse: 2.0 * Gb);
+        bed.Join("w2", limit: 4 * Gb, inUse: 1.9 * Gb);
+        bed.Join("w3", limit: 4 * Gb, inUse: 1.0 * Gb);
+
+        // A takes w3 (3.0 GB free); counted at its allowance, w3 is left with about 0.85.
+        using var a = bed.Wip.TryEnter(Member("A"));
+        Assert.Equal(new WorkerId("w3"), bed.Wip.PlacedOn(Member("A")));
+        using var b = bed.Wip.TryEnter(Member("B"));
+        Assert.Equal(new WorkerId("w2"), bed.Wip.PlacedOn(Member("B")));
+
+        // w3's next sample has its runs in its figures: what was counted against it is dropped.
+        bed.Measure("w3", limit: 4 * Gb, inUse: 1.5 * Gb);
+        using var c = bed.Wip.TryEnter(Member("C"));
+        Assert.Equal(new WorkerId("w3"), bed.Wip.PlacedOn(Member("C")));
+    }
+
+    [Fact]
+    public void Unmeasured_workers_rank_by_runs_placed_against_their_own_bound()
+    {
+        var bounds = new Dictionary<string, int> { ["w1"] = 6, ["w2"] = 2 };
+        var bed = new Bed(max: 10, bound: info => bounds[info.Id.Value]);
+        bed.Join("w1");
+        bed.Join("w2");
+        Assert.Null(bed.Pool.Gate(new WorkerId("w1")).Headroom);
+        Assert.Null(bed.Pool.Gate(new WorkerId("w2")).Headroom);
+
+        using var a = bed.Wip.TryEnter(Member("A"));
+        using var b = bed.Wip.TryEnter(Member("B"));
+        using var c = bed.Wip.TryEnter(Member("C"));
+        using var d = bed.Wip.TryEnter(Member("D"));
+
+        // D: w1 holds 2 of 6, w2 1 of 2.
+        Assert.Equal(
+            ["w1", "w2", "w1", "w1"],
+            new[] { "A", "B", "C", "D" }.Select(m => bed.Wip.PlacedOn(Member(m))?.Value));
+    }
+
+    [Fact]
+    public void A_manager_prefers_a_worker_under_its_bound()
+    {
+        var bounds = new Dictionary<string, int> { ["w1"] = 1, ["w2"] = 2 };
+        var bed = new Bed(max: 5, bound: info => bounds[info.Id.Value]);
+        bed.Join("w1", limit: 10 * Gb, inUse: 1 * Gb);
+        bed.Join("w2", limit: 10 * Gb, inUse: 3 * Gb);
+        var manager = Member(WipLedger.ManagerName);
+
+        using var a = bed.Wip.TryEnter(Member("A"));
+        Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(Member("A")));
+
+        using var slot = bed.Wip.TryEnter(manager);
+        Assert.NotNull(slot);
+        Assert.Equal(new WorkerId("w2"), bed.Wip.PlacedOn(manager));
+        Assert.Null(Assert.Single(bed.Wip.View().Running, h => h.Member == WipLedger.ManagerName).Reason);
+    }
+
+    [Fact]
+    public void A_manager_takes_a_worker_under_its_bound_but_over_its_memory_threshold_before_going_over_a_bound()
+    {
+        var bounds = new Dictionary<string, int> { ["w1"] = 3, ["w2"] = 1 };
+        var bed = new Bed(max: 5, bound: info => bounds[info.Id.Value]);
+        bed.Join("w1", limit: 10 * Gb, inUse: 2 * Gb);
+        bed.Join("w2", limit: 10 * Gb, inUse: 1 * Gb);
+        var manager = Member(WipLedger.ManagerName);
+
+        using var a = bed.Wip.TryEnter(Member("A"));
+        using var b = bed.Wip.TryEnter(Member("B"));
+        Assert.Equal(new WorkerId("w2"), bed.Wip.PlacedOn(Member("A")));
+        Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(Member("B")));
+
+        // w2 is at its bound; w1 is under its bound but over its memory threshold.
+        bed.Measure("w1", limit: 10 * Gb, inUse: 9 * Gb);
+
+        using var slot = bed.Wip.TryEnter(manager);
+        Assert.NotNull(slot);
+        Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(manager));
+        Assert.Null(Assert.Single(bed.Wip.View().Running, h => h.Member == WipLedger.ManagerName).Reason);
+        Assert.Equal(1, bed.Wip.PlacedCount(new WorkerId("w2")));
+    }
+
+    [Fact]
+    public void A_manager_goes_over_a_bound_only_when_every_worker_is_at_it_and_then_on_the_least_loaded()
+    {
+        var bed = OverBoundBed();
+
+        // Both workers hold their bound: w1 1 of 1, w2 2 of 2. w1 has fewer placed, though w2 ranks first.
+        var alpha = Member(WipLedger.ManagerName);
+        using var first = bed.Wip.TryEnter(alpha);
+        Assert.NotNull(first);
+        Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(alpha));
+
+        // Now w1 holds 2 of 1, w2 2 of 2.
+        var beta = new ContainerId("Beta", WipLedger.ManagerName);
+        using var second = bed.Wip.TryEnter(beta);
+        Assert.NotNull(second);
+        Assert.Equal(new WorkerId("w2"), bed.Wip.PlacedOn(beta));
+
+        // Members keep the bound, and the queue its order.
+        var view = bed.Wip.View();
+        var waiting = Assert.Single(view.Waiting);
+        Assert.Equal(("Alpha", "D", WipLedger.SlotReason), (waiting.Team, waiting.Member, waiting.Reason));
+        Assert.Equal(5, view.Running.Count);
+        Assert.Equal(
+            new HashSet<(string, string, string?)>
+            {
+                ("Alpha", "A", null), ("Alpha", "B", null), ("Alpha", "C", null),
+                ("Alpha", WipLedger.ManagerName, $"over w1's bound of 1: {WipLedger.OverBoundReason}"),
+                ("Beta", WipLedger.ManagerName, $"over w2's bound of 2: {WipLedger.OverBoundReason}"),
+            },
+            view.Running.Select(h => (h.Team, h.Member, h.Reason)).ToHashSet());
+    }
+
+    [Fact]
+    public void A_manager_prefers_a_worker_with_room_over_one_held_by_memory()
+    {
+        var bed = new Bed();
+        bed.Join("w1", limit: 100 * Gb, inUse: 95 * Gb);
+        bed.Join("w2", limit: 4 * Gb, inUse: 1 * Gb);
+        Assert.Equal([new WorkerId("w1"), new WorkerId("w2")], bed.Pool.Workers);
+        var manager = Member(WipLedger.ManagerName);
+
+        using var slot = bed.Wip.TryEnter(manager);
+
+        Assert.NotNull(slot);
+        Assert.Equal(new WorkerId("w2"), bed.Wip.PlacedOn(manager));
+    }
+
+    [Fact]
+    public void The_workers_view_names_each_workers_runs_and_a_manager_over_a_bound_says_why()
+    {
+        var bed = OverBoundBed();
+        using var manager = bed.Wip.TryEnter(Member(WipLedger.ManagerName));
+
+        var workers = WorkersView.Of(bed.Pool, bed.Wip, "test");
+
+        Assert.Equal(["w1", "w2"], workers.Select(w => w.Id));
+        Assert.Equal(
+            new HashSet<(string, string, string?)>
+            {
+                ("Alpha", "C", null),
+                ("Alpha", WipLedger.ManagerName, $"over w1's bound of 1: {WipLedger.OverBoundReason}"),
+            },
+            workers[0].Runs.Select(r => (r.Team, r.Member, r.Reason)).ToHashSet());
+        Assert.Equal(
+            new HashSet<(string, string, string?)> { ("Alpha", "A", null), ("Alpha", "B", null) },
+            workers[1].Runs.Select(r => (r.Team, r.Member, r.Reason)).ToHashSet());
+    }
+
+    [Fact]
+    public void A_measurement_that_frees_a_waiter_counts_nothing_against_a_worker()
+    {
+        var bed = new Bed(max: 5, memoryPerRunMb: 2048);
+        bed.Join("w1", limit: 10 * Gb, inUse: 9 * Gb);
+        bed.Join("w2", limit: 10 * Gb, inUse: 9.5 * Gb);
+
+        Assert.Null(bed.Wip.TryEnter(Member("A")));
+        Assert.Equal("waiting for memory: 9.0 of 10.0 GB in use", Assert.Single(bed.Wip.View().Waiting).Reason);
+
+        // The new measurement asks where A would go; asking places nothing.
+        bed.Measure("w1", limit: 10 * Gb, inUse: 1 * Gb);
+        bed.Measure("w2", limit: 10 * Gb, inUse: 3.5 * Gb);
+        bed.Wip.HeadroomChanged();
+
+        using var a = bed.Wip.TryEnter(Member("A"));
+        Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(Member("A")));
+
+        // w1: 9.0 GB free less one run's allowance still leads w2's 6.5; less two, it does not.
+        using var b = bed.Wip.TryEnter(Member("B"));
+        Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(Member("B")));
+        using var c = bed.Wip.TryEnter(Member("C"));
+        Assert.Equal(new WorkerId("w2"), bed.Wip.PlacedOn(Member("C")));
+    }
+
+    [Fact]
+    public void A_run_that_asks_again_while_running_is_counted_once()
+    {
+        var bed = new Bed(max: 5, memoryPerRunMb: 2048);
+        bed.Join("w1", limit: 10 * Gb, inUse: 1 * Gb);
+        bed.Join("w2", limit: 10 * Gb, inUse: 4 * Gb);
+
+        using var a = bed.Wip.TryEnter(Member("A"));
+        Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(Member("A")));
+        Assert.NotNull(bed.Wip.TryEnter(Member("A")));
+        Assert.NotNull(bed.Wip.TryEnter(Member("A")));
+        Assert.Equal(1, bed.Wip.PlacedCount(new WorkerId("w1")));
+
+        // w1: 9.0 GB free less one allowance leads w2's 6.0; less two, it does not.
+        using var b = bed.Wip.TryEnter(Member("B"));
+        Assert.Equal(new WorkerId("w1"), bed.Wip.PlacedOn(Member("B")));
+        using var c = bed.Wip.TryEnter(Member("C"));
+        Assert.Equal(new WorkerId("w2"), bed.Wip.PlacedOn(Member("C")));
+    }
+
+    [Fact]
+    public void A_fixed_pool_keeps_its_order_whatever_is_placed_on_it()
+    {
+        var clock = new ManualTime(Now);
+        var gates = new[] { "w1", "w2" }.Select(id => (Id: new WorkerId(id), Gate: new HeadroomGate(() => 80, () => 0, clock))).ToArray();
+        gates[0].Gate.Update(WorkerCapacity.NotMeasured with { MemoryLimitBytes = 10 * Gb, MemoryAnonBytes = 5 * Gb, MemoryShmemBytes = 0, NotMeasured = [] }, Now);
+        gates[1].Gate.Update(WorkerCapacity.NotMeasured with { MemoryLimitBytes = 10 * Gb, MemoryAnonBytes = 1 * Gb, MemoryShmemBytes = 0, NotMeasured = [] }, Now);
+        var pool = new WorkerPool([.. gates.Select(g => (g.Id, g.Gate))]);
+        var wip = new WipLedger(0, pool);
+        pool.Placed = wip.PlacedCount;
+
+        var slots = Enumerable.Range(0, 10).Select(i => wip.TryEnter(Member($"M{i}"))!).ToList();
+
+        Assert.Equal([new WorkerId("w1"), new WorkerId("w2")], pool.Workers);
+        Assert.Equal(10, wip.PlacedCount(new WorkerId("w1")));
+        slots.ForEach(slot => slot.Dispose());
+    }
+
+    /// <summary>Two workers each at its own bound - w1 holds C (1 of 1), w2 holds A and B (2 of 2) - and D
+    /// waiting for a slot. w2 ranks first on headroom.</summary>
+    private static Bed OverBoundBed()
+    {
+        var bounds = new Dictionary<string, int> { ["w1"] = 1, ["w2"] = 2 };
+        var bed = new Bed(max: 5, bound: info => bounds[info.Id.Value]);
+        bed.Join("w1", limit: 10 * Gb, inUse: 3 * Gb);
+        bed.Join("w2", limit: 10 * Gb, inUse: 1 * Gb);
+
+        foreach (var member in new[] { "A", "B", "C" }) Assert.NotNull(bed.Wip.TryEnter(Member(member)));
+        Assert.Equal(["w2", "w2", "w1"], new[] { "A", "B", "C" }.Select(m => bed.Wip.PlacedOn(Member(m))?.Value));
+        Assert.Null(bed.Wip.TryEnter(Member("D")));
+        Assert.Equal(WipLedger.SlotReason, Assert.Single(bed.Wip.View().Waiting).Reason);
+        return bed;
+    }
+
     private static ContainerId Member(string name) => new("Alpha", name);
 
     private sealed class Bed
     {
         private readonly ManualTime _clock = new(Now);
 
-        public Bed(int max = 5, Func<WorkerInfo, int?>? bound = null)
+        public Bed(int max = 5, Func<WorkerInfo, int?>? bound = null, int? memoryPerRunMb = null)
         {
-            Pool = new WorkerPool(_ => new HeadroomGate(() => 80, () => 0, _clock), bound, _clock);
+            Pool = new WorkerPool(
+                _ => new HeadroomGate(() => 80, () => 0, _clock), bound, _clock,
+                memoryPerRunMb is { } mb ? () => mb : null);
             Wip = new WipLedger(max, Pool);
             Pool.Placed = Wip.PlacedCount;
         }

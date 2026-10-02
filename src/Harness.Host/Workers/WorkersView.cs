@@ -8,7 +8,8 @@ namespace Harness.Host;
 /// One worker as people see it: <c>GET /api/workers</c> and each capacity sample's <c>workers</c>. Its
 /// build, when it connected, whether it is connected or dropped (and since when), what it measured -
 /// CPUs, memory limit, memory in use, when, and what it could not measure - its own bound under the
-/// default run limit, what a run asking it now would wait for, and the runs placed on it.
+/// default run limit, what a run asking it now would wait for, and the runs placed on it (a Manager
+/// placed over its bound says so).
 /// </summary>
 public sealed record WorkerSample(
     string Id,
@@ -64,7 +65,7 @@ public static class WorkersView
                     measured ? figures!.NotMeasured : CgroupReader.AllFigures),
                 entry.Gate.Reason(),
                 [.. running.Where(hold => wip.PlacedOn(new ContainerId(hold.Team, hold.Member)) == id)
-                    .Select(hold => new RunHold(hold.Team, hold.Member, hold.Since, null))]);
+                    .Select(hold => new RunHold(hold.Team, hold.Member, hold.Since, hold.Reason))]);
         })];
     }
 }

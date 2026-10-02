@@ -137,6 +137,45 @@ public sealed class CapacitySamplingTests
         Assert.Equal(("Developer", "w1"), (top.Member, top.Worker));
     }
 
+    [Fact]
+    public async Task A_manager_over_a_workers_bound_says_so_in_the_samples_running_runs()
+    {
+        var clock = new ManualTime(DateTimeOffset.UnixEpoch.AddDays(1));
+        var pool = new WorkerPool(_ => new HeadroomGate(() => 80, () => 0, clock), bound: _ => 1, clock: clock);
+        var wip = new WipLedger(5, pool);
+        pool.Placed = wip.PlacedCount;
+        var w1 = new Answering((long)2e9, (long)10e9, clock, "w1");
+        var w2 = new Answering((long)3e9, (long)10e9, clock, "w2");
+        pool.Join(w1, new WorkerInfo(w1.Id, "v", 4, (long)10e9, clock.GetUtcNow()));
+        pool.Join(w2, new WorkerInfo(w2.Id, "v", 4, (long)10e9, clock.GetUtcNow()));
+
+        // Neither is measured yet: A takes w1, B w2, and then both are at their bound of 1.
+        var manager = new ContainerId("Alpha", WipLedger.ManagerName);
+        using var a = wip.TryEnter(new ContainerId("Alpha", "A"));
+        using var b = wip.TryEnter(new ContainerId("Alpha", "B"));
+        using var slot = wip.TryEnter(manager);
+        Assert.Equal(new WorkerId("w1"), wip.PlacedOn(manager));
+
+        var sampler = new CapacitySampler(
+            () => [.. pool.Entries().Select(e => (e.Worker!, e.Gate))], wip, new NoLease(), () => 80, () => 0, clock: clock, interval: Interval)
+        {
+            Describe = () => WorkersView.Of(pool, wip, "v"),
+        };
+        w1.Control = w2.Control = sampler.HandleAsync;
+
+        var sample = await sampler.SampleAsync(Ct);
+
+        var overBound = $"over w1's bound of 1: {WipLedger.OverBoundReason}";
+        Assert.Equal(
+            new HashSet<(string, string?)> { ("A", null), ("B", null), (WipLedger.ManagerName, overBound) },
+            sample.Runs.Running.Select(r => (r.Member, r.Reason)).ToHashSet());
+        var workers = sample.Workers!;
+        Assert.Equal(
+            new HashSet<(string, string?)> { ("A", null), (WipLedger.ManagerName, overBound) },
+            workers.Single(w => w.Id == "w1").Runs.Select(r => (r.Member, r.Reason)).ToHashSet());
+        Assert.Equal(("B", (string?)null), workers.Single(w => w.Id == "w2").Runs.Select(r => (r.Member, r.Reason)).Single());
+    }
+
     /// <summary>A worker that answers every sample with the same figures, until it is told to say nothing.</summary>
     private sealed class Answering(long inUse, long limit, TimeProvider clock, string id = "local") : IRunWorker
     {
