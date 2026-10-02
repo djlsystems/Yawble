@@ -116,6 +116,9 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
         Interval = interval ?? DefaultInterval;
     }
 
+    /// <summary>Each worker as people see it, carried on every sample; null leaves the sample without them.</summary>
+    public Func<IReadOnlyList<WorkerSample>>? Describe { get; set; }
+
     /// <summary>The worker this samples: the first, when there are several.</summary>
     public IRunWorker Worker => workers()[0].Worker;
 
@@ -292,7 +295,7 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
                         ? (measured.CpuTicks - was) / (double)ticksPerSecond / seconds * 100
                         : null;
 
-                runs.Add(new RunFigures(run.Team, run.Name, measured.Processes, measured.ResidentBytes, cpuPercent));
+                runs.Add(new RunFigures(run.Team, run.Name, measured.Processes, measured.ResidentBytes, cpuPercent, worker.Value));
             }
 
             _previous = new Previous(at, figures.CpuUsageUsec, ticks);
@@ -325,7 +328,8 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
                 runs.OrderByDescending(run => run.ResidentBytes).Take(TopRuns).ToArray(),
                 runs.Where(run => run.CpuPercent is not null)
                     .OrderByDescending(run => run.CpuPercent).Take(TopRuns).ToArray(),
-                lease.Read());
+                lease.Read(),
+                Describe?.Invoke());
 
             _history.Enqueue(sample);
             while (_history.Count > 0 && at - _history.Peek().At > HistorySpan) _history.Dequeue();
@@ -422,7 +426,8 @@ public sealed record CapacitySample(
     AdmissionSample Admission,
     IReadOnlyList<RunFigures> TopByMemory,
     IReadOnlyList<RunFigures> TopByCpu,
-    HeavyLeaseSnapshot? HeavyLease);
+    HeavyLeaseSnapshot? HeavyLease,
+    IReadOnlyList<WorkerSample>? Workers = null);
 
 /// <param name="CpusInUse">CPUs' worth of time used since the last sample.</param>
 /// <param name="PercentOfLimit">That against <c>LimitCpus</c>; null when there is no limit.</param>
@@ -450,4 +455,5 @@ public sealed record RunHold(string Team, string Member, DateTimeOffset Since, s
 public sealed record AdmissionSample(int MemoryPercent, int MemoryPressurePercent, string? Holding);
 
 /// <param name="CpuPercent">Percent of one CPU since the last sample; null on a run's first.</param>
-public sealed record RunFigures(string Team, string Member, int Processes, long ResidentBytes, double? CpuPercent);
+/// <param name="Worker">The worker the run is on.</param>
+public sealed record RunFigures(string Team, string Member, int Processes, long ResidentBytes, double? CpuPercent, string? Worker = null);

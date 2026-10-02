@@ -52,6 +52,23 @@ public static class WorkerEndpoints
             .ExcludeFromDescription();
     }
 
+    /// <summary><c>GET /api/workers</c>: every worker, for people.</summary>
+    public static void MapList(WebApplication app, Func<IReadOnlyList<WorkerSample>> workers)
+    {
+        app.MapGet("/api/workers", () => Results.Ok(workers()))
+            .HumansOnly()
+            .WithTags("Admission")
+            .WithSummary("The workers runs are placed on: each one's build, connection, measured capacity and runs")
+            .WithDescription(
+                "One entry per worker, in the order they connected. `state` is `connected` or `dropped` (its "
+                + "connection is down and it has its grace to come back; `droppedAt` says when). `capacity` is "
+                + "what the worker measured of its own container - `cpus`, `memoryLimitBytes`, `memoryInUseBytes`, "
+                + "`memoryPercent`, `sampledAt` - with every figure it did not measure named in `notMeasured` and "
+                + "null, never 0; `bound` is how many runs it may hold under the default run limit, null when "
+                + "`wip.maxRunning` is set. `holding` is what a run asking it now would wait for on headroom, or "
+                + "null. `runs` are the runs placed on it. A Host that runs its runs itself lists its own one worker.");
+    }
+
     private static async Task Refuse(HttpContext context, int status, string sentence)
     {
         context.Response.StatusCode = status;

@@ -38,7 +38,8 @@ public sealed class WorkerPool : IRunPlacement
     {
         _fixed = true;
         _clock = TimeProvider.System;
-        foreach (var (id, gate) in workers) _entries.Add(new Entry(id, gate, new WorkerInfo(id, null, null, null, DateTimeOffset.MinValue), _joined++));
+        var since = DateTimeOffset.UtcNow;
+        foreach (var (id, gate) in workers) _entries.Add(new Entry(id, gate, new WorkerInfo(id, null, null, null, since), _joined++));
     }
 
     /// <summary>

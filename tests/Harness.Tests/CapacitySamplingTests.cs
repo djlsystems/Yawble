@@ -85,16 +85,70 @@ public sealed class CapacitySamplingTests
         Assert.Equal((long)10e9, next.Memory.LimitBytes);
     }
 
-    /// <summary>A worker that answers every sample with the same figures, until it is told to say nothing.</summary>
-    private sealed class Answering(long inUse, long limit, TimeProvider clock) : IRunWorker
+    [Fact]
+    public async Task Each_worker_s_figures_and_runs_are_in_the_sample()
     {
+        var clock = new ManualTime(DateTimeOffset.UnixEpoch.AddDays(1));
+        var pool = new WorkerPool(_ => new HeadroomGate(() => 80, () => 0, clock), clock: clock);
+        var wip = new WipLedger(5, pool);
+        var w1 = new Answering((long)2e9, (long)10e9, clock, "w1");
+        var w2 = new Answering((long)9e9, (long)10e9, clock, "w2");
+        pool.Join(w1, new WorkerInfo(w1.Id, "v", 4, (long)10e9, clock.GetUtcNow()));
+        pool.Join(w2, new WorkerInfo(w2.Id, "v", 8, (long)10e9, clock.GetUtcNow()));
+
+        var sampler = new CapacitySampler(
+            () => [.. pool.Entries().Select(e => (e.Worker!, e.Gate))], wip, new NoLease(), () => 80, () => 0, clock: clock, interval: Interval)
+        {
+            Describe = () => WorkersView.Of(pool, wip, "v"),
+        };
+        w1.Control = w2.Control = sampler.HandleAsync;
+
+        var sample = await sampler.SampleAsync(Ct);
+
+        // Each worker's own figures and reason; the top level is their sum.
+        var workers = sample.Workers!;
+        Assert.Equal(["w1", "w2"], workers.Select(w => w.Id));
+        Assert.Equal((long)2e9, workers[0].Capacity.MemoryInUseBytes);
+        Assert.Null(workers[0].Holding);
+        Assert.Equal("waiting for memory: 9.0 of 10.0 GB in use", workers[1].Holding);
+        Assert.Equal((long)20e9, sample.Memory.LimitBytes);
+        Assert.Equal((long)11e9, sample.Memory.InUseBytes);
+        Assert.Null(sample.Admission.Holding);
+    }
+
+    [Fact]
+    public async Task A_top_run_names_its_worker()
+    {
+        var clock = new ManualTime(DateTimeOffset.UnixEpoch.AddDays(1));
+        var pool = new WorkerPool(_ => new HeadroomGate(() => 80, () => 0, clock), clock: clock);
+        var wip = new WipLedger(5, pool);
+        var w1 = new Answering((long)1e9, (long)10e9, clock, "w1")
+        {
+            Runs = [new RunMeasured(new RunId(new ContainerId("alpha", "Developer"), "n"), 77, 2, 500_000_000, 10, DateTimeOffset.UnixEpoch)],
+        };
+        pool.Join(w1, new WorkerInfo(w1.Id, "v", 4, (long)10e9, clock.GetUtcNow()));
+        var sampler = new CapacitySampler(
+            () => [.. pool.Entries().Select(e => (e.Worker!, e.Gate))], wip, new NoLease(), () => 80, () => 0, clock: clock, interval: Interval);
+        w1.Control = sampler.HandleAsync;
+
+        var sample = await sampler.SampleAsync(Ct);
+
+        var top = Assert.Single(sample.TopByMemory);
+        Assert.Equal(("Developer", "w1"), (top.Member, top.Worker));
+    }
+
+    /// <summary>A worker that answers every sample with the same figures, until it is told to say nothing.</summary>
+    private sealed class Answering(long inUse, long limit, TimeProvider clock, string id = "local") : IRunWorker
+    {
+        public IReadOnlyList<RunMeasured> Runs { get; init; } = [];
+
         private long _seq;
 
         public Func<WorkerEnvelope, CancellationToken, Task> Control { get; set; } = (_, _) => Task.CompletedTask;
 
         public bool Silent { get; set; }
 
-        public WorkerId Id => WorkerId.Local;
+        public WorkerId Id { get; } = new(id);
 
         public Task Closed { get; } = new TaskCompletionSource().Task;
 
@@ -113,6 +167,7 @@ public sealed class CapacitySamplingTests
 
             var figures = new CapacityFigures(
                 "v2", 4, false, 0, 0, 0, limit, false, inUse, inUse, 0, 0, null, null, null, null, true, []);
+            foreach (var run in Runs) await AnswerAsync(run);
             await AnswerAsync(new WorkerCapacitySampled(clock.GetUtcNow(), figures, []));
         }
     }
