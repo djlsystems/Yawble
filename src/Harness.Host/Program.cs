@@ -696,7 +696,7 @@ builder.Services.AddSingleton<LeaseActions>();
 // defect it exists to catch. `AgentRunnerCompositionTests` asserts what comes out of here.
 // Who agent children run as, decided once here and logged at start. `agent` when the
 // Host can switch to it, the Host's own user otherwise - see AgentLaunchUser.
-builder.Services.AddSingleton(_ => AgentLaunchUser.Resolve(
+builder.Services.AddSingleton(_ => InProcessWorker.LaunchUser(
     builder.Configuration["Agents:RunAs"] ?? Environment.GetEnvironmentVariable("HARNESS_AGENT_USER")));
 // The runs in flight, for the live route. The runner records; nothing is stored.
 builder.Services.AddSingleton<LiveRuns>();
@@ -709,25 +709,49 @@ builder.Services.AddSingleton(sp => new AgentCliUpdater(
     sp.GetRequiredService<AgentUpdateGate>(),
     sp.GetRequiredService<AgentLaunchUser>(),
     dataRoot));
-// HOW MUCH MEMORY ONE RUN MAY USE, AND HOW: a cgroup per run, an rlimit per process, or nothing,
-// decided once here from the container's own cgroup and logged at start (RunMemoryLimits). The
-// figure is a setting, read through a delegate at every launch.
-builder.Services.AddSingleton(_ => RunMemoryLimits.Resolve(tenantSettings.RunMemoryLimit, ceiling: tenantSettings.RunMemoryCeiling));
-// THE HEAVY ALLOWANCE: the run holding the `heavy` lease is raised to the container's limit less the
-// Host reserve less what the other runs are measured to use, and lowered when it lets go. Moved by
-// LeaseActions on every acquire, release and run end. See RunAllowances.
-builder.Services.AddSingleton(sp => new RunAllowances(
-    sp.GetRequiredService<RunMemoryLimits>(),
+// THE RUN WORKER, IN THIS PROCESS. Control talks to runs only through the run protocol: a run is
+// started, reported and ended by records over the in-process transport, and this worker is the one
+// place that launches, measures and limits them. ONE worker, shared by the runner, the leases, the
+// reports and the capacity sample (RunWorkerCompositionTests). It is composed here from what control
+// owns - the idle-clock registry, who agent children run as, the shared update gate, the memory
+// settings and the heavy allowance's rule - and decides the rest itself: HOW MUCH MEMORY ONE RUN MAY
+// USE, AND HOW (a cgroup per run, an rlimit per process, or nothing, decided once from the
+// container's own cgroup and logged at start; see RunMemoryLimits), and THE HEAVY ALLOWANCE, which
+// raises the run holding the `heavy` lease to the container's limit less the Host reserve less what
+// the other runs are measured to use, and lowers it when it lets go (RunAllowances). The cgroup and
+// proc roots are configuration so a test Host reads a fixture.
+builder.Services.AddSingleton(sp => new RunDirectory(
+    () => sp.GetRequiredService<IMemberReports>(),
+    () => sp.GetRequiredService<IDiagnosticsLog>(),
+    sp.GetRequiredService<LiveRuns>()));
+builder.Services.AddSingleton(sp => InProcessWorker.Create(
+    WorkerId.Local,
+    sp.GetRequiredService<RunHeartbeat>(),
+    sp.GetRequiredService<AgentLaunchUser>(),
+    sp.GetRequiredService<AgentUpdateGate>(),
+    tenantSettings.RunMemoryLimit,
+    tenantSettings.RunMemoryCeiling,
     tenantSettings.HeavyRunMemoryLimit,
-    () => sp.GetRequiredService<InstanceLeases>().Holders(InstanceLeases.Heavy).Select(o => o.Key).ToList(),
-    new ProcessGroupReader(builder.Configuration["Capacity:ProcRoot"] ?? "/proc"),
-    RunProcessGroups.Shared,
-    procRoot: builder.Configuration["Capacity:ProcRoot"] ?? "/proc",
-    runAs: sp.GetRequiredService<AgentLaunchUser>(),
-    log: sp.GetRequiredService<ILogger<RunAllowances>>()));
+    sp.GetRequiredService<RunDirectory>().HandleAsync,
+    sp.GetRequiredService<ILogger<ProcessAgentRunner>>(),
+    sp.GetRequiredService<ILogger<RunAllowances>>(),
+    builder.Configuration["Capacity:CgroupRoot"],
+    builder.Configuration["Capacity:ProcRoot"],
+    () => sp.GetRequiredService<InstanceLeases>().Holders(InstanceLeases.Heavy).Select(o => o.Key).ToList()));
+builder.Services.AddSingleton<IRunWorker>(sp => sp.GetRequiredService<InProcessWorker>().Worker);
+builder.Services.AddSingleton(sp => sp.GetRequiredService<InProcessWorker>().Memory!);
+builder.Services.AddSingleton(sp => sp.GetRequiredService<InProcessWorker>().Allowances!);
 // Member TMPDIRs on the data volume, never a /tmp the engine may hold in memory (MemberTemp).
 builder.Services.AddSingleton(_ => MemberTemp.RootUnder(dataRoot));
-builder.Services.AddSingleton<ProcessAgentRunner>();
+// BY FACTORY: the runner has a second constructor, which builds a worker of its own from parts, and
+// production's is this one, over the shared worker.
+builder.Services.AddSingleton(sp => new ProcessAgentRunner(
+    sp.GetRequiredService<AgentCatalog>(),
+    sp.GetRequiredService<IRunWorker>(),
+    sp.GetRequiredService<RunDirectory>(),
+    sp.GetRequiredService<InProcessWorker>().Host.Launcher,
+    () => ProcessAgentRunner.Allowance((tenantSettings.RunMemoryLimit(), tenantSettings.RunMemoryCeiling())),
+    sp.GetRequiredService<MemberTempRoot>().Path));
 builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(
     sp.GetRequiredService<ProcessAgentRunner>(),
     sp.GetRequiredService<IPrincipalStore>(),

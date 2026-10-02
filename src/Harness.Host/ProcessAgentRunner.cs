@@ -60,6 +60,27 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         _tempRoot = temp?.Path;
     }
 
+    /// <summary>
+    /// The Host's runner, over a worker it shares with the leases, the reports and the capacity sample.
+    /// <paramref name="memory"/> is the settings' memory figures, read when each run's start is built;
+    /// <paramref name="tempRoot"/> is where members' temporary folders go.
+    /// </summary>
+    public ProcessAgentRunner(
+        AgentCatalog catalog,
+        IRunWorker worker,
+        RunDirectory directory,
+        RunLauncher launcher,
+        Func<RunMemoryAllowance?> memory,
+        string? tempRoot)
+    {
+        _catalog = catalog;
+        _worker = worker;
+        _directory = directory;
+        _launcher = launcher;
+        _memory = memory;
+        _tempRoot = tempRoot;
+    }
+
     /// <summary>The worker this runner starts its runs on.</summary>
     public IRunWorker Worker => _worker;
 

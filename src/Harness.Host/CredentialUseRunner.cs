@@ -36,6 +36,9 @@ namespace Harness.Host;
 public sealed class CredentialUseRunner(
     IAgentRunner inner, IPrincipalStore principals, AgentCatalog catalog) : IAgentRunner
 {
+    /// <summary>The runner this one measures.</summary>
+    public IAgentRunner Inner => inner;
+
     /// <summary>One read: the answer, and whether the store actually gave one.</summary>
     private readonly record struct Probe(DateTimeOffset? At, bool Answered);
 

@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Capacity;
@@ -14,6 +16,9 @@ namespace Harness.Tests;
 public sealed class RunBoundaryTests : IDisposable
 {
     private static readonly ContainerId Member = new("alpha", "worker");
+
+    /// <summary>How long a lost run may take to be seen as one. A run past it failed, it did not hang.</summary>
+    private static readonly TimeSpan Bound = TimeSpan.FromSeconds(10);
 
     private readonly string _root = Directory.CreateTempSubdirectory("harness-boundary-").FullName;
 
@@ -124,6 +129,222 @@ public sealed class RunBoundaryTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------------------------
+    // A run whose end never arrives is a lost run, never a hang.
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_transport_that_drops_the_end_is_a_lost_run_not_a_hang()
+    {
+        var swallowed = 0;
+        var bed = new Bed(_root, drop: e => e is RunEnded && Interlocked.Increment(ref swallowed) > 0);
+        try
+        {
+            var start = bed.Start(Launch("sh", ["-c", "exit 0"]));
+            var elapsed = Stopwatch.StartNew();
+            var running = bed.Directory.RunAsync(bed.Worker, start, Ct);
+
+            await Until(() => Volatile.Read(ref swallowed) == 1, Bound);
+            await bed.Worker.SendAsync(new SampleCapacity(), Ct);
+            var result = await running.WaitAsync(Bound, Ct);
+            Say($"The dropped end was a lost run after {elapsed.Elapsed.TotalSeconds:0.000} s.");
+
+            Assert.Equal(1, Volatile.Read(ref swallowed));
+            Assert.Equal(-1, result.ExitCode);
+            Assert.Equal(FailureClasses.Interrupted, result.FailureClass);
+            Assert.Equal(RunDirectory.LostRunText, result.LaunchError);
+        }
+        finally
+        {
+            // Closed only after the bounded wait: closing is a trigger of its own.
+            bed.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task A_dropped_end_through_the_member_runtime_frees_its_slot_and_ends_its_card()
+    {
+        var swallowed = 0;
+        var bed = new Bed(_root, drop: e => e is RunEnded && Interlocked.Increment(ref swallowed) > 0);
+        try
+        {
+            var ended = new ConcurrentQueue<ContainerId>();
+            var wip = new WipLedger(1);
+            await using var members = new ContainerTestBed(
+                wip, onRunEnding: (id, _, _, _) => { ended.Enqueue(id); return Task.FromResult(true); });
+
+            var script = await Script("exit 0\n");
+            var catalog = new AgentCatalog(
+            [
+                new AgentDefinition("probe", AgentMode.Headless, new AgentLaunch("sh", [script], LanguageModel: false)),
+            ]);
+            var runner = new ProcessAgentRunner(catalog, bed.Worker, bed.Directory, bed.Launcher, () => null, null);
+            var id = new ContainerId("alpha", "lost");
+            await members.Host.AddAsync(
+                new ContainerDefinition(
+                    id, "probe", SystemPrompt: "You are a probe.", WorkingDirectory: Workspace(), Subscribes: [],
+                    Environment: new Dictionary<string, string>()),
+                members.AsMember(runner),
+                Ct);
+
+            var elapsed = Stopwatch.StartNew();
+            await members.Store.AppendAsync(
+                new NewMessage(MessageTypes.InstructionFor(id), """{"instruction":"build it"}""", "console"), Ct);
+
+            await Until(() => Volatile.Read(ref swallowed) == 1, Bound, () => members.Host.PumpOnceAsync(Ct));
+            await bed.Worker.SendAsync(new SampleCapacity(), Ct);
+            await Until(() => !ended.IsEmpty && members.Host.Find(id)!.State != ContainerState.Running, Bound, () => members.Host.PumpOnceAsync(Ct));
+            Say($"The member's dropped end was a lost run after {elapsed.Elapsed.TotalSeconds:0.000} s.");
+
+            var failed = Assert.Single(await members.OfTypeAsync(MessageTypes.Failed));
+            using var payload = System.Text.Json.JsonDocument.Parse(failed.Payload);
+            Assert.Equal(RunDirectory.LostRunText, payload.RootElement.GetProperty("launchError").GetString());
+            Assert.Equal(FailureClasses.Interrupted, payload.RootElement.GetProperty("failureClass").GetString());
+            Assert.Equal([id], ended);
+            Assert.Empty(wip.View().Running);
+        }
+        finally
+        {
+            bed.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task A_closed_transport_ends_an_open_run_as_interrupted()
+    {
+        var bed = new Bed(_root);
+        var go = Path.Combine(_root, "go");
+        try
+        {
+            var script = await Script($"i=0; while [ ! -e '{go}' ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done\n");
+            var start = bed.Start(Launch("sh", [script]));
+            var running = bed.Directory.RunAsync(bed.Worker, start, Ct);
+            await bed.Recorded<RunStarted>().WaitAsync(Bound, Ct);
+
+            var elapsed = Stopwatch.StartNew();
+            bed.Dispose();
+            var result = await running.WaitAsync(Bound, Ct);
+            Say($"The closed connection's run was lost after {elapsed.Elapsed.TotalSeconds:0.000} s.");
+
+            Assert.Equal(FailureClasses.Interrupted, result.FailureClass);
+            Assert.Equal(RunDirectory.LostRunText, result.LaunchError);
+        }
+        finally
+        {
+            File.WriteAllText(go, "");
+            bed.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task A_start_that_cannot_be_sent_ends_as_interrupted()
+    {
+        var directory = new RunDirectory();
+        var start = new StartRun(RunId.For(Member), "probe", "s", "p", "", _root, new Dictionary<string, string>(), null, null, null, null, null);
+
+        var result = await directory.RunAsync(new Refusing(), start, Ct).WaitAsync(Bound, Ct);
+
+        Assert.Equal(FailureClasses.Interrupted, result.FailureClass);
+        Assert.Equal(RunDirectory.LostRunText, result.LaunchError);
+    }
+
+    [Fact]
+    public async Task A_connection_that_closes_after_the_start_and_before_the_process_ends_it_as_interrupted()
+    {
+        var bed = new Bed(_root);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            // Applied, and held before its process starts.
+            var update = bed.Updates.UpdateAsync("sh", _ => release.Task, Ct);
+            var start = bed.Start(Launch("sh", ["-c", "exit 0"]));
+            var running = bed.Directory.RunAsync(bed.Worker, start, Ct);
+            await bed.Recorded<RunProgress>().WaitAsync(Bound, Ct);
+
+            bed.Dispose();
+            var result = await running.WaitAsync(Bound, Ct);
+
+            Assert.Equal(FailureClasses.Interrupted, result.FailureClass);
+            Assert.Equal(RunDirectory.LostRunText, result.LaunchError);
+            Assert.DoesNotContain(nameof(RunStarted), bed.Order(start.Run));
+        }
+        finally
+        {
+            release.TrySetResult(true);
+            bed.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task An_unanswered_stop_ends_as_interrupted_after_the_backstop()
+    {
+        await RunBounded().WaitAsync(Bound, Ct);
+
+        async Task RunBounded()
+        {
+            var time = new ManualTime(new DateTimeOffset(2026, 10, 2, 0, 0, 0, TimeSpan.Zero));
+            var directory = new RunDirectory(clock: time);
+            var deaf = new Deaf(directory);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+            var start = new StartRun(RunId.For(Member), "probe", "s", "p", "", _root, new Dictionary<string, string>(), null, null, null, null, null);
+
+            var running = directory.RunAsync(deaf, start, stop.Token);
+            await stop.CancelAsync();
+            await Until(() => deaf.Cancels == 1, Bound);
+
+            time.Advance(RunDirectory.StopBackstop - TimeSpan.FromMilliseconds(1));
+            await Task.Delay(50, Ct);
+            Assert.False(running.IsCompleted, "the run was taken as lost before the backstop");
+
+            time.Advance(TimeSpan.FromMilliseconds(1));
+            var result = await running.WaitAsync(Bound, Ct);
+
+            Assert.Equal(FailureClasses.Interrupted, result.FailureClass);
+            Assert.Equal(RunDirectory.LostRunText, result.LaunchError);
+        }
+    }
+
+    [Fact]
+    public async Task An_end_during_a_sample_is_not_a_lost_run()
+    {
+        using var bed = new Bed(_root);
+
+        for (var batch = 0; batch < 4; batch++)
+        {
+            var elapsed = Stopwatch.StartNew();
+            for (var i = 0; i < 50; i++)
+            {
+                using var both = new Barrier(2);
+                var start = bed.Start(Launch("sh", ["-c", "exit 0"]));
+                var run = Task.Run(() => { both.SignalAndWait(Ct); return bed.Directory.RunAsync(bed.Worker, start, Ct); }, Ct);
+                var sample = Task.Run(async () => { both.SignalAndWait(Ct); await bed.Worker.SendAsync(new SampleCapacity(), Ct); }, Ct);
+
+                var result = await run.WaitAsync(Bound, Ct);
+                await sample.WaitAsync(Bound, Ct);
+
+                Assert.NotEqual(FailureClasses.Interrupted, result.FailureClass);
+                Assert.Equal(0, result.ExitCode);
+            }
+
+            Assert.True(elapsed.Elapsed < Bound, $"batch {batch} took {elapsed.Elapsed.TotalSeconds:0.0} s");
+        }
+
+        Assert.Equal(bed.Seqs.Order(), bed.Seqs);
+        Assert.Equal(bed.Seqs.Distinct().Count(), bed.Seqs.Count);
+    }
+
+    [Fact]
+    public void Stopping_the_host_does_not_close_its_worker_so_a_run_ends_as_today_not_lost()
+    {
+        // The service container disposes what it built when the Host stops. The worker is not
+        // disposable, so a run still ending then ends in the Host's own words
+        // (A_stop_crosses_as_cancel_and_ends_as_today), never as lost.
+        Assert.False(typeof(IDisposable).IsAssignableFrom(typeof(InProcessWorker)));
+        Assert.False(typeof(IAsyncDisposable).IsAssignableFrom(typeof(InProcessWorker)));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    private static void Say(string line) => TestContext.Current.TestOutputHelper?.WriteLine(line);
 
     private string Workspace() => Directory.CreateDirectory(Path.Combine(_root, "workspace")).FullName;
 
@@ -137,13 +358,50 @@ public sealed class RunBoundaryTests : IDisposable
     private static RunLaunch Launch(string fileName, IReadOnlyList<string> arguments, string? usageFormat = null) =>
         new(fileName, arguments, null, null, usageFormat, false, null, null, null, []);
 
-    private static async Task Until(Func<bool> condition, TimeSpan bound)
+    private static async Task Until(Func<bool> condition, TimeSpan bound, Func<Task>? between = null)
     {
         var deadline = DateTime.UtcNow + bound;
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) throw new TimeoutException($"Not true within {bound.TotalSeconds:0} s.");
+            if (between is not null) await between();
             await Task.Delay(20);
+        }
+    }
+
+    /// <summary>A worker whose connection refuses every send.</summary>
+    private sealed class Refusing : IRunWorker
+    {
+        public WorkerId Id => WorkerId.Local;
+
+        public Task Closed { get; } = new TaskCompletionSource().Task;
+
+        public Task SendAsync(ControlMessage message, CancellationToken ct = default) =>
+            Task.FromException(new InvalidOperationException("The connection refused it."));
+    }
+
+    /// <summary>A worker that starts what it is sent and then hears nothing: a stop never ends.</summary>
+    private sealed class Deaf(RunDirectory control) : IRunWorker
+    {
+        private int _cancels;
+
+        public int Cancels => Volatile.Read(ref _cancels);
+
+        public WorkerId Id => WorkerId.Local;
+
+        public Task Closed { get; } = new TaskCompletionSource().Task;
+
+        public async Task SendAsync(ControlMessage message, CancellationToken ct = default)
+        {
+            switch (message)
+            {
+                case StartRun start:
+                    await control.HandleAsync(new WorkerEnvelope(Id, 1, new RunStarted(start.Run, 4242, DateTimeOffset.UnixEpoch)), ct);
+                    break;
+                case CancelRun:
+                    Interlocked.Increment(ref _cancels);
+                    break;
+            }
         }
     }
 
@@ -159,23 +417,31 @@ public sealed class RunBoundaryTests : IDisposable
         private readonly List<(Func<object, bool> Matches, TaskCompletionSource<object> Found)> _waiters = [];
         private long _counter;
 
-        public Bed(string root, bool reports = true)
+        public Bed(string root, bool reports = true, Func<WorkerEvent, bool>? drop = null)
         {
             _root = root;
             Reports = new ProgressLines();
             Directory = new RunDirectory(Reports);
-            var launcher = new RunLauncher(Heartbeat, reports: reports, lookup: LaunchLookup.Once, updates: Updates);
+            Launcher = new RunLauncher(Heartbeat, reports: reports, lookup: LaunchLookup.Once, updates: Updates);
             _worker = InProcessWorker.Connect(
                 WorkerId.Local,
                 events => new WorkerHost(
-                    WorkerId.Local, events, launcher, Heartbeat, processes: new ProcessGroupReader("/proc"),
+                    WorkerId.Local, events, Launcher, Heartbeat, processes: new ProcessGroupReader("/proc"),
                     cgroup: new CgroupReader("/sys/fs/cgroup")),
                 async (envelope, ct) =>
                 {
+                    lock (Seqs) Seqs.Add(envelope.Seq);
+                    if (drop?.Invoke(envelope.Event) == true) return;
+
                     Record(envelope.Event);
                     await Directory.HandleAsync(envelope, ct);
                 });
         }
+
+        /// <summary>Every envelope's sequence number, in the order it was delivered.</summary>
+        public List<long> Seqs { get; } = [];
+
+        public RunLauncher Launcher { get; }
 
         public RunHeartbeat Heartbeat { get; } = new();
 
@@ -247,7 +513,7 @@ public sealed class RunBoundaryTests : IDisposable
             }
         }
 
-        public void Dispose() => _worker.Dispose();
+        public void Dispose() => _worker.Close();
     }
 
     private sealed class ProgressLines : IMemberReports
@@ -267,5 +533,70 @@ public sealed class RunBoundaryTests : IDisposable
         public Task<MemberReportOutcome> PublishAsync(ContainerId member, string type, string payload, CancellationToken ct = default) => Ok();
 
         private static Task<MemberReportOutcome> Ok() => Task.FromResult(MemberReportOutcome.Ok);
+    }
+}
+
+/// <summary>A clock a test moves by hand; its timers fire when it passes their time.</summary>
+internal sealed class ManualTime(DateTimeOffset start) : TimeProvider
+{
+    private readonly Lock _gate = new();
+    private readonly List<Timer> _timers = [];
+    private DateTimeOffset _now = start;
+
+    public override DateTimeOffset GetUtcNow()
+    {
+        lock (_gate) return _now;
+    }
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+    {
+        var timer = new Timer(this, callback, state);
+        timer.Change(dueTime, period);
+        return timer;
+    }
+
+    public void Advance(TimeSpan by)
+    {
+        List<Timer> due;
+        lock (_gate)
+        {
+            _now += by;
+            due = [.. _timers.Where(t => t.Due <= _now)];
+            foreach (var timer in due) _timers.Remove(timer);
+        }
+
+        foreach (var timer in due) timer.Fire();
+    }
+
+    private sealed class Timer(ManualTime clock, TimerCallback callback, object? state) : ITimer
+    {
+        public DateTimeOffset Due { get; private set; }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            lock (clock._gate)
+            {
+                clock._timers.Remove(this);
+                if (dueTime == Timeout.InfiniteTimeSpan) return true;
+
+                Due = clock._now + dueTime;
+                clock._timers.Add(this);
+            }
+
+            return true;
+        }
+
+        public void Fire() => callback(state);
+
+        public void Dispose()
+        {
+            lock (clock._gate) clock._timers.Remove(this);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+            return ValueTask.CompletedTask;
+        }
     }
 }

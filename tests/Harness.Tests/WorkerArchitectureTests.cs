@@ -72,9 +72,8 @@ public sealed class WorkerArchitectureTests
             "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
 
         // Moved behind the protocol by the commits after this one, each deleting its own entries.
-        ["Program.<Main>$: " + ReachesAWorkerLauncher] = "pending: moves in this item, into the worker's composition.",
-        ["Program.<Main>$: " + ReadsProc] = "pending: moves in this item, into the worker's composition.",
-        ["Program.<Main>$: " + TouchesACgroup] = "pending: moves in this item, into the worker's composition.",
+        ["Program.<Main>$: " + ReadsProc] = "pending: moves in this item, with the capacity sampler's readers.",
+        ["Program.<Main>$: " + TouchesACgroup] = "pending: moves in this item, with the capacity sampler's readers.",
         ["LeaseActions.MovedAsync: " + ReachesAWorkerLauncher] = "pending: moves in this item, to ChangeRunMemoryAllowance.",
         ["CapacitySampler.Sample: " + ReachesAWorkerLauncher] = "pending: moves in this item, to SampleCapacity.",
         ["PluginMemberRunner.RunPluginAsync: " + ReachesAWorkerLauncher] = "pending: moves in this item, to StartRun.",
