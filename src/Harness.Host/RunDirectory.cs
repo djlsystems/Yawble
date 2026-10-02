@@ -213,8 +213,8 @@ public sealed class RunDirectory
                 open.Since ??= envelope.Seq;
                 break;
 
-            case RunCredentialApplied:
-                _secrets?.Remember(run.Member, open.Redaction ?? ValueRedactor.Empty);
+            case RunCredentialApplied applied:
+                _secrets?.Remember(run.Member, (open.Redaction ?? ValueRedactor.Empty).With(applied.Redaction ?? ValueRedactor.Empty));
                 break;
 
             case RunProgress progress:

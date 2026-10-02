@@ -199,7 +199,10 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             Credential: credential,
             Redaction: launch is null || credential.Missing is not null
                 ? ValueRedactor.Empty
-                : Redaction(launch, invocation.Environment, credential));
+                : Redaction(launch, invocation.Environment, credential),
+            CredentialNames: launch is null || credential.Missing is not null
+                ? null
+                : [.. RunSecrets.CredentialNames(_catalog).Order(StringComparer.Ordinal)]);
     }
 
     /// <summary>

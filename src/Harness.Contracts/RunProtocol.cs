@@ -66,7 +66,8 @@ public abstract record MemberCommand(ContainerId Member) : ControlMessage;
 /// and never reads a store or a key ring - and <see cref="Redaction"/> the values the run's text is
 /// redacted of before it leaves the worker: the credential's and every credential variable the
 /// child's environment carries. Both hold secrets and refuse to be written as JSON; null on a run
-/// that has none.
+/// that has none. <see cref="CredentialNames"/> names every variable that holds a credential - names
+/// only, no values - so the worker redacts the values its own child's environment carries too.
 /// </summary>
 public sealed record StartRun(
     RunId Run,
@@ -83,7 +84,8 @@ public sealed record StartRun(
     RunLiveView? LiveView,
     RunProcess? Process = null,
     RunCredential? Credential = null,
-    ValueRedactor? Redaction = null) : RunCommand(Run);
+    ValueRedactor? Redaction = null,
+    IReadOnlyList<string>? CredentialNames = null) : RunCommand(Run);
 
 /// <summary>
 /// A member that is a program: its executable and arguments, the only variables it inherits from the
@@ -186,13 +188,16 @@ public abstract record RunEvent(RunId Run) : WorkerEvent;
 /// <summary>The worker is connected and takes runs.</summary>
 public sealed record WorkerReady(WorkerId Worker) : WorkerEvent;
 
-/// <summary>The run's process exists.</summary>
 /// <summary>
 /// The run's credential is applied and its child's environment is final, just before the child is
-/// started: from here control keeps the run's <see cref="StartRun.Redaction"/> as the member's, for
-/// its reports and its transcript. A run refused before this point leaves the member's set as it was.
+/// started: from here control keeps the run's <see cref="StartRun.Redaction"/>, together with
+/// <see cref="Redaction"/> - the set the worker read from the child's environment it built - as the
+/// member's, for its reports and its transcript. A run refused before this point leaves the member's
+/// set as it was. <see cref="Redaction"/> holds secrets and refuses to be written as JSON.
 /// </summary>
-public sealed record RunCredentialApplied(RunId Run) : RunEvent(Run);
+public sealed record RunCredentialApplied(RunId Run, ValueRedactor? Redaction = null) : RunEvent(Run);
+
+/// <summary>The run's process exists.</summary>
 
 public sealed record RunStarted(RunId Run, int ProcessId, DateTimeOffset At) : RunEvent(Run);
 

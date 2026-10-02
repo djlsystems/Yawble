@@ -610,12 +610,16 @@ public sealed partial class RunLauncher(
                 start.Environment["XDG_CACHE_HOME"] = Path.Combine(memberTemp!, RunHomes.CacheFolder);
             }
 
-            // THE RUN'S OWN CREDENTIAL, as control read it from the environment the child is given
-            // (MemberEnvironment, the same rule as above) and sent with the start: applied to what
+            // THE RUN'S OWN CREDENTIAL, as control read it and sent with the start, together with
+            // every credential variable this child's environment carries as built here
+            // (MemberEnvironment, the same rule as above), read where the child is: applied to what
             // this run returns from here on, and kept by control for its reports and its transcript
-            // as the live view serves it, from now.
-            redactor = run.Redaction ?? ValueRedactor.Empty;
-            await sink.CredentialAppliedAsync();
+            // as the live view serves it, from now. In one process the two sets are the same.
+            redactor = (run.Redaction ?? ValueRedactor.Empty).With(
+                run.CredentialNames is { } names
+                    ? ValueRedactor.OfEnvironment(start.Environment, names, (invocation.Credential ?? RunCredential.Home).Environment.Values)
+                    : ValueRedactor.Empty);
+            await sink.CredentialAppliedAsync(redactor);
 
             // A transcript the agent names itself is the newest one written from here on.
             var launchedAt = DateTimeOffset.UtcNow;
