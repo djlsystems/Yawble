@@ -90,6 +90,18 @@ public sealed class WorkerAsks(Func<IRunWorker> any, TimeProvider? clock = null)
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Asks a worker of this process's own that takes no run: for a control part composed without
+    /// the Host's worker, as a test composes one. The same worker code, over the same transport.
+    /// </summary>
+    public static WorkerAsks InProcess(AgentLaunchUser? runAs)
+    {
+        WorkerAsks? asks = null;
+        var worker = InProcessWorker.ForAgentClis(WorkerId.Local, runAs, (envelope, ct) => asks?.HandleAsync(envelope, ct) ?? Task.CompletedTask);
+        asks = new WorkerAsks(() => worker.Worker);
+        return asks;
+    }
+
     /// <summary>A new request id.</summary>
     public static string NewRequest() => Guid.NewGuid().ToString("N");
 }

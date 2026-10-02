@@ -1699,7 +1699,10 @@ builder.Services.ConfigureHttpJsonOptions(options => ConfigureHostJson(options.S
 builder.Services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddSingleton<AgentAuthProbe>();
+// THE SIGN-IN PROBE: asked of a connected worker, recorded in agent-auth.json for the doctor.
+builder.Services.AddSingleton(sp => new AgentAuthProbe(
+    sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<AgentLaunchUser>(), sp.GetRequiredService<IRunCredentials>(),
+    sp.GetRequiredService<WorkerAsks>(), dataRoot, sp.GetRequiredService<ILogger<AgentAuthProbe>>()));
 // THE LAUNCH CHECK: each preset's free invocation through the member runner's own launch (AgentLaunchChecks).
 builder.Services.AddSingleton(sp => new AgentLaunchChecks(
     sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<ProcessAgentRunner>(), dataRoot,

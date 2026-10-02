@@ -442,10 +442,10 @@ func sampleReport() *doctor.HostReport {
 	r.Database.Schema = &doctor.Schema{Applied: []string{"auth-001", "messages-001"}, Accepted: true}
 	r.Backups.DailyCount, r.Backups.NewestDailyAt = 1, strp("2026-09-23T18:47:24+00:00")
 	r.Agents = []doctor.Agent{
-		{Agent: "claude", Installed: true, Version: strp("2.1.280"), Authenticated: boolp(true), Detail: "saved login", CredentialVariable: strp("ANTHROPIC_API_KEY")},
-		{Agent: "codex", Installed: true, Authenticated: boolp(false), Detail: "The status command exited 1.", CredentialVariable: strp("OPENAI_API_KEY")},
-		{Agent: "copilot", Installed: true, Detail: "no probe", CredentialVariable: strp("GH_TOKEN")},
-		{Agent: "agy", Installed: false, Detail: "'agy' is not on PATH."},
+		{Agent: "claude", Installed: boolp(true), Version: strp("2.1.280"), Authenticated: boolp(true), Detail: "saved login", CredentialVariable: strp("ANTHROPIC_API_KEY")},
+		{Agent: "codex", Installed: boolp(true), Authenticated: boolp(false), Detail: "The status command exited 1.", CredentialVariable: strp("OPENAI_API_KEY")},
+		{Agent: "copilot", Installed: boolp(true), Detail: "no probe", CredentialVariable: strp("GH_TOKEN")},
+		{Agent: "agy", Installed: boolp(false), Detail: "'agy' is not on PATH."},
 	}
 	return r
 }
@@ -703,5 +703,54 @@ func TestTheAgentsRowSaysEachLaunchAndOnlyOkIsOk(t *testing.T) {
 	}
 	if got := (doctor.Agent{Launch: &doctor.Launch{Result: "maybe"}}).LaunchText(); got != `not known (the Host said "maybe")` {
 		t.Errorf("unknown result read as %q", got)
+	}
+}
+
+// A CLI no worker answered for is not measured: installed null decodes as nil, reads "not measured"
+// in the agents row and the agents block, fails no check, needs no hint, and is never "not installed".
+func TestANullInstalledIsNotMeasuredAndFailsNoCheck(t *testing.T) {
+	r, err := doctor.ParseHostReport(`{"agents":[{"agent":"claude","installed":null,"version":null,"authenticated":null,` +
+		`"detail":"Not measured: no worker is connected to ask this CLI.","measuredAt":null,"measuredOn":null}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := r.Agents[0]
+	if a.Installed != nil || a.IsInstalled() || a.NotInstalled() {
+		t.Fatalf("installed decoded as %v", a.Installed)
+	}
+
+	row := find(t, doctor.InstanceChecks(&r, nil, now), "agents")
+	if row.Verdict != doctor.OK || !strings.Contains(row.Detail, "claude not measured") || strings.Contains(row.Detail, "not installed") || row.Fix != "" {
+		t.Errorf("agents row: %+v", row)
+	}
+	if h := doctor.SignInHint(a); h != "" {
+		t.Errorf("hint %q", h)
+	}
+
+	var out bytes.Buffer
+	doctor.RenderAgents(&out, r.Agents)
+	text := out.String()
+	if !strings.Contains(text, "installed   not measured") || !strings.Contains(text, "signed in   not measured") ||
+		!strings.Contains(text, "no worker is connected") || strings.Contains(text, "installed   no\n") || strings.Contains(text, "  measured    ") {
+		t.Errorf("render:\n%s", text)
+	}
+}
+
+// The doctor says when it measured a sign-in and on which worker: in the agents row and in each block.
+func TestTheDoctorSaysWhenAndOnWhichWorkerItMeasured(t *testing.T) {
+	r := sampleReport()
+	for i := range r.Agents {
+		r.Agents[i].MeasuredAt, r.Agents[i].MeasuredOn = strp("2026-10-02T12:00:00+00:00"), strp("w1")
+	}
+
+	row := find(t, doctor.InstanceChecks(r, nil, now), "agents")
+	if !strings.Contains(row.Detail, "(sign-ins measured 2026-10-02 12:00 UTC on worker w1)") {
+		t.Errorf("agents row: %+v", row)
+	}
+
+	var out bytes.Buffer
+	doctor.RenderAgents(&out, r.Agents[:1])
+	if !strings.Contains(out.String(), "  measured    2026-10-02 12:00 UTC on worker w1\n") {
+		t.Errorf("render:\n%s", out.String())
 	}
 }

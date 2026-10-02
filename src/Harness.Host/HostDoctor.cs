@@ -22,8 +22,14 @@ public sealed record DoctorBackups(string Directory, int DailyCount, DateTimeOff
 /// <param name="CredentialVariable">The environment variable that signs this command in, from
 /// <c>auth-probes.json</c>, or null when the probe names none. The operator CLI prints it in its
 /// sign-in hint rather than carrying its own copy of the list.</param>
+/// <param name="Installed">Whether the Host's last sign-in probe found the command on a worker's
+/// PATH; false too when nothing was measured, which <see cref="MeasuredAt"/> null says. The JSON
+/// carries <see cref="InstalledAsMeasured"/> under <c>installed</c>: null when not measured.</param>
+/// <param name="MeasuredAt">When the probe this is from ran (<see cref="AgentAuthRecord"/>); null when
+/// no worker answered for this command, or the Host has recorded no probe.</param>
+/// <param name="MeasuredOn">The worker that answered it; null when none did.</param>
 public sealed record DoctorAgent(
-    string Agent, bool Installed, string? Version, bool? Authenticated, string Detail,
+    string Agent, [property: JsonIgnore] bool Installed, string? Version, bool? Authenticated, string Detail,
     string? CredentialVariable = null,
     // WHEN THE INSTALLED VERSION ARRIVED: the first recorded line - a start, or a person's update
     // through the platform - that had it after a different one. Null when the kept history never
@@ -39,7 +45,14 @@ public sealed record DoctorAgent(
     // whether that credential is stored, null under home. Read from the database and agents.json,
     // never the key ring: whether a value decrypts is the Host's to say.
     string CredentialSource = TenantSettings.HomeSource,
-    bool? IssuedSet = null);
+    bool? IssuedSet = null,
+    DateTimeOffset? MeasuredAt = null,
+    string? MeasuredOn = null)
+{
+    /// <summary>Installed as the doctor says it: null when nothing was measured, never "not installed" then.</summary>
+    [JsonPropertyName("installed")]
+    public bool? InstalledAsMeasured => MeasuredAt is null ? null : Installed;
+}
 
 public sealed record DoctorReport(
     DateTimeOffset At,
@@ -95,7 +108,7 @@ public static class HostDoctor
             await DatabaseAsync(database, ct),
             Backups(database, Path.Combine(dataRoot, "backups")),
             recordedAt,
-            await AgentsAsync(versions, history, launches, Sources(dataRoot, database), ct),
+            Agents(versions, history, launches, Sources(dataRoot, database), AgentAuthRecord.Read(dataRoot)),
             // Who the Host said, at its last start, agent children run as - and, when it
             // refuses them, why. Recorded by the Host, because the doctor is a different process.
             AgentLaunchRecord.Read(dataRoot),
@@ -140,38 +153,47 @@ public static class HostDoctor
     /// Per COMMAND in `auth-probes.json`, in file order, which is the four agents the product
     /// supports out of the box. Not per preset: that needs the catalog, and loading it writes.
     ///
-    /// `Installed` is measured now; `Version` is what the last start recorded. They are two facts
-    /// and are reported as two: a version is not blanked because the command is missing today,
-    /// and the reader sees both, which is the honest shape ("was 2.1.3 at the last start, is not on
-    /// PATH now").
+    /// `Installed` and `Authenticated` are the Host's LAST SIGN-IN PROBE (<see cref="AgentAuthRecord"/>),
+    /// with when it ran and which worker answered: the CLIs are a worker's, and the doctor is another
+    /// process that asks none and runs nothing. No record, or no worker that answered for a command:
+    /// not measured, with why. `Version` is what the last start recorded. They are separate facts and
+    /// are reported as such: a version is not blanked because the last probe did not find the command.
     /// </summary>
-    private static async Task<IReadOnlyList<DoctorAgent>> AgentsAsync(
+    private static IReadOnlyList<DoctorAgent> Agents(
         IReadOnlyDictionary<string, string?> versions, IReadOnlyList<CliVersionsAtStart> history,
         AgentLaunchChecksRecord? launches, IReadOnlyDictionary<string, (string Source, bool? Set)> sources,
-        CancellationToken ct)
+        AgentAuthRecord? probed)
     {
         var specs = AgentAuthProbe.LoadSpecs();
         var agents = new List<DoctorAgent>(specs.Count);
 
-        // Asked as `agent`, the way the Host asks, and never by running an agent-installed
-        // program as whoever started the doctor - see AgentAuthProbe.ProbeCommandAsync.
-        var runAs = AgentLaunchUser.Resolve(Environment.GetEnvironmentVariable("HARNESS_AGENT_USER"));
-
         foreach (var command in specs.Keys)
         {
-            var (installed, authenticated, detail) = await AgentAuthProbe.ProbeCommandAsync(command, specs, ct, runAs);
             versions.TryGetValue(command, out var version);
             var now = CliVersionHistory.Now(command, history);
 
             var (source, issuedSet) = sources.TryGetValue(command, out var found) ? found : (TenantSettings.HomeSource, null);
 
+            var answer = probed?.For(command);
+            var measured = answer is { Installed: { } installed }
+                ? (Installed: installed, answer.Authenticated, answer.Detail, At: (DateTimeOffset?)probed!.At, On: probed.Worker)
+                : (Installed: false, Authenticated: (bool?)null, Detail: NotMeasured(probed, answer), At: null, On: null);
+
             agents.Add(new DoctorAgent(
-                command, installed, version, authenticated, detail, specs[command].CredentialVariable,
-                now.UpdatedAt, now.Since, launches?.ForCommand(command), source, issuedSet));
+                command, measured.Installed, version, measured.Authenticated, measured.Detail, specs[command].CredentialVariable,
+                now.UpdatedAt, now.Since, launches?.ForCommand(command), source, issuedSet, measured.At, measured.On));
         }
 
         return agents;
     }
+
+    /// <summary>Why a command's sign-in is not measured, in the probe's own words where it ran.</summary>
+    private static string NotMeasured(AgentAuthRecord? probed, CommandSignIn? answer) =>
+        probed is null
+            ? "Not measured: the Host has recorded no sign-in probe yet. It asks a worker when the Agents screen or the Concierge reads sign-ins."
+            : answer is null
+                ? $"Not measured: the Host's last sign-in probe, at {probed.At.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC, did not ask this command."
+                : $"{answer.Detail} (the Host's last sign-in probe, at {probed.At.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC)";
 
     /// <summary>
     /// Per command, whether a preset launching it is set to an issued credential and, when one is,

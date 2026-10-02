@@ -1764,8 +1764,12 @@ export interface AgentAuthReport {
   /** The command it launches. */
   command: string
 
-  /** Whether the command resolves at all. An uninstalled CLI cannot be signed in. */
-  installed: boolean
+  /**
+   * Whether the command resolves at all on the worker that was asked. An uninstalled CLI cannot be
+   * signed in. `null` is NOT MEASURED: no worker was connected to ask, or the one asked did not
+   * answer - `detail` says which. Never "not installed": nothing looked.
+   */
+  installed: boolean | null
 
   /** Signed in, signed out, or not measured. */
   authenticated: boolean | null

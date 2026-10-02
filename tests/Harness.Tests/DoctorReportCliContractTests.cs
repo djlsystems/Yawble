@@ -68,12 +68,25 @@ public sealed class DoctorReportCliContractTests : IDisposable
             ["none"] = RunMemoryLimits.NotAvailable("no mechanism on this machine"),
         };
 
+        // The Host's last sign-in probe, as control records it: when, on which worker, and each answer.
+        var probedAt = new DateTimeOffset(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
+        new AgentAuthRecord(probedAt, "w1", [.. AgentAuthProbe.LoadSpecs().Keys.Select(c => new CommandSignIn(c, true, null, "measured on w1"))])
+            .Write(_root);
+
         var fixtures = Path.Combine(FindRepoRoot(), "cli", "internal", "doctor", "testdata");
         foreach (var (name, memory) in mechanisms)
         {
             WipRecord.Of(settings, memory).Write(_root);
             var json = HostDoctor.ToJson(await HostDoctor.ReportAsync(_root, ct));
             Assert.DoesNotContain(Secret, json);
+
+            // Every agent says when its sign-in was measured, and on which worker.
+            foreach (var agent in JsonNode.Parse(json)!["agents"]!.AsArray())
+            {
+                Assert.Equal(probedAt, agent!["measuredAt"]!.GetValue<DateTimeOffset>());
+                Assert.Equal("w1", agent["measuredOn"]!.GetValue<string>());
+                Assert.True(agent["installed"]!.GetValue<bool>());
+            }
 
             var path = Path.Combine(fixtures, $"host-doctor-{name}.json");
             if (Environment.GetEnvironmentVariable("HARNESS_WRITE_CLI_FIXTURES") == "1")

@@ -383,4 +383,20 @@ describe('AgentsDialog, mounted', () => {
 
     wrapper.unmount();
   });
+
+  it('shows why a sign-in was not measured when no worker answered, and never says not installed', async () => {
+    const why = 'Not measured: no worker is connected to ask this CLI.';
+    getAgentAuth.mockResolvedValue([
+      { agent: 'claude-headless', command: 'claude', installed: null, authenticated: null, detail: why, referenced: true, source: 'home' },
+    ]);
+    const wrapper = await mountDialog(AgentsDialog);
+    await settle();
+
+    const text = row('claude-headless').textContent ?? '';
+    expect(text).toContain('Not measured');
+    expect(text).toContain(why);
+    expect(text.toLowerCase()).not.toContain('not installed');
+
+    wrapper.unmount();
+  });
 });

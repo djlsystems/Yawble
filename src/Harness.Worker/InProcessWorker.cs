@@ -99,6 +99,23 @@ public sealed class InProcessWorker
         return worker;
     }
 
+    /// <summary>
+    /// A worker in this process that answers only about its agent CLIs (a sign-in probe, commands, a
+    /// removal as the agent) and takes no run: what a control part composed without the Host's own
+    /// worker - a test's - asks, over the same transport and the same worker code.
+    /// </summary>
+    public static InProcessWorker ForAgentClis(
+        WorkerId id, AgentLaunchUser? runAs, Func<WorkerEnvelope, CancellationToken, Task> control, RunHomes? homes = null)
+    {
+        var heartbeat = new RunHeartbeat();
+        return Connect(
+            id,
+            events => new WorkerHost(
+                id, events, new RunLauncher(heartbeat, runAs: runAs), heartbeat,
+                cli: new WorkerAgentCli(id, runAs, homes ?? new RunHomes(runAs, RunHomeRemoval.For(runAs)))),
+            control);
+    }
+
     /// <summary>Who agent children run as on this worker, decided once (<see cref="AgentLaunchUser.Resolve"/>).</summary>
     public static AgentLaunchUser LaunchUser(string? configured) => AgentLaunchUser.Resolve(configured);
 
