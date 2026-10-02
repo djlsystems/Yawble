@@ -16,8 +16,9 @@ public enum CredentialSource
 /// whatever launches the CLI only applies it.
 ///
 /// <para>
-/// Under <see cref="CredentialSource.Home"/> it is <see cref="Home"/>: nothing is set, nothing is
-/// removed, and HOME is inherited exactly as before. Under <see cref="CredentialSource.Issued"/> it
+/// Under <see cref="CredentialSource.Home"/> nothing is set, nothing of the preset's own is removed,
+/// and HOME is inherited; it carries only the variables other commands declare, removed as an
+/// issued run removes them. Under <see cref="CredentialSource.Issued"/> it
 /// holds the issued variable, the variables the preset's declaration displaces (removed whoever set
 /// them), the variables other presets declare for other commands (removed unless the preset's or
 /// the team's env handed them in, as every provider key is scoped), and a HOME of the run's own -
@@ -39,7 +40,8 @@ public sealed record RunCredential(
     bool PerRunHome,
     string? Missing)
 {
-    /// <summary>The shared home's run: nothing set, nothing removed, HOME inherited.</summary>
+    /// <summary>The shared home's run when nothing is known of its preset: nothing set, nothing
+    /// removed, HOME inherited.</summary>
     public static RunCredential Home { get; } =
         new(CredentialSource.Home, new Dictionary<string, string>(), [], [], false, null);
 

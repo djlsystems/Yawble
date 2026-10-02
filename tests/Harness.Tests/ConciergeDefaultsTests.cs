@@ -2,6 +2,7 @@ using Harness.Contracts;
 using Harness.Host;
 using Harness.Identity;
 using Harness.Messaging;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 
 namespace Harness.Tests;
@@ -142,6 +143,39 @@ public sealed class ConciergeDefaultsTests : IDisposable
         var notSet = await OpenAsync(RunCredential.NotSet("not set"));
         Assert.False(notSet.Env!.ContainsKey("ANTHROPIC_API_KEY"));
         Assert.Equal("from-the-team", notSet.Env["ANTHROPIC_AUTH_TOKEN"]);
+    }
+
+    [Fact]
+    public async Task Under_home_the_concierge_sets_none_of_the_variables_other_commands_declare()
+    {
+        var catalog = new AgentCatalog(AgentCatalogFile.BuiltIns());
+        var concierge = catalog.Definitions.First(d => d is { Mode: not AgentMode.Headless, IssuedCredential: not null });
+        var credentials = new RunCredentials(
+            catalog, _ => CredentialSource.Home,
+            new AgentCredentialStore(Path.Combine(_dataRoot, "absent.db"), new EphemeralDataProtectionProvider()));
+        var resolved = await credentials.ResolveAsync(concierge.Name, null, TestContext.Current.CancellationToken);
+        Assert.NotEmpty(resolved.OtherProviders);
+
+        using var restore = new EnvironmentScope([new("HOME", _dataRoot)]);
+        var principals = new MintingPrincipals();
+
+        async Task<Harness.Pty.PtySpec> OpenAsync(RunCredential credential) =>
+            await new ConciergeLaunchFactory(
+                    new TeamPaths(_dataRoot), "http://localhost:5000", principals, catalog,
+                    credentials: new Fixed(credential))
+                .ForAsync(
+                    team: "", teamLabel: "this instance", user: "user-1", login: "person@example.com",
+                    concierge.Name, teamEnv: new Dictionary<string, string> { ["TEAM_VAR"] = "team" },
+                    ct: TestContext.Current.CancellationToken);
+
+        var bare = await OpenAsync(RunCredential.Home);
+        var scoped = await OpenAsync(resolved);
+
+        // Its PTY cannot remove a variable, so it sets none of them - not even empty - and is the
+        // terminal it always was.
+        Assert.Empty(scoped.Env!.Keys.Intersect(resolved.OtherProviders));
+        Assert.Equal(bare.Env!.Keys.Order(StringComparer.Ordinal), scoped.Env.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(bare.Argv!.Count, scoped.Argv!.Count);
     }
 
     private sealed class Fixed(RunCredential credential) : IRunCredentials

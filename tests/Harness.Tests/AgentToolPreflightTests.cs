@@ -1,5 +1,6 @@
 using Harness.Contracts;
 using Harness.Host;
+using Microsoft.AspNetCore.DataProtection;
 
 namespace Harness.Tests;
 
@@ -107,7 +108,7 @@ public sealed class AgentToolPreflightTests
     }
 
     [Fact]
-    public async Task Under_the_shared_home_every_preset_is_listed_as_before_with_no_credential_and_no_home_of_its_own()
+    public async Task Under_the_shared_home_every_preset_is_listed_as_before_with_no_issued_credential_and_no_home_of_its_own()
     {
         var clis = new RecordedClis();
         var reports = await Reports(AgentCatalogFile.BuiltIns(), clis, new Sources(new HashSet<string>()));
@@ -115,7 +116,7 @@ public sealed class AgentToolPreflightTests
         Assert.NotEmpty(clis.Calls);
         Assert.All(clis.Calls, c =>
         {
-            Assert.Null(c.Credential);
+            Assert.NotEqual(CredentialSource.Issued, c.Credential?.Source);
             Assert.False(c.Environment.ContainsKey("HOME"));
             Assert.DoesNotContain(FakeKey, c.Environment.Values);
         });
@@ -127,12 +128,41 @@ public sealed class AgentToolPreflightTests
     }
 
     [Fact]
+    public async Task A_member_preset_on_the_shared_home_is_listed_with_its_runs_credential_and_a_concierge_with_none()
+    {
+        var catalog = new AgentCatalog(AgentCatalogFile.BuiltIns());
+        var credentials = new RunCredentials(
+            catalog, _ => CredentialSource.Home,
+            new AgentCredentialStore(Path.Combine(Path.GetTempPath(), $"absent-{Guid.NewGuid():N}.db"), new EphemeralDataProtectionProvider()));
+
+        // A member preset's listing scopes away what its run would: other commands' declared variables.
+        var members = new RecordedClis();
+        await Reports([.. catalog.Definitions.Where(d => d.Mode == AgentMode.Headless)], members, credentials);
+
+        Assert.NotEmpty(members.Calls);
+        Assert.All(members.Calls, c =>
+        {
+            Assert.Equal(CredentialSource.Home, c.Credential?.Source);
+            Assert.NotEmpty(c.Credential!.OtherProviders);
+            Assert.Empty(c.Credential.Environment);
+        });
+        Assert.Empty(members.Made);
+
+        // The Concierge's terminal cannot remove a variable, so its listing is handed nothing.
+        var concierges = new RecordedClis();
+        await Reports([.. catalog.Definitions.Where(d => d.Mode != AgentMode.Headless)], concierges, credentials);
+
+        Assert.NotEmpty(concierges.Calls);
+        Assert.All(concierges.Calls, c => Assert.Null(c.Credential));
+    }
+
+    [Fact]
     public async Task An_issued_member_preset_is_listed_with_its_credential_in_a_home_of_its_own_removed_after()
     {
         var clis = new RecordedClis();
         var reports = await Reports(AgentCatalogFile.BuiltIns(), clis, new Sources(new HashSet<string> { "claude-headless" }));
 
-        var issued = clis.Calls.Where(c => c.Credential is not null).ToList();
+        var issued = clis.Calls.Where(c => c.Credential is { Source: CredentialSource.Issued }).ToList();
         Assert.Equal(2, issued.Count);
         Assert.All(issued, c =>
         {
@@ -166,7 +196,7 @@ public sealed class AgentToolPreflightTests
         Assert.Contains("is not set", codex.Detail);
         Assert.Empty(codex.Ran);
         Assert.Empty(clis.Made);
-        Assert.DoesNotContain(clis.Calls, c => c.Credential is not null);
+        Assert.DoesNotContain(clis.Calls, c => c.Credential is { Source: CredentialSource.Issued });
     }
 
     [Fact]
