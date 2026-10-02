@@ -76,20 +76,26 @@ internal sealed class ProcessBed : IAsyncDisposable
 
     private static string Dll => Path.Combine(AppContext.BaseDirectory, "Harness.Host.dll");
 
-    /// <summary>Control on a free loopback port, bootstrapped with one person signed in.</summary>
-    public async Task StartControlAsync(int graceSeconds = 2, int keepAliveSeconds = 1)
+    /// <summary>
+    /// Control on a free loopback port, bootstrapped with one person signed in; under a prefix (another
+    /// user, which must be able to write <see cref="Root"/>) and with more environment, when given.
+    /// </summary>
+    public async Task StartControlAsync(
+        int graceSeconds = 2, int keepAliveSeconds = 1, IReadOnlyList<string>? prefix = null, IReadOnlyDictionary<string, string>? more = null)
     {
+        var environment = (more ?? new Dictionary<string, string>()).ToDictionary(p => p.Key, string? (p) => p.Value);
+
         for (var attempt = 0; ; attempt++)
         {
             var port = FreePort();
             Url = new Uri($"http://127.0.0.1:{port}");
             Control = Start("control", [
-                "dotnet", Dll, "--Role", "control", "--DataRoot", Root, "--urls", Url.ToString().TrimEnd('/'),
+                .. prefix ?? [], "dotnet", Dll, "--Role", "control", "--DataRoot", Root, "--urls", Url.ToString().TrimEnd('/'),
                 "--Workers:Key", Key, "--Workers:GraceSeconds", $"{graceSeconds}", "--Workers:KeepAliveSeconds", $"{keepAliveSeconds}",
 
                 // Its own lines, not the request log of the bed's polling, are what a failure shows.
                 "--Logging:LogLevel:Microsoft.AspNetCore", "Warning",
-            ], new Dictionary<string, string?>());
+            ], environment);
 
             if (await ReadyAsync()) break;
             if (attempt == 1 || !Control.Exited) throw new TimeoutException($"Control did not answer /api/version within {Bound.TotalSeconds:0} s:\n{Control.Text()}");
