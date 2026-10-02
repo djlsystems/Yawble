@@ -33,8 +33,19 @@ public sealed class HeadroomGate(
 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private volatile Measured? _last;
+    private long _samples;
 
-    public void Update(CgroupFigures figures, DateTimeOffset at) => _last = new Measured(figures, at);
+    public void Update(CgroupFigures figures, DateTimeOffset at)
+    {
+        _last = new Measured(figures, at);
+        Interlocked.Increment(ref _samples);
+    }
+
+    /// <summary>
+    /// How many measurements have been handed to <see cref="Update"/>: what tells one sample from the
+    /// next, even when two carry the same time.
+    /// </summary>
+    public long Samples => Interlocked.Read(ref _samples);
 
     /// <summary>
     /// Bytes of memory the last measurement left under the limit, or null when the limit or the use

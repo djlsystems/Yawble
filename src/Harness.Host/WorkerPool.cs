@@ -18,10 +18,18 @@ namespace Harness.Host;
 /// </para>
 /// <para>
 /// <see cref="Workers"/> lists the workers a run may be placed on now, in the order they are tried:
-/// most measured memory headroom first; then workers with no headroom figure (no sample yet, or no
-/// memory limit), which hold nothing back and are never taken for 0 or unlimited; ties to the worker
-/// with fewer runs placed, then to the one that connected first. A dropped worker is never listed, nor
-/// one that is draining (its operator is about to stop it): its runs go on, and nothing new goes to it.
+/// most projected memory headroom first - the measured headroom less <c>wip.memoryPerRunMb</c> for each
+/// run placed on the worker since its last sample, so a burst inside one sample spreads instead of
+/// piling onto the worker that led it; then workers with no headroom figure (no sample yet, or no
+/// memory limit), which hold nothing back and are never taken for 0 or unlimited, by runs placed
+/// against their own bound; ties to the worker with fewer runs placed, then to the one that connected
+/// first. A dropped worker is never listed, nor one that is draining (its operator is about to stop
+/// it): its runs go on, and nothing new goes to it.
+/// </para>
+/// <para>
+/// The projection only orders the workers. Whether a run waits is the gate's, which reads the measured
+/// figure alone: nothing estimated holds a run. The count against a worker resets when its next sample
+/// lands, whose figures carry those runs by then.
 /// </para>
 /// </remarks>
 public sealed class WorkerPool : IRunPlacement
@@ -31,6 +39,7 @@ public sealed class WorkerPool : IRunPlacement
     private readonly bool _fixed;
     private readonly Func<WorkerId, HeadroomGate>? _newGate;
     private readonly Func<WorkerInfo, int?>? _bound;
+    private readonly Func<int>? _memoryPerRunMb;
     private readonly TimeProvider _clock;
     private long _joined;
     private TaskCompletionSource _connected = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -46,13 +55,17 @@ public sealed class WorkerPool : IRunPlacement
 
     /// <summary>
     /// A pool workers join as they connect, each with a gate from <paramref name="gate"/>, and each
-    /// bounded by <paramref name="bound"/> (null: no cap of its own).
+    /// bounded by <paramref name="bound"/> (null: no cap of its own). <paramref name="memoryPerRunMb"/>
+    /// is what each run placed since a worker's last sample is counted at against its headroom; absent,
+    /// nothing is.
     /// </summary>
-    public WorkerPool(Func<WorkerId, HeadroomGate> gate, Func<WorkerInfo, int?>? bound = null, TimeProvider? clock = null)
+    public WorkerPool(
+        Func<WorkerId, HeadroomGate> gate, Func<WorkerInfo, int?>? bound = null, TimeProvider? clock = null, Func<int>? memoryPerRunMb = null)
     {
         _newGate = gate;
         _bound = bound;
         _clock = clock ?? TimeProvider.System;
+        _memoryPerRunMb = memoryPerRunMb;
     }
 
     /// <summary>How many runs are placed on a worker now; the ledger's answer, for ties.</summary>
@@ -62,19 +75,28 @@ public sealed class WorkerPool : IRunPlacement
     {
         get
         {
-            Entry[] placeable;
+            (Entry Entry, int SinceSample)[] placeable;
             lock (_gate)
             {
                 if (_fixed) return [.. _entries.Select(e => e.Id)];
-                placeable = [.. _entries.Where(e => e.Worker is not null && e.DroppedAt is null && !e.Draining)];
+                placeable = [.. _entries.Where(e => e.Worker is not null && e.DroppedAt is null && !e.Draining)
+                    .Select(e => (e, e.PlacedSinceSample()))];
             }
 
             // Outside the pool's lock: the ledger asks this under its own, and the count is the ledger's.
             var placed = Placed;
+            var allowance = (_memoryPerRunMb?.Invoke() ?? 0) * 1024L * 1024L;
             return [.. placeable
-                .Select(e => (Entry: e, Headroom: e.Gate.Headroom, Placed: placed?.Invoke(e.Id) ?? 0))
-                .OrderBy(e => e.Headroom is null ? 1 : 0)
-                .ThenByDescending(e => e.Headroom ?? 0)
+                .Select(e => (
+                    e.Entry,
+                    Projected: e.Entry.Gate.Headroom - e.SinceSample * allowance,
+                    Placed: placed?.Invoke(e.Entry.Id) ?? 0,
+                    Bound: _bound?.Invoke(e.Entry.Info)))
+                .OrderBy(e => e.Projected is null ? 1 : 0)
+                .ThenByDescending(e => e.Projected ?? 0)
+                // Unmeasured: by how full each is against its own bound. A set run limit leaves every
+                // worker unbounded, so bounded and unbounded workers never compare on these two scales.
+                .ThenBy(e => e.Projected is null ? Load(e.Placed, e.Bound) : 0)
                 .ThenBy(e => e.Placed)
                 .ThenBy(e => e.Entry.Order)
                 .Select(e => e.Entry.Id)];
@@ -82,6 +104,29 @@ public sealed class WorkerPool : IRunPlacement
     }
 
     public string? HeadroomReason(WorkerId worker) => Gate(worker).Reason();
+
+    /// <summary>
+    /// A run was placed on <paramref name="worker"/>: it counts against that worker's headroom until
+    /// the worker's next sample. A fixed pool is never ranked, and counts nothing.
+    /// </summary>
+    public void RunPlaced(WorkerId worker)
+    {
+        lock (_gate)
+        {
+            if (_fixed || _entries.FirstOrDefault(e => e.Id == worker) is not { } entry) return;
+            var samples = entry.Gate.Samples;
+            if (entry.CountedAgainst != samples)
+            {
+                entry.CountedAgainst = samples;
+                entry.Counted = 0;
+            }
+
+            entry.Counted++;
+        }
+    }
+
+    /// <summary>How full a worker is against its own bound; with no bound, its runs placed.</summary>
+    private static double Load(int placed, int? bound) => bound is { } b ? placed / (double)Math.Max(b, 1) : placed;
 
     public int? Bound(WorkerId worker)
     {
@@ -235,6 +280,15 @@ public sealed class WorkerPool : IRunPlacement
         public DateTimeOffset? DroppedAt { get; set; }
 
         public bool Draining { get; set; }
+
+        /// <summary>Runs placed since the sample <see cref="CountedAgainst"/> names.</summary>
+        public int Counted { get; set; }
+
+        /// <summary>The gate's <see cref="HeadroomGate.Samples"/> when <see cref="Counted"/> was last reset.</summary>
+        public long CountedAgainst { get; set; }
+
+        /// <summary>Runs placed since the last sample: none once a new one has landed.</summary>
+        public int PlacedSinceSample() => CountedAgainst == gate.Samples ? Counted : 0;
     }
 }
 
