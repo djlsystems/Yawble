@@ -442,6 +442,15 @@ describe('Concierge', () => {
     expect(api.saveTenantSettings).not.toHaveBeenCalled();
   });
 
+  /** Idle is unwatched AND inactive, and the hint says so; the running sessions sit in the same tab. */
+  it('says what idle means beside the idle window, and lists the running sessions', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'concierge');
+
+    expect(bodyText()).toContain('A Concierge nobody has open and that has done nothing for this long is ended. For example 1h or 30m.');
+    expect(bodyText()).toContain('No Concierge session is running.');
+  });
+
   /** The Concierge tab also holds this browser's terminal display. */
   it('holds this browser\'s terminal display, saved as it changes and never by Save', async () => {
     const wrapper = await openDialog();

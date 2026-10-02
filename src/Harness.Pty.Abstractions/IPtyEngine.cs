@@ -24,6 +24,16 @@ public interface IPtySession : IAsyncDisposable
 }
 
 /// <summary>
+/// A terminal whose child is a process this machine can name. A PTY's child leads its own session and
+/// process group, so its id is also its group's.
+/// </summary>
+public interface IPtyProcess
+{
+    /// <summary>The child's process id, or null when it cannot be read.</summary>
+    int? ProcessId { get; }
+}
+
+/// <summary>
 /// The size a child is spawned at when the caller has not measured one. Named constants rather than
 /// literals in the record header because the connect path needs the same fallback: a client that
 /// omits its geometry must land on the value the spec would have used, not a second guess.

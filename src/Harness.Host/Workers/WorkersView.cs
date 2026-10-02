@@ -8,8 +8,8 @@ namespace Harness.Host;
 /// One worker as people see it: <c>GET /api/workers</c> and each capacity sample's <c>workers</c>. Its
 /// build, when it connected, whether it is connected or dropped (and since when), what it measured -
 /// CPUs, memory limit, memory in use, when, and what it could not measure - its own bound under the
-/// default run limit, what a run asking it now would wait for, and the runs placed on it (a Manager
-/// placed over its bound says so).
+/// default run limit, what a run asking it now would wait for, the runs placed on it (a Manager
+/// placed over its bound says so), and the people's Concierge terminals it runs with what each costs it.
 /// </summary>
 public sealed record WorkerSample(
     string Id,
@@ -19,7 +19,21 @@ public sealed record WorkerSample(
     DateTimeOffset? DroppedAt,
     WorkerCapacitySample Capacity,
     string? Holding,
-    IReadOnlyList<RunHold> Runs);
+    IReadOnlyList<RunHold> Runs,
+    IReadOnlyList<TerminalHold> Terminals);
+
+/// <summary>
+/// One person's Concierge terminal on a worker, and its memory: the resident bytes of its process
+/// group (the CLI and every process it started that did not start a session of its own) at the
+/// worker's last sample. Null figures are not measured - not yet sampled, or no readable process -
+/// never 0.
+/// </summary>
+public sealed record TerminalHold(
+    string User,
+    DateTimeOffset Since,
+    long? ResidentBytes,
+    int? Processes,
+    DateTimeOffset? SampledAt);
 
 /// <param name="Bound">How many runs it may hold at once under the default run limit; null when a set limit is the instance's total.</param>
 /// <param name="NotMeasured">Every figure it did not measure; a null figure is never 0.</param>
@@ -38,7 +52,9 @@ public static class WorkersView
     public const string Dropped = "dropped";
 
     /// <summary>Every worker in <paramref name="pool"/>, in the order they connected.</summary>
-    public static IReadOnlyList<WorkerSample> Of(WorkerPool pool, WipLedger wip, string version)
+    /// <param name="terminals">The Concierge terminals on a worker; none when null.</param>
+    public static IReadOnlyList<WorkerSample> Of(
+        WorkerPool pool, WipLedger wip, string version, Func<WorkerId, IReadOnlyList<TerminalHold>>? terminals = null)
     {
         var running = wip.View().Running;
         return [.. pool.Entries().Select(entry =>
@@ -65,7 +81,8 @@ public static class WorkersView
                     measured ? figures!.NotMeasured : CgroupReader.AllFigures),
                 entry.Gate.Reason(),
                 [.. running.Where(hold => wip.PlacedOn(new ContainerId(hold.Team, hold.Member)) == id)
-                    .Select(hold => new RunHold(hold.Team, hold.Member, hold.Since, hold.Reason))]);
+                    .Select(hold => new RunHold(hold.Team, hold.Member, hold.Since, hold.Reason))],
+                terminals?.Invoke(id) ?? []);
         })];
     }
 }

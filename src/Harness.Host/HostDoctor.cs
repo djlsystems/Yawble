@@ -64,7 +64,8 @@ public sealed record DoctorReport(
     AgentLaunchRecord? AgentLaunch = null,
     AgentToolsRecord? AgentTools = null,
     DoctorWip? Wip = null,
-    WorkersRecord? Workers = null);
+    WorkersRecord? Workers = null,
+    ConciergeSessionsRecord? Concierge = null);
 
 /// <summary>
 /// The doctor's <c>wip</c>: <c>GET /api/wip</c>'s <c>limit</c> and <c>runMemory</c>, as the running Host
@@ -116,7 +117,10 @@ public static class HostDoctor
             AgentToolsSection(dataRoot),
             WipSection(dataRoot),
             // Control's workers, as control last recorded them; null when it recorded none (all, or never).
-            WorkersRecord.Read(dataRoot));
+            WorkersRecord.Read(dataRoot),
+            // The running Concierge sessions - whose, on which worker, last activity, when the idle
+            // window would end each - as the Host last recorded them; null when it recorded none.
+            ConciergeSessionsRecord.Read(dataRoot));
     }
 
     /// <summary>

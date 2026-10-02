@@ -1200,6 +1200,10 @@ export const listWatchRoots = (team: TeamId) =>
  */
 export const endConcierge = () => send('/api/concierge', { method: 'DELETE' })
 
+/** Ends the named person's Concierge session, as `endConcierge` ends your own. */
+export const endConciergeOf = (user: string) =>
+  send(`/api/concierge?user=${encodeURIComponent(user)}`, { method: 'DELETE' })
+
 /**
  * Stores one image in your Concierge's folder and answers where. A refusal - not an image, too
  * large - throws the server's own sentence, which the panel shows as it is.

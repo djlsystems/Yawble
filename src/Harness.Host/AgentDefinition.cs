@@ -193,7 +193,17 @@ public sealed record AgentDefinition(
         + "exists, and the CLI version that was measured. One value is stored per command, so "
         + "presets launching the same command declare the same kinds. Null means this preset "
         + "signs in only through the shared home, and its source cannot be `issued`.")]
-    IssuedCredential? IssuedCredential = null)
+    IssuedCredential? IssuedCredential = null,
+
+    [property: Description(
+        "What this Interactive preset's CLI prints at an idle prompt, measured, and so how many bytes a "
+        + "Concierge session of it must print within one minute for that output to count as activity "
+        + "(the idle window ends only an unwatched session with no activity). Declared only from a "
+        + "measurement: open the Concierge on this preset, close the tab, and read the session's "
+        + "`outputPerMinute` from `GET /api/concierge` after fifteen minutes; set the floor above the "
+        + "most it printed in a minute. Null means not measured: the session uses the platform's "
+        + "default floor, shown as `default`, never as measured. Ignored for a Headless preset.")]
+    IdleOutputFloor? IdleOutput = null)
 {
     /// <summary>Whether this preset is compiled into the build. Computed from the name, never
     /// stored: a file cannot make a custom preset built-in, or a built-in custom.</summary>

@@ -90,6 +90,7 @@ public sealed class RunProtocolTests
             [Run]),
         new LaunchChecked("r1", "ok", 0, null, "ran cli --version"),
         new TerminalEnded("terminal:t1", 0),
+        new TerminalMeasured("terminal:t1", 4343, 2, 2048, 17, At),
         new AgentFileRead("r2", AgentFileRead.Ok, null, 3),
     ];
 

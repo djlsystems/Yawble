@@ -213,6 +213,7 @@ public sealed record WorkerEnvelope(WorkerId Worker, long Seq, WorkerEvent Event
 [JsonDerivedType(typeof(WorkerCapacitySampled), "workerCapacitySampled")]
 [JsonDerivedType(typeof(LaunchChecked), "launchChecked")]
 [JsonDerivedType(typeof(TerminalEnded), "terminalEnded")]
+[JsonDerivedType(typeof(TerminalMeasured), "terminalMeasured")]
 [JsonDerivedType(typeof(AgentFileRead), "agentFileRead")]
 public abstract record WorkerEvent;
 

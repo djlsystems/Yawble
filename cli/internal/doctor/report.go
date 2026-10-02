@@ -42,6 +42,9 @@ type HostReport struct {
 	// Workers is what control recorded of its workers (workers.go). Nil: the single-process
 	// form, an older Host, or nothing recorded yet.
 	Workers *WorkersRecord `json:"workers"`
+	// Concierge is what the Host recorded of its running Concierge sessions (concierge.go). Nil: an
+	// older Host, or nothing recorded yet.
+	Concierge *ConciergeRecord `json:"concierge"`
 }
 
 type Schema struct {

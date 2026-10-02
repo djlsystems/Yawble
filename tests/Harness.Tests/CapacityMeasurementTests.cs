@@ -1,5 +1,6 @@
 using Harness.Containers;
 using Harness.Contracts;
+using Harness.Host;
 using Harness.Host.Capacity;
 
 namespace Harness.Tests;
@@ -251,6 +252,55 @@ public sealed class CapacityMeasurementTests : IDisposable
         // A group with no process in /proc is not measured, never zero.
         Assert.Null(sums[400]);
         Assert.False(sums.ContainsKey(300));
+    }
+
+    [Fact]
+    public async Task A_terminals_process_group_is_measured_alongside_the_runs()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var proc = Path.Combine(_root, "proc");
+        WriteProcess(proc, 100, "agent-cli", group: 100, utime: 30, stime: 20, residentPages: 1000);
+        WriteProcess(proc, 500, "concierge-cli", group: 500, utime: 7, stime: 3, residentPages: 2000);
+        WriteProcess(proc, 501, "node", group: 500, utime: 1, stime: 1, residentPages: 400);
+
+        var groups = new RunProcessGroups();
+        using var run = groups.Register(100, new ContainerId("Alpha", "Developer"));
+        var events = new Events();
+        var heartbeat = new RunHeartbeat();
+        var host = new WorkerHost(
+            new WorkerId("w1"), events, new RunLauncher(heartbeat, reports: false), heartbeat,
+            processes: new ProcessGroupReader(proc, 4096), groups: groups,
+            streaming: new WorkerStreaming(new Sink(), new FakePtyEngine { ProcessId = 500 }, null));
+
+        await host.ApplyAsync(new StartTerminal("terminal:t1", new TerminalLaunch(
+            ["fixture-cli"], _root, new Dictionary<string, string>(), [], null, null, null), 80, 24), ct);
+        await host.ApplyAsync(new SampleCapacity(), ct);
+
+        var published = events.Published.Select(e => e.Event).ToList();
+        var measuredRun = Assert.Single(published.OfType<RunMeasured>());
+        Assert.Equal(100, measuredRun.Group);
+        var terminal = Assert.Single(published.OfType<TerminalMeasured>());
+        Assert.Equal(new TerminalMeasured("terminal:t1", 500, 2, 2400 * 4096L, 12, terminal.At), terminal);
+
+        // Both before the sample that closes them.
+        Assert.IsType<WorkerCapacitySampled>(published[^1]);
+        await host.ApplyAsync(new StopTerminal("terminal:t1"), ct);
+    }
+
+    private sealed class Events : IRunEvents
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<WorkerEnvelope> Published { get; } = new();
+
+        public Task PublishAsync(WorkerEnvelope envelope, CancellationToken ct = default)
+        {
+            Published.Enqueue(envelope);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class Sink : IRunStreamSink
+    {
+        public ValueTask<bool> StreamAsync(StreamChunk chunk, CancellationToken ct = default) => ValueTask.FromResult(true);
     }
 
     [Fact]

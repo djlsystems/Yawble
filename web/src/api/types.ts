@@ -2196,6 +2196,33 @@ export interface ConciergeSettings {
   /** What the launcher will actually run after defaults, and whether it can. OPTIONAL: absent
    *  means "not known", never "fine". */
   effective?: ConciergeEffective
+  /** Every running Concierge session, any person's, oldest first. Absent from a server that does not list them. */
+  sessions?: ConciergeSessionView[]
+}
+
+/**
+ * One running Concierge session as `GET /api/concierge` lists it. A session is ended only when nobody
+ * has had it open AND it has done nothing for `concierge.idleTimeout`; `wouldEndAt` is when that
+ * would be, null while someone has it open. `memory` null is NOT MEASURED, never 0.
+ */
+export interface ConciergeSessionView {
+  user: string
+  email: string | null
+  worker: string | null
+  startedAt: string
+  viewer: boolean
+  lastViewerAt: string | null
+  lastActivityAt: string
+  /** What it last did: started, output, typed, attached or call. A plain string here, because a
+   *  quoted word that is also an icon's name would be taken for one by the icon-font subset. */
+  lastActivity: string
+  callsInFlight: number
+  /** `source` `default` is the platform's floor, never a measurement. */
+  outputFloor: { bytesPerMinute: number; source: 'declared' | 'default'; measuredWith: string | null }
+  /** Bytes printed in each of its last minutes, oldest first, the current minute last. */
+  outputPerMinute: number[]
+  wouldEndAt: string | null
+  memory: { residentBytes: number; processes: number; sampledAt: string } | null
 }
 
 /**
@@ -3525,6 +3552,8 @@ export interface WorkerSample {
   }
   holding: string | null
   runs: { team: string; member: string; since: string }[]
+  /** The people's Concierge terminals on it, with their process group's memory - null when not measured, never 0. Absent from a server that does not say. */
+  terminals?: { user: string; since: string; residentBytes: number | null; processes: number | null; sampledAt: string | null }[]
 }
 
 /** A holder of, or waiter for, the heavy lease. `team` is null for the Concierge. */

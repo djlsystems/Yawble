@@ -47,6 +47,12 @@ public sealed class WorkerTerminals(
     /// <summary>The sessions open on this worker.</summary>
     public IReadOnlyCollection<string> Sessions => [.. _terminals.Keys];
 
+    /// <summary>Each open terminal's process group, by session, for those whose child can be named.</summary>
+    public IReadOnlyDictionary<string, int> Groups() =>
+        _terminals
+            .Where(entry => entry.Value.Session is IPtyProcess { ProcessId: > 0 })
+            .ToDictionary(entry => entry.Key, entry => ((IPtyProcess)entry.Value.Session).ProcessId!.Value, StringComparer.Ordinal);
+
     /// <summary>Spawns a terminal. Throws, with nothing left behind, when it cannot be made or spawned.</summary>
     public async Task StartAsync(StartTerminal start, CancellationToken ct = default)
     {

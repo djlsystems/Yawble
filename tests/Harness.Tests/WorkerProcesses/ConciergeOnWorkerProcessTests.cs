@@ -60,6 +60,46 @@ public sealed class ConciergeOnWorkerProcessTests
     }
 
     [Fact]
+    public async Task A_concierge_terminals_memory_is_shown_under_its_worker_and_goes_when_it_ends()
+    {
+        await using var bed = new ProcessBed();
+        try
+        {
+            bed.AddFakes();
+            await bed.StartControlAsync();
+            await bed.UseFakeConciergeAsync();
+            bed.StartFakeWorker("w1");
+            await bed.UntilWorkerAsync("w1", WorkersView.Connected);
+
+            await using var browser = await bed.OpenConciergeAsync();
+            browser.Read();
+            await bed.UntilAsync("the Concierge is ready", () => Task.FromResult(browser.Seen.Contains("READY", StringComparison.Ordinal)));
+
+            // Measured by the worker from the terminal's own process group, and listed under it.
+            await bed.UntilAsync("the terminal's memory is under w1", async () =>
+                await TerminalsOnAsync(bed, "w1") is [var hold]
+                    && hold.TryGetProperty("residentBytes", out var bytes) && bytes.ValueKind == System.Text.Json.JsonValueKind.Number
+                    && bytes.GetInt64() > 0
+                    && hold.GetProperty("processes").GetInt32() >= 1);
+
+            (await bed.Person.DeleteAsync("/api/concierge", Ct)).EnsureSuccessStatusCode();
+
+            await bed.UntilAsync("the terminal left w1", async () => await TerminalsOnAsync(bed, "w1") is []);
+        }
+        finally
+        {
+            bed.StopTerminals();
+        }
+    }
+
+    private static async Task<System.Text.Json.JsonElement[]> TerminalsOnAsync(ProcessBed bed, string worker)
+    {
+        var workers = await System.Net.Http.Json.HttpClientJsonExtensions.GetFromJsonAsync<System.Text.Json.JsonElement>(bed.Person, "/api/workers", Ct);
+        var entry = workers.EnumerateArray().Single(w => w.GetProperty("id").GetString() == worker);
+        return [.. entry.GetProperty("terminals").EnumerateArray()];
+    }
+
+    [Fact]
     public async Task Ending_the_concierge_releases_its_lease()
     {
         await using var bed = new ProcessBed();

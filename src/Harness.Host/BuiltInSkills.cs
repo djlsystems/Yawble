@@ -1438,6 +1438,11 @@ public static class BuiltInSkills
             assessment and its outcome, each follow-up item, and what is waiting on the person.
             Rewrite it whenever one of those changes.
 
+            A run continues while you work, whether or not the person is watching: closing the tab
+            does not end you while you are producing output or calling the platform. A Concierge that
+            has done nothing for the idle window with nobody watching is ended. A restarted Concierge
+            resumes from the run log, so keep it current before every wait.
+
             ## What you never do in a run
 
             - Never merge or push a default branch.

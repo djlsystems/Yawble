@@ -247,7 +247,7 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
             // A deployment's value outside the dialog's range still stands.
             Assert.Equal(TimeSpan.FromSeconds(30), settings.QuietWindow);
             Assert.Equal(25, settings.CausationDepthLimit);
-            Assert.Equal(TimeSpan.FromHours(8), settings.ConciergeIdleTimeout);
+            Assert.Equal(TimeSpan.FromHours(1), settings.ConciergeIdleTimeout);
 
             using var value = JsonDocument.Parse("9");
             await settings.WriteAsync(
@@ -267,6 +267,76 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
                 new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 1, memoryLimitMb: 0);
             Assert.Equal("1", bare.Fallback("wip.maxRunning"));
             Assert.Equal("builtIn", bare.FallbackSource("wip.maxRunning"));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(directory, recursive: true); }
+            catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task A_fresh_volume_reads_a_one_hour_concierge_idle_timeout()
+    {
+        await InFreshDatabase(async (database, ct) =>
+        {
+            var settings = new TenantSettings(new SqliteTenantSettingsStore(database), new ConfigurationBuilder().Build(), cpuCount: 1);
+            await settings.LoadAsync(ct);
+
+            Assert.Equal(TimeSpan.FromHours(1), settings.ConciergeIdleTimeout);
+            Assert.Equal("01:00:00", settings.Fallback("concierge.idleTimeout"));
+            Assert.Equal("builtIn", settings.FallbackSource("concierge.idleTimeout"));
+            Assert.Null(settings.Row("concierge.idleTimeout"));
+        });
+    }
+
+    [Fact]
+    public async Task A_stored_concierge_idle_timeout_keeps_its_row()
+    {
+        await InFreshDatabase(async (database, ct) =>
+        {
+            var configuration = new ConfigurationBuilder().Build();
+            var settings = new TenantSettings(new SqliteTenantSettingsStore(database), configuration, cpuCount: 1);
+            await settings.LoadAsync(ct);
+
+            // An instance that set the old default keeps it: only the default moved.
+            using var value = JsonDocument.Parse("\"08:00:00\"");
+            await settings.WriteAsync(
+                new Dictionary<string, JsonElement> { ["concierge.idleTimeout"] = value.RootElement.Clone() },
+                null, "someone@example.test", ct);
+
+            var restarted = new TenantSettings(new SqliteTenantSettingsStore(database), configuration, cpuCount: 1);
+            await restarted.LoadAsync(ct);
+            Assert.Equal(TimeSpan.FromHours(8), restarted.ConciergeIdleTimeout);
+            Assert.NotNull(restarted.Row("concierge.idleTimeout"));
+            Assert.Equal("01:00:00", restarted.Fallback("concierge.idleTimeout"));
+        });
+    }
+
+    [Fact]
+    public void The_concierge_idle_timeout_description_says_idle_means_unwatched_and_inactive()
+    {
+        var settings = new TenantSettings(null!, new ConfigurationBuilder().Build(), cpuCount: 1);
+        var description = settings.DescriptionOf("concierge.idleTimeout");
+
+        Assert.Contains("both unwatched and inactive", description, StringComparison.Ordinal);
+        Assert.Contains("no browser has had it open for this long AND it has shown no activity for this long", description, StringComparison.Ordinal);
+        Assert.Contains("no terminal output above its preset's floor, no keystrokes, and no platform call under its own credential", description, StringComparison.Ordinal);
+        Assert.Contains("A session someone has open is never ended.", description, StringComparison.Ordinal);
+    }
+
+    private static async Task InFreshDatabase(Func<string, CancellationToken, Task> body)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), $"harness-settings-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var database = Path.Combine(directory, "messages.db");
+
+        try
+        {
+            await new SchemaMigrator(database).ApplyAsync(SchemaModules.All, ct);
+            await body(database, ct);
         }
         finally
         {

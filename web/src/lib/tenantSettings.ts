@@ -93,7 +93,7 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     tab: 'concierge',
     kind: 'duration',
     label: 'Close an idle Concierge after',
-    hint: 'A Concierge terminal nobody has typed in for this long is closed. For example 8h or 30m.',
+    hint: 'A Concierge nobody has open and that has done nothing for this long is ended. For example 1h or 30m.',
   },
   {
     name: 'quiet.window',

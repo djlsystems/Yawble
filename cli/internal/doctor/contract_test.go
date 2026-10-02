@@ -14,7 +14,8 @@ import (
 // The Host's own --doctor report, written by DoctorReportCliContractTests from a real launch check
 // (a fake CLI aborting under a 64 MB data limit, leaking a credential on stderr) and the wip
 // figures the Host recorded under cgroup, rlimit and not enforced, decodes here into the launch
-// result and the Host's figures, with nothing derived and nothing unredacted.
+// result, the Host's figures and its running Concierge sessions, with nothing derived and nothing
+// unredacted.
 func TestTheHostsOwnDoctorReportDecodes(t *testing.T) {
 	for _, c := range []struct{ file, runMemory string }{
 		{"host-doctor-cgroup.json", "cgroup, 1792 MB per run: "},
@@ -72,6 +73,26 @@ func TestTheHostsOwnDoctorReportDecodes(t *testing.T) {
 		if got := rows["agents"]; got.Verdict != doctor.Warn || !strings.Contains(got.Detail, failed.Agent+" ") ||
 			!strings.Contains(got.Detail, "launch FAILED, exit 134") {
 			t.Errorf("%s: agents row %s %q", c.file, got.Verdict, got.Detail)
+		}
+
+		if r.Concierge == nil || len(r.Concierge.Sessions) != 2 {
+			t.Fatalf("%s: concierge not decoded: %+v", c.file, r.Concierge)
+		}
+		var concierge []string
+		for _, ch := range doctor.InstanceChecks(&r, nil, time.Now()) {
+			if ch.Name == "concierge" {
+				if ch.Verdict != doctor.Info {
+					t.Errorf("%s: concierge row %s, want information", c.file, ch.Verdict)
+				}
+				concierge = append(concierge, ch.Detail)
+			}
+		}
+		want := []string{
+			"person@example.test: on worker-1, last activity 2026-10-02 12:20 UTC (call), would end at 2026-10-02 13:20 UTC, 300 MB",
+			"user-2: on worker-1, last activity 2026-10-02 12:30 UTC (typed), open in a browser, so not ended, memory not measured",
+		}
+		if strings.Join(concierge, "\n") != strings.Join(want, "\n") {
+			t.Errorf("%s: concierge rows\n%s\nwant\n%s", c.file, strings.Join(concierge, "\n"), strings.Join(want, "\n"))
 		}
 
 		var out bytes.Buffer

@@ -66,7 +66,11 @@ public static class WorkerEndpoints
                 + "`memoryPercent`, `sampledAt` - with every figure it did not measure named in `notMeasured` and "
                 + "null, never 0; `bound` is how many runs it may hold under the default run limit, null when "
                 + "`wip.maxRunning` is set. `holding` is what a run asking it now would wait for on headroom, or "
-                + "null. `runs` are the runs placed on it. A Host that runs its runs itself lists its own one worker.");
+                + "null. `runs` are the runs placed on it. `terminals` are the people's Concierge terminals it runs: "
+                + "`user`, `since`, and `residentBytes` and `processes` of the terminal's process group (the CLI and "
+                + "every process it started that did not start a session of its own) at its last sample, "
+                + "`sampledAt` - null, never 0, when not measured. A terminal that ends leaves the list. A Host that "
+                + "runs its runs itself lists its own one worker.");
     }
 
     private static async Task Refuse(HttpContext context, int status, string sentence)
