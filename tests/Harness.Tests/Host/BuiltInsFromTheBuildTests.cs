@@ -256,6 +256,27 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
+    /// A plugin reads the site collections its manifest declares: the plugin skill names `reads`,
+    /// the `sites` block, the budget and the Delete/Archive advice, and the site skill names the read
+    /// in the same sentence as `site.put`.
+    /// </summary>
+    [Fact]
+    public void The_plugin_and_site_skills_name_the_declared_read()
+    {
+        static string Flat(string name) => System.Text.RegularExpressions.Regex.Replace(BuiltInSkills.Find(name)!.Body, @"\s+", " ");
+
+        var plugins = Flat("authoring-plugins");
+        Assert.Contains("\"reads\": [{\"site\": \"board\", \"collection\": \"items\"}]", plugins, StringComparison.Ordinal);
+        Assert.Contains("Each run's request then carries `sites`", plugins, StringComparison.Ordinal);
+        Assert.Contains("up to 8 MiB a run, less when the work batch, config or secrets are large", plugins, StringComparison.Ordinal);
+        Assert.Contains("A page's Delete or Archive is best kept in site data the plugin reads - a `status` on the document - rather than in a second store", plugins, StringComparison.Ordinal);
+
+        Assert.Contains(
+            "(`site.put` records, and the collections their manifest `reads`, handed to each run) all read and write the same data.",
+            Flat("building-sites"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The packaging-solutions skill is for writing a spec whose delivery is a solution package and
     /// handing the person its link, which the Concierge and the Manager do. It carries the four
     /// points, and the skills that lead to it point there.

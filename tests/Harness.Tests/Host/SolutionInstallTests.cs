@@ -388,6 +388,52 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         Assert.Null(Get<PluginCatalog>().For("jb-agents"));
     }
 
+    /// <summary>A neutral package in Alpha's documents whose plugin, unique to the test, reads
+    /// <paramref name="reads"/>.</summary>
+    private string NeutralPackage(string pluginId, IReadOnlyList<string> sites, IReadOnlyList<(string, string)> reads, string version = "1.0.0") =>
+        SolutionSamples.Neutral(
+            Path.Combine(Get<TeamDocuments>().EnsureFor(host.Alpha), "packages", Guid.NewGuid().ToString("N")),
+            pluginId, sites, reads, version);
+
+    [Fact]
+    public async Task A_package_whose_plugin_reads_a_site_it_does_not_ship_is_refused_by_the_check_route()
+    {
+        using var person = await host.PersonAsync();
+        var plugin = "keeper-" + Guid.NewGuid().ToString("N")[..8];
+        var folder = NeutralPackage(plugin, ["board"], [("ledger", "items")]);
+
+        var body = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/check", new { folder }, Ct));
+
+        Assert.False(body.GetProperty("ok").GetBoolean(), body.ToString());
+        var refusal = Assert.Single(body.GetProperty("refusals").EnumerateArray());
+        Assert.Equal($"plugins/{plugin}/plugin.json", refusal.GetProperty("file").GetString());
+        Assert.Equal("reads[0].site", refusal.GetProperty("field").GetString());
+        Assert.Equal("'ledger' is not one of this package's `sites`; a plugin in a package reads only a site the package ships.", refusal.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task An_update_whose_plugin_reads_a_dropped_site_is_refused_before_anything_changes()
+    {
+        var plugin = "keeper-" + Guid.NewGuid().ToString("N")[..8];
+        var team = Done(await Get<SolutionInstaller>().InstallAsync(
+            new SolutionInstallRequest(NeutralPackage(plugin, ["board", "ledger"], [("board", "items"), ("ledger", "items")]), Unique("Reads")),
+            Person, Ct)).Team;
+
+        // 1.1.0 drops `ledger` but its plugin still reads it.
+        var newer = NeutralPackage(plugin, ["board"], [("board", "items"), ("ledger", "items")], version: "1.1.0");
+
+        using var person = await host.PersonAsync();
+        var preview = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/preview", new { folder = newer, team }, Ct));
+        Assert.False(preview.GetProperty("ok").GetBoolean(), preview.ToString());
+        Assert.Contains("reads[1].site", preview.ToString());
+
+        var update = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/update", new { folder = newer, team }, Ct));
+        Assert.False(update.GetProperty("ok").GetBoolean(), update.ToString());
+
+        Assert.Equal("1.0.0", (await Get<ITeamSolutionStore>().FindAsync(team, Ct))!.Version);
+        Assert.NotNull((await Get<SiteService>().FindAsync(team, "ledger", null, Ct)).Value);
+    }
+
     [Fact]
     public async Task A_link_opens_only_a_folder_in_the_documents_or_a_teams_folder()
     {

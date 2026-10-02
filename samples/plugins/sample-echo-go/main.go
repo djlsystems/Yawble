@@ -48,6 +48,21 @@ type request struct {
 	Secrets struct {
 		Token *string `json:"token"`
 	} `json:"secrets"`
+	// Sites are the collections of this team's own sites the manifest declares in `reads`, newest
+	// first; this sample declares none. Cut and Missing are sentences when set.
+	Sites []struct {
+		Site       string `json:"site"`
+		Collection string `json:"collection"`
+		Documents  []struct {
+			ID        string          `json:"id"`
+			Doc       json.RawMessage `json:"doc"`
+			UpdatedAt string          `json:"updatedAt"`
+			UpdatedBy string          `json:"updatedBy"`
+		} `json:"documents"`
+		Total   int     `json:"total"`
+		Cut     *string `json:"cut"`
+		Missing *string `json:"missing"`
+	} `json:"sites"`
 }
 
 // Records are structs, not maps, so their keys come out in the order the .NET sample writes them.

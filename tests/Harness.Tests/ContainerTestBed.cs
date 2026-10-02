@@ -48,7 +48,7 @@ public sealed class ContainerTestBed : IAsyncDisposable
         _directory = Path.Combine(Path.GetTempPath(), $"harness-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_directory);
 
-        var database = Path.Combine(_directory, "messages.db");
+        var database = DatabasePath = Path.Combine(_directory, "messages.db");
         new SchemaMigrator(database).ApplyAsync(SchemaModules.All).GetAwaiter().GetResult();
 
         Store = new SqliteMessageStore(database);
@@ -73,6 +73,9 @@ public sealed class ContainerTestBed : IAsyncDisposable
     }
 
     public SqliteMessageStore Store { get; }
+
+    /// <summary>The message log's database file, for a test that reads every table of it.</summary>
+    public string DatabasePath { get; }
 
     /// <summary>The pending-delivery rows, when the bed was asked for them; null otherwise.</summary>
     public SqlitePendingDeliveries? Pending { get; }

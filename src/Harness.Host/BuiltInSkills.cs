@@ -1171,6 +1171,17 @@ public static class BuiltInSkills
               usual but wakes nobody. A failed run, a published event and a hand-back still wake as
               always.
 
+            A plugin also READS its own team's site data. The manifest declares the collections, at
+            most 32, never another team's: `"reads": [{"site": "board", "collection": "items"}]`.
+            Each run's request then carries `sites`: per declared read, the collection's documents
+            newest first, each with its `id`, `doc`, `updatedAt` and `updatedBy`, and the collection's
+            `total`. It is up to 8 MiB a run, less when the work batch, config or secrets are large;
+            what does not fit is cut, the newest kept, and `cut` says so in a sentence, as does one
+            line on the card. A site the team does not have reads as `missing`. In a package, a
+            plugin reads only a site the package ships. A page's Delete or Archive is best kept in
+            site data the plugin reads - a `status` on the document - rather than in a second store
+            of the plugin's own, so a run never brings back what a person removed.
+
             ## 3. Settings and secrets
 
             Settings are per member, chosen when the member is hired, and checked against the manifest
@@ -1569,7 +1580,8 @@ public static class BuiltInSkills
             - **Static files**: HTML, JS, CSS, images, JSON. Nothing in a site runs on the platform.
             - **Data**: per site, named collections of JSON documents (id to document, with who
               changed it last and when). The page, your team's agents (the `site` tool) and your
-              team's plugins (`site.put` records) all read and write the same data.
+              team's plugins (`site.put` records, and the collections their manifest `reads`, handed
+              to each run) all read and write the same data.
             - **Actions**: a click calls `site.action(name, payload)`. That appends one `site.action`
               event to the team's log, and an event trigger turns it into work for a member.
             - **Triggers**: a person adds an event trigger on `site.action` in the team's Triggers

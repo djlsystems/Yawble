@@ -38,6 +38,26 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     private readonly ISecretStore? secrets;
     private readonly Connections? connections;
     private readonly SiteService? sites;
+    private readonly long siteReadBudget;
+
+    /// <summary>
+    /// The most a run is handed of the site collections its manifest <c>reads</c>, counted in FRAMED
+    /// bytes: each document as it appears inside the <see cref="StartRun"/> frame's stdin string,
+    /// escaped by the request's encoder and again by the frame's. Less when the rest of the request
+    /// leaves less room in the frame (see <see cref="EnvelopeMarginBytes"/>).
+    /// </summary>
+    public const long SiteReadBudgetBytes = 8 * 1024 * 1024;
+
+    /// <summary>
+    /// What is kept free in the frame for the read's envelopes - one per declared read, each with its
+    /// site, collection, counts and sentences - which are always delivered and never counted against
+    /// the budget. 32 envelopes at their largest frame at under 20 KiB: names are slugs, which neither
+    /// encoder escapes, and <see cref="PluginManifest.MaxReads"/> bounds their number.
+    /// </summary>
+    public const int EnvelopeMarginBytes = 64 * 1024;
+
+    /// <summary>For tests: told what each run was handed of its declared reads and what it cost.</summary>
+    public Action<PluginSiteDelivery>? SiteDataDelivered { get; set; }
 
     /// <summary>
     /// The Host's: the plugin runs on <paramref name="worker"/>, through the run protocol, and
@@ -53,7 +73,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         IPluginMemberSettings? settings = null,
         ISecretStore? secrets = null,
         Connections? connections = null,
-        SiteService? sites = null)
+        SiteService? sites = null,
+        long siteReadBudget = SiteReadBudgetBytes)
     {
         this.catalog = catalog;
         this.reports = reports;
@@ -64,6 +85,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         this.secrets = secrets;
         this.connections = connections;
         this.sites = sites;
+        this.siteReadBudget = siteReadBudget;
     }
 
     /// <summary>
@@ -78,7 +100,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         IPluginMemberSettings? settings = null,
         ISecretStore? secrets = null,
         Connections? connections = null,
-        SiteService? sites = null)
+        SiteService? sites = null,
+        long siteReadBudget = SiteReadBudgetBytes)
     {
         var directory = new RunDirectory(reports);
         this.catalog = catalog;
@@ -93,6 +116,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         this.secrets = secrets;
         this.connections = connections;
         this.sites = sites;
+        this.siteReadBudget = siteReadBudget;
     }
 
     /// <summary>The worker plugin runs go to.</summary>
@@ -163,7 +187,47 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         // THE REDACTION SET: every bound secret AND every access token this run is handed.
         IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.Select(g => g.AccessToken)];
 
-        var request = Request(invocation, manifest, config, resolvedSecrets, grants);
+        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray());
+
+        StartRun Start(string stdin) => new(
+            RunId.For(invocation.Member),
+            invocation.Implementation,
+            "",
+            "",
+            "",
+            invocation.WorkingDirectory,
+            new Dictionary<string, string>(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            new RunProcess(
+                plugin.Executable,
+                manifest.Arguments,
+                InheritedVariables,
+                new Dictionary<string, string>
+                {
+                    [CausationVariable] = invocation.Causation.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                },
+                stdin,
+                manifest.TimeoutSeconds,
+                plugin.Directory));
+
+        // THE DECLARED READS, read now as the member and measured against what the rest of the
+        // request leaves in the frame. A cut or a missing site is said on stdin and in one row each.
+        if (manifest.Reads.Count > 0)
+        {
+            var (read, delivery) = await ReadSitesAsync(invocation.Member, manifest, FramedBytes(Start(request)), ct);
+            request = Request(invocation, manifest, config, resolvedSecrets, grants, read);
+
+            foreach (var row in (string?[])[delivery.CutRow, delivery.MissingRow])
+            {
+                if (row is not null) await reports.ProgressAsync(invocation.Member, Redact(row, redacted), ct);
+            }
+
+            SiteDataDelivered?.Invoke(delivery);
+        }
 
         // The run's record, gathered as the lines arrive.
         var gathered = new Gathered();
@@ -174,30 +238,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         // here, in order, before the next is read.
         var (ended, lost) = await directory.RunProcessAsync(
             worker,
-            new StartRun(
-                RunId.For(invocation.Member),
-                invocation.Implementation,
-                "",
-                "",
-                "",
-                invocation.WorkingDirectory,
-                new Dictionary<string, string>(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                new RunProcess(
-                    plugin.Executable,
-                    manifest.Arguments,
-                    InheritedVariables,
-                    new Dictionary<string, string>
-                    {
-                        [CausationVariable] = invocation.Causation.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    },
-                    request,
-                    manifest.TimeoutSeconds,
-                    plugin.Directory)),
+            Start(request),
             line => OnLineAsync(invocation.Member, manifest, invocation.Context.Limits, line, gathered, redacted, ct),
             ct);
 
@@ -285,7 +326,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     internal static string Request(
         MemberInvocation invocation, PluginManifest manifest,
         IReadOnlyDictionary<string, JsonNode?> config, IReadOnlyDictionary<string, string> resolvedSecrets,
-        IReadOnlyDictionary<string, ConnectionGrant>? grants = null)
+        IReadOnlyDictionary<string, ConnectionGrant>? grants = null, JsonArray? sites = null)
     {
         var work = new JsonArray();
 
@@ -354,10 +395,160 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 ["expiresAt"] = g.Value.ExpiresAt?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
                 ["scopes"] = new JsonArray([.. g.Value.Scopes.Select(scope => (JsonNode?)JsonValue.Create(scope))]),
             }))),
+
+            // THE DECLARED READS of the member's own team's sites (see ReadSitesAsync); [] for none.
+            ["sites"] = sites ?? new JsonArray(),
         };
 
         return document.ToJsonString() + "\n";
     }
+
+    /// <summary>
+    /// The collections <paramref name="manifest"/> <c>reads</c>, as the run's <c>sites</c> block:
+    /// one envelope per declared read, in declaration order, each with its documents newest first.
+    ///
+    /// <list type="bullet">
+    /// <item>OWN TEAM ONLY: each is listed in the member's team with the member as a bound actor, as
+    /// <c>site.put</c> writes, so another team's site reads exactly as a missing one does. A read
+    /// appends nothing to the tenant log.</item>
+    /// <item>THE BUDGET counts documents only, in framed bytes: the lesser of the runner's budget and
+    /// what <paramref name="rest"/> - the <see cref="StartRun"/> frame with <c>sites: []</c> - leaves
+    /// in the frame after <see cref="EnvelopeMarginBytes"/>, never below zero. Envelopes are always
+    /// delivered, paid from the margin.</item>
+    /// <item>A STRICT NEWEST-FIRST PREFIX: collections fill in declaration order, and the first
+    /// document that does not fit ends delivery for the whole run. Whole documents only.</item>
+    /// <item>NEVER SILENT: each collection cut says so in its <c>cut</c>, and the run writes one row
+    /// for the cut and one for missing sites, naming names and counts, never content.</item>
+    /// </list>
+    /// </summary>
+    public async Task<(JsonArray Sites, PluginSiteDelivery Delivery)> ReadSitesAsync(
+        ContainerId member, PluginManifest manifest, long rest, CancellationToken ct = default)
+    {
+        var room = WorkerFrameCodec.MaxBytes - rest - EnvelopeMarginBytes;
+        var frameLimited = room < siteReadBudget;
+        var budget = Math.Max(0, Math.Min(siteReadBudget, room));
+
+        var limit = siteReadBudget % (1024 * 1024) == 0
+            ? $"{siteReadBudget / (1024 * 1024)} MiB"
+            : $"{siteReadBudget.ToString(CultureInfo.InvariantCulture)} bytes";
+        var clause = frameLimited
+            ? $"{limit}, less what the rest of the request takes; {budget.ToString(CultureInfo.InvariantCulture)} bytes were left"
+            : limit;
+
+        var reads = new List<(PluginSiteRead Read, IReadOnlyList<SiteDocument>? Documents, string? Missing)>();
+
+        foreach (var read in manifest.Reads)
+        {
+            if (sites is null)
+            {
+                reads.Add((read, null, "This Host serves no sites."));
+                continue;
+            }
+
+            var listed = await sites.ListDocumentsAsync(member.Team, read.Site, read.Collection, SiteActor.Member(member), ct);
+
+            reads.Add(listed.Value is { } documents
+                ? (read, [.. documents.OrderByDescending(d => d.UpdatedAt).ThenBy(d => d.Id, StringComparer.Ordinal)], null)
+                : (read, null, listed.Refusal ?? SiteService.NoSuchSite));
+        }
+
+        // WHAT FITS: the newest documents first, until the first that does not.
+        long spent = 0;
+        var full = false;
+        var delivered = new List<List<JsonObject>>();
+
+        foreach (var (_, documents, _) in reads)
+        {
+            var entries = new List<JsonObject>();
+            delivered.Add(entries);
+
+            foreach (var document in documents ?? [])
+            {
+                if (full) break;
+
+                var entry = new JsonObject
+                {
+                    ["id"] = document.Id,
+                    ["doc"] = JsonNode.Parse(document.Json),
+                    ["updatedAt"] = document.UpdatedAt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+                    ["updatedBy"] = document.UpdatedBy,
+                };
+
+                // Its comma too, after the first of its list.
+                var cost = FramedBytes(entry) + (entries.Count > 0 ? 1 : 0);
+
+                if (spent + cost > budget)
+                {
+                    full = true;
+                    break;
+                }
+
+                spent += cost;
+                entries.Add(entry);
+            }
+        }
+
+        var block = new JsonArray();
+        var cut = new List<string>();
+        var missing = new List<string>();
+
+        for (var i = 0; i < reads.Count; i++)
+        {
+            var (read, documents, gone) = reads[i];
+            var total = documents?.Count ?? 0;
+            var count = delivered[i].Count;
+            string? sentence = null;
+
+            if (documents is not null && count < total)
+            {
+                sentence = $"Only {count} of {total} documents of {read.Site}/{read.Collection} were delivered (newest first): "
+                    + $"this run's site data is limited to {clause}. The rest were cut.";
+                cut.Add($"{read.Site}/{read.Collection} {count} of {total}");
+            }
+
+            if (gone is not null) missing.Add($"{read.Site}/{read.Collection} ({gone})");
+
+            block.Add(new JsonObject
+            {
+                ["site"] = read.Site,
+                ["collection"] = read.Collection,
+                ["documents"] = new JsonArray(),
+                ["total"] = total,
+                ["cut"] = sentence,
+                ["missing"] = gone,
+            });
+        }
+
+        // THE ENVELOPES' OWN COST, measured empty; the documents then add exactly what was spent.
+        var envelopeBytes = FramedBytes(block) - FramedBytes(new JsonArray());
+
+        for (var i = 0; i < reads.Count; i++)
+        {
+            var list = (JsonArray)block[i]!["documents"]!;
+            foreach (var entry in delivered[i]) list.Add(entry);
+        }
+
+        return (block, new PluginSiteDelivery(
+            rest, budget, frameLimited, spent, envelopeBytes,
+            cut.Count == 0 ? null : $"Site data for this run was cut: {string.Join(", ", cut)}. This run's site data is limited to {clause}.",
+            missing.Count == 0 ? null : $"A declared read found no site: {string.Join(", ", missing)}."));
+    }
+
+    /// <summary>
+    /// What <paramref name="node"/> costs inside a worker frame: its request text
+    /// (<see cref="JsonNode.ToJsonString"/>), escaped again as a string by
+    /// <see cref="WorkerFrameCodec.Json"/>, in UTF-8 bytes. Both escape character by character, so
+    /// pieces' costs add up.
+    /// </summary>
+    public static long FramedBytes(JsonNode node) =>
+        Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(node.ToJsonString(), WorkerFrameCodec.Json)) - 2;
+
+    /// <summary>
+    /// <paramref name="start"/> as <see cref="WorkerFrameCodec.Write"/> frames it, in UTF-8 bytes,
+    /// without its refusal: a plugin run seals nothing, so this is the frame bar its id's digits.
+    /// </summary>
+    public static long FramedBytes(StartRun start) =>
+        Encoding.UTF8.GetByteCount(JsonSerializer.Serialize<WorkerFrame>(new CommandFrame(0, start), WorkerFrameCodec.Json));
 
     /// <summary>The manifest's defaults under this member's own values, each checked against its
     /// field's type. A required field with neither is a refusal naming it. Bounds are a WRITE's
@@ -911,3 +1102,13 @@ public interface ISecretStore
 {
     string? TryGet(string logicalKey);
 }
+
+/// <summary>
+/// What one run was handed of its declared reads. <paramref name="Rest"/> is the framed size of its
+/// <see cref="StartRun"/> with <c>sites: []</c>; <paramref name="Budget"/> the documents' share,
+/// <paramref name="FrameLimited"/> when the frame's room set it rather than the runner's budget;
+/// <paramref name="DocumentBytes"/> and <paramref name="EnvelopeBytes"/> what each part added to the
+/// frame. <paramref name="CutRow"/> and <paramref name="MissingRow"/> are the run's rows, or null.
+/// </summary>
+public sealed record PluginSiteDelivery(
+    long Rest, long Budget, bool FrameLimited, long DocumentBytes, long EnvelopeBytes, string? CutRow, string? MissingRow);

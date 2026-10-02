@@ -49,6 +49,23 @@ public sealed class PluginCatalogTests : IDisposable
     }
 
     [Fact]
+    public void A_plugin_whose_reads_are_malformed_is_listed_as_refused_on_rescan()
+    {
+        Assert.Equal("`reads[0]` names a team; a plugin reads only its own team's sites.",
+            RefusalFor(PluginInstall.Manifest(edit: m => m["reads"] = JsonNode.Parse("""[{"site":"board","collection":"items","team":"beta"}]"""))));
+    }
+
+    [Fact]
+    public void A_plugin_with_well_formed_reads_is_loaded_with_them()
+    {
+        PluginInstall.Write(_dataRoot, manifest: PluginInstall.Manifest(edit: m =>
+            m["reads"] = JsonNode.Parse("""[{"site":"board","collection":"items"},{"site":"board","collection":"notes"}]""")));
+
+        var plugin = Assert.Single(Scan().Plugins);
+        Assert.Equal([new PluginSiteRead("board", "items"), new PluginSiteRead("board", "notes")], plugin.Manifest.Reads);
+    }
+
+    [Fact]
     public void A_later_schema_version_is_refused_rather_than_misread()
     {
         Assert.Contains("`schemaVersion` 2 is not one this Host reads",
