@@ -1744,6 +1744,20 @@ export interface AgentInstallation {
 
   /** The preset's own install guidance, or null. Never composed. */
   install?: AgentInstall | null
+
+  /**
+   * Sent only by a server whose agent CLIs are on workers: each worker's answer for this command,
+   * where `state` and `message` come from. EMPTY is NOT MEASURED - no worker that runs agents has
+   * answered - and never "installed". Absent: the server answered from its own PATH.
+   */
+  measuredOn?: InstallMeasurement[]
+}
+
+/** One worker's answer to whether a command is on its PATH, and when it gave it. */
+export interface InstallMeasurement {
+  worker: string
+  installed: boolean
+  at: string
 }
 
 /**

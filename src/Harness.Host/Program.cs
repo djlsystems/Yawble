@@ -663,15 +663,8 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<FolderWatch>(),
         sp.GetRequiredService<TenantLogging>(),
 
-        // THE AGENT a package's agent members run when it names none: the first headless model
-        // preset installed on this machine, else the first in the catalog. The wizard may name one.
-        () =>
-        {
-            var headless = agents.Definitions.Where(d => d.Mode == AgentMode.Headless).ToList();
-            return (headless.FirstOrDefault(d => d.Launch.LanguageModel && probe.Probe(d).State is null)
-                ?? headless.FirstOrDefault(d => d.Launch.LanguageModel)
-                ?? headless.FirstOrDefault())?.Name;
-        },
+        // THE AGENT a package's agent members run when it names none (SolutionDefaultAgent).
+        () => SolutionDefaultAgent.Of(agents, probe),
         sp.GetRequiredService<Connections>(),
         sp.GetRequiredService<ConnectionStore>(),
         sp.GetRequiredService<IPluginMemberSettingsStore>(),
@@ -722,11 +715,17 @@ builder.Services.AddSingleton(sp => new TeamSkills(
 // walk PATH once per preset on every render, and one that lived forever would go on reporting a
 // problem the person had just fixed. It runs no candidate binary - it resolves a name and stops -
 // so it takes no dependency on anything that could.
-// Constructed rather than resolved by type: its three parameters are the injection seams the specs
-// drive (a `fileExists`, a clock, the cache window) and none of them is a service, so leaving the
+// Constructed rather than resolved by type: its parameters are the injection seams the specs
+// drive (a clock, the cache window, the workers' answers) and none of them is resolved by type, so leaving the
 // container to choose a constructor would either fail to find one or quietly pick the wrong shape
 // the day another is added.
-builder.Services.AddSingleton(new AgentInstallProbe());
+// In CONTROL its answer is the workers' and never this machine's PATH, which has no agent CLI on it:
+// what each placeable worker measured (WorkerInstalls), from the sign-in probe and from the
+// measurement each worker gets as it joins. In `all` the runs are this machine's, and so is the PATH.
+builder.Services.AddSingleton(sp => WorkerInstalls.Over(sp.GetRequiredService<WorkerPool>()));
+builder.Services.AddSingleton(sp => control
+    ? new AgentInstallProbe(workers: sp.GetRequiredService<WorkerInstalls>())
+    : new AgentInstallProbe());
 // The one path from the progress ROUTE to whatever is currently running that member. Singleton
 // because both ends have to be looking at the same object for a heartbeat to mean anything.
 builder.Services.AddSingleton<RunHeartbeat>();
@@ -1766,7 +1765,8 @@ builder.Services.AddHttpContextAccessor();
 // THE SIGN-IN PROBE: asked of a connected worker, recorded in agent-auth.json for the doctor.
 builder.Services.AddSingleton(sp => new AgentAuthProbe(
     sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<AgentLaunchUser>(), sp.GetRequiredService<IRunCredentials>(),
-    sp.GetRequiredService<WorkerAsks>(), dataRoot, sp.GetRequiredService<ILogger<AgentAuthProbe>>()));
+    sp.GetRequiredService<WorkerAsks>(), dataRoot, sp.GetRequiredService<ILogger<AgentAuthProbe>>(),
+    installs: sp.GetRequiredService<AgentInstallProbe>(), measured: control ? sp.GetRequiredService<WorkerInstalls>() : null));
 // THE LAUNCH CHECK: each preset's free invocation through the member runner's own launch (AgentLaunchChecks).
 builder.Services.AddSingleton(sp => new AgentLaunchChecks(
     sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<ProcessAgentRunner>(), dataRoot,
@@ -2426,6 +2426,14 @@ if (control)
 RetryWhenAWorkerJoins.Wire(
     control, workerConnections,
     ct => app.Services.GetRequiredService<UnfinishedRemovalRetry>().RetryAsync(ct: ct),
+    app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+// Each worker that joins is asked which agent CLIs it has, so whether one is installed is every
+// worker's answer, and two that disagree are seen.
+MeasureInstallsWhenAWorkerJoins.Wire(
+    control, joined => workerConnections.Joined += joined,
+    worker => app.Services.GetRequiredService<WorkerPool>().For(worker),
+    () => MeasureInstallsWhenAWorkerJoins.Commands(app.Services.GetRequiredService<AgentCatalog>()),
+    app.Services.GetRequiredService<WorkerAsks>(), app.Services.GetRequiredService<WorkerInstalls>(),
     app.Services.GetRequiredService<ILogger<WorkerConnections>>());
 AgentUpdatesAtStart.Wire(
     control, builder.Configuration["HARNESS_IMAGE"], builder.Configuration["HARNESS_UPDATE_AGENTS"], joined => workerConnections.Joined += joined,

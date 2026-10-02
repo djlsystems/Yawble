@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 using Harness.Pty;
 
 namespace Harness.Host;
@@ -85,7 +86,14 @@ public sealed record AgentInstallation(
         "Where to go to install this Agent, from the preset's own `install` - or null when the "
         + "preset carries none, in which case the client renders the same sentence with no link "
         + "and NEVER a constructed one.")]
-    AgentInstall? Install);
+    AgentInstall? Install,
+
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [property: Description(
+        "In control only: each placeable worker's answer for this command - `worker`, `installed` and "
+        + "`at` - which is where `state` and `message` come from. Empty: no such worker has answered, "
+        + "so the command is not measured. Absent: this Host answered from its own PATH.")]
+    IReadOnlyList<InstallMeasurement>? MeasuredOn = null);
 
 /// <summary>
 /// Whether the CLI a preset names is on this machine at all.
@@ -118,6 +126,7 @@ public sealed class AgentInstallProbe
 
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeSpan _window;
+    private readonly WorkerInstalls? _workers;
 
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Answer> _cache = new(StringComparer.OrdinalIgnoreCase);
@@ -129,12 +138,19 @@ public sealed class AgentInstallProbe
     /// sleeping through it. `ReapIdleAsync` takes `now` for this reason and so does this.
     /// </param>
     /// <param name="window">How long an answer is reused; <see cref="DefaultWindow"/> when null.</param>
+    /// <param name="workers">
+    /// In <c>control</c>, what the workers measured: every answer is theirs and this machine's PATH is
+    /// never looked at, because control has no agent CLI on it. Null in <c>all</c>, where the runs are
+    /// this machine's and so is the PATH.
+    /// </param>
     public AgentInstallProbe(
         Func<DateTimeOffset>? now = null,
-        TimeSpan? window = null)
+        TimeSpan? window = null,
+        WorkerInstalls? workers = null)
     {
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _window = window ?? DefaultWindow;
+        _workers = workers;
     }
 
     /// <summary>
@@ -171,8 +187,10 @@ public sealed class AgentInstallProbe
     }
 
     /// <summary>Whether a command of this name resolves on this machine's PATH - and nothing
-    /// more than that. See the class comment: resolution is not execution.</summary>
-    public bool Resolves(string? command) => ResolvedPathOf(command) is not null;
+    /// more than that. See the class comment: resolution is not execution. In <c>control</c>: whether
+    /// every worker that counts measured it installed, and at least one did.</summary>
+    public bool Resolves(string? command) =>
+        _workers is null ? ResolvedPathOf(command) is not null : MeasuredOn(command) is true;
 
     /// <summary>
     /// One preset's answer, told whether any team references it.
@@ -189,6 +207,8 @@ public sealed class AgentInstallProbe
         // `AgentCatalog.Launch` carries for the same reason. An empty command resolves to nothing,
         // which is the honest answer for a preset that could never launch either way.
         var command = definition.Launch?.FileName ?? string.Empty;
+        if (_workers is not null) return OnWorkers(definition, command, referenced, _workers);
+
         var resolved = ResolvedPathOf(command);
 
         return new AgentInstallation(
@@ -200,6 +220,64 @@ public sealed class AgentInstallProbe
             MessageFor(command, resolved is not null),
             LinkableInstall(definition.Install));
     }
+
+    /// <summary>
+    /// The answer in <c>control</c>, from what the workers measured and nothing else.
+    ///
+    /// Installed on every worker that answered: no state. Missing on any: <c>AgentNotInstalled</c>,
+    /// because a worker MEASURED it missing and a run placed there would fail - and when another
+    /// worker has it, the message names both sides and picks neither. No answer from a worker that
+    /// counts: no state and no warning, and the message says it has not been measured and why.
+    /// </summary>
+    private AgentInstallation OnWorkers(AgentDefinition definition, string command, bool referenced, WorkerInstalls workers)
+    {
+        var measured = command.Trim().Length == 0 ? [] : workers.For(command.Trim());
+        var installed = measured.Where(m => m.Installed).Select(m => m.Worker).ToList();
+        var missing = measured.Where(m => !m.Installed).Select(m => m.Worker).ToList();
+
+        var message = measured.Count == 0 ? $"{command} has not been measured: {workers.NotMeasuredBecause()}."
+            : missing.Count == 0 ? $"{command} is installed on {ListOf(installed)}."
+            : installed.Count == 0 ? $"{command} is not installed on {ListOf(missing)}."
+            : $"{command} is installed on {ListOf(installed)} but not on {ListOf(missing)}: the workers disagree.";
+
+        return new AgentInstallation(
+            definition.Name,
+            command,
+            missing.Count > 0 ? AgentInstallStates.NotInstalled : null,
+            null,
+            referenced,
+            message,
+            LinkableInstall(definition.Install),
+            measured);
+    }
+
+    /// <summary>"a", "a and b", "a, b and c".</summary>
+    private static string ListOf(IReadOnlyList<string> names) =>
+        names.Count <= 1 ? string.Concat(names) : $"{string.Join(", ", names.Take(names.Count - 1))} and {names[^1]}";
+
+    /// <summary>
+    /// Whether every worker that counts measured <paramref name="command"/> installed (true), any
+    /// measured it missing (false), or none has answered (null). Only in <c>control</c>.
+    /// </summary>
+    private bool? MeasuredOn(string? command)
+    {
+        var name = (command ?? string.Empty).Trim();
+        var measured = name.Length == 0 ? [] : _workers!.For(name);
+        return measured.Count == 0 ? null : measured.All(m => m.Installed);
+    }
+
+    /// <summary>
+    /// Whether the preset's CLI is installed where its runs go: on this machine's PATH in <c>all</c>,
+    /// and in <c>control</c> as the workers measured it - null when none that counts has answered.
+    /// </summary>
+    public bool? Measured(AgentDefinition definition) =>
+        _workers is null ? ResolvedPathOf(definition.Launch?.FileName) is not null : MeasuredOn(definition.Launch?.FileName);
+
+    /// <summary>
+    /// Whether the preset's CLI is KNOWN to be installed where its runs go. Not measured is not
+    /// installed: a default chosen on that would be a guess.
+    /// </summary>
+    public bool Installed(AgentDefinition definition) => Measured(definition) is true;
 
     /// <summary>
     /// Every preset's answer, in catalog order, including the hidden ones.
