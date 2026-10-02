@@ -82,7 +82,9 @@ yawble update             a newer yawble when there is one, then the instance on
 yawble logs [-f]          the container log
 yawble backup [--output <file>] [--full] [--yes]   the instance's data in one .tar.gz on this computer, to restore here or elsewhere
 yawble restore <file> [--replace] [--yes]         a backup into this computer's instance, on either engine, then start it
-yawble agents             per agent: installed, signed in, launches, and how to sign in if not
+yawble agents             per agent: installed, signed in, launches, its credential source, and how to sign in if not
+yawble agents credential set <preset|command> [--token] | clear <preset|command>   the issued credential of a CLI command; see below
+yawble agents source <preset> home|issued   whether a preset signs in through the shared home or its command's issued credential
 yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
 yawble config get|set     port, engine, memory, cpus, running limit, image
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
@@ -204,6 +206,22 @@ yawble up
 ```
 
 `NAME=value` on the command line is accepted with a warning, because the shell keeps it in its history. Names starting with `HARNESS_` are refused (the platform's own credentials never come from this file). The values live in `env` in yawble's config folder (`%AppData%\yawble` on Windows, `~/Library/Application Support/yawble` on macOS, `~/.config/yawble` on Linux), readable only by you. For `GH_TOKEN` a fine-grained token with read and write on Contents and Pull requests for the repositories your teams use is safer than a `gh` login token, which ends when you log out of `gh`. `yawble doctor` asks GitHub whether `GH_TOKEN` still works and says so when GitHub rejects it. A sign-in done inside the product (an agent's own login in a Concierge terminal) is kept on the data volume and needs no secret here.
+
+## Issued agent credentials
+
+Besides signing in through the shared home, a preset can sign in with a credential issued to it. The credential is stored once per CLI command (`claude`, `codex`, `grok`, `copilot`) and shared by every preset that runs that command; whether a preset uses it is the preset's own source, `home` (the default) or `issued`:
+
+```sh
+yawble agents credential set claude-headless               # asks, typing hidden; stored for claude
+printf '%s\n' "$CODEX_KEY" | yawble agents credential set codex   # the first line of stdin
+yawble agents credential set copilot --token               # a token rather than an API key
+yawble agents source claude-headless issued                # this preset now uses it; claude is unchanged
+yawble agents credential clear claude                      # every preset that runs claude loses it
+```
+
+The value is never taken from the command line: a second argument, or `<preset>=<value>`, is refused and nothing is sent. It travels to the instance on stdin, into a request file only the Host can read, which the Host deletes before acting; yawble waits 60 seconds for the answer and withdraws the request if none comes. Nothing prints the value: the answer is the command, and who set it and when (`operator` for this CLI). `--token` sends the token kind (Claude's `CLAUDE_CODE_OAUTH_TOKEN`, Copilot's `COPILOT_GITHUB_TOKEN`); without it the value is an API key, and the Host refuses a kind the preset does not declare. `yawble agents` and `yawble doctor` show each preset's source, `home` or `issued (set / NOT set)`; under `issued` with nothing set, the hint is `yawble agents credential set <preset>`, and that preset's member runs do not start until it is set. Copilot refuses to start when `COPILOT_GITHUB_TOKEN`, `GH_TOKEN` or `GITHUB_TOKEN` holds a classic `ghp_` token - the team's git `GH_TOKEN` included - so the Host refuses a classic token for Copilot; use a fine-grained one, for git too.
+
+You are responsible for your provider's terms when one credential is used by many runs.
 
 ## Updating, remote access, uninstalling
 
