@@ -22,6 +22,12 @@ public sealed class ControlRefusedException(string sentence) : Exception(sentenc
 /// returns <see cref="RefusedExitCode"/>, so a worker that can never be taken does not knock forever.
 /// </para>
 /// <para>
+/// GIVES UP, when given a time: with no welcomed connection for that long - counted from the start, or
+/// from the drop of the last connection that was welcomed - <see cref="RunAsync"/> returns
+/// <see cref="GaveUpExitCode"/>, so the engine's restart policy starts the worker again. On Docker a
+/// worker shares control's network namespace, and one that outlived control's restart is in a dead one.
+/// </para>
+/// <para>
 /// THE OUTBOX IS BOUNDED (<see cref="OutboxLimit"/> events or <see cref="OutboxBytes"/>). Past it this
 /// worker can no longer prove what control saw, so it starts a new session and stops every run it
 /// has: control takes the old session's runs as lost with their worker.
@@ -31,6 +37,9 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
 {
     /// <summary>What a worker process exits with when control refused it.</summary>
     public const int RefusedExitCode = 3;
+
+    /// <summary>What a worker process exits with when control did not answer for its give-up time.</summary>
+    public const int GaveUpExitCode = 4;
 
     public const int OutboxLimit = 10_000;
 
@@ -47,6 +56,8 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
     private readonly ILogger? _log;
     private readonly int _outboxLimit;
     private readonly long _outboxBytes;
+    private readonly TimeSpan? _giveUp;
+    private readonly string _control;
 
     private readonly Lock _gate = new();
     private readonly LinkedList<(WorkerEnvelope Envelope, long Bytes)> _outbox = new();
@@ -68,7 +79,9 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
         TimeProvider? clock = null,
         ILogger? log = null,
         int outboxLimit = OutboxLimit,
-        long outboxBytes = OutboxBytes)
+        long outboxBytes = OutboxBytes,
+        TimeSpan? giveUp = null,
+        string? control = null)
     {
         _id = id;
         _version = version;
@@ -79,6 +92,8 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
         _log = log;
         _outboxLimit = outboxLimit;
         _outboxBytes = outboxBytes;
+        _giveUp = giveUp is { } after && after > TimeSpan.Zero ? after : null;
+        _control = control ?? "control";
     }
 
     /// <summary>This worker process's session: new at each start, and when it gives up what it could not prove.</summary>
@@ -96,8 +111,42 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
     /// <summary>Takes a person's keystrokes for a terminal: the worker's own <c>Input</c>. Called as they arrive, outside the command queue.</summary>
     public Action<StreamInput> Input { get; set; } = _ => { };
 
-    /// <summary>What control's welcome said to run by.</summary>
+    /// <summary>What control's welcome, or a later settings frame, said to run by.</summary>
     public Action<RunWorkerSettings> Settings { get; set; } = _ => { };
+
+    /// <summary>
+    /// Told true when control welcomed this worker and at every keep-alive it answers, false when the
+    /// connection drops: what the worker's health file follows.
+    /// </summary>
+    public Action<bool> Alive { get; set; } = _ => { };
+
+    /// <summary>Whether this worker takes no new run; said in every hello.</summary>
+    public bool Draining
+    {
+        get
+        {
+            lock (_gate) return _draining;
+        }
+    }
+
+    private bool _draining;
+
+    /// <summary>Starts or ends draining, and tells control now when connected (else the next hello does).</summary>
+    public async Task SetDrainingAsync(bool draining)
+    {
+        WorkerSocket? socket;
+        lock (_gate)
+        {
+            if (_draining == draining) return;
+            _draining = draining;
+            socket = _socket;
+        }
+
+        _log?.LogInformation(draining
+            ? "This worker is draining: it takes no new run, and the runs it has go on."
+            : "This worker is no longer draining: it takes runs again.");
+        if (socket is not null) await AnswerAsync(socket, new WorkerDraining(draining));
+    }
 
     /// <summary>How many times a connection was opened, for a test that counts them.</summary>
     public int Connects => Volatile.Read(ref _connects);
@@ -127,6 +176,7 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
     public async Task<int> RunAsync(CancellationToken ct)
     {
         var attempt = 0;
+        var contact = _clock.GetUtcNow();
 
         while (!ct.IsCancellationRequested)
         {
@@ -143,6 +193,7 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
             }
             catch (Exception exception) when (!ct.IsCancellationRequested)
             {
+                if (GaveUp(contact)) return GaveUpExitCode;
                 var wait = Backoff[Math.Min(attempt++, Backoff.Length - 1)];
                 _log?.LogWarning("Could not reach control ({Message}); trying again in {Seconds} s.", exception.Message, wait.TotalSeconds);
                 if (!await WaitAsync(wait, ct)) break;
@@ -156,13 +207,31 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
                 return RefusedExitCode;
             }
 
-            if (welcomed) attempt = 0;
+            if (welcomed)
+            {
+                attempt = 0;
+                contact = _clock.GetUtcNow();
+            }
+            else if (GaveUp(contact))
+            {
+                return GaveUpExitCode;
+            }
+
             var delay = Backoff[Math.Min(attempt++, Backoff.Length - 1)];
             _log?.LogWarning("The connection to control dropped; connecting again in {Seconds} s.", delay.TotalSeconds);
             if (!await WaitAsync(delay, ct)) break;
         }
 
         return 0;
+    }
+
+    /// <summary>Whether the give-up time has passed since <paramref name="contact"/>, said once when it has.</summary>
+    private bool GaveUp(DateTimeOffset contact)
+    {
+        if (_giveUp is not { } after || _clock.GetUtcNow() - contact < after) return false;
+
+        _log?.LogError("No answer from control at {Control} for {Seconds} s; this worker exits so the engine starts it again.", _control, (int)after.TotalSeconds);
+        return true;
     }
 
     public async Task PublishAsync(WorkerEnvelope envelope, CancellationToken ct = default)
@@ -220,8 +289,9 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
         try
         {
             long last;
-            lock (_gate) last = _lastSeq;
-            await socket.SendAsync(new WorkerHello(_id, _version, Session, nonce, _capacity(), OpenRuns(), last), ct);
+            bool draining;
+            lock (_gate) (last, draining) = (_lastSeq, _draining);
+            await socket.SendAsync(new WorkerHello(_id, _version, Session, nonce, _capacity(), OpenRuns(), last, draining), ct);
 
             switch (await socket.ReceiveAsync(ct))
             {
@@ -249,6 +319,8 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
             _sent = welcome.HandledSeq;
             _socket = socket;
         }
+
+        Alive(true);
 
         // What control has not handled goes first, in order; then this worker says it takes runs, once.
         await FlushAsync();
@@ -286,6 +358,11 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
 
                     case PingFrame ping:
                         _ = AnswerAsync(socket, new PongFrame(ping.N));
+                        Alive(true);
+                        break;
+
+                    case WorkerSettingsFrame changed:
+                        Settings(changed.Settings);
                         break;
 
                     case HandledFrame handled:
@@ -311,6 +388,7 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
                 if (ReferenceEquals(_socket, socket)) _socket = null;
             }
 
+            Alive(false);
             commands.Writer.TryComplete();
             await applying;
         }

@@ -147,6 +147,7 @@ public sealed class WorkerConnections
                 remote = new RemoteWorker(
                     new WorkerInfo(hello.Worker, hello.Version, hello.Capacity.Cpus, hello.Capacity.MemoryLimitBytes, _clock.GetUtcNow()),
                     hello.Session, _control, _timings, Dropped, Gone, _clock, _log, _streams);
+                remote.DrainingChanged += DrainingChanged;
                 _workers[hello.Worker] = remote;
             }
         }
@@ -183,6 +184,10 @@ public sealed class WorkerConnections
             _pool.Join(remote, remote.Info);
         }
 
+        // A drain the worker was asked for survives its reconnect: its hello says so.
+        remote.Draining = hello.Draining;
+        _pool.Drain(remote.Id, hello.Draining);
+
         _log?.LogInformation("Worker {Worker} {How} (version {Version}, session {Session}).", remote.Id, back ? "is back" : "connected", hello.Version, hello.Session);
         _wip.WorkersChanged();
         Changed?.Invoke();
@@ -218,6 +223,32 @@ public sealed class WorkerConnections
                 // Gone again: the run went with it.
             }
         }
+    }
+
+    /// <summary>
+    /// Tells every connected worker the figures it runs by, now: a setting they are built from changed.
+    /// A worker not connected at this moment gets them in its next welcome.
+    /// </summary>
+    public async Task SettingsChangedAsync()
+    {
+        foreach (var worker in Workers().Where(w => !w.Gone && !w.Dropped))
+        {
+            await worker.SendSettingsAsync(_settings(worker.Info));
+        }
+    }
+
+    private void DrainingChanged(RemoteWorker remote)
+    {
+        lock (_gate)
+        {
+            if (_stopping || !_workers.TryGetValue(remote.Id, out var current) || !ReferenceEquals(current, remote)) return;
+        }
+
+        _pool.Drain(remote.Id, remote.Draining);
+        _log?.LogInformation(remote.Draining
+            ? "Worker {Worker} is draining: nothing new is placed on it, and its runs go on."
+            : "Worker {Worker} is no longer draining.", remote.Id);
+        Changed?.Invoke();
     }
 
     private void Dropped(RemoteWorker remote)

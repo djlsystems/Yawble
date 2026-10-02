@@ -78,12 +78,17 @@ internal sealed class ProcessBed : IAsyncDisposable
 
     /// <summary>
     /// Control on a free loopback port, bootstrapped with one person signed in; under a prefix (another
-    /// user, which must be able to write <see cref="Root"/>) and with more environment, when given.
+    /// user, which must be able to write <see cref="Root"/>) and with more environment, when given. With
+    /// <paramref name="keyFile"/> the worker key is not on the command line: control reads it from that
+    /// file (HARNESS_WORKER_KEY_FILE), as it does in an image.
     /// </summary>
     public async Task StartControlAsync(
-        int graceSeconds = 2, int keepAliveSeconds = 1, IReadOnlyList<string>? prefix = null, IReadOnlyDictionary<string, string>? more = null)
+        int graceSeconds = 2, int keepAliveSeconds = 1, IReadOnlyList<string>? prefix = null, IReadOnlyDictionary<string, string>? more = null,
+        string? keyFile = null)
     {
         var environment = (more ?? new Dictionary<string, string>()).ToDictionary(p => p.Key, string? (p) => p.Value);
+        if (keyFile is not null) environment[WorkerKeyFile.FileVariable] = keyFile;
+        string[] key = keyFile is null ? ["--Workers:Key", Key] : [];
 
         for (var attempt = 0; ; attempt++)
         {
@@ -91,7 +96,7 @@ internal sealed class ProcessBed : IAsyncDisposable
             Url = new Uri($"http://127.0.0.1:{port}");
             Control = Start("control", [
                 .. prefix ?? [], "dotnet", Dll, "--Role", "control", "--DataRoot", Root, "--urls", Url.ToString().TrimEnd('/'),
-                "--Workers:Key", Key, "--Workers:GraceSeconds", $"{graceSeconds}", "--Workers:KeepAliveSeconds", $"{keepAliveSeconds}",
+                .. key, "--Workers:GraceSeconds", $"{graceSeconds}", "--Workers:KeepAliveSeconds", $"{keepAliveSeconds}",
 
                 // Its own lines, not the request log of the bed's polling, are what a failure shows.
                 "--Logging:LogLevel:Microsoft.AspNetCore", "Warning",
@@ -112,7 +117,7 @@ internal sealed class ProcessBed : IAsyncDisposable
     {
         var environment = new Dictionary<string, string?>
         {
-            ["HARNESS_CONTROL_URL"] = Url.ToString().TrimEnd('/'),
+            ["HARNESS_CONTROL_URL"] = Url?.ToString().TrimEnd('/'),
             ["HARNESS_WORKER_KEY"] = key ?? Key,
             ["HARNESS_WORKER_ID"] = id,
 
