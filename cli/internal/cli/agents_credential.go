@@ -69,7 +69,7 @@ func newAgentsCredentialCommand(deps Deps) *cobra.Command {
 			"provider's terms when one credential is used by many runs.",
 		Example: "  yawble agents credential set claude-headless          # asks, typing hidden\n" +
 			"  printf '%s\\n' \"$KEY\" | yawble agents credential set codex\n" +
-			"  yawble agents credential set copilot --token\n" +
+			"  yawble agents credential set claude --token          # claude takes an API key or a token\n" +
 			"  yawble agents credential clear claude",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
@@ -94,13 +94,16 @@ func oneName(verb string) cobra.PositionalArgs {
 }
 
 func newAgentsCredentialSet(deps Deps) *cobra.Command {
-	var token bool
+	var token, apiKey bool
 	cmd := &cobra.Command{
 		Use:   "set <preset|command>",
 		Short: "Set or replace the credential of a preset's command, from a hidden prompt or stdin",
 		Args:  oneName("set"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+			if token && apiKey {
+				return UsageError{"--token and --api-key are two kinds; give one"}
+			}
 			value, err := readCredentialValue(deps, name)
 			if err != nil {
 				return err
@@ -112,12 +115,20 @@ func newAgentsCredentialSet(deps Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			kind := "apiKey"
-			if token {
+			// Neither flag leaves the kind to the Host, which takes the only one a CLI declares
+			// (codex, grok, copilot) and asks for one where there are two (claude).
+			kind := ""
+			switch {
+			case token:
 				kind = "token"
+			case apiKey:
+				kind = "apiKey"
 			}
 			body, err := askCredentialHost(cmd.Context(), e, credentialRequest{Action: "set", Agent: name, Kind: kind, Value: value})
 			if err != nil {
+				if kind == "" && strings.Contains(err.Error(), "the kind must be") {
+					return fmt.Errorf("%w Choose it with --api-key or --token", err)
+				}
 				return err
 			}
 			command := body.commandOr(name)
@@ -127,7 +138,8 @@ func newAgentsCredentialSet(deps Deps) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&token, "token", false, "the value is a token (an OAuth or GitHub token) rather than an API key")
+	cmd.Flags().BoolVar(&token, "token", false, "the value is a token (an OAuth or GitHub token); needed only where the CLI takes two kinds")
+	cmd.Flags().BoolVar(&apiKey, "api-key", false, "the value is an API key; needed only where the CLI takes two kinds")
 	return cmd
 }
 

@@ -45,8 +45,18 @@ func (h *credentialHost) answer(req map[string]any) (int, map[string]any) {
 	}
 	switch req["action"] {
 	case "set":
-		if req["kind"] == "apiKey" && command == "copilot" {
-			return 400, map[string]any{"error": "copilot declares no apiKey credential; set a token with --token"}
+		// As the Host takes it: an omitted kind is the only one a CLI declares; claude declares two.
+		kind, _ := req["kind"].(string)
+		if kind == "" && command == "copilot" {
+			kind = "token"
+		}
+		switch {
+		case command == "claude" && kind != "apiKey" && kind != "token":
+			return 400, map[string]any{"error": "`claude` takes `apiKey` or `token`, so the kind must be one of those."}
+		case command == "copilot" && kind != "token":
+			return 400, map[string]any{"error": "`copilot` takes `token`, so the kind must be that."}
+		case command == "copilot" && strings.HasPrefix(req["value"].(string), "ghp_"):
+			return 400, map[string]any{"error": "This CLI refuses to start with a credential beginning `ghp_` in COPILOT_GITHUB_TOKEN, so it is not stored."}
 		}
 		h.set[command] = true
 		return 200, map[string]any{"command": command, "set": true, "setBy": "operator", "setAt": "2026-10-02T10:00:00Z"}
@@ -55,7 +65,11 @@ func (h *credentialHost) answer(req map[string]any) (int, map[string]any) {
 		return 200, map[string]any{"command": command, "set": false, "setBy": nil, "setAt": nil}
 	case "source":
 		h.sources[name] = req["source"].(string)
-		return 200, map[string]any{"agent": name, "command": command, "source": req["source"], "set": h.set[command]}
+		var setBy, setAt any
+		if h.set[command] {
+			setBy, setAt = "operator", "2026-10-02T10:00:00Z"
+		}
+		return 200, map[string]any{"agent": name, "command": command, "source": req["source"], "set": h.set[command], "setBy": setBy, "setAt": setAt}
 	}
 	return 400, map[string]any{"error": "unknown action"}
 }
@@ -101,7 +115,7 @@ const secretValue = "sk-ant-api03-not-a-real-value-0123456789"
 
 func TestCredentialSetReadsTheValueFromStdin(t *testing.T) {
 	h := newCredentialHost(t)
-	code, out, errOut := run(t, piped(h, secretValue+"\nsecond line is not read\n"), "agents", "credential", "set", "claude-headless")
+	code, out, errOut := run(t, piped(h, secretValue+"\nsecond line is not read\n"), "agents", "credential", "set", "claude-headless", "--api-key")
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
@@ -129,7 +143,7 @@ func TestCredentialSetAsksAtAHiddenPromptOnATerminal(t *testing.T) {
 	deps.Interactive = true
 	var asked string
 	deps.ReadSecret = func(prompt string) (string, error) { asked = prompt; return secretValue, nil }
-	code, out, errOut := run(t, deps, "agents", "credential", "set", "claude")
+	code, out, errOut := run(t, deps, "agents", "credential", "set", "claude", "--api-key")
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
@@ -163,7 +177,7 @@ func TestCredentialSetRefusesAValueInArgv(t *testing.T) {
 
 func TestCredentialRequestTravelsOnStdinNeverInExecArgs(t *testing.T) {
 	h := newCredentialHost(t)
-	code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude-headless")
+	code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude-headless", "--api-key")
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
@@ -202,11 +216,46 @@ func TestCredentialSetWithTokenSendsTheTokenKind(t *testing.T) {
 	}
 }
 
+// A CLI that declares one kind needs no flag; one that declares two is asked which.
+func TestCredentialSetLeavesTheKindToTheHostWithoutAFlag(t *testing.T) {
+	h := newCredentialHost(t)
+	code, out, errOut := run(t, piped(h, "github_pat_0123456789\n"), "agents", "credential", "set", "copilot-headless")
+	if code != 0 || len(h.requests) != 1 {
+		t.Fatalf("exit %d %s %s: %+v", code, out, errOut, h.requests)
+	}
+	if _, sent := h.requests[0]["kind"]; sent {
+		t.Errorf("a kind was sent with neither flag: %+v", h.requests[0])
+	}
+	if !h.set["copilot"] || !strings.Contains(out, "The copilot credential is set") {
+		t.Errorf("store %+v output %q", h.set, out)
+	}
+
+	h = newCredentialHost(t)
+	code, _, errOut = run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude")
+	if code != 1 || !strings.Contains(errOut, "the kind must be one of those") || !strings.Contains(errOut, "--api-key or --token") {
+		t.Errorf("exit %d stderr %q", code, errOut)
+	}
+
+	code, _, errOut = run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude", "--token", "--api-key")
+	if code != 2 || len(h.requests) != 1 {
+		t.Errorf("both flags: exit %d stderr %q requests %d", code, errOut, len(h.requests))
+	}
+}
+
 func TestCredentialSetShowsTheHostsRefusal(t *testing.T) {
 	h := newCredentialHost(t)
-	code, _, errOut := run(t, piped(h, "github_pat_0123456789\n"), "agents", "credential", "set", "copilot-headless")
-	if code != 1 || !strings.Contains(errOut, "--token") {
+	code, _, errOut := run(t, piped(h, "github_pat_0123456789\n"), "agents", "credential", "set", "copilot-headless", "--api-key")
+	if code != 1 || !strings.Contains(errOut, "`copilot` takes `token`, so the kind must be that.") {
 		t.Errorf("exit %d stderr %q", code, errOut)
+	}
+	// A classic token Copilot would not start with: the Host's 400, as it words it, and nothing stored.
+	h = newCredentialHost(t)
+	code, _, errOut = run(t, piped(h, "ghp_not-a-real-token\n"), "agents", "credential", "set", "copilot-headless")
+	if code != 1 || !strings.Contains(errOut, "refuses to start with a credential beginning `ghp_`") || h.set["copilot"] {
+		t.Errorf("exit %d stderr %q store %+v", code, errOut, h.set)
+	}
+	if strings.Contains(errOut, "not-a-real-token") {
+		t.Errorf("the value was printed: %q", errOut)
 	}
 	h = newCredentialHost(t)
 	code, _, errOut = run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "nobody")
@@ -226,7 +275,7 @@ func TestCredentialSetRefusesAnEmptyValueAndSendsNothing(t *testing.T) {
 // One value per command: set through one preset, cleared through its sibling.
 func TestCredentialClear(t *testing.T) {
 	h := newCredentialHost(t)
-	if code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude-headless"); code != 0 {
+	if code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude-headless", "--api-key"); code != 0 {
 		t.Fatalf("set: exit %d: %s %s", code, out, errOut)
 	}
 	code, out, errOut := run(t, stubbed(h), "agents", "credential", "clear", "claude")
@@ -266,6 +315,15 @@ func TestCredentialSourceSwitch(t *testing.T) {
 	code, _, errOut = run(t, stubbed(h), "agents", "source", "claude-headless", "elsewhere")
 	if code != 2 || !strings.Contains(errOut, "home or issued") || len(h.requests) != 2 {
 		t.Errorf("exit %d stderr %q", code, errOut)
+	}
+
+	// The source body carries the command's state: once it is set, issued has nothing to warn of.
+	if code, out, errOut := run(t, piped(h, secretValue+"\n"), "agents", "credential", "set", "claude", "--api-key"); code != 0 {
+		t.Fatalf("set: exit %d: %s %s", code, out, errOut)
+	}
+	code, out, _ = run(t, stubbed(h), "agents", "source", "claude-headless", "issued")
+	if code != 0 || !strings.Contains(out, "its issued credential") || strings.Contains(out, "none is set yet") {
+		t.Errorf("exit %d output %q", code, out)
 	}
 }
 

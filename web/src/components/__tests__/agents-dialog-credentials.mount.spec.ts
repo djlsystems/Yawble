@@ -58,6 +58,7 @@ const claudeDeclaration: IssuedCredentialDeclaration = {
   displaces: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'],
   loginPrecedence: 'credential',
   measuredWith: '2.1.287',
+  homeVariables: ['CLAUDE_CONFIG_DIR'],
 };
 
 const grokDeclaration: IssuedCredentialDeclaration = {
@@ -65,7 +66,19 @@ const grokDeclaration: IssuedCredentialDeclaration = {
   displaces: ['XAI_API_KEY', 'GROK_CODE_XAI_API_KEY'],
   loginPrecedence: 'login',
   measuredWith: '1.0.0',
+  homeVariables: ['GROK_HOME'],
 };
+
+// Copilot's token kind refuses a classic personal access token: the Host answers 400 for one.
+const copilotDeclaration: IssuedCredentialDeclaration = {
+  kinds: [{ kind: 'token', variable: 'COPILOT_GITHUB_TOKEN', refusedPrefixes: ['ghp_'] }],
+  displaces: ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'],
+  loginPrecedence: 'credential',
+  measuredWith: '0.0.400',
+  homeVariables: ['COPILOT_HOME'],
+};
+
+const CopilotRefusal = 'This CLI refuses to start with a credential beginning `ghp_` in COPILOT_GITHUB_TOKEN, so it is not stored.';
 
 const preset = (name: string, fileName: string, mode: 'Headless' | 'Interactive', builtIn = true): Agent => ({
   name,
@@ -81,7 +94,10 @@ const agents: Agent[] = [
   preset('claude', 'claude', 'Interactive'),
   preset('claude-headless', 'claude', 'Headless'),
   preset('grok', 'grok', 'Interactive'),
+  preset('copilot-headless', 'copilot', 'Headless'),
   preset('my-model', 'my-cli', 'Headless', false),
+  // Hidden: the Host lists only the visible presets, so this one has no credentials entry.
+  preset('hidden-model', 'claude', 'Headless'),
 ];
 
 const entry = (agent: string, command: string, sharedWith: string[], declaration: IssuedCredentialDeclaration | null,
@@ -102,6 +118,7 @@ function credentials(over: Partial<AgentCredential> = {}): AgentCredential[] {
     entry('claude', 'claude', ['claude-headless'], claudeDeclaration, over),
     entry('claude-headless', 'claude', ['claude'], claudeDeclaration, over),
     entry('grok', 'grok', [], grokDeclaration),
+    entry('copilot-headless', 'copilot', [], copilotDeclaration),
     entry('my-model', 'my-cli', [], null),
   ];
 }
@@ -258,6 +275,33 @@ describe('AgentsDialog credentials, mounted', () => {
 
     expect(document.body.querySelector('[data-credential-problem]')?.textContent).toContain('line break');
     expect(bodyText()).not.toContain(Secret);
+
+    wrapper.unmount();
+  });
+
+  it('shows the Host\'s 400 for a value the CLI refuses, and stores nothing', async () => {
+    setAgentCredential.mockRejectedValue(new Error(CopilotRefusal));
+    const wrapper = await mountDialog(AgentsDialog);
+
+    await openEditor('copilot-headless');
+    await type('Token', 'ghp_not-a-real-token');
+    button('Save').click();
+    await settle();
+
+    expect(setAgentCredential.mock.calls[0]).toEqual(['copilot-headless', { kind: 'token', value: 'ghp_not-a-real-token' }]);
+    expect(document.body.querySelector('[data-credential-problem]')?.textContent).toContain(CopilotRefusal);
+    expect(document.body.querySelector('[data-credential-editor]')).not.toBeNull();
+    expect(stateOf('copilot-headless')).toContain('not set');
+
+    wrapper.unmount();
+  });
+
+  it('shows no credential block for a preset the credentials list leaves out', async () => {
+    const wrapper = await mountDialog(AgentsDialog);
+
+    expect(document.body.querySelector('[data-agent-credential="hidden-model"]')).toBeNull();
+    expect(document.body.querySelector('button[aria-label="Credential hidden-model"]')).toBeNull();
+    expect(stateOf('claude')).toContain('not set');
 
     wrapper.unmount();
   });

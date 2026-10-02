@@ -1794,6 +1794,9 @@ export type AgentCredentialSource = 'home' | 'issued'
 export interface IssuedCredentialKind {
   kind: 'apiKey' | 'token'
   variable: string
+  /** Beginnings of a value this CLI refuses to start with. The Host answers 400 for one, with a
+   *  sentence the screen shows as it is. Absent or null for none. */
+  refusedPrefixes?: string[] | null
 }
 
 /**
@@ -1805,6 +1808,8 @@ export interface IssuedCredentialDeclaration {
   displaces: string[]
   loginPrecedence: 'credential' | 'login' | 'unmeasured'
   measuredWith: string
+  /** The CLI's own config-directory variables, removed from an issued run. Display only. */
+  homeVariables?: string[] | null
 }
 
 /**

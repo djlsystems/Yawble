@@ -13,10 +13,11 @@ export type TenantSettingTab = 'admission' | 'spend' | 'concierge' | 'sweeps' | 
 /**
  * How a field is typed and checked. `lanes` is `kanban.wipLimits`, edited one lane at a time;
  * `packages` is a list of OS package names typed into one box, separated by spaces or commas.
- * `tagMap` is `agents.tags`, preset name to its list of tags, edited from the Agents screen
- * rather than this dialog.
+ * `tagMap` is `agents.tags`, preset name to its list of tags, and `sourceMap` is
+ * `agents.credentialSource`, preset name to `home` or `issued`. Both are edited from the Agents
+ * screen rather than this dialog, which lists neither.
  */
-export type TenantSettingKind = 'count' | 'duration' | 'theme' | 'lanes' | 'packages' | 'tagMap'
+export type TenantSettingKind = 'count' | 'duration' | 'theme' | 'lanes' | 'packages' | 'tagMap' | 'sourceMap'
 
 export interface TenantSettingField {
   name: string
