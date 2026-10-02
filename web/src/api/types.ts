@@ -407,6 +407,66 @@ export interface DocumentsFolder {
 }
 
 /** What a clone carried, and what it could not. The team exists either way. */
+/**
+ * One row inside a documents folder. Here rather than in `api/documents.ts` since the answers of
+ * the change routes carry it too; that file re-exports it.
+ */
+export interface DocumentEntry {
+  name: string
+  path: string
+  isFolder: boolean
+  size: number
+  modifiedAt: string
+  /** How many things are in a folder. What makes it removable, so the UI can say so up front. */
+  children: number
+}
+
+/**
+ * A NAME CLASH ON MOVE, COPY OR UPLOAD, answered per item. Absent means "ask": the server answers
+ * 409 with `clashes` and does nothing, and the person chooses.
+ */
+export type OnClash = 'keep-both' | 'replace' | 'skip'
+
+export interface DocumentsRenameItem { path: string; name: string }
+
+export interface DocumentsTransferItem { path: string; onClash?: OnClash }
+
+/** A move or copy: every item from the folder the route names, into `to`. */
+export interface DocumentsTransfer {
+  to: { folder: DocumentsFolderKey; path: string }
+  items: DocumentsTransferItem[]
+}
+
+export interface DocumentLeft { path: string; reason: string }
+
+/** One item of a rename, move or copy, as the server did it. `to` is relative to the destination
+ *  folder, with any keep-both name already applied. */
+export interface DocumentsChangeResult {
+  from: string
+  to: string
+  outcome: 'done' | 'skipped' | 'failed'
+  reason?: string | null
+  notCopied?: DocumentLeft[] | null
+}
+
+export interface DocumentsClash { from: string; to: string; isFolder: boolean }
+
+/**
+ * WHAT A RENAME, MOVE OR COPY ANSWERED, as data rather than a throw: every item done or skipped,
+ * a clash nobody chose for (nothing done), or a batch that partly failed (the sentence and every
+ * item). A plain refusal is still thrown with the server's sentence.
+ */
+export type DocumentsChangeAnswer =
+  | { kind: 'ok'; results: DocumentsChangeResult[] }
+  | { kind: 'clash'; error: string; clashes: DocumentsClash[] }
+  | { kind: 'partial'; error: string; results: DocumentsChangeResult[] }
+
+/** What an upload that named `onClash` answered. */
+export type DocumentsUploadAnswer =
+  | { kind: 'saved'; entry: DocumentEntry }
+  | { kind: 'skipped'; path: string }
+  | { kind: 'clash'; error: string; clashes: DocumentsClash[] }
+
 export interface TeamCloned {
   team: Team
   repos: number

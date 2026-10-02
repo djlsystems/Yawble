@@ -690,14 +690,14 @@ const rowBusy = computed(
       <q-card-section v-if="error" class="q-py-sm text-negative">{{ error }}</q-card-section>
 
       <q-card-section class="agents-list">
-        <div v-if="filteredAgents.length > 0" class="agent-tiles">
+        <div v-if="filteredAgents.length > 0" class="os-tiles agent-tiles">
           <div
             v-for="agent in filteredAgents"
             :key="agent.name"
-            class="agent-tile"
+            class="os-tile agent-tile"
             :data-agent-tile="agent.name"
           >
-            <div class="agent-tile-head">
+            <div class="os-tile-head agent-tile-head">
               <q-icon name="terminal" size="18px" aria-hidden="true" />
               <span class="mono agent-name text-weight-medium">{{ agent.name }}</span>
               <q-badge
@@ -707,13 +707,13 @@ const rowBusy = computed(
                 class="agent-kind"
               />
             </div>
-            <div class="agent-tile-line os-text-muted">
+            <div class="os-tile-line agent-tile-line os-text-muted">
               {{ captionFor(agent) }} · <span class="mono">{{ agent.launch?.fileName }}</span>
             </div>
 
             <!-- TAGS: the ones hiring uses, whose they are, and on a built-in the build's beside
                  the operator's so a person can see what Reset would bring back. -->
-            <div class="agent-tile-line agent-tags-line">
+            <div class="os-tile-line agent-tile-line agent-tags-line">
               <span v-if="tagsText(agent.tags)">{{ tagsText(agent.tags) }}</span>
               <span v-else class="os-text-muted">no tags</span>
               <template v-if="isBuiltIn(agent)">
@@ -724,14 +724,14 @@ const rowBusy = computed(
               </template>
             </div>
 
-            <div class="agent-tile-line">
+            <div class="os-tile-line agent-tile-line">
               <span v-if="reportsUsage(agent)" class="text-positive">reports usage</span>
               <span v-else class="os-text-muted">does not report usage</span>
             </div>
 
             <!-- THE STATE, ON EVERY TILE. TEXT PLUS ICON, NEVER COLOUR ALONE. Material SYMBOLS names:
                  the app loads Symbols Outlined only. -->
-            <div class="agent-tile-line">
+            <div class="os-tile-line agent-tile-line">
               <q-icon :name="statusOf(agent).icon" size="14px" class="q-mr-xs" aria-hidden="true" />
               <span
                 :class="{
@@ -743,7 +743,7 @@ const rowBusy = computed(
 
             <!-- THE CLI'S VERSION, on a built-in: what the Host's CLI version record says, when it
                  last changed and who brought it. "version not known" is never a guess. -->
-            <div v-if="isBuiltIn(agent)" class="agent-tile-line agent-version-line">
+            <div v-if="isBuiltIn(agent)" class="os-tile-line agent-tile-line agent-version-line">
               <q-icon name="sync" size="14px" class="q-mr-xs" aria-hidden="true" />
               <span v-if="versionOf(agent).version" class="mono agent-version">{{ versionOf(agent).version }}</span>
               <span v-else class="os-text-muted agent-version">version not known</span>
@@ -755,7 +755,7 @@ const rowBusy = computed(
                  updating, or what it came to. A waiting one can be cancelled; a running one cannot. -->
             <div
               v-if="outcomeOf(agent)"
-              class="agent-tile-line agent-version-outcome"
+              class="os-tile-line agent-tile-line agent-version-outcome"
               :data-phase="updateStateOf(agent)?.phase"
             >
               <q-spinner v-if="inGate(agent)" size="12px" class="q-mr-xs" aria-hidden="true" />
@@ -773,13 +773,13 @@ const rowBusy = computed(
                 @click="cancelUpdate(agent)"
               />
             </div>
-            <div v-if="heldOf(agent)" class="agent-tile-line os-text-muted agent-update-held">
+            <div v-if="heldOf(agent)" class="os-tile-line agent-tile-line os-text-muted agent-update-held">
               {{ heldOf(agent) }}
             </div>
 
             <!-- The remedy, and ONLY where there is something to remedy; the link is an addition,
                  never a substitute, and nothing composes one from the preset's name. -->
-            <div v-if="missing(agent)" class="agent-tile-line agent-install-help">
+            <div v-if="missing(agent)" class="os-tile-line agent-tile-line agent-install-help">
               {{ guidanceFor(agent).text }}
               <a
                 v-if="guidanceFor(agent).url"
@@ -791,7 +791,7 @@ const rowBusy = computed(
             </div>
 
             <!-- Signed in or not. "Not measured" is grey and carries no warning glyph. -->
-            <div class="agent-tile-line agent-auth-line">
+            <div class="os-tile-line agent-tile-line agent-auth-line">
               <q-icon :name="authOf(agent).icon" size="14px" class="q-mr-xs" aria-hidden="true" />
               <span
                 :class="{
@@ -808,7 +808,7 @@ const rowBusy = computed(
                  preset that runs it: who set it and when, never a value. -->
             <div
               v-if="credentialOf(agent)"
-              class="agent-tile-line agent-credential"
+              class="os-tile-line agent-tile-line agent-credential"
               :data-agent-credential="agent.name"
             >
               <div class="agent-source">
@@ -857,7 +857,7 @@ const rowBusy = computed(
 
             <!-- What this preset's CLI would load, as the Host listed it. Its gaps are counted here
                  and explained in Details, where they have room to say what they mean. -->
-            <div v-if="toolsOf(agent)" class="agent-tile-line agent-tools-line">
+            <div v-if="toolsOf(agent)" class="os-tile-line agent-tile-line agent-tools-line">
               <q-icon :name="toolsOf(agent)!.icon" size="14px" class="q-mr-xs" aria-hidden="true" />
               <span
                 :class="{
@@ -873,7 +873,7 @@ const rowBusy = computed(
                 {{ toolsReportOf(agent)?.detail }}
               </span>
             </div>
-            <div v-if="gapCount(agent) > 0" class="agent-tile-line os-text-muted agent-gap-count">
+            <div v-if="gapCount(agent) > 0" class="os-tile-line agent-tile-line os-text-muted agent-gap-count">
               {{ gapCount(agent) === 1 ? '1 gap' : `${gapCount(agent)} gaps` }}, explained in Details
             </div>
 
@@ -1098,33 +1098,9 @@ const rowBusy = computed(
 }
 
 /* WRAPPED TILES: as many columns as fit, each at least wide enough for a version line. */
+/* The grid itself is `os-tiles` (css/tiles.scss); this only says how narrow a column may get. */
 .agent-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
-  gap: 12px;
-}
-
-.agent-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px 14px 8px;
-  border: 1px solid var(--os-rule-strong);
-  border-radius: 6px;
-  min-width: 0;
-}
-
-.agent-tile-line {
-  font-size: 12px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.agent-tile-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  --os-tile-min: 19rem;
 }
 
 .agent-tile-actions {

@@ -5,7 +5,7 @@ import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
 import { useConsoleStore } from '../stores/console';
 import { useKanbanStore } from '../stores/kanban';
-import type { TeamId } from '../api/types';
+import { asDocumentsFolderKey, type DocumentsFolderKey, type TeamId } from '../api/types';
 import { useSessionStore } from '../stores/session';
 import { useDisplayStore } from '../stores/display';
 import { useTerminalDisplayStore } from '../stores/terminalDisplay';
@@ -41,6 +41,7 @@ import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
 import {
   ConnectionsAction,
   DocumentsAction,
+  TeamDocumentsAction,
   OutcomesAction,
   PluginsAction,
   RepositoriesAction,
@@ -109,8 +110,9 @@ const teamSettingsTab = ref<'general' | 'members'>('general');
 const gitOpen = ref(false);
 const documentsOpen = ref(false);
 
-/** Which team's folder the documents manager should open on, or null for its own default. Set by
- *  the ribbon row that was clicked; documents are not the active team's. */
+/** Which team's folder the documents manager opens on: the active team's from Active Team ›
+ *  Documents, or null (the documents root, every team's folder) from Projects › Documents. */
+const documentsStart = ref<DocumentsFolderKey | null>(null);
 const usersOpen = ref(false);
 const agentsOpen = ref(false);
 
@@ -194,7 +196,12 @@ function toggleConcierge() {
  */
 const terminalDisplay = useTerminalDisplayStore();
 const conciergeFullScreen = computed(() => terminalDisplay.maximised || $q.screen.lt.sm);
-const conciergeFabShown = computed(() => !(conciergeOpen.value && conciergeFullScreen.value));
+/** The documents explorer full screen (maximised, or a phone) covers the corner too, and the
+ *  bubble over it hid the end of its status bar and the last row's menu. It has its own close. */
+const documentsFullScreen = ref(false);
+const conciergeFabShown = computed(
+  () => !(conciergeOpen.value && conciergeFullScreen.value) && !(documentsOpen.value && documentsFullScreen.value),
+);
 
 watch(conciergeOpen, (isOpen) => {
   if (isOpen) {
@@ -268,7 +275,9 @@ function onRibbonAction(action: string) {
   else if (action === TeamSitesAction) openSites(board.activeWorkTeamId || null);
   // UNPREFIXED, deliberately, and for the same reasons as `backlog` below - see `lib/ribbon.ts`.
   // Documents live under one tenant root, so this needs no active team.
-  else if (action === DocumentsAction) documentsOpen.value = true;
+  else if (action === DocumentsAction) openDocuments(null);
+  // The same explorer, opened at the active team's own folder rather than the root.
+  else if (action === TeamDocumentsAction) openDocuments(board.activeWorkTeamId ? asDocumentsFolderKey(board.activeWorkTeamId) : null);
   // NOT A DIALOG - this action selects the permanent Teams tab, the same door `IndexPage`'s own
   // Teams tab click uses.
   else if (action === 'admin-teams') board.showTeamsView();
@@ -293,6 +302,12 @@ function onRibbonAction(action: string) {
   // NOT A DIALOG: an address, `#/solutions`, so a tile's Manage, the board header and the
   // Concierge reach the same screens. Unprefixed: it needs no active team.
   else if (action === SolutionsAction) void router.push('/solutions');
+}
+
+/** The documents explorer, at the root or at one team's folder. */
+function openDocuments(start: DocumentsFolderKey | null) {
+  documentsStart.value = start;
+  documentsOpen.value = true;
 }
 
 /** Every team's sites, or one team's. */
@@ -542,7 +557,7 @@ async function signOut() {
       :team-id="board.activeWorkTeam.id"
       :any-member-running="board.activeWorkTeam.containers.some((c) => c.state === 'Running')"
     />
-    <DocumentsDialog v-model="documentsOpen" />
+    <DocumentsDialog v-model="documentsOpen" v-model:full-screen="documentsFullScreen" :start="documentsStart" />
     <UsersDialog v-model="usersOpen" />
     <AgentsDialog v-model="agentsOpen" />
     <TenantSettingsDialog

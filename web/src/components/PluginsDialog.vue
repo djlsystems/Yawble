@@ -367,16 +367,16 @@ const verdictText = computed(() => {
 
         <!-- ONE TILE PER VERSION, as the Agents screen shows its presets: the Host's verdict on
              the head, what an installed version declares in the body, the actions at the foot. -->
-        <div v-if="shownRows.length > 0" class="plugin-tiles">
+        <div v-if="shownRows.length > 0" class="os-tiles plugin-tiles">
           <div
             v-for="row in shownRows"
             :key="row.key"
-            class="plugin-tile"
+            class="os-tile plugin-tile"
             :data-plugin="row.id"
             :data-plugin-version="row.version ?? ''"
             :data-verdict="row.verdict"
           >
-            <div class="plugin-tile-head">
+            <div class="os-tile-head plugin-tile-head">
               <q-icon name="extension" size="18px" class="plugin-icon" aria-hidden="true" />
               <span class="text-weight-medium">{{ row.name }}</span>
               <span v-if="row.version" class="mono">{{ row.version }}</span>
@@ -384,25 +384,25 @@ const verdictText = computed(() => {
               <q-space />
               <q-badge :color="verdictColor[row.verdict]" :label="verdictLabel[row.verdict]" />
             </div>
-            <div class="plugin-tile-line mono os-text-muted">{{ row.id }}</div>
+            <div class="os-tile-line plugin-tile-line mono os-text-muted">{{ row.id }}</div>
 
-            <div v-if="row.verdict === 'refused'" class="plugin-tile-line text-negative" data-reason>
+            <div v-if="row.verdict === 'refused'" class="os-tile-line plugin-tile-line text-negative" data-reason>
               {{ row.reason ?? 'The Host gave no reason.' }}
             </div>
 
-            <div v-else-if="row.verdict === 'inactive'" class="plugin-tile-line os-text-muted" data-reason>
+            <div v-else-if="row.verdict === 'inactive'" class="os-tile-line plugin-tile-line os-text-muted" data-reason>
               {{ row.reason ?? 'Kept on disk and not in use: another version of this plugin is active.' }}
             </div>
 
             <template v-else-if="row.verdict === 'installed'">
-              <div v-if="row.plugin.description" class="plugin-tile-line plugin-description q-mt-xs" data-description>{{ row.plugin.description }}</div>
+              <div v-if="row.plugin.description" class="os-tile-line plugin-tile-line plugin-description q-mt-xs" data-description>{{ row.plugin.description }}</div>
 
               <!-- WHAT IT DECLARES, COUNTED: the whole of it is in Details, where a plugin with
                    seventeen settings has the room they need. -->
-              <div class="plugin-tile-line os-text-muted q-mt-xs" data-plugin-summary>{{ declaresSummary(row.plugin) }}</div>
+              <div class="os-tile-line plugin-tile-line os-text-muted q-mt-xs" data-plugin-summary>{{ declaresSummary(row.plugin) }}</div>
 
               <!-- WHO IS HIRED ON IT, on the tile: each a link to that member's settings. -->
-              <div class="plugin-tile-line" data-members-summary>
+              <div class="os-tile-line plugin-tile-line" data-members-summary>
                 <span class="os-text-muted">Members: </span>
                 <template v-if="row.plugin.members.length === 0">None hired</template>
                 <template v-for="(member, index) in row.plugin.members" :key="`${member.team}/${member.member}`">
@@ -687,37 +687,13 @@ const verdictText = computed(() => {
 }
 
 /* WRAPPED TILES, as the Agents screen lays out its presets: as many columns as fit. */
+/* The grid itself is `os-tiles` (css/tiles.scss); this only says how narrow a column may get. */
 .plugin-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
-  gap: 12px;
-}
-
-.plugin-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px 14px 8px;
-  border: 1px solid var(--os-rule-strong);
-  border-radius: 6px;
-  min-width: 0;
-}
-
-.plugin-tile-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  --os-tile-min: 22rem;
 }
 
 .plugin-icon {
   color: var(--os-plugin-accent);
-}
-
-.plugin-tile-line {
-  font-size: 12px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
 }
 
 /* Three lines of the description on the tile; the whole of it is in Details. */

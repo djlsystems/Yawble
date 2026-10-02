@@ -785,12 +785,16 @@ public sealed class FolderRemoval(
         if (remaining is Leftovers leftovers) leftovers.Reasons[path] = Why(ex);
     }
 
-    /// <summary>A person's words for why a delete refused: permission, in use, or the system's own.</summary>
-    private static string Why(Exception ex) => ex switch
+    /// <summary>A person's words for why a delete, move or copy refused: permission, in use, another
+    /// drive, or the system's own.</summary>
+    internal static string Why(Exception ex) => ex switch
     {
         UnauthorizedAccessException => "permission denied",
         IOException io when io.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021)
             || io.Message.Contains("busy", StringComparison.OrdinalIgnoreCase) => "in use",
+        // EXDEV on Unix (its errno is the HResult there), ERROR_NOT_SAME_DEVICE on Windows.
+        IOException io when io.HResult is 18 or unchecked((int)0x80070011)
+            || io.Message.Contains("cross-device", StringComparison.OrdinalIgnoreCase) => "on another drive",
         _ => ex.Message.TrimEnd('.'),
     };
 

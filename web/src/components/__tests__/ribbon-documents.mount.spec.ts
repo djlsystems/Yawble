@@ -35,7 +35,9 @@ vi.mock('../../lib/useAgentInstallations', () => ({
 
 import RibbonBar from '../RibbonBar.vue';
 import RibbonMobileMenu from '../RibbonMobileMenu.vue';
-import { DocumentsAction } from '../../lib/ribbon';
+import { DocumentsAction, TeamDocumentsAction } from '../../lib/ribbon';
+import { useConsoleStore } from '../../stores/console';
+import { asTeamId } from '../../api/types';
 // Importing this module is what installs the Quasar plugin - it registers a `beforeAll` hook at
 // MODULE level, so the import itself is the setup.
 import '../../test/mountQuasar';
@@ -83,9 +85,17 @@ async function render(component: Component): Promise<VueWrapper> {
  * renders wrongly and nothing logs; a `startsWith` finder simply matches nothing, and the failure
  * it produces - "no Documents QItem rendered" - describes a component that is on screen.
  */
+function documentsControls(wrapper: VueWrapper, type: string) {
+  return wrapper.findAllComponents({ name: type }).filter((candidate) => candidate.text().includes('Documents'));
+}
+
+/**
+ * PROJECTS › DOCUMENTS, the last of the two. Active Team › Documents comes first on both surfaces
+ * (the Active Team block is before Projects); it is the shortcut to the active team's folder, and
+ * the cases below it are about the door to every folder.
+ */
 function documentsControl(wrapper: VueWrapper, type: string) {
-  const found = wrapper.findAllComponents({ name: type })
-    .find((candidate) => candidate.text().includes('Documents'));
+  const found = documentsControls(wrapper, type).at(-1);
 
   if (!found) throw new Error(`no Documents ${type} rendered`);
 
@@ -110,7 +120,7 @@ describe.each(Surfaces)('%s, with no active team', (_name, component, type) => {
     const text = (await render(component)).text();
 
     expect(text).toContain('Documents');
-    expect(text.indexOf('Documents')).toBeGreaterThan(text.indexOf('Backlog'));
+    expect(text.lastIndexOf('Documents')).toBeGreaterThan(text.indexOf('Backlog'));
   });
 
   /**
@@ -137,6 +147,30 @@ describe.each(Surfaces)('%s, with no active team', (_name, component, type) => {
    * call the ribbon makes would reach happy-dom's real socket, and this is the assertion that says
    * it must not.
    */
+  /**
+   * THE SHORTCUT IS GATED; THE DOOR IS NOT. Active Team › Documents opens the active team's own
+   * folder, so with no active team it is disabled - and Projects › Documents beside it is not.
+   */
+  it('disables Active Team › Documents with no active team, and enables it with one', async () => {
+    const without = await render(component);
+    const controls = documentsControls(without, type);
+    expect(controls).toHaveLength(2);
+    expect(controls[0]!.props('disable')).toBe(true);
+    expect(controls[1]!.props('disable')).toBe(false);
+    without.unmount();
+
+    const board = useConsoleStore();
+    board.teams = [{ id: 'alpha', name: 'Alpha' }] as never;
+    board.activeTeamId = asTeamId('alpha');
+    const withTeam = await render(component);
+    const shortcut = documentsControls(withTeam, type)[0]!;
+    expect(shortcut.props('disable')).toBe(false);
+
+    await shortcut.trigger('click');
+    await flushPromises();
+    expect(withTeam.emitted('action')).toEqual([[TeamDocumentsAction]]);
+  });
+
   it('makes no request of its own to draw the item', async () => {
     const fetching = vi.spyOn(globalThis, 'fetch');
 
