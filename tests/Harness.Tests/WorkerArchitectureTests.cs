@@ -66,13 +66,13 @@ public sealed class WorkerArchitectureTests
     {
         ["PathSearch.Find: " + ResolvesOnThePath] =
             "the resolver: the one walk of PATH; every caller of it is listed here.",
-        ["Program.<Main>$: " + ResolvesOnThePath] =
+        ["Program.Main: " + ResolvesOnThePath] =
             "gh: whether the GitHub CLI is on control's PATH, where control runs it.",
-        ["RepoEndpoints.Map: " + ResolvesOnThePath] =
+        ["RepoEndpoints.GetRepoStatusAsync: " + ResolvesOnThePath] =
             "gh: whether the GitHub CLI is on control's PATH, where control runs it.",
         ["PluginCatalog.OnPath: " + ResolvesOnThePath] =
             "plugin runtime: a plugin manifest's required runtime, never an agent CLI.",
-        ["SolutionChecker.Check: " + ResolvesOnThePath] =
+        ["SolutionPlatform.ForDataRoot: " + ResolvesOnThePath] =
             "plugin runtime: a solution package's required runtime, never an agent CLI.",
         ["AgentInstallProbe.ResolvedPathOf: " + ResolvesOnThePath] =
             "all only: control composes the probe over WorkerInstalls and never reaches it; pinned at runtime by "

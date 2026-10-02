@@ -295,11 +295,11 @@ public sealed class AgentInstallControlRouteTests : IDisposable
 
         Assert.Equal(
             "{\"agent\":\"sh-headless\",\"command\":\"sh\",\"state\":null,\"resolvedPath\":" + JsonSerializer.Serialize(PathSearch.Find("sh"))
-            + ",\"referenced\":false,\"message\":\"sh resolves on this machine\\u0027s PATH.\",\"install\":null}",
+            + ",\"referenced\":false,\"message\":\"sh resolves on this machine's PATH.\",\"install\":null}",
             installations["sh-headless"].GetRawText());
         Assert.Equal(
             "{\"agent\":\"absent-headless\",\"command\":\"" + Absent + "\",\"state\":\"AgentNotInstalled\",\"resolvedPath\":null"
-            + ",\"referenced\":false,\"message\":\"" + Absent + " was not found on this machine\\u0027s PATH.\",\"install\":null}",
+            + ",\"referenced\":false,\"message\":\"" + Absent + " was not found on this machine's PATH.\",\"install\":null}",
             installations["absent-headless"].GetRawText());
         Assert.All(installations.Values, i => Assert.False(i.TryGetProperty("measuredOn", out _)));
     }
@@ -314,7 +314,7 @@ public sealed class AgentInstallControlRouteTests : IDisposable
 
         Assert.Equal(
             "{\"agent\":\"absent-headless\",\"state\":\"AgentNotInstalled\",\"referenced\":false,\"message\":\""
-            + Absent + " was not found on this machine\\u0027s PATH.\",\"install\":null}",
+            + Absent + " was not found on this machine's PATH.\",\"install\":null}",
             installations["absent-headless"].GetRawText());
         Assert.All(installations.Values, i => Assert.False(i.TryGetProperty("measuredOn", out _)));
     }
