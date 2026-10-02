@@ -2094,6 +2094,10 @@ export interface RepoStatus {
    * <default> in the clone; the work is on <commit>; the team branch is team/<id>". Measured on
    * every read; the platform resets nothing. Null when unmoved or not measured. */
   defaultBranchMoved?: string | null
+  /** False when there is no working clone: none was made, or what is there is an empty clone (an
+   * interrupted clone's `.git` and nothing else). The card reads it "Not ready" and offers Fetch,
+   * which makes the clone. Absent from an older Host, which means ready. */
+  cloneReady?: boolean
 }
 
 /**

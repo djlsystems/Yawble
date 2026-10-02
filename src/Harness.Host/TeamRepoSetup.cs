@@ -120,11 +120,13 @@ public sealed class NewTeamRepos(TeamRepoSetup setup, RepoPlan plan, bool wantsL
     }
 
     /// <summary>The <c>local-repo.created</c> tenant row, when the create made one.</summary>
-    public async Task LogAsync(TenantLogging audit, HttpContext context, string team, CancellationToken ct)
+    /// <remarks>Who acted is given, not read from the request: a create outlives its request when
+    /// the caller goes away (see <see cref="DetachedWork"/>).</remarks>
+    public async Task LogAsync(TenantLogging audit, string? actorId, string? actorEmail, string team, CancellationToken ct)
     {
         if (LocalRepository is not { Created: true } made) return;
-        await audit.WriteAsync(
-            context, TenantActions.LocalRepoCreated, made.Name, made.Name,
+        await audit.WriteAsAsync(
+            actorId, actorEmail, TenantActions.LocalRepoCreated, made.Name, made.Name,
             new { reference = made.Reference, defaultBranch = LocalRepos.InitialBranch, team }, ct);
     }
 

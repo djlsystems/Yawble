@@ -125,6 +125,15 @@ function tidyStep(status: RepoStatus): LadderStep {
  * ONE SENTENCE PER RUNG. A caption a person skips teaches nothing either.
  */
 export function nextStep(status: RepoStatus, refreshedThisOpen: boolean): LadderStep {
+  // NO CLONE YET, OR AN EMPTY ONE: Fetch makes it, and it stays the one offer until it has.
+  if (status.cloneReady === false) {
+    return {
+      rung: 'refreshed',
+      action: 'fetch',
+      reason: 'the repository has not been cloned: Fetch makes the clone, and every rung below is measured from it',
+    }
+  }
+
   if (!refreshedThisOpen) {
     return {
       rung: 'refreshed',

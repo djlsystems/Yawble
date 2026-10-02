@@ -781,6 +781,7 @@ public static class BacklogEndpoints
             IMessageLog log,
             TenantLogging audit,
             TeamRepoSetup repoSetup,
+            DetachedWork detached,
             CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
@@ -878,38 +879,76 @@ public static class BacklogEndpoints
                 return Results.BadRequest(new { error = ex.Message });
             }
 
+            // WHO ACTED, READ NOW: the create and the dispatch below outlive the request when its
+            // caller goes away, and nothing in them may read the request after that.
+            var actor = await DispatchActor.OfAsync(context, principal, users, ct);
+            var tipRecorder = context.RequestServices.GetService<BacklogTipRecorder>();
+            var creatorId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var creatorEmail = context.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+
             TeamSummary created;
-            string? repoSetupInstruction = null;
-            bool repoSetupFailed = false;
-            var teamCreated = false;
+            bool repoSetupFailed;
+            long correlation = 0, dispatchId = 0;
 
             try
             {
-                created = await teams.CreateAsync(
-                    request.Name,
-                    request.Agent,
-                    additionalInstructions: request.AdditionalInstructions,
-                    memberAgent: null,
-                    memberAgents: request.MemberAgents,
-                    root: request.Root,
-                    repos: newRepos.Repos,
-                    ct: ct,
-                    handleRepoSetup: outcomes =>
+                // FROM HERE THE CREATE AND THE DISPATCH RUN TO COMPLETION ON THE HOST'S LIFETIME, not
+                // the request's: a large clone outlasts a browser, and stopping at the abort left a
+                // team with an empty clone and the item never dispatched. See DetachedWork.
+                (created, repoSetupFailed, correlation, dispatchId) = await detached.RunAsync(
+                    "Dispatching to a new team", async work =>
                     {
-                        // Choose a standalone failure wake and stop the dispatch: folding failure
-                        // behind the spec hides the need for a person and invites endless retries.
-                        // Returning false preserves the complete repo failure instruction.
-                        repoSetupFailed = outcomes.Any(o => o.Result is RepoCloneResult.Failed);
-                        if (repoSetupFailed) return false;
-                        repoSetupInstruction = RepoSetupMessage.For(outcomes);
-                        return true;
-                    },
+                        string? repoSetupInstruction = null;
+                        var failed = false;
+                        var teamCreated = false;
+                        TeamSummary made;
 
-                    // ONE UNIT WITH THE TEAM, as on `POST /api/teams`: a repository that cannot be
-                    // made refuses the create, naming why.
-                    addRepo: newRepos.AddRepoAsync);
-                teamCreated = true;
-                await newRepos.LogAsync(audit, context, created.Id, ct);
+                        try
+                        {
+                            made = await teams.CreateAsync(
+                                request.Name,
+                                request.Agent,
+                                additionalInstructions: request.AdditionalInstructions,
+                                memberAgent: null,
+                                memberAgents: request.MemberAgents,
+                                root: request.Root,
+                                repos: newRepos.Repos,
+                                ct: work,
+                                handleRepoSetup: outcomes =>
+                                {
+                                    // Choose a standalone failure wake and stop the dispatch: folding failure
+                                    // behind the spec hides the need for a person and invites endless retries.
+                                    // Returning false preserves the complete repo failure instruction.
+                                    failed = outcomes.Any(o => o.Result is RepoCloneResult.Failed);
+                                    if (failed) return false;
+                                    repoSetupInstruction = RepoSetupMessage.For(outcomes);
+                                    return true;
+                                },
+
+                                // ONE UNIT WITH THE TEAM, as on `POST /api/teams`: a repository that cannot be
+                                // made refuses the create, naming why.
+                                addRepo: newRepos.AddRepoAsync);
+                            teamCreated = true;
+                            await newRepos.LogAsync(audit, creatorId, creatorEmail, made.Id, work);
+                        }
+                        finally
+                        {
+                            await newRepos.ForgetUnlessCreatedAsync(teamCreated);
+                        }
+
+                        if (failed) return (made, true, 0L, 0L);
+
+                        // THE TEAM IS NOT REMOVED IF THE DISPATCH FAILS, AND THAT IS THE RIGHT DIRECTION. An
+                        // empty team is visible on the Teams tab and a person can delete it; a create that undid
+                        // itself would be the destructive direction, and deletion is this product's most
+                        // destructive operation. What must not happen is the reverse order - telling a Manager
+                        // that does not exist yet - and that is what this is.
+                        var (root, record) = await DispatchIntoAsync(
+                            made.Id, item, actor, tipRecorder, backlog, teams, log, audit, work,
+                            repoSetupInstruction);
+                        return (made, false, root, record);
+                    },
+                    ct);
             }
             catch (RepoSetupRefusedException refused)
             {
@@ -925,10 +964,6 @@ public static class BacklogEndpoints
                 // repo URL it cannot parse. All of those are answerable by the caller, so 400.
                 return Results.BadRequest(new { error = ex.Message });
             }
-            finally
-            {
-                await newRepos.ForgetUnlessCreatedAsync(teamCreated);
-            }
 
             if (repoSetupFailed)
             {
@@ -941,15 +976,6 @@ public static class BacklogEndpoints
                         + "but the item was not dispatched. A person must resolve repository setup before dispatching to this team.",
                 });
             }
-
-            // THE TEAM IS NOT REMOVED IF THE DISPATCH FAILS, AND THAT IS THE RIGHT DIRECTION. An
-            // empty team is visible on the Teams tab and a person can delete it; a create that undid
-            // itself would be the destructive direction, and deletion is this product's most
-            // destructive operation. What must not happen is the reverse order - telling a Manager
-            // that does not exist yet - and that is what this is.
-            var (correlation, dispatchId) = await DispatchIntoAsync(
-                created.Id, item, context, principal, backlog, teams, users, log, audit, ct,
-                repoSetupInstruction);
 
             return Results.Ok(new
             {
@@ -1341,9 +1367,29 @@ public static class BacklogEndpoints
         IMessageLog log,
         TenantLogging audit,
         CancellationToken ct,
+        string? repoSetupInstruction = null) =>
+        await DispatchIntoAsync(
+            stored, item, await DispatchActor.OfAsync(context, principal, users, ct),
+            context.RequestServices.GetService<BacklogTipRecorder>(), backlog, teams, log, audit, ct,
+            repoSetupInstruction);
+
+    /// <summary>
+    /// The dispatch itself, touching nothing of the request: who acted and the start recorder are
+    /// read before, so a dispatch into a team created for it can finish after its caller has gone.
+    /// </summary>
+    private static async Task<(long Correlation, long Dispatch)> DispatchIntoAsync(
+        string stored,
+        BacklogItem item,
+        DispatchActor who,
+        BacklogTipRecorder? recorder,
+        IBacklogStore backlog,
+        TeamRegistry teams,
+        IMessageLog log,
+        TenantLogging audit,
+        CancellationToken ct,
         string? repoSetupInstruction = null)
     {
-        var actor = await ActorOfAsync(context, principal, users, ct);
+        var actor = who.Actor;
 
         var dispatched = await log.AppendAsync(
             new NewMessage(
@@ -1363,7 +1409,7 @@ public static class BacklogEndpoints
         // WHERE THE DISPATCH STARTS IS READ BEFORE THE MANAGER IS TOLD, so nothing the team does
         // for this item can be mistaken for where it started. Only work beyond it is ever stored as
         // landed. See BacklogTipRecorder.RecordBaseAsync.
-        if (context.RequestServices.GetService<BacklogTipRecorder>() is { } recorder)
+        if (recorder is not null)
         {
             await recorder.RecordBaseAsync(record, ct);
         }
@@ -1389,11 +1435,22 @@ public static class BacklogEndpoints
                 dispatched.Seq),
             ct);
 
-        await WriteAuditAsync(
-            context, principal, users, audit, TenantActions.BacklogItemDispatched, PlatformBacklogId.Format(item.Id),
+        await audit.WriteAsAsync(
+            who.PrincipalId, who.Email, TenantActions.BacklogItemDispatched, PlatformBacklogId.Format(item.Id),
             item.Title, new { item = item.Id, team = stored, correlation = dispatched.Seq }, ct);
 
         return (dispatched.Seq, record.Id);
+    }
+
+    /// <summary>Who made a dispatch, as its rows name them: read from the request before the work.</summary>
+    private sealed record DispatchActor(string Actor, string PrincipalId, string? Email)
+    {
+        public static async Task<DispatchActor> OfAsync(
+            HttpContext context, Principal principal, IUserStore users, CancellationToken ct) =>
+            new(
+                await ActorOfAsync(context, principal, users, ct),
+                principal.Id,
+                await ActorEmailOfAsync(context, principal, users, ct));
     }
 
     private const string StartDescription =

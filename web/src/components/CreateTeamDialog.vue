@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { createTeam, fileSystemRoots, listCatalog, repoCheckRefusal } from '../api/client';
+import { carriesOnMessage, creatingLine, waitWasCutOff } from '../lib/slowCreate';
 import {
   agentsForMode,
   type Catalog,
@@ -316,6 +317,7 @@ async function loadDefaults() {
 
 watch(open, (showing) => {
   if (showing) {
+    carriesOn.value = '';
     void loadDefaults();
   }
 });
@@ -463,6 +465,12 @@ function moveMemberAgent(index: number, direction: -1 | 1) {
 
 const busy = ref(false);
 
+/** The name being created, shown while it is; the field can change under a wait. */
+const creating = ref('');
+
+/** Set when the wait for a create was cut off: the create carries on on the server. */
+const carriesOn = ref('');
+
 const valid = computed(() => formIsLegal());
 
 async function submit() {
@@ -474,6 +482,8 @@ async function submit() {
 
   busy.value = true;
   serverError.value = '';
+  carriesOn.value = '';
+  creating.value = name.value.trim();
 
   try {
     const created = await createTeam(
@@ -551,6 +561,13 @@ async function submit() {
     if (refused) {
       repoChoices.value = afterRefusal(repoChoices.value, refused);
       refusal.value = refused;
+      return;
+    }
+
+    // A WAIT THAT WAS CUT OFF IS NOT A FAILURE: the Host finishes the create without us.
+    if (waitWasCutOff(cause)) {
+      refusal.value = null;
+      carriesOn.value = carriesOnMessage(creating.value);
       return;
     }
 
@@ -925,6 +942,17 @@ async function submit() {
             :busy="busy"
             @choose="choose"
           />
+
+          <!-- A LARGE CLONE TAKES MINUTES, and a spinning button alone reads as stuck. -->
+          <q-banner v-if="busy" dense class="os-bg-tint-info" data-testid="create-progress">
+            <template #avatar><q-icon name="hourglass_empty" /></template>
+            {{ creatingLine(creating) }}
+          </q-banner>
+
+          <q-banner v-if="carriesOn" dense class="os-bg-tint-info" data-testid="create-carries-on">
+            <template #avatar><q-icon name="info" /></template>
+            {{ carriesOn }}
+          </q-banner>
 
           <q-banner v-if="serverError" dense class="os-bg-tint-error text-negative">
             <template #avatar><q-icon name="error" /></template>
