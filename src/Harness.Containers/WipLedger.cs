@@ -259,6 +259,21 @@ public sealed class WipLedger
     }
 
     /// <summary>
+    /// Every member holding a slot placed on <paramref name="worker"/>, read under one lock: sent to
+    /// it already or not yet (still starting, or held at an update gate). A placement either finished
+    /// before this read, and is in it, or starts after it and reads the workers then.
+    /// </summary>
+    public IReadOnlyList<WipHold> HoldsOn(WorkerId worker)
+    {
+        lock (_gate)
+        {
+            return [.. _placed.Where(placed => placed.Value == worker)
+                .Select(placed => _running[placed.Key])
+                .OrderBy(hold => hold.Since)];
+        }
+    }
+
+    /// <summary>
     /// The first worker with room and under its own bound, or, when none has, the first worker's
     /// reason. A Manager takes the first worker without asking. No worker at all is
     /// <see cref="WorkerReason"/>.

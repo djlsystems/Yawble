@@ -32,18 +32,38 @@ public sealed record WorkersRecord(DateTimeOffset RecordedAt, IReadOnlyList<Work
 
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    /// <summary>The workers now, from the pool, the ledger's figures and the runs placed on each.</summary>
+    /// <summary>
+    /// The workers now, from the pool, the ledger's figures and the runs on each. A worker's runs are
+    /// every run open on it and every slot placed on it that has not been sent there yet - still
+    /// starting, or held at the update gate - named by team and member with an empty run until it is
+    /// open. Whether a worker drains is read BEFORE its slots: a record that says draining then holds
+    /// every placement made on it before the drain, and the ledger places nothing on a draining worker
+    /// after, so a draining worker with no runs here has none coming.
+    /// </summary>
     public static WorkersRecord Of(WorkerPool pool, WipLedger wip, Func<WorkerId, IReadOnlyCollection<RunId>> openOn, string version) =>
         new(DateTimeOffset.UtcNow, [.. WorkersView.Of(pool, wip, version).Select(sample =>
         {
             var id = new WorkerId(sample.Id);
             var capacity = sample.Capacity;
+            var draining = pool.IsDraining(id);
             return new WorkerRecordItem(
-                sample.Id, sample.Version, sample.State, pool.IsDraining(id), sample.ConnectedSince, sample.DroppedAt,
-                [.. openOn(id).Select(run => new WorkerRecordRun(run.Nonce, run.Member.Team, run.Member.Name))],
+                sample.Id, sample.Version, sample.State, draining, sample.ConnectedSince, sample.DroppedAt,
+                RunsOn(id, wip, openOn),
                 new WorkerRecordCapacity(
                     capacity.Cpus, capacity.MemoryLimitBytes, capacity.MemoryInUseBytes, capacity.Bound, capacity.NotMeasured.Count > 0));
         })]);
+
+    private static WorkerRecordRun[] RunsOn(WorkerId worker, WipLedger wip, Func<WorkerId, IReadOnlyCollection<RunId>> openOn)
+    {
+        var held = wip.HoldsOn(worker);
+        var open = openOn(worker);
+        return [.. open.Select(run => new WorkerRecordRun(run.Nonce, run.Member.Team, run.Member.Name)),
+            .. held.Where(hold => !open.Any(run => SameMember(run, hold))).Select(hold => new WorkerRecordRun(string.Empty, hold.Team, hold.Member))];
+    }
+
+    private static bool SameMember(RunId run, WipHold hold) =>
+        string.Equals(run.Member.Team, hold.Team, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(run.Member.Name, hold.Member, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Never throws: a control that cannot record it still serves its workers, and logs why.</summary>
     public void Write(string dataRoot, ILogger? log = null)
