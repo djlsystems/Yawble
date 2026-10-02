@@ -9,9 +9,9 @@ using Microsoft.Data.Sqlite;
 namespace Harness.Tests;
 
 /// <summary>
-/// THE ONE PLACE A RUN'S CREDENTIAL IS DECIDED. Home is nothing to apply and reads no store; issued
-/// places the stored value in the variable its kind declares and lists what the run displaces;
-/// anything short of a usable value is missing, which stops the run; and the record never prints
+/// THE ONE PLACE A RUN'S CREDENTIAL IS DECIDED. Home sets nothing, reads no store and lists the
+/// variables other commands declare; issued places the stored value in the variable its kind
+/// declares and lists what the run displaces; anything short of a usable value is missing, which stops the run; and the record never prints
 /// or serialises the value.
 /// </summary>
 public sealed class RunCredentialsTests : IDisposable
@@ -38,20 +38,49 @@ public sealed class RunCredentialsTests : IDisposable
     }
 
     [Fact]
-    public async Task Home_resolves_to_nothing()
+    public async Task Home_sets_nothing_never_reads_the_store_and_scopes_every_other_commands_declared_variable()
     {
         // No database at all: a home preset must not touch the store.
-        var store = new AgentCredentialStore(Path.Combine(_root, "absent", "messages.db"), new EphemeralDataProtectionProvider());
-        var credentials = new RunCredentials(Catalog(), _ => CredentialSource.Home, store);
+        var database = Path.Combine(_root, "absent", "messages.db");
+        var store = new AgentCredentialStore(database, new EphemeralDataProtectionProvider());
+        var catalog = Catalog();
+        var credentials = new RunCredentials(catalog, _ => CredentialSource.Home, store);
 
-        var credential = await credentials.ResolveAsync("claude-headless", null, Ct);
+        foreach (var definition in catalog.Definitions)
+        {
+            var credential = await credentials.ResolveAsync(definition.Name, null, Ct);
 
-        Assert.Same(RunCredential.Home, credential);
-        Assert.Empty(credential.Environment);
-        Assert.Empty(credential.Displace);
-        Assert.Empty(credential.OtherProviders);
-        Assert.False(credential.PerRunHome);
-        Assert.Null(credential.Missing);
+            Assert.Equal(CredentialSource.Home, credential.Source);
+            Assert.Empty(credential.Environment);
+            Assert.Empty(credential.Displace);
+            Assert.False(credential.PerRunHome);
+            Assert.Null(credential.Missing);
+
+            // Exactly what every other command declares: none of its own, never the git token.
+            var command = RunCredentials.CommandOf(definition);
+            var others = catalog.Definitions
+                .Where(d => !string.Equals(RunCredentials.CommandOf(d), command, StringComparison.OrdinalIgnoreCase))
+                .SelectMany(HomeLaunchBed.Declared)
+                .Except([AgentEnvironment.GitHubVariable])
+                .Distinct()
+                .Order(StringComparer.Ordinal);
+            Assert.Equal(others, credential.OtherProviders);
+            Assert.Empty(credential.OtherProviders.Intersect(HomeLaunchBed.Declared(definition)));
+        }
+
+        // A preset whose command nothing declares loses every declared variable.
+        var undeclared = catalog.Definitions.First(d => !catalog.Definitions.Any(
+            o => o.IssuedCredential is not null
+                && string.Equals(RunCredentials.CommandOf(o), RunCredentials.CommandOf(d), StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(
+            catalog.Definitions.SelectMany(HomeLaunchBed.Declared).Distinct().Order(StringComparer.Ordinal),
+            (await credentials.ResolveAsync(undeclared.Name, null, Ct)).OtherProviders);
+
+        // An unknown preset is nothing known: nothing set, nothing removed.
+        Assert.Same(RunCredential.Home, await credentials.ResolveAsync("no-such-preset", null, Ct));
+
+        Assert.False(File.Exists(database));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(database)));
     }
 
     [Fact]
@@ -84,6 +113,7 @@ public sealed class RunCredentialsTests : IDisposable
             Assert.Contains("GROK_CODE_XAI_API_KEY", credential.OtherProviders);
             Assert.DoesNotContain("GH_TOKEN", credential.OtherProviders);
             Assert.DoesNotContain("ANTHROPIC_API_KEY", credential.OtherProviders);
+            Assert.Empty(credential.OtherProviders.Intersect(HomeLaunchBed.Declared(catalog.Definition(preset)!)));
         }
 
         // Nothing stored for grok: missing, with the fix named.

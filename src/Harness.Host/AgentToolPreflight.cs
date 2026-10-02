@@ -224,9 +224,11 @@ public sealed class AgentToolPreflight(
     /// <summary>
     /// ONE PRESET'S LISTING, WITH THE CREDENTIAL ITS LAUNCH WOULD START WITH.
     /// <list type="bullet">
-    /// <item>The shared home: as it always was.</item>
+    /// <item>A MEMBER preset on the shared home: as its member run - other commands' declared
+    /// variables removed (<see cref="AgentEnvironment.ApplyCredential"/>), its home inherited.</item>
+    /// <item>The CONCIERGE on the shared home: as it always was.</item>
     /// <item>An issued MEMBER preset: as its member run - the credential applied
-    /// (<see cref="AgentEnvironment.ApplyIssued"/>) in a home of the listing's own, removed after.
+    /// (<see cref="AgentEnvironment.ApplyCredential"/>) in a home of the listing's own, removed after.
     /// Its credential not set is NOT MEASURED, as such a run does not start.</item>
     /// <item>The CONCIERGE: as its terminal - its home kept, each displaced variable its declaration
     /// names set empty and the credential set, the way <see cref="ConciergeLaunchFactory"/> does; on
@@ -241,7 +243,9 @@ public sealed class AgentToolPreflight(
 
         if (credential.Source != CredentialSource.Issued)
         {
-            return await AgentToolListers.ListAsync(command, arguments, environment, runner, ct);
+            return definition.Mode == AgentMode.Headless
+                ? await AgentToolListers.ListAsync(command, arguments, environment, runner, ct, credential)
+                : await AgentToolListers.ListAsync(command, arguments, environment, runner, ct);
         }
 
         if (definition.Mode != AgentMode.Headless)

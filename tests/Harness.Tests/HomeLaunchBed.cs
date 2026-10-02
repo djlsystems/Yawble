@@ -37,13 +37,18 @@ internal sealed class HomeLaunchBed : IDisposable
             File.SetUnixFileMode(Path.Combine(bin, command), (UnixFileMode)0b111_101_101);
         }
 
-        // A grok launch writes its harness entry into the Host's GROK_HOME: never the real one.
-        var grokHome = Directory.CreateDirectory(Path.Combine(_root, "grok-home")).FullName;
+        // A launch may write its harness entry into the Host's config directory for its CLI: each
+        // one a declaration names points into this bed, never at the real one.
+        var homes = Catalog.Definitions
+            .SelectMany(d => d.IssuedCredential?.HomeVariables ?? [])
+            .Distinct(StringComparer.Ordinal)
+            .Select(n => new KeyValuePair<string, string>(
+                n, Directory.CreateDirectory(Path.Combine(_root, "homes", n)).FullName));
 
         _host = new EnvironmentScope(
             HostCredentials.Select(n => new KeyValuePair<string, string>(n, HostValue(n)))
-                .Append(new("PATH", bin + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH")))
-                .Append(new("GROK_HOME", grokHome)));
+                .Concat(homes)
+                .Append(new("PATH", bin + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"))));
 
         Credentials = new RunCredentials(
             Catalog, _ => CredentialSource.Home, new AgentCredentialStore(Database, new EphemeralDataProtectionProvider()));

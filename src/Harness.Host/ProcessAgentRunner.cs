@@ -1438,11 +1438,10 @@ public sealed partial class ProcessAgentRunner(
 
     /// <summary>
     /// A member launch's environment, in its order: <paramref name="environment"/> (the preset's env
-    /// and the team's), then the preset's isolation and the CLI's update-off, then an issued
-    /// <paramref name="credential"/> (what it displaces removed, its variable set), then the names
-    /// that must be absent removed and provider keys scoped to this command. Shared with the launch
-    /// check. Under the shared home the credential step does nothing, so the order and contents are
-    /// what they always were.
+    /// and the team's), then the preset's isolation and the CLI's update-off, then the run's
+    /// <paramref name="credential"/> (other commands' declared variables removed; an issued one's
+    /// displaced variables removed and its variable set), then the names that must be absent
+    /// removed and provider keys scoped to this command. Shared with the launch check.
     /// </summary>
     private static void MemberEnvironment(
         ProcessStartInfo start, AgentCommand command, IReadOnlyDictionary<string, string> environment,
@@ -1463,9 +1462,9 @@ public sealed partial class ProcessAgentRunner(
             foreach (var (name, value) in updateOff) start.Environment[name] = value;
         }
 
-        // AN ISSUED CREDENTIAL, after the preset's and the team's env as update-off is, so neither
-        // can outrank it. See AgentEnvironment.ApplyIssued; the tool listing applies the same.
-        var handedIn = AgentEnvironment.ApplyIssued(start.Environment, credential, environment);
+        // THE RUN'S CREDENTIAL, after the preset's and the team's env as update-off is, so neither
+        // can outrank it. See AgentEnvironment.ApplyCredential; the tool listing applies the same.
+        var handedIn = AgentEnvironment.ApplyCredential(start.Environment, credential, environment);
 
         // REMOVED, NOT CLEARED, AND THE ORDER MATTERS: after the merge above, so a caller
         // cannot reintroduce one of these by handing it in.
