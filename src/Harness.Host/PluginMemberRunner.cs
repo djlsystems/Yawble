@@ -201,7 +201,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             line => OnLineAsync(invocation.Member, manifest, invocation.Context.Limits, line, gathered, redacted, ct),
             ct);
 
-        if (lost) return MemberResult.NotRun(RunDirectory.LostRunText, FailureClasses.Interrupted);
+        if (lost) return MemberResult.NotRun(ended.LaunchError ?? RunDirectory.LostRunText, ended.FailureClass ?? FailureClasses.Interrupted);
 
         var outcome = ended.Process!;
 

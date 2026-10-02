@@ -32,8 +32,9 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     private readonly AgentCatalog _catalog;
     private readonly IRunWorker _worker;
     private readonly RunDirectory _directory;
-    private readonly RunLauncher _launcher;
+    private readonly RunLauncher? _launcher;
     private readonly Func<RunMemoryAllowance?> _memory;
+    private readonly Func<ContainerId, RunMemoryAllowance?>? _memoryFor;
     private readonly string? _tempRoot;
     private readonly Func<ContainerId, IRunWorker>? _placedOn;
     private readonly IRunCredentials? _credentials;
@@ -82,12 +83,14 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         AgentCatalog catalog,
         IRunWorker worker,
         RunDirectory directory,
-        RunLauncher launcher,
+        RunLauncher? launcher,
         Func<RunMemoryAllowance?> memory,
         string? tempRoot,
         Func<ContainerId, IRunWorker>? placedOn = null,
-        IRunCredentials? credentials = null)
+        IRunCredentials? credentials = null,
+        Func<ContainerId, RunMemoryAllowance?>? memoryFor = null)
     {
+        _memoryFor = memoryFor;
         _catalog = catalog;
         _worker = worker;
         _placedOn = placedOn;
@@ -115,6 +118,9 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// over it is handed over as a file.
     /// </summary>
     public const int MaxArgumentBytes = RunLauncher.MaxArgumentBytes;
+
+    /// <summary>What the launch check says where this process launches no run itself.</summary>
+    public const string NotCheckedHere = "Not checked: no worker is connected.";
 
     /// <summary>How long the launch check waits for a free invocation before it is killed and read as failed.</summary>
     public static readonly TimeSpan LaunchCheckTimeout = RunLauncher.LaunchCheckTimeout;
@@ -155,6 +161,8 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         var environment = AgentToolPreflight.LaunchShape(definition).Environment;
         var credential = _credentials is null ? RunCredential.Home : await _credentials.ResolveAsync(agent, definition, ct);
         var launch = Launch(command, definition.TimeoutSeconds, environment, credential);
+        if (_launcher is null) return await CheckOnAWorkerAsync(launch, check, definition, environment, credential, timeout, ct);
+
         return await _launcher.CheckLaunchAsync(
             launch,
             check,
@@ -166,6 +174,38 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             credential,
             Redaction(launch, environment, credential),
             _tempRoot);
+    }
+
+    /// <summary>
+    /// The launch check where this process launches nothing itself: sent to the connected worker with
+    /// the most measured headroom, as a member run of the preset would be placed, and answered by it.
+    /// </summary>
+    private async Task<AgentLaunchReport> CheckOnAWorkerAsync(
+        RunLaunch launch, IReadOnlyList<string> check, AgentDefinition definition, IReadOnlyDictionary<string, string> environment,
+        RunCredential credential, TimeSpan? timeout, CancellationToken ct)
+    {
+        IRunWorker worker;
+        try
+        {
+            worker = _worker is IRunWorkerRouter router ? router.Any() : _worker;
+        }
+        catch (InvalidOperationException)
+        {
+            return AgentLaunchReport.Unchecked(NotCheckedHere);
+        }
+
+        var bound = timeout ?? LaunchCheckTimeout;
+        var found = await _directory.CheckLaunchAsync(
+            worker,
+            new CheckLaunch(
+                Guid.NewGuid().ToString("N"), launch, check, definition.Updates?.Arguments ?? [], environment, _memory(),
+                (int)Math.Ceiling(bound.TotalSeconds), _tempRoot, credential, Redaction(launch, environment, credential)),
+            bound + TimeSpan.FromSeconds(30),
+            ct);
+
+        return found is null
+            ? AgentLaunchReport.Unchecked($"Not checked: worker {worker.Id} did not answer the launch check.")
+            : new AgentLaunchReport(found.Result, found.ExitCode, found.StderrTail, found.Detail);
     }
 
     /// <summary>Everything the worker needs for this invocation, resolved now.</summary>
@@ -193,13 +233,16 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             invocation.Environment,
             invocation.UnreachableRoot,
             launch,
-            _memory(),
+            _memoryFor is { } memoryFor ? memoryFor(invocation.Container) : _memory(),
             _tempRoot,
             definition?.LiveView is { } view ? LiveView.ToRun(view) : null,
             Credential: credential,
             Redaction: launch is null || credential.Missing is not null
                 ? ValueRedactor.Empty
-                : Redaction(launch, invocation.Environment, credential));
+                : Redaction(launch, invocation.Environment, credential),
+            CredentialNames: launch is null || credential.Missing is not null
+                ? null
+                : [.. RunSecrets.CredentialNames(_catalog).Order(StringComparer.Ordinal)]);
     }
 
     /// <summary>

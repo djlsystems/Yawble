@@ -46,11 +46,13 @@ public sealed record WipView(int Max, IReadOnlyList<WipHold> Running, IReadOnlyL
 ///
 /// <para>
 /// <b>AND A WORKER.</b> An admitted run is placed on the first worker (<see cref="IRunPlacement"/>)
-/// whose headroom has no reason to hold it, and <see cref="PlacedOn"/> says which until its slot is
+/// whose headroom has no reason to hold it and which has not reached its own bound
+/// (<see cref="IRunPlacement.Bound"/>), and <see cref="PlacedOn"/> says which until its slot is
 /// released. The gate above is per worker: a run waits with the first worker's reason only when none
-/// has room. A Manager goes on the first worker unchecked. There is one worker today, the Host's own,
-/// so this decides nothing new; the run limit, the reserved slot, the queue and the reasons stay
-/// instance-wide here.
+/// has room. A Manager goes on the first worker unchecked. With no worker connected, every run the
+/// limit admits - a Manager's too - waits in the same queue with <see cref="WorkerReason"/>, and is
+/// never refused; <see cref="WorkersChanged"/> wakes the waiters when one connects. The run limit,
+/// the reserved slot, the queue and the reasons stay instance-wide here.
 /// </para>
 ///
 /// <para>
@@ -67,6 +69,9 @@ public sealed class WipLedger
 
     /// <summary>What a run waiting for the run limit is waiting for.</summary>
     public const string SlotReason = "waiting for a slot";
+
+    /// <summary>What a run the limit has room for waits for while no worker is connected to run it on.</summary>
+    public const string WorkerReason = "waiting for a worker";
 
     private readonly object _gate = new();
     private readonly Dictionary<string, WipHold> _running = new(StringComparer.OrdinalIgnoreCase);
@@ -201,6 +206,25 @@ public sealed class WipLedger
     }
 
     /// <summary>
+    /// A worker connected or went: every waiter asks again, so a run waiting for a worker starts on
+    /// the one that came.
+    /// </summary>
+    public void WorkersChanged()
+    {
+        lock (_gate)
+        {
+            _heldForHeadroom.Clear();
+            PulseLocked();
+        }
+    }
+
+    /// <summary>How many running members are placed on <paramref name="worker"/>.</summary>
+    public int PlacedCount(WorkerId worker)
+    {
+        lock (_gate) return _placed.Values.Count(placed => placed == worker);
+    }
+
+    /// <summary>
     /// Takes a waiter out of the queue without starting it - its team was paused, or its container
     /// stopped. A waiter that will never ask again must not hold the head of the queue.
     /// </summary>
@@ -235,18 +259,33 @@ public sealed class WipLedger
     }
 
     /// <summary>
-    /// The first worker with room, or, when none has, the first worker's reason. A Manager takes the
-    /// first worker without asking.
+    /// The first worker with room and under its own bound, or, when none has, the first worker's
+    /// reason. A Manager takes the first worker without asking. No worker at all is
+    /// <see cref="WorkerReason"/>.
     /// </summary>
     private (WorkerId? Worker, string? Reason) PlaceLocked(bool manager)
     {
         string? first = null;
+        var workers = _placement.Workers;
+        if (workers.Count == 0) return (null, WorkerReason);
 
-        foreach (var worker in _placement.Workers)
+        foreach (var worker in workers)
         {
             if (manager) return (worker, null);
-            if (_placement.HeadroomReason(worker) is not { } reason) return (worker, null);
-            first ??= reason;
+            if (_placement.HeadroomReason(worker) is { } reason)
+            {
+                first ??= reason;
+                continue;
+            }
+
+            // At its own bound: as full as the run limit would be.
+            if (_placement.Bound(worker) is { } bound && _placed.Values.Count(placed => placed == worker) >= bound)
+            {
+                first ??= SlotReason;
+                continue;
+            }
+
+            return (worker, null);
         }
 
         return (null, first);
@@ -351,4 +390,7 @@ public interface IRunPlacement
     IReadOnlyList<WorkerId> Workers { get; }
 
     string? HeadroomReason(WorkerId worker);
+
+    /// <summary>How many runs <paramref name="worker"/> may hold at once; null for no cap of its own.</summary>
+    int? Bound(WorkerId worker) => null;
 }

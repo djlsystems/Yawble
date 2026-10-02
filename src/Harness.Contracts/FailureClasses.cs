@@ -107,6 +107,15 @@ public static class FailureClasses
     public const string Crashed = "crashed";
 
     /// <summary>
+    /// The WORKER running the run stopped: its connection dropped and did not come back within its
+    /// grace, or came back as a new process. Nothing more is known of the run - how far it got, what
+    /// it spent - and nothing is wrong with the agent. Never resumed automatically: the Manager
+    /// re-sends the instruction, which runs it on a worker that is there, and escalates only when it
+    /// has already happened twice.
+    /// </summary>
+    public const string WorkerLost = "worker-lost";
+
+    /// <summary>
     /// NOBODY COULD CLASSIFY IT - the default, and a real class rather than an absence. Treated
     /// exactly as <see cref="AgentFault"/>: never resumed.
     /// </summary>
@@ -115,7 +124,7 @@ public static class FailureClasses
     /// <summary>Every class, for a test or a renderer that wants to enumerate them.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        Quota, Rate, Transport, AgentFault, LaunchMissing, OutOfMemory, Crashed, Timeout, Interrupted, Unknown,
+        Quota, Rate, Transport, AgentFault, LaunchMissing, OutOfMemory, Crashed, Timeout, Interrupted, WorkerLost, Unknown,
     ];
 
     /// <summary>
@@ -162,6 +171,8 @@ public static class FailureClasses
             + "its own last words on stderr are in the run's error. It is not resumed automatically.",
         Timeout => "The idle clock fired.",
         Interrupted => "The run was cut off before it finished.",
+        WorkerLost => "The worker running this run stopped, so how far it got is not known; "
+            + "re-sending the instruction runs it on a worker that is there.",
         Unknown => "Nothing here could say why, so this is treated exactly as an agent fault and "
             + "will not be resumed automatically.",
         _ => null,

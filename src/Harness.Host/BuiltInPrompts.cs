@@ -148,6 +148,9 @@ public static class BuiltInPrompts
         usually because it was being installed or updated. Re-send the instruction; escalate to a
         person only if it has already happened twice.
 
+        A member run that failed `[worker-lost]` was cut off because the worker running it stopped.
+        Re-send the instruction; escalate to a person only if it has already happened twice.
+
         ## Shared folder
 
         The team's shared folder is `{shared}` (also in HARNESS_SHARED). It is what a person sees in

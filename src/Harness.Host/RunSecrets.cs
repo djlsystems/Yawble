@@ -42,7 +42,7 @@ public sealed class RunSecrets(AgentCatalog catalog, IRunCredentials? credential
     /// <summary>The set of a run whose child is given <paramref name="environment"/>: the issued value
     /// and the value of every credential variable it carries.</summary>
     public static ValueRedactor Of(IDictionary<string, string?> environment, RunCredential credential, AgentCatalog catalog) =>
-        ValueRedactor.For(credential.Environment.Values.Concat(Carried(environment, CredentialNames(catalog))));
+        ValueRedactor.OfEnvironment(environment, CredentialNames(catalog), credential.Environment.Values);
 
     /// <summary>Keeps <paramref name="redactor"/> as <paramref name="member"/>'s set until its next run.</summary>
     public void Remember(ContainerId member, ValueRedactor redactor) => _byMember[member] = redactor;
@@ -76,8 +76,4 @@ public sealed class RunSecrets(AgentCatalog catalog, IRunCredentials? credential
 
         return For(member).With(ValueRedactor.For(values.Where(v => !string.IsNullOrEmpty(v))));
     }
-
-    private static IEnumerable<string?> Carried(IDictionary<string, string?> environment, IReadOnlySet<string> names) =>
-        names.Select(name => environment.TryGetValue(name, out var value) ? value : null)
-            .Where(value => !string.IsNullOrEmpty(value));
 }
