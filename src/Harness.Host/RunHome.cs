@@ -19,8 +19,9 @@ namespace Harness.Host;
 ///
 /// <para>
 /// REMOVED THROUGH <see cref="FolderRemoval"/>, because the agent writes inside it: the Host's pass,
-/// then the agent's, links removed and never followed. A home a crash left behind is removed before
-/// the member's next issued run makes its own.
+/// then the agent's, links removed and never followed, however the run or the making of its home
+/// ends. A home a crash left behind is removed before the member's next issued run makes its own; one
+/// a launch check or a listing left in the folder they share, at Host start and before the next one.
 /// </para>
 /// </summary>
 public static class RunHome
@@ -28,46 +29,79 @@ public static class RunHome
     /// <summary>The start of every run home's name in its parent.</summary>
     public const string Prefix = "home-";
 
-    /// <summary>Where a run home's CLIs keep their caches: beside the homes, kept across runs.
-    /// Copilot unpacks about 186 MB into a fresh HOME's cache otherwise, on every run.</summary>
+    /// <summary>Where a run home's CLIs keep their caches: beside the homes, kept across runs and
+    /// listings. Copilot unpacks about 186 MB into a fresh HOME's cache otherwise, every time.</summary>
     public const string CacheFolder = ".cache";
 
     /// <summary>Where a run home's transcripts are kept once the run ends: beside the homes, so the
     /// finished run's transcript is still there to read after its home is removed.</summary>
     public const string TranscriptsFolder = "transcripts";
 
+    /// <summary>How long a kept transcript is kept. Older ones are removed whenever the member
+    /// keeps another.</summary>
+    public static readonly TimeSpan TranscriptsKept = TimeSpan.FromDays(14);
+
+    /// <summary>How old a home in a parent several launches share must be before a sweep removes it,
+    /// when no live launch of this Host owns it. Longer than any listing or launch check takes.</summary>
+    public static readonly TimeSpan SharedLeftoverAge = TimeSpan.FromMinutes(10);
+
+    /// <summary>The homes this Host has made and not yet removed: a sweep never touches one.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> Live = new(StringComparer.Ordinal);
+
+    /// <summary>The cache folder beside <paramref name="home"/>, for its XDG_CACHE_HOME.</summary>
+    public static string CacheBeside(string home) => Path.Combine(Path.GetDirectoryName(home)!, CacheFolder);
+
     /// <summary>The grok config file inside a home, as grok looks for it.</summary>
     public static string GrokConfigIn(string home) => Path.Combine(home, ".grok", "config.toml");
 
     /// <summary>
     /// A new home in <paramref name="parent"/>, with <paramref name="grokConfig"/> (a file the Host
-    /// wrote and shared with the agent's group) copied to <c>.grok/config.toml</c> when given.
-    /// When <paramref name="memberFolder"/> - the parent is one member's TMPDIR - homes an earlier
-    /// run left there are removed first and the member's <see cref="CacheFolder"/> is made beside
-    /// it; a parent several launches share (the launch check's) is never swept. Null when it could
-    /// not be made.
+    /// wrote and shared with the agent's group) copied to <c>.grok/config.toml</c> when given, and
+    /// the <see cref="CacheFolder"/> beside it. When <paramref name="memberFolder"/> - the parent is
+    /// one member's TMPDIR - every home an earlier run left there is removed first; in a parent
+    /// several launches share (the launch check's and the listings'), only those older than
+    /// <see cref="SharedLeftoverAge"/> that no live launch owns. Null when it could not be made, and
+    /// then nothing is left: a home that was begun is removed however its making ends, cancelled
+    /// or failed.
     /// </summary>
     public static async Task<string?> CreateAsync(
         string parent, AgentLaunchUser? runAs, string? grokConfig, CancellationToken ct, bool memberFolder = true)
     {
         if (memberFolder) await SweepAsync(parent, runAs, ct);
+        else await SweepSharedAsync(parent, runAs, ct);
 
         var home = Path.Combine(parent, Prefix + Convert.ToHexStringLower(Guid.NewGuid().ToByteArray())[..12]);
+        Live[home] = 0;
 
+        var made = false;
+        try
+        {
+            made = await MakeAsync(parent, home, runAs, grokConfig, ct);
+            return made ? home : null;
+        }
+        finally
+        {
+            if (!made) await RemoveAsync(home, runAs);
+        }
+    }
+
+    private static async Task<bool> MakeAsync(
+        string parent, string home, AgentLaunchUser? runAs, string? grokConfig, CancellationToken ct)
+    {
         if (runAs is { Switches: true } agent)
         {
-            if (SystemCommand.Find("mkdir") is not { } mkdir || SystemCommand.Find("cp") is not { } cp) return null;
-            if (!await RunAsync([.. agent.Prefix, mkdir, "-m", "700", "--", home], ct)) return null;
-            if (memberFolder && !await RunAsync([.. agent.Prefix, mkdir, "-p", "-m", "700", "--", Path.Combine(parent, CacheFolder)], ct)) return null;
+            if (SystemCommand.Find("mkdir") is not { } mkdir || SystemCommand.Find("cp") is not { } cp) return false;
+            if (!await RunAsync([.. agent.Prefix, mkdir, "-m", "700", "--", home], ct)) return false;
+            if (!await RunAsync([.. agent.Prefix, mkdir, "-p", "-m", "700", "--", Path.Combine(parent, CacheFolder)], ct)) return false;
 
             if (grokConfig is not null)
             {
                 var grok = Path.GetDirectoryName(GrokConfigIn(home))!;
-                if (!await RunAsync([.. agent.Prefix, mkdir, "-m", "700", "--", grok], ct)) return null;
-                if (!await RunAsync([.. agent.Prefix, cp, "--", grokConfig, GrokConfigIn(home)], ct)) return null;
+                if (!await RunAsync([.. agent.Prefix, mkdir, "-m", "700", "--", grok], ct)) return false;
+                if (!await RunAsync([.. agent.Prefix, cp, "--", grokConfig, GrokConfigIn(home)], ct)) return false;
             }
 
-            return home;
+            return true;
         }
 
         try
@@ -77,13 +111,15 @@ public static class RunHome
             if (OperatingSystem.IsWindows())
             {
                 Directory.CreateDirectory(home);
-                if (memberFolder) Directory.CreateDirectory(Path.Combine(parent, CacheFolder));
+                Directory.CreateDirectory(Path.Combine(parent, CacheFolder));
             }
             else
             {
                 Directory.CreateDirectory(home, OwnerOnly);
-                if (memberFolder) Directory.CreateDirectory(Path.Combine(parent, CacheFolder), OwnerOnly);
+                Directory.CreateDirectory(Path.Combine(parent, CacheFolder), OwnerOnly);
             }
+
+            ct.ThrowIfCancellationRequested();
 
             if (grokConfig is not null)
             {
@@ -93,11 +129,11 @@ public static class RunHome
                 File.Copy(grokConfig, GrokConfigIn(home));
             }
 
-            return home;
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return null;
+            return false;
         }
     }
 
@@ -134,6 +170,15 @@ public static class RunHome
             if (!await RunAsync([.. agent.Prefix, mkdir, "-p", "-m", "700", "--", folder], CancellationToken.None)) return transcript;
             if (!await RunAsync([.. agent.Prefix, mv, "-n", "-T", "--", source, kept], CancellationToken.None)) return transcript;
 
+            // Files only, as the agent, older than the bound: never a folder, never through a link.
+            if (SystemCommand.Find("find") is { } find)
+            {
+                await RunAsync(
+                    [.. agent.Prefix, find, folder, "-mindepth", "1", "-maxdepth", "1", "-type", "f",
+                        "-mmin", "+" + (long)TranscriptsKept.TotalMinutes, "-delete"],
+                    CancellationToken.None);
+            }
+
             return transcript with { Path = kept };
         }
 
@@ -143,11 +188,29 @@ public static class RunHome
             else Directory.CreateDirectory(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
             File.Move(source, kept);
+            PruneKept(folder, DateTime.UtcNow - TranscriptsKept);
             return transcript with { Path = kept };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return transcript;
+        }
+    }
+
+    /// <summary>Removes the transcripts in <paramref name="folder"/> last written before
+    /// <paramref name="before"/>: files only, a link removed as a link.</summary>
+    private static void PruneKept(string folder, DateTime before)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(folder))
+            {
+                if (File.GetLastWriteTimeUtc(file) < before) File.Delete(file);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The next kept transcript prunes again.
         }
     }
 
@@ -160,7 +223,39 @@ public static class RunHome
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // The next issued run of this member sweeps it.
+            // Swept later: the member's next issued run, or the next shared sweep.
+        }
+        finally
+        {
+            Live.TryRemove(home, out _);
+        }
+    }
+
+    /// <summary>
+    /// Removes the homes in <paramref name="parent"/>, a folder several launches share, that no live
+    /// launch of this Host owns and that nothing has written in for <see cref="SharedLeftoverAge"/>:
+    /// those a stopped Host or a lost removal left. Run at Host start and before each new one is made.
+    /// </summary>
+    public static async Task SweepSharedAsync(string parent, AgentLaunchUser? runAs, CancellationToken ct, DateTime? now = null)
+    {
+        var before = (now ?? DateTime.UtcNow) - SharedLeftoverAge;
+
+        IEnumerable<string> stale;
+        try
+        {
+            stale = Directory.EnumerateDirectories(parent, Prefix + "*")
+                .Where(home => !Live.ContainsKey(home) && Directory.GetLastWriteTimeUtc(home) < before)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        foreach (var home in stale)
+        {
+            ct.ThrowIfCancellationRequested();
+            await RemoveAsync(home, runAs);
         }
     }
 
@@ -171,7 +266,7 @@ public static class RunHome
         IEnumerable<string> stale;
         try
         {
-            stale = Directory.EnumerateDirectories(parent, Prefix + "*").ToList();
+            stale = Directory.EnumerateDirectories(parent, Prefix + "*").Where(home => !Live.ContainsKey(home)).ToList();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

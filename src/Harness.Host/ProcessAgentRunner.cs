@@ -1555,8 +1555,8 @@ public sealed partial class ProcessAgentRunner(
         foreach (var argument in check) start.ArgumentList.Add(argument);
         MemberEnvironment(start, command, AgentToolPreflight.LaunchShape(definition).Environment, credential);
 
-        // In the temp root every member folder is made in, which the agent can write; never swept,
-        // as other launches share it. Removed in the finally below.
+        // In the temp root every member folder is made in, which the agent can write, and shared with
+        // other launches: swept only of old homes nobody owns. Removed in the finally below.
         string? home = null;
         if (credential.PerRunHome)
         {
@@ -1568,6 +1568,7 @@ public sealed partial class ProcessAgentRunner(
             }
 
             start.Environment["HOME"] = home;
+            start.Environment["XDG_CACHE_HOME"] = RunHome.CacheBeside(home);
         }
 
         try

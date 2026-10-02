@@ -55,7 +55,8 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
     /// <summary>A fake CLI called <paramref name="command"/>, the presets that launch it, and the
     /// runner and store a run of them goes through.</summary>
     private async Task<(ProcessAgentRunner Runner, AgentCredentialStore Store, IRunCredentials Credentials)> SetUpAsync(
-        string command = "claude", IssuedCredential? declaration = null, int exitCode = 0, AgentLiveView? liveView = null)
+        string command = "claude", IssuedCredential? declaration = null, int exitCode = 0, AgentLiveView? liveView = null,
+        bool hold = false)
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "The fake CLI is a shell script and the login a FIFO.");
 
@@ -71,6 +72,8 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
             // A transcript in its home, where a session id names it; a plugin listing that lists none.
             + "if [ \"$3\" = --session-id ]; then mkdir -p \"$HOME/t\"; echo '{\"type\":\"user\"}' > \"$HOME/t/$4.jsonl\"; fi\n"
             + "if [ \"$1\" = plugin ]; then echo '[]'; fi\n"
+            // A run still going when it is stopped.
+            + (hold ? "sleep 30\n" : "")
             + $"exit {exitCode}\n");
 
         Directory.CreateDirectory(Path.Combine(SharedHome, ".claude"));
@@ -262,6 +265,112 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
     }
 
     [Fact]
+    public async Task An_issued_run_cancelled_mid_launch_leaves_no_home()
+    {
+        var (runner, store, _) = await SetUpAsync(hold: true);
+        await store.SetAsync("claude", ClaudeLike.Kinds[0], Key, new CredentialActor("u1", "person@example.test"), Ct);
+        _issued.Add("fake-headless");
+
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var run = runner.RunAsync(Invocation(), stop.Token);
+
+        // Stopped once the CLI is running in its home.
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (!File.Exists(Seen) || !File.ReadAllText(Seen).Contains("--- home", StringComparison.Ordinal))
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The CLI never started.");
+            await Task.Delay(50, Ct);
+        }
+
+        var home = SeenEnvironment()["HOME"];
+        Assert.True(Directory.Exists(home));
+
+        await stop.CancelAsync();
+        try
+        {
+            await run.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // A cancelled run may end by throwing.
+        }
+
+        Assert.False(Directory.Exists(home), $"{home} is still there after the run was cancelled.");
+        Assert.Empty(Directory.EnumerateDirectories(SeenEnvironment()["TMPDIR"], RunHome.Prefix + "*"));
+    }
+
+    [Fact]
+    public async Task A_home_whose_making_is_cancelled_or_fails_after_it_was_begun_is_not_left()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix modes.");
+        var parent = Directory.CreateDirectory(Path.Combine(_root, "member-temp")).FullName;
+
+        // Cancelled once the folder is made.
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => RunHome.CreateAsync(parent, null, null, cancelled.Token));
+        Assert.Empty(Directory.EnumerateDirectories(parent, RunHome.Prefix + "*"));
+
+        // Failed after the folder is made: the grok entry to copy in is not there.
+        Assert.Null(await RunHome.CreateAsync(parent, null, Path.Combine(_root, "no-such-config.toml"), Ct));
+        Assert.Empty(Directory.EnumerateDirectories(parent, RunHome.Prefix + "*"));
+    }
+
+    [Fact]
+    public async Task Shared_homes_left_behind_are_swept_at_start_and_before_the_next_but_never_a_live_or_recent_one()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix modes.");
+        var shared = Directory.CreateDirectory(Path.Combine(_root, "shared")).FullName;
+
+        var old = Directory.CreateDirectory(Path.Combine(shared, RunHome.Prefix + "old000000000")).FullName;
+        File.WriteAllText(Path.Combine(old, "left"), "x");
+        Directory.SetLastWriteTimeUtc(old, DateTime.UtcNow - RunHome.SharedLeftoverAge - TimeSpan.FromMinutes(1));
+        var recent = Directory.CreateDirectory(Path.Combine(shared, RunHome.Prefix + "recent000000")).FullName;
+
+        // Before a new one is made: the old leftover goes, the recent one stays.
+        var live = await RunHome.CreateAsync(shared, null, null, Ct, memberFolder: false);
+        Assert.NotNull(live);
+        Assert.False(Directory.Exists(old));
+        Assert.True(Directory.Exists(recent));
+
+        // At Host start, as Program calls it, later on: what nobody owns goes, the live one stays.
+        Directory.SetLastWriteTimeUtc(live, DateTime.UtcNow - RunHome.SharedLeftoverAge - TimeSpan.FromMinutes(1));
+        await RunHome.SweepSharedAsync(shared, null, Ct, now: DateTime.UtcNow + RunHome.SharedLeftoverAge + TimeSpan.FromMinutes(1));
+        Assert.True(Directory.Exists(live));
+        Assert.False(Directory.Exists(recent));
+
+        await RunHome.RemoveAsync(live, null);
+        Assert.False(Directory.Exists(live));
+    }
+
+    [Fact]
+    public async Task Kept_transcripts_older_than_the_bound_are_pruned_when_another_is_kept()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix modes.");
+        var temp = Directory.CreateDirectory(Path.Combine(_root, "member-temp")).FullName;
+        var kept = Directory.CreateDirectory(Path.Combine(temp, RunHome.TranscriptsFolder)).FullName;
+
+        var old = Path.Combine(kept, "home-aaaaaaaaaaaa-old.jsonl");
+        File.WriteAllText(old, "{}");
+        File.SetLastWriteTimeUtc(old, DateTime.UtcNow - RunHome.TranscriptsKept - TimeSpan.FromDays(1));
+        var recent = Path.Combine(kept, "home-bbbbbbbbbbbb-recent.jsonl");
+        File.WriteAllText(recent, "{}");
+        File.SetLastWriteTimeUtc(recent, DateTime.UtcNow - TimeSpan.FromDays(1));
+
+        var home = await RunHome.CreateAsync(temp, null, null, Ct);
+        Assert.NotNull(home);
+        var written = Path.Combine(Directory.CreateDirectory(Path.Combine(home, "t")).FullName, "s.jsonl");
+        File.WriteAllText(written, "{\"type\":\"user\"}");
+
+        var moved = await RunHome.KeepTranscriptAsync(new AgentTranscript(written, LiveView.ClaudeJsonl), home, temp, null);
+        await RunHome.RemoveAsync(home, null);
+
+        Assert.True(File.Exists(moved!.Path));
+        Assert.True(File.Exists(recent));
+        Assert.False(File.Exists(old));
+    }
+
+    [Fact]
     public async Task An_issued_run_with_no_credential_set_does_not_start()
     {
         var (runner, _, _) = await SetUpAsync();
@@ -407,6 +516,10 @@ public sealed class IssuedCredentialLaunchTests : IDisposable
         Assert.StartsWith(homes + Path.DirectorySeparatorChar + RunHome.Prefix, seen["HOME"]);
         Assert.Empty(SeenHomeListing());
         Assert.Empty(Directory.EnumerateDirectories(homes, RunHome.Prefix + "*"));
+
+        // One cache beside the listing homes, kept across listings, not one in each fresh home.
+        Assert.Equal(Path.Combine(homes, RunHome.CacheFolder), seen["XDG_CACHE_HOME"]);
+        Assert.True(Directory.Exists(seen["XDG_CACHE_HOME"]));
     }
 
     [Fact]

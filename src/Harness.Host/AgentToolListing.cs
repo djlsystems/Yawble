@@ -96,7 +96,7 @@ public sealed class CliListingRunner(AgentLaunchUser? runAs = null, string? home
 
     public bool Installed(string command) => PathSearch.Find(command) is not null;
 
-    // A parent several launches share, as the launch check's: never swept.
+    // A parent several launches share, as the launch check's: swept only of old homes nobody owns.
     public Task<string?> MakeHomeAsync(CancellationToken ct) =>
         runAs is { Refuses: true }
             ? Task.FromResult<string?>(null)

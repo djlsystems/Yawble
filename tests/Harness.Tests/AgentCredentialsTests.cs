@@ -101,6 +101,45 @@ public sealed class AgentCredentialsTests : IAsyncLifetime
         Assert.All(rows, r => Assert.Equal("claude", r.Subject));
         Assert.Contains("\"variable\":\"ANTHROPIC_API_KEY\"", rows[0].Detail);
         Assert.Contains("\"variable\":\"CLAUDE_CODE_OAUTH_TOKEN\"", rows[1].Detail);
+
+        // The clear row names what was cleared as the set row names what was set.
+        Assert.Equal("""{"command":"claude","kind":"token","variable":"CLAUDE_CODE_OAUTH_TOKEN"}""", rows[2].Detail);
+    }
+
+    [Fact]
+    public async Task A_name_nothing_answers_to_is_refused_in_a_fixed_sentence_that_never_quotes_it()
+    {
+        // What a person or a script may type where the name goes: a value.
+        const string Typed = "fake-typed-as-a-name-Wq4rT8yU2p";
+
+        foreach (var (method, body) in new (HttpMethod, object?)[]
+                 {
+                     (HttpMethod.Put, new { kind = "apiKey", value = First }), (HttpMethod.Delete, null),
+                 })
+        {
+            var refused = await SendAsync(method, $"/api/agents/{Typed}/credential", body);
+            Assert.Equal(HttpStatusCode.NotFound, refused.Status);
+            Assert.Equal(AgentCredentials.NotFound, JsonDocument.Parse(refused.Body).RootElement.GetProperty("error").GetString());
+            Assert.DoesNotContain("Wq4rT8yU", refused.Body);
+        }
+
+        foreach (var request in new object[]
+                 {
+                     new { action = "set", agent = Typed, kind = "apiKey", value = First },
+                     new { action = "clear", agent = Typed },
+                     new { action = "status", agent = Typed },
+                     new { action = "source", agent = Typed, source = "issued" },
+                     new { action = Typed, agent = "claude" },
+                 })
+        {
+            var answer = await ExchangeAsync(request);
+            Assert.True(answer.GetProperty("status").GetInt32() is 404 or 400);
+            Assert.DoesNotContain("Wq4rT8yU", answer.GetRawText());
+        }
+
+        Assert.Equal(404, (await ExchangeAsync(new { action = "status", agent = Typed })).GetProperty("status").GetInt32());
+        Assert.Equal(AgentCredentials.NotFound,
+            (await ExchangeAsync(new { action = "clear", agent = Typed })).GetProperty("body").GetProperty("error").GetString());
     }
 
     [Fact]
@@ -167,6 +206,30 @@ public sealed class AgentCredentialsTests : IAsyncLifetime
         await SourcesAsync(new() { ["claude-headless"] = "issued" });
         var credential = await Services.GetRequiredService<IRunCredentials>().ResolveAsync("claude-headless", null, Ct);
         Assert.Equal(First, credential.Environment["ANTHROPIC_API_KEY"]);
+        Assert.Single(await TenantRowsAsync(), r => r.Action.StartsWith("agents.credential-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Over_the_request_file_nothing_is_set_or_cleared_when_its_tenant_row_cannot_be_written()
+    {
+        await ExecuteAsync("ALTER TABLE tenant_events RENAME TO tenant_events_away");
+        var unrecordedSet = await ExchangeAsync(new { action = "set", agent = "claude", kind = "apiKey", value = ByOperator });
+        await ExecuteAsync("ALTER TABLE tenant_events_away RENAME TO tenant_events");
+
+        Assert.Equal(500, unrecordedSet.GetProperty("status").GetInt32());
+        Assert.Contains("could not be written", unrecordedSet.GetProperty("body").GetProperty("error").GetString());
+        Assert.False(await StoredAsync("claude"));
+        Assert.DoesNotContain(await TenantRowsAsync(), r => r.Action.StartsWith("agents.credential-", StringComparison.Ordinal));
+
+        Assert.Equal(200, (await ExchangeAsync(new { action = "set", agent = "claude", kind = "apiKey", value = ByOperator }))
+            .GetProperty("status").GetInt32());
+
+        await ExecuteAsync("ALTER TABLE tenant_events RENAME TO tenant_events_away");
+        var unrecordedClear = await ExchangeAsync(new { action = "clear", agent = "claude" });
+        await ExecuteAsync("ALTER TABLE tenant_events_away RENAME TO tenant_events");
+
+        Assert.Equal(500, unrecordedClear.GetProperty("status").GetInt32());
+        Assert.True(await StoredAsync("claude"));
         Assert.Single(await TenantRowsAsync(), r => r.Action.StartsWith("agents.credential-", StringComparison.Ordinal));
     }
 
@@ -307,6 +370,50 @@ public sealed class AgentCredentialsTests : IAsyncLifetime
         Assert.Contains($"ANTHROPIC_API_KEY={Second}", seen);
         var temp = seen.Single(l => l.StartsWith("TMPDIR=", StringComparison.Ordinal))[7..];
 
+        // A PUMPED run: a member told through the route, run by the Host's own pump, its rows and
+        // payloads written to the log. Its CLI records what it was handed outside the data root and
+        // answers without echoing it.
+        var quiet = Path.Combine(Directory.CreateDirectory(Path.Combine(_outside, "quiet-bin")).FullName, "claude");
+        var quietSeen = Path.Combine(_outside, "quiet-seen.txt");
+        await TestExecutable.WriteAsync(quiet, "#!/bin/sh\n" + $"env > '{quietSeen}'\n" + "echo done\n");
+        catalog.Replace([.. catalog.Definitions, new AgentDefinition("fake-quiet", AgentMode.Headless,
+            new AgentLaunch(quiet, ["-p", "{userPrompt}"]), IssuedCredential: builtIn.IssuedCredential)]);
+        await SourcesAsync(new() { ["fake-claude"] = "issued", ["fake-quiet"] = "issued" });
+
+        var added = await SendAsync(HttpMethod.Post, $"/api/teams/{_team}/containers", new { name = "Quiet", agent = "fake-quiet" });
+        Assert.True(added.Status == HttpStatusCode.OK, added.Body);
+        var told = await SendAsync(HttpMethod.Post, $"/api/teams/{_team}/containers/Quiet/tell", new { instruction = "work" });
+        Assert.True(told.Status == HttpStatusCode.OK, told.Body);
+
+        var log = Services.GetRequiredService<IMessageLog>();
+        IReadOnlyList<Message> ended = [];
+        await WaitUntilAsync(() =>
+        {
+            ended = log.ReadAfterAsync(0, [MessageTypes.Completed, MessageTypes.Failed], 100, Ct).GetAwaiter().GetResult()
+                .Where(m => m.Source.Contains("Quiet", StringComparison.Ordinal)).ToList();
+            return ended.Count > 0;
+        });
+        Assert.True(File.Exists(quietSeen), string.Join("\n", ended.Select(m => m.Type + " " + m.Payload)));
+        Assert.Contains($"ANTHROPIC_API_KEY={Second}", File.ReadAllLines(quietSeen));
+        var quietTemp = File.ReadAllLines(quietSeen).Single(l => l.StartsWith("TMPDIR=", StringComparison.Ordinal))[7..];
+
+        // Every row of the log, each payload whole.
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=False"))
+        {
+            await connection.OpenAsync(Ct);
+            await using var rows = connection.CreateCommand();
+            rows.CommandText = "SELECT type || ' ' || source || ' ' || payload FROM messages";
+            await using var reader = await rows.ExecuteReaderAsync(Ct);
+            var count = 0;
+            while (await reader.ReadAsync(Ct))
+            {
+                _responses.Add(reader.GetString(0));
+                count++;
+            }
+
+            Assert.True(count > 0);
+        }
+
         var launch = await Services.GetRequiredService<AgentLaunchChecks>().ReportsAsync(Ct, fresh: true);
         Assert.Equal(AgentLaunchReport.Ok, launch["fake-claude"].Result);
 
@@ -329,10 +436,11 @@ public sealed class AgentCredentialsTests : IAsyncLifetime
             Assert.DoesNotContain(_responses, r => r.Contains(needle, StringComparison.Ordinal));
         }
 
-        // EVERY FILE under the data root - the database and its WAL, logs, records, the request
-        // folder - as Latin-1 and as UTF-16.
+        // EVERY FILE under the data root - the database and its WAL, the Host's logs, records, the
+        // request folder - and in the pumped member's TMPDIR, as Latin-1 and as UTF-16.
         SqliteConnection.ClearAllPools();
-        foreach (var file in Directory.EnumerateFiles(_dataRoot, "*", SearchOption.AllDirectories))
+        foreach (var file in Directory.EnumerateFiles(_dataRoot, "*", SearchOption.AllDirectories)
+                     .Concat(Directory.EnumerateFiles(quietTemp, "*", SearchOption.AllDirectories)))
         {
             byte[] bytes;
             try { bytes = await File.ReadAllBytesAsync(file, Ct); }
@@ -343,12 +451,13 @@ public sealed class AgentCredentialsTests : IAsyncLifetime
             foreach (var needle in secrets.Concat(fragments))
             {
                 Assert.False(latin.Contains(needle, StringComparison.Ordinal) || utf16.Contains(needle, StringComparison.Ordinal),
-                    $"{Path.GetRelativePath(_dataRoot, file)} holds an issued credential in plain text.");
+                    $"{file} holds an issued credential in plain text.");
             }
         }
 
-        // And the run left no home behind.
+        // And neither run left a home behind.
         Assert.Empty(Directory.EnumerateDirectories(temp, RunHome.Prefix + "*"));
+        Assert.Empty(Directory.EnumerateDirectories(quietTemp, RunHome.Prefix + "*"));
     }
 
     // ---- helpers --------------------------------------------------------------------------------------
