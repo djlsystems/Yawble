@@ -37,6 +37,25 @@ public sealed class WorkersRecordTests
         bed.Go("BlockDev");
     }
 
+    // The doctor's running limit is control's record of it. Written at start only, it read "no worker is
+    // connected" for as long as control ran, while GET /api/wip had the sum of the workers' bounds.
+    [Fact]
+    public async Task The_doctors_running_limit_follows_a_worker_joining_and_going()
+    {
+        await using var bed = new ProcessBed();
+        await bed.StartControlAsync(graceSeconds: 1);
+
+        Assert.Equal(0, WipRecord.Read(bed.Root)?.Limit.Limit);
+
+        var worker = bed.StartWorker("w1");
+        await bed.UntilAsync("the record counts w1's bound", () => Task.FromResult(
+            WipRecord.Read(bed.Root)?.Limit is { Bound: "workers", Limit: > 0 } limit && limit.Reason.Contains("w1", StringComparison.Ordinal)));
+
+        worker.Stop();
+        await bed.UntilAsync("the record drops w1 once it has gone", () => Task.FromResult(
+            WipRecord.Read(bed.Root)?.Limit is { Limit: 0 }));
+    }
+
     [Fact]
     public async Task A_host_that_runs_its_runs_itself_records_no_workers()
     {

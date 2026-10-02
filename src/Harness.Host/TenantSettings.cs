@@ -358,7 +358,7 @@ public sealed class TenantSettings
             each.All(e => e.Limit.Cpus is not null) ? each.Sum(e => e.Limit.Cpus) : null,
             each.All(e => e.Limit.MemoryBound is not null) ? each.Sum(e => e.Limit.MemoryBound) : null,
             memory, memoryPerRunMb,
-            $"sum of {each.Count} worker{(each.Count == 1 ? "" : "s")}' bounds: "
+            (each.Count == 1 ? "sum of 1 worker's bound: " : $"sum of {each.Count} workers' bounds: ")
             + string.Join(", ", each.Select(e => $"{e.Worker.Id} {e.Limit.Limit} ({e.Limit.Reason})")));
     }
 

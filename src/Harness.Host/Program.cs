@@ -2378,6 +2378,10 @@ var workerConnections = new WorkerConnections(
     log: app.Services.GetRequiredService<ILogger<WorkerConnections>>(),
     streams: app.Services.GetRequiredService<WorkerStreams>().Deliver);
 workerConnections.Changed += () => wip.SetMax(tenantSettings.WipMaxRunning);
+// The run limit is the sum of the connected workers' bounds, so --doctor's record of it is written
+// again whenever a worker joins or goes, as it is after a setting change; written at start only, it
+// said "no worker is connected" for as long as control ran.
+workerConnections.Changed += () => WipRecord.Of(tenantSettings, app.Services.GetRequiredService<RunMemoryLimits>()).Write(dataRoot, app.Logger);
 // A setting the figures a worker runs by are built from may have changed: every connected worker is
 // told now, not at its next welcome. Any change is said, since the figures are cheap to send and a
 // list of the settings they read would drift from the code that reads them.
