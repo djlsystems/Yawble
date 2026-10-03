@@ -504,7 +504,7 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         // "nobody is working it" nudge) ends in a run-end publish of this clone. Under load one of
         // those lands between a test's commit and its own publish: it pushes the commit, the test's
         // publish then has nothing to push, and the tip is recorded by that other publish moments
-        // after the test has read it (B003E). Created with it, the Manager is told nothing.
+        // after the test has read it. Created with it, the Manager is told nothing.
         var team = (await registry.CreateAsync(name, agent, memberAgent: agent, repos: [Url], ct: Ct)).Id;
 
         Assert.True(Directory.Exists(Path.Combine(Clone(team), ".git")), "the platform did not clone");
