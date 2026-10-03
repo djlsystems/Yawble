@@ -22,7 +22,7 @@ public static partial class RepoEndpoints
         app.MapPost("/api/teams/{team}/repos/{repo}/bring-current-and-merge", BringCurrentAndMergeAsync)
             .WithName("BringCurrentAndMerge")
             .WithTags("Repos")
-            .HumansOnly()
+            .HumansOrConcierge(Permits.Merge)
             .WithSummary("Merge origin/main into the team branch, push it, then merge it to main")
             .WithDescription(
                 "Fetches, then merges origin/main into team/{id} in the team's clone with a merge commit "
@@ -32,7 +32,7 @@ public static partial class RepoEndpoints
                 + "object database, and the answer (409) names every conflicting file for the team or "
                 + "a person to resolve on the team branch. Refused before anything is touched while a "
                 + "member is working, while the clone has uncommitted changes or a detached HEAD, and "
-                + "in contributor mode (409). It runs no tests." + DefaultBranchNote);
+                + "in contributor mode (409). It runs no tests." + DefaultBranchNote + ConciergeMergeNote);
     }
 
     private static async Task<IResult> BringCurrentAndMergeAsync(
@@ -47,14 +47,22 @@ public static partial class RepoEndpoints
         ITenantLog log,
         BacklogTipRecorder landedRecorder,
         BacklogLandedCache landedCache,
+        IUserStore users,
+        ConciergeMergeGate mergeGate,
         CancellationToken ct)
     {
+        // THE SAME QUESTION MERGE TO MAIN ASKS, asked here first: the team branch is pushed below,
+        // before Merge to main runs, so a caller it would refuse must not get that far.
+        var caller = await mergeGate.CheckAsync(httpContext, users, ct);
+        if (caller.Refusal is { } refused) return refused;
+        log = ConciergeMergeGate.For(log, caller);
+
         if (teams.ExistingName(team) is not { } stored)
         {
             return Results.NotFound(new { error = $"No team '{team}'." });
         }
 
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
+        var email = caller.ActorEmail;
         var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
         const string action = TenantActions.RepoBringCurrentAndMerge;
 
@@ -276,7 +284,8 @@ public static partial class RepoEndpoints
             : $"origin/{branch} merged into {teamBranch} ({ShortenSha(mergeCommit)}) and pushed.{localNote}";
 
         // THEN MERGE TO MAIN, THE SAME HANDLER ITS OWN BUTTON CALLS - every check it makes, and its own row.
-        var merged = await MergeToMainAsync(team, repo, httpContext, teams, gitRunner, paths, host, log, landedRecorder, landedCache, ct);
+        var merged = await MergeToMainAsync(
+            team, repo, httpContext, teams, gitRunner, paths, host, log, landedRecorder, landedCache, users, mergeGate, ct);
         if (merged is IValueHttpResult { Value: RepoActionResult done })
         {
             return Results.Ok(done with { Message = $"{broughtCurrent} {done.Message}" });

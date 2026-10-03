@@ -99,6 +99,17 @@ public static class Permits
     /// </summary>
     public const string Outcomes = "Outcomes";
 
+    /// <summary>
+    /// Merge to main, and Bring current and merge, for the CONCIERGE: its own verb, folded into
+    /// nothing else. Held by <c>ConciergeLaunchFactory.ConciergePermits</c> alone and taken from
+    /// every other principal at authentication however its key was made, so a Manager, a member, a
+    /// plugin or a pasted key never reaches a default branch with it. Holding it is not enough: the
+    /// routes also ask the tenant setting <c>concierge.mayMerge</c>, off unless a person turns it on.
+    ///
+    /// NOT IN <see cref="All"/>, which is what a member key or an API key can be minted with.
+    /// </summary>
+    public const string Merge = "Merge";
+
     public static IReadOnlySet<string> All { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         Read, Tell, CreateContainer, CreateTeam, Progress,

@@ -88,6 +88,13 @@ public static class PermitGate
             return;
         }
 
+        if (endpoint.Metadata.GetMetadata<HumansOrConciergeMarker>() is { } door
+            && !(ConciergeLaunchFactory.IsConcierge(principal) && principal.May(door.Permit)))
+        {
+            await Refuse(context, HumansOnlyMessage);
+            return;
+        }
+
         if (endpoint.Metadata.GetMetadata<PermitRequirement>() is { } required
             && !principal.May(required.Permit))
         {
