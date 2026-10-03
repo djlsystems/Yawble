@@ -55,6 +55,7 @@ describe('the Admission field', () => {
     expect(names).toEqual([
       'causation.depthLimit',
       'concierge.idleTimeout',
+      'concierge.mayMerge',
       'kanban.wipLimits',
       'quiet.window',
       'resume.maxAutomatic',
@@ -276,6 +277,29 @@ describe('system packages', () => {
 
     expect(changedSettings(settings, { 'system.packages': 'htop,  jq' }, {})).toEqual({});
     expect(changedSettings(settings, { 'system.packages': 'htop' }, {})).toEqual({ 'system.packages': ['htop'] });
+  });
+});
+
+describe('concierge.mayMerge', () => {
+  it('is a toggle on the Concierge tab whose hint says what it allows and that it is off unless a person turns it on', () => {
+    const field = TenantSettingFields.find((entry) => entry.name === 'concierge.mayMerge')!;
+
+    expect(field.tab).toBe('concierge');
+    expect(field.kind).toBe('toggle');
+    expect(field.hint).toContain('Lets the Concierge merge');
+    expect(field.hint).toContain('it is off unless a person turns it on.');
+  });
+
+  it('goes as a boolean, takes only on or off, and is unchanged when put back', () => {
+    expect(wireValue('toggle', 'true')).toBe(true);
+    expect(wireValue('toggle', 'false')).toBe(false);
+    expect(validateDraft('toggle', 'true')).toBeNull();
+    expect(validateDraft('toggle', 'false')).toBeNull();
+    expect(validateDraft('toggle', 'yes')).toBe('On or off.');
+
+    const stored = [setting('concierge.mayMerge', false)];
+    expect(changedSettings(stored, { 'concierge.mayMerge': 'false' }, {})).toEqual({});
+    expect(changedSettings(stored, { 'concierge.mayMerge': 'true' }, {})).toEqual({ 'concierge.mayMerge': true });
   });
 });
 

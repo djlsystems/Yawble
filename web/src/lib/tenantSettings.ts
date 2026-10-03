@@ -15,9 +15,10 @@ export type TenantSettingTab = 'admission' | 'spend' | 'concierge' | 'sweeps' | 
  * `packages` is a list of OS package names typed into one box, separated by spaces or commas.
  * `tagMap` is `agents.tags`, preset name to its list of tags, and `sourceMap` is
  * `agents.credentialSource`, preset name to `home` or `issued`. Both are edited from the Agents
- * screen rather than this dialog, which lists neither.
+ * screen rather than this dialog, which lists neither. `toggle` is on or off; its draft is the text
+ * `true` or `false` and it goes on the wire as a boolean.
  */
-export type TenantSettingKind = 'count' | 'duration' | 'theme' | 'lanes' | 'packages' | 'tagMap' | 'sourceMap'
+export type TenantSettingKind = 'count' | 'duration' | 'theme' | 'lanes' | 'packages' | 'tagMap' | 'sourceMap' | 'toggle'
 
 export interface TenantSettingField {
   name: string
@@ -34,6 +35,11 @@ export const KanbanWipLimits = 'kanban.wipLimits'
 export const SystemPackages = 'system.packages'
 export const AgentTags = 'agents.tags'
 export const AgentCredentialSources = 'agents.credentialSource'
+export const ConciergeMayMerge = 'concierge.mayMerge'
+
+/** This sentence is put in front of a person, word for word: what the setting allows, and that it is off unless turned on. */
+export const ConciergeMayMergeSentence =
+  'Lets the Concierge merge a team’s finished branch through the platform’s Merge to main, as the step of a backlog run you asked for or on your own request, recorded as done for you; it is off unless a person turns it on.'
 
 /** This sentence is put in front of a person, word for word. */
 export const SystemPackagesRestartSentence = 'Adding one costs a restart, not an image rebuild.'
@@ -94,6 +100,13 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     kind: 'duration',
     label: 'Close an idle Concierge after',
     hint: 'A Concierge nobody has open and that has done nothing for this long is ended. For example 1h or 30m.',
+  },
+  {
+    name: ConciergeMayMerge,
+    tab: 'concierge',
+    kind: 'toggle',
+    label: 'Let the Concierge merge finished work',
+    hint: ConciergeMayMergeSentence,
   },
   {
     name: 'quiet.window',
@@ -406,6 +419,10 @@ export function validateDraft(kind: TenantSettingKind, text: string, max?: numbe
     return (ThemeChoices as readonly string[]).includes(trimmed) ? null : 'Auto, light or dark.'
   }
 
+  if (kind === 'toggle') {
+    return trimmed === 'true' || trimmed === 'false' ? null : 'On or off.'
+  }
+
   if (kind === 'packages') {
     const names = packageNames(trimmed)
     const bad = names.find((name) => !PackageName.test(name))
@@ -445,6 +462,7 @@ export function wireValue(kind: TenantSettingKind, text: string): unknown {
   if (kind === 'count') return Number(text.trim())
   if (kind === 'duration') return timeSpanOf(durationSeconds(text) ?? 0)
   if (kind === 'packages') return packageNames(text)
+  if (kind === 'toggle') return text.trim() === 'true'
 
   return text.trim()
 }
@@ -459,6 +477,7 @@ function sameValue(kind: TenantSettingKind, draft: string, stored: unknown): boo
   }
   if (kind === 'count') return draft.trim() !== '' && Number(draft.trim()) === Number(text)
   if (kind === 'packages') return packageNames(draft).join(' ') === packageNames(text).join(' ')
+  if (kind === 'toggle') return draft.trim() === text.toLowerCase()
 
   return draft.trim() === text
 }

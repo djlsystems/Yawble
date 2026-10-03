@@ -80,6 +80,7 @@ function settings() {
       }),
       setting('workflow.spendLimit', 100000000),
       setting('concierge.idleTimeout', '08:00:00'),
+      setting('concierge.mayMerge', false),
       setting('quiet.window', '00:30:00'),
       setting('resume.maxAutomatic', 3),
       setting('causation.depthLimit', 25),
@@ -451,6 +452,44 @@ describe('Concierge', () => {
     expect(bodyText()).toContain('No Concierge session is running.');
   });
 
+  /**
+   * B003F: whether the Concierge may merge is a person's choice. The Concierge tab shows it with its
+   * one sentence - what it allows, and that it is off unless a person turns it on - never the key.
+   */
+  it('shows whether the Concierge may merge, off, with its one sentence and never the key', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'concierge');
+
+    const toggle = wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === 'Let the Concierge merge finished work');
+    expect(toggle).toBeDefined();
+    expect(toggle!.props('modelValue')).toBe(false);
+    expect(bodyText()).toContain(
+      'Lets the Concierge merge a team’s finished branch through the platform’s Merge to main, as the step of a backlog run you asked for or on your own request, recorded as done for you; it is off unless a person turns it on.',
+    );
+    expect(bodyText()).not.toContain('concierge.mayMerge');
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it('sends the Concierge merge setting as a boolean when a person turns it on, and nothing when put back', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'concierge');
+
+    const toggle = () => wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === 'Let the Concierge merge finished work')!;
+    toggle().vm.$emit('update:modelValue', true);
+    await flushPromises();
+    toggle().vm.$emit('update:modelValue', false);
+    await flushPromises();
+    expect(saveButton().disabled).toBe(true);
+
+    toggle().vm.$emit('update:modelValue', true);
+    await flushPromises();
+    expect(toggle().props('modelValue')).toBe(true);
+    saveButton().click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'concierge.mayMerge': true });
+  });
+
   /** The Concierge tab also holds this browser's terminal display. */
   it('holds this browser\'s terminal display, saved as it changes and never by Save', async () => {
     const wrapper = await openDialog();
@@ -609,7 +648,7 @@ describe('every tab', () => {
 
     expect([...seen.keys()].sort()).toEqual(
       [
-        'causation.depthLimit', 'concierge.idleTimeout', 'quiet.window', 'resume.maxAutomatic', 'runs.memoryLimitMb',
+        'causation.depthLimit', 'concierge.idleTimeout', 'concierge.mayMerge', 'quiet.window', 'resume.maxAutomatic', 'runs.memoryLimitMb',
         'theme.default', 'wip.maxRunning', 'wip.memoryPerRunMb', 'workflow.spendLimit',
       ],
     );
