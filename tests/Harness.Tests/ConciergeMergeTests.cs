@@ -17,7 +17,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Harness.Tests;
 
 /// <summary>
-/// B003F: a person may let the Concierge merge, through the platform's own Merge to main and Bring
+/// A person may let the Concierge merge, through the platform's own Merge to main and Bring
 /// current and merge. The setting <c>concierge.mayMerge</c> is off by default; with it on, the
 /// Concierge holding <c>Merge</c> lands a team branch exactly as a person does, and the tenant row
 /// names the person with <c>viaConcierge</c>. Nobody else gets through, whatever it holds. Every

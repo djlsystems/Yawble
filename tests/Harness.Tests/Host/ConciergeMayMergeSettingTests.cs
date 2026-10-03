@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests.Host;
 
 /// <summary>
-/// B003F: <c>concierge.mayMerge</c> is off on a fresh volume and on an existing one, is listed for
+/// <c>concierge.mayMerge</c> is off on a fresh volume and on an existing one, is listed for
 /// the Settings dialog with one sentence, and its write and reset land with their tenant rows in
 /// one transaction or not at all.
 /// </summary>

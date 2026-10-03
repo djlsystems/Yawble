@@ -488,7 +488,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     /// The Concierge runs a backlog, and what it never does in a run stays a person's: team deletion
     /// and workflow close are `HumansOnly`, so the Concierge's key is refused them however the skill
     /// is read. Merge opens to the Concierge only through `HumansOrConcierge(Merge)` and the setting
-    /// a person turns on (B003F, <c>ConciergeMergeTests</c>).
+    /// a person turns on (<c>ConciergeMergeTests</c>).
     /// </summary>
     [Fact]
     public void The_concierge_runs_a_backlog_and_leaves_merge_team_deletion_and_workflow_close_to_the_person()
