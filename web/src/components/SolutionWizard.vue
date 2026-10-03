@@ -43,6 +43,7 @@ import {
   secretSetWith,
   secretSentence,
   secretState,
+  settingDefaultWords,
   settingInputKind,
   settingKey,
   settingStartValue,
@@ -841,7 +842,7 @@ function next() {
                 />
                 <div class="text-caption os-text-muted">
                   {{ setting.description }}
-                  <template v-if="setting.default !== null && setting.default !== undefined"> Default: {{ JSON.stringify(setting.default) }}.</template>
+                  <template v-if="settingDefaultWords(setting) !== null"> Default: {{ settingDefaultWords(setting) }}.</template>
                   {{ setting.required ? 'Required.' : 'Optional.' }}
                 </div>
                 </template>
@@ -1042,6 +1043,8 @@ function next() {
 .solution-body {
   max-height: 65vh;
   overflow-y: auto;
+  /* A package's text (a path, a URL, a long name) wraps rather than widening the dialog. */
+  overflow-wrap: anywhere;
 }
 
 .solution-heading {

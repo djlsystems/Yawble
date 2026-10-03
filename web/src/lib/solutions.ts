@@ -203,6 +203,19 @@ export function settingStartValue(setting: SolutionPersonSetting): unknown {
   return '';
 }
 
+/**
+ * A setting's default in words, as the member settings form says it: a list as its items joined by
+ * commas ("none" when empty), a toggle as on or off; null when the manifest gives none. Never JSON: a
+ * long list written as JSON has no space to wrap at and pushes the dialog wider than the screen.
+ */
+export function settingDefaultWords(setting: SolutionPersonSetting): string | null {
+  const fallback = setting.default;
+  if (fallback === null || fallback === undefined) return null;
+  if (Array.isArray(fallback)) return fallback.length > 0 ? fallback.map(String).join(', ') : 'none';
+  if (typeof fallback === 'boolean') return fallback ? 'on' : 'off';
+  return String(fallback);
+}
+
 /** Whether a value says nothing was given: blank text, an empty list, no number. */
 export function isBlank(value: unknown): boolean {
   if (value === null || value === undefined) return true;
