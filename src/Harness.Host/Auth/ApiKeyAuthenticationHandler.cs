@@ -45,6 +45,9 @@ public sealed class ApiKeyAuthenticationHandler(
             return AuthenticateResult.Fail("Unknown credential.");
         }
 
+        // MERGE IS THE CONCIERGE'S, taken here from anything else that carries it.
+        principal = ConciergeLaunchFactory.Strip(principal);
+
         return AuthenticateResult.Success(
             new AuthenticationTicket(PrincipalClaims.ToClaimsPrincipal(principal, Scheme), Scheme));
     }

@@ -27,6 +27,13 @@ public static partial class RepoEndpoints
         + "`defaultBranch` on the repo status). When it is not known the route answers 409 and "
         + "changes nothing; it never assumes `main`.";
 
+    /// <summary>Appended to Merge to main and Bring current and merge: the one machine caller they take.</summary>
+    private const string ConciergeMergeNote =
+        " A person's button, and also the person's tenant Concierge's while it holds `Merge` and the "
+        + "tenant setting `concierge.mayMerge` is on (off unless a person turns it on); every other "
+        + "machine principal is refused as a person's action is, and the Concierge with the setting off "
+        + "is answered 403 naming the setting. The Concierge's rows name the person, with `viaConcierge`.";
+
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/teams/{team}/repo-status", GetRepoStatusAsync)
@@ -65,8 +72,9 @@ public static partial class RepoEndpoints
                 + "move. A merge that conflicts is refused and changes nothing at all: the merge is "
                 + "computed in the object database, so no branch moves, no file is touched, and "
                 + "there is no half-merged state to abort. In contributor mode it "
-                + "answers 409 and changes nothing: the work goes upstream with Open pull request." + DefaultBranchNote)
-            .HumansOnly()
+                + "answers 409 and changes nothing: the work goes upstream with Open pull request." + DefaultBranchNote
+                + ConciergeMergeNote)
+            .HumansOrConcierge(Permits.Merge)
             .WithTags("Repos")
             .WithSummary("Merge a repository's team branch to main");
 
@@ -1354,14 +1362,23 @@ public static partial class RepoEndpoints
         ITenantLog log,
         BacklogTipRecorder landedRecorder,
         BacklogLandedCache landedCache,
+        IUserStore users,
+        ConciergeMergeGate mergeGate,
         CancellationToken ct)
     {
+        // A PERSON, OR THE PERSON'S CONCIERGE WHILE concierge.mayMerge IS ON - asked before anything
+        // is read or touched. Past this the Concierge runs exactly this handler, and every row it
+        // writes names the person with viaConcierge.
+        var caller = await mergeGate.CheckAsync(httpContext, users, ct);
+        if (caller.Refusal is { } refused) return refused;
+        log = ConciergeMergeGate.For(log, caller);
+
         if (teams.ExistingName(team) is not { } stored)
         {
             return Results.NotFound(new { error = $"No team '{team}'." });
         }
 
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
+        var email = caller.ActorEmail;
         var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         // Check if team has any running members
@@ -2202,10 +2219,10 @@ public static partial class RepoEndpoints
     /// The success answer every action route gives: the repo, the status it has just produced, a
     /// sentence, and whether the action did what it set out to do.
     ///
-    /// <c>isPerson: true</c> IS ASSERTED AT THE CALL SITE RATHER THAN ASSUMED INSIDE THE HELPER -
-    /// every action route in this file carries <c>.HumansOnly()</c>, so the clone's absolute host
-    /// path this puts on the wire is going to a person. <c>Merge_to_main_refuses_machine_principals</c>
-    /// is the proof that the marker bites.
+    /// <c>isPerson</c> IS READ OFF THE CALLER, NOT ASSUMED. Every action route in this file is a
+    /// person's, but Merge to main and Bring current and merge also take the person's Concierge
+    /// (<c>HumansOrConcierge(Merge)</c>), and the clone's absolute host path goes to a person only.
+    /// <c>Merge_to_main_refuses_machine_principals</c> is the proof that the markers bite.
     ///
     /// Reachability is NOT measured here: <paramref name="originReachable"/> is whatever the caller
     /// learned from the git work it just did. Adding an <c>ls-remote</c> here would make every
@@ -2239,7 +2256,7 @@ public static partial class RepoEndpoints
             clonePath,
             storedTeamId,
             teams.DefaultBranchFor(storedTeamId, repoName),
-            isPerson: true,
+            isPerson: PrincipalClaims.From(httpContext.User) is null or { Kind: PrincipalKind.User },
             originReachable,
             originUnreachableReason,
             ct,

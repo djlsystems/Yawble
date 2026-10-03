@@ -252,23 +252,103 @@ public sealed partial class PlatformMcpTools
 
     [McpServerTool(Name = "repo"), Description(
         "Repository and worktree status for one team: paths, and whether work is pushed or merged. "
-        + "This is harness repo. It does not fetch, rebase, push, merge, or delete a branch. "
+        + "action is status (the default) or merge. "
+        + "merge is the Concierge's, and only when a person has turned on the setting concierge.mayMerge: "
+        + "it runs the platform's Merge to main for one repository (bringCurrent true: Bring current and "
+        + "merge), which lands the team branch by fast-forward or a merge commit, never forced, refuses a "
+        + "conflict changing nothing, and records landed on the backlog item. It is refused to a Manager "
+        + "and a member. This is harness repo. It does not fetch, rebase, push, or delete a branch. "
         + "Those are a person's buttons. Do not request /api yourself, and do not guess a path.")]
     public async Task<string> Repo(
         [Description("Team id. Required for a Concierge. Omit for a member of a team.")] string? team = null,
         [Description("Ask origin again. Omit to read the status already recorded.")] bool? refresh = null,
+        [Description("status (the default) or merge.")] string? action = null,
+        [Description("The repository's name, for merge, as the status names it.")] string? repo = null,
+        [Description("For merge: true runs Bring current and merge, which first merges the default branch into the team branch.")]
+        bool? bringCurrent = null,
         CancellationToken cancellationToken = default)
     {
-        var resolved = await TeamAsync(team, cancellationToken);
-        if (resolved is null) return "Refused: name a team. A Concierge has no default team.";
+        var verb = string.IsNullOrWhiteSpace(action) ? "status" : action.Trim().ToLowerInvariant();
+        if (verb is not ("status" or "merge"))
+        {
+            return "Refused: repo action is status or merge.";
+        }
 
-        return await SendAsync(
-            HttpMethod.Get,
-            "/api/teams/" + Uri.EscapeDataString(resolved) + "/repo-status"
-                + Query(("refresh", refresh == true ? "true" : null)),
+        var resolved = await TeamAsync(team, cancellationToken);
+        if (resolved is null)
+        {
+            return verb == "merge"
+                ? MergeRefusal("name a team. A Concierge has no default team.")
+                : "Refused: name a team. A Concierge has no default team.";
+        }
+
+        var teamPath = "/api/teams/" + Uri.EscapeDataString(resolved);
+        if (verb == "status")
+        {
+            return await SendAsync(
+                HttpMethod.Get,
+                teamPath + "/repo-status" + Query(("refresh", refresh == true ? "true" : null)),
+                null,
+                cancellationToken);
+        }
+
+        if (string.IsNullOrWhiteSpace(repo))
+        {
+            return MergeRefusal("name the repository, as the status names it.");
+        }
+
+        // RELAYED WITH THE CALLER'S OWN KEY: who may merge, and whether the setting is on, are the
+        // routes' to decide, never this tool's.
+        var route = bringCurrent == true ? "bring-current-and-merge" : "merge-to-main";
+        var reply = await SendAsync(
+            HttpMethod.Post,
+            teamPath + "/repos/" + Uri.EscapeDataString(repo.Trim()) + "/" + route,
             null,
             cancellationToken);
+
+        if (reply.StartsWith("HTTP 2", StringComparison.Ordinal)) return reply;
+        return MergeRefusal(reply.StartsWith("Refused: ", StringComparison.Ordinal) ? reply["Refused: ".Length..] : Explain(reply));
     }
+
+    /// <summary>
+    /// A merge refusal: it starts <c>Refused:</c>, names the tool and the setting, and carries no URL
+    /// - a fetch's stderr names origin's, and an agent reading one goes to fetch it.
+    /// </summary>
+    private static string MergeRefusal(string reason) =>
+        "Refused: the `repo` tool's merge did not run or did not land: " + WithoutUrls(reason).Trim().TrimEnd('.')
+        + ". The Concierge merges only while a person has turned on " + TenantSettings.ConciergeMayMergeName
+        + ", and never a Manager or a member.";
+
+    /// <summary>The route's status, error and detail, from the relayed reply.</summary>
+    private static string Explain(string reply)
+    {
+        var split = reply.Split(Environment.NewLine, 2);
+        var status = split[0];
+        if (split.Length < 2 || string.IsNullOrWhiteSpace(split[1])) return $"{status}.";
+
+        try
+        {
+            using var document = JsonDocument.Parse(split[1]);
+            string Field(string name) =>
+                document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty(name, out var value)
+                    ? value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.ToString()
+                    : "";
+
+            var error = Field("error");
+            var detail = Field("detail");
+            return string.Join(" ", new[] { $"{status}:", error, detail }.Where(p => p.Length > 0));
+        }
+        catch (JsonException)
+        {
+            return $"{status}.";
+        }
+    }
+
+    private static string WithoutUrls(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            System.Text.RegularExpressions.Regex.Replace(text, @"[a-zA-Z][a-zA-Z0-9+.-]*://\S+", "(an address)"),
+            @"/api/\S*", "(a route)");
 
     private bool IsTeamBound()
     {

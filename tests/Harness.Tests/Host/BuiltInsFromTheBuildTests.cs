@@ -485,27 +485,36 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
-    /// The Concierge runs a backlog, and what it never does in a run stays a person's: merge, team
-    /// deletion and workflow close are `HumansOnly`, so the Concierge's key is refused them however
-    /// the skill is read.
+    /// The Concierge runs a backlog, and what it never does in a run stays a person's: team deletion
+    /// and workflow close are `HumansOnly`, so the Concierge's key is refused them however the skill
+    /// is read. Merge opens to the Concierge only through `HumansOrConcierge(Merge)` and the setting
+    /// a person turns on (<c>ConciergeMergeTests</c>).
     /// </summary>
     [Fact]
     public void The_concierge_runs_a_backlog_and_leaves_merge_team_deletion_and_workflow_close_to_the_person()
     {
         var endpoints = host.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().ToList();
 
+        RouteEndpoint Find(string method, string route) => endpoints.Single(e =>
+            string.Equals(e.RoutePattern.RawText, route, StringComparison.Ordinal)
+            && e.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods.Contains(method) == true);
+
         foreach (var (method, route) in new[]
         {
-            ("POST", "/api/teams/{team}/repos/{repo}/merge-to-main"),
-            ("POST", "/api/teams/{team}/repos/{repo}/bring-current-and-merge"),
             ("DELETE", "/api/teams/{team}"),
             ("POST", "/api/teams/{team}/workflows/{correlation:long}/close"),
         })
         {
-            var endpoint = endpoints.Single(e =>
-                string.Equals(e.RoutePattern.RawText, route, StringComparison.Ordinal)
-                && e.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods.Contains(method) == true);
-            Assert.True(endpoint.Metadata.GetMetadata<HumansOnlyMarker>() is not null, $"{method} {route} is not HumansOnly");
+            Assert.True(Find(method, route).Metadata.GetMetadata<HumansOnlyMarker>() is not null, $"{method} {route} is not HumansOnly");
+        }
+
+        foreach (var route in new[]
+        {
+            "/api/teams/{team}/repos/{repo}/merge-to-main",
+            "/api/teams/{team}/repos/{repo}/bring-current-and-merge",
+        })
+        {
+            Assert.Equal(Permits.Merge, Find("POST", route).Metadata.GetMetadata<HumansOrConciergeMarker>()?.Permit);
         }
 
         var body = BuiltInSkills.Find("running-the-backlog")!.Body;
