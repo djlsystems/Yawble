@@ -44,6 +44,7 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
     private readonly string _dataRoot;
     private readonly AbortWitness _witness = new();
     private BlockingClone? _clone;
+    private SlowTeamCreatedLog? _tenantLog;
     private readonly WebApplicationFactory<Program> _factory;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -62,12 +63,17 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
                 services.Replace(ServiceDescriptor.Singleton<IRepoClone>(sp => _clone = new BlockingClone(
                     new RepoClone(sp.GetRequiredService<GitRunner>(), localRepos: sp.GetRequiredService<LocalRepos>()),
                     sp.GetRequiredService<LocalRepos>())));
+                var tenantLog = services.Single(d => d.ServiceType == typeof(ITenantLog)).ImplementationInstance as ITenantLog
+                    ?? throw new InvalidOperationException("the Host no longer registers its tenant log as an instance");
+                services.Replace(ServiceDescriptor.Singleton<ITenantLog>(_tenantLog = new SlowTeamCreatedLog(tenantLog)));
             }));
     }
 
     private TeamRegistry Teams => _factory.Services.GetRequiredService<TeamRegistry>();
 
     private BlockingClone Clone => _clone ??= (BlockingClone)_factory.Services.GetRequiredService<IRepoClone>();
+
+    private SlowTeamCreatedLog TenantLog => _tenantLog ??= (SlowTeamCreatedLog)_factory.Services.GetRequiredService<ITenantLog>();
 
     // ---- the request is aborted mid-clone ----
 
@@ -145,6 +151,7 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
     {
         var person = await PersonAsync();
         Clone.Arm(failAfterRelease: true);
+        TenantLog.Arm();
 
         await AbandonMidCloneAsync("/api/teams", token =>
             person.PostAsJsonAsync("/api/teams", new { name = "Abandoned Failure", agent = Agent(), memberAgents = new[] { Agent() } }, token));
@@ -156,10 +163,14 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         bool Notice(Message m) => m.Payload.Contains(PayloadFields.RepoNotReady, StringComparison.Ordinal)
             && m.Payload.Contains(JsonSerializer.Serialize(clonePath).Trim('"'), StringComparison.Ordinal);
 
-        await EventuallyAsync(async () => (await messages.ReadAfterAsync(0, [manager], 100, Ct)).Any(Notice));
+        // BOTH, NOT THE NOTICE ALONE: the notice is written inside the create, and team.created by its
+        // caller afterwards, so the one can be there while the other is still on its way.
+        await EventuallyAsync(async () => (await messages.ReadAfterAsync(0, [manager], 100, Ct)).Any(Notice)
+            && (await TenantRowsAsync(TenantActions.TeamCreated)).Any(r => r.Subject == team));
 
         Assert.Contains(await messages.ReadAfterAsync(0, [manager], 100, Ct), Notice);
         Assert.Contains(await TenantRowsAsync(TenantActions.TeamCreated), r => r.Subject == team);
+        Assert.Contains(Teams.All(), t => t.Id == team);
     }
 
     [Fact]
@@ -599,6 +610,37 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
             foreach (var (_, path) in repos) Directory.Delete(path, recursive: true);
             return await real.EnsureAllAsync(repos, ct);
         }
+    }
+
+    /// <summary>
+    /// The tenant log, with <c>team.created</c> held back. Armed, every write of that action waits
+    /// before it reaches the real log - never skipped, never held behind another write - so the
+    /// gap the Host already has between a create and its caller's tenant row is wide on every run.
+    /// Every other write, and every read, goes straight through.
+    /// </summary>
+    private sealed class SlowTeamCreatedLog(ITenantLog inner) : ITenantLog
+    {
+        private static readonly TimeSpan Delay = TimeSpan.FromSeconds(1);
+        private volatile bool _armed;
+
+        public void Arm() => _armed = true;
+
+        public async Task WriteAsync(string? actorId, string? actorEmail, string action, string? subject = null,
+            string? subjectName = null, string? detail = null, CancellationToken ct = default)
+        {
+            if (_armed && action == TenantActions.TeamCreated) await Task.Delay(Delay, ct);
+            await inner.WriteAsync(actorId, actorEmail, action, subject, subjectName, detail, ct);
+        }
+
+        public Task<TenantEvent?> FindLatestAsync(string action, string subject, CancellationToken ct = default) =>
+            inner.FindLatestAsync(action, subject, ct);
+
+        public Task<IReadOnlyList<TenantEvent>> FindLatestBySubjectAsync(
+            IReadOnlyCollection<string> actions, CancellationToken ct = default) =>
+            inner.FindLatestBySubjectAsync(actions, ct);
+
+        public Task<TenantLogPage> ReadAsync(long? before = null, int take = 50, CancellationToken ct = default) =>
+            inner.ReadAsync(before, take, ct);
     }
 
     private sealed class Lifetime : Microsoft.Extensions.Hosting.IHostApplicationLifetime
