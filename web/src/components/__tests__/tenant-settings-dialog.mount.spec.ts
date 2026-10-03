@@ -453,7 +453,7 @@ describe('Concierge', () => {
   });
 
   /**
-   * B003F: whether the Concierge may merge is a person's choice. The Concierge tab shows it with its
+   * Whether the Concierge may merge is a person's choice. The Concierge tab shows it with its
    * one sentence - what it allows, and that it is off unless a person turns it on - never the key.
    */
   it('shows whether the Concierge may merge, off, with its one sentence and never the key', async () => {

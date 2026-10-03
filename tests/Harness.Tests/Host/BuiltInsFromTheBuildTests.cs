@@ -525,7 +525,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
-    /// B003F: with `concierge.mayMerge` on, the Concierge merges a backlog item whose every
+    /// With `concierge.mayMerge` on, the Concierge merges a backlog item whose every
     /// Done-when line is met - never not met or unverified - through the `repo` tool, in the order
     /// the plan requires, reads `landed`, and reports each merge to the person in one message. With
     /// it off it says once that merging is the person's step in the Git dialog and names the setting.
