@@ -13,6 +13,7 @@ import TeamKpiStrip from '../components/TeamKpiStrip.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
 import TeamsView from '../components/TeamsView.vue';
 import SolutionBlockedBanner from '../components/SolutionBlockedBanner.vue';
+import TeamSiteLinks from '../components/TeamSiteLinks.vue';
 import { panelPath } from '../lib/solutionPanel';
 import { useDisplayStore } from '../stores/display';
 import { useKanbanStore } from '../stores/kanban';
@@ -511,6 +512,8 @@ onUnmounted(() => {
         <!-- The LABEL. The shell-level Concierge is launched from this team's `.id`, so the heading binds
              to the same identifier rather than to a separately-derived name. -->
         <div class="text-h6">{{ activeTeam.name }}</div>
+        <!-- The team's published sites, a globe each: its site cards leave the board once done. -->
+        <TeamSiteLinks :team="activeTeam.id" />
         <span v-if="teamPaused(activeTeam)" class="console-tab-status console-tab-status--paused team-heading-pause">
           PAUSED
         </span>

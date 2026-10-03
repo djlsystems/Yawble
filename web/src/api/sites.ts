@@ -9,6 +9,7 @@ import { json, send } from './client'
  * | operation | route |
  * |---|---|
  * | every site | `GET /api/sites` |
+ * | one team's sites | `GET /api/teams/{team}/sites` |
  * | one site, its versions and collections | `GET /api/teams/{team}/sites/{site}` |
  * | roll back | `POST /api/teams/{team}/sites/{site}/rollback` |
  * | unpublish | `POST /api/teams/{team}/sites/{site}/unpublish` |
@@ -74,6 +75,10 @@ const site = (team: string, name: string, suffix = '') =>
 
 /** Every site across every team. A person's. */
 export const listSites = () => json<Site[]>('/api/sites')
+
+/** One team's sites, as `GET /api/sites` lists them. */
+export const listTeamSites = (team: string) =>
+  json<Site[]>(`/api/teams/${encodeURIComponent(team)}/sites`)
 
 export const getSite = (team: string, name: string) => json<SiteDetail>(site(team, name))
 
