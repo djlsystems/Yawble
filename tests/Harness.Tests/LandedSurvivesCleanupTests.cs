@@ -115,12 +115,11 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         var sha = Run(clone, "rev-parse", "HEAD").Stdout.Trim();
 
         var registry = _factory.Services.GetRequiredService<TeamRegistry>();
-        await _factory.Services.GetRequiredService<ITeamPublisher>().PublishAsync(
+        var report = await _factory.Services.GetRequiredService<ITeamPublisher>().PublishAsync(
             team, registry.ReposFor(team), new ContainerId(team, "Manager"), null, Ct);
 
-        var tip = Assert.Single(await Backlog.TipsAsync((await CurrentDispatchAsync(item)).Id, Ct));
+        var tip = await SingleTipAsync(team, item, report, sha);
         Assert.Equal(Repo, tip.Repo);
-        Assert.Equal(sha, tip.Sha);
 
         // Another team's clone exists BEFORE the merge, so only a fetch can show it.
         var other = await TeamAsync("Gamma");
@@ -341,8 +340,8 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         File.WriteAllText(Path.Combine(clone, "b.txt"), "b\n");
         Commit(clone, "B");
         var b = Run(clone, "rev-parse", "HEAD").Stdout.Trim();
-        await publisher.PublishAsync(team, registry.ReposFor(team), new ContainerId(team, "Manager"), null, Ct);
-        Assert.Equal(b, Assert.Single(await Backlog.TipsAsync((await CurrentDispatchAsync(item)).Id, Ct)).Sha);
+        var report = await publisher.PublishAsync(team, registry.ReposFor(team), new ContainerId(team, "Manager"), null, Ct);
+        await SingleTipAsync(team, item, report, b);
 
         await TeamAsync("Iota");
         Assert.Equal(HttpStatusCode.OK, (await person.DeleteAsync($"/api/teams/{team}", Ct)).StatusCode);
@@ -374,6 +373,60 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         var kept = await CurrentDispatchAsync(item);
         Assert.Equal(stored.LandedAt, kept.LandedAt);
         Assert.Equal(sha, kept.LandedSha);
+    }
+
+    /// <summary>
+    /// The dispatch's one recorded tip, at <paramref name="sha"/> - or, when it is not, a failure
+    /// naming which of the publish's silent returns was taken: the outcome, the clone's team
+    /// branch, contributor mode, whether the dispatch is still the team's current one above its
+    /// floor, its start, and every push row written so far.
+    /// </summary>
+    private async Task<BacklogDispatchTip> SingleTipAsync(string team, long item, TeamPublishReport report, string sha)
+    {
+        var dispatch = await CurrentDispatchAsync(item);
+        var tips = await Backlog.TipsAsync(dispatch.Id, Ct);
+        if (tips.Count == 1 && tips[0].Sha == sha) return tips[0];
+
+        var registry = _factory.Services.GetRequiredService<TeamRegistry>();
+        var floor = registry.FloorFor(team);
+        var current = (await Backlog.LatestDispatchesAsync(Ct)).Any(d => d.Id == dispatch.Id
+            && string.Equals(d.TeamId, team, StringComparison.OrdinalIgnoreCase) && d.Correlation > floor);
+        var bases = await Backlog.BasesAsync(dispatch.Id, Ct);
+        var missed = await Backlog.MissedStartsAsync(dispatch.Id, Ct);
+        var branch = Run(Clone(team), "rev-parse", "--verify", $"refs/heads/team/{team}");
+        var log = _factory.Services.GetRequiredService<IMessageLog>();
+        var rows = new List<Message>();
+        for (var seq = 1L; seq <= await log.HighestSeqAsync(Ct); seq++)
+        {
+            if (await log.FindAsync(seq, Ct) is { } row) rows.Add(row);
+        }
+
+        // A TIP RECORDED LATE, by a publish still running when this one returned, is told apart
+        // from one never recorded at all.
+        var waited = Stopwatch.StartNew();
+        var later = tips;
+        while (waited.Elapsed < TimeSpan.FromSeconds(10) && !later.Any(t => t.Sha == sha))
+        {
+            await Task.Delay(50, Ct);
+            later = await Backlog.TipsAsync(dispatch.Id, Ct);
+        }
+
+        Assert.Fail(string.Join("\n",
+        [
+            $"expected the one tip {sha}; recorded [{string.Join(", ", tips.Select(t => $"{t.Repo} {t.Sha} at {t.RecordedAt}"))}] for dispatch {dispatch.Id} (team {dispatch.TeamId}, correlation {dispatch.Correlation}).",
+            .. report.Repos.Select(r =>
+                $"publish {r.Repo}: {r.Result}; branches [{string.Join(", ", r.Branches)}]; published [{string.Join(", ", r.Published ?? [])}]; reason {r.Reason ?? "-"}"),
+            $"clone team/{team}: exit {branch.Exit} {branch.Stdout.Trim()}",
+            $"contributor mode: {registry.ContributorFor(team, Repo).ContributorMode}",
+            $"team floor {floor}; dispatch current for the team above it: {current}",
+            $"bases: [{string.Join("; ", bases.Select(b => $"{b.Repo} default {b.DefaultSha} team {b.TeamSha ?? "-"}"))}]",
+            $"missed starts: [{string.Join("; ", missed.Select(m => $"{m.Repo}: {m.Reason}"))}]",
+            later.Any(t => t.Sha == sha)
+                ? $"the tip {sha} was recorded {waited.ElapsedMilliseconds} ms after this publish returned"
+                : "the tip was still not recorded 10 s after this publish returned",
+            .. rows.Select(m => $"row {m.Seq} {m.Type} from {m.Source} causation {m.CausationSeq?.ToString() ?? "-"} at {m.OccurredAt:HH:mm:ss.fff}: {(m.Payload.Length > 120 ? m.Payload[..120] : m.Payload)}"),
+        ]));
+        throw new UnreachableException();
     }
 
     private static DateTimeOffset Parse(string at) =>
@@ -446,8 +499,13 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         var services = _factory.Services;
         var registry = services.GetRequiredService<TeamRegistry>();
         var agent = services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;
-        var team = (await registry.CreateAsync(name, agent, memberAgent: agent, ct: Ct)).Id;
-        await registry.SetReposAsync(team, [Url], Ct);
+        // THE REPOSITORY AT CREATION, NOT SET AFTERWARDS. Set afterwards, the platform tells the
+        // Manager its repositories are ready, and each Manager run that follows (that one, then the
+        // "nobody is working it" nudge) ends in a run-end publish of this clone. Under load one of
+        // those lands between a test's commit and its own publish: it pushes the commit, the test's
+        // publish then has nothing to push, and the tip is recorded by that other publish moments
+        // after the test has read it. Created with it, the Manager is told nothing.
+        var team = (await registry.CreateAsync(name, agent, memberAgent: agent, repos: [Url], ct: Ct)).Id;
 
         Assert.True(Directory.Exists(Path.Combine(Clone(team), ".git")), "the platform did not clone");
         Assert.Equal("trunk", registry.DefaultBranchFor(team, Repo).Branch);
