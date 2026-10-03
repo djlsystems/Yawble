@@ -157,7 +157,8 @@ describe('the board', () => {
       // A card's box is its lane's column: 300px per lane, which happy-dom cannot lay out itself.
       vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
         const lane = this.closest('.k-lane');
-        const index = lane ? [...lane.parentElement!.children].indexOf(lane) : 0;
+        // Among the LANES only: a divider sits between every two lanes.
+        const index = lane ? [...lane.parentElement!.querySelectorAll(':scope > .k-lane')].indexOf(lane) : 0;
         return { left: index * 300, top: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON() {} } as DOMRect;
       });
     });
@@ -386,5 +387,60 @@ describe('the filter bar', () => {
 
     await clear.trigger('click');
     expect(kanban.clearFilters).toHaveBeenCalled();
+  });
+});
+
+// ONE WIDTH FOR EVERY LANE: a divider between two lanes sets it, the board carries it as a CSS
+// variable every lane reads, and the browser remembers it. A long outcome once stretched every lane.
+describe('the lane width', () => {
+  beforeEach(() => {
+    try { window.localStorage.removeItem('kanban.laneWidth'); } catch { /* none */ }
+  });
+
+  const width = (board: VueWrapper) => (board.find('.k-board').element as HTMLElement).style.getPropertyValue('--k-lane-width');
+
+  it('starts at 300px, with one divider between every two lanes', async () => {
+    const board = await mountBoard([card({ id: '1' })]);
+
+    expect(width(board)).toBe('300px');
+    expect(board.findAll('[data-test="lane-divider"]')).toHaveLength(board.findAll('.k-lane').length - 1);
+  });
+
+  it('widens every lane by dragging a divider, and remembers the width', async () => {
+    const board = await mountBoard([card({ id: '1' })]);
+    const divider = board.find('[data-test="lane-divider"]');
+
+    await divider.trigger('pointerdown', { clientX: 300, pointerId: 1 });
+    divider.element.dispatchEvent(new PointerEvent('pointermove', { clientX: 400, pointerId: 1 }));
+    divider.element.dispatchEvent(new PointerEvent('pointerup', { clientX: 400, pointerId: 1 }));
+    await flushPromises();
+
+    expect(width(board)).toBe('400px');
+    expect(window.localStorage.getItem('kanban.laneWidth')).toBe('400');
+  });
+
+  it('opens at the remembered width', async () => {
+    window.localStorage.setItem('kanban.laneWidth', '360');
+    const board = await mountBoard([card({ id: '1' })]);
+
+    expect(width(board)).toBe('360px');
+  });
+
+  it('moves with the arrow keys, and Home or a double-click resets it', async () => {
+    const board = await mountBoard([card({ id: '1' })]);
+    const divider = board.find('[data-test="lane-divider"]');
+
+    await divider.trigger('keydown', { key: 'ArrowRight' });
+    expect(width(board)).toBe('316px');
+    await divider.trigger('keydown', { key: 'ArrowLeft' });
+    await divider.trigger('keydown', { key: 'ArrowLeft' });
+    expect(width(board)).toBe('284px');
+    await divider.trigger('keydown', { key: 'Home' });
+    expect(width(board)).toBe('300px');
+
+    await divider.trigger('keydown', { key: 'ArrowRight' });
+    await divider.trigger('dblclick');
+    expect(width(board)).toBe('300px');
+    expect(window.localStorage.getItem('kanban.laneWidth')).toBe('300');
   });
 });

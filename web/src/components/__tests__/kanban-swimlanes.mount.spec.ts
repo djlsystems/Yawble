@@ -245,7 +245,7 @@ describe('swimlanes', () => {
     expect(cells).toHaveLength(6);
     expect(cells[1]!.find('[data-card-id="a"]').exists()).toBe(true);
     expect(cells[5]!.find('[data-card-id="b"]').exists()).toBe(true);
-    expect(grid.attributes('style')).toContain('grid-template-columns: 10rem repeat(3, 17rem)');
+    expect(grid.attributes('style')).toContain('grid-template-columns: 10rem repeat(3, var(--k-lane-width))');
     expect(grid.findAll('.k-swim-sticky-top')).toHaveLength(4);
     expect(grid.find('[data-lane-id="in-progress"] .k-lane-count').text()).toBe('3 / 4 running');
   });

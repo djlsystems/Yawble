@@ -273,9 +273,9 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
 }
 
 .k-card-outcome-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wraps inside the lane rather than widening it (a long outcome statement stretched every lane). */
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .k-card-outcome-proposed {

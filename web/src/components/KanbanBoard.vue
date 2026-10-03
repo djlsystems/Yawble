@@ -13,6 +13,7 @@ import KanbanChangeOutcome from './KanbanChangeOutcome.vue';
 import KanbanProposedOutcomes from './KanbanProposedOutcomes.vue';
 import OutcomesDialog from './OutcomesDialog.vue';
 import { FlipDurationMs, flipShifts, flipTransform, type CardBox } from '../lib/flip';
+import { clampLaneWidth, DefaultLaneWidth, LaneWidthStep, loadLaneWidth, saveLaneWidth } from '../lib/kanbanLaneWidth';
 
 /**
  * The board: swim lanes from the active template, cards from the projection.
@@ -104,8 +105,56 @@ function laneOver(lane: KanbanLane): boolean {
   return laneOverLimit(laneCount(lane), lane.wipLimit);
 }
 
-/** The swimlane grid: a team column, then one track per lane at the `.k-lane` width. */
-const gridColumns = computed(() => `10rem repeat(${kanban.lanes.length}, 17rem)`);
+// ONE WIDTH FOR EVERY LANE, set by dragging any divider between two lanes and remembered by this
+// browser. It is a CSS variable on the board, so the lanes, the swimlanes grid and a card leaving a
+// lane all read the same figure.
+const laneWidth = ref(loadLaneWidth());
+const boardStyle = computed(() => ({ '--k-lane-width': `${laneWidth.value}px` }));
+
+function setLaneWidth(width: number) {
+  laneWidth.value = clampLaneWidth(width);
+}
+
+/** A drag on a divider moves every lane's width by how far the pointer moved, saved when it is let go. */
+function startLaneResize(event: PointerEvent) {
+  const handle = event.currentTarget as HTMLElement;
+  const startX = event.clientX;
+  const startWidth = laneWidth.value;
+  handle.setPointerCapture?.(event.pointerId);
+
+  const move = (e: PointerEvent) => setLaneWidth(startWidth + (e.clientX - startX));
+  const end = () => {
+    handle.removeEventListener('pointermove', move);
+    handle.removeEventListener('pointerup', end);
+    handle.removeEventListener('pointercancel', end);
+    saveLaneWidth(laneWidth.value);
+  };
+
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+
+/** The keyboard on a divider: arrows narrow or widen every lane a step, Home resets. */
+function laneResizeKey(event: KeyboardEvent) {
+  const next =
+    event.key === 'ArrowLeft' ? laneWidth.value - LaneWidthStep
+      : event.key === 'ArrowRight' ? laneWidth.value + LaneWidthStep
+        : event.key === 'Home' ? DefaultLaneWidth
+          : null;
+  if (next === null) return;
+  event.preventDefault();
+  setLaneWidth(next);
+  saveLaneWidth(laneWidth.value);
+}
+
+function resetLaneWidth() {
+  setLaneWidth(DefaultLaneWidth);
+  saveLaneWidth(laneWidth.value);
+}
+
+/** The swimlane grid: a team column, then one track per lane at the shared lane width. */
+const gridColumns = computed(() => `10rem repeat(${kanban.lanes.length}, var(--k-lane-width))`);
 
 const lanesEl = ref<HTMLElement | null>(null);
 
@@ -244,7 +293,7 @@ function openOutcomes(id: string | null = null) {
 </script>
 
 <template>
-  <div class="k-board">
+  <div class="k-board" :style="boardStyle">
     <div class="row items-center q-gutter-sm q-mb-sm">
       <div class="text-h6">Kanban</div>
       <div class="text-caption os-text-muted">
@@ -356,7 +405,8 @@ function openOutcomes(id: string | null = null) {
     </div>
 
     <div v-else ref="lanesEl" class="k-lanes">
-      <section v-for="lane in kanban.lanes" :key="lane.id" class="k-lane" :data-lane-id="lane.id">
+      <template v-for="(lane, index) in kanban.lanes" :key="lane.id">
+      <section class="k-lane" :data-lane-id="lane.id">
         <header class="k-lane-head" :class="{ 'k-lane-head--over': laneOver(lane) }">
           <span class="k-lane-title">{{ lane.title }}</span>
           <span class="k-lane-count">{{ isRunningLane(lane.id) ? inProgressText(lane) : laneCountText(lane) }}</span>
@@ -395,6 +445,24 @@ function openOutcomes(id: string | null = null) {
           />
         </TransitionGroup>
       </section>
+
+        <!-- THE DIVIDER after every lane but the last: dragging any one sets every lane's width.
+             A separator a person can focus, so the arrows do what the drag does. -->
+        <div
+          v-if="index < kanban.lanes.length - 1"
+          class="k-lane-divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Lane width"
+          :aria-valuenow="laneWidth"
+          tabindex="0"
+          title="Drag to make every lane wider or narrower; double-click to reset"
+          data-test="lane-divider"
+          @pointerdown.prevent="startLaneResize"
+          @keydown="laneResizeKey"
+          @dblclick="resetLaneWidth"
+        />
+      </template>
     </div>
 
     <KanbanCardPanel />
@@ -413,14 +481,17 @@ function openOutcomes(id: string | null = null) {
    nobody can read is worse than a lane you have to scroll to. */
 .k-lanes {
   display: flex;
-  gap: 12px;
+  gap: 0;
   align-items: flex-start;
   overflow-x: auto;
   padding-bottom: 8px;
 }
 
 .k-lane {
-  flex: 0 0 17rem;
+  /* The shared width, and never wider: a long outcome or title wraps rather than stretching the lane. */
+  flex: 0 0 var(--k-lane-width, 300px);
+  width: var(--k-lane-width, 300px);
+  min-width: 0;
   background: var(--os-chrome);
   border: 1px solid var(--os-rule);
   border-radius: 8px;
@@ -451,8 +522,8 @@ function openOutcomes(id: string | null = null) {
   font-weight: 600;
 }
 
-/* The swimlanes grid. Columns are set inline: a team column, then one 17rem track per lane - the
-   same width `.k-lane` has on the board, so switching views does not reflow a card. */
+/* The swimlanes grid. Columns are set inline: a team column, then one track per lane at the shared
+   `--k-lane-width` the board's lanes use, so switching views does not reflow a card. */
 .k-swimlanes {
   display: grid;
   gap: 8px 12px;
@@ -531,7 +602,38 @@ function openOutcomes(id: string | null = null) {
    the same card into its new lane. Left in the flow, every lane would jump a card's height. */
 .k-card-move-leave-active {
   position: absolute;
-  width: calc(17rem - 16px);
+  width: calc(var(--k-lane-width, 300px) - 16px);
+}
+
+/* The divider between two lanes: the 12px gap the lanes used to have, with a line that shows on
+   hover and focus. */
+.k-lane-divider {
+  flex: 0 0 12px;
+  align-self: stretch;
+  min-height: 8rem;
+  cursor: col-resize;
+  touch-action: none;
+  position: relative;
+}
+
+.k-lane-divider::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.k-lane-divider:hover::after,
+.k-lane-divider:focus-visible::after {
+  background: var(--q-primary);
+}
+
+.k-lane-divider:focus-visible {
+  outline: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
