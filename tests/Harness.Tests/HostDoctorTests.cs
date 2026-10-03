@@ -174,6 +174,43 @@ public sealed class HostDoctorTests : IDisposable
         Assert.True(document.RootElement.GetProperty("database").GetProperty("schema").GetProperty("accepted").GetBoolean());
     }
 
+    /// <summary>
+    /// A command the Host's last probe found held by the platform's update reads updating, with the
+    /// probe's time set: never "not installed", and the JSON's <c>installed</c> stays null.
+    /// </summary>
+    [Fact]
+    public async Task A_command_held_for_an_update_reads_updating_never_not_installed()
+    {
+        var at = new DateTimeOffset(2026, 10, 3, 9, 0, 0, TimeSpan.Zero);
+        const string updating = "Updating claude on w1; it is measured again when the update ends.";
+        new AgentAuthRecord(at, "w1", [new CommandSignIn("claude", null, null, updating, updating)]).Write(_root);
+
+        var report = await HostDoctor.ReportAsync(_root, TestContext.Current.CancellationToken);
+
+        var claude = Assert.Single(report.Agents, a => a.Agent == "claude");
+        Assert.Equal(updating, claude.Updating);
+        Assert.Null(claude.InstalledAsMeasured);
+        Assert.Contains(updating, claude.Detail, StringComparison.Ordinal);
+        using var json = JsonDocument.Parse(HostDoctor.ToJson(report));
+        var row = json.RootElement.GetProperty("agents").EnumerateArray().Single(a => a.GetProperty("agent").GetString() == "claude");
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("installed").ValueKind);
+        Assert.Equal(updating, row.GetProperty("updating").GetString());
+
+        // A command not held carries no updating key, as before.
+        var codex = json.RootElement.GetProperty("agents").EnumerateArray().Single(a => a.GetProperty("agent").GetString() == "codex");
+        Assert.False(codex.TryGetProperty("updating", out _));
+    }
+
+    [Fact]
+    public async Task With_no_probe_recorded_the_hint_names_every_time_a_worker_is_asked()
+    {
+        var report = await HostDoctor.ReportAsync(_root, TestContext.Current.CancellationToken);
+
+        Assert.All(report.Agents, a => Assert.Equal(
+            "Not measured: the Host has recorded no sign-in probe yet. It asks a worker when one joins or comes back, "
+            + "when an update ends, and when the Agents screen or the Concierge reads sign-ins.", a.Detail));
+    }
+
     [Fact]
     public async Task Each_agent_names_the_variable_that_signs_it_in()
     {

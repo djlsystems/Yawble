@@ -41,6 +41,12 @@ type ListedItem struct {
 	Off    *string `json:"off"`
 }
 
+// updating is whether a preset was not listed because the platform's update held its CLI: the Host's
+// sentence for that state begins "Updating".
+func updating(p PresetToolReport) bool {
+	return p.Detail != nil && strings.HasPrefix(*p.Detail, "Updating ")
+}
+
 // offersTools is the Host's ListedKinds.OffersTools: skills and hooks are listed, never tools.
 func offersTools(kind string) bool {
 	return kind == "server" || kind == "connector" || kind == "plugin"
@@ -71,7 +77,11 @@ func AgentToolsCheck(r *HostReport, err error) Check {
 			parts = append(parts, p.Preset+" not verified")
 			verdict = Warn
 		case "notMeasured":
-			parts = append(parts, p.Preset+" not measured")
+			if updating(p) {
+				parts = append(parts, p.Preset+" updating")
+			} else {
+				parts = append(parts, p.Preset+" not measured")
+			}
 		}
 	}
 	if len(parts) == 0 {

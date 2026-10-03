@@ -64,6 +64,9 @@ type Agent struct {
 	Authenticated      *bool   `json:"authenticated"`
 	Detail             string  `json:"detail"`
 	CredentialVariable *string `json:"credentialVariable"`
+	// Updating is the Host's sentence when its last probe found the command held by the platform's
+	// update, which it did not ask: the install is being replaced, never "not installed".
+	Updating *string `json:"updating"`
 	// Kind and LanguageModel are the Host's own words for what a member runs (MemberRef.KindOf,
 	// AgentLaunch.LanguageModel). The Host's report lists the auth-probes.json commands today, every
 	// one a model agent, and sends neither; an entry that says it is a plugin or runs no model has
@@ -153,6 +156,8 @@ func (a Agent) LaunchText() string {
 		return "FAILED"
 	case l.Result == "not checked":
 		return "not checked"
+	case l.Result == "updating":
+		return "updating"
 	default:
 		return fmt.Sprintf("not known (the Host said %q)", l.Result)
 	}

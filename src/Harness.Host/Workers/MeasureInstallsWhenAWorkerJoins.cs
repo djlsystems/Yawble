@@ -25,7 +25,8 @@ public static class MeasureInstallsWhenAWorkerJoins
     /// </summary>
     public static bool Wire(
         bool control, Action<Action<WorkerId>> onJoined, Func<WorkerId, IRunWorker?> worker,
-        Func<IReadOnlyList<string>> commands, WorkerAsks asks, WorkerInstalls installs, ILogger? log = null)
+        Func<IReadOnlyList<string>> commands, WorkerAsks asks, WorkerInstalls installs, ILogger? log = null,
+        AgentUpdateGate? gate = null)
     {
         if (!control) return false;
 
@@ -35,7 +36,7 @@ public static class MeasureInstallsWhenAWorkerJoins
         {
             try
             {
-                if (worker(joined) is { } connection) await MeasureAsync(connection, commands(), asks, installs, log);
+                if (worker(joined) is { } connection) await MeasureAsync(connection, commands(), asks, installs, log, gate: gate);
             }
             catch (Exception exception)
             {
@@ -53,11 +54,18 @@ public static class MeasureInstallsWhenAWorkerJoins
             .Select(d => d.Launch.FileName.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)];
 
-    /// <summary>Asks <paramref name="worker"/> about <paramref name="commands"/> and records each answer's <c>installed</c>.</summary>
+    /// <summary>
+    /// Asks <paramref name="worker"/> about <paramref name="commands"/> and records each answer's
+    /// <c>installed</c>. A command <paramref name="gate"/> holds for an update is not asked, and an
+    /// answer for one whose hold began or ended while it was asked is dropped: it is measured again
+    /// when the update ends.
+    /// </summary>
     public static async Task MeasureAsync(
         IRunWorker worker, IReadOnlyList<string> commands, WorkerAsks asks, WorkerInstalls installs,
-        ILogger? log = null, CancellationToken ct = default)
+        ILogger? log = null, CancellationToken ct = default, AgentUpdateGate? gate = null)
     {
+        var turn = gate?.Turn ?? 0;
+        if (gate is not null) commands = [.. commands.Where(command => gate.Holding(command) is null)];
         if (commands.Count == 0) return;
 
         var specs = AgentAuthProbe.LoadSpecs();
@@ -71,6 +79,8 @@ public static class MeasureInstallsWhenAWorkerJoins
             return;
         }
 
-        installs.Record(worker.Id, probed.Results.Select(result => (result.Command, result.Installed)));
+        installs.Record(
+            worker.Id, probed.Results.Select(result => (result.Command, result.Installed)),
+            gate is null ? null : command => gate.HeldSince(command, turn));
     }
 }

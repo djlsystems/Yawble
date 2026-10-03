@@ -14,15 +14,23 @@ namespace Harness.Host;
 /// RECORDED FOR THE DOCTOR: every pass is written as <see cref="AgentLaunchChecksRecord"/>, once the
 /// Host is serving, after every catalog save and whenever <c>GET /api/agents/auth</c> asks again, so
 /// <c>--doctor</c> - another process, often another user - reads the Host's own check and never runs one.
+///
+/// A PRESET WHOSE COMMAND THE PLATFORM'S UPDATE HOLDS reads <see cref="AgentLaunchReport.Updating"/>, from
+/// the gate at every read: a cached check from before the hold never shows during it, and a cached
+/// "updating" never outlives it.
 /// </summary>
+/// <param name="onThisMachine">A Host that runs its runs itself: the update's sentence says "this machine".</param>
 public sealed class AgentLaunchChecks(
-    AgentCatalog catalog, ProcessAgentRunner runner, string? dataRoot = null, ILogger<AgentLaunchChecks>? log = null)
+    AgentCatalog catalog, ProcessAgentRunner runner, string? dataRoot = null, ILogger<AgentLaunchChecks>? log = null,
+    AgentUpdateGate? gate = null, bool onThisMachine = false)
     : BackgroundService
 {
     private static readonly TimeSpan Fresh = TimeSpan.FromSeconds(30);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _again = new(0);
-    private (DateTimeOffset At, IReadOnlyDictionary<string, AgentLaunchReport> Reports)? _cache;
+    private volatile Checked? _cache;
+
+    private sealed record Checked(DateTimeOffset At, long Turn, IReadOnlyDictionary<string, AgentLaunchReport> Reports);
 
     /// <summary>
     /// One report per preset, by name, case-insensitively; cached for 30 seconds like the sign-in probe.
@@ -33,8 +41,15 @@ public sealed class AgentLaunchChecks(
         await _gate.WaitAsync(ct);
         try
         {
-            if (!fresh && _cache is { } cached && DateTimeOffset.UtcNow - cached.At < Fresh) return cached.Reports;
+            // Not a check that a hold began or ended across, once the command is no longer held.
+            if (!fresh && _cache is { } cached && DateTimeOffset.UtcNow - cached.At < Fresh
+                && !cached.Reports.Keys.Any(preset => Holding(preset) is null && CommandOf(preset) is { } command
+                    && gate?.HeldSince(command, cached.Turn) == true))
+            {
+                return Overlay(cached.Reports);
+            }
 
+            var turn = gate?.Turn ?? 0;
             var reports = new Dictionary<string, AgentLaunchReport>(StringComparer.OrdinalIgnoreCase);
             var presets = new List<PresetLaunchCheck>();
             foreach (var definition in catalog.Definitions)
@@ -45,15 +60,31 @@ public sealed class AgentLaunchChecks(
             }
 
             var at = DateTimeOffset.UtcNow;
-            _cache = (at, reports);
+            _cache = new Checked(at, turn, reports);
             if (dataRoot is not null) new AgentLaunchChecksRecord(at, presets).Write(dataRoot, log);
-            return reports;
+            return Overlay(reports);
         }
         finally
         {
             _gate.Release();
         }
     }
+
+    /// <summary>Drops the cached check, so the next read checks again: the workers changed.</summary>
+    public void Forget() => _cache = null;
+
+    /// <summary>The update holding <paramref name="preset"/>'s command now, or null.</summary>
+    private AgentUpdateHold? Holding(string preset) =>
+        gate is not null && CommandOf(preset) is { } command ? gate.Holding(command) : null;
+
+    private string? CommandOf(string preset) =>
+        (catalog.For(preset)?.FileName ?? catalog.Definition(preset)?.Launch?.FileName) is { Length: > 0 } command ? command : null;
+
+    private IReadOnlyDictionary<string, AgentLaunchReport> Overlay(IReadOnlyDictionary<string, AgentLaunchReport> reports) =>
+        gate is null ? reports : reports.ToDictionary(
+            report => report.Key,
+            report => Holding(report.Key) is { } hold ? AgentLaunchReport.Held(hold, onThisMachine) : report.Value,
+            StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The sign-in reports, each carrying its preset's launch check.</summary>
     public static IReadOnlyList<AgentAuthReport> Attach(
@@ -86,6 +117,13 @@ public sealed class AgentLaunchChecks(
     }
 
     private void Again() => _again.Release();
+
+    /// <summary>Asks for another check: a command's update ended.</summary>
+    public void Refresh()
+    {
+        Forget();
+        Again();
+    }
 }
 
 /// <summary>One preset's launch check as the Host recorded it, with the command it starts.</summary>
@@ -135,7 +173,7 @@ public sealed record AgentLaunchChecksRecord(DateTimeOffset At, IReadOnlyList<Pr
     /// <summary>
     /// The launch of one COMMAND, which is how the doctor lists agents: the presets that start it, read
     /// worst first. One that failed is the command's answer (its own exit code and stderr tail, the preset
-    /// named); otherwise one that started is ok; otherwise not checked. A command no preset starts is not
+    /// named); otherwise one held by the platform's update reads updating; otherwise one that started is ok; otherwise not checked. A command no preset starts is not
     /// checked, never ok. The values are the presets' own reports, as <c>GET /api/agents/auth</c> carries them.
     /// </summary>
     public AgentLaunchReport ForCommand(string command)
@@ -144,6 +182,7 @@ public sealed record AgentLaunchChecksRecord(DateTimeOffset At, IReadOnlyList<Pr
         if (mine.Length == 0) return AgentLaunchReport.Unchecked($"No preset starts `{command}`, so nothing was started.");
 
         var chosen = mine.FirstOrDefault(p => p.Launch.Result == AgentLaunchReport.Failed)
+                     ?? mine.FirstOrDefault(p => p.Launch.Result == AgentLaunchReport.Updating)
                      ?? mine.FirstOrDefault(p => p.Launch.Result == AgentLaunchReport.Ok)
                      ?? mine[0];
 
