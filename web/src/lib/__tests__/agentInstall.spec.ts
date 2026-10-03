@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest'
 import type { AgentInstallation } from '../../api/types'
 import {
   AgentNotInstalled,
+  AgentUpdating,
   AgentsAction,
   agentsBadge,
   installGuidance,
   installStatus,
   installationFor,
   isNotInstalled,
+  isUpdating,
   listOf,
   referencedNotInstalled,
 } from '../agentInstall'
@@ -350,5 +352,59 @@ describe('in control, where the workers measured it', () => {
     expect(listOf(['worker-1'])).toBe('worker-1')
     expect(listOf(['worker-1', 'worker-2'])).toBe('worker-1 and worker-2')
     expect(listOf(['worker-1', 'worker-2', 'worker-3'])).toBe('worker-1, worker-2 and worker-3')
+  })
+})
+
+describe('a preset whose command the platform is updating', () => {
+  const at = '2026-10-03T09:00:00Z'
+  const updating = (agent: string, phase: 'waiting' | 'updating', worker: string | null, referenced = true) =>
+    installation({
+      agent,
+      state: AgentUpdating,
+      resolvedPath: null,
+      referenced,
+      message: `Updating ${agent}; it is measured again when the update ends.`,
+      measuredOn: [{ worker: 'worker-1', installed: false, at }],
+      updating: { phase, worker, since: at },
+    })
+
+  it('is its own exact wire value, and never missing', () => {
+    expect(AgentUpdating).toBe('AgentUpdating')
+    expect(isUpdating(updating('claude-headless', 'updating', 'worker-1'))).toBe(true)
+    expect(isNotInstalled(updating('claude-headless', 'updating', 'worker-1'))).toBe(false)
+  })
+
+  it("an updating preset reads 'Updating on worker-1', never not installed", () => {
+    expect(installStatus(updating('claude-headless', 'updating', 'worker-1'))).toEqual({ text: 'Updating on worker-1', icon: 'sync', tone: 'unknown' })
+  })
+
+  it("waiting reads 'Updating: waiting for runs to finish' and names no worker", () => {
+    const status = installStatus(updating('claude-headless', 'waiting', null))
+    expect(status.text).toBe('Updating: waiting for runs to finish')
+    expect(status.text).not.toMatch(/worker/)
+  })
+
+  it("in a server that runs its runs itself it reads 'Updating on this machine'", () => {
+    const here = installation({ agent: 'claude-headless', state: AgentUpdating, resolvedPath: null, updating: { phase: 'updating', worker: null, since: at } })
+    expect(installStatus(here).text).toBe('Updating on this machine')
+  })
+
+  it('an updating preset is not counted by the badge, and the badge says so in words', () => {
+    const badge = agentsBadge([updating('claude-headless', 'updating', 'worker-1')])
+    expect(badge).toEqual({ count: 0, text: '↻', icon: 'sync', label: 'claude-headless is being updated on worker-1; its runs wait for it.' })
+    expect(referencedNotInstalled([updating('claude-headless', 'updating', 'worker-1')])).toEqual([])
+  })
+
+  it('an updating preset nobody uses lights no badge', () => {
+    expect(agentsBadge([updating('claude-headless', 'updating', 'worker-1', false)])).toBeNull()
+  })
+
+  it('missing and updating together name both, and count only the missing one', () => {
+    const badge = agentsBadge([missing('copilot', true), updating('claude-headless', 'updating', 'worker-1')])
+    expect(badge?.count).toBe(1)
+    expect(badge?.text).toBe('1')
+    expect(badge?.label).toBe(
+      'copilot is not installed on this machine, and a team uses it. claude-headless is being updated on worker-1; its runs wait for it.',
+    )
   })
 })

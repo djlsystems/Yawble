@@ -181,7 +181,7 @@ public sealed class ControlUpdateGateTests : IDisposable
     }
 
     [Fact]
-    public async Task A_launch_check_in_control_reads_not_checked_while_an_update_waits()
+    public async Task A_launch_check_in_control_reads_updating_while_an_update_waits()
     {
         var bed = new Bed(_root);
         var run = bed.Runner.RunAsync(Bed.Invocation("alpha"), Ct);
@@ -191,12 +191,76 @@ public sealed class ControlUpdateGateTests : IDisposable
 
         var check = await bed.Runner.CheckLaunchAsync("fake", Ct);
 
-        Assert.Equal(AgentLaunchReport.Unchecked(RunLauncher.UpdatingText(Cli)), check);
+        Assert.Equal(new AgentLaunchReport(AgentLaunchReport.Updating, null, null,
+            $"Updating {Cli}: waiting for 1 run of it to finish, then it runs on one worker; it is measured again when the update ends."), check);
         Assert.Empty(bed.W1.Sent.OfType<CheckLaunch>());
         Assert.Empty(bed.W2.Sent.OfType<CheckLaunch>());
 
         await bed.EndAsync(bed.W1, start, 0);
         await run.WaitAsync(Bound, Ct);
+    }
+
+    [Fact]
+    public async Task The_update_names_the_worker_it_runs_on_once_it_starts()
+    {
+        var bed = new Bed(_root) { AnswerUpdates = false };
+        var run = bed.Runner.RunAsync(Bed.Invocation("alpha"), Ct);
+        var start = await bed.StartedOn(bed.W1);
+        bed.Updater.Request("fake", "person@example.test");
+        await Until(() => bed.Gate.Updating(Cli));
+
+        // Waiting: no worker is picked yet, so none is named.
+        Assert.Equal((AgentUpdatePhases.Waiting, (string?)null, 1), (bed.Gate.Holding(Cli)!.Phase, bed.Gate.Holding(Cli)!.Worker, bed.Gate.Holding(Cli)!.Runs));
+
+        // The run ends; the update starts on the worker picked then - w2 - and the gate names it.
+        bed.Best = "w2";
+        await bed.EndAsync(bed.W1, start, 0);
+        await run.WaitAsync(Bound, Ct);
+        await Until(() => bed.W2.Sent.OfType<RunAgentCommands>().Any());
+
+        Assert.Equal((AgentUpdatePhases.Updating, "w2"), (bed.Gate.Holding(Cli)!.Phase, bed.Gate.Holding(Cli)!.Worker));
+        Assert.Empty(bed.W1.Sent.OfType<RunAgentCommands>());
+        bed.W2.Lose("Worker w2 did not come back within its grace.");
+        await Until(() => bed.Gate.Holding(Cli) is null);
+    }
+
+    [Theory]
+    [InlineData(AgentUpdatePhases.Done)]
+    [InlineData(AgentUpdatePhases.Failed)]
+    [InlineData(AgentUpdatePhases.Cancelled)]
+    public async Task UpdateEnded_is_raised_once_whichever_way_the_update_ends(string ending)
+    {
+        var bed = new Bed(_root) { AnswerUpdates = ending == AgentUpdatePhases.Done };
+        var raised = new System.Collections.Concurrent.ConcurrentQueue<(string Command, AgentUpdateHold? Holding)>();
+        bed.Gate.UpdateEnded += command => raised.Enqueue((command, bed.Gate.Holding(command)));
+        var run = bed.Runner.RunAsync(Bed.Invocation("alpha"), Ct);
+        var start = await bed.StartedOn(bed.W1);
+        bed.Updater.Request("fake", "person@example.test");
+        await Until(() => bed.Gate.Updating(Cli));
+        Assert.Empty(raised);
+
+        if (ending == AgentUpdatePhases.Cancelled)
+        {
+            Assert.NotNull(bed.Gate.Cancel(Cli, "person@example.test").State);
+            await bed.EndAsync(bed.W1, start, 0);
+        }
+        else
+        {
+            await bed.EndAsync(bed.W1, start, 0);
+            if (ending == AgentUpdatePhases.Failed)
+            {
+                await Until(() => bed.W1.Sent.OfType<RunAgentCommands>().Any());
+                bed.W1.Lose("Worker w1 did not come back within its grace.");
+            }
+        }
+
+        await Until(() => bed.Gate.StateOf(Cli).Phase == ending);
+        await run.WaitAsync(Bound, Ct);
+        await Task.Delay(200, Ct);
+
+        var (command, holding) = Assert.Single(raised);
+        Assert.Equal(Cli, command);
+        Assert.Null(holding);
     }
 
     [Fact]

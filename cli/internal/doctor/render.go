@@ -25,6 +25,8 @@ func RenderAgents(w io.Writer, agents []Agent) {
 		}
 		fmt.Fprintln(w, a.Agent)
 		switch {
+		case a.Updating != nil:
+			fmt.Fprintln(w, "  installed   updating")
 		case a.Installed == nil:
 			fmt.Fprintln(w, "  installed   not measured")
 		case !*a.Installed:

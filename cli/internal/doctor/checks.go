@@ -428,6 +428,10 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 	for _, a := range r.Agents {
 		var part string
 		switch {
+		case a.Updating != nil:
+			// The platform's update holds it: not asked, never "not installed", never a failure.
+			parts = append(parts, a.Agent+" updating")
+			continue
 		case a.Installed == nil:
 			// Not measured: no worker answered the Host's probe. Never "not installed", never a failure.
 			parts = append(parts, a.Agent+" not measured")

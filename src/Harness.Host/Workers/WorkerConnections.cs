@@ -70,6 +70,13 @@ public sealed class WorkerConnections
     /// </summary>
     public event Action<WorkerId>? Joined;
 
+    /// <summary>
+    /// Raised on every welcome once the worker's connection can be sent to: a new session, as
+    /// <see cref="Joined"/> is, and a worker back on its own session too, which raises
+    /// <see cref="Changed"/> before its socket is attached and no <see cref="Joined"/>.
+    /// </summary>
+    public event Action<WorkerId>? Attached;
+
     /// <summary>The workers connected or dropped and within their grace.</summary>
     public IReadOnlyList<RemoteWorker> Workers()
     {
@@ -199,7 +206,11 @@ public sealed class WorkerConnections
 
         // Joined only once the socket is the worker's: a handler that asks the worker something at once
         // (the start's CLI update, the removal retry) would otherwise be refused as not connected.
-        await RunToEndAsync(remote, socket, ct, back ? null : () => Joined?.Invoke(remote.Id));
+        await RunToEndAsync(remote, socket, ct, () =>
+        {
+            if (!back) Joined?.Invoke(remote.Id);
+            Attached?.Invoke(remote.Id);
+        });
     }
 
     private static Task RunToEndAsync(RemoteWorker remote, WorkerSocket socket, CancellationToken ct, Action? attached = null) =>

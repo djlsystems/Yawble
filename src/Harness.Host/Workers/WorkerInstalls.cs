@@ -27,8 +27,13 @@ public sealed class WorkerInstalls(Func<IReadOnlyList<WorkerId>> placeable, Func
     public static WorkerInstalls Over(WorkerPool pool, TimeProvider? clock = null) =>
         new(() => pool.Workers, () => pool.Entries().Count, clock);
 
-    /// <summary>What <paramref name="worker"/> answered for each command, each replacing that worker's older answer.</summary>
-    public void Record(WorkerId worker, IEnumerable<(string Command, bool Installed)> answers)
+    /// <summary>
+    /// What <paramref name="worker"/> answered for each command, each replacing that worker's older answer.
+    /// An answer <paramref name="discard"/> names is dropped and the older one stands: one asked while
+    /// the platform's update held the command (<see cref="AgentUpdateGate.HeldSince"/>), which says
+    /// nothing about the install once the update has replaced it.
+    /// </summary>
+    public void Record(WorkerId worker, IEnumerable<(string Command, bool Installed)> answers, Func<string, bool>? discard = null)
     {
         var at = _clock.GetUtcNow();
         lock (_gate)
@@ -38,7 +43,11 @@ public sealed class WorkerInstalls(Func<IReadOnlyList<WorkerId>> placeable, Func
                 _answers[worker] = commands = new(StringComparer.OrdinalIgnoreCase);
             }
 
-            foreach (var (command, installed) in answers) commands[command] = (installed, at);
+            foreach (var (command, installed) in answers)
+            {
+                if (discard?.Invoke(command) == true) continue;
+                commands[command] = (installed, at);
+            }
         }
     }
 

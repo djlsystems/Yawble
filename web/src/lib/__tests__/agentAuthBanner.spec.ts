@@ -38,3 +38,18 @@ describe('authProblems', () => {
     ).toEqual([])
   })
 })
+
+describe('authProblems while an update holds a CLI', () => {
+  it('an updating sign-in raises no banner', () => {
+    expect(
+      authProblems([
+        report({
+          installed: null,
+          authenticated: null,
+          detail: 'Updating grok on worker-1; it is measured again when the update ends.',
+          updating: 'Updating grok on worker-1; it is measured again when the update ends.',
+        }),
+      ]),
+    ).toEqual([])
+  })
+})

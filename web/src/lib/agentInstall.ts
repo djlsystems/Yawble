@@ -23,6 +23,27 @@ import type { AgentInstall, AgentInstallation } from '../api/types'
 export const AgentNotInstalled = 'AgentNotInstalled'
 
 /**
+ * The wire value for a preset whose command the platform's update holds, waiting or running. Its own
+ * state, and never missing: the install is being replaced, and it is measured again when the update
+ * ends. Exact match, like {@link AgentNotInstalled}.
+ */
+export const AgentUpdating = 'AgentUpdating'
+
+/** Whether the platform's update holds this preset's command now. */
+export function isUpdating(installation: AgentInstallation | undefined | null): boolean {
+  return installation?.state === AgentUpdating
+}
+
+/**
+ * WHERE an update runs, in words: the worker it runs on, "this machine" for a server that runs its
+ * runs itself, or null while it waits for runs and no worker is picked yet. Never a guess.
+ */
+export function whereUpdating(installation: AgentInstallation): string | null {
+  if (!installation.measuredOn) return 'this machine'
+  return installation.updating?.phase === 'updating' ? (installation.updating.worker ?? null) : null
+}
+
+/**
  * The ribbon action the badge attaches to.
  *
  * ONE definition for both surfaces, so the desktop strip and the mobile drawer cannot mark
@@ -111,6 +132,18 @@ export function installStatus(
 ): InstallStatus {
   if (!installation) {
     return { text: 'Not checked', icon: 'help', tone: 'unknown' }
+  }
+
+  // UPDATING COMES FIRST: the install is being replaced, so it is never "not installed" or "found".
+  if (isUpdating(installation)) {
+    const where = whereUpdating(installation)
+    return {
+      text: installation.updating?.phase === 'waiting'
+        ? 'Updating: waiting for runs to finish'
+        : where ? `Updating on ${where}` : 'Updating',
+      icon: 'sync',
+      tone: 'unknown',
+    }
   }
 
   const measured = installation.measuredOn
@@ -214,7 +247,21 @@ export function agentsBadge(
 ): AgentsBadge | null {
   const missing = referencedNotInstalled(installations)
 
-  if (missing.length === 0) return null
+  // BEING UPDATED IS NOT MISSING. In use and held by the platform's update, a preset is said in words
+  // - its runs wait - and never counted, so nobody is sent to install a CLI that is there.
+  const updating = (installations ?? []).filter((entry) => entry.referenced && isUpdating(entry))
+  const updates = updating.map((entry) => {
+    const where = whereUpdating(entry)
+    return where
+      ? `${entry.agent} is being updated on ${where}; its runs wait for it.`
+      : `${entry.agent} is being updated once its runs finish; new runs wait for it.`
+  })
+
+  if (missing.length === 0) {
+    return updates.length === 0
+      ? null
+      : { count: 0, text: '↻', icon: 'sync', label: updates.join(' ') }
+  }
 
   // Grouped by WHERE, in the order first met: one place reads as before; several name each.
   const groups = new Map<string, string[]>()
@@ -233,9 +280,11 @@ export function agentsBadge(
     count: missing.length,
     text: String(missing.length),
     icon: 'error',
-    label:
+    label: [
       missing.length === 1
         ? `${clauses[0]}, and a team uses it.`
         : `${clauses.join(' and ')}, and teams use them.`,
+      ...updates,
+    ].join(' '),
   }
 }

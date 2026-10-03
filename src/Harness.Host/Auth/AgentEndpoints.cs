@@ -40,7 +40,8 @@ public static class AgentEndpoints
     /// <summary>
     /// The probe as a machine principal reads it: no command and no Host disk path. <c>measuredOn</c>
     /// is the workers' answer in control - worker ids, booleans and times - and written only there,
-    /// so in <c>all</c> this is the shape it always was.
+    /// so in <c>all</c> this is the shape it always was. <c>updating</c> is written only while the
+    /// platform's update holds the command.
     /// </summary>
     internal sealed record RedactedInstallation(
         string Agent,
@@ -49,7 +50,9 @@ public static class AgentEndpoints
         string Message,
         AgentInstall? Install,
         [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<InstallMeasurement>? MeasuredOn);
+        IReadOnlyList<InstallMeasurement>? MeasuredOn,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        AgentUpdatingOn? Updating = null);
 
     public static void Map(WebApplication app, string dataRoot)
     {
@@ -126,7 +129,7 @@ public static class AgentEndpoints
                     buildTags = catalog.BuildTags(a.Name),
                 }),
                 installations = installations.Select(i => new RedactedInstallation(
-                    i.Agent, i.State, i.Referenced, i.Message, i.Install, i.MeasuredOn)),
+                    i.Agent, i.State, i.Referenced, i.Message, i.Install, i.MeasuredOn, i.Updating)),
                 ignoredTagOverrides = catalog.IgnoredTagOverrides,
             });
         })

@@ -31,7 +31,19 @@ public static class AgentInstallStates
     /// rather than a label: renaming it is a wire change.
     /// </summary>
     public const string NotInstalled = "AgentNotInstalled";
+
+    /// <summary>
+    /// What a preset whose command the platform's update holds reports, waiting or running
+    /// (<see cref="AgentUpdateGate.Holding"/>): its own state and NEVER <see cref="NotInstalled"/>,
+    /// because the install is being replaced, not missing, and it is measured again when the update
+    /// ends. A wire value, like <see cref="NotInstalled"/>.
+    /// </summary>
+    public const string Updating = "AgentUpdating";
 }
+
+/// <summary>The update holding a preset's command, as <c>GET /api/agents</c> carries it: <c>waiting</c> or
+/// <c>updating</c>, the worker it runs on (null until one is picked) and since when.</summary>
+public sealed record AgentUpdatingOn(string Phase, string? Worker, DateTimeOffset Since);
 
 /// <summary>
 /// What the probe answers for one preset - the payload the fourth state rides on.
@@ -53,7 +65,8 @@ public sealed record AgentInstallation(
     string Command,
 
     [property: Description(
-        "NULL when the command resolves, and `AgentNotInstalled` when it does not.\n\n"
+        "NULL when the command resolves, `AgentNotInstalled` when it does not, and `AgentUpdating` "
+        + "while the platform's update of the command holds it (then never `AgentNotInstalled`).\n\n"
         + "A nullable STRING and deliberately not a new `ContainerState`: that enum crosses two "
         + "serialisers as a name and the SPA compares it. It is also NOT `MissingAgent`, which "
         + "keeps meaning 'the catalog has no such entry' - a different fact with a different "
@@ -93,7 +106,13 @@ public sealed record AgentInstallation(
         "In control only: each placeable worker's answer for this command - `worker`, `installed` and "
         + "`at` - which is where `state` and `message` come from. Empty: no such worker has answered, "
         + "so the command is not measured. Absent: this Host answered from its own PATH.")]
-    IReadOnlyList<InstallMeasurement>? MeasuredOn = null);
+    IReadOnlyList<InstallMeasurement>? MeasuredOn = null,
+
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [property: Description(
+        "Only while the platform's update holds this preset's command: `phase` (`waiting` or "
+        + "`updating`), `worker` (null until one is picked) and `since`. Absent otherwise.")]
+    AgentUpdatingOn? Updating = null);
 
 /// <summary>
 /// Whether the CLI a preset names is on this machine at all.
@@ -127,8 +146,9 @@ public sealed class AgentInstallProbe
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeSpan _window;
     private readonly WorkerInstalls? _workers;
+    private readonly AgentUpdateGate? _gate;
 
-    private readonly Lock _gate = new();
+    private readonly Lock _cacheLock = new();
     private readonly Dictionary<string, Answer> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly record struct Answer(string? ResolvedPath, DateTimeOffset TakenAt);
@@ -143,14 +163,31 @@ public sealed class AgentInstallProbe
     /// never looked at, because control has no agent CLI on it. Null in <c>all</c>, where the runs are
     /// this machine's and so is the PATH.
     /// </param>
+    /// <param name="gate">The update gate: a command it holds reads <see cref="AgentInstallStates.Updating"/>
+    /// and is not measured, in either role.</param>
     public AgentInstallProbe(
         Func<DateTimeOffset>? now = null,
         TimeSpan? window = null,
-        WorkerInstalls? workers = null)
+        WorkerInstalls? workers = null,
+        AgentUpdateGate? gate = null)
     {
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _window = window ?? DefaultWindow;
         _workers = workers;
+        _gate = gate;
+    }
+
+    /// <summary>The update holding <paramref name="command"/> now, or null.</summary>
+    public AgentUpdateHold? Holding(string? command) =>
+        _gate is not null && (command ?? string.Empty).Trim() is { Length: > 0 } name ? _gate.Holding(name) : null;
+
+    /// <summary>Drops this machine's cached answer for <paramref name="command"/>: its update ended.</summary>
+    public void Forget(string command)
+    {
+        lock (_cacheLock)
+        {
+            _cache.Remove(command.Trim());
+        }
     }
 
     /// <summary>
@@ -168,7 +205,7 @@ public sealed class AgentInstallProbe
 
         var now = _now();
 
-        lock (_gate)
+        lock (_cacheLock)
         {
             if (_cache.TryGetValue(name, out var cached) && now - cached.TakenAt < _window)
             {
@@ -178,7 +215,7 @@ public sealed class AgentInstallProbe
 
         var resolved = PathSearch.Find(name);
 
-        lock (_gate)
+        lock (_cacheLock)
         {
             _cache[name] = new Answer(resolved, now);
         }
@@ -207,6 +244,7 @@ public sealed class AgentInstallProbe
         // `AgentCatalog.Launch` carries for the same reason. An empty command resolves to nothing,
         // which is the honest answer for a preset that could never launch either way.
         var command = definition.Launch?.FileName ?? string.Empty;
+        if (Holding(command) is { } hold) return Held(definition, command, referenced, hold);
         if (_workers is not null) return OnWorkers(definition, command, referenced, _workers);
 
         var resolved = ResolvedPathOf(command);
@@ -251,6 +289,24 @@ public sealed class AgentInstallProbe
             measured);
     }
 
+    /// <summary>
+    /// The answer while the platform's update holds the command: <see cref="AgentInstallStates.Updating"/>
+    /// with the gate's sentence, never <see cref="AgentInstallStates.NotInstalled"/>. In control the
+    /// workers' answers from before the hold are carried as they were; nothing is looked up on a PATH
+    /// that may be half replaced.
+    /// </summary>
+    private AgentInstallation Held(AgentDefinition definition, string command, bool referenced, AgentUpdateHold hold) =>
+        new(
+            definition.Name,
+            command,
+            AgentInstallStates.Updating,
+            null,
+            referenced,
+            UpdatingOn.Text(hold, onThisMachine: _workers is null),
+            LinkableInstall(definition.Install),
+            _workers?.For(command.Trim()),
+            new AgentUpdatingOn(hold.Phase, _workers is null ? null : hold.Worker, hold.Since));
+
     /// <summary>"a", "a and b", "a, b and c".</summary>
     private static string ListOf(IReadOnlyList<string> names) =>
         names.Count <= 1 ? string.Concat(names) : $"{string.Join(", ", names.Take(names.Count - 1))} and {names[^1]}";
@@ -271,7 +327,8 @@ public sealed class AgentInstallProbe
     /// and in <c>control</c> as the workers measured it - null when none that counts has answered.
     /// </summary>
     public bool? Measured(AgentDefinition definition) =>
-        _workers is null ? ResolvedPathOf(definition.Launch?.FileName) is not null : MeasuredOn(definition.Launch?.FileName);
+        Holding(definition.Launch?.FileName) is not null ? null
+        : _workers is null ? ResolvedPathOf(definition.Launch?.FileName) is not null : MeasuredOn(definition.Launch?.FileName);
 
     /// <summary>
     /// Whether the preset's CLI is KNOWN to be installed where its runs go. Not measured is not

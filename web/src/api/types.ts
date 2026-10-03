@@ -1784,7 +1784,8 @@ export interface AgentInstallation {
   command: string
 
   /**
-   * NULL when the command resolves, and `AgentNotInstalled` when it does not.
+   * NULL when the command resolves, `AgentNotInstalled` when it does not, and `AgentUpdating` while
+   * the platform's update holds the command (then never `AgentNotInstalled`).
    *
    * A STRING, never an enum: the enum crosses two serialisers as a name and this side compares the
    * string. It is a DIFFERENT fact from a container's `missingAgent`, which means the catalog has
@@ -1811,6 +1812,19 @@ export interface AgentInstallation {
    * answered - and never "installed". Absent: the server answered from its own PATH.
    */
   measuredOn?: InstallMeasurement[]
+
+  /** Sent only while the platform's update holds this preset's command: absent otherwise. */
+  updating?: AgentUpdatingOn | null
+}
+
+/**
+ * The update holding a preset's command: `waiting` for its runs, or `updating`; `worker` is the one it
+ * runs on, null until one is picked (and always in a server that runs its runs itself).
+ */
+export interface AgentUpdatingOn {
+  phase: 'waiting' | 'updating'
+  worker: string | null
+  since: string
 }
 
 /** One worker's answer to whether a command is on its PATH, and when it gave it. */
@@ -1863,6 +1877,12 @@ export interface AgentAuthReport {
    * for its command. Absent from an older server, which reads as not known rather than as home.
    */
   source?: AgentCredentialSource
+
+  /**
+   * While the platform's update holds the preset's command: the server's sentence. The CLI was not
+   * asked, so `installed` and `authenticated` are null - never "not installed" or signed out.
+   */
+  updating?: string | null
 }
 
 /** How a preset signs in. Chosen per preset in the tenant setting `agents.credentialSource`. */

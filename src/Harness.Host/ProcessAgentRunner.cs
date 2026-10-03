@@ -200,10 +200,10 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         var credential = _credentials is null ? RunCredential.Home : await _credentials.ResolveAsync(agent, definition, ct);
         var launch = Launch(command, definition.TimeoutSeconds, environment, credential);
 
-        // Under control's one update gate: not checked while an update waits or runs, and a check in
+        // Under control's one update gate: updating while an update waits or runs, and a check in
         // flight holds the update off as a run does.
         if (_gateHere is null) return await CheckOnAWorkerAsync(launch, check, definition, environment, credential, timeout, ct);
-        if (_gateHere.Updating(launch.FileName)) return AgentLaunchReport.Unchecked(RunLauncher.UpdatingText(launch.FileName));
+        if (_gateHere.Holding(launch.FileName) is { } hold) return AgentLaunchReport.Held(hold);
 
         using var share = await _gateHere.EnterRunAsync(launch.FileName, null, ct);
         return await CheckOnAWorkerAsync(launch, check, definition, environment, credential, timeout, ct);
