@@ -34,9 +34,11 @@ export function stamp(iso: string): string {
   return new Date(parsed).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
-/** Who brought the version: a container start, or a person (named when the record has them). */
+/** Who brought the version: a container start, a person (named when the record has them), or control
+ *  measuring it on a worker when the workers changed. */
 function whoFor(entry: CliVersion): string {
   if (entry.updatedBy === 'person') return entry.person ? `by ${entry.person}` : 'by a person'
+  if (entry.updatedBy === 'measured') return 'as measured on a worker'
 
   return 'at a container start'
 }

@@ -77,6 +77,8 @@ public sealed class AgentUpdateGate
         public Asked? Current;
         public AgentUpdateState? Last;
         public readonly SemaphoreSlim OneUpdate = new(1, 1);
+        public AgentUpdateHold? Hold;
+        public long Turned;
     }
 
     /// <summary>A person's update, from asked to finished. Changed only under its state's lock.</summary>
@@ -92,6 +94,52 @@ public sealed class AgentUpdateGate
 
     private readonly ConcurrentDictionary<string, State> _states = new(StringComparer.Ordinal);
     private long _next;
+    private long _turn;
+
+    /// <summary>
+    /// Raised once each time a hold of a command ends - the update done, failed or cancelled while it
+    /// waited - after the launches it held are let go, with <see cref="Holding"/> already null.
+    /// </summary>
+    public event Action<string>? UpdateEnded;
+
+    /// <summary>
+    /// A count raised whenever any command's hold begins or ends. Read it before asking a worker about
+    /// a command and pass it to <see cref="HeldSince"/> with the answer: a count, not a time, so no
+    /// two clocks are compared.
+    /// </summary>
+    public long Turn => Interlocked.Read(ref _turn);
+
+    /// <summary>
+    /// Whether <paramref name="command"/> is held now, or its hold began or ended since
+    /// <paramref name="turn"/> was read: an answer about it asked then says nothing about the install.
+    /// </summary>
+    public bool HeldSince(string command, long turn)
+    {
+        if (!_states.TryGetValue(command, out var s)) return false;
+        lock (s) return s.Hold is not null || s.Turned > turn;
+    }
+
+    /// <summary>
+    /// The update holding <paramref name="command"/> now - waiting for its runs, or running, and on which
+    /// worker once one is picked - or null. Exactly the window <see cref="Updating"/> reports.
+    /// </summary>
+    public AgentUpdateHold? Holding(string command)
+    {
+        if (!_states.TryGetValue(command, out var s)) return null;
+        lock (s) return s.Hold is { } hold ? hold with { Runs = s.Running.Count } : null;
+    }
+
+    /// <summary>The updater names the worker it picked for <paramref name="command"/>'s update, as it starts it.</summary>
+    public void RunsOn(string command, string worker)
+    {
+        if (!_states.TryGetValue(command, out var s)) return;
+        lock (s)
+        {
+            if (s.Hold is { } hold) s.Hold = hold with { Phase = AgentUpdatePhases.Updating, Worker = worker };
+        }
+    }
+
+    private void Turned(State state) => state.Turned = Interlocked.Increment(ref _turn);
 
     private State For(string command) => _states.GetOrAdd(command, _ => new State());
 
@@ -192,6 +240,8 @@ public sealed class AgentUpdateGate
         {
             updating = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             state.Updating = updating;
+            state.Hold = new AgentUpdateHold(command, AgentUpdatePhases.Waiting, null, DateTimeOffset.UtcNow);
+            Turned(state);
 
             if (state.Running.Count == 0)
             {
@@ -217,20 +267,35 @@ public sealed class AgentUpdateGate
                     if (asked.Phase == AgentUpdatePhases.Cancelled) throw new OperationCanceledException(ct);
                     Start(asked);
                 }
+
+                if (state.Updating == updating && state.Hold is { Phase: AgentUpdatePhases.Waiting } hold)
+                {
+                    state.Hold = hold with { Phase = AgentUpdatePhases.Updating };
+                }
             }
 
             return await update(ct);
         }
         finally
         {
+            var ended = false;
             lock (state)
             {
-                if (state.Updating == updating) state.Updating = null;
+                if (state.Updating == updating)
+                {
+                    // Not when a cancel ended this hold already: that one said so.
+                    state.Updating = null;
+                    state.Hold = null;
+                    Turned(state);
+                    ended = true;
+                }
+
                 state.Drained = null;
             }
 
             updating.TrySetResult();
             state.OneUpdate.Release();
+            if (ended) Ended(command);
         }
     }
 
@@ -328,6 +393,8 @@ public sealed class AgentUpdateGate
             release = state.Updating;
             state.Updating = null;
             state.Drained = null;
+            state.Hold = null;
+            Turned(state);
 
             state.Last = StateFor(command, state, asked) with
             {
@@ -339,8 +406,21 @@ public sealed class AgentUpdateGate
 
         release?.TrySetResult();
         asked.Cancel.Cancel();
+        if (release is not null) Ended(command);
 
         return (cancelled, false);
+    }
+
+    private void Ended(string command)
+    {
+        try
+        {
+            UpdateEnded?.Invoke(command);
+        }
+        catch (Exception)
+        {
+            // A listener's failure is its own; the hold has ended either way.
+        }
     }
 
     /// <summary>What the gate says about <paramref name="command"/>'s update now.</summary>
@@ -395,6 +475,7 @@ public sealed class AgentUpdateGate
             // The last run out starts the update in the same step, so its state never reads
             // "waiting for 0 runs".
             if (state.Current is { } asked) Start(asked);
+            if (state.Hold is { Phase: AgentUpdatePhases.Waiting } hold) state.Hold = hold with { Phase = AgentUpdatePhases.Updating };
             state.Drained.TrySetResult();
         }
     }
@@ -407,6 +488,38 @@ public sealed class AgentUpdateGate
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0) gate.Leave(command, id);
         }
+    }
+}
+
+/// <summary>
+/// AN UPDATE HOLDING A COMMAND NOW, as the gate holds it: <see cref="Phase"/> is
+/// <see cref="AgentUpdatePhases.Waiting"/> (for <see cref="Runs"/> runs in flight) or
+/// <see cref="AgentUpdatePhases.Updating"/>; <see cref="Worker"/> is the worker it runs on, null until
+/// one is picked, which is when it starts. Nothing in it is estimated.
+/// </summary>
+public sealed record AgentUpdateHold(string Command, string Phase, string? Worker, DateTimeOffset Since, int Runs = 0);
+
+/// <summary>
+/// WHAT A COMMAND HELD BY AN UPDATE READS, everywhere it is read: the install state, the sign-in, the
+/// launch check, the tool listing and the doctor. Its own state, never "not installed": the install is
+/// being replaced, and it is measured again when the update ends.
+/// </summary>
+public static class UpdatingOn
+{
+    /// <summary>The sentence for <paramref name="hold"/>; <paramref name="onThisMachine"/> in a Host that runs its runs itself.</summary>
+    public static string Text(AgentUpdateHold hold, bool onThisMachine = false)
+    {
+        const string again = "it is measured again when the update ends.";
+        if (hold.Phase == AgentUpdatePhases.Waiting)
+        {
+            var runs = hold.Runs == 1 ? "1 run" : $"{hold.Runs} runs";
+            return $"Updating {hold.Command}: waiting for {runs} of it to finish, then it runs on "
+                   + (onThisMachine ? "this machine" : "one worker") + $"; {again}";
+        }
+
+        return onThisMachine ? $"Updating {hold.Command} on this machine; {again}"
+            : hold.Worker is { } worker ? $"Updating {hold.Command} on {worker}; {again}"
+            : $"Updating {hold.Command}; {again}";
     }
 }
 
@@ -431,7 +544,8 @@ public sealed record AgentUpdateResult(
 /// null when the version is not known.</param>
 /// <param name="Since">The oldest line kept.</param>
 /// <param name="UpdatedBy">Who brought this version, from the line at <paramref name="UpdatedAt"/>:
-/// `start` for a container start's line, `person` for a person's update through the platform; null
+/// `start` for a container start's line, `person` for a person's update through the platform,
+/// `measured` for a line control wrote when the workers changed and a version differed; null
 /// when <paramref name="UpdatedAt"/> is, so always null for a version that is not known.</param>
 /// <param name="Person">That person's email when the line records it.</param>
 public sealed record CliVersionNow(

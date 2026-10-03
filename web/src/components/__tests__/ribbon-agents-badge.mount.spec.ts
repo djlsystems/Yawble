@@ -127,3 +127,66 @@ describe('the Agents badge', () => {
     expect(said).toEqual({ strip: [], drawer: [] });
   });
 });
+
+// WHILE THE PLATFORM'S UPDATE HOLDS A CLI A TEAM USES, THE BADGE SAYS SO IN WORDS - on the desktop
+// strip and in the drawer - and never that it is not installed; once the update ends and the CLI is
+// measured installed, there is no badge.
+describe('the Agents badge while an update holds a CLI', () => {
+  async function texts(installations: AgentInstallation[]): Promise<{ strip: string; drawer: string }> {
+    fixture.installations = installations;
+    const strip = mount(RibbonBar, { attachTo: document.body });
+    await flushPromises();
+    const stripText = [...strip.element.querySelectorAll('.q-badge')].map((b) => `${b.textContent} ${b.getAttribute('aria-label')}`).join(' ');
+    strip.unmount();
+    const drawer = mount(RibbonMobileMenu, { attachTo: document.body });
+    await flushPromises();
+    const drawerText = drawer.text() + ' ' + [...drawer.element.querySelectorAll('.q-badge')].map((b) => b.getAttribute('aria-label')).join(' ');
+    drawer.unmount();
+    return { strip: stripText, drawer: drawerText };
+  }
+
+  it("in control, while claude updates on worker-1 the Agents item says so in words and never 'not installed' — desktop and drawer", async () => {
+    const said = await labels([
+      entry('claude-headless', {
+        state: 'AgentUpdating',
+        message: 'Updating claude on worker-1; it is measured again when the update ends.',
+        measuredOn: [{ worker: 'worker-1', installed: false, at }],
+        updating: { phase: 'updating', worker: 'worker-1', since: at },
+      }),
+    ]);
+
+    const expected = 'claude-headless is being updated on worker-1; its runs wait for it.';
+    expect(said).toEqual({ strip: [expected], drawer: [expected] });
+
+    const { strip, drawer } = await texts(fixture.installations);
+    for (const text of [strip, drawer]) {
+      expect(text).toMatch(/being updated/);
+      expect(text).not.toMatch(/not installed/i);
+      expect(text).not.toMatch(/install it/i);
+    }
+    expect(strip).toContain('↻');
+  });
+
+  it('while the update waits, the badge says its runs wait and names no worker — desktop and drawer', async () => {
+    const said = await labels([
+      entry('claude-headless', {
+        state: 'AgentUpdating',
+        message: 'Updating claude: waiting for 1 run of it to finish, then it runs on one worker; it is measured again when the update ends.',
+        measuredOn: [{ worker: 'worker-1', installed: true, at }],
+        updating: { phase: 'waiting', worker: null, since: at },
+      }),
+    ]);
+
+    const expected = 'claude-headless is being updated once its runs finish; new runs wait for it.';
+    expect(said).toEqual({ strip: [expected], drawer: [expected] });
+    expect(said.strip[0]).not.toMatch(/not installed/i);
+  });
+
+  it('once the update ends and the CLI is installed the badge is gone — desktop and drawer', async () => {
+    const said = await labels([
+      entry('claude-headless', { message: 'claude is installed on worker-1.', measuredOn: [{ worker: 'worker-1', installed: true, at }] }),
+    ]);
+
+    expect(said).toEqual({ strip: [], drawer: [] });
+  });
+});

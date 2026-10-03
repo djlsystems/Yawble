@@ -499,3 +499,52 @@ describe('AgentsDialog, the install line', () => {
     expect(text).not.toContain('Not found');
   });
 });
+
+// WHILE THE PLATFORM'S UPDATE HOLDS A CLI, ITS TILE SAYS SO IN WORDS: the install line reads
+// "Updating", the sign-in line reads "Updating" with the server's sentence, and nothing on it says
+// "not installed" or "not authenticated" - in both phases of the update.
+describe('AgentsDialog, while an update holds a CLI', () => {
+  const sentence = {
+    waiting: 'Updating claude: waiting for 1 run of it to finish, then it runs on one worker; it is measured again when the update ends.',
+    updating: 'Updating claude on worker-1; it is measured again when the update ends.',
+  } as const;
+
+  it.each(['waiting', 'updating'] as const)('the %s phase reads "Updating" on the install and sign-in lines, never not installed', async (phase) => {
+    listCatalog.mockResolvedValue({
+      agents: [builtIn],
+      installations: [{
+        agent: 'claude-headless',
+        command: 'claude',
+        state: 'AgentUpdating',
+        resolvedPath: null,
+        referenced: true,
+        message: sentence[phase],
+        measuredOn: [{ worker: 'worker-1', installed: false, at: '2026-10-03T09:00:00Z' }],
+        updating: { phase, worker: phase === 'updating' ? 'worker-1' : null, since: '2026-10-03T09:00:00Z' },
+      }],
+    });
+    getAgentAuth.mockResolvedValue([{
+      agent: 'claude-headless',
+      command: 'claude',
+      installed: null,
+      authenticated: null,
+      detail: sentence[phase],
+      referenced: true,
+      source: 'home',
+      updating: sentence[phase],
+    }]);
+
+    const wrapper = await mountDialog(AgentsDialog);
+    await settle();
+
+    const tile = row('claude-headless').textContent ?? '';
+    expect(tile).toMatch(/Updating/);
+    expect(tile).toContain(phase === 'updating' ? 'Updating on worker-1' : 'Updating: waiting for runs to finish');
+    expect(row('claude-headless').querySelector('.agent-auth-line')?.textContent).toMatch(/Updating/);
+    expect(tile).not.toMatch(/not installed/i);
+    expect(tile).not.toMatch(/not authenticated/i);
+    expect(row('claude-headless').querySelector('.agent-install-help')).toBeNull();
+
+    wrapper.unmount();
+  });
+});

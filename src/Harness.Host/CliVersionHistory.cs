@@ -5,9 +5,12 @@ namespace Harness.Host;
 /// <summary>One container start and the version each agent CLI reported at it. A null version is
 /// a CLI that was not installed at that start. <paramref name="By"/> is null for a start's line and
 /// `update` for the line the Host writes after a person's update of one CLI; <paramref name="Person"/>
-/// is that person's email when the Host knew it, and null on a start's line.</summary>
+/// is that person's email when the Host knew it, and null on a start's line. `measured` is a line control
+/// wrote when the workers changed and a version differed, with the <paramref name="Worker"/> that said so.</summary>
 public sealed record CliVersionsAtStart(
-    DateTimeOffset At, IReadOnlyDictionary<string, string?> Versions, string? By = null, string? Person = null);
+    DateTimeOffset At, IReadOnlyDictionary<string, string?> Versions, string? By = null, string? Person = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Worker = null);
 
 /// <summary>
 /// Which CLI versions this VOLUME has started with, newest first.
@@ -46,7 +49,12 @@ public sealed class CliVersionHistory(string path)
             if (Parse(line) is { } start) starts.Add(start);
         }
 
-        return [.. starts.OrderByDescending(start => start.At).Take(Math.Clamp(take, 1, MaxTake))];
+        // Lines are dated to the second: of two in one second, the one written later is the newer.
+        return [.. starts.Select((start, line) => (start, line))
+            .OrderByDescending(entry => entry.start.At)
+            .ThenByDescending(entry => entry.line)
+            .Select(entry => entry.start)
+            .Take(Math.Clamp(take, 1, MaxTake))];
     }
 
     /// <summary>
@@ -73,7 +81,13 @@ public sealed class CliVersionHistory(string path)
                 var arrived = newestFirst[i - 1];
                 return new CliVersionNow(
                     cli, version, arrived.At, since,
-                    arrived.By == "update" ? "person" : "start", arrived.Person);
+                    arrived.By switch
+                    {
+                        "update" => "person",
+                        CliVersionsWhenWorkersChange.By => CliVersionsWhenWorkersChange.By,
+                        _ => "start",
+                    },
+                    arrived.Person);
             }
         }
 
@@ -88,7 +102,8 @@ public sealed class CliVersionHistory(string path)
     /// <paramref name="person"/> is the email of the person who asked, written as `person` when known.
     /// </summary>
     public async Task<bool> AppendAsync(
-        IReadOnlyDictionary<string, string?> changed, string by, CancellationToken ct = default, string? person = null)
+        IReadOnlyDictionary<string, string?> changed, string by, CancellationToken ct = default, string? person = null,
+        string? worker = null)
     {
         try
         {
@@ -104,6 +119,7 @@ public sealed class CliVersionHistory(string path)
                 ["by"] = by,
             };
             if (person is not null) fields["person"] = person;
+            if (worker is not null) fields["worker"] = worker;
             var line = JsonSerializer.Serialize(fields);
 
             var lines = File.Exists(Path) ? [.. await File.ReadAllLinesAsync(Path, ct)] : new List<string>();
@@ -153,7 +169,11 @@ public sealed class CliVersionHistory(string path)
                 ? personValue.GetString()
                 : null;
 
-            return new CliVersionsAtStart(when, map, by, person);
+            var worker = root.TryGetProperty("worker", out var workerValue) && workerValue.ValueKind == JsonValueKind.String
+                ? workerValue.GetString()
+                : null;
+
+            return new CliVersionsAtStart(when, map, by, person, worker);
         }
         catch (JsonException)
         {

@@ -754,3 +754,33 @@ func TestTheDoctorSaysWhenAndOnWhichWorkerItMeasured(t *testing.T) {
 		t.Errorf("render:\n%s", out.String())
 	}
 }
+
+// A CLI the platform's update held when the Host last probed reads "updating" - in the agents row and
+// its block - with the probe's time set and installed null: never "not installed", and no warning.
+func TestAgentsRowSaysUpdatingNotNotInstalled(t *testing.T) {
+	r, err := doctor.ParseHostReport(`{"agents":[{"agent":"claude","installed":null,"version":"2.0.1","authenticated":null,` +
+		`"detail":"Updating claude on w1; it is measured again when the update ends.","measuredAt":"2026-10-03T09:00:00+00:00","measuredOn":"w1",` +
+		`"updating":"Updating claude on w1; it is measured again when the update ends.",` +
+		`"launch":{"result":"updating","exitCode":null,"stderrTail":null,"detail":"claude-headless: Updating claude on w1; it is measured again when the update ends."}}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := r.Agents[0]
+	if a.Updating == nil || a.NotInstalled() {
+		t.Fatalf("decoded as %+v", a)
+	}
+	if got := a.LaunchText(); got != "updating" {
+		t.Errorf("launch read as %q", got)
+	}
+
+	row := find(t, doctor.InstanceChecks(&r, nil, now), "agents")
+	if row.Verdict != doctor.OK || !strings.Contains(row.Detail, "claude updating") || strings.Contains(row.Detail, "not installed") || row.Fix != "" {
+		t.Errorf("agents row: %+v", row)
+	}
+
+	var out bytes.Buffer
+	doctor.RenderAgents(&out, r.Agents)
+	if text := out.String(); !strings.Contains(text, "installed   updating") || strings.Contains(text, "installed   no\n") {
+		t.Errorf("render:\n%s", text)
+	}
+}

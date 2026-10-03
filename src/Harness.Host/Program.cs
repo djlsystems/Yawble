@@ -723,9 +723,10 @@ builder.Services.AddSingleton(sp => new TeamSkills(
 // what each placeable worker measured (WorkerInstalls), from the sign-in probe and from the
 // measurement each worker gets as it joins. In `all` the runs are this machine's, and so is the PATH.
 builder.Services.AddSingleton(sp => WorkerInstalls.Over(sp.GetRequiredService<WorkerPool>()));
+// A command the update gate holds reads updating, in both roles, and never not installed.
 builder.Services.AddSingleton(sp => control
-    ? new AgentInstallProbe(workers: sp.GetRequiredService<WorkerInstalls>())
-    : new AgentInstallProbe());
+    ? new AgentInstallProbe(workers: sp.GetRequiredService<WorkerInstalls>(), gate: sp.GetRequiredService<AgentUpdateGate>())
+    : new AgentInstallProbe(gate: sp.GetRequiredService<AgentUpdateGate>()));
 // The one path from the progress ROUTE to whatever is currently running that member. Singleton
 // because both ends have to be looking at the same object for a heartbeat to mean anything.
 builder.Services.AddSingleton<RunHeartbeat>();
@@ -1766,11 +1767,12 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(sp => new AgentAuthProbe(
     sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<AgentLaunchUser>(), sp.GetRequiredService<IRunCredentials>(),
     sp.GetRequiredService<WorkerAsks>(), dataRoot, sp.GetRequiredService<ILogger<AgentAuthProbe>>(),
-    installs: sp.GetRequiredService<AgentInstallProbe>(), measured: control ? sp.GetRequiredService<WorkerInstalls>() : null));
+    installs: sp.GetRequiredService<AgentInstallProbe>(), measured: control ? sp.GetRequiredService<WorkerInstalls>() : null,
+    gate: sp.GetRequiredService<AgentUpdateGate>()));
 // THE LAUNCH CHECK: each preset's free invocation through the member runner's own launch (AgentLaunchChecks).
 builder.Services.AddSingleton(sp => new AgentLaunchChecks(
     sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<ProcessAgentRunner>(), dataRoot,
-    sp.GetRequiredService<ILogger<AgentLaunchChecks>>()));
+    sp.GetRequiredService<ILogger<AgentLaunchChecks>>(), sp.GetRequiredService<AgentUpdateGate>(), onThisMachine: !control));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentLaunchChecks>());
 
 // THE PRE-FLIGHT: what each preset's CLI would load, listed by the CLI itself as the agent user,
@@ -1782,7 +1784,8 @@ builder.Services.AddSingleton(sp =>
 {
     var preflight = new AgentToolPreflight(
         sp.GetRequiredService<AgentCatalog>(), sp.GetRequiredService<IListingRunner>(), dataRoot,
-        sp.GetRequiredService<ILogger<AgentToolPreflight>>(), sp.GetRequiredService<IRunCredentials>());
+        sp.GetRequiredService<ILogger<AgentToolPreflight>>(), sp.GetRequiredService<IRunCredentials>(),
+        sp.GetRequiredService<AgentUpdateGate>(), onThisMachine: !control);
 
     // Listed again when a preset's source (through any settings write) or its command's credential
     // changes, as after a catalog save.
@@ -2434,12 +2437,63 @@ MeasureInstallsWhenAWorkerJoins.Wire(
     worker => app.Services.GetRequiredService<WorkerPool>().For(worker),
     () => MeasureInstallsWhenAWorkerJoins.Commands(app.Services.GetRequiredService<AgentCatalog>()),
     app.Services.GetRequiredService<WorkerAsks>(), app.Services.GetRequiredService<WorkerInstalls>(),
-    app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+    app.Services.GetRequiredService<ILogger<WorkerConnections>>(), app.Services.GetRequiredService<AgentUpdateGate>());
 AgentUpdatesAtStart.Wire(
     control, builder.Configuration["HARNESS_IMAGE"], builder.Configuration["HARNESS_UPDATE_AGENTS"], joined => workerConnections.Joined += joined,
     () => AgentUpdatesAtStart.OnePerCommand(app.Services.GetRequiredService<AgentCatalog>()),
     agent => app.Services.GetRequiredService<AgentCliUpdater>().Request(agent, person: null),
     app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+// EVERYTHING CONTROL MEASURES THROUGH A WORKER IS MEASURED AGAIN WHEN THE WORKERS CHANGE - the sign-in
+// probe, the launch check, the tool pre-flight and the CLI version record - as one pass once the
+// changes settle, and when an update ends, which also asks every placeable worker about that command.
+// Measured at start only, none of them had a worker to ask.
+RemeasureWhenWorkersChange.Wire(
+    control,
+    changed => workerConnections.Changed += changed,
+    attached => workerConnections.Attached += attached,
+    ended => app.Services.GetRequiredService<AgentUpdateGate>().UpdateEnded += ended,
+    () =>
+    {
+        var auth = app.Services.GetRequiredService<AgentAuthProbe>();
+        var launch = app.Services.GetRequiredService<AgentLaunchChecks>();
+        var tools = app.Services.GetRequiredService<AgentToolPreflight>();
+        return new RemeasureWhenWorkersChange(
+            [
+                ("the sign-in probe", ct => auth.ReportsAsync(ct)),
+                ("the launch check", ct => launch.ReportsAsync(ct, fresh: true)),
+                ("the tool pre-flight", ct => tools.PassAsync(ct)),
+                ("the CLI versions", ct => CliVersionsWhenWorkersChange.MeasureAsync(
+                    app.Services.GetRequiredService<AgentCatalog>(), app.Services.GetRequiredService<WorkerAsks>(), dataRoot,
+                    app.Services.GetRequiredService<AgentUpdateGate>(), app.Logger, ct)),
+            ],
+            () =>
+            {
+                auth.Forget();
+                launch.Forget();
+            },
+            log: app.Services.GetRequiredService<ILogger<RemeasureWhenWorkersChange>>(),
+            stopping: app.Lifetime.ApplicationStopping);
+    },
+    command =>
+    {
+        var pool = app.Services.GetRequiredService<WorkerPool>();
+        return Task.WhenAll(pool.Workers.Select(worker => pool.For(worker)).OfType<IRunWorker>().Select(worker =>
+            MeasureInstallsWhenAWorkerJoins.MeasureAsync(
+                worker, [command], app.Services.GetRequiredService<WorkerAsks>(), app.Services.GetRequiredService<WorkerInstalls>(),
+                app.Logger, app.Lifetime.ApplicationStopping, app.Services.GetRequiredService<AgentUpdateGate>())));
+    },
+    app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+// In all no worker joins: when an update ends, this machine's answers are taken again.
+if (!control)
+{
+    app.Services.GetRequiredService<AgentUpdateGate>().UpdateEnded += command =>
+    {
+        app.Services.GetRequiredService<AgentInstallProbe>().Forget(command);
+        app.Services.GetRequiredService<AgentAuthProbe>().Forget();
+        app.Services.GetRequiredService<AgentLaunchChecks>().Refresh();
+        app.Services.GetRequiredService<AgentToolPreflight>().Refresh();
+    };
+}
 // Control's workers, recorded for --doctor (another process) on every change and every few seconds.
 System.Threading.Timer? workersRecording = null;
 if (control)
@@ -3021,7 +3075,7 @@ app.MapPost("/api/teams", async (
             if (definition is not null)
             {
                 var installation = probe.Probe(definition);
-                if (installation.State is not null)
+                if (installation.State == AgentInstallStates.NotInstalled)
                 {
                     unresolvedList.Add(new { agent = installation.Agent, command = installation.Command, message = installation.Message });
                 }
@@ -3038,7 +3092,7 @@ app.MapPost("/api/teams", async (
             if (definition is not null)
             {
                 var installation = probe.Probe(definition);
-                if (installation.State is not null)
+                if (installation.State == AgentInstallStates.NotInstalled)
                 {
                     unresolvedList.Add(new { agent = installation.Agent, command = installation.Command, message = installation.Message });
                 }
@@ -3054,7 +3108,7 @@ app.MapPost("/api/teams", async (
                 if (definition is not null)
                 {
                     var installation = probe.Probe(definition);
-                    if (installation.State is not null)
+                    if (installation.State == AgentInstallStates.NotInstalled)
                     {
                         unresolvedList.Add(new { agent = installation.Agent, command = installation.Command, message = installation.Message });
                     }
@@ -4728,7 +4782,7 @@ app.MapPut("/api/teams/{team}/member-agent", async (
             if (definition is not null)
             {
                 var installation = probe.Probe(definition);
-                if (installation.State is not null)
+                if (installation.State == AgentInstallStates.NotInstalled)
                 {
                     unresolvedList.Add(new { agent = installation.Agent, command = installation.Command, message = installation.Message });
                 }
@@ -5120,7 +5174,7 @@ app.MapPost("/api/teams/{team}/containers", async (
         if (definition is not null)
         {
             var installation = probe.Probe(definition);
-            if (installation.State is not null)
+            if (installation.State == AgentInstallStates.NotInstalled)
             {
                 unresolvedList.Add(new { agent = installation.Agent, command = installation.Command, message = installation.Message });
             }
@@ -5793,7 +5847,7 @@ app.MapPatch("/api/teams/{team}/containers/{name}", async (
             if (definition is not null)
             {
                 var installation = probe.Probe(definition);
-                if (installation.State is not null)
+                if (installation.State == AgentInstallStates.NotInstalled)
                 {
                     unresolvedList.Add(new { agent = installation.Agent, command = installation.Command, message = installation.Message });
                 }

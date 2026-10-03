@@ -28,6 +28,8 @@ public sealed record DoctorBackups(string Directory, int DailyCount, DateTimeOff
 /// <param name="MeasuredAt">When the probe this is from ran (<see cref="AgentAuthRecord"/>); null when
 /// no worker answered for this command, or the Host has recorded no probe.</param>
 /// <param name="MeasuredOn">The worker that answered it; null when none did.</param>
+/// <param name="Updating">The gate's sentence when the Host's last probe found the command held by the
+/// platform's update, so it was not asked: never "not installed". Null otherwise.</param>
 public sealed record DoctorAgent(
     string Agent, [property: JsonIgnore] bool Installed, string? Version, bool? Authenticated, string Detail,
     string? CredentialVariable = null,
@@ -47,7 +49,9 @@ public sealed record DoctorAgent(
     string CredentialSource = TenantSettings.HomeSource,
     bool? IssuedSet = null,
     DateTimeOffset? MeasuredAt = null,
-    string? MeasuredOn = null)
+    string? MeasuredOn = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Updating = null)
 {
     /// <summary>Installed as the doctor says it: null when nothing was measured, never "not installed" then.</summary>
     [JsonPropertyName("installed")]
@@ -188,7 +192,8 @@ public static class HostDoctor
 
             agents.Add(new DoctorAgent(
                 command, measured.Installed, version, measured.Authenticated, measured.Detail, specs[command].CredentialVariable,
-                now.UpdatedAt, now.Since, launches?.ForCommand(command), source, issuedSet, measured.At, measured.On));
+                now.UpdatedAt, now.Since, launches?.ForCommand(command), source, issuedSet, measured.At, measured.On,
+                answer?.Updating));
         }
 
         return agents;
@@ -197,7 +202,7 @@ public static class HostDoctor
     /// <summary>Why a command's sign-in is not measured, in the probe's own words where it ran.</summary>
     private static string NotMeasured(AgentAuthRecord? probed, CommandSignIn? answer) =>
         probed is null
-            ? "Not measured: the Host has recorded no sign-in probe yet. It asks a worker when the Agents screen or the Concierge reads sign-ins."
+            ? "Not measured: the Host has recorded no sign-in probe yet. It asks a worker when one joins or comes back, when an update ends, and when the Agents screen or the Concierge reads sign-ins."
             : answer is null
                 ? $"Not measured: the Host's last sign-in probe, at {probed.At.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC, did not ask this command."
                 : $"{answer.Detail} (the Host's last sign-in probe, at {probed.At.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC)";

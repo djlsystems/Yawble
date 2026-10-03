@@ -170,6 +170,30 @@ public sealed class WorkerRoleTests
     }
 
     /// <summary>
+    /// IN CONTROL ONLY, EVERY CHANGE OF WORKERS MEASURES THE AGENT CLIS AGAIN: the pass is wired to the
+    /// real worker connections in control, and not in all, where no worker joins.
+    /// </summary>
+    [Theory]
+    [InlineData("control", true)]
+    [InlineData("all", false)]
+    public async Task Only_control_remeasures_when_the_workers_change(string role, bool wired)
+    {
+        var root = Directory.CreateTempSubdirectory($"harness-{role}-remeasure-").FullName;
+        var logged = new Captured();
+        try
+        {
+            await using var host = Host(root, role, logged);
+            _ = host.Services;
+
+            Assert.Equal(wired, logged.Messages.Contains(RemeasureWhenWorkersChange.WiredText));
+        }
+        finally
+        {
+            Clean(root);
+        }
+    }
+
+    /// <summary>
     /// ALL'S OWN WORKER REMOVES ITS RUN HOMES WITH THE WORKER'S RULE: every run home the composed Host's
     /// worker holds - its launcher's and its agent CLIs' - is removed by <see cref="RunHomeRemoval"/>,
     /// never looped back through control's <see cref="FolderRemoval"/>.

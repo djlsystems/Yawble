@@ -99,7 +99,7 @@ public sealed class AgentCliUpdater(
     public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);
 
     /// <summary>How long a version may take.</summary>
-    private static readonly TimeSpan VersionTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan VersionTimeout = CliVersionsWhenWorkersChange.VersionTimeout;
 
     /// <summary>What an update reads when no worker is connected to run it.</summary>
     public const string NoWorkerText = "No worker is connected to run the update; nothing was run.";
@@ -174,18 +174,20 @@ public sealed class AgentCliUpdater(
 
         // The version with its update-off; the update WITHOUT it: that is for launches, and an
         // explicit update must not read it.
-        var version = new AgentCliRun(
-            command, [.. updates?.Arguments ?? [], "--version"], updates?.Environment ?? new Dictionary<string, string>(), [],
-            (int)VersionTimeout.TotalSeconds);
+        var version = CliVersionsWhenWorkersChange.VersionRun(command, updates);
         var run = new AgentCliRun(
             update[0], [.. update.Skip(1)], new Dictionary<string, string>(), [], (int)Timeout.TotalSeconds, WithUpdatesOn: true);
 
+        // Picked now, as it starts, and named to the gate: what reads "updating on <worker>" from here.
+        if (_asks.Value.Pick() is not { } worker) throw new InvalidOperationException(NoWorkerText);
+        gate.RunsOn(command, worker.Id.Value);
+
         var asked = await _asks.Value.AskAsync<AgentCommandsRan>(
-            new RunAgentCommands(WorkerAsks.NewRequest(), [version, run, version]), Timeout + VersionTimeout * 2 + TimeSpan.FromSeconds(30), token);
+            worker, new RunAgentCommands(WorkerAsks.NewRequest(), [version, run, version]), Timeout + VersionTimeout * 2 + TimeSpan.FromSeconds(30), token);
 
         if (asked.Answer is not { Results: [var before, var ran, var after] })
         {
-            throw new InvalidOperationException(asked.Worker is { } worker ? LostText(worker) : NoWorkerText);
+            throw new InvalidOperationException(asked.Worker is { } lost ? LostText(lost) : NoWorkerText);
         }
 
         var at = DateTimeOffset.UtcNow;
@@ -213,11 +215,7 @@ public sealed class AgentCliUpdater(
             now);
     }
 
-    /// <summary>The first line a `--version` printed, or null when it is not installed or did not exit 0.</summary>
-    private static string? VersionOf(AgentCliRunResult version) =>
-        version is { Installed: true, ExitCode: 0 }
-            ? version.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim()
-            : null;
+    private static string? VersionOf(AgentCliRunResult version) => CliVersionsWhenWorkersChange.VersionOf(version);
 
     private static string Tail(string text)
     {

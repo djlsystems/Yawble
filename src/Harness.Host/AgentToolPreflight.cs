@@ -100,10 +100,13 @@ public sealed record AgentToolsRecord(DateTimeOffset At, IReadOnlyList<PresetToo
 /// costs its own listing's timeout, not a start. NEVER WRITES THE HOME: every listing is a read
 /// (<see cref="AgentToolListers"/>), and the Host's own per-launch configuration (the grok config
 /// the member launch rewrites) is not touched here.
+///
+/// A COMMAND THE PLATFORM'S UPDATE HOLDS is not listed - its install is being replaced - and reads not
+/// measured with the gate's sentence; the pass after the update ends lists it.
 /// </summary>
 public sealed class AgentToolPreflight(
     AgentCatalog catalog, IListingRunner runner, string dataRoot, ILogger<AgentToolPreflight>? log = null,
-    IRunCredentials? credentials = null)
+    IRunCredentials? credentials = null, AgentUpdateGate? gate = null, bool onThisMachine = false)
     : BackgroundService
 {
     private readonly SemaphoreSlim _again = new(0);
@@ -152,7 +155,9 @@ public sealed class AgentToolPreflight(
         Running = true;
         try
         {
-            var record = new AgentToolsRecord(DateTimeOffset.UtcNow, await ReportsAsync(catalog.Definitions, runner, ct, credentials));
+            var record = new AgentToolsRecord(
+                DateTimeOffset.UtcNow,
+                await ReportsAsync(catalog.Definitions, runner, ct, credentials, gate is null ? null : gate.Holding, onThisMachine));
             _current = record;
             record.Write(dataRoot, log);
 
@@ -178,7 +183,7 @@ public sealed class AgentToolPreflight(
     /// </summary>
     public static async Task<IReadOnlyList<PresetToolReport>> ReportsAsync(
         IReadOnlyList<AgentDefinition> definitions, IListingRunner runner, CancellationToken ct,
-        IRunCredentials? credentials = null)
+        IRunCredentials? credentials = null, Func<string, AgentUpdateHold?>? holding = null, bool onThisMachine = false)
     {
         var listed = new Dictionary<string, CliListing>(StringComparer.Ordinal);
         var reports = new List<PresetToolReport>(definitions.Count);
@@ -190,7 +195,11 @@ public sealed class AgentToolPreflight(
             var allowance = AgentIsolationPolicy.For(definition)!;
             CliListing? listing = null;
 
-            if (launch.LanguageModel && allowance.State != IsolationState.NotAModel)
+            if (launch.LanguageModel && allowance.State != IsolationState.NotAModel && holding?.Invoke(launch.FileName) is { } hold)
+            {
+                listing = CliListing.NotMeasured(launch.FileName, UpdatingOn.Text(hold, onThisMachine));
+            }
+            else if (launch.LanguageModel && allowance.State != IsolationState.NotAModel)
             {
                 var credential = credentials is null
                     ? RunCredential.Home

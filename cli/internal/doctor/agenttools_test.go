@@ -86,3 +86,17 @@ func TestTheBlockListsEachPresetItsGapsAndTheConciergesToolsAsInformation(t *tes
 		t.Errorf("a program that runs no model is listed:\n%s", text)
 	}
 }
+
+// A preset not listed because the platform's update held its CLI reads "updating", never a warning.
+func TestAgentToolsRowSaysUpdating(t *testing.T) {
+	held := strings.Replace(toolsStdout,
+		`"verdict":"isolated","foreign":[],"loaded":[],"switchedOff":[],"gaps":["A repository's own .claude/settings.json still loads."],"ran":["claude mcp list"],"detail":null`,
+		`"verdict":"notMeasured","foreign":[],"loaded":[],"switchedOff":[],"gaps":[],"ran":[],"detail":"Updating claude on w1; it is measured again when the update ends."`, 1)
+	if held == toolsStdout {
+		t.Fatal("the fixture did not change")
+	}
+	c := doctor.AgentToolsCheck(report(t, held), nil)
+	if c.Verdict != doctor.OK || !strings.Contains(c.Detail, "claude-headless updating") || strings.Contains(c.Detail, "claude-headless not measured") {
+		t.Errorf("row: %+v", c)
+	}
+}

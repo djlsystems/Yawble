@@ -332,6 +332,115 @@ public sealed class AgentInstallControlRouteTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------------------------
+    // While the platform's update holds a command.
+    // ---------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(AgentUpdatePhases.Waiting)]
+    [InlineData(AgentUpdatePhases.Updating)]
+    public async Task In_control_a_held_command_reads_updating_in_the_installations_never_not_installed(string phase)
+    {
+        PathIsAsAssumed();
+        await using var bed = await Bed.StartAsync(_root, control: true, W1);
+        bed.RecordEveryCommand(W1, installed: true);
+        bed.Installs.Record(W1, [("sh", false)]);
+        Assert.Equal("AgentNotInstalled", (await bed.InstallationsAsync(person: true))["sh-headless"].GetProperty("state").GetString());
+
+        await using var held = await Held.StartAsync(bed, "sh", phase);
+
+        foreach (var person in new[] { true, false })
+        {
+            var sh = (await bed.InstallationsAsync(person))["sh-headless"];
+            Assert.Equal(AgentInstallStates.Updating, sh.GetProperty("state").GetString());
+            Assert.StartsWith("Updating sh", sh.GetProperty("message").GetString());
+            Assert.Equal(phase, sh.GetProperty("updating").GetProperty("phase").GetString());
+            Assert.DoesNotContain("AgentNotInstalled", sh.GetRawText(), StringComparison.Ordinal);
+        }
+
+        var auth = await bed.Person.GetFromJsonAsync<JsonElement>("/api/agents/auth", Ct);
+        var shAuth = auth.EnumerateArray().First(r => r.GetProperty("agent").GetString() == "sh-headless");
+        Assert.Equal(JsonValueKind.Null, shAuth.GetProperty("installed").ValueKind);
+        Assert.StartsWith("Updating sh", shAuth.GetProperty("updating").GetString());
+        Assert.Equal(AgentLaunchReport.Updating, shAuth.GetProperty("launch").GetProperty("result").GetString());
+
+        // Outside a hold the answer carries no updating key at all.
+        await held.DisposeAsync();
+        Assert.False((await bed.InstallationsAsync(person: true))["sh-headless"].TryGetProperty("updating", out _));
+    }
+
+    /// <summary>
+    /// A held run waits and never fails, so nothing warns of an unresolved agent while its update holds
+    /// it - and the same action with no hold, on a command a worker measured missing, still warns.
+    /// </summary>
+    [Theory]
+    [InlineData("create", true)]
+    [InlineData("create", false)]
+    [InlineData("hire", true)]
+    [InlineData("hire", false)]
+    [InlineData("change", true)]
+    [InlineData("change", false)]
+    [InlineData("allowlist", true)]
+    [InlineData("allowlist", false)]
+    public async Task In_control_hiring_on_a_held_preset_warns_of_nothing(string site, bool held)
+    {
+        PathIsAsAssumed();
+        await using var bed = await Bed.StartAsync(_root, control: true, W1);
+        bed.RecordEveryCommand(W1, installed: true);
+        bed.Installs.Record(W1, [("sh", false)]);
+        var team = site == "create" ? null : await bed.TeamAsync();
+        if (site == "change") await bed.HireAsync(team!, "Dev", "absent-headless");
+
+        await using var hold = held ? await Held.StartAsync(bed, "sh", AgentUpdatePhases.Updating) : null;
+
+        var response = site switch
+        {
+            "create" => await bed.Person.PostAsJsonAsync("/api/teams", new { name = "Omega", agent = "sh-headless", memberAgents = new[] { "sh-headless" } }, Ct),
+            "hire" => await bed.Person.PostAsJsonAsync($"/api/teams/{team}/containers", new { name = "Dev", agent = "sh-headless" }, Ct),
+            "change" => await bed.Person.PatchAsJsonAsync($"/api/teams/{team}/containers/Dev", new { agent = "sh-headless" }, Ct),
+            _ => await bed.Person.PutAsJsonAsync($"/api/teams/{team}/member-agent", new { agents = new[] { "sh-headless" } }, Ct),
+        };
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
+        var warnings = Unresolved(await response.Content.ReadFromJsonAsync<JsonElement>(Ct));
+        if (held)
+        {
+            Assert.Empty(warnings);
+        }
+        else
+        {
+            // Team create warns once for the team's agent and once for its member agents.
+            Assert.NotEmpty(warnings);
+            Assert.All(warnings, w => Assert.Equal("sh is not installed on worker-1.", w.GetProperty("message").GetString()));
+        }
+    }
+
+    /// <summary>A hold of a command's update on the composed Host's own gate, by a task the test completes: nothing runs.</summary>
+    private sealed class Held : IAsyncDisposable
+    {
+        private readonly TaskCompletionSource<bool> _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private IDisposable? _share;
+        private Task<bool> _update = Task.FromResult(true);
+
+        public static async Task<Held> StartAsync(Bed bed, string command, string phase)
+        {
+            var gate = bed.Services.GetRequiredService<AgentUpdateGate>();
+            var held = new Held();
+            if (phase == AgentUpdatePhases.Waiting) held._share = await gate.EnterRunAsync(command, null, Ct);
+            held._update = gate.UpdateAsync(command, _ => held._release.Task, Ct);
+            if (phase == AgentUpdatePhases.Updating) gate.RunsOn(command, "worker-1");
+            Assert.Equal(phase, gate.Holding(command)?.Phase);
+            return held;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            _share?.Dispose();
+            _release.TrySetResult(true);
+            await _update.WaitAsync(TimeSpan.FromSeconds(60));
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
 
     private static List<(string Worker, bool Installed)> MeasuredOn(JsonElement installation) =>
         installation.TryGetProperty("measuredOn", out var measured) && measured.ValueKind == JsonValueKind.Array
@@ -353,6 +462,8 @@ public sealed class AgentInstallControlRouteTests : IDisposable
         public HttpClient Person { get; private set; } = null!;
 
         public HttpClient Machine { get; private set; } = null!;
+
+        public IServiceProvider Services => _factory.Services;
 
         public static async Task<Bed> StartAsync(string root, bool control, params WorkerId[] connected)
         {
