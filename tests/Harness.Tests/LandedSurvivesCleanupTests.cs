@@ -499,8 +499,13 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         var services = _factory.Services;
         var registry = services.GetRequiredService<TeamRegistry>();
         var agent = services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;
-        var team = (await registry.CreateAsync(name, agent, memberAgent: agent, ct: Ct)).Id;
-        await registry.SetReposAsync(team, [Url], Ct);
+        // THE REPOSITORY AT CREATION, NOT SET AFTERWARDS. Set afterwards, the platform tells the
+        // Manager its repositories are ready, and each Manager run that follows (that one, then the
+        // "nobody is working it" nudge) ends in a run-end publish of this clone. Under load one of
+        // those lands between a test's commit and its own publish: it pushes the commit, the test's
+        // publish then has nothing to push, and the tip is recorded by that other publish moments
+        // after the test has read it (B003E). Created with it, the Manager is told nothing.
+        var team = (await registry.CreateAsync(name, agent, memberAgent: agent, repos: [Url], ct: Ct)).Id;
 
         Assert.True(Directory.Exists(Path.Combine(Clone(team), ".git")), "the platform did not clone");
         Assert.Equal("trunk", registry.DefaultBranchFor(team, Repo).Branch);
