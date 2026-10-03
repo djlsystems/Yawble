@@ -1742,7 +1742,8 @@ export interface CliVersion {
    *  the version is not known: a version nobody could read has no update time. */
   updatedAt: string | null
   since: string | null
-  /** `start` for a container start, `person` for a person's update through the platform. A plain
+  /** `start` for a container start, `person` for a person's update through the platform, `measured`
+   *  when control measured it on a worker as the workers changed. A plain
    *  string rather than a union: every quoted literal in the app is cut into the icon font subset. */
   updatedBy: string | null
   /** That person's email, when the record has it. */
