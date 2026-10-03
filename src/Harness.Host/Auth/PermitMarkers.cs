@@ -10,7 +10,15 @@ public sealed record PermitExemption;
 public sealed record HumansOnlyMarker;
 
 /// <summary>
-/// The three things a route can say about who may call it, and it must say exactly one -
+/// A person's endpoint that one machine principal may also call: a person's tenant Concierge
+/// holding <paramref name="Permit"/>. Every other machine principal is refused exactly as
+/// <see cref="HumansOnlyMarker"/> refuses it, whatever it holds. The handler still decides the rest
+/// (for Merge to main, the tenant setting a person turns on).
+/// </summary>
+public sealed record HumansOrConciergeMarker(string Permit);
+
+/// <summary>
+/// The four things a route can say about who may call it, and it must say exactly one -
 /// <c>RouteMarkerTests</c> fails the build otherwise.
 ///
 /// THREE rather than two, and the third is not a convenience. Most of this product's route table is
@@ -55,6 +63,18 @@ public static class PermitMarkers
         where TBuilder : IEndpointConventionBuilder
     {
         builder.Add(endpoint => endpoint.Metadata.Add(new HumansOnlyMarker()));
+        return builder;
+    }
+
+    /// <summary>
+    /// HumansOnly, with one door: the person's own tenant Concierge holding <paramref name="permit"/>.
+    /// Not RequirePermit, whose refusal tells a Manager to ask for its credential to be widened -
+    /// there is nothing to widen, so everyone else keeps the humans-only sentence.
+    /// </summary>
+    public static TBuilder HumansOrConcierge<TBuilder>(this TBuilder builder, string permit)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        builder.Add(endpoint => endpoint.Metadata.Add(new HumansOrConciergeMarker(permit)));
         return builder;
     }
 

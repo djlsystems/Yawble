@@ -318,6 +318,11 @@ builder.Services.AddSingleton<IOutcomeStore>(outcomeStore);
 // THE GATE, read through a delegate so a person's change applies to the next declaration.
 builder.Services.AddSingleton(sp => new OutcomeGate(
     () => sp.GetRequiredService<TenantSettings>().OutcomesRequireForCompletion, outcomeStore));
+
+// THE CONCIERGE'S MERGE, read through a delegate so turning it off refuses the next merge of a
+// Concierge session already running.
+builder.Services.AddSingleton(sp => new ConciergeMergeGate(
+    () => sp.GetRequiredService<TenantSettings>().ConciergeMayMerge));
 builder.Services.AddSingleton(new LedgerIdentity(ledgerStart?.InstanceId, ledgerStart?.LedgerStartedAt));
 builder.Services.AddSingleton(new KanbanStore(store));
 

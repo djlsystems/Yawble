@@ -86,6 +86,7 @@ public sealed class TenantSettings
     public const string AgentTagsName = "agents.tags";
     public const string AgentCredentialSourceName = "agents.credentialSource";
     public const string OutcomesRequireForCompletionName = "outcomes.requireForCompletion";
+    public const string ConciergeMayMergeName = "concierge.mayMerge";
     public const string LeasesHeavyHoldersName = "leases.heavy.holders";
 
     private readonly SqliteTenantSettingsStore _store;
@@ -230,6 +231,11 @@ public sealed class TenantSettings
                 + "\"No outcome\". `on` refuses the declaration with a sentence naming the `outcome` tool. "
                 + "A person's close and the platform's own declarations are never refused. Applies to the "
                 + "next declaration.",
+                Choices: ["off", "on"]),
+            new(ConciergeMayMergeName, TenantSettingKind.Choice, "off", null,
+                "Lets the Concierge merge a team's finished branch to the default branch through Merge "
+                + "to main and Bring current and merge, as a person's merge does, and it is off unless a "
+                + "person turns it on.",
                 Choices: ["off", "on"]),
             new(LeasesHeavyHoldersName, TenantSettingKind.Integer, "1", "Leases:Heavy:Holders",
                 "How many runs may hold the `heavy` lease at once, across all teams. An agent takes it "
@@ -505,6 +511,10 @@ public sealed class TenantSettings
 
     /// <summary><c>outcomes.requireForCompletion</c>: whether an agent's declaration needs an outcome.</summary>
     public bool OutcomesRequireForCompletion => Current(OutcomesRequireForCompletionName) == "on";
+
+    /// <summary><c>concierge.mayMerge</c>: whether the Concierge may merge a team branch to the
+    /// default branch. Read through a delegate by <see cref="ConciergeMergeGate"/>, never captured.</summary>
+    public bool ConciergeMayMerge => Current(ConciergeMayMergeName) == "on";
 
     /// <summary><c>system.packages</c>: what the entrypoint installs at the next start.</summary>
     public IReadOnlyList<string> SystemPackages =>

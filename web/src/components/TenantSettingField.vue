@@ -39,6 +39,14 @@ const packageRefusal = (value: string) => validateDraft('packages', value);
       :error="!!error"
       :error-message="error ?? undefined"
     />
+    <!-- ON OR OFF: the draft is the word `on` or `off`, as the server reads and takes it. -->
+    <q-toggle
+      v-else-if="field.kind === 'toggle'"
+      :model-value="draft === 'on'"
+      :label="field.label"
+      :disable="disable || !setting"
+      @update:model-value="(value: boolean) => (draft = value ? 'on' : 'off')"
+    />
     <!-- A LIST OF PACKAGES is the product's one list input. The draft stays the space-separated text
          the setting is read and checked as; the chips are its names. Lifted with this dialog, which
          sits above the Concierge panel, so its Add dialog opens in front of it. -->
@@ -67,6 +75,7 @@ const packageRefusal = (value: string) => validateDraft('packages', value);
       :error-message="error ?? undefined"
       no-error-icon
     />
+    <div v-if="field.kind === 'toggle' && error" class="text-caption text-negative">{{ error }}</div>
     <div v-if="field.hint" class="text-caption os-text-muted tenant-setting-hint">{{ field.hint }}</div>
     <!-- A field with no hint of its own shows the server's description, every key in it read as its label. -->
     <div v-if="!field.hint && setting?.description" class="text-caption os-text-muted" data-description>{{ descriptionText(setting.description) }}</div>

@@ -15,9 +15,10 @@ export type TenantSettingTab = 'admission' | 'spend' | 'concierge' | 'sweeps' | 
  * `packages` is a list of OS package names typed into one box, separated by spaces or commas.
  * `tagMap` is `agents.tags`, preset name to its list of tags, and `sourceMap` is
  * `agents.credentialSource`, preset name to `home` or `issued`. Both are edited from the Agents
- * screen rather than this dialog, which lists neither.
+ * screen rather than this dialog, which lists neither. `toggle` is on or off; its draft is one of
+ * {@link ToggleWords}, the words the server reads and lists it as, and it goes on the wire as that word.
  */
-export type TenantSettingKind = 'count' | 'duration' | 'theme' | 'lanes' | 'packages' | 'tagMap' | 'sourceMap'
+export type TenantSettingKind = 'count' | 'duration' | 'theme' | 'lanes' | 'packages' | 'tagMap' | 'sourceMap' | 'toggle'
 
 export interface TenantSettingField {
   name: string
@@ -34,6 +35,11 @@ export const KanbanWipLimits = 'kanban.wipLimits'
 export const SystemPackages = 'system.packages'
 export const AgentTags = 'agents.tags'
 export const AgentCredentialSources = 'agents.credentialSource'
+export const ConciergeMayMerge = 'concierge.mayMerge'
+
+/** This sentence is put in front of a person, word for word: what the setting allows, and that it is off unless turned on. */
+export const ConciergeMayMergeSentence =
+  'Lets the Concierge merge a team’s finished branch through the platform’s Merge to main, as the step of a backlog run you asked for or on your own request, recorded as done for you; it is off unless a person turns it on.'
 
 /** This sentence is put in front of a person, word for word. */
 export const SystemPackagesRestartSentence = 'Adding one costs a restart, not an image rebuild.'
@@ -96,6 +102,13 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     hint: 'A Concierge nobody has open and that has done nothing for this long is ended. For example 1h or 30m.',
   },
   {
+    name: ConciergeMayMerge,
+    tab: 'concierge',
+    kind: 'toggle',
+    label: 'Let the Concierge merge finished work',
+    hint: ConciergeMayMergeSentence,
+  },
+  {
     name: 'quiet.window',
     tab: 'sweeps',
     kind: 'duration',
@@ -142,6 +155,9 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
 ]
 
 export const ThemeChoices = ['auto', 'light', 'dark'] as const
+
+/** The only values the server takes for an on-or-off setting: the words, never a boolean. */
+export const ToggleWords = ['off', 'on'] as const
 
 /** Durations the server accepts: one minute to thirty days. */
 const MinDurationSeconds = 60
@@ -406,6 +422,10 @@ export function validateDraft(kind: TenantSettingKind, text: string, max?: numbe
     return (ThemeChoices as readonly string[]).includes(trimmed) ? null : 'Auto, light or dark.'
   }
 
+  if (kind === 'toggle') {
+    return (ToggleWords as readonly string[]).includes(trimmed) ? null : 'On or off.'
+  }
+
   if (kind === 'packages') {
     const names = packageNames(trimmed)
     const bad = names.find((name) => !PackageName.test(name))
@@ -439,7 +459,7 @@ export function timeSpanOf(seconds: number): string {
 
 /**
  * The value a draft is sent as. Counts go as numbers, durations as `hh:mm:ss` whatever spelling was
- * typed (`8h` goes as `08:00:00`), the theme as the word.
+ * typed (`8h` goes as `08:00:00`), the theme and a toggle as the word.
  */
 export function wireValue(kind: TenantSettingKind, text: string): unknown {
   if (kind === 'count') return Number(text.trim())
