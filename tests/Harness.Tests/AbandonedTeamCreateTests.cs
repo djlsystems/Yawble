@@ -163,10 +163,14 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         bool Notice(Message m) => m.Payload.Contains(PayloadFields.RepoNotReady, StringComparison.Ordinal)
             && m.Payload.Contains(JsonSerializer.Serialize(clonePath).Trim('"'), StringComparison.Ordinal);
 
-        await EventuallyAsync(async () => (await messages.ReadAfterAsync(0, [manager], 100, Ct)).Any(Notice));
+        // BOTH, NOT THE NOTICE ALONE: the notice is written inside the create, and team.created by its
+        // caller afterwards, so the one can be there while the other is still on its way.
+        await EventuallyAsync(async () => (await messages.ReadAfterAsync(0, [manager], 100, Ct)).Any(Notice)
+            && (await TenantRowsAsync(TenantActions.TeamCreated)).Any(r => r.Subject == team));
 
         Assert.Contains(await messages.ReadAfterAsync(0, [manager], 100, Ct), Notice);
         Assert.Contains(await TenantRowsAsync(TenantActions.TeamCreated), r => r.Subject == team);
+        Assert.Contains(Teams.All(), t => t.Id == team);
     }
 
     [Fact]
