@@ -15,8 +15,8 @@ export type TenantSettingTab = 'admission' | 'spend' | 'concierge' | 'sweeps' | 
  * `packages` is a list of OS package names typed into one box, separated by spaces or commas.
  * `tagMap` is `agents.tags`, preset name to its list of tags, and `sourceMap` is
  * `agents.credentialSource`, preset name to `home` or `issued`. Both are edited from the Agents
- * screen rather than this dialog, which lists neither. `toggle` is on or off; its draft is the text
- * `true` or `false` and it goes on the wire as a boolean.
+ * screen rather than this dialog, which lists neither. `toggle` is on or off; its draft is one of
+ * {@link ToggleWords}, the words the server reads and lists it as, and it goes on the wire as that word.
  */
 export type TenantSettingKind = 'count' | 'duration' | 'theme' | 'lanes' | 'packages' | 'tagMap' | 'sourceMap' | 'toggle'
 
@@ -155,6 +155,9 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
 ]
 
 export const ThemeChoices = ['auto', 'light', 'dark'] as const
+
+/** The only values the server takes for an on-or-off setting: the words, never a boolean. */
+export const ToggleWords = ['off', 'on'] as const
 
 /** Durations the server accepts: one minute to thirty days. */
 const MinDurationSeconds = 60
@@ -420,7 +423,7 @@ export function validateDraft(kind: TenantSettingKind, text: string, max?: numbe
   }
 
   if (kind === 'toggle') {
-    return trimmed === 'true' || trimmed === 'false' ? null : 'On or off.'
+    return (ToggleWords as readonly string[]).includes(trimmed) ? null : 'On or off.'
   }
 
   if (kind === 'packages') {
@@ -456,13 +459,12 @@ export function timeSpanOf(seconds: number): string {
 
 /**
  * The value a draft is sent as. Counts go as numbers, durations as `hh:mm:ss` whatever spelling was
- * typed (`8h` goes as `08:00:00`), the theme as the word.
+ * typed (`8h` goes as `08:00:00`), the theme and a toggle as the word.
  */
 export function wireValue(kind: TenantSettingKind, text: string): unknown {
   if (kind === 'count') return Number(text.trim())
   if (kind === 'duration') return timeSpanOf(durationSeconds(text) ?? 0)
   if (kind === 'packages') return packageNames(text)
-  if (kind === 'toggle') return text.trim() === 'true'
 
   return text.trim()
 }
@@ -477,7 +479,6 @@ function sameValue(kind: TenantSettingKind, draft: string, stored: unknown): boo
   }
   if (kind === 'count') return draft.trim() !== '' && Number(draft.trim()) === Number(text)
   if (kind === 'packages') return packageNames(draft).join(' ') === packageNames(text).join(' ')
-  if (kind === 'toggle') return draft.trim() === text.toLowerCase()
 
   return draft.trim() === text
 }

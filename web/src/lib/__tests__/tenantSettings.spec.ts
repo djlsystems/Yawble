@@ -25,6 +25,7 @@ import {
   canReset,
   defaultText,
   resetLine,
+  ToggleWords,
 } from '../tenantSettings';
 import type { TenantSetting } from '../../api/types';
 
@@ -290,16 +291,31 @@ describe('concierge.mayMerge', () => {
     expect(field.hint).toContain('it is off unless a person turns it on.');
   });
 
-  it('goes as a boolean, takes only on or off, and is unchanged when put back', () => {
-    expect(wireValue('toggle', 'true')).toBe(true);
-    expect(wireValue('toggle', 'false')).toBe(false);
-    expect(validateDraft('toggle', 'true')).toBeNull();
-    expect(validateDraft('toggle', 'false')).toBeNull();
+  it('goes as the word on or off, takes only those, and is unchanged when put back', () => {
+    expect(wireValue('toggle', 'on')).toBe('on');
+    expect(wireValue('toggle', 'off')).toBe('off');
+    expect(validateDraft('toggle', 'on')).toBeNull();
+    expect(validateDraft('toggle', 'off')).toBeNull();
+    expect(validateDraft('toggle', 'true')).toBe('On or off.');
     expect(validateDraft('toggle', 'yes')).toBe('On or off.');
 
-    const stored = [setting('concierge.mayMerge', false)];
-    expect(changedSettings(stored, { 'concierge.mayMerge': 'false' }, {})).toEqual({});
-    expect(changedSettings(stored, { 'concierge.mayMerge': 'true' }, {})).toEqual({ 'concierge.mayMerge': true });
+    const stored = [setting('concierge.mayMerge', 'off')];
+    expect(changedSettings(stored, { 'concierge.mayMerge': 'off' }, {})).toEqual({});
+    expect(changedSettings(stored, { 'concierge.mayMerge': 'on' }, {})).toEqual({ 'concierge.mayMerge': 'on' });
+    expect(validateDraft('toggle', draftOf(stored[0]!.value))).toBeNull();
+  });
+
+  /**
+   * The server takes this setting only as one of the words it lists, `off` and `on`, and refuses a
+   * boolean; ConciergeMayMergeSettingTests pins the same two words on the server side.
+   */
+  it('sends only a word the server takes for it, whichever way it is turned', () => {
+    expect([...ToggleWords]).toEqual(['off', 'on']);
+    for (const word of ToggleWords) {
+      const sent = changedSettings([setting('concierge.mayMerge', word === 'on' ? 'off' : 'on')], { 'concierge.mayMerge': word }, {});
+      expect(typeof sent['concierge.mayMerge']).toBe('string');
+      expect(ToggleWords).toContain(sent['concierge.mayMerge']);
+    }
   });
 });
 

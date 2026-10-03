@@ -80,7 +80,8 @@ function settings() {
       }),
       setting('workflow.spendLimit', 100000000),
       setting('concierge.idleTimeout', '08:00:00'),
-      setting('concierge.mayMerge', false),
+      // As the server lists it: the word, never a boolean, with its built-in default.
+      setting('concierge.mayMerge', 'off', { default: 'off', defaultSource: 'builtIn' }),
       setting('quiet.window', '00:30:00'),
       setting('resume.maxAutomatic', 3),
       setting('causation.depthLimit', 25),
@@ -470,7 +471,37 @@ describe('Concierge', () => {
     expect(saveButton().disabled).toBe(true);
   });
 
-  it('sends the Concierge merge setting as a boolean when a person turns it on, and nothing when put back', async () => {
+  it('shows the Concierge merge setting on when the server says on', async () => {
+    const withOn = settings();
+    Object.assign(withOn.settings.find((entry) => entry.name === 'concierge.mayMerge')!, {
+      value: 'on', source: 'row', updatedAt: '2026-10-01T09:00:00Z', updatedBy: 'lead@example.com',
+    });
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(withOn));
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'concierge');
+
+    const toggle = wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === 'Let the Concierge merge finished work')!;
+    expect(toggle.props('modelValue')).toBe(true);
+    expect(bodyText()).not.toContain('On or off.');
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it('sends the word off when a person turns the Concierge merge setting off', async () => {
+    const withOn = settings();
+    Object.assign(withOn.settings.find((entry) => entry.name === 'concierge.mayMerge')!, { value: 'on', source: 'row' });
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(withOn));
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'concierge');
+
+    wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === 'Let the Concierge merge finished work')!.vm.$emit('update:modelValue', false);
+    await flushPromises();
+    saveButton().click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'concierge.mayMerge': 'off' });
+  });
+
+  it('sends the word on when a person turns the Concierge merge setting on, and nothing when put back', async () => {
     const wrapper = await openDialog();
     await showTab(wrapper, 'concierge');
 
@@ -487,7 +518,7 @@ describe('Concierge', () => {
     saveButton().click();
     await flushPromises();
 
-    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'concierge.mayMerge': true });
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'concierge.mayMerge': 'on' });
   });
 
   /** The Concierge tab also holds this browser's terminal display. */
@@ -653,8 +684,9 @@ describe('every tab', () => {
       ],
     );
     for (const [name, source] of seen) {
-      expect(source, name).toMatch(/^(Set by \S+@\S+|From the host configuration)/);
+      expect(source, name).toMatch(/^(Set by \S+@\S+|From the host configuration|The built-in default)/);
     }
+    expect(seen.get('concierge.mayMerge')).toBe('The built-in default (off)');
     expect(seen.get('wip.maxRunning')).toContain('Set by ops@example.com');
     expect(seen.get('quiet.window')).toContain('Set by lead@example.com');
     expect(seen.get('resume.maxAutomatic')).toBe('From the host configuration (default 3)');

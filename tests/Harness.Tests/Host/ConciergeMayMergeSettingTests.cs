@@ -103,6 +103,26 @@ public sealed class ConciergeMayMergeSettingTests(HostFixture host) : IClassFixt
         Assert.NotNull(await host.Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.TenantSettingReset, Name, Ct));
     }
 
+    /// <summary>
+    /// The Settings dialog sends this setting as the word <c>on</c> or <c>off</c> (its <c>ToggleWords</c>);
+    /// these are the only two the server lists and takes, and a boolean is refused naming the setting.
+    /// </summary>
+    [Fact]
+    public async Task It_takes_only_the_words_off_and_on_the_web_dialog_sends_and_a_boolean_is_refused()
+    {
+        var settings = host.Services.GetRequiredService<TenantSettings>();
+        Assert.Equal(["off", "on"], settings.Definition(Name)!.Choices);
+
+        using var client = await host.PersonAsync();
+        var boolean = await client.PutAsJsonAsync("/api/tenant/settings", new Dictionary<string, object> { [Name] = true }, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, boolean.StatusCode);
+        using (var refused = JsonDocument.Parse(await boolean.Content.ReadAsStringAsync(Ct)))
+        {
+            Assert.Equal(Name, refused.RootElement.GetProperty("field").GetString());
+        }
+        Assert.False(settings.ConciergeMayMerge);
+    }
+
     [Fact]
     public async Task A_write_is_not_made_when_its_tenant_row_cannot_be()
     {

@@ -39,13 +39,13 @@ const packageRefusal = (value: string) => validateDraft('packages', value);
       :error="!!error"
       :error-message="error ?? undefined"
     />
-    <!-- ON OR OFF: the draft is the text `true` or `false`, as every other box's draft is text. -->
+    <!-- ON OR OFF: the draft is the word `on` or `off`, as the server reads and takes it. -->
     <q-toggle
       v-else-if="field.kind === 'toggle'"
-      :model-value="draft === 'true'"
+      :model-value="draft === 'on'"
       :label="field.label"
       :disable="disable || !setting"
-      @update:model-value="(value: boolean) => (draft = value ? 'true' : 'false')"
+      @update:model-value="(value: boolean) => (draft = value ? 'on' : 'off')"
     />
     <!-- A LIST OF PACKAGES is the product's one list input. The draft stays the space-separated text
          the setting is read and checked as; the chips are its names. Lifted with this dialog, which
