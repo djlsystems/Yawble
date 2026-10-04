@@ -87,6 +87,8 @@ import {
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostConnection, hostField, hostList, hostPlugin, hostProvider, hostSecret, hostSettings, hostSlot } from '../../test/pluginFixtures';
 import { button, settle, type } from '../../test/formProbe';
+import { announceProviderReturn, leaveForProvider } from '../../lib/providerReturn';
+import type { CallbackOutcome } from '../../lib/connections';
 
 const mailSend = 'https://graph.microsoft.com/Mail.Send';
 const gmail = 'https://mail.google.com/';
@@ -352,36 +354,117 @@ describe("a Google slot's sign-in, in another tab", () => {
   const googleOnly = hostSlot({ providers: ['google'], scopes: { google: [gmail] }, required: true });
   const made = hostConnection({ id: 'conn-g', provider: 'google', name: 'Dana', scopes: ['openid', 'email', gmail] });
 
-  it('opens the provider in a new tab, leaves this page as it is, and binds the connection the other tab came back with', async () => {
-    const wrapper = await mountMember(googleOnly);
-    startConnection.mockResolvedValue({
-      authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=r2',
-      state: 'r2',
-      redirectUri: 'http://localhost:8080/api/connections/callback',
-      expiresAt: '2026-10-04T10:10:00Z',
-    });
+  const googleFlow = {
+    authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=r2',
+    state: 'r2',
+    redirectUri: 'http://localhost:8080/api/connections/callback',
+    expiresAt: '2026-10-04T10:10:00Z',
+  };
 
+  /** Connect Google and Sign in with Google: the link to the other tab, or null. */
+  async function startGoogle() {
+    startConnection.mockResolvedValue(googleFlow);
     await click(slotButton('Connect Google'));
     expect(step()).toBe('signin');
     await click(button('Sign in with Google'));
+    return bodyFind('[data-guided-connect] a[data-signin-link]');
+  }
+
+  /** The other tab: opened from the link, sent on to the provider, and back with `outcome`. */
+  async function otherTab(href: string, outcome: CallbackOutcome) {
+    const tag = new URLSearchParams(href.slice(href.indexOf('?'))).get('signin')!;
+    const sent = await leaveForProvider(tag);
+    expect(await announceProviderReturn(outcome)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await settle();
+    return sent;
+  }
+
+  afterEach(() => sessionStorage.clear());
+
+  it('opens the provider in a new tab, leaves this page as it is, and binds the connection the other tab came back with', async () => {
+    const wrapper = await mountMember(googleOnly);
+
+    const link = await startGoogle();
 
     expect(startConnection).toHaveBeenCalledWith({ provider: 'google', scopes: [gmail] });
     expect(goTo).not.toHaveBeenCalled();
-    const link = bodyFind('[data-guided-connect] a[data-signin-link]')!;
-    expect(link.getAttribute('href')).toBe('https://accounts.google.com/o/oauth2/v2/auth?state=r2');
-    expect(link.getAttribute('target')).toBe('_blank');
-    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toContain('noopener');
 
-    // The tab the provider returned to says what came back.
+    // The other tab is sent on to the provider, and says what came back.
     listConnections.mockResolvedValue([made]);
-    const back = new BroadcastChannel('connections.return');
-    back.postMessage({ outcome: 'connected', id: 'conn-g' });
-    back.close();
+    const sent = await otherTab(link!.getAttribute('href')!, { outcome: 'connected', id: 'conn-g' });
+
+    expect(sent).toBe(googleFlow.authorizationUrl);
+    expect(step()).toBe('result');
+    expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', { config: {}, secrets: {}, connections: { mail: 'conn-g' } });
+
+    wrapper.unmount();
+  });
+
+  it('binds only the connection its own sign-in came back with, not one another sign-in announces', async () => {
+    const wrapper = await mountMember(googleOnly);
+    const link = await startGoogle();
+    listConnections.mockResolvedValue([made, workMail]);
+
+    // Another tab's sign-in - another slot's, or Admin → Connections' - comes back while this one waits.
+    sessionStorage.setItem('connections.tab', 'another-sign-in');
+    void announceProviderReturn({ outcome: 'connected', id: 'conn-work' }, 20);
+    const stray = new BroadcastChannel('connections.return');
+    stray.postMessage({ outcome: 'connected', id: 'conn-work' });
+    stray.close();
     await new Promise((resolve) => setTimeout(resolve, 20));
     await settle();
 
-    expect(step()).toBe('result');
+    expect(savePluginSettings).not.toHaveBeenCalled();
+    expect(step()).toBe('signin');
+
+    // Its own comes back: that one is bound.
+    await otherTab(link!.getAttribute('href')!, { outcome: 'connected', id: 'conn-g' });
+    expect(savePluginSettings).toHaveBeenCalledTimes(1);
     expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', { config: {}, secrets: {}, connections: { mail: 'conn-g' } });
+
+    wrapper.unmount();
+  });
+});
+
+describe("a slot's Add connection and a sign-in with a code already waiting", () => {
+  const googleOnly = hostSlot({ providers: ['google'], scopes: { google: [gmail] }, required: true });
+  const waitingMicrosoft = {
+    flowId: 'flow-waiting',
+    provider: 'microsoft',
+    userCode: 'FAKE-WAIT',
+    verificationUri: 'https://microsoft.example.test/devicelogin',
+    expiresAt: '2099-10-04T10:15:00Z',
+    state: 'waiting' as const,
+  };
+
+  it("starts the slot's own sign-in when the waiting one is for a provider the slot does not take", async () => {
+    listOpenConnectionFlows.mockResolvedValue([waitingMicrosoft]);
+    const wrapper = await mountMember(googleOnly);
+
+    await click(slotButton('Connect Google'));
+
+    const dialog = bodyFind('[data-guided-connect]')!;
+    expect(dialog.textContent).not.toContain('FAKE-WAIT');
+    expect(getConnectionFlow).not.toHaveBeenCalled();
+    expect(getConnectionNeeds).toHaveBeenCalledWith('google', { plugin: 'mailer', slot: 'mail' });
+    expect(step()).toBe('signin');
+    expect(button('Sign in with Google')).toBeDefined();
+
+    wrapper.unmount();
+  });
+
+  it('picks the waiting one back up when the slot takes its provider', async () => {
+    listOpenConnectionFlows.mockResolvedValue([waitingMicrosoft]);
+    getConnectionFlow.mockResolvedValue({ state: 'waiting', sentence: 'Waiting for you to sign in.', connection: null });
+    const wrapper = await mountMember(microsoftOnly);
+
+    await click(slotButton('Connect Microsoft'));
+
+    expect(bodyFind('[data-guided-connect]')?.textContent).toContain('FAKE-WAIT');
+    expect(getConnectionNeeds).not.toHaveBeenCalled();
 
     wrapper.unmount();
   });

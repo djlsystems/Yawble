@@ -36,7 +36,7 @@ import {
   rememberGuidedConnect,
 } from '../lib/connections';
 import { productCli } from '../presentation/product';
-import { awaitProviderReturn } from '../lib/providerReturn';
+import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/providerReturn';
 
 /**
  * ADD CONNECTION: connecting an account for a person who has never registered an OAuth app.
@@ -355,9 +355,11 @@ async function signIn() {
     const flow = await startConnection({ provider: chosen.id, scopes: chosenScopes.value });
     if (props.need) {
       // From a slot: the provider opens in another tab, and this one waits for its return.
+      // The tab is tagged, so only this sign-in's return is taken here.
       stopWaiting();
-      tabUrl.value = flow.authorizationUrl;
-      stopReturn = awaitProviderReturn((outcome) => void providerReturned(outcome));
+      const tag = newSigninTag();
+      tabUrl.value = signinTabAddress(tag);
+      stopReturn = awaitProviderReturn(tag, flow.authorizationUrl, (outcome) => void providerReturned(outcome));
       return;
     }
     rememberGuidedConnect(chosen.id);
@@ -473,7 +475,7 @@ async function readFlow() {
 
 // --- 3. Sign in in another tab, from a slot ---------------------------------------------------------
 
-/** The provider's consent page, opened in another tab; null until the sign-in is started. */
+/** The Console address that opens the other tab and sends it on to the provider; null until the sign-in is started. */
 const tabUrl = ref<string | null>(null);
 const tabRefusal = ref<string | null>(null);
 let stopReturn: (() => void) | null = null;

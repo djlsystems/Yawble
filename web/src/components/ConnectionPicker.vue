@@ -8,6 +8,7 @@ import SlotConnect from './SlotConnect.vue';
 import {
   connectionsForSlot,
   goneRefusal,
+  guidedProviders,
   missingScopes,
   providerName,
   scopeRefusal,
@@ -98,8 +99,11 @@ async function reconnect(asked?: { connectionId: string; scopes: string[] }) {
 
 // --- Connect, from this slot ----------------------------------------------------------------------
 
-/** Connect is offered while nothing suitable is bound: none, or one that no longer exists. */
-const offerConnect = computed(() => !chosen.value);
+/**
+ * Connect is offered while nothing suitable is bound - none, or one that no longer exists - to a
+ * slot Add connection can sign in for. A custom provider's slot says where its connection is made.
+ */
+const offerConnect = computed(() => !chosen.value && !!props.plugin && guidedProviders(props.spec).length > 0);
 
 const binding = ref(false);
 const bindRefusal = ref('');

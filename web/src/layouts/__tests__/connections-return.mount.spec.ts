@@ -9,9 +9,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createRouter, createWebHashHistory } from 'vue-router';
+const { goTo } = vi.hoisted(() => ({ goTo: vi.fn() }));
+vi.mock('../../lib/browserNavigation', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  goTo,
+}));
+
 import MainLayout from '../MainLayout.vue';
 import ConnectionsDialog from '../../components/ConnectionsDialog.vue';
 import { landProviderReturn } from '../../lib/connections';
+import { awaitProviderReturn } from '../../lib/providerReturn';
 import { useConsoleStore } from '../../stores/console';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -33,8 +40,8 @@ const stubs = {
 };
 
 /** What the Host's callback leaves in the address bar, then the app's boot: rewrite, router, shell. */
-async function returnFromProvider(search: string) {
-  window.history.replaceState(null, '', `/console${search}`);
+async function returnFromProvider(search: string, address = `/console${search}`) {
+  window.history.replaceState(null, '', address);
 
   landProviderReturn();
 
@@ -57,10 +64,12 @@ async function returnFromProvider(search: string) {
 }
 
 beforeEach(() => {
+  goTo.mockReset();
   vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
 });
 
 afterEach(() => {
+  sessionStorage.clear();
   vi.unstubAllGlobals();
   resetBody();
   window.history.replaceState(null, '', '/');
@@ -93,28 +102,41 @@ describe("the provider's redirect back to /console?connection=…", () => {
     wrapper.unmount();
   });
 
-  it('tells a tab waiting on a sign-in started from a slot what came back, and closes itself', async () => {
-    // A slot's Add connection, in the tab that opened the provider, is waiting for this return.
-    localStorage.setItem('connections.waiting', '1');
+  it('tells the tab waiting on its own sign-in what came back, and closes itself once it is taken', async () => {
+    // This tab was opened from a slot's Add connection, for the sign-in tagged 'tag-1'.
+    sessionStorage.setItem('connections.tab', 'tag-1');
     const heard: unknown[] = [];
-    const listener = new BroadcastChannel('connections.return');
-    listener.onmessage = (event) => heard.push(event.data);
+    const stop = awaitProviderReturn('tag-1', 'https://accounts.google.com/o/oauth2/v2/auth?state=r2', (outcome) => heard.push(outcome));
     const close = vi.spyOn(window, 'close').mockImplementation(() => {});
 
     const { wrapper } = await returnFromProvider('?connection=connected&id=conn-1');
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(heard).toEqual([{ outcome: 'connected', id: 'conn-1' }]);
     expect(close).toHaveBeenCalled();
-    expect(localStorage.getItem('connections.waiting')).toBeNull();
+    expect(sessionStorage.getItem('connections.tab')).toBeNull();
 
-    listener.close();
+    stop();
+    close.mockRestore();
+    wrapper.unmount();
+  });
+
+  it('stays open with its notice when no tab takes its sign-in any more', async () => {
+    sessionStorage.setItem('connections.tab', 'tag-gone');
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+
+    const { wrapper } = await returnFromProvider('?connection=connected&id=conn-1');
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    expect(wrapper.findComponent(ConnectionsDialog).props('modelValue')).toBe(true);
+    expect(close).not.toHaveBeenCalled();
+
     close.mockRestore();
     wrapper.unmount();
   });
 
   it('shows a return nobody is waiting for where it lands, as before', async () => {
-    localStorage.removeItem('connections.waiting');
+    sessionStorage.clear();
     const close = vi.spyOn(window, 'close').mockImplementation(() => {});
 
     const { wrapper } = await returnFromProvider('?connection=connected&id=conn-1');
@@ -123,6 +145,20 @@ describe("the provider's redirect back to /console?connection=…", () => {
     expect(close).not.toHaveBeenCalled();
 
     close.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("goes on to the provider the waiting tab names, when opened from a slot's sign-in link", async () => {
+    const stop = awaitProviderReturn('tag-2', 'https://accounts.google.com/o/oauth2/v2/auth?state=r2', () => {});
+
+    const { wrapper } = await returnFromProvider('', '/#/console?signin=tag-2');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(goTo).toHaveBeenCalledWith('https://accounts.google.com/o/oauth2/v2/auth?state=r2');
+    // Kept for the way back, in this tab only.
+    expect(sessionStorage.getItem('connections.tab')).toBe('tag-2');
+
+    stop();
     wrapper.unmount();
   });
 });

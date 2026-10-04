@@ -21,21 +21,24 @@ const fresh = hostConnection({ id: 'conn-new', provider: 'microsoft', name: 'Dan
 
 let calls: Call[] = [];
 let signedIn = false;
+/** The mailbox slot's providers and scopes. */
+let mailbox: { providers: string[]; scopes: Record<string, string[]> };
 
 beforeEach(() => {
   calls = [];
   signedIn = false;
-  const settings = scoutSettings({
-    connectionFields: {
-      mailbox: {
-        description: 'Where postings are emailed from.',
-        providers: ['microsoft'],
-        scopes: { microsoft: [mailSend] },
-        required: true,
-        summary: 'needs a Microsoft connection',
+  mailbox = { providers: ['microsoft'], scopes: { microsoft: [mailSend] } };
+  const settings = () =>
+    scoutSettings({
+      connectionFields: {
+        mailbox: {
+          description: 'Where postings are emailed from.',
+          ...mailbox,
+          required: true,
+          summary: 'needs a connection',
+        },
       },
-    },
-  });
+    });
   vi.stubGlobal(
     'fetch',
     vi.fn(
@@ -44,8 +47,8 @@ beforeEach(() => {
           (call) =>
             call.url === '/api/teams/job-tracker/members/scout/plugin-settings'
               ? call.method === 'PUT'
-                ? reply(200, { ...settings, connections: { mailbox: 'conn-new' } })
-                : reply(200, settings)
+                ? reply(200, { ...settings(), connections: { mailbox: 'conn-new' } })
+                : reply(200, settings())
               : undefined,
           (call) =>
             call.method === 'GET' && call.url.startsWith('/api/connections/providers')
@@ -129,6 +132,18 @@ describe("the control panel's connection fix", () => {
       secrets: { apiKey: 'JOB_BOARD_KEY' },
       connections: { mailbox: 'conn-new' },
     });
+
+    wrapper.unmount();
+  });
+
+  it("says where a custom provider's connection is made, with no Connect to offer", async () => {
+    mailbox = { providers: ['custom-crm'], scopes: { 'custom-crm': ['read'] } };
+    const wrapper = await mountDialog(SolutionPanel, { team: 'job-tracker' });
+    await settle();
+
+    const fix = bodyFind('[data-blocked="mailbox"] [data-fix-connection]');
+    expect(fix?.querySelector('[data-slot-connect]')).toBeNull();
+    expect(fix?.textContent).toContain('No account yet? Connect one in Admin → Connections.');
 
     wrapper.unmount();
   });

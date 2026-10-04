@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { Connection, ConnectionProvider, ConnectionSlot } from '../api/types';
-import { providerName } from '../lib/connections';
+import { guidedProviders, providerName } from '../lib/connections';
 import ConnectDialog from './ConnectDialog.vue';
 
 /**
@@ -36,7 +36,7 @@ const emit = defineEmits<{
   closed: [];
 }>();
 
-const connectable = computed(() => props.spec.providers.filter((id) => id === 'google' || id === 'microsoft'));
+const connectable = computed(() => guidedProviders(props.spec));
 const label = computed(() => `Connect ${connectable.value.map((id) => providerName(id, props.providers)).join(' or ')}`);
 const need = computed(() => ({
   plugin: props.plugin,

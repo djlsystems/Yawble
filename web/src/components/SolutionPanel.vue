@@ -54,6 +54,7 @@ import {
 import { cappedLine, spentTodayLine } from '../lib/triggers';
 import ConnectionPicker from './ConnectionPicker.vue';
 import { bindSlot } from '../lib/slotBinding';
+import { guidedProviders } from '../lib/connections';
 import HostPathPicker from './HostPathPicker.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 import SolutionWizard from './SolutionWizard.vue';
@@ -603,6 +604,12 @@ function closeUninstall() {
                   @connected="reloadConnections"
                   @closed="rereadPanel"
                 />
+                <div
+                  v-if="guidedProviders(settings[item.fix.connection.member]!.shape.connections![item.fix.connection.slot]!).length === 0"
+                  class="text-caption os-text-muted"
+                >
+                  No account yet? Connect one in Admin → Connections.
+                </div>
               </div>
               <div v-else class="text-caption os-text-muted">Set it under Controls.</div>
             </div>
