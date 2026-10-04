@@ -43,8 +43,8 @@ public static class TeamActivity
                 [Description("Start of the period, a UTC instant. Give it with `to`, or neither for the "
                     + "team's own window.")] DateTimeOffset? from,
                 [Description("End of the period, a UTC instant, at most a year after `from`.")] DateTimeOffset? to,
-                TeamRegistry teams, ContainerHost host, IMessageLog log, IUsageLedger ledger, TimeProvider clock,
-                CancellationToken ct) =>
+                TeamRegistry teams, ITeamStore store, ContainerHost host, IMessageLog log, IUsageLedger ledger,
+                TimeProvider clock, CancellationToken ct) =>
             {
                 if (teams.ExistingName(team) is not { } stored)
                 {
@@ -53,7 +53,7 @@ public static class TeamActivity
 
                 if (Refusal(from, to) is { } refusal) return Results.BadRequest(new { error = refusal });
 
-                return Results.Ok(await ReadAsync(stored, from, to, teams, host, log, ledger, clock.GetUtcNow(), ct));
+                return Results.Ok(await ReadAsync(stored, from, to, teams, store, host, log, ledger, clock.GetUtcNow(), ct));
             })
             .WithTags("Activity")
             .RequirePermit(Permits.Read)
@@ -85,10 +85,17 @@ public static class TeamActivity
 
     public static async Task<TeamActivityAnswer> ReadAsync(
         string team, DateTimeOffset? from, DateTimeOffset? to,
-        TeamRegistry teams, ContainerHost host, IMessageLog log, IUsageLedger ledger, DateTimeOffset now,
-        CancellationToken ct)
+        TeamRegistry teams, ITeamStore store, ContainerHost host, IMessageLog log, IUsageLedger ledger,
+        DateTimeOffset now, CancellationToken ct)
     {
-        var floor = teams.FloorFor(team);
+        // SCOPED BY THE TEAM'S CREATION, NOT BY ITS MEMBERS' FLOOR: Reset's "Delete memory" raises
+        // every named member's floor to the log head, and the spans must outlive it. The creation
+        // instant is turned into the log position it fell at, and every ledger row and log row read
+        // here is above that, so a team re-created under the same name never shows the runs of the
+        // team it replaced: their runs ended before it existed.
+        var floor = await store.CreatedAtAsync(team, ct) is { } created
+            ? await log.LastSeqBeforeAsync(created, ct)
+            : 0;
 
         string window;
         DateTimeOffset start;
@@ -116,7 +123,7 @@ public static class TeamActivity
             .OrderBy(m => IsManager(m.Id.Name) ? 0 : 1)
             .ToList();
 
-        var runs = await ledger.ReadTeamRunsAsync(team, start, end, [.. current.Select(m => m.Id.Name)], ct);
+        var runs = await ledger.ReadTeamRunsAsync(team, floor, start, end, [.. current.Select(m => m.Id.Name)], ct);
 
         var members = new List<TeamActivityMember>();
 

@@ -129,28 +129,34 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
     }
 
     public async Task<IReadOnlyList<UsageLedgerRow>> ReadTeamRunsAsync(
-        string team, DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection<string> members,
+        string team, long floor, DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection<string> members,
         CancellationToken ct = default)
     {
         await using var connection = Open();
 
         // Every read here walks `ix_usage_ledger_team_ended` (`outcome-005`), so a year-long period
-        // reads that year's rows and each edge row is one step from the period's ends.
+        // reads the rows that ended since its start and each edge row is one step from its ends.
         var start = Stamp(from);
         var end = Stamp(to);
 
+        // EVERY RUN THAT OVERLAPS the period: it ended at or after its start, and began before its
+        // end. The beginning is tested here rather than in SQL because `queued_at` is not stored in
+        // the "O" form `ended_at` is, so the two do not compare as text.
         await using var inside = connection.CreateCommand();
         inside.CommandText =
             $"""
              SELECT {RunColumns} FROM usage_ledger
-             WHERE team_id = $team AND ended_at >= $from AND ended_at < $to
+             WHERE team_id = $team AND run_seq > $floor AND ended_at >= $from
              """;
         inside.Parameters.AddWithValue("$team", team);
+        inside.Parameters.AddWithValue("$floor", floor);
         inside.Parameters.AddWithValue("$from", start);
-        inside.Parameters.AddWithValue("$to", end);
 
         var rows = new Dictionary<long, UsageLedgerRow>();
-        foreach (var row in await ReadRunsAsync(inside, ct)) rows[row.RunSeq] = row;
+        foreach (var row in await ReadRunsAsync(inside, ct))
+        {
+            if ((row.QueuedAt ?? row.StartedAt ?? row.EndedAt) < to) rows[row.RunSeq] = row;
+        }
 
         var named = members
             .Concat(rows.Values.Select(r => r.Member))
@@ -169,10 +175,11 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
                 command.CommandText =
                     $"""
                      SELECT {RunColumns} FROM usage_ledger
-                     WHERE team_id = $team AND member = $member AND {edge}
+                     WHERE team_id = $team AND member = $member AND run_seq > $floor AND {edge}
                      LIMIT 1
                      """;
                 command.Parameters.AddWithValue("$team", team);
+                command.Parameters.AddWithValue("$floor", floor);
                 command.Parameters.AddWithValue("$member", member);
                 command.Parameters.AddWithValue("$from", start);
                 command.Parameters.AddWithValue("$to", end);

@@ -251,6 +251,29 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
     }
 
     [Fact]
+    public async Task A_removed_member_whose_run_outlasts_the_window_is_listed_not_current()
+    {
+        var team = await bed.TeamAsync("Activity removed late", "Dev", "Late", "Long");
+        await bed.RunAsync(team, "Late", "completed", 1251, queued: null, started: T(80), ended: T(150));
+        await bed.RunAsync(team, "Long", "completed", 1252, queued: null, started: T(-10), ended: T(150));
+
+        await bed.RemoveAsync(team, "Late");
+        await bed.RemoveAsync(team, "Long");
+
+        var answer = await bed.ActivityAsync(team, T(0), T(100));
+
+        // A run overlaps the window when it began before its end and ended after its start: one
+        // that ends after the window still puts its member in it, its running clipped to the end.
+        Assert.Equal(
+            [TeamRegistry.DefaultManagerName, "Dev", "Late", "Long"],
+            answer.GetProperty("members").EnumerateArray().Select(m => m.GetProperty("member").GetString()).ToArray());
+        Assert.False(Member(answer, "Late").GetProperty("current").GetBoolean());
+        Assert.False(Member(answer, "Long").GetProperty("current").GetBoolean());
+        Assert.Equal(["running 80-100 w1251"], Spans(answer, "Late"));
+        Assert.Equal(["running 0-100 w1252"], Spans(answer, "Long"));
+    }
+
+    [Fact]
     public async Task A_period_over_a_year_is_refused_with_a_sentence()
     {
         var team = await bed.TeamAsync("Activity year", "Dev");
@@ -321,6 +344,29 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
         // Every span is where it was; the reason went with the log rows that held it.
         Assert.Equal(Spans(before, "Dev"), Spans(after, "Dev"));
         Assert.False(Member(after, "Dev").GetProperty("spans").EnumerateArray().Last().TryGetProperty("reason", out _));
+    }
+
+    [Fact]
+    public async Task A_recreated_team_does_not_show_its_predecessors_runs()
+    {
+        var team = await bed.TeamAsync("Activity recreated", "Dev");
+
+        // The predecessor's runs carry the log positions they ran at, below anything its successor runs.
+        await bed.RunAsync(team, "Dev", "blocked", 1601, queued: null, started: T(-20), ended: T(-10), seq: await bed.HeadAsync());
+        await bed.RunAsync(team, "Dev", "completed", 1602, queued: T(10), started: T(20), ended: T(30), seq: await bed.HeadAsync());
+        await bed.RunAsync(team, "Old", "failed", 1603, queued: null, started: T(10), ended: T(40), seq: await bed.HeadAsync());
+
+        await bed.DeleteTeamAsync(team);
+        Assert.Equal(team, await bed.TeamAsync("Activity recreated", "Dev"));
+
+        await bed.RunAsync(team, "Dev", "completed", 1604, queued: null, started: T(60), ended: T(70));
+
+        var answer = await bed.ActivityAsync(team, T(0), T(100));
+
+        Assert.Equal(
+            [TeamRegistry.DefaultManagerName, "Dev"],
+            answer.GetProperty("members").EnumerateArray().Select(m => m.GetProperty("member").GetString()).ToArray());
+        Assert.Equal(["running 60-70 w1604", "idle 70-100"], Spans(answer, "Dev"));
     }
 
     private static string Url(string team, DateTimeOffset from, DateTimeOffset to) =>
@@ -461,7 +507,7 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
         /// <summary>One finished run, written to the ledger as its writer would.</summary>
         public async Task RunAsync(
             string team, string member, string outcome, long correlation,
-            DateTimeOffset? queued, DateTimeOffset? started, DateTimeOffset ended)
+            DateTimeOffset? queued, DateTimeOffset? started, DateTimeOffset ended, long? seq = null)
         {
             await using var connection = new SqliteConnection($"Data Source={Database};Pooling=false");
             await connection.OpenAsync(Ct);
@@ -472,7 +518,7 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
                     queued_at, started_at, ended_at, measured)
                 VALUES ($seq, $correlation, $team, $team, $member, 'agent', $outcome, $queued, $started, $ended, 0)
                 """;
-            insert.Parameters.AddWithValue("$seq", Interlocked.Increment(ref _run));
+            insert.Parameters.AddWithValue("$seq", seq ?? Interlocked.Increment(ref _run));
             insert.Parameters.AddWithValue("$correlation", correlation);
             insert.Parameters.AddWithValue("$team", team);
             insert.Parameters.AddWithValue("$member", member);
@@ -481,6 +527,16 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
             insert.Parameters.AddWithValue("$started", (object?)started?.ToString("O") ?? DBNull.Value);
             insert.Parameters.AddWithValue("$ended", ended.ToString("O"));
             await insert.ExecuteNonQueryAsync(Ct);
+        }
+
+        /// <summary>A log position no ledger row holds yet: a fresh row's own.</summary>
+        public async Task<long> HeadAsync() =>
+            (await Log.AppendAsync(new NewMessage("test.mark", "{}", "console"), Ct)).Seq;
+
+        public async Task DeleteTeamAsync(string team)
+        {
+            var deleted = await Person.DeleteAsync($"/api/teams/{team}", Ct);
+            Assert.True(deleted.IsSuccessStatusCode, await deleted.Content.ReadAsStringAsync(Ct));
         }
 
         public Task<Message> TellAsync(string team, string member, string instruction) =>
