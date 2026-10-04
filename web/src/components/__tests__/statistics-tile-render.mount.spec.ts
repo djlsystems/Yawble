@@ -15,6 +15,7 @@ import { useConsoleStore } from '../../stores/console';
 import { asTeamId } from '../../api/types';
 import type { ActivityMember, ActivitySpan, TeamActivity, TeamWorkflows } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
+import { ActivityStates } from '../../lib/teamActivity';
 
 const teamId = asTeamId('alpha');
 
@@ -176,16 +177,23 @@ describe('each span as drawn', () => {
   };
 
   it('notches blocked and failed so neither depends on hue, and leaves running plain', async () => {
-    // ActivityStates order: running, waiting, blocked, failed, idle.
-    expect(await draw(0)).toEqual(['rect']);
+    expect(await draw(ActivityStates.indexOf('running'))).toEqual(['rect']);
     wrapper!.unmount();
-    expect(await draw(1)).toEqual(['rect']);
+    expect(await draw(ActivityStates.indexOf('waiting'))).toEqual(['rect']);
     wrapper!.unmount();
-    expect(await draw(2)).toEqual(['rect', 'polygon']);
+    expect(await draw(ActivityStates.indexOf('blocked'))).toEqual(['rect', 'polygon']);
     wrapper!.unmount();
-    expect(await draw(3)).toEqual(['rect', 'polygon', 'polygon']);
+    expect(await draw(ActivityStates.indexOf('failed'))).toEqual(['rect', 'polygon', 'polygon']);
     wrapper!.unmount();
-    expect(await draw(4)).toEqual(['rect']);
+    expect(await draw(ActivityStates.indexOf('idle'))).toEqual(['rect']);
+  });
+
+  it('stripes held so it never depends on hue', async () => {
+    const held = await draw(ActivityStates.indexOf('held'));
+
+    expect(held[0]).toBe('rect');
+    expect(held.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(held)).toEqual(new Set(['rect']));
   });
 });
 

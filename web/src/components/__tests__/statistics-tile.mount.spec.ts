@@ -227,6 +227,29 @@ describe('the Statistics tile', () => {
     expect(tile().attributes('aria-label')).toBe(`Statistics ${localStretch(at(14, 2), at(14, 30))}: 3 members - 3 running`);
   });
 
+  it('counts a member waiting for a slot in its aria-label, and gives the reason in the tooltip', async () => {
+    answer = activity({ members: [
+      member('Manager'),
+      member('DeveloperInes', { spans: [{
+        state: 'held', from: iso(at(14, 26)), to: null,
+        reason: 'waiting for memory: 11.2 of 12.9 GB in use', reasonKind: 'memory',
+      }] }),
+      member('Tester'),
+    ] });
+
+    await mountStrip({ containers: [container('Manager', 'Manager'), container('DeveloperInes', 'Ines Lopez'), container('Tester', 'Tester Okon')] });
+
+    expect(tile().attributes('aria-label'))
+      .toBe(`Statistics ${localStretch(at(14, 2), at(14, 30))}: 3 members - 2 running, 1 waiting for a slot`);
+
+    const chart = wrapper!.findComponent({ name: 'Echarts' });
+    const option = chart.props('option') as { tooltip: { formatter: (params: unknown) => string } };
+    const box = document.createElement('div');
+    box.innerHTML = option.tooltip.formatter([{ axisValue: at(14, 30) }]);
+
+    expect(box.textContent).toContain('IL Ines Lopez — waiting for a slot 4 min (memory: 11.2 of 12.9 GB in use)');
+  });
+
   it('escapes a name in the tooltip, so markup shows as characters', async () => {
     answer = activity({ members: [member('Manager'), member('Bold', { spans: [
       { state: 'blocked', from: iso(at(14, 5)), to: null, reason: '<i>key</i>' },

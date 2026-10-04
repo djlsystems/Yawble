@@ -66,6 +66,7 @@ const colours = computed(() => {
   return {
     running: token('--os-stat-running'),
     waiting: token('--os-stat-waiting'),
+    held: token('--os-stat-held'),
     blocked: token('--os-stat-blocked'),
     failed: token('--os-stat-failed'),
     idle: token('--os-stat-idle'),

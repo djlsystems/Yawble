@@ -20,6 +20,7 @@ export interface GrownSpan {
   open: boolean
   workflow?: number
   reason?: string
+  reasonKind?: string
 }
 
 /** One drawn lane: the member's stored name, the label a person reads, and its initials. */
@@ -31,7 +32,25 @@ export interface Lane {
 }
 
 /** The order states are counted in, in the summary and anywhere else they are listed. */
-export const ActivityStates: readonly ActivityState[] = ['running', 'waiting', 'blocked', 'failed', 'idle']
+export const ActivityStates: readonly ActivityState[] = ['running', 'waiting', 'held', 'blocked', 'failed', 'idle']
+
+/** A state as a person reads it: `held` is "waiting for a slot", the rest their own word. */
+export function stateWords(state: ActivityState): string {
+  return state === 'held' ? 'waiting for a slot' : state
+}
+
+/**
+ * WHAT A HOLD WAITED FOR, after "waiting for a slot": the hold's own sentence less its "waiting for "
+ * ("memory: 11.2 of 12.9 GB in use"), "no worker connected" for a worker, and nothing for the run
+ * limit, which the words already say.
+ */
+export function heldFor(span: { reason?: string; reasonKind?: string }): string | null {
+  if (span.reasonKind === 'slot') return null
+  if (span.reasonKind === 'worker') return 'no worker connected'
+  if (!span.reason) return null
+
+  return span.reason.replace(/^waiting for /, '')
+}
 
 /**
  * A NAME'S INITIALS: its words split on space, `-`, `_` and `.`; two or more words give the first
@@ -91,6 +110,7 @@ export function growSpans(spans: readonly ActivitySpan[], end: number): GrownSpa
 
     if (span.workflow !== undefined) grown.workflow = span.workflow
     if (span.reason !== undefined) grown.reason = span.reason
+    if (span.reasonKind !== undefined) grown.reasonKind = span.reasonKind
 
     return grown
   })
@@ -188,7 +208,7 @@ export function activitySummary(
 
   const parts = ActivityStates
     .filter((state) => counts.has(state))
-    .map((state) => `${counts.get(state)} ${state}`)
+    .map((state) => `${counts.get(state)} ${stateWords(state)}`)
 
   if (nothing > 0) parts.push(`${nothing} with no runs at the end`)
 
@@ -246,8 +266,9 @@ export function tooltipHtml(lanes: readonly Lane[], at: number, withDate: boolea
     let what = 'no runs in this window'
 
     if (span) {
-      what = `${span.state} ${stretchLength(span.to - span.from)}`
-      if (span.reason) what += ` (${span.reason})`
+      what = `${stateWords(span.state)} ${stretchLength(span.to - span.from)}`
+      const reason = span.state === 'held' ? heldFor(span) : span.reason
+      if (reason) what += ` (${reason})`
     }
 
     return `<div class="stats-tip-row">${chip}${who} — ${escapeHtml(what)}</div>`
@@ -279,7 +300,7 @@ export interface Column {
   members: MemberTime[]
 }
 
-const noTime = (): StateTime => ({ running: 0, waiting: 0, blocked: 0, failed: 0, idle: 0 })
+const noTime = (): StateTime => ({ running: 0, waiting: 0, held: 0, blocked: 0, failed: 0, idle: 0 })
 
 const zoneFormats = new Map<string, Intl.DateTimeFormat>()
 
@@ -500,12 +521,12 @@ export function columnTooltipHtml(
   const shown = ActivityStates.filter((state) => !options.hidden?.has(state))
   const split = (ms: StateTime) => shown
     .filter((state) => ms[state] > 0)
-    .map((state) => `${state} ${memberTime(ms[state])}`)
+    .map((state) => `${stateWords(state)} ${memberTime(ms[state])}`)
 
   const totals = shown
     .filter((state) => column.totals[state] > 0)
     .map((state) => `<div class="stats-tip-row"><span class="stats-chip stats-chip--${state}"></span>`
-      + `${escapeHtml(`${state} ${memberTime(column.totals[state])}`)}</div>`)
+      + `${escapeHtml(`${stateWords(state)} ${memberTime(column.totals[state])}`)}</div>`)
 
   const members = column.members.flatMap((share) => {
     const person = people.get(share.member) ?? { name: share.member, initials: memberInitials(share.member) }
@@ -779,10 +800,14 @@ export function bucketUnit(bucket: Bucket): { name: string; ms: number } {
 /** The colours a state is drawn in, and the tile's own colour its notches are cut from. */
 export type StatePalette = Record<ActivityState, string> & { chrome: string }
 
+/** Held's stripes: two pixels of the background every six, the first three in. */
+const HeldStripe = { offset: 3, width: 2, every: 6 }
+
 /**
  * ONE RECTANGLE OF ONE STATE, as chart shapes: the state's colour, and for blocked and failed a notch
- * cut from the background - one corner for blocked, both left corners for failed - so neither is
- * told by hue alone. The tile's lanes and the dialog's columns draw states the same way.
+ * cut from the background - one corner for blocked, both left corners for failed - and for held
+ * upright stripes cut the same way, so none of them is told by hue alone. The tile's lanes and the
+ * dialog's columns draw states the same way.
  */
 export function stateShapes(x: number, y: number, width: number, height: number, state: ActivityState, palette: StatePalette) {
   const children: { type: string; shape: Record<string, unknown>; style: { fill: string } }[] = [
@@ -793,6 +818,12 @@ export function stateShapes(x: number, y: number, width: number, height: number,
 
   if (state === 'blocked' || state === 'failed') {
     children.push({ type: 'polygon', shape: { points: [[x, y], [x + notch, y], [x, y + notch]] }, style: { fill: palette.chrome } })
+  }
+
+  if (state === 'held') {
+    for (let stripe = x + HeldStripe.offset; stripe + HeldStripe.width <= x + width; stripe += HeldStripe.every) {
+      children.push({ type: 'rect', shape: { x: stripe, y, width: HeldStripe.width, height }, style: { fill: palette.chrome } })
+    }
   }
 
   if (state === 'failed') {

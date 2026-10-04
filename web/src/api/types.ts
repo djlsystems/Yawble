@@ -1440,7 +1440,8 @@ export interface TeamRollupRow {
 }
 
 /** One state a member's lane can be in. "No data" is never a state: it is the absence of a span. */
-export type ActivityState = 'running' | 'waiting' | 'blocked' | 'failed' | 'idle'
+/** `held` is the part of a wait an admission hold covered: "waiting for a slot". */
+export type ActivityState = 'running' | 'waiting' | 'held' | 'blocked' | 'failed' | 'idle'
 
 /** One stretch of one state. `to` is null while it is still open at the answer's `serverNow`. */
 export interface ActivitySpan {
@@ -1449,8 +1450,13 @@ export interface ActivitySpan {
   to: string | null
   /** The workflow a run or its block belongs to, when it names one. */
   workflow?: number
-  /** A block's or failure's words while the log still holds them. Text, never markup. */
+  /**
+   * A block's or failure's words while the log still holds them, or a hold's sentence as admission
+   * worded it ("waiting for memory: 11.2 of 12.9 GB in use"). Text, never markup.
+   */
   reason?: string
+  /** A held span's reason in one word: `slot`, `memory`, `pressure` or `worker`. */
+  reasonKind?: string
 }
 
 /** One member's lane. `current` is false for a member since removed. */
@@ -3146,6 +3152,19 @@ export interface ConnectionDeviceStart {
   expiresAt: string
 }
 
+/**
+ * One of `GET /api/connections/flows/open`: a sign-in with a code the caller started that the Host
+ * still holds - the code the person types, never the provider's device code.
+ */
+export interface ConnectionOpenFlow {
+  flowId: string
+  provider: string
+  userCode: string
+  verificationUri: string
+  expiresAt: string
+  state: ConnectionFlow['state']
+}
+
 /** `GET /api/connections/flows/{flowId}`: where a sign-in with a code is, in a sentence. */
 export interface ConnectionFlow {
   state: 'waiting' | 'done' | 'refused' | 'expired'
@@ -3356,7 +3375,24 @@ export interface SolutionPlan {
     documents: SolutionDocumentInput[]
   }
   personSettings: SolutionPersonSetting[]
+  /**
+   * Each connection input with its slot as the package's plugin declares it - known before the
+   * plugin is installed, which the installed plugins and the needs read are not.
+   */
+  personConnections: SolutionPersonConnection[]
   ignored: string[]
+}
+
+/** One connection input of a plan: its member's plugin, and the providers and scopes the slot takes. */
+export interface SolutionPersonConnection {
+  member: string
+  slot: string
+  description: string
+  required: boolean
+  plugin: string | null
+  providers: string[]
+  /** Provider -> the scopes the slot asks of a connection of it. */
+  scopes: Record<string, string[]>
 }
 
 /** `POST /api/solutions/check`. A 400 (a refused folder) is thrown with the Host's sentence. */

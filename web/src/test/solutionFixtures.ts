@@ -187,6 +187,17 @@ export function hostPlan(version = '1.1.0'): SolutionPlan {
         choices: null,
       },
     ],
+    personConnections: [
+      {
+        member: 'Scout',
+        slot: 'mail',
+        description: 'Where postings are emailed from.',
+        required: true,
+        plugin: 'job-board',
+        providers: ['microsoft'],
+        scopes: { microsoft: ['https://graph.microsoft.com/Mail.Send'] },
+      },
+    ],
     ignored: [],
   };
 }

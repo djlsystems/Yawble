@@ -9,14 +9,15 @@ namespace Harness.Host;
 
 /// <summary>
 /// WHAT EACH MEMBER WAS DOING, AND WHEN: <c>GET /api/teams/{team}/activity</c>. Per member, the
-/// stretches of a period it was running, waiting, blocked, failed or idle, decided here once from
-/// recorded times so the web only draws and buckets them.
+/// stretches of a period it was running, waiting, held for admission, blocked, failed or idle, decided
+/// here once from recorded times so the web only draws and buckets them.
 ///
 /// <para>
 /// THE SOURCE IS THE LEDGER, plus the log's run in progress. <c>usage_ledger</c> keeps every finished
 /// run's queue, start and end and how it ended, and nothing deletes it, so the spans survive Reset's
 /// "Delete memory" and log retention. The log adds only what the ledger cannot know yet - a run still
-/// going - and the words of a block or failure while it still holds them.
+/// going - and the words of a block or failure while it still holds them. <c>admission_holds</c>,
+/// as lasting as the ledger, says which part of a wait was a hold for a slot and why.
 /// </para>
 ///
 /// <para>
@@ -29,6 +30,7 @@ public static class TeamActivity
 {
     public const string Running = "running";
     public const string Waiting = "waiting";
+    public const string Held = "held";
     public const string Blocked = "blocked";
     public const string Failed = "failed";
     public const string Idle = "idle";
@@ -44,7 +46,7 @@ public static class TeamActivity
                     + "team's own window.")] DateTimeOffset? from,
                 [Description("End of the period, a UTC instant, at most a year after `from`.")] DateTimeOffset? to,
                 TeamRegistry teams, ITeamStore store, ContainerHost host, IMessageLog log, IUsageLedger ledger,
-                TimeProvider clock, CancellationToken ct) =>
+                IAdmissionHoldLedger holds, TimeProvider clock, CancellationToken ct) =>
             {
                 if (teams.ExistingName(team) is not { } stored)
                 {
@@ -53,19 +55,23 @@ public static class TeamActivity
 
                 if (Refusal(from, to) is { } refusal) return Results.BadRequest(new { error = refusal });
 
-                return Results.Ok(await ReadAsync(stored, from, to, teams, store, host, log, ledger, clock.GetUtcNow(), ct));
+                return Results.Ok(await ReadAsync(stored, from, to, teams, store, host, log, ledger, holds, clock.GetUtcNow(), ct));
             })
             .WithTags("Activity")
             .RequirePermit(Permits.Read)
             .WithSummary("What each member of this team was doing, and when")
             .WithDescription(
-                "Per member, ordered non-overlapping `spans` of `running`, `waiting`, `blocked` (a block "
+                "Per member, ordered non-overlapping `spans` of `running`, `waiting`, `held`, `blocked` (a block "
                 + "or a question for a person), `failed` or `idle`, clipped to the period, derived from "
                 + "the usage ledger and the run in progress. A stretch nothing recorded has no span: no "
                 + "data is never a state. A span's `to` is null when it is still open at `serverNow` "
                 + "inside a requested period; "
                 + "`workflow` names the workflow a run or its block belongs to; `reason` is a block's or "
                 + "failure's words while the log still holds them.\n\n"
+                + "`held` (waiting for a slot) is the part of a wait an admission hold covers, with the hold's "
+                + "`reason` sentence and its `reasonKind` (`slot`, `memory`, `pressure` or `worker`), from "
+                + "`admission_holds`; the rest of the wait stays `waiting`, and running still wins. Waits "
+                + "from before holds were recorded stay `waiting`.\n\n"
                 + "With no `from` and `to`, the team's own window (`window: \"workflows\"`): from the root "
                 + "of its earliest workflow, open or closed, to the latest activity of any of them - a "
                 + "closed workflow's end, an open one's newest row - and never to the clock, so it does "
@@ -89,16 +95,15 @@ public static class TeamActivity
     public static async Task<TeamActivityAnswer> ReadAsync(
         string team, DateTimeOffset? from, DateTimeOffset? to,
         TeamRegistry teams, ITeamStore store, ContainerHost host, IMessageLog log, IUsageLedger ledger,
-        DateTimeOffset now, CancellationToken ct)
+        IAdmissionHoldLedger holdLedger, DateTimeOffset now, CancellationToken ct)
     {
         // SCOPED BY THE TEAM'S CREATION, NOT BY ITS MEMBERS' FLOOR: Reset's "Delete memory" raises
         // every named member's floor to the log head, and the spans must outlive it. The creation
         // instant is turned into the log position it fell at, and every ledger row and log row read
         // here is above that, so a team re-created under the same name never shows the runs of the
         // team it replaced: their runs ended before it existed.
-        var floor = await store.CreatedAtAsync(team, ct) is { } created
-            ? await log.LastSeqBeforeAsync(created, ct)
-            : 0;
+        var created = await store.CreatedAtAsync(team, ct);
+        var floor = created is { } at ? await log.LastSeqBeforeAsync(at, ct) : 0;
 
         string window;
         DateTimeOffset start;
@@ -129,13 +134,18 @@ public static class TeamActivity
 
         var runs = await ledger.ReadTeamRunsAsync(team, floor, start, end, [.. current.Select(m => m.Id.Name)], ct);
 
+        // THE HOLDS, by the same scope in time: a hold that began before the team was created was its
+        // predecessor's under the same name.
+        var holds = await holdLedger.ReadTeamAsync(team, created ?? DateTimeOffset.MinValue, start, end, ct);
+
         var members = new List<TeamActivityMember>();
 
         foreach (var (id, snapshot) in current)
         {
             var mine = runs.Where(r => Same(r.Member, id.Name)).ToList();
             var inProgress = await InProgressAsync(log, id, snapshot!.SinceSeq, ct);
-            var spans = await SpansAsync(mine, inProgress, start, end, now, log, id, floor, ct);
+            var held = holds.Where(h => Same(h.Member, id.Name)).ToList();
+            var spans = await SpansAsync(mine, held, inProgress, start, end, now, log, id, floor, ct);
 
             members.Add(new TeamActivityMember(id.Name, MemberRef.KindOf(snapshot.Agent), IsManager(id.Name), true, spans));
         }
@@ -150,7 +160,8 @@ public static class TeamActivity
         foreach (var name in removed)
         {
             var mine = runs.Where(r => Same(r.Member, name)).ToList();
-            var spans = await SpansAsync(mine, null, start, end, now, log, new ContainerId(team, name), floor, ct);
+            var held = holds.Where(h => Same(h.Member, name)).ToList();
+            var spans = await SpansAsync(mine, held, null, start, end, now, log, new ContainerId(team, name), floor, ct);
 
             members.Add(new TeamActivityMember(name, mine[^1].MemberKind, IsManager(name), false, spans));
         }
@@ -170,16 +181,19 @@ public static class TeamActivity
     }
 
     /// <summary>One recorded stretch before clipping. <see cref="Rank"/> decides an overlap: running
-    /// over waiting over what a run left behind. An open stretch ends at <see cref="DateTimeOffset.MaxValue"/>.</summary>
+    /// over held over waiting over what a run left behind. An open stretch ends at
+    /// <see cref="DateTimeOffset.MaxValue"/>.</summary>
     private sealed record Stretch(
-        string State, DateTimeOffset From, DateTimeOffset To, int Rank, long? Workflow, UsageLedgerRow? Run);
+        string State, DateTimeOffset From, DateTimeOffset To, int Rank, long? Workflow, UsageLedgerRow? Run,
+        AdmissionHoldRow? Hold = null);
 
     /// <summary>
     /// One member's spans over [<paramref name="from"/>, <paramref name="to"/>), from its ledger rows
     /// in <c>run_seq</c> order and its run in progress.
     /// </summary>
     private static async Task<IReadOnlyList<TeamActivitySpan>> SpansAsync(
-        IReadOnlyList<UsageLedgerRow> runs, Message? inProgress, DateTimeOffset from, DateTimeOffset to,
+        IReadOnlyList<UsageLedgerRow> runs, IReadOnlyList<AdmissionHoldRow> holds, Message? inProgress,
+        DateTimeOffset from, DateTimeOffset to,
         DateTimeOffset now, IMessageLog log, ContainerId member, long floor, CancellationToken ct)
     {
         var stretches = new List<Stretch>();
@@ -193,7 +207,7 @@ public static class TeamActivity
                 stretches.Add(new Stretch(Waiting, queued, started, 2, run.Correlation, run));
             }
 
-            if (run.StartedAt is { } start) stretches.Add(new Stretch(Running, start, run.EndedAt, 3, run.Correlation, run));
+            if (run.StartedAt is { } start) stretches.Add(new Stretch(Running, start, run.EndedAt, 4, run.Correlation, run));
 
             // WHAT THE RUN LEFT BEHIND lasts until the member's next run is queued or starts - the
             // earliest time that run recorded - or, after its last, until its run in progress or now.
@@ -207,7 +221,14 @@ public static class TeamActivity
 
         if (inProgress is not null)
         {
-            stretches.Add(new Stretch(Running, inProgress.OccurredAt, DateTimeOffset.MaxValue, 3, inProgress.CorrelationId, null));
+            stretches.Add(new Stretch(Running, inProgress.OccurredAt, DateTimeOffset.MaxValue, 4, inProgress.CorrelationId, null));
+        }
+
+        // WHAT ADMISSION RECORDED: a hold is held over a wait, and over what the last run left behind
+        // while the next one is still queued, until it was released; one still held is open.
+        foreach (var hold in holds)
+        {
+            stretches.Add(new Stretch(Held, hold.HeldAt, hold.ReleasedAt ?? DateTimeOffset.MaxValue, 3, null, null, hold));
         }
 
         // CLIPPED TO THE PERIOD, and to now: nothing is said about time that has not passed.
@@ -234,6 +255,13 @@ public static class TeamActivity
 
             if (winner is null) continue;
 
+            // A held stretch belongs to the run whose wait it is in, when that run has finished.
+            if (winner.State == Held
+                && stretches.FirstOrDefault(s => s.State == Waiting && s.From <= a && s.To >= b) is { } wait)
+            {
+                winner = winner with { Workflow = wait.Workflow };
+            }
+
             if (spans.Count > 0 && spans[^1].To == a && Joins(spans[^1].Stretch, winner))
             {
                 spans[^1] = (spans[^1].Stretch, spans[^1].From, b);
@@ -253,16 +281,22 @@ public static class TeamActivity
                 ? await ReasonAsync(log, member, floor, run, ct)
                 : null;
 
+            if (stretch.Hold is { } hold)
+            {
+                answer.Add(new TeamActivitySpan(Held, start, open ? null : stop, stretch.Workflow, hold.Reason, hold.ReasonKind));
+                continue;
+            }
+
             answer.Add(new TeamActivitySpan(stretch.State, start, open ? null : stop, stretch.Workflow, reason));
         }
 
         return answer;
     }
 
-    /// <summary>Two neighbouring stretches read as one span: the same state of the same run, or idle
-    /// after idle.</summary>
+    /// <summary>Two neighbouring stretches read as one span: the same state of the same run or the
+    /// same hold, or idle after idle.</summary>
     private static bool Joins(Stretch a, Stretch b) =>
-        a.State == b.State && (a.Run == b.Run || (a.State == Idle && b.State == Idle));
+        a.State == b.State && a.Hold == b.Hold && (a.Run == b.Run || (a.State == Idle && b.State == Idle));
 
     private static string After(string runOutcome) => runOutcome switch
     {
@@ -341,10 +375,11 @@ public sealed record TeamActivityMember(
     IReadOnlyList<TeamActivitySpan> Spans);
 
 /// <summary>One stretch of one state. <see cref="To"/> null is still open at the answer's
-/// <c>serverNow</c>.</summary>
+/// <c>serverNow</c>. <see cref="ReasonKind"/> is a held span's only.</summary>
 public sealed record TeamActivitySpan(
     string State,
     DateTimeOffset From,
     DateTimeOffset? To,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Workflow = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ReasonKind = null);

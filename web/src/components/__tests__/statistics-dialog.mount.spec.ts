@@ -161,7 +161,7 @@ interface ChartOption {
     appendTo: string
     position: (point: number[], params: unknown, dom: unknown, rect: unknown, size: { contentSize: number[]; viewSize: number[] }) => number[]
   };
-  series: { name: string; data: number[][] }[];
+  series: { name: string; data: number[][]; itemStyle?: { color?: string; decal?: unknown } }[];
 }
 
 /** The reference lanes' labels, read at each lane's middle. */
@@ -407,7 +407,7 @@ describe('the columns', () => {
     await openFromTile();
 
     const option = dialogOption();
-    const states = ['running', 'waiting', 'blocked', 'failed', 'idle'];
+    const states = ['running', 'waiting', 'held', 'blocked', 'failed', 'idle'];
 
     expect(option.legend.data).toEqual(states);
 
@@ -423,6 +423,35 @@ describe('the columns', () => {
     expect(series.waiting).toEqual([[utc('14:06:00'), utc('14:07:00'), 0, 1 / 3]]);
     expect(series.failed).toEqual([]);
     expect(series.idle).toEqual([]);
+  });
+
+  it('draws held as its own series, striped, and names it waiting for a slot in the legend', async () => {
+    answer = activity({
+      members: [
+        member('Manager', []),
+        member('DeveloperInes', [
+          { state: 'waiting', from: iso(utc('14:06:00')), to: iso(utc('14:06:20')) },
+          { state: 'held', from: iso(utc('14:06:20')), to: iso(utc('14:06:50')), reason: 'waiting for a slot', reasonKind: 'slot' },
+        ]),
+      ],
+    });
+
+    await mountStrip();
+    await openFromTile();
+
+    const option = dialogOption() as ChartOption & { legend: { formatter: (name: string) => string } };
+
+    expect(option.legend.data).toContain('held');
+    expect(option.legend.formatter('held')).toBe('waiting for a slot');
+    expect(option.legend.formatter('waiting')).toBe('waiting');
+
+    // Held sits on waiting in the 14:06 column: 20 s waiting, then 30 s held.
+    const held = option.series.find((s) => s.name === 'held')!;
+    expect(held.data).toEqual([[utc('14:06:00'), utc('14:07:00'), 1 / 3, 1 / 3 + 0.5]]);
+    expect(held.itemStyle?.decal).toBeTruthy();
+    expect(option.series.find((s) => s.name === 'blocked')!.itemStyle?.decal).toBeUndefined();
+
+    expect(await hoverText(option, utc('14:06:30'))).toContain('waiting for a slot 30 s');
   });
 
   it('draws a state the legend has toggled off in the theme\'s faint ink, not the chart\'s own grey', async () => {

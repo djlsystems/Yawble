@@ -309,6 +309,29 @@ builder.Services.AddSingleton<ISubscriptions>(store);
 builder.Services.AddSingleton(workflowWaits);
 builder.Services.AddSingleton<IUsageLedger>(new SqliteUsageLedger(database));
 
+// EVERY ADMISSION HOLD, written down by admission as it happens (`admission_holds`), so the team
+// activity read can show a wait for a slot with its reason after the fact. The writer queues; a
+// write that fails is logged and admission carries on.
+var admissionHolds = new SqliteAdmissionHolds(database);
+var admissionHoldWriter = new AdmissionHoldWriter(admissionHolds);
+
+// A HOST START CLOSES WHAT IT DID NOT SEE END: a hold still open belonged to a Host that went down
+// while the run waited. It is closed at this start, its reason unchanged, marked unfinished. A
+// failure is printed and the Host starts anyway; the rows stay open for the next start.
+try
+{
+    if (await admissionHolds.CloseUnfinishedAsync(DateTimeOffset.UtcNow) is > 0 and var closed)
+    {
+        Console.WriteLine($"Closed {closed} admission hold(s) left open by the last run of this Host, marked unfinished.");
+    }
+}
+catch (Exception exception) when (exception is not OperationCanceledException)
+{
+    Console.Error.WriteLine($"The admission holds left open could not be closed and are tried again at the next start: {exception.Message}");
+}
+builder.Services.AddSingleton<IAdmissionHoldLedger>(admissionHolds);
+builder.Services.AddSingleton(admissionHoldWriter);
+
 // THE OUTCOMES AND THEIR LINKS, in the same file: every person's write lands with its tenant_events
 // row in one transaction, written with the tenant log's own columns.
 var outcomeStore = new SqliteOutcomeStore(database, TenantAuditRow.AppendAsync);
@@ -970,7 +993,7 @@ if (control)
     tenantSettings.Workers = () => [.. workers.Entries().Where(e => e.DroppedAt is null).Select(e => WorkerBounds.Of(e.Info))];
 }
 
-var wip = new WipLedger(tenantSettings.WipMaxRunning, workers);
+var wip = new WipLedger(tenantSettings.WipMaxRunning, workers, admissionHoldWriter);
 workers.Placed = wip.PlacedCount;
 builder.Services.AddSingleton(headroom);
 builder.Services.AddSingleton(workers);
@@ -1808,6 +1831,7 @@ builder.Services.AddMcpServer()
 
 var app = builder.Build();
 app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
+admissionHoldWriter.Logger = app.Services.GetRequiredService<ILogger<AdmissionHoldWriter>>();
 
 {
     // A preset switched between home and issued reads as such at once, not after the probe's cache.
@@ -2538,6 +2562,11 @@ app.Services.GetRequiredService<ConciergeSessionStore>().Changed += () => record
 recordConciergeSessions();
 app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
 app.Lifetime.ApplicationStopping.Register(() => workersRecording?.Dispose());
+// The Host going down ends no admission hold: a waiter it withdraws, or admits to a slot it frees,
+// leaves its row open for the next start to close, marked unfinished. Registered after the other
+// stopping callbacks, so it runs before them (a token runs its callbacks newest first) - before
+// dropping the workers frees a slot.
+app.Lifetime.ApplicationStopping.Register(wip.HostStopping);
 Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
     app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version,
     worker => ConciergeSessionsView.TerminalsOn(

@@ -204,6 +204,14 @@ export function usedByLabels(connection: Pick<Connection, 'usedBy'>): string[] {
  * `/console?connection=connected|reconnected|refused[&id=…][&reason=…]`. Null when the query carries
  * none of it.
  */
+/**
+ * The providers of a slot Add connection signs in to: Google and Microsoft. A custom provider's
+ * account is connected in Admin → Connections.
+ */
+export function guidedProviders(spec: Pick<ConnectionSlot, 'providers'>): string[] {
+  return spec.providers.filter((id) => id === 'google' || id === 'microsoft');
+}
+
 export type CallbackOutcome =
   | { outcome: 'connected' | 'reconnected'; id: string | null }
   | { outcome: 'refused'; reason: string };

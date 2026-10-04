@@ -119,6 +119,29 @@ public sealed class SolutionCheckTests : IDisposable
     }
 
     [Fact]
+    public void Each_connection_input_carries_its_slots_plugin_providers_and_scopes_before_any_install()
+    {
+        // The plugin is only in the package: nothing is installed yet, and the wizard still needs to
+        // know which providers the slot takes and what it asks of each.
+        var folder = Sample();
+        PluginJson(p => p["connections"] = JsonNode.Parse(
+            """{"mail":{"description":"The mailbox.","providers":["google","microsoft"],"scopes":{"google":["https://mail.google.com/"],"microsoft":["Mail.Read"]},"required":true}}"""))(folder);
+        Json(m => m["inputs"]!["connections"] = new JsonArray(new JsonObject { ["member"] = "Scout", ["slot"] = "mail", ["description"] = "The inbox to watch." }))(folder);
+
+        var check = Check(folder);
+        Assert.True(check.Ok, string.Join("\n", check.Refusals));
+
+        var input = Assert.Single(check.Plan!.PersonConnections);
+        Assert.Equal(("Scout", "mail", "The inbox to watch.", "job-board"), (input.Member, input.Slot, input.Description, input.Plugin));
+        Assert.Equal(["google", "microsoft"], input.Providers);
+        Assert.Equal(["https://mail.google.com/"], input.Scopes["google"]);
+        Assert.Equal(["Mail.Read"], input.Scopes["microsoft"]);
+
+        var json = JsonNode.Parse(JsonSerializer.Serialize(check.Plan, new JsonSerializerOptions(JsonSerializerDefaults.Web)))!;
+        Assert.Equal("microsoft", json["personConnections"]![0]!["providers"]![1]!.GetValue<string>());
+    }
+
+    [Fact]
     public void The_1_1_0_variant_passes_and_differs_from_1_0_0_as_its_overlay_says()
     {
         var before = Check(Sample()).Plan!;

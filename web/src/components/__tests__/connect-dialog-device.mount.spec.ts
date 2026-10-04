@@ -21,6 +21,7 @@ const {
   startConnection,
   startDeviceConnection,
   getConnectionFlow,
+  listOpenConnectionFlows,
   renameConnection,
   saveConnectionProvider,
   goTo,
@@ -32,6 +33,7 @@ const {
   startConnection: vi.fn(),
   startDeviceConnection: vi.fn(),
   getConnectionFlow: vi.fn(),
+  listOpenConnectionFlows: vi.fn(),
   renameConnection: vi.fn(),
   saveConnectionProvider: vi.fn(),
   goTo: vi.fn(),
@@ -46,6 +48,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   startConnection,
   startDeviceConnection,
   getConnectionFlow,
+  listOpenConnectionFlows,
   renameConnection,
   saveConnectionProvider,
 }));
@@ -136,6 +139,7 @@ beforeEach(() => {
     startConnection,
     startDeviceConnection,
     getConnectionFlow,
+    listOpenConnectionFlows,
     renameConnection,
     saveConnectionProvider,
     goTo,
@@ -150,6 +154,7 @@ beforeEach(() => {
   copyText.mockResolvedValue(undefined);
   startDeviceConnection.mockResolvedValue(started());
   getConnectionFlow.mockResolvedValue({ state: 'waiting', sentence: 'Waiting for you to sign in.' });
+  listOpenConnectionFlows.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -431,6 +436,38 @@ describe("Microsoft's sign-in step", () => {
     await advance(30_000);
 
     expect(getConnectionFlow.mock.calls.length).toBe(reads);
+
+    wrapper.unmount();
+  });
+
+  it('picks a waiting sign-in back up when Add connection is closed and opened again: its code, link, countdown and state', async () => {
+    const wrapper = await mountConnections();
+    await startSignIn();
+    await advance(61_000);
+    await click(bodyFind('[data-guided-connect] button[aria-label="Close"]'));
+
+    // The Host still holds the flow, and lists it as the caller's own waiting one.
+    listOpenConnectionFlows.mockResolvedValue([
+      { flowId: 'flow-1', provider: 'microsoft', userCode: fakeCode, verificationUri, expiresAt: '2026-10-04T10:15:00Z', state: 'waiting' },
+    ]);
+    await advance(60_000);
+    await click(button('Add connection'));
+
+    expect(listOpenConnectionFlows).toHaveBeenCalled();
+    expect(step()).toBe('signin');
+    expect(bodyFind('[data-device-state]')!.getAttribute('data-device-state')).toBe('waiting');
+    expect(bodyFind('[data-device-code]')!.textContent).toContain(fakeCode);
+    expect(bodyFind('a[data-device-link]')!.getAttribute('href')).toBe(verificationUri);
+    expect(bodyFind('[data-device-countdown]')!.textContent).toContain('12:59');
+    // No second code was asked for: it is the same sign-in.
+    expect(startDeviceConnection).toHaveBeenCalledTimes(1);
+
+    // And it is read again until it is done.
+    const reads = getConnectionFlow.mock.calls.length;
+    getConnectionFlow.mockResolvedValue({ state: 'done', sentence: 'Connected person@example.test.', connection: connected });
+    await advance(3_000);
+    expect(getConnectionFlow.mock.calls.length).toBeGreaterThan(reads);
+    expect(step()).toBe('result');
 
     wrapper.unmount();
   });

@@ -246,5 +246,48 @@ public static class OutcomeSchema
             """
             CREATE INDEX ix_usage_ledger_team_ended ON usage_ledger(team_id, ended_at);
             """),
+
+        // EVERY ADMISSION HOLD: a run that waited for a slot, for memory, for memory pressure to ease or
+        // for a worker, from when it was first held to when the hold ended, one row per reason
+        // (`SqliteAdmissionHolds`, written by admission through `AdmissionHoldWriter`). Like the
+        // ledger it keeps the team's name as it was and nothing deletes a row; the one update is the
+        // close - `released_at` set once, with `unfinished` when a Host start closes a row the Host
+        // before it never saw end - so Reset and log retention never take a hold.
+        new MigrationStep(
+            "outcome-006",
+            """
+            CREATE TABLE admission_holds (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id      TEXT    NOT NULL COLLATE NOCASE,
+                team_name    TEXT    NULL,
+                member       TEXT    NOT NULL COLLATE NOCASE,
+                delivery_seq INTEGER NULL,
+                held_at      TEXT    NOT NULL,
+                released_at  TEXT    NULL,
+                reason_kind  TEXT    NOT NULL,
+                reason       TEXT    NOT NULL,
+                unfinished   INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE INDEX ix_admission_holds_team_held ON admission_holds(team_id, held_at);
+            CREATE INDEX ix_admission_holds_open ON admission_holds(team_id, member) WHERE released_at IS NULL;
+
+            CREATE TRIGGER admission_holds_close_only BEFORE UPDATE ON admission_holds
+            WHEN OLD.released_at IS NOT NULL
+              OR NEW.released_at IS NULL
+              OR NEW.id IS NOT OLD.id
+              OR NEW.team_id IS NOT OLD.team_id
+              OR NEW.team_name IS NOT OLD.team_name
+              OR NEW.member IS NOT OLD.member
+              OR NEW.delivery_seq IS NOT OLD.delivery_seq
+              OR NEW.held_at IS NOT OLD.held_at
+              OR NEW.reason_kind IS NOT OLD.reason_kind
+              OR NEW.reason IS NOT OLD.reason
+              OR (NEW.unfinished IS NOT OLD.unfinished AND NEW.unfinished IS NOT 1)
+            BEGIN SELECT RAISE(ABORT, 'admission_holds is append-only: a row is only closed, once'); END;
+
+            CREATE TRIGGER admission_holds_no_delete BEFORE DELETE ON admission_holds
+            BEGIN SELECT RAISE(ABORT, 'admission_holds is append-only'); END;
+            """),
     ];
 }

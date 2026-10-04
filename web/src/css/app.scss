@@ -68,6 +68,9 @@
   // on purpose, each theme's own strong rule.
   --os-stat-running: #2e7d4f;
   --os-stat-waiting: #5f7385;
+  // HELD - waiting for a slot - is a strong warning orange between blocked's amber and failed's red,
+  // and is striped wherever it is drawn, so it is never told from either by hue alone.
+  --os-stat-held: #c4410c;
   --os-stat-blocked: #b26a00;
   --os-stat-failed: #c62828;
   --os-stat-idle: var(--os-rule-strong);
@@ -153,6 +156,7 @@ body.body--dark {
 
   --os-stat-running: var(--os-ok);
   --os-stat-waiting: #8fa1b3;
+  --os-stat-held: #f07a3a;
   --os-stat-blocked: var(--os-warn);
   --os-stat-failed: var(--os-error);
   // Redeclared here, not inherited: a var() resolves where it is declared, so the :root one keeps
@@ -737,6 +741,7 @@ table.os-cols-fixed {
 
 .stats-tooltip .stats-chip--running { background: var(--os-stat-running); }
 .stats-tooltip .stats-chip--waiting { background: var(--os-stat-waiting); }
+.stats-tooltip .stats-chip--held { background: repeating-linear-gradient(90deg, var(--os-stat-held) 0 3px, transparent 3px 5px); }
 .stats-tooltip .stats-chip--blocked { background: var(--os-stat-blocked); }
 .stats-tooltip .stats-chip--failed { background: var(--os-stat-failed); }
 .stats-tooltip .stats-chip--idle { background: var(--os-stat-idle); }
