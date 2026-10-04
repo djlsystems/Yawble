@@ -53,6 +53,7 @@ import {
 } from '../lib/solutionPanel';
 import { cappedLine, spentTodayLine } from '../lib/triggers';
 import ConnectionPicker from './ConnectionPicker.vue';
+import { bindSlot } from '../lib/slotBinding';
 import HostPathPicker from './HostPathPicker.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 import SolutionWizard from './SolutionWizard.vue';
@@ -175,6 +176,35 @@ async function bind(item: SolutionPanelBlocked, connection: string) {
   await saveSettings(fix.member);
 }
 
+/**
+ * A sign-in from a slot completed: the new connection is bound through the member's settings route,
+ * with its STORED settings. A refusal is thrown for the slot to show. The panel is read again once
+ * the dialog closes: read now, the fix the dialog was opened from would leave with it.
+ */
+async function bindConnected(member: string, slot: string, connection: string) {
+  await bindSlot(props.team, member, slot, connection);
+  const state = settings.value[member];
+  if (state) state.connections = { ...state.connections, [slot]: connection };
+}
+
+/** Add connection from a slot was closed: the panel is read again, so a slot bound there is no longer listed as missing. */
+async function rereadPanel() {
+  try {
+    panel.value = { ...(await solutionPanel(props.team)) };
+  } catch {
+    // The next read shows it.
+  }
+}
+
+/** The connections and providers again, after a sign-in from a slot made one. */
+async function reloadConnections() {
+  try {
+    [available.value, providers.value] = await Promise.all([listConnections(), listConnectionProviders()]);
+  } catch {
+    // The pickers keep what they had.
+  }
+}
+
 // --- Controls: triggers --------------------------------------------------------------------------
 
 const caps = ref<Record<string, string>>({});
@@ -266,6 +296,8 @@ interface MemberSettings {
   config: PluginFieldValues;
   secrets: Record<string, string>;
   connections: Record<string, string>;
+  /** The plugin it runs, for a slot's Connect; empty when its settings could not be read. */
+  plugin: string;
   problem: string;
   saved: boolean;
 }
@@ -294,6 +326,7 @@ async function loadSettings(read: SolutionPanel) {
           config,
           secrets: initialSecrets(shape, stored.secrets),
           connections: { ...(stored.connections ?? {}) },
+          plugin: stored.plugin,
           problem: '',
           saved: false,
         };
@@ -303,6 +336,7 @@ async function loadSettings(read: SolutionPanel) {
           config: {},
           secrets: {},
           connections: {},
+          plugin: '',
           problem: `The settings could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
           saved: false,
         };
@@ -563,9 +597,12 @@ function closeUninstall() {
                   :spec="settings[item.fix.connection.member]!.shape.connections![item.fix.connection.slot]!"
                   :connections="available"
                   :providers="providers"
+                  :plugin="settings[item.fix.connection.member]!.plugin || undefined"
+                  :bind="(id: string) => bindConnected(item.fix!.connection!.member, item.fix!.connection!.slot, id)"
                   @update:model-value="(value: string) => bind(item, value)"
+                  @connected="reloadConnections"
+                  @closed="rereadPanel"
                 />
-                <div class="text-caption os-text-muted">No account yet? Connect one in Admin → Connections.</div>
               </div>
               <div v-else class="text-caption os-text-muted">Set it under Controls.</div>
             </div>
@@ -768,6 +805,8 @@ function closeUninstall() {
                   v-model:secrets="settings[member.member]!.secrets"
                   v-model:connections="settings[member.member]!.connections"
                   :shape="settings[member.member]!.shape"
+                  :plugin="settings[member.member]!.plugin || undefined"
+                  :bind-slot="(slot: string, id: string) => bindConnected(member.member, slot, id)"
                 />
                 <div class="row items-center q-gutter-sm q-mt-xs">
                   <q-btn
@@ -796,6 +835,8 @@ function closeUninstall() {
               v-model:secrets="settings[member.member]!.secrets"
               v-model:connections="settings[member.member]!.connections"
               :shape="slotShape(member.member)"
+              :plugin="settings[member.member]!.plugin || undefined"
+              :bind-slot="(slot: string, id: string) => bindConnected(member.member, slot, id)"
             />
             <q-btn
               unelevated

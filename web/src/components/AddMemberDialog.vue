@@ -335,6 +335,7 @@ async function submit() {
             v-model:secrets="pluginSecrets"
             v-model:connections="pluginConnections"
             :shape="plugin"
+            :plugin="plugin.id"
           />
         </div>
 

@@ -92,4 +92,37 @@ describe("the provider's redirect back to /console?connection=…", () => {
 
     wrapper.unmount();
   });
+
+  it('tells a tab waiting on a sign-in started from a slot what came back, and closes itself', async () => {
+    // A slot's Add connection, in the tab that opened the provider, is waiting for this return.
+    localStorage.setItem('connections.waiting', '1');
+    const heard: unknown[] = [];
+    const listener = new BroadcastChannel('connections.return');
+    listener.onmessage = (event) => heard.push(event.data);
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+
+    const { wrapper } = await returnFromProvider('?connection=connected&id=conn-1');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(heard).toEqual([{ outcome: 'connected', id: 'conn-1' }]);
+    expect(close).toHaveBeenCalled();
+    expect(localStorage.getItem('connections.waiting')).toBeNull();
+
+    listener.close();
+    close.mockRestore();
+    wrapper.unmount();
+  });
+
+  it('shows a return nobody is waiting for where it lands, as before', async () => {
+    localStorage.removeItem('connections.waiting');
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+
+    const { wrapper } = await returnFromProvider('?connection=connected&id=conn-1');
+
+    expect(wrapper.findComponent(ConnectionsDialog).props('modelValue')).toBe(true);
+    expect(close).not.toHaveBeenCalled();
+
+    close.mockRestore();
+    wrapper.unmount();
+  });
 });

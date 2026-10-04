@@ -3143,6 +3143,19 @@ export interface ConnectionDeviceStart {
   expiresAt: string
 }
 
+/**
+ * One of `GET /api/connections/flows/open`: a sign-in with a code the caller started that the Host
+ * still holds - the code the person types, never the provider's device code.
+ */
+export interface ConnectionOpenFlow {
+  flowId: string
+  provider: string
+  userCode: string
+  verificationUri: string
+  expiresAt: string
+  state: ConnectionFlow['state']
+}
+
 /** `GET /api/connections/flows/{flowId}`: where a sign-in with a code is, in a sentence. */
 export interface ConnectionFlow {
   state: 'waiting' | 'done' | 'refused' | 'expired'

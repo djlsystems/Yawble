@@ -38,6 +38,7 @@ import VersionTag from '../components/VersionTag.vue';
 import CapacityMonitor from '../components/CapacityMonitor.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
+import { announceProviderReturn } from '../lib/providerReturn';
 import {
   ConnectionsAction,
   DocumentsAction,
@@ -146,6 +147,10 @@ const connectionNotice = ref<CallbackOutcome | null>(null);
 onMounted(() => {
   const returned = callbackOutcome(router.currentRoute.value.query);
   if (!returned) return;
+
+  // A slot's Add connection opened the provider in this tab and waits in its own: tell it, and
+  // close. A tab the browser will not close shows the notice as before.
+  if (announceProviderReturn(returned)) window.close();
 
   connectionNotice.value = returned;
   connectionsOpen.value = true;

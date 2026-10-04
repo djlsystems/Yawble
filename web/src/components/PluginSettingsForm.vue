@@ -36,7 +36,13 @@ import ConnectionPicker from './ConnectionPicker.vue';
  * The "as JSON" view is read-only, and it is exactly `settingsBody` - what will be stored - for
  * checking, never for editing.
  */
-const props = defineProps<{ shape: PluginSettingsShape }>();
+const props = defineProps<{
+  shape: PluginSettingsShape;
+  /** The plugin's id: with it, each slot offers Connect where nothing suitable is bound. */
+  plugin?: string | undefined;
+  /** Binds a slot of the member being edited at the Host, throwing its refusal. Absent at hire. */
+  bindSlot?: ((slot: string, connectionId: string) => Promise<void>) | undefined;
+}>();
 
 const config = defineModel<PluginFieldValues>('config', { required: true });
 const secrets = defineModel<Record<string, string>>('secrets', { required: true });
@@ -194,7 +200,10 @@ function secretHint(description: string | null | undefined, required: boolean) {
         :spec="declared"
         :connections="available"
         :providers="providers"
+        :plugin="plugin"
+        :bind="bindSlot ? (id: string) => bindSlot!(String(key), id) : undefined"
         @update:model-value="(value: string) => (connections = { ...connections, [key]: value })"
+        @connected="loadConnections"
       />
       <div v-if="connectionsProblem" class="text-caption text-negative" data-connections-problem>
         {{ connectionsProblem }}

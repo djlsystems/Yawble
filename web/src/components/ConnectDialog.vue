@@ -4,6 +4,8 @@ import {
   getConnectionFlow,
   getConnectionNeeds,
   listConnectionProviders,
+  listConnections,
+  listOpenConnectionFlows,
   renameConnection,
   saveConnectionProvider,
   startConnection,
@@ -16,6 +18,7 @@ import type {
   ConnectionGuide,
   ConnectionGuideStep,
   ConnectionNeeds,
+  ConnectionOpenFlow,
   ConnectionProvider,
   ConnectionProviderSave,
   MicrosoftAudience,
@@ -23,6 +26,7 @@ import type {
 import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { copyText } from '../lib/clipboard';
 import {
+  type CallbackOutcome,
   countdown,
   googleClientIdProblem,
   guideLink,
@@ -32,6 +36,7 @@ import {
   rememberGuidedConnect,
 } from '../lib/connections';
 import { productCli } from '../presentation/product';
+import { awaitProviderReturn } from '../lib/providerReturn';
 
 /**
  * ADD CONNECTION: connecting an account for a person who has never registered an OAuth app.
@@ -52,6 +57,15 @@ import { productCli } from '../presentation/product';
  *    it is done and moves on to `result` by itself. Nothing leaves this address, so it works from
  *    localhost, a LAN address or a tunnel alike.
  *
+ * STARTED FROM A SLOT (`need`): a plugin's connection slot that has nothing suitable bound opens this
+ * dialog for that slot alone - its providers only, the scopes of that one slot - and skips the
+ * service step when the slot takes one provider. Google's sign-in then opens in a new tab, so the
+ * form the slot is in is still there when it comes back; `connected` says which connection the
+ * sign-in made, and the opener binds it.
+ *
+ * A SIGN-IN WITH A CODE STILL WAITING at the Host is picked back up on open: closing the dialog, or
+ * reloading the page, does not lose the code the person may be typing at Microsoft.
+ *
  * THE CLIENT SECRET IS WRITE-ONLY here as in Advanced: typed, sent once, never shown or kept. The
  * provider's device code never reaches the browser: only the code the person types does.
  */
@@ -60,11 +74,15 @@ const props = defineProps<{
   connections: Connection[];
   /** The connection the guided sign-in came back with: opens at the last step. */
   returned?: { id: string | null } | { refused: string } | null;
+  /** The slot this was started from: its plugin, its name and the providers it takes. */
+  need?: { plugin: string; slot: string; providers: string[] } | null;
 }>();
 const open = defineModel<boolean>({ required: true });
 const emit = defineEmits<{
   /** A provider's client or a connection's name was saved: read the lists again. */
   changed: [];
+  /** The sign-in completed and stored this connection. */
+  connected: [connection: Connection];
 }>();
 
 type Step = 'service' | 'setup' | 'signin' | 'result';
@@ -83,15 +101,21 @@ const setUpNow = ref(false);
 const provider = computed(() => props.providers.find((candidate) => candidate.id === providerId.value) ?? null);
 const needsSetUp = computed(() => provider.value !== null && !provider.value.configured && !setUpNow.value);
 
+/** Each opening, so an answer read for an earlier one is dropped. */
+let opening = 0;
+
 watch(open, (showing) => {
   if (!showing) {
     // Closing cancels nothing at the Host: it only stops reading the flow.
     stopDevice();
+    stopWaiting();
     return;
   }
   problem.value = '';
   device.value = null;
   deviceConnection.value = null;
+  tabUrl.value = null;
+  tabRefusal.value = null;
 
   if (props.returned) {
     step.value = 'result';
@@ -112,14 +136,47 @@ watch(open, (showing) => {
   clientSecret.value = '';
   audience.value = 'common';
   tenantId.value = '';
+
+  void begin(++opening);
 });
+
+/** A waiting sign-in with a code is picked back up; else a slot taking one provider skips the service step. */
+async function begin(seq: number) {
+  let flows: ConnectionOpenFlow[] = [];
+  try {
+    flows = await listOpenConnectionFlows();
+  } catch {
+    // Nothing to pick up: the dialog starts at the service, as it would have.
+  }
+  if (seq !== opening || !open.value || step.value !== 'service' || providerId.value !== null) return;
+
+  const waiting = flows.find(
+    (flow) =>
+      flow.state === 'waiting'
+      && new Date(flow.expiresAt).getTime() > Date.now()
+      && services.value.some((service) => service.id === flow.provider)
+      && props.providers.some((candidate) => candidate.id === flow.provider),
+  );
+  if (waiting) {
+    resumeDevice(waiting);
+    return;
+  }
+
+  const only = props.need && services.value.length === 1 ? services.value[0]! : null;
+  if (!only) return;
+  await choose(only.id);
+  if (seq === opening && open.value && needs.value && step.value === 'service') await next();
+}
 
 // --- 1. Service -----------------------------------------------------------------------------------
 
-const services = [
+const builtIn = [
   { id: 'google', name: 'Google' },
   { id: 'microsoft', name: 'Microsoft' },
 ];
+
+/** The services offered: a slot's own, when started from one. */
+const services = computed(() => (props.need ? builtIn.filter((service) => props.need!.providers.includes(service.id)) : builtIn));
 
 async function choose(id: string) {
   providerId.value = id;
@@ -129,7 +186,8 @@ async function choose(id: string) {
   needsLoading.value = true;
 
   try {
-    needs.value = await getConnectionNeeds(id);
+    const need = props.need;
+    needs.value = need ? await getConnectionNeeds(id, { plugin: need.plugin, slot: need.slot }) : await getConnectionNeeds(id);
   } catch (cause) {
     problem.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
@@ -270,6 +328,13 @@ async function signIn() {
   problem.value = '';
   try {
     const flow = await startConnection({ provider: chosen.id, scopes: chosenScopes.value });
+    if (props.need) {
+      // From a slot: the provider opens in another tab, and this one waits for its return.
+      stopWaiting();
+      tabUrl.value = flow.authorizationUrl;
+      stopReturn = awaitProviderReturn((outcome) => void providerReturned(outcome));
+      return;
+    }
     rememberGuidedConnect(chosen.id);
     goTo(flow.authorizationUrl);
   } catch (cause) {
@@ -324,9 +389,24 @@ async function startDevice() {
   }
 }
 
+/** A sign-in with a code the Host still holds, shown again as it was: its code, link and countdown. */
+function resumeDevice(flow: ConnectionOpenFlow) {
+  stopDevice();
+  providerId.value = flow.provider;
+  device.value = { flowId: flow.flowId, userCode: flow.userCode, verificationUri: flow.verificationUri, expiresAt: flow.expiresAt };
+  deviceRead.value = null;
+  step.value = 'signin';
+  now.value = Date.now();
+  clock = setInterval(() => (now.value = Date.now()), 1000);
+  // Read at once: the flow may have moved on while the dialog was closed.
+  readTimer = setTimeout(readFlow, 0);
+}
+
 /** Back to the service: the code shown is left to expire at the Host. */
 function back() {
   stopDevice();
+  stopWaiting();
+  tabUrl.value = null;
   device.value = null;
   deviceRead.value = null;
   step.value = 'service';
@@ -362,6 +442,48 @@ async function readFlow() {
     resultName.value = '';
     emit('changed');
     step.value = 'result';
+    if (read.connection) emit('connected', read.connection);
+  }
+}
+
+// --- 3. Sign in in another tab, from a slot ---------------------------------------------------------
+
+/** The provider's consent page, opened in another tab; null until the sign-in is started. */
+const tabUrl = ref<string | null>(null);
+const tabRefusal = ref<string | null>(null);
+let stopReturn: (() => void) | null = null;
+
+function stopWaiting() {
+  stopReturn?.();
+  stopReturn = null;
+}
+
+onBeforeUnmount(stopWaiting);
+
+/** The other tab came back from the provider: the connection it made, or the Host's reason. */
+async function providerReturned(outcome: CallbackOutcome) {
+  stopWaiting();
+  if (!open.value) return;
+  resultName.value = '';
+
+  if (outcome.outcome === 'refused') {
+    tabRefusal.value = outcome.reason;
+    step.value = 'result';
+    return;
+  }
+
+  try {
+    const made = outcome.id ? (await listConnections()).find((connection) => connection.id === outcome.id) : undefined;
+    emit('changed');
+    if (made) {
+      deviceConnection.value = made;
+      step.value = 'result';
+      emit('connected', made);
+    } else {
+      step.value = 'result';
+    }
+  } catch (cause) {
+    problem.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
 
@@ -376,7 +498,7 @@ const returnedConnection = computed(() => {
   if (!returned || !('id' in returned) || !returned.id) return null;
   return props.connections.find((connection) => connection.id === returned.id) ?? null;
 });
-const refusal = computed(() => (props.returned && 'refused' in props.returned ? props.returned.refused : null));
+const refusal = computed(() => tabRefusal.value ?? (props.returned && 'refused' in props.returned ? props.returned.refused : null));
 
 async function finish() {
   const connection = returnedConnection.value;
@@ -654,7 +776,23 @@ const stepLabels = computed(() => [
 
       <!-- 3. SIGN IN -->
       <q-card-section v-else-if="step === 'signin' && provider" data-connect-step="signin" class="q-gutter-y-sm">
-        <div>
+        <div v-if="tabUrl" data-signin-tab>
+          <div>
+            <a :href="tabUrl" target="_blank" rel="noopener noreferrer" data-signin-link>Open {{ provider.name }} to sign in</a>
+            in another tab, and agree there. This step moves on by itself when you are back.
+          </div>
+          <div class="row items-center q-gutter-sm q-mt-sm os-text-muted">
+            <q-spinner size="16px" />
+            <span>Waiting for you to sign in…</span>
+          </div>
+        </div>
+        <div v-else-if="need">
+          {{ provider.name }} opens in another tab to sign in and agree, so this page stays as it is.
+          {{ chosenScopes.length === 0
+            ? 'Only the account\'s name and email address are asked for.'
+            : `${chosenScopes.length === 1 ? 'One thing is' : `${chosenScopes.length} things are`} asked for besides the account's name and email address.` }}
+        </div>
+        <div v-else>
           Your browser goes to {{ provider.name }} to sign in and agree, then comes back here.
           {{ chosenScopes.length === 0
             ? 'Only the account\'s name and email address are asked for.'
@@ -718,7 +856,7 @@ const stepLabels = computed(() => [
             @click="startDevice"
           />
           <q-btn
-            v-else-if="!isMicrosoft || device === null"
+            v-else-if="(!isMicrosoft || device === null) && tabUrl === null"
             color="primary"
             no-caps
             :label="`Sign in with ${provider.name}`"

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import ChipListInput from './ChipListInput.vue';
+import SlotConnect from './SlotConnect.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   checkSolution,
   installSolution,
+  listConnectionProviders,
+  listPlugins,
   previewSolution,
   solutionsInstalled,
   teamSolution,
@@ -13,6 +16,10 @@ import { uploadDocument } from '../api/documents';
 import {
   asDocumentsFolderKey,
   asTeamId,
+  type Connection,
+  type ConnectionProvider,
+  type ConnectionSlot,
+  type InstalledPlugin,
   type InstalledSolution,
   type SolutionCheck,
   type SolutionDiff,
@@ -122,6 +129,7 @@ function reset() {
   previewProblem.value = '';
   values.value = {};
   bindings.value = {};
+  connectedHere.value = [];
   files.value = {};
   result.value = null;
   installError.value = '';
@@ -148,6 +156,7 @@ async function start() {
 
   teamName.value = plan.team.name;
   seedValues(plan);
+  void loadSlots(plan);
 
   try {
     installed.value = await solutionsInstalled();
@@ -334,8 +343,41 @@ function connectionWords(id: string | null): string {
   return connectionOptions.value.find((option) => option.value === id)?.label ?? id;
 }
 
+// CONNECT BESIDE EACH PICKER: the slot its member's plugin declares, as the installed plugin says it,
+// and the providers to sign in to. A connection made here is selected in that picker; the install
+// binds it, as it binds one chosen there.
+const plugins = ref<InstalledPlugin[]>([]);
+const providers = ref<ConnectionProvider[]>([]);
+const connectedHere = ref<Connection[]>([]);
+
+async function loadSlots(from: SolutionPlan) {
+  if (from.inputs.connections.length === 0) return;
+  try {
+    const [list, read] = await Promise.all([listPlugins(), listConnectionProviders()]);
+    plugins.value = list.plugins;
+    providers.value = read;
+  } catch {
+    // Without them there is no Connect; the pickers are as they were.
+  }
+}
+
+/** The plugin and slot a connection input is for, or null when its plugin is not installed yet. */
+function slotOf(input: { member: string; slot: string }): { plugin: string; spec: ConnectionSlot } | null {
+  const pluginId = plan.value?.members.find((member) => member.name === input.member)?.pluginId;
+  const spec = plugins.value.find((plugin) => plugin.id === pluginId)?.connections?.[input.slot];
+  return pluginId && spec ? { plugin: pluginId, spec } : null;
+}
+
+function connectedFor(input: { member: string; slot: string }, connection: Connection) {
+  connectedHere.value = [...connectedHere.value.filter((made) => made.id !== connection.id), connection];
+  bindings.value = { ...bindings.value, [slotKey(input)]: connection.id };
+}
+
 const connectionOptions = computed(() =>
-  (okPreview.value?.connections ?? []).map((connection) => ({
+  [
+    ...(okPreview.value?.connections ?? []),
+    ...connectedHere.value.filter((made) => !(okPreview.value?.connections ?? []).some((listed) => listed.id === made.id)),
+  ].map((connection) => ({
     value: connection.id,
     label: `${connection.name} - ${connection.account} (${connection.provider})${connection.status === 'ok' ? '' : `, ${connection.status}`}`,
   })),
@@ -860,17 +902,29 @@ function next() {
                   </div>
                 </div>
                 <template v-else>
-                <q-select
-                  :model-value="bindings[slotKey(input)] || null"
-                  :options="connectionOptions"
-                  emit-value
-                  map-options
-                  outlined
-                  dense
-                  clearable
-                  :label="`Connection for ${input.member}: ${input.slot}`"
-                  @update:model-value="(value: string | null) => (bindings = { ...bindings, [slotKey(input)]: value ?? '' })"
-                />
+                <div class="row items-center q-gutter-sm no-wrap">
+                  <q-select
+                    class="col"
+                    :model-value="bindings[slotKey(input)] || null"
+                    :options="connectionOptions"
+                    emit-value
+                    map-options
+                    outlined
+                    dense
+                    clearable
+                    :label="`Connection for ${input.member}: ${input.slot}`"
+                    @update:model-value="(value: string | null) => (bindings = { ...bindings, [slotKey(input)]: value ?? '' })"
+                  />
+                  <SlotConnect
+                    v-if="slotOf(input)"
+                    :plugin="slotOf(input)!.plugin"
+                    :slot-name="input.slot"
+                    :spec="slotOf(input)!.spec"
+                    :providers="providers"
+                    :connections="connectedHere"
+                    @connected="(connection: Connection) => connectedFor(input, connection)"
+                  />
+                </div>
                 <div class="text-caption os-text-muted">
                   {{ input.description }} {{ input.required ? 'Required.' : 'Optional.' }}
                 </div>
