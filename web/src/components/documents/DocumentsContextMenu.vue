@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { nextTick, ref } from 'vue';
 import type { DocumentsAction, DocumentsSortColumn, MenuEntry } from '../../lib/documentsExplorer';
 import type { DocumentsView } from '../../lib/documentsPrefs';
 
@@ -36,14 +36,30 @@ const Sorts: { column: DocumentsSortColumn; label: string }[] = [
   { column: 'modified', label: 'Modified' },
 ];
 
+/**
+ * A MENU ALREADY OPEN IS CLOSED FIRST. Quasar's `show` on a showing menu does nothing, and the
+ * place a `touch-position` menu opens at is read only when it shows - so a right-click on another
+ * item left it where it first opened. Hidden, then shown, it opens where the new click was.
+ */
+const showing = ref(false);
+
+async function show(event?: Event) {
+  if (showing.value) {
+    menu.value?.hide();
+    await nextTick();
+  }
+
+  menu.value?.show(event);
+}
+
 defineExpose({
-  show: (event?: Event) => menu.value?.show(event),
+  show,
   hide: () => menu.value?.hide(),
 });
 </script>
 
 <template>
-  <q-menu ref="menu" no-parent-event touch-position class="context-menu documents-menu">
+  <q-menu ref="menu" no-parent-event touch-position class="context-menu documents-menu" @before-show="showing = true" @hide="showing = false">
     <q-list dense class="documents-menu-list">
       <template v-for="(entry, index) in entries" :key="index">
         <q-separator v-if="entry.kind === 'separator'" />

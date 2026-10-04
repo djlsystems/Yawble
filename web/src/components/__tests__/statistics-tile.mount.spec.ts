@@ -223,7 +223,7 @@ describe('the Statistics tile', () => {
   it('summarises itself in its aria-label', async () => {
     await mountStrip();
 
-    expect(tile().attributes('aria-label')).toMatch(/^Statistics: 3 members — 3 running since 14:02$/);
+    expect(tile().attributes('aria-label')).toBe('Statistics since 14:02: 3 members - 3 running');
   });
 
   it('escapes a name in the tooltip, so markup shows as characters', async () => {

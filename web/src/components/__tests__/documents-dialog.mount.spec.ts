@@ -37,6 +37,7 @@ import {
   rowNames,
   settle,
   toolbarButton,
+  until,
 } from '../../test/documentsExplorer';
 import { bodyText, resetBody } from '../../test/mountQuasar';
 
@@ -139,6 +140,54 @@ describe('DocumentsDialog: gone and retired folders', () => {
 
     expect(server.callsTo('delete')[0]!.url).toBe('/api/teams/gone/documents?path=&recursive=true');
     expect(crumbLabels()).toEqual(['Documents']);
+  });
+
+  it('deletes all documents of several gone folders selected at the root, after one question naming each', async () => {
+    server = documentsServer({
+      folders: [aFolder('alpha', 'Alpha'), aFolder('gone', 'Gone', { exists: false }), aFolder('old', 'Old', { exists: false })],
+      listings: { 'alpha:': [], 'gone:': [aFile('left.md'), aFile('over.txt')], 'old:': [aFile('x.md')] },
+    });
+    await openExplorer();
+
+    await click(row('Gone'));
+    await click(row('Old'), { ctrlKey: true });
+    await rightClick(row('Old'));
+    await click(menuItem('deleteAll')!);
+    expect(questionText()).toBe('Delete all 3 documents of 2 folders (Gone, Old)? This cannot be undone.');
+
+    await click(document.body.querySelector('[data-confirm]')!);
+
+    expect(server.callsTo('delete').map((call) => call.url)).toEqual([
+      '/api/teams/gone/documents?path=&recursive=true',
+      '/api/teams/old/documents?path=&recursive=true',
+    ]);
+    expect(crumbLabels()).toEqual(['Documents']);
+  });
+});
+
+describe('DocumentsDialog: the context menu', () => {
+  /**
+   * A SECOND RIGHT-CLICK WHILE THE MENU IS OPEN moves it to the new place and speaks of the new
+   * item. The menu was shown once and kept: `show` on a showing menu does nothing, so it stayed
+   * where it first opened, offering the first item's actions.
+   */
+  it('a right-click on another item while the menu is open reopens it for that item', async () => {
+    await openExplorer('alpha');
+    await rightClick(row('reports'));
+    expect(menuItem('pasteInto') ?? menuItem('open')).toBeTruthy();
+    expect(menuItem('download')).toBeNull();
+    const place = () => {
+      const menuElement = document.body.querySelector<HTMLElement>('.q-menu.documents-menu')!;
+      return `${menuElement.style.left} ${menuElement.style.top}`;
+    };
+    const first = await until(() => (place().trim() ? place() : null));
+
+    row('notes.md').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 200 }));
+    await until(() => menuItem('download') && place() !== first);
+
+    expect(place()).not.toBe(first);
+    expect(document.body.querySelectorAll('.documents-menu-list')).toHaveLength(1);
+    expect(menuItem('download')).toBeTruthy();
   });
 });
 

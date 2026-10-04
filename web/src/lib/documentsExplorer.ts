@@ -417,8 +417,14 @@ export function availability(action: DocumentsAction, context: MenuContext): Ava
       if (count === 0) return refuse('Select something first');
       if (atRoot) return refuse("A live team's folder cannot be deleted");
       return { ok: true };
-    case 'deleteAll':
-      return one?.team && folderState(one.team) !== 'live' ? { ok: true } : refuse('Only a gone or superseded folder');
+    case 'deleteAll': {
+      // ONE OR MANY TEAM FOLDERS AT THE ROOT, every one of them gone or superseded: a live team's
+      // folder is never deleted whole, so one live folder in the selection refuses them all.
+      const teams = context.selected.map((item) => item.team);
+      if (teams.length === 0 || teams.some((team) => !team)) return refuse('Only a gone or superseded folder');
+      if (teams.some((team) => folderState(team!) === 'live')) return refuse("A live team's folder is selected");
+      return { ok: true };
+    }
     case 'rename':
       if (count !== 1) return refuse('Select one item to rename');
       if (atRoot) return refuse("A team's folder cannot be renamed");
@@ -522,7 +528,12 @@ export function menuFor(target: MenuTarget, context: MenuContext): MenuEntry[] {
   const count = context.selected.length;
 
   if (count > 1) {
-    if (atRoot) return [entry('copy')];
+    if (atRoot) {
+      // Delete all is offered when any selected folder could be cleared out, and refused with its
+      // reason while a live team's folder is among them.
+      const anyGone = context.selected.some((item) => item.team && folderState(item.team) !== 'live');
+      return anyGone ? [entry('copy'), separator, entry('deleteAll', `Delete all documents of ${count} folders`)] : [entry('copy')];
+    }
 
     return [entry('cut'), entry('copy'), entry('moveTo'), separator, entry('delete', `Delete (${count} items)`)];
   }

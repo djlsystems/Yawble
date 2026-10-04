@@ -196,6 +196,23 @@ describe('menuFor', () => {
       .toContain('deleteAll');
   });
 
+  it('at the root: several gone or earlier folders offer Delete all for every one of them', () => {
+    const entries = menuFor('item', context({ location: RootLocation, folder: null, selected: [itemOfFolder(Folders[2]!), itemOfFolder(Folders[3]!)] }));
+    expect(actions(entries)).toEqual(['copy', 'deleteAll']);
+    expect(entries.find((entry) => entry.kind === 'action' && entry.action === 'deleteAll')).toMatchObject({ label: 'Delete all documents of 2 folders' });
+    expect(disabled(entries, 'deleteAll')?.disabled).toBeUndefined();
+  });
+
+  it("at the root: Delete all is refused, with its reason, while a live team's folder is selected too", () => {
+    const entries = menuFor('item', context({ location: RootLocation, folder: null, selected: [itemOfFolder(Folders[2]!), itemOfFolder(Folders[0]!)] }));
+    expect(disabled(entries, 'deleteAll')?.disabled).toBe("A live team's folder is selected");
+  });
+
+  it('at the root: several live folders offer no Delete all', () => {
+    const list = actions(menuFor('item', context({ location: RootLocation, folder: null, selected: [itemOfFolder(Folders[0]!), itemOfFolder(Folders[1]!)] })));
+    expect(list).toEqual(['copy']);
+  });
+
   it("in a gone folder: writes are refused with the reason, copy, cut, move to and delete are not", () => {
     const gone = context({ location: { folder: key('gone'), path: '' }, folder: Folders[2]!, selected: [entry('a.md')], clipboardFull: true });
     expect(availability('newFolder', gone)).toEqual({ ok: false, reason: "Nothing can be added to a gone team's documents" });
