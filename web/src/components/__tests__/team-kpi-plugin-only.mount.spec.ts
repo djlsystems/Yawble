@@ -5,6 +5,13 @@
 // about usage capture, and the workflow tile draws no budget line or bar. A team with an agent on
 // it still says what it said before.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// The Statistics tile reads `/activity` when it mounts. Nothing here is about it, so the read never
+// answers, rather than reaching for a server that is not there.
+vi.mock('../../api/client', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTeamActivity: () => new Promise(() => {}),
+}));
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 

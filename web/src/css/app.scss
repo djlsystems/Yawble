@@ -63,6 +63,15 @@
   // `--os-surface`, 5.26:1 on `--os-chrome`. Dark lifts it to `--os-warn`.
   --os-warn-ink: #8a5a00;
 
+  // THE STATISTICS TILE'S LANES: each state a mark of at least 3:1 on `--os-chrome`, the tile it is
+  // drawn on (`statistics-tile-contrast.spec.ts` measures both themes). Idle is a pale empty track
+  // on purpose, each theme's own strong rule.
+  --os-stat-running: #2e7d4f;
+  --os-stat-waiting: #5f7385;
+  --os-stat-blocked: #b26a00;
+  --os-stat-failed: #c62828;
+  --os-stat-idle: var(--os-rule-strong);
+
   // PALE GROUNDS for a banner or a chip, one per state, replacing Quasar's `bg-*-1` classes - which
   // are fixed light pastels and paint a white-hot box on a dark page.
   --os-tint-ok: #e8f4ed;
@@ -127,6 +136,14 @@ body.body--dark {
   --os-error: #ec5a7f;
   --os-info: #7ea6d6;
   --os-warn-ink: var(--os-warn);
+
+  --os-stat-running: var(--os-ok);
+  --os-stat-waiting: #8fa1b3;
+  --os-stat-blocked: var(--os-warn);
+  --os-stat-failed: var(--os-error);
+  // Redeclared here, not inherited: a var() resolves where it is declared, so the :root one keeps
+  // the light rule colour.
+  --os-stat-idle: var(--os-rule-strong);
 
   --os-tint-ok: #16261c;
   --os-tint-warn: #2b2213;
