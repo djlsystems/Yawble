@@ -21,6 +21,16 @@ public sealed record BindingRefusal(string Error, string? ReconnectId = null, IR
 /// <summary>The answer to a flow's start: where to send the browser.</summary>
 public sealed record ConnectionStart(string AuthorizationUrl, string State, string RedirectUri, DateTimeOffset ExpiresAt);
 
+/// <summary>The answer to a sign-in with a code: what the person is shown. Never the device code.</summary>
+public sealed record DeviceStart(string FlowId, string UserCode, string VerificationUri, DateTimeOffset ExpiresAt)
+{
+    public object Body() => new { flowId = FlowId, userCode = UserCode, verificationUri = VerificationUri, expiresAt = ExpiresAt };
+}
+
+/// <summary>A sign-in with a code as it stands: <c>waiting</c>, <c>done</c> (with the connection's
+/// id), <c>refused</c> or <c>expired</c>, and the sentence that says so.</summary>
+public sealed record DeviceFlowState(string State, string Sentence, string? ConnectionId);
+
 /// <summary>Who acts: a person's id and email, or the operator at the engine.</summary>
 public sealed record ConnectionActor(string Id, string? Email)
 {
@@ -47,7 +57,9 @@ public sealed record ConnectionActor(string Id, string? Email)
 /// <item>Nothing here answers a token or the client secret to a route, a row or a log.</item>
 /// </list>
 /// </summary>
-public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints, TimeProvider clock, IUserStore? users = null)
+public sealed class Connections(
+    ConnectionStore store, IOAuthEndpoints endpoints, TimeProvider clock, IUserStore? users = null,
+    Func<TimeSpan, CancellationToken, Task>? delay = null) : IDisposable
 {
     public static readonly TimeSpan FlowLifetime = TimeSpan.FromMinutes(10);
 
@@ -61,6 +73,8 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
     public const string Where = "Admin → Connections";
 
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _refreshing = new(StringComparer.Ordinal);
+
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? ((wait, ct) => Task.Delay(wait, clock, ct));
 
     public ConnectionStore Store => store;
 
@@ -114,8 +128,46 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
         if (change.ClientSecret is { Length: > 4096 }) return (null, "`clientSecret` is longer than 4096 characters.");
 
         string? tenant = null;
+        var secret = change.ClientSecret;
 
-        if (id == ConnectionProviders.Microsoft && !string.IsNullOrWhiteSpace(change.Tenant))
+        if (!string.IsNullOrWhiteSpace(change.Audience))
+        {
+            // THE GUIDED MICROSOFT SAVE: a public client, signed in with a code. Its tenant is who can
+            // sign in, and it holds no secret, so the exchange and every refresh send none.
+            if (id != ConnectionProviders.Microsoft) return (null, "`audience` is for Microsoft only.");
+            if (!string.IsNullOrWhiteSpace(change.Tenant)) return (null, "`audience` and `tenant` do not go together: `tenant` is the Advanced form's.");
+            if (!string.IsNullOrEmpty(change.ClientSecret))
+            {
+                return (null, "A Microsoft app saved with who can sign in is a public client and takes no `clientSecret`. Leave it out, or set a secret under Advanced.");
+            }
+
+            if (!ConnectionProviders.IsGuid(clientId))
+            {
+                return (null, "`clientId` is not an Application (client) ID: it looks like xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. Copy it from the app's Overview.");
+            }
+
+            switch (change.Audience.Trim())
+            {
+                case ConnectionProviders.AudienceCommon:
+                    tenant = ConnectionProviders.MicrosoftDefaultTenant;
+                    break;
+                case ConnectionProviders.AudienceOrganizations:
+                    tenant = ConnectionProviders.AudienceOrganizations;
+                    break;
+                case ConnectionProviders.AudienceTenant:
+                    if (!ConnectionProviders.IsGuid(change.TenantId))
+                    {
+                        return (null, "`tenantId` is not a Directory (tenant) ID: it looks like xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. Copy it from the app's Overview.");
+                    }
+                    tenant = change.TenantId!.Trim().ToLowerInvariant();
+                    break;
+                default:
+                    return (null, "`audience` is common (personal and any work account), organizations (work accounts only) or tenant (only your organisation, with `tenantId`).");
+            }
+
+            secret = "";
+        }
+        else if (id == ConnectionProviders.Microsoft && !string.IsNullOrWhiteSpace(change.Tenant))
         {
             tenant = change.Tenant.Trim();
             if (tenant.Length > 128 || !tenant.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-'))
@@ -149,7 +201,8 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
 
         var changed = new List<string>();
         if (before?.ClientId != stored.ClientId) changed.Add("clientId");
-        if (change.ClientSecret is not null) changed.Add(change.ClientSecret.Length == 0 ? "clientSecret (cleared)" : "clientSecret");
+        if (secret is { Length: > 0 }) changed.Add("clientSecret");
+        else if (secret is not null && (change.ClientSecret is not null || before?.ClientSecretSet == true)) changed.Add("clientSecret (cleared)");
         if (before?.Tenant != stored.Tenant) changed.Add("tenant");
         if (before?.Name != stored.Name) changed.Add("name");
         if (before?.AuthorizeUrl != stored.AuthorizeUrl) changed.Add("authorizeUrl");
@@ -158,7 +211,7 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
         if (!(before?.DefaultScopes ?? []).SequenceEqual(stored.DefaultScopes)) changed.Add("defaultScopes");
 
         await store.SaveProviderAsync(
-            stored, change.ClientSecret,
+            stored, secret,
             actor.Row(TenantActions.ConnectionProviderSaved, id, ConnectionProviders.Resolve(id, stored).Name,
                 new { provider = id, created = before is null, changed }),
             ct);
@@ -176,41 +229,15 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
     public async Task<(ConnectionStart? Start, string? Error)> StartAsync(
         ConnectionActor actor, StartConnection request, string? origin, CancellationToken ct = default)
     {
-        ConnectionRecord? reconnecting = null;
-
-        if (!string.IsNullOrWhiteSpace(request.ReconnectId))
+        if (!string.IsNullOrWhiteSpace(request.Flow))
         {
-            reconnecting = await store.GetAsync(request.ReconnectId.Trim(), ct);
-            if (reconnecting is null) return (null, $"There is no connection '{request.ReconnectId}' to reconnect.");
-
-            if (!string.IsNullOrWhiteSpace(request.Provider) && request.Provider.Trim() != reconnecting.Provider)
-            {
-                return (null, $"Connection {reconnecting.Named} is a {ConnectionProviders.Display(reconnecting.Provider)} connection; reconnect it with that provider.");
-            }
+            return (null, request.Flow.Trim() == DeviceFlow
+                ? "A sign-in with a code starts with StartDeviceAsync."
+                : $"`flow` is \"{DeviceFlow}\" to sign in with a code, or left out for the browser sign-in.");
         }
 
-        var providerId = reconnecting?.Provider ?? request.Provider?.Trim();
-        if (string.IsNullOrEmpty(providerId)) return (null, "`provider` is required: google, microsoft or a custom provider's id.");
-
-        if (await ProviderAsync(providerId, ct) is not { } provider)
-        {
-            return (null, $"'{providerId}' is not a provider on this Host. Set one up in {Where} first.");
-        }
-
-        if (!provider.Configured)
-        {
-            return (null, $"{provider.Name} has no OAuth client yet. Set its client ID and secret in {Where} first.");
-        }
-
-        if (Scopes(request.Scopes) is not { } asked) return (null, "`scopes` must be scope strings with no spaces.");
-
-        if (request.Name is { } name && name.Trim().Length > MaximumNameLength)
-        {
-            return (null, $"`name` is longer than {MaximumNameLength} characters.");
-        }
-
-        var scopes = Union(provider.DefaultScopes, asked, reconnecting?.Scopes ?? []);
-        if (provider.Kind == ConnectionProviders.Microsoft) scopes = Union(scopes, ["offline_access"]);
+        var (provider, reconnecting, scopes, error) = await PrepareAsync(request, ct);
+        if (error is not null) return (null, error);
 
         var (redirectUri, loopback, redirectError) = Redirect(request.RedirectUri, origin);
         if (redirectError is not null) return (null, redirectError);
@@ -220,7 +247,7 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
         var now = clock.GetUtcNow();
 
         await store.InsertFlowAsync(new ConnectionFlow(
-            state, actor.Id, provider.Id, scopes, string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(),
+            state, actor.Id, provider!.Id, scopes!, string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(),
             reconnecting?.Id, redirectUri!, loopback, verifier, now, null), ct);
 
         var query = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -228,7 +255,7 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
             ["response_type"] = "code",
             ["client_id"] = provider.ClientId!,
             ["redirect_uri"] = redirectUri!,
-            ["scope"] = string.Join(' ', scopes),
+            ["scope"] = string.Join(' ', scopes!),
             ["state"] = state,
             ["code_challenge"] = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))),
             ["code_challenge_method"] = "S256",
@@ -240,6 +267,50 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
         var url = provider.AuthorizeUrl + separator + string.Join('&', query.Select(q => $"{Uri.EscapeDataString(q.Key)}={Uri.EscapeDataString(q.Value)}"));
 
         return (new ConnectionStart(url, state, redirectUri!, now + FlowLifetime), null);
+    }
+
+    /// <summary>What both flows check first: the connection reconnected, the provider set up, and
+    /// the scopes to ask - the provider's defaults, the asked, and a reconnect's old ones.</summary>
+    private async Task<(OAuthProvider? Provider, ConnectionRecord? Reconnecting, IReadOnlyList<string>? Scopes, string? Error)> PrepareAsync(
+        StartConnection request, CancellationToken ct)
+    {
+        ConnectionRecord? reconnecting = null;
+
+        if (!string.IsNullOrWhiteSpace(request.ReconnectId))
+        {
+            reconnecting = await store.GetAsync(request.ReconnectId.Trim(), ct);
+            if (reconnecting is null) return (null, null, null, $"There is no connection '{request.ReconnectId}' to reconnect.");
+
+            if (!string.IsNullOrWhiteSpace(request.Provider) && request.Provider.Trim() != reconnecting.Provider)
+            {
+                return (null, null, null, $"Connection {reconnecting.Named} is a {ConnectionProviders.Display(reconnecting.Provider)} connection; reconnect it with that provider.");
+            }
+        }
+
+        var providerId = reconnecting?.Provider ?? request.Provider?.Trim();
+        if (string.IsNullOrEmpty(providerId)) return (null, null, null, "`provider` is required: google, microsoft or a custom provider's id.");
+
+        if (await ProviderAsync(providerId, ct) is not { } provider)
+        {
+            return (null, null, null, $"'{providerId}' is not a provider on this Host. Set one up in {Where} first.");
+        }
+
+        if (!provider.Configured)
+        {
+            return (null, null, null, $"{provider.Name} has no OAuth client yet. Set its client ID{(provider.DeviceAuthorizationUrl is null ? " and secret" : "")} in {Where} first.");
+        }
+
+        if (Scopes(request.Scopes) is not { } asked) return (null, null, null, "`scopes` must be scope strings with no spaces.");
+
+        if (request.Name is { } name && name.Trim().Length > MaximumNameLength)
+        {
+            return (null, null, null, $"`name` is longer than {MaximumNameLength} characters.");
+        }
+
+        var scopes = Union(provider.DefaultScopes, asked, reconnecting?.Scopes ?? []);
+        if (provider.Kind == ConnectionProviders.Microsoft) scopes = Union(scopes, ["offline_access"]);
+
+        return (provider, reconnecting, scopes, null);
     }
 
     /// <summary>
@@ -290,11 +361,24 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
         var answer = await endpoints.ExchangeCodeAsync(provider, await store.ClientSecretAsync(provider.Id, ct), code, flow.RedirectUri, flow.CodeVerifier, ct);
         if (!answer.Ok) return (null, false, $"{provider.Name} refused the sign-in: {answer.Reason}.");
 
+        return await FinishAsync(provider, answer, flow.UserId, flow.Scopes, flow.Name, flow.ReconnectId, who, now, ct);
+    }
+
+    /// <summary>
+    /// THE ONE COMPLETION of every flow, once the provider has answered tokens: the account read
+    /// from the ID token or userinfo, then a new connection, or a reconnect that must be the same
+    /// account with the scopes merged. Tokens are stored as ciphertext, with the tenant row in the
+    /// same transaction.
+    /// </summary>
+    private async Task<(ConnectionRecord? Connection, bool Reconnected, string? Error)> FinishAsync(
+        OAuthProvider provider, OAuthTokenAnswer answer, string userId, IReadOnlyList<string> asked, string? name,
+        string? reconnectId, ConnectionActor who, DateTimeOffset now, CancellationToken ct)
+    {
         var account = await AccountAsync(provider, answer, ct);
-        var granted = Granted(flow.Scopes, answer);
+        var granted = Granted(asked, answer);
         var tokens = new ConnectionTokens(answer.RefreshToken, answer.AccessToken, Expiry(now, answer.ExpiresIn));
 
-        if (flow.ReconnectId is { } reconnectId)
+        if (reconnectId is not null)
         {
             // UNDER THE REFRESH'S GATE: a refresh in flight with the old refresh token finishes
             // first, so it can neither store its tokens over these nor mark this reconnect refused.
@@ -326,13 +410,211 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
 
         var record = new ConnectionRecord(
             "conn-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
-            flow.Name ?? account, provider.Id, account, granted, now, null, ConnectionRecord.Ok, null);
+            name ?? account, provider.Id, account, granted, now, null, ConnectionRecord.Ok, null);
 
-        await store.InsertAsync(record, tokens, flow.UserId, who.Row(
+        await store.InsertAsync(record, tokens, userId, who.Row(
             TenantActions.ConnectionConnected, record.Id, record.Name,
             new { connection = record.Id, provider = provider.Id, account, scopes = granted }), ct);
 
         return (await store.GetAsync(record.Id, ct), false, null);
+    }
+
+    // ---- sign in with a code (the device flow) ---------------------------------------------------
+
+    public const string DeviceFlow = "device";
+
+    public const string Waiting = "waiting";
+
+    public const string Done = "done";
+
+    public const string Refused = "refused";
+
+    public const string Expired = "expired";
+
+    /// <summary>How long a finished sign-in with a code can still be read, for a dialog reopened late.</summary>
+    public static readonly TimeSpan DeviceFlowKept = TimeSpan.FromHours(1);
+
+    /// <summary>What a provider's <c>slow_down</c> adds to the wait between polls (RFC 8628).</summary>
+    public static readonly TimeSpan SlowDown = TimeSpan.FromSeconds(5);
+
+    private static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(5);
+
+    private readonly ConcurrentDictionary<string, DeviceSignIn> _deviceFlows = new(StringComparer.Ordinal);
+
+    private readonly CancellationTokenSource _stopping = new();
+
+    /// <summary>
+    /// Starts a sign-in with a code for <paramref name="actor"/>: the provider's device endpoint is
+    /// asked for a code, the DEVICE CODE IS KEPT HERE - in memory only, never in a row, a log or a
+    /// file, and spent once - and the Host polls the token endpoint by itself until the person
+    /// approves, refuses, or the code expires. Only the user code, the link and the expiry are
+    /// answered.
+    /// </summary>
+    public async Task<(DeviceStart? Start, string? Error)> StartDeviceAsync(
+        ConnectionActor actor, StartConnection request, CancellationToken ct = default)
+    {
+        if (!string.IsNullOrWhiteSpace(request.RedirectUri))
+        {
+            return (null, "`redirectUri` is not used when signing in with a code; leave it out.");
+        }
+
+        var (provider, reconnecting, scopes, error) = await PrepareAsync(request, ct);
+        if (error is not null) return (null, error);
+
+        if (provider!.DeviceAuthorizationUrl is null)
+        {
+            return (null, $"{provider.Name} has no sign-in with a code on this Host; sign in through the browser instead.");
+        }
+
+        var answer = await endpoints.DeviceAuthorizationAsync(provider, scopes!, ct);
+        if (!answer.Ok) return (null, $"{provider.Name} did not start the sign-in: {answer.Reason}.");
+
+        var now = clock.GetUtcNow();
+        Sweep(now);
+
+        var flow = new DeviceSignIn(
+            Random(24), actor, scopes!, string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(), reconnecting?.Id,
+            answer.DeviceCode!, answer.VerificationUri!,
+            answer.ExpiresIn is > 0 ? now.AddSeconds(answer.ExpiresIn.Value) : now + FlowLifetime);
+
+        _deviceFlows[flow.Id] = flow;
+        _ = Task.Run(() => PollAsync(flow, provider, answer.Interval is > 0 ? TimeSpan.FromSeconds(answer.Interval.Value) : DefaultInterval));
+
+        return (new DeviceStart(flow.Id, answer.UserCode!, flow.VerificationUri, flow.ExpiresAt), null);
+    }
+
+    /// <summary>A sign-in with a code as its starter reads it, or null - for a flow that does not
+    /// exist and, alike, for one somebody else started.</summary>
+    public DeviceFlowState? DeviceFlowOf(string flowId, ConnectionActor actor) =>
+        _deviceFlows.TryGetValue(flowId, out var flow) && string.Equals(flow.Actor.Id, actor.Id, StringComparison.Ordinal)
+            ? flow.Read()
+            : null;
+
+    /// <summary>
+    /// Polls at the provider's interval, 5 s more after each <c>slow_down</c>, until the person
+    /// approves (the same completion as the web flow), refuses, or the code expires. Refusal and
+    /// expiry store nothing. A provider that cannot be reached is asked again at the next interval.
+    /// </summary>
+    private async Task PollAsync(DeviceSignIn flow, OAuthProvider provider, TimeSpan interval)
+    {
+        var ct = _stopping.Token;
+
+        try
+        {
+            var secret = await store.ClientSecretAsync(provider.Id, ct);
+
+            while (true)
+            {
+                await _delay(interval, ct);
+
+                if (clock.GetUtcNow() >= flow.ExpiresAt)
+                {
+                    flow.Settle(Expired, ExpiredSentence);
+                    return;
+                }
+
+                var answer = await endpoints.DeviceTokenAsync(provider, secret, flow.DeviceCode!, ct);
+
+                if (answer.Ok)
+                {
+                    var (connection, reconnected, refusal) = await FinishAsync(
+                        provider, answer, flow.Actor.Id, flow.Scopes, flow.Name, flow.ReconnectId, flow.Actor, clock.GetUtcNow(), ct);
+
+                    if (refusal is not null) flow.Settle(Refused, refusal);
+                    else flow.Settle(Done, $"{(reconnected ? "Reconnected" : "Connected")} {connection!.Named}.", connection.Id);
+                    return;
+                }
+
+                switch (answer.Error)
+                {
+                    case "authorization_pending":
+                        continue;
+                    case "slow_down":
+                        interval += SlowDown;
+                        continue;
+                    case "expired_token" or "code_expired":
+                        flow.Settle(Expired, ExpiredSentence);
+                        return;
+                    case "access_denied" or "authorization_declined":
+                        flow.Settle(Refused, $"The sign-in was declined at {provider.Name}. Nothing was stored; try again.");
+                        return;
+                }
+
+                if (answer.Refused)
+                {
+                    flow.Settle(Refused, $"{provider.Name} refused the sign-in: {answer.Reason}. Nothing was stored; try again.");
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The Host is stopping; nobody is left to read the flow.
+        }
+        catch (Exception exception)
+        {
+            flow.Settle(Refused, exception is Microsoft.Data.Sqlite.SqliteException sqlite
+                ? $"The connection could not be stored ({sqlite.SqliteErrorCode}). Try again."
+                : $"The sign-in could not be finished ({exception.GetType().Name}). Try again.");
+        }
+    }
+
+    private const string ExpiredSentence = "The code expired before the sign-in was finished. Nothing was stored; try again.";
+
+    /// <summary>Finished flows go a while after their expiry; nothing reads them later than that.</summary>
+    private void Sweep(DateTimeOffset now)
+    {
+        foreach (var (id, flow) in _deviceFlows)
+        {
+            if (flow.ExpiresAt + DeviceFlowKept < now && flow.Read().State != Waiting) _deviceFlows.TryRemove(id, out _);
+        }
+    }
+
+    /// <summary>Stops every poll still running.</summary>
+    public void Dispose()
+    {
+        _stopping.Cancel();
+        _stopping.Dispose();
+    }
+
+    /// <summary>One sign-in with a code, in memory. The device code goes when the flow settles.</summary>
+    private sealed class DeviceSignIn(
+        string id, ConnectionActor actor, IReadOnlyList<string> scopes, string? name, string? reconnectId,
+        string deviceCode, string verificationUri, DateTimeOffset expiresAt)
+    {
+        private readonly Lock _lock = new();
+
+        private DeviceFlowState _state = new(Waiting, $"Waiting for you to enter the code at {verificationUri}.", null);
+
+        public string Id => id;
+
+        public ConnectionActor Actor => actor;
+
+        public IReadOnlyList<string> Scopes => scopes;
+
+        public string? Name => name;
+
+        public string? ReconnectId => reconnectId;
+
+        public string VerificationUri => verificationUri;
+
+        public DateTimeOffset ExpiresAt => expiresAt;
+
+        public string? DeviceCode { get; private set; } = deviceCode;
+
+        public void Settle(string state, string sentence, string? connectionId = null)
+        {
+            lock (_lock)
+            {
+                _state = new DeviceFlowState(state, sentence, connectionId);
+                DeviceCode = null;
+            }
+        }
+
+        public DeviceFlowState Read()
+        {
+            lock (_lock) return _state;
+        }
     }
 
     // ---- the run --------------------------------------------------------------------------------
@@ -596,11 +878,13 @@ public sealed class RefreshNotStoredException(Microsoft.Data.Sqlite.SqliteExcept
 /// <summary>Body of <c>PUT /api/connections/providers/{id}</c>.</summary>
 public sealed record ProviderChange(
     string? ClientId, string? ClientSecret, string? Tenant = null, string? Name = null,
-    string? AuthorizeUrl = null, string? TokenUrl = null, string? UserinfoUrl = null, IReadOnlyList<string>? DefaultScopes = null);
+    string? AuthorizeUrl = null, string? TokenUrl = null, string? UserinfoUrl = null, IReadOnlyList<string>? DefaultScopes = null,
+    string? Audience = null, string? TenantId = null);
 
 /// <summary>Body of <c>POST /api/connections/start</c>.</summary>
 public sealed record StartConnection(
-    string? Provider, IReadOnlyList<string>? Scopes = null, string? Name = null, string? ReconnectId = null, string? RedirectUri = null);
+    string? Provider, IReadOnlyList<string>? Scopes = null, string? Name = null, string? ReconnectId = null, string? RedirectUri = null,
+    string? Flow = null);
 
 /// <summary>Body of <c>POST /api/connections/complete</c>.</summary>
 public sealed record CompleteConnection(string? State, string? Code);

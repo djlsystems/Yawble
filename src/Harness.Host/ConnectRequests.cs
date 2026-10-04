@@ -10,11 +10,11 @@ namespace Harness.Host;
 ///
 /// <para>
 /// The CLI writes <c>&lt;dataRoot&gt;/connections/.connect</c>:
-/// <c>{ request: nonce, op: start|complete|list|remove, ...the route's body }</c>. Once a second this
+/// <c>{ request: nonce, op: start|complete|flow|list|remove, ...the route's body }</c>. Once a second this
 /// service answers it in <c>.connect-report.json</c> carrying that nonce and the status and body the
 /// route would give, then removes the request. The fields per op are the bodies of
-/// <c>POST /api/connections/start</c>, <c>POST /api/connections/complete</c> and the id of
-/// <c>DELETE /api/connections/{id}</c>.
+/// <c>POST /api/connections/start</c> (<c>flow: "device"</c> included), <c>POST /api/connections/complete</c>,
+/// the <c>flowId</c> of <c>GET /api/connections/flows/{flowId}</c> and the id of <c>DELETE /api/connections/{id}</c>.
 /// </para>
 ///
 /// <para>
@@ -118,9 +118,10 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
         {
             "start" => await StartAsync(nonce, root, ct),
             "complete" => await CompleteAsync(nonce, root, ct),
+            "flow" => await FlowAsync(nonce, root, ct),
             "list" => await ListAsync(nonce, ct),
             "remove" => await RemoveAsync(nonce, root, ct),
-            var other => new { request = nonce, status = 400, error = $"'{other}' is not an op: start, complete, list or remove." },
+            var other => new { request = nonce, status = 400, error = $"'{other}' is not an op: start, complete, flow, list or remove." },
         };
 
         await WriteReportAsync(report, ct);
@@ -186,11 +187,20 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
 
     private async Task<object> StartAsync(string nonce, JsonElement root, CancellationToken ct)
     {
-        var (start, error) = await connections.StartAsync(
-            ConnectionActor.Operator,
-            new StartConnection(
-                Text(root, "provider"), Strings(root, "scopes"), Text(root, "name"), Text(root, "reconnectId"), Text(root, "redirectUri")),
-            origin: null, ct);
+        var request = new StartConnection(
+            Text(root, "provider"), Strings(root, "scopes"), Text(root, "name"), Text(root, "reconnectId"), Text(root, "redirectUri"),
+            Text(root, "flow"));
+
+        if (request.Flow?.Trim() == Connections.DeviceFlow)
+        {
+            // No port and no listener: the CLI shows the code and link, then reads the flow.
+            var (device, refusal) = await connections.StartDeviceAsync(ConnectionActor.Operator, request, ct);
+            return refusal is not null
+                ? new { request = nonce, status = 400, error = refusal }
+                : new { request = nonce, status = 200, error = (string?)null, start = device!.Body() };
+        }
+
+        var (start, error) = await connections.StartAsync(ConnectionActor.Operator, request, origin: null, ct);
 
         return error is not null
             ? new { request = nonce, status = 400, error }
@@ -211,6 +221,19 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
         return error is not null
             ? new { request = nonce, status = 400, error }
             : new { request = nonce, status = 200, error = (string?)null, connection = await ViewAsync(connection!, ct) };
+    }
+
+    private async Task<object> FlowAsync(string nonce, JsonElement root, CancellationToken ct)
+    {
+        if (connections.DeviceFlowOf(Text(root, "flowId") ?? "", ConnectionActor.Operator) is not { } flow)
+        {
+            return new { request = nonce, status = 404, error = ConnectionEndpoints.MissingFlow };
+        }
+
+        var view = await ConnectionEndpoints.FlowViewAsync(
+            connections, flow, c => teams is null ? Bare(c.Connection, c.Uses) : ConnectionEndpoints.View(c.Connection, c.Uses, teams), ct);
+
+        return new { request = nonce, status = 200, error = (string?)null, flow = view };
     }
 
     private async Task<object> ListAsync(string nonce, CancellationToken ct)
