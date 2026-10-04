@@ -614,17 +614,33 @@ async function removeSelected() {
 }
 
 /**
- * A GONE TEAM'S WHOLE FOLDER, deleted after the person is told how many files go. The server
- * removes it only when its marker says the platform made it, and never a live team's.
+ * GONE TEAMS' WHOLE FOLDERS - one, or several selected at the root - deleted after one question
+ * saying how many files go. The server removes each only when its marker says the platform made
+ * it, and never a live team's; one that fails is named and the others still go.
  */
-async function deleteAll(folder: DocumentsFolder | null = current.value) {
-  if (!folder || folder.exists) return;
+async function deleteAll(chosen: (DocumentsFolder | null)[] = [current.value]) {
+  const folders = chosen.filter((folder): folder is DocumentsFolder => !!folder && !folder.exists);
+  if (folders.length === 0) return;
 
   try {
-    const files = (await api.listDocuments(folder.folder, '', true)).length;
-    if (!(await ask(`Delete all ${files} documents of ${folder.label}? This cannot be undone.`))) return;
+    let files = 0;
+    for (const folder of folders) files += (await api.listDocuments(folder.folder, '', true)).length;
 
-    await api.deleteDocument(folder.folder, '', true);
+    const question = folders.length === 1
+      ? `Delete all ${files} documents of ${folders[0]!.label}? This cannot be undone.`
+      : `Delete all ${files} documents of ${folders.length} folders (${folders.map((folder) => folder.label).join(', ')})? This cannot be undone.`;
+    if (!(await ask(question))) return;
+
+    const failures: string[] = [];
+    for (const folder of folders) {
+      try {
+        await api.deleteDocument(folder.folder, '', true);
+      } catch (failure) {
+        failures.push(`${folder.label}: ${(failure as Error).message}`);
+      }
+    }
+
+    error.value = failures.length ? `Not deleted: ${failures.join(' ')}` : '';
     await loadFolders();
     location.value = RootLocation;
     selection.value = EmptySelection;
@@ -766,7 +782,7 @@ function act(action: DocumentsAction, target?: DropTarget) {
       void removeSelected();
       break;
     case 'deleteAll':
-      void deleteAll(one?.team ?? current.value);
+      void deleteAll(selectedItems.value.some((item) => item.team) ? selectedItems.value.map((item) => item.team ?? null) : [current.value]);
       break;
     case 'newFolder':
       void newFolder();
