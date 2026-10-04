@@ -4,7 +4,8 @@
 // installed plugins will ask of it in words, each line naming the plugin that wants it and any of
 // them untickable; setting up the provider's app, only when its client is not set up yet, as a
 // checklist of the provider's own guide; and signing in through the existing web flow, which comes
-// back to the dialog for an optional name. Today's Providers tab and Connect form are under Advanced,
+// back to the dialog for an optional name. Microsoft's guided way, signing in with a code, is
+// connect-dialog-device.mount.spec.ts. Today's Providers tab and Connect form are under Advanced,
 // unchanged.
 //
 // THE MOCK IS OF `api/client`, in the shapes the Host serves, of the one navigation the web makes
@@ -258,17 +259,6 @@ describe('The service step', () => {
     wrapper.unmount();
   });
 
-  it('sends Microsoft to Advanced, with Microsoft chosen in the Connect form', async () => {
-    const wrapper = await mountConnections();
-    await click(button('Add connection'));
-    await click(bodyFind('[data-connect-service="microsoft"]'));
-
-    expect(bodyFind('[data-guided-connect]')).toBeNull();
-    expect(bodyFind('[data-connect-dialog]')).not.toBeNull();
-    expect(bodyFind('[data-needs-client]')!.textContent).toContain('Its client is not set up yet.');
-
-    wrapper.unmount();
-  });
 });
 
 describe('The set-up step', () => {
