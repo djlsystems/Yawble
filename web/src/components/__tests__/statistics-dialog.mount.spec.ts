@@ -174,16 +174,18 @@ function dialogOption(): ChartOption {
 }
 
 /**
- * THE TOOLTIP ECHARTS SHOWS for a pointer at `at` over the columns: the dialog's option on a real
- * chart of a fixed size, with the pointer moved there the way a mouse moves it. What ECharts hands
- * the formatter is ECharts' own choice, so this is read from the tooltip it draws.
+ * THE TOOLTIP ECHARTS SHOWS for a pointer moved over the columns to each instant in turn: the
+ * dialog's option on a real chart of a fixed size, with the pointer moved the way a mouse moves it,
+ * read after each move has had time to settle - ECharts throttles its hover line, and whatever that
+ * hands the tooltip arrives late. Empty when no tooltip shows. What ECharts hands the formatter is
+ * ECharts' own choice, so this is read from the tooltip it draws.
  */
-function hoverText(option: ChartOption, at: number): string {
-  return hoverMarkup(option, at).textContent ?? '';
+async function hoverText(option: ChartOption, ...at: number[]): Promise<string> {
+  return (await hoverMarkup(option, ...at)).textContent ?? '';
 }
 
 /** The same tooltip as markup, out of the chart it was drawn in. */
-function hoverMarkup(option: ChartOption, at: number): HTMLElement {
+async function hoverMarkup(option: ChartOption, ...at: number[]): Promise<HTMLElement> {
   const host = document.createElement('div');
   document.body.appendChild(host);
 
@@ -192,11 +194,16 @@ function hoverMarkup(option: ChartOption, at: number): HTMLElement {
   try {
     chart.setOption(option as never);
 
-    const [x, y] = chart.convertToPixel({ xAxisIndex: 1, yAxisIndex: 1 }, [at, 0.1]) as number[];
-    chart.getZr().handler.dispatch('mousemove', { zrX: x, zrY: y, offsetX: x, offsetY: y });
+    for (const instant of at) {
+      const [x, y] = chart.convertToPixel({ xAxisIndex: 1, yAxisIndex: 1 }, [instant, 0.1]) as number[];
+      chart.getZr().handler.dispatch('mousemove', { zrX: x, zrY: y, offsetX: x, offsetY: y });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
 
+    const shown = host.querySelector<HTMLElement>('.stats-tooltip');
     const tip = document.createElement('div');
-    tip.innerHTML = host.querySelector('.stats-tooltip')?.innerHTML ?? '';
+
+    if (shown && shown.style.display !== 'none' && shown.style.visibility !== 'hidden') tip.innerHTML = shown.innerHTML;
 
     return tip;
   } finally {
@@ -366,9 +373,9 @@ describe('the columns', () => {
     await wrapper!.setProps({ containers: [...board, container('Bold', '<b>Bold</b>')] as never });
     await openFromTile();
 
-    const text = hoverText(dialogOption(), utc('14:05:30'));
+    const text = await hoverText(dialogOption(), utc('14:05:30'));
 
-    expect(hoverMarkup(dialogOption(), utc('14:05:30')).querySelector('b')).toBeNull();
+    expect((await hoverMarkup(dialogOption(), utc('14:05:30'))).querySelector('b')).toBeNull();
     expect(text).toContain('running 1 min 30 s');
     expect(text).toContain('M Manager — running 1 min');
     expect(text).toContain('IL Ines Lopez — running 30 s, blocked 30 s');
@@ -382,11 +389,14 @@ describe('the columns', () => {
     const option = dialogOption();
 
     // The 14:05 column, early and late in it; then 14:06, late in it, with no column after it.
-    expect(hoverText(option, utc('14:05:06'))).toContain('14:05–14:06');
-    expect(hoverText(option, utc('14:05:54'))).toContain('14:05–14:06');
-    expect(hoverText(option, utc('14:05:54'))).toContain('running 1 min 30 s');
-    expect(hoverText(option, utc('14:06:50'))).toContain('14:06–14:07');
-    expect(hoverText(option, utc('14:06:50'))).toContain('waiting 20 s');
+    expect(await hoverText(option, utc('14:05:06'))).toContain('14:05–14:06');
+    expect(await hoverText(option, utc('14:05:54'))).toContain('14:05–14:06');
+    expect(await hoverText(option, utc('14:05:54'))).toContain('running 1 min 30 s');
+    expect(await hoverText(option, utc('14:06:50'))).toContain('14:06–14:07');
+    expect(await hoverText(option, utc('14:06:50'))).toContain('waiting 20 s');
+    // Into the 14:05 column's right half from its left half, and on into the gap after 14:06.
+    expect(await hoverText(option, utc('14:05:10'), utc('14:05:50'))).toContain('14:05–14:06');
+    expect(await hoverText(option, utc('14:06:30'), utc('14:07:30'))).toBe('');
   });
 
   it('reads No runs in this period when nothing was recorded', async () => {
@@ -418,6 +428,6 @@ describe('the columns', () => {
     expect(laneNames(option, 3)).toEqual(['Manager', 'Ines Lopez', 'Gone Member (removed)']);
     expect(option.series.find((s) => s.name === 'running')!.data).toEqual([[utc('14:05:00'), utc('14:06:00'), 0, 2]]);
 
-    expect(hoverText(option, utc('14:05:30'))).toContain('GM Gone Member (removed) — running 30 s');
+    expect(await hoverText(option, utc('14:05:30'))).toContain('GM Gone Member (removed) — running 30 s');
   });
 });
