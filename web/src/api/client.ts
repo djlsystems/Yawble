@@ -78,6 +78,7 @@ import type {
   TeamWasReset,
   RepositoryResetPreview,
   TeamWorkflowTiming,
+  TeamActivity,
   TeamWorkflows,
   TenantApiKey,
   TenantLogPage,
@@ -354,6 +355,13 @@ export const getTeamWorkflow = (team: TeamId) =>
  */
 export const getTeamWorkflows = (team: TeamId) =>
   json<TeamWorkflows>(`/api/teams/${encodeURIComponent(team)}/workflows`)
+
+/**
+ * What each member of a team was doing, and when, over the team's own window: from its oldest open
+ * workflow, else its most recent one, to now. The Statistics tile reads it.
+ */
+export const getTeamActivity = (team: TeamId) =>
+  json<TeamActivity>(`/api/teams/${encodeURIComponent(team)}/activity`)
 
 /**
  * Every reachable team's workflow projection, in one read. Fetched only while the Teams table is

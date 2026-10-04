@@ -1439,6 +1439,43 @@ export interface TeamRollupRow {
   openWorkflows: TeamWorkflows
 }
 
+/** One state a member's lane can be in. "No data" is never a state: it is the absence of a span. */
+export type ActivityState = 'running' | 'waiting' | 'blocked' | 'failed' | 'idle'
+
+/** One stretch of one state. `to` is null while it is still open at the answer's `serverNow`. */
+export interface ActivitySpan {
+  state: ActivityState
+  from: string
+  to: string | null
+  /** The workflow a run or its block belongs to, when it names one. */
+  workflow?: number
+  /** A block's or failure's words while the log still holds them. Text, never markup. */
+  reason?: string
+}
+
+/** One member's lane. `current` is false for a member since removed. */
+export interface ActivityMember {
+  member: string
+  kind: string | null
+  isManager: boolean
+  current: boolean
+  spans: ActivitySpan[]
+}
+
+/**
+ * WHAT EACH MEMBER WAS DOING, AND WHEN, from `GET /api/teams/{team}/activity`. Mirrors
+ * `TeamActivityAnswer` in `Harness.Host/TeamActivity.cs`. `window` is `open` (from the oldest open
+ * workflow), `latest` (from the most recent one, none open), `requested`, or `none` for a team that
+ * has never run - which carries no members and null `from` / `to`.
+ */
+export interface TeamActivity {
+  from: string | null
+  to: string | null
+  serverNow: string
+  window: 'open' | 'latest' | 'requested' | 'none'
+  members: ActivityMember[]
+}
+
 /**
  * EVERY WORKFLOW A TEAM HAS RUN, OPEN AND CLOSED ALIKE AND NEWEST FIRST, and one span over the open
  * ones, from `GET /api/teams/{team}/workflows`. Mirrors `TeamWorkflows` in
