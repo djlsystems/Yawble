@@ -3037,6 +3037,14 @@ export interface ConnectionProviderSave {
   clientId: string
   clientSecret?: string
   tenant?: string
+  /**
+   * Microsoft's guided setup: who can sign in. `common` is personal and any work account,
+   * `organizations` work accounts only, `tenant` only the organisation `tenantId` names. Saved with
+   * no secret: a public client.
+   */
+  audience?: MicrosoftAudience
+  /** With `audience: 'tenant'`: the Directory (tenant) ID, a GUID. */
+  tenantId?: string
   name?: string
   authorizeUrl?: string
   tokenUrl?: string
@@ -3068,6 +3076,9 @@ export interface Connection {
 }
 
 /** `POST /api/connections/start`. */
+/** Who can sign in through a Microsoft app the guided setup saved. */
+export type MicrosoftAudience = 'common' | 'organizations' | 'tenant'
+
 export interface ConnectionStartRequest {
   provider?: string
   scopes: string[]
@@ -3082,6 +3093,30 @@ export interface ConnectionStart {
   state: string
   redirectUri: string
   expiresAt: string
+}
+
+/** `POST /api/connections/start` for sign-in with a code, at a provider with a device endpoint. */
+export interface ConnectionDeviceStartRequest extends Omit<ConnectionStartRequest, 'redirectUri'> {
+  flow: 'device'
+}
+
+/**
+ * Its answer: the code the person enters at `verificationUri`, until `expiresAt`. The provider's
+ * device code stays on the Host, which waits for the sign-in itself.
+ */
+export interface ConnectionDeviceStart {
+  flowId: string
+  userCode: string
+  verificationUri: string
+  expiresAt: string
+}
+
+/** `GET /api/connections/flows/{flowId}`: where a sign-in with a code is, in a sentence. */
+export interface ConnectionFlow {
+  state: 'waiting' | 'done' | 'refused' | 'expired'
+  sentence: string
+  /** When `done`: the connection it stored. */
+  connection?: Connection | null
 }
 
 /**

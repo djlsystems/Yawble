@@ -12,6 +12,7 @@
 // the countdown and the reads are driven by the spec; the countdown is run under more than one time
 // zone (TZ=UTC and the machine's own) and reads the same in each.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushPromises } from '@vue/test-utils';
 
 const {
   listConnections,
@@ -162,10 +163,26 @@ async function mountConnections() {
   return wrapper;
 }
 
+/** `settle`, which waits on a real timer, or its like on the spec's clock once that is pinned. */
+async function settled() {
+  if (!vi.isFakeTimers()) return settle();
+  await flushPromises();
+  await vi.advanceTimersByTimeAsync(0);
+  await flushPromises();
+}
+
 async function click(element: Element | null) {
   if (!element) throw new Error('nothing to click');
   (element as HTMLElement).click();
-  await settle();
+  await settled();
+}
+
+/** `type`, on either clock. */
+async function typeIn(label: string, value: string) {
+  const element = field(label);
+  element.value = value;
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  await settled();
 }
 
 const step = () => bodyFind('[data-connect-step]')?.getAttribute('data-connect-step') ?? null;
@@ -185,7 +202,7 @@ function pinClock() {
 
 async function advance(ms: number) {
   await vi.advanceTimersByTimeAsync(ms);
-  await settle();
+  await settled();
 }
 
 /** Signed-in step, code asked for: what a person sees once they press Sign in with Microsoft. */
@@ -365,7 +382,7 @@ describe("Microsoft's sign-in step", () => {
     expect(getConnectionFlow.mock.calls.length).toBe(reads);
 
     renameConnection.mockResolvedValue({});
-    await type('Name (optional)', 'Work mail');
+    await typeIn('Name (optional)', 'Work mail');
     await click(button('Finish'));
     expect(renameConnection).toHaveBeenCalledWith('conn-ms', 'Work mail');
 

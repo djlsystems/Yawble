@@ -1,12 +1,32 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { getConnectionNeeds, listConnectionProviders, renameConnection, saveConnectionProvider, startConnection } from '../api/client';
-import type { Connection, ConnectionGuide, ConnectionGuideStep, ConnectionNeeds, ConnectionProvider, ConnectionProviderSave } from '../api/types';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import {
+  getConnectionFlow,
+  getConnectionNeeds,
+  listConnectionProviders,
+  renameConnection,
+  saveConnectionProvider,
+  startConnection,
+  startDeviceConnection,
+} from '../api/client';
+import type {
+  Connection,
+  ConnectionDeviceStart,
+  ConnectionFlow,
+  ConnectionGuide,
+  ConnectionGuideStep,
+  ConnectionNeeds,
+  ConnectionProvider,
+  ConnectionProviderSave,
+  MicrosoftAudience,
+} from '../api/types';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { copyText } from '../lib/clipboard';
 import {
+  countdown,
   googleClientIdProblem,
   guideLink,
+  microsoftIdProblem,
   named,
   redirectUriWarning,
   rememberGuidedConnect,
@@ -22,15 +42,18 @@ import { productCli } from '../presentation/product';
  * 2. SET UP THE APP - only when the provider's client is not set up: the provider's own guide, read
  *    for the ticked scopes, as a
  *    checklist, with deep links (into the person's project, once they name it), values to copy and
- *    a Done tick per step. Its last step takes the client ID and secret and saves them.
- * 3. SIGN IN - the existing web flow with the ticked scopes. The browser leaves for the provider and
- *    comes back to the Console, which opens this dialog again at `result`: the account, and an
- *    optional name for it.
+ *    a Done tick per step. Its last step takes the client ID (and, for Google, the secret) and saves
+ *    them. Microsoft's first step also asks who can sign in; its client is a public one, with no
+ *    secret at all.
+ * 3. SIGN IN - for Google, the existing web flow with the ticked scopes: the browser leaves for the
+ *    provider and comes back to the Console, which opens this dialog again at `result`, the account
+ *    and an optional name for it. For Microsoft, sign-in with a code: the Host asks Microsoft for
+ *    one, the person enters it at Microsoft's page in another tab, and this step reads the flow until
+ *    it is done and moves on to `result` by itself. Nothing leaves this address, so it works from
+ *    localhost, a LAN address or a tunnel alike.
  *
- * Microsoft's sign-in is not guided yet: choosing it hands over to Advanced (`advanced`), the
- * Connect form with Microsoft chosen.
- *
- * THE CLIENT SECRET IS WRITE-ONLY here as in Advanced: typed, sent once, never shown or kept.
+ * THE CLIENT SECRET IS WRITE-ONLY here as in Advanced: typed, sent once, never shown or kept. The
+ * provider's device code never reaches the browser: only the code the person types does.
  */
 const props = defineProps<{
   providers: ConnectionProvider[];
@@ -40,8 +63,6 @@ const props = defineProps<{
 }>();
 const open = defineModel<boolean>({ required: true });
 const emit = defineEmits<{
-  /** Connect this provider from Advanced instead. */
-  advanced: [provider: string];
   /** A provider's client or a connection's name was saved: read the lists again. */
   changed: [];
 }>();
@@ -63,8 +84,14 @@ const provider = computed(() => props.providers.find((candidate) => candidate.id
 const needsSetUp = computed(() => provider.value !== null && !provider.value.configured && !setUpNow.value);
 
 watch(open, (showing) => {
-  if (!showing) return;
+  if (!showing) {
+    // Closing cancels nothing at the Host: it only stops reading the flow.
+    stopDevice();
+    return;
+  }
   problem.value = '';
+  device.value = null;
+  deviceConnection.value = null;
 
   if (props.returned) {
     step.value = 'result';
@@ -83,6 +110,8 @@ watch(open, (showing) => {
   done.value = new Set();
   clientId.value = '';
   clientSecret.value = '';
+  audience.value = 'common';
+  tenantId.value = '';
 });
 
 // --- 1. Service -----------------------------------------------------------------------------------
@@ -93,12 +122,6 @@ const services = [
 ];
 
 async function choose(id: string) {
-  if (id === 'microsoft') {
-    open.value = false;
-    emit('advanced', id);
-    return;
-  }
-
   providerId.value = id;
   needs.value = null;
   unticked.value = new Set();
@@ -168,7 +191,33 @@ const clientBusy = ref(false);
 
 const steps = computed<ConnectionGuideStep[]>(() => guide.value?.steps ?? []);
 const redirectWarning = computed(() => redirectUriWarning(currentOrigin(), productCli));
-const clientIdProblem = computed(() => (provider.value?.kind === 'google' ? googleClientIdProblem(clientId.value) : null));
+
+/** Microsoft's client is public and signs in with a code: no secret, no redirect URI. */
+const isMicrosoft = computed(() => provider.value?.kind === 'microsoft');
+
+const clientIdProblem = computed(() => {
+  if (provider.value?.kind === 'google') return googleClientIdProblem(clientId.value);
+  if (isMicrosoft.value) return microsoftIdProblem(clientId.value, 'Application (client) ID');
+  return null;
+});
+
+/** Who can sign in through a Microsoft app, chosen on its first step. */
+const audience = ref<MicrosoftAudience>('common');
+const tenantId = ref('');
+const audiences: { value: MicrosoftAudience; label: string; hint: string }[] = [
+  { value: 'common', label: 'Personal and any work account', hint: 'Choose the same when you register the app.' },
+  { value: 'organizations', label: 'Work accounts only', hint: 'Any organisation\'s work or school account, no personal one.' },
+  { value: 'tenant', label: 'Only my organisation', hint: 'Accounts in your own directory only.' },
+];
+const tenantIdProblem = computed(() => (audience.value === 'tenant' ? microsoftIdProblem(tenantId.value, 'Directory (tenant) ID') : null));
+
+/** Anything still in the way of Save client, or null. */
+const cannotSave = computed(
+  () =>
+    clientId.value.trim() === ''
+    || clientIdProblem.value !== null
+    || (isMicrosoft.value && audience.value === 'tenant' && (tenantId.value.trim() === '' || tenantIdProblem.value !== null)),
+);
 
 async function copy(value: string) {
   try {
@@ -180,10 +229,15 @@ async function copy(value: string) {
 
 async function saveClient() {
   const chosen = provider.value;
-  if (!chosen || clientBusy.value || clientId.value.trim() === '' || clientIdProblem.value) return;
+  if (!chosen || clientBusy.value || cannotSave.value) return;
 
   const body: ConnectionProviderSave = { clientId: clientId.value.trim() };
-  if (clientSecret.value !== '') body.clientSecret = clientSecret.value;
+  if (isMicrosoft.value) {
+    body.audience = audience.value;
+    if (audience.value === 'tenant') body.tenantId = tenantId.value.trim();
+  } else if (clientSecret.value !== '') {
+    body.clientSecret = clientSecret.value;
+  }
 
   clientBusy.value = true;
   problem.value = '';
@@ -207,6 +261,10 @@ const leaving = ref(false);
 async function signIn() {
   const chosen = provider.value;
   if (!chosen || leaving.value) return;
+  if (isMicrosoft.value) {
+    await startDevice();
+    return;
+  }
 
   leaving.value = true;
   problem.value = '';
@@ -221,12 +279,99 @@ async function signIn() {
   }
 }
 
+// --- 3. Sign in with a code -----------------------------------------------------------------------
+
+/** How often the flow is read while it waits. The Host does the waiting at the provider. */
+const flowReadEvery = 3000;
+
+const device = ref<ConnectionDeviceStart | null>(null);
+const deviceRead = ref<ConnectionFlow | null>(null);
+const deviceConnection = ref<Connection | null>(null);
+const now = ref(Date.now());
+let readTimer: ReturnType<typeof setTimeout> | null = null;
+let clock: ReturnType<typeof setInterval> | null = null;
+
+const deviceState = computed(() => deviceRead.value?.state ?? 'waiting');
+const deviceLeft = computed(() => (device.value ? countdown(device.value.expiresAt, now.value) : ''));
+
+function stopDevice() {
+  if (readTimer !== null) clearTimeout(readTimer);
+  if (clock !== null) clearInterval(clock);
+  readTimer = null;
+  clock = null;
+}
+
+onBeforeUnmount(stopDevice);
+
+/** Asks the Host for a code (again, on Try again) and starts reading the flow. */
+async function startDevice() {
+  const chosen = provider.value;
+  if (!chosen) return;
+
+  stopDevice();
+  leaving.value = true;
+  problem.value = '';
+  try {
+    device.value = await startDeviceConnection({ provider: chosen.id, scopes: chosenScopes.value, flow: 'device' });
+    deviceRead.value = null;
+    now.value = Date.now();
+    clock = setInterval(() => (now.value = Date.now()), 1000);
+    readTimer = setTimeout(readFlow, flowReadEvery);
+  } catch (cause) {
+    problem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    leaving.value = false;
+  }
+}
+
+/** Back to the service: the code shown is left to expire at the Host. */
+function back() {
+  stopDevice();
+  device.value = null;
+  deviceRead.value = null;
+  step.value = 'service';
+}
+
+async function readFlow() {
+  const flow = device.value;
+  readTimer = null;
+  if (!flow || !open.value) return;
+
+  let read: ConnectionFlow;
+  try {
+    read = await getConnectionFlow(flow.flowId);
+  } catch (cause) {
+    // A read that failed is not an ending: say so and read again.
+    problem.value = cause instanceof Error ? cause.message : String(cause);
+    if (device.value === flow && open.value) readTimer = setTimeout(readFlow, flowReadEvery);
+    return;
+  }
+  // Try again or a close while the read was out: this answer is for a flow no longer shown.
+  if (device.value !== flow || !open.value) return;
+
+  problem.value = '';
+  deviceRead.value = read;
+  if (read.state === 'waiting') {
+    readTimer = setTimeout(readFlow, flowReadEvery);
+    return;
+  }
+
+  stopDevice();
+  if (read.state === 'done') {
+    deviceConnection.value = read.connection ?? null;
+    resultName.value = '';
+    emit('changed');
+    step.value = 'result';
+  }
+}
+
 // --- Back from the provider -----------------------------------------------------------------------
 
 const resultName = ref('');
 const finishing = ref(false);
 
 const returnedConnection = computed(() => {
+  if (deviceConnection.value) return deviceConnection.value;
   const returned = props.returned;
   if (!returned || !('id' in returned) || !returned.id) return null;
   return props.connections.find((connection) => connection.id === returned.id) ?? null;
@@ -300,9 +445,6 @@ const stepLabels = computed(() => [
             :data-connect-service="service.id"
             @click="choose(service.id)"
           />
-        </div>
-        <div v-if="providerId === null" class="text-caption os-text-muted">
-          Microsoft is set up under Advanced for now.
         </div>
 
         <template v-if="provider">
@@ -397,6 +539,33 @@ const stepLabels = computed(() => [
                 data-guide-link
               >Open in {{ provider.name }}</a>
 
+              <div v-if="isMicrosoft && item.id === 'register'" class="connect-audience" data-guide-audience>
+                <div class="text-caption os-text-muted">Who can sign in? Choose the same here as at Microsoft.</div>
+                <div v-for="option in audiences" :key="option.value">
+                  <q-radio
+                    v-model="audience"
+                    dense
+                    :val="option.value"
+                    :label="option.label"
+                    :data-audience="option.value"
+                  />
+                  <div class="text-caption os-text-muted connect-audience-hint">{{ option.hint }}</div>
+                </div>
+                <q-input
+                  v-if="audience === 'tenant'"
+                  v-model="tenantId"
+                  outlined
+                  dense
+                  label="Directory (tenant) ID"
+                  hint="On the app's Overview page, under the Application (client) ID."
+                  spellcheck="false"
+                  autocomplete="off"
+                  :error="tenantIdProblem !== null"
+                >
+                  <template #error><span data-tenant-id-shape>{{ tenantIdProblem }}</span></template>
+                </q-input>
+              </div>
+
               <template v-if="item.id === 'apis'">
                 <div v-for="api in apisFor(item)" :key="api.api" data-guide-api>
                   <a :href="guideLink(api.link, projectId)" target="_blank" rel="noopener noreferrer" class="mono">{{ api.api }}</a>
@@ -414,7 +583,7 @@ const stepLabels = computed(() => [
                   v-model="clientId"
                   outlined
                   dense
-                  label="Client ID"
+                  :label="isMicrosoft ? 'Application (client) ID' : 'Client ID'"
                   spellcheck="false"
                   autocomplete="off"
                   :error="clientIdProblem !== null"
@@ -423,6 +592,7 @@ const stepLabels = computed(() => [
                   <template #error><span data-client-id-shape>{{ clientIdProblem }}</span></template>
                 </q-input>
                 <q-input
+                  v-if="!isMicrosoft"
                   v-model="clientSecret"
                   outlined
                   dense
@@ -438,7 +608,7 @@ const stepLabels = computed(() => [
                     no-caps
                     label="Save client"
                     :loading="clientBusy"
-                    :disable="clientBusy || clientId.trim() === '' || clientIdProblem !== null"
+                    :disable="clientBusy || cannotSave"
                     @click="saveClient"
                   />
                 </div>
@@ -446,6 +616,40 @@ const stepLabels = computed(() => [
             </div>
           </li>
         </ol>
+      </q-card-section>
+
+      <!-- 3. SIGN IN WITH A CODE -->
+      <q-card-section v-else-if="step === 'signin' && provider && isMicrosoft" data-connect-step="signin" class="q-gutter-y-sm">
+        <template v-if="device === null">
+          <div>
+            {{ provider.name }} gives you a code to enter on its own sign-in page, in another tab. Nothing
+            has to come back to this address, so it works however you reached this page.
+            {{ chosenScopes.length === 0
+              ? 'Only the account\'s name and email address are asked for.'
+              : `${chosenScopes.length === 1 ? 'One thing is' : `${chosenScopes.length} things are`} asked for besides the account's name and email address.` }}
+          </div>
+        </template>
+        <div v-else :data-device-state="deviceState">
+          <template v-if="deviceState === 'waiting'">
+            <div>
+              Open
+              <a :href="device.verificationUri" target="_blank" rel="noopener noreferrer" data-device-link>{{ device.verificationUri }}</a>
+              and enter this code:
+            </div>
+            <div class="row items-center q-gutter-sm q-my-sm">
+              <span class="mono connect-device-code" data-device-code>{{ device.userCode }}</span>
+              <q-btn flat round dense icon="content_copy" aria-label="Copy the code" @click="copy(device.userCode)" />
+            </div>
+            <div class="text-caption os-text-muted" data-device-countdown>
+              The code expires in {{ deviceLeft }}. Sign in there and agree; this step moves on by itself.
+            </div>
+            <div class="row items-center q-gutter-sm q-mt-sm os-text-muted">
+              <q-spinner size="16px" />
+              <span>Waiting for you to sign in…</span>
+            </div>
+          </template>
+          <div v-else class="text-negative" data-device-sentence>{{ deviceRead?.sentence }}</div>
+        </div>
       </q-card-section>
 
       <!-- 3. SIGN IN -->
@@ -503,8 +707,25 @@ const stepLabels = computed(() => [
           <q-btn flat no-caps label="Back" @click="step = 'service'" />
         </template>
         <template v-else-if="step === 'signin' && provider">
-          <q-btn flat no-caps label="Back" @click="step = 'service'" />
-          <q-btn color="primary" no-caps :label="`Sign in with ${provider.name}`" :loading="leaving" :disable="leaving" @click="signIn" />
+          <q-btn flat no-caps label="Back" @click="back" />
+          <q-btn
+            v-if="isMicrosoft && device !== null && deviceState !== 'waiting'"
+            color="primary"
+            no-caps
+            label="Try again"
+            :loading="leaving"
+            :disable="leaving"
+            @click="startDevice"
+          />
+          <q-btn
+            v-else-if="!isMicrosoft || device === null"
+            color="primary"
+            no-caps
+            :label="`Sign in with ${provider.name}`"
+            :loading="leaving"
+            :disable="leaving"
+            @click="signIn"
+          />
         </template>
         <template v-else-if="step === 'result'">
           <q-btn color="primary" no-caps label="Finish" :loading="finishing" @click="finish" />
@@ -559,6 +780,17 @@ const stepLabels = computed(() => [
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.connect-audience-hint {
+  margin-left: 30px;
+}
+
+.connect-device-code {
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  user-select: all;
 }
 
 .connect-copy {
