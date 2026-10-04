@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
@@ -110,8 +111,12 @@ public sealed class TeamTokenRunsTests(TeamTokenRunsTests.Bed bed) : IClassFixtu
         // takes both as one batch and closes each with its own terminal row.
         var root = await bed.TellAsync(team, "Dev", "first");
         await bed.AwaitRowAsync(m => m.Type == MessageTypes.Started && m.Source == $"{team}/Dev", "Dev's first start");
+        var queued = bed.QueueDepth(team, "Dev");
         await bed.TellAsync(team, "Dev", "second", root.Seq);
         await bed.TellAsync(team, "Dev", "third", root.Seq);
+
+        // Both are in Dev's queue before its first run ends, or the next run could take one alone.
+        await bed.AwaitQueuedAsync(team, "Dev", queued + 2);
         bed.Release(team, "Dev");
         hold.SetResult();
 
@@ -121,7 +126,15 @@ public sealed class TeamTokenRunsTests(TeamTokenRunsTests.Bed bed) : IClassFixtu
 
         var dev = Mine(await bed.RunsAsync(team, from, DateTimeOffset.UtcNow.AddMinutes(1)), "Dev");
 
-        Assert.Equal(2, dev.Length);
+        // Counted from the log, not fixed at two: the platform can wake Dev once more for the open
+        // workflow after its Manager's run, and that is a run of its own.
+        var mine = (await bed.Log.ReadAfterAsync(0, [MessageTypes.Started, MessageTypes.Completed], int.MaxValue, Ct))
+            .Where(m => m.Source == $"{team}/Dev")
+            .ToList();
+        var runs = mine.Count(m => m.Type == MessageTypes.Started);
+
+        Assert.True(mine.Count(m => m.Type == MessageTypes.Completed) > runs, "No run closed more than one delivery.");
+        Assert.Equal(runs, dev.Length);
         Assert.All(dev, run => Assert.Equal(Bed.RunBillable, run.GetProperty("billable").GetInt64()));
     }
 
@@ -416,6 +429,21 @@ public sealed class TeamTokenRunsTests(TeamTokenRunsTests.Bed bed) : IClassFixtu
             var body = await response.Content.ReadAsStringAsync(Ct);
             Assert.True(response.StatusCode == HttpStatusCode.OK, $"{(int)response.StatusCode} from {url}: {body}");
             return JsonDocument.Parse(body).RootElement.Clone();
+        }
+
+        /// <summary>How many deliveries this member holds, its run in progress among them.</summary>
+        public int QueueDepth(string team, string member) =>
+            _factory.Services.GetRequiredService<ContainerHost>().Find(new ContainerId(team, member))?.QueueDepth ?? 0;
+
+        public async Task AwaitQueuedAsync(string team, string member, int depth)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+
+            while (QueueDepth(team, member) < depth)
+            {
+                if (DateTime.UtcNow > deadline) throw new TimeoutException($"{member} never held {depth} deliveries.");
+                await Task.Delay(20, Ct);
+            }
         }
 
         public async Task AwaitRowAsync(Func<Message, bool> match, string what) => await AwaitCountAsync(match, 1, what);
