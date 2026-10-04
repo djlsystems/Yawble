@@ -6,7 +6,6 @@ import {
   checkSolution,
   installSolution,
   listConnectionProviders,
-  listPlugins,
   previewSolution,
   solutionsInstalled,
   teamSolution,
@@ -19,7 +18,6 @@ import {
   type Connection,
   type ConnectionProvider,
   type ConnectionSlot,
-  type InstalledPlugin,
   type InstalledSolution,
   type SolutionCheck,
   type SolutionDiff,
@@ -343,29 +341,31 @@ function connectionWords(id: string | null): string {
   return connectionOptions.value.find((option) => option.value === id)?.label ?? id;
 }
 
-// CONNECT BESIDE EACH PICKER: the slot its member's plugin declares, as the installed plugin says it,
-// and the providers to sign in to. A connection made here is selected in that picker; the install
-// binds it, as it binds one chosen there.
-const plugins = ref<InstalledPlugin[]>([]);
+// CONNECT BESIDE EACH PICKER: the slot as the plan's personConnections name it - a bundled plugin is
+// not installed before the install, so only the package knows its slots - and the providers to sign
+// in to. A connection made here is selected in that picker; the install binds it, as it binds one
+// chosen there.
 const providers = ref<ConnectionProvider[]>([]);
 const connectedHere = ref<Connection[]>([]);
 
 async function loadSlots(from: SolutionPlan) {
   if (from.inputs.connections.length === 0) return;
   try {
-    const [list, read] = await Promise.all([listPlugins(), listConnectionProviders()]);
-    plugins.value = list.plugins;
-    providers.value = read;
+    providers.value = await listConnectionProviders();
   } catch {
     // Without them there is no Connect; the pickers are as they were.
   }
 }
 
-/** The plugin and slot a connection input is for, or null when its plugin is not installed yet. */
-function slotOf(input: { member: string; slot: string }): { plugin: string; spec: ConnectionSlot } | null {
-  const pluginId = plan.value?.members.find((member) => member.name === input.member)?.pluginId;
-  const spec = plugins.value.find((plugin) => plugin.id === pluginId)?.connections?.[input.slot];
-  return pluginId && spec ? { plugin: pluginId, spec } : null;
+/** The plugin and slot a connection input is for, or null when the plan does not say. */
+function slotOf(input: { member: string; slot: string }): { plugin: string; name: string; spec: ConnectionSlot } | null {
+  const named = plan.value?.personConnections.find((entry) => slotKey(entry) === slotKey(input));
+  if (!named?.plugin || providers.value.length === 0) return null;
+  return {
+    plugin: named.plugin,
+    name: plan.value?.plugins.find((plugin) => plugin.id === named.plugin)?.name ?? named.plugin,
+    spec: { description: named.description, providers: named.providers, scopes: named.scopes, required: named.required, summary: '' },
+  };
 }
 
 function connectedFor(input: { member: string; slot: string }, connection: Connection) {
@@ -920,6 +920,7 @@ function next() {
                     :plugin="slotOf(input)!.plugin"
                     :slot-name="input.slot"
                     :spec="slotOf(input)!.spec"
+                    :plugin-name="slotOf(input)!.name"
                     :providers="providers"
                     :connections="connectedHere"
                     @connected="(connection: Connection) => connectedFor(input, connection)"

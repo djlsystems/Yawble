@@ -19,6 +19,8 @@ const props = withDefaults(
     plugin: string;
     slotName: string;
     spec: ConnectionSlot;
+    /** The plugin's name, for a slot whose plugin is not installed yet. */
+    pluginName?: string | undefined;
     providers: ConnectionProvider[];
     connections: Connection[];
     /** Whether the button shows: nothing suitable is bound. */
@@ -36,7 +38,13 @@ const emit = defineEmits<{
 
 const connectable = computed(() => props.spec.providers.filter((id) => id === 'google' || id === 'microsoft'));
 const label = computed(() => `Connect ${connectable.value.map((id) => providerName(id, props.providers)).join(' or ')}`);
-const need = computed(() => ({ plugin: props.plugin, slot: props.slotName, providers: connectable.value }));
+const need = computed(() => ({
+  plugin: props.plugin,
+  slot: props.slotName,
+  providers: connectable.value,
+  scopes: props.spec.scopes,
+  pluginName: props.pluginName,
+}));
 
 const open = ref(false);
 watch(open, (showing, was) => {

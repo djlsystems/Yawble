@@ -74,8 +74,17 @@ const props = defineProps<{
   connections: Connection[];
   /** The connection the guided sign-in came back with: opens at the last step. */
   returned?: { id: string | null } | { refused: string } | null;
-  /** The slot this was started from: its plugin, its name and the providers it takes. */
-  need?: { plugin: string; slot: string; providers: string[] } | null;
+  /**
+   * The slot this was started from: its plugin, its name and the providers it takes. `scopes` and
+   * `pluginName` stand in when the needs read does not know the slot - a plugin not installed yet.
+   */
+  need?: {
+    plugin: string;
+    slot: string;
+    providers: string[];
+    scopes?: Record<string, string[]> | undefined;
+    pluginName?: string | undefined;
+  } | null;
 }>();
 const open = defineModel<boolean>({ required: true });
 const emit = defineEmits<{
@@ -187,12 +196,28 @@ async function choose(id: string) {
 
   try {
     const need = props.need;
-    needs.value = need ? await getConnectionNeeds(id, { plugin: need.plugin, slot: need.slot }) : await getConnectionNeeds(id);
+    needs.value = need ? orSlot(await getConnectionNeeds(id, { plugin: need.plugin, slot: need.slot }), id) : await getConnectionNeeds(id);
   } catch (cause) {
     problem.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     needsLoading.value = false;
   }
+}
+
+/**
+ * The needs read knows only installed plugins: for a slot it does not know, the scopes the slot
+ * itself names, shown as themselves.
+ */
+function orSlot(read: ConnectionNeeds, id: string): ConnectionNeeds {
+  const need = props.need;
+  const scopes = need?.scopes?.[id] ?? [];
+  if (!need || read.needs.length > 0 || scopes.length === 0) return read;
+  const plugins = [need.pluginName ?? need.plugin];
+  return {
+    ...read,
+    needs: [{ plugin: need.plugin, slot: need.slot, description: null, scopes }],
+    scopes: scopes.map((scope) => ({ scope, words: null, plugins })),
+  };
 }
 
 /** Ticks or unticks one entry of a set: a scope left out, a scope's details shown, a guide step done. */

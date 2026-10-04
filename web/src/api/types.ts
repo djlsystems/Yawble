@@ -3366,7 +3366,24 @@ export interface SolutionPlan {
     documents: SolutionDocumentInput[]
   }
   personSettings: SolutionPersonSetting[]
+  /**
+   * Each connection input with its slot as the package's plugin declares it - known before the
+   * plugin is installed, which the installed plugins and the needs read are not.
+   */
+  personConnections: SolutionPersonConnection[]
   ignored: string[]
+}
+
+/** One connection input of a plan: its member's plugin, and the providers and scopes the slot takes. */
+export interface SolutionPersonConnection {
+  member: string
+  slot: string
+  description: string
+  required: boolean
+  plugin: string | null
+  providers: string[]
+  /** Provider -> the scopes the slot asks of a connection of it. */
+  scopes: Record<string, string[]>
 }
 
 /** `POST /api/solutions/check`. A 400 (a refused folder) is thrown with the Host's sentence. */

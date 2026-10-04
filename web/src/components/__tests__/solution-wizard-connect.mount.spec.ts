@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 //
 // THE SOLUTION WIZARD'S YOUR PART: each connection input has Connect <Provider> beside its picker,
-// opening Add connection started from that member's slot - the providers and scopes of the slot its
-// plugin declares. The member does not exist yet, so a completed sign-in only selects the new
-// connection in that picker; the install binds it, exactly as a connection chosen there is bound.
+// opening Add connection started from that member's slot - the providers and scopes the plan's
+// personConnections name, since a bundled plugin is not installed before the install and neither the
+// installed plugins nor the needs read know its slots. The member does not exist yet, so a completed
+// sign-in only selects the new connection in that picker; the install binds it, exactly as a
+// connection chosen there is bound.
 //
 // A FAKE HOST at `fetch`. No provider is called: the sign-in is Microsoft's sign-in with a code,
 // faked at the flow read. Every code here is an obviously fake one.
@@ -30,11 +32,14 @@ const fresh = hostConnection({ id: 'conn-new', provider: 'microsoft', name: 'Dan
 
 let calls: Call[] = [];
 let signedIn = false;
+/** Whether the package's plugin is already installed on the Host. */
+let installed = true;
 
 beforeEach(() => {
   setActivePinia(createPinia());
   calls = [];
   signedIn = false;
+  installed = true;
   vi.stubGlobal(
     'fetch',
     vi.fn(
@@ -45,19 +50,24 @@ beforeEach(() => {
               ? reply(200, { ok: true, team: 'job-tracker', teamName: 'Job Tracker', version: '1.1.0', missing: [], steps: steps(8) })
               : undefined,
           (call) => (call.url === '/api/teams/job-tracker/solution' ? reply(200, { team: 'job-tracker', missing: [] }) : undefined),
-          (call) => (call.method === 'GET' && call.url === '/api/plugins' ? reply(200, hostList([jobBoard])) : undefined),
+          (call) => (call.method === 'GET' && call.url === '/api/plugins' ? reply(200, hostList(installed ? [jobBoard] : [])) : undefined),
           (call) =>
             call.method === 'GET' && call.url.startsWith('/api/connections/providers')
               ? reply(200, [hostProvider({ id: 'google' }), hostProvider({ id: 'microsoft', clientId: '00000000-0000-0000-0000-00000000c1d0', configured: true })])
               : undefined,
           (call) =>
             call.method === 'GET' && call.url.startsWith('/api/connections/needs?')
-              ? reply(200, {
-                  provider: 'microsoft',
-                  needs: [{ plugin: 'job-board', slot: 'mail', description: null, scopes: [mailSend] }],
-                  scopes: [{ scope: mailSend, words: 'Send mail as you', plugins: ['Job Board (sample)'] }],
-                  apis: [],
-                })
+              ? reply(
+                  200,
+                  installed
+                    ? {
+                        provider: 'microsoft',
+                        needs: [{ plugin: 'job-board', slot: 'mail', description: null, scopes: [mailSend] }],
+                        scopes: [{ scope: mailSend, words: 'Send mail as you', plugins: ['Job Board (sample)'] }],
+                        apis: [],
+                      }
+                    : { provider: 'microsoft', needs: [], scopes: [], apis: [] },
+                )
               : undefined,
           (call) => (call.method === 'GET' && call.url === '/api/connections/flows/open' ? reply(200, []) : undefined),
           (call) =>
@@ -116,7 +126,40 @@ async function click(element: Element | null | undefined) {
 const picker = (wrapper: VueWrapper) =>
   wrapper.findAllComponents(QSelect).find((select) => select.props('label') === 'Connection for Scout: mail')!;
 
+async function signIn() {
+  vi.useFakeTimers({ now: new Date('2026-10-04T10:00:00Z'), toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  await click(button('Sign in with Microsoft'));
+  await vi.advanceTimersByTimeAsync(3000);
+  await settled();
+  vi.useRealTimers();
+}
+
 describe('Solution wizard - Connect beside a connection input', () => {
+  it("takes a bundled plugin's slot from the plan: its providers and scopes, before anything is installed", async () => {
+    installed = false;
+    const wrapper = await yourPart();
+
+    const connect = bodyFind('[data-connection-input="Scout/mail"] [data-slot-connect]');
+    expect(connect?.textContent).toContain('Connect Microsoft');
+    await click(connect?.querySelector('button'));
+    expect(bodyFind('[data-guided-connect] [data-connect-step]')?.getAttribute('data-connect-step')).toBe('signin');
+
+    await signIn();
+
+    // The sign-in asked for the slot's scope, though no installed plugin wants it yet.
+    expect((sent(calls, 'POST', '/api/connections/start')[0]!.body as { scopes: string[] }).scopes).toEqual([mailSend]);
+    await click(button('Finish'));
+    expect(picker(wrapper).props('modelValue')).toBe('conn-new');
+
+    button('Next').click();
+    await settle();
+    button('Install').click();
+    await settle();
+    expect((sent(calls, 'POST', '/api/solutions/install')[0]!.body as { connections: unknown }).connections).toEqual({
+      Scout: { mail: 'conn-new' },
+    });
+  });
+
   it("opens Add connection for that member's slot, selects the new connection, and the install binds it", async () => {
     const wrapper = await yourPart();
 

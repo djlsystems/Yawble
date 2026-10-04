@@ -80,11 +80,12 @@ import {
   type ConnectionSlot,
   type ContainerSnapshot,
   type InstalledPlugin,
+  type PluginMemberSettings,
   type Team,
   type TeamId,
 } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
-import { hostConnection, hostList, hostPlugin, hostProvider, hostSettings, hostSlot } from '../../test/pluginFixtures';
+import { hostConnection, hostField, hostList, hostPlugin, hostProvider, hostSecret, hostSettings, hostSlot } from '../../test/pluginFixtures';
 import { button, settle, type } from '../../test/formProbe';
 
 const mailSend = 'https://graph.microsoft.com/Mail.Send';
@@ -185,10 +186,21 @@ const inbox = {
 } as unknown as ContainerSnapshot;
 
 /** Member settings for a plugin member whose `mail` slot is `slot`, bound as given. */
-async function mountMember(slot: ConnectionSlot, bound: Record<string, string> = {}) {
-  const plugin = mailer(slot);
+async function mountMember(
+  slot: ConnectionSlot,
+  bound: Record<string, string> = {},
+  stored: { plugin?: InstalledPlugin; config?: PluginMemberSettings['config']; secrets?: Record<string, string> } = {},
+) {
+  const plugin = stored.plugin ?? mailer(slot);
   getPluginSettings.mockResolvedValue(
-    hostSettings(plugin, { team: 'alpha', member: 'Inbox', config: {}, secrets: {}, connections: bound, connectionFields: { mail: slot } }),
+    hostSettings(plugin, {
+      team: 'alpha',
+      member: 'Inbox',
+      config: stored.config ?? {},
+      secrets: stored.secrets ?? {},
+      connections: bound,
+      connectionFields: { mail: slot },
+    }),
   );
   updateMember.mockResolvedValue({ ...inbox });
 
@@ -260,6 +272,33 @@ describe("a plugin member's slot with nothing suitable bound", () => {
     expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', { config: {}, secrets: {}, connections: { mail: 'conn-new' } });
     // Bound: nothing suitable is missing any more, so Connect is no longer offered.
     expect(bodyFind('[data-connection-slot="mail"] [data-slot-connect]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it("keeps the member's stored settings and secret names when it binds the slot", async () => {
+    // The route replaces config and secrets with what it is sent: binding sends back what is stored.
+    const plugin = hostPlugin({
+      id: 'mailer',
+      name: 'Mailer',
+      connections: { mail: microsoftOnly },
+      config: { folder: hostField({ type: 'string', default: 'Inbox' }), labels: hostField({ type: 'list', default: [] }) },
+      secrets: { signing: hostSecret() },
+    });
+    const wrapper = await mountMember(microsoftOnly, {}, {
+      plugin,
+      config: { folder: 'Jobs', labels: ['urgent'] },
+      secrets: { signing: 'MAILER_SIGNING_KEY' },
+    });
+    listConnections.mockResolvedValue([fresh]);
+
+    await signInFromSlot();
+
+    expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', {
+      config: { folder: 'Jobs', labels: ['urgent'] },
+      secrets: { signing: 'MAILER_SIGNING_KEY' },
+      connections: { mail: 'conn-new' },
+    });
 
     wrapper.unmount();
   });
