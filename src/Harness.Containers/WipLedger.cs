@@ -262,14 +262,15 @@ public sealed class WipLedger
     {
         lock (_gate)
         {
-            if (RemoveWaiterLocked(id.ToString(), withdrawn: true)) PulseLocked();
+            if (RemoveWaiterLocked(id.ToString())) PulseLocked();
         }
     }
 
     /// <summary>
-    /// The Host is going down. A waiter withdrawn from now on - its claim loop cancelled by the
-    /// shutdown - has not ended its hold, so its recorded hold is left open: the next Host start closes
-    /// it, marked unfinished. A waiter that starts is still closed as started.
+    /// The Host is going down. No recorded hold is closed from now on: a waiter withdrawn by the
+    /// shutdown has not ended its hold, and one admitted to a slot the shutdown freed (its run
+    /// cancelled) never starts. Each is left open, and the next Host start closes it, marked
+    /// unfinished. A reason that changes kind meanwhile keeps the open row.
     /// </summary>
     public void HostStopping()
     {
@@ -422,7 +423,7 @@ public sealed class WipLedger
         if (_holds is null) return;
 
         var kind = ReasonKind(reason);
-        if (_recorded.TryGetValue(key, out var open) && open.Kind == kind) return;
+        if (_recorded.TryGetValue(key, out var open) && (open.Kind == kind || _hostStopping)) return;
 
         var now = DateTimeOffset.UtcNow;
         var since = _waiting.TryGetValue(key, out var hold) && !_recorded.ContainsKey(key) ? hold.Since : now;
@@ -439,11 +440,11 @@ public sealed class WipLedger
         }
     }
 
-    /// <summary>Closes a waiter's recorded hold, when it has one: it started, or it withdrew - except a
-    /// withdrawal while the Host stops, which leaves it open (<see cref="HostStopping"/>).</summary>
-    private void ReleaseRecordLocked(string key, WipHold hold, bool withdrawn)
+    /// <summary>Closes a waiter's recorded hold, when it has one: it started, or it withdrew - except
+    /// while the Host stops, which leaves it open (<see cref="HostStopping"/>).</summary>
+    private void ReleaseRecordLocked(string key, WipHold hold)
     {
-        if (_holds is null || !_recorded.Remove(key) || (withdrawn && _hostStopping)) return;
+        if (_holds is null || !_recorded.Remove(key) || _hostStopping) return;
 
         try
         {
@@ -455,11 +456,11 @@ public sealed class WipLedger
         }
     }
 
-    private bool RemoveWaiterLocked(string key, bool withdrawn = false)
+    private bool RemoveWaiterLocked(string key)
     {
         _heldForHeadroom.Remove(key);
         if (!_waiting.Remove(key, out var hold)) return false;
-        ReleaseRecordLocked(key, hold, withdrawn);
+        ReleaseRecordLocked(key, hold);
         _queue.RemoveAll(queued => string.Equals(queued, key, StringComparison.OrdinalIgnoreCase));
         return true;
     }

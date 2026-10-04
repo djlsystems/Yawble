@@ -185,27 +185,38 @@ public sealed class AdmissionHoldsTests : IDisposable
     }
 
     [Fact]
-    public async Task While_the_Host_stops_a_withdrawn_waiter_leaves_its_row_open_and_a_start_still_closes_its_own()
+    public async Task While_the_Host_stops_no_row_is_closed_not_by_a_slot_the_stop_frees_a_reason_change_or_a_withdrawal()
     {
         var writer = new AdmissionHoldWriter(_store, _log);
-        var wip = new WipLedger(1, holds: writer);
+        string? headroom = null;
+        var wip = new WipLedger(1, () => headroom, writer);
         var dev3 = new ContainerId("Alpha", "Dev3");
+        var dev4 = new ContainerId("Alpha", "Dev4");
 
         var running = wip.TryEnterFor(Dev1, 10);
         Assert.NotNull(running);
         Assert.Null(wip.TryEnterFor(Dev2, 20));
         Assert.Null(wip.TryEnterFor(dev3, 30));
+        Assert.Null(wip.TryEnterFor(dev4, 40));
 
+        // The stop cancels the running run, which frees its slot; the head waiter's claim loop, not
+        // yet cancelled, takes it. That is the stop, not the hold ending.
         wip.HostStopping();
         running.Dispose();
-        using var started = wip.TryEnterFor(Dev2, 20);
-        Assert.NotNull(started);
+        using var admitted = wip.TryEnterFor(Dev2, 20);
+        Assert.NotNull(admitted);
+
+        // A withdrawal, and a reason that changes kind, during the stop close nothing either.
         wip.Withdraw(dev3);
+        admitted.Dispose();
+        headroom = Memory;
+        Assert.Null(wip.TryEnterFor(dev4, 40));
+        Assert.Equal(Memory, Assert.Single(wip.View().Waiting).Reason);
         await WrittenAsync(writer);
 
         Assert.Equal(
-            ["Dev2|closed", "Dev3|open"],
-            (await RowsAsync()).OrderBy(r => r.Member).Select(r => $"{r.Member}|{(r.ReleasedAt is null ? "open" : "closed")}"));
+            ["Dev2|slot|open", "Dev3|slot|open", "Dev4|slot|open"],
+            (await RowsAsync()).OrderBy(r => r.Member).Select(r => $"{r.Member}|{r.ReasonKind}|{(r.ReleasedAt is null ? "open" : "closed")}"));
     }
 
     [Fact]

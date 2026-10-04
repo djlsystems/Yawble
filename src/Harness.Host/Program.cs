@@ -1832,9 +1832,6 @@ builder.Services.AddMcpServer()
 var app = builder.Build();
 app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
 admissionHoldWriter.Logger = app.Services.GetRequiredService<ILogger<AdmissionHoldWriter>>();
-// A waiter withdrawn by the Host going down has not ended its hold: its row stays open for the next
-// start to close, marked unfinished.
-app.Lifetime.ApplicationStopping.Register(wip.HostStopping);
 
 {
     // A preset switched between home and issued reads as such at once, not after the probe's cache.
@@ -2565,6 +2562,11 @@ app.Services.GetRequiredService<ConciergeSessionStore>().Changed += () => record
 recordConciergeSessions();
 app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
 app.Lifetime.ApplicationStopping.Register(() => workersRecording?.Dispose());
+// The Host going down ends no admission hold: a waiter it withdraws, or admits to a slot it frees,
+// leaves its row open for the next start to close, marked unfinished. Registered after the other
+// stopping callbacks, so it runs before them (a token runs its callbacks newest first) - before
+// dropping the workers frees a slot.
+app.Lifetime.ApplicationStopping.Register(wip.HostStopping);
 Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
     app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version,
     worker => ConciergeSessionsView.TerminalsOn(
