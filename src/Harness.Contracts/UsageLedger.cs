@@ -30,6 +30,18 @@ public interface IUsageLedger
     /// </summary>
     Task<LedgerPage> ReadPageAsync(
         DateTimeOffset since, long? before, int take, CancellationToken ct = default);
+
+    /// <summary>
+    /// <paramref name="team"/>'s runs around one period, in <c>run_seq</c> order: every run that
+    /// ended in [<paramref name="from"/>, <paramref name="to"/>), and for each member of
+    /// <paramref name="members"/> and each member with such a run, its ONE run that ended last before
+    /// <paramref name="from"/> (the state it carried into the period) and its first that ended at or
+    /// after <paramref name="to"/> (a run still going when the period ends). A member runs one run at
+    /// a time, so no other run can overlap the period. What the team activity read derives from.
+    /// </summary>
+    Task<IReadOnlyList<UsageLedgerRow>> ReadTeamRunsAsync(
+        string team, DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection<string> members,
+        CancellationToken ct = default);
 }
 
 /// <summary>One <c>usage_ledger</c> row: one finished run. NULL token figures are "not measured",

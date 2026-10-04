@@ -336,7 +336,9 @@ public static class LedgerRows
     }
 
     /// <summary>Whether the run published a run-level `blocked` (one naming no <c>item</c>) between its
-    /// start and this row - the rule <c>ReadRunsAsync</c> reads a run as Blocked by.</summary>
+    /// start and this row - the rule <c>ReadRunsAsync</c> reads a run as Blocked by - or asked a
+    /// person to decide (`needs-decision`), which leaves the member waiting on a person just as a
+    /// block does: the team activity read shows both as blocked, after a Reset too.</summary>
     private static async Task<bool> BlockedAsync(
         SqliteConnection connection, SqliteTransaction transaction, Message terminal, long? startedSeq,
         CancellationToken ct)
@@ -348,12 +350,13 @@ public static class LedgerRows
         command.CommandText =
             $"""
              SELECT EXISTS (SELECT 1 FROM messages
-                            WHERE source = $source COLLATE NOCASE AND type = $blocked
+                            WHERE source = $source COLLATE NOCASE AND type IN ($blocked, $needsDecision)
                               AND seq > $from AND seq < $terminal
                               AND json_extract(payload, '$.{PayloadFields.Item}') IS NULL)
              """;
         command.Parameters.AddWithValue("$source", terminal.Source);
         command.Parameters.AddWithValue("$blocked", MessageTypes.Blocked);
+        command.Parameters.AddWithValue("$needsDecision", MessageTypes.NeedsDecision);
         command.Parameters.AddWithValue("$from", from);
         command.Parameters.AddWithValue("$terminal", terminal.Seq);
 
