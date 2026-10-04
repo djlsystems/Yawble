@@ -36,6 +36,9 @@ var (
 	browserWait = 10 * time.Minute
 )
 
+// listen opens the loopback listener the provider's redirect comes back to; tests count it.
+var listen = net.Listen
+
 // providerPattern is a provider id as the Host names one: google, microsoft, custom-<id>, at most
 // 40 characters in all.
 var providerPattern = regexp.MustCompile(`^(google|microsoft|custom-[a-z0-9][a-z0-9-]{0,32})$`)
@@ -176,7 +179,7 @@ func connect(ctx context.Context, out io.Writer, deps Deps, provider string, sco
 		}
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	listener, err := listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return fmt.Errorf("cannot listen on 127.0.0.1:%d for the provider's redirect: %w", port, err)
 	}

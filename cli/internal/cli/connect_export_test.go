@@ -1,6 +1,10 @@
 package cli
 
-import "time"
+import (
+	"net"
+	"sync/atomic"
+	"time"
+)
 
 // FastConnect makes the connect commands wait briefly for the Host and the browser. The returned
 // func restores the defaults.
@@ -16,3 +20,14 @@ const (
 	ConnectReportScript   = connectReportScript
 	ConnectWithdrawScript = connectWithdrawScript
 )
+
+// CountListens counts the loopback listeners the connect commands open from now on; the returned
+// func reads the count. The listener itself is still opened.
+func CountListens() func() int {
+	var n atomic.Int32
+	listen = func(network, address string) (net.Listener, error) {
+		n.Add(1)
+		return net.Listen(network, address)
+	}
+	return func() int { return int(n.Load()) }
+}
