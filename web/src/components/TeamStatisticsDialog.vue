@@ -67,6 +67,12 @@ const LaneHeight = 16;
 /** The columns' own height, under the lanes. */
 const ColumnsHeight = 240;
 
+/** THE SAME LEFT EDGE FOR BOTH GRIDS, so a lane and the columns under it share one time axis. */
+const GridLeft = 128;
+
+/** Room between the lanes and the columns for the y axis's unit. */
+const ColumnsGap = 32;
+
 /** Bucket edges fall on this browser's own timezone. */
 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -237,13 +243,14 @@ const option = computed(() => {
   const end = Math.max(periodTo.value, start + 1);
   const palette = colours.value;
   const laneTop = 36;
-  const columnsTop = laneTop + lanesHeight.value + 12;
+  const columnsTop = laneTop + lanesHeight.value + ColumnsGap;
 
   const timeAxis = (gridIndex: number, labels: boolean) => ({
     type: 'time',
     gridIndex,
     min: start,
     max: end,
+    axisLine: { show: labels },
     axisLabel: { show: labels, hideOverlap: true },
     axisTick: { show: labels },
     splitLine: { show: false },
@@ -265,8 +272,8 @@ const option = computed(() => {
       feature: { dataZoom: { xAxisIndex: [0, 1], yAxisIndex: false } },
     },
     grid: [
-      { left: 8, right: 16, top: laneTop, height: lanesHeight.value, containLabel: true },
-      { left: 8, right: 16, top: columnsTop, height: ColumnsHeight, containLabel: true },
+      { left: GridLeft, right: 16, top: laneTop, height: lanesHeight.value },
+      { left: GridLeft, right: 16, top: columnsTop, height: ColumnsHeight },
     ],
     xAxis: [timeAxis(0, false), timeAxis(1, true)],
     yAxis: [
@@ -280,13 +287,13 @@ const option = computed(() => {
         splitLine: { show: false },
         axisLine: { show: false },
         axisTick: { show: false },
-        axisLabel: { fontSize: 10, formatter: laneLabel },
+        axisLabel: { fontSize: 10, formatter: laneLabel, width: GridLeft - 12, overflow: 'truncate' },
       },
       {
         type: 'value',
         gridIndex: 1,
         name: unit.value.name,
-        nameTextStyle: { align: 'left' },
+        nameTextStyle: { align: 'right' },
         min: 0,
       },
     ],
@@ -347,7 +354,7 @@ const option = computed(() => {
   };
 });
 
-const chartHeight = computed(() => `${36 + lanesHeight.value + 12 + ColumnsHeight + 64}px`);
+const chartHeight = computed(() => `${36 + lanesHeight.value + ColumnsGap + ColumnsHeight + 64}px`);
 
 const chart = ref<InstanceType<typeof VChart> | null>(null);
 
