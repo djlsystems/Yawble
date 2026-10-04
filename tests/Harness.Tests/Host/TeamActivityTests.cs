@@ -485,6 +485,7 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
         await bed.RunAsync(team, "Dev", "completed", 1731, queued: T(10), started: T(40), ended: T(50));
         await bed.HoldAsync(team, "Dev", "slot", "waiting for a slot", T(20), T(40));
         await bed.TellAndSettleAsync(team, "Dev", "look");
+        await bed.QuietAsync(team);
 
         var before = await bed.ActivityAsync(team, T(0), T(100));
         Assert.Contains("held 20-40 w1731", Spans(before, "Dev"));
