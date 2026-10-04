@@ -71,8 +71,15 @@ const needs: ConnectionNeeds = {
     { scope: drive, words: 'See and change the Drive files it made', plugins: ['drive-filer'] },
     { scope: odd, words: null, plugins: ['drive-filer'] },
   ],
-  apis: [{ api: 'gmail.googleapis.com', link: 'https://console.cloud.google.com/apis/library/gmail.googleapis.com' }],
+  apis: [
+    { api: 'gmail.googleapis.com', link: 'https://console.cloud.google.com/apis/library/gmail.googleapis.com?project={projectId}' },
+    { api: 'drive.googleapis.com', link: 'https://console.cloud.google.com/apis/library/drive.googleapis.com?project={projectId}' },
+  ],
 };
+
+// The Host's own wording of the address warning, at the start of the client step's text.
+const servedWarning =
+  "Google and Microsoft refuse a redirect URI on an IP address such as 172.31.242.154. Open this page at http://localhost:8080 on the machine running the container, where the providers accept http, and register that address instead; or connect from that machine with the operator CLI's `connect`.";
 
 const googleGuide: ConnectionGuide = {
   steps: [
@@ -86,9 +93,12 @@ const googleGuide: ConnectionGuide = {
     {
       id: 'apis',
       title: 'Turn on the APIs',
-      text: 'Turn on each API the scopes need.',
-      link: 'https://console.cloud.google.com/apis/library/gmail.googleapis.com?project={projectId}',
-      copy: [{ label: 'API', value: 'gmail.googleapis.com' }],
+      text: 'Turn on each API the scopes need, in the same project.',
+      link: 'https://console.cloud.google.com/flows/enableapi?apiid=gmail.googleapis.com,drive.googleapis.com&project={projectId}',
+      copy: [
+        { label: 'Gmail API', value: 'gmail.googleapis.com' },
+        { label: 'Google Drive API', value: 'drive.googleapis.com' },
+      ],
     },
     {
       id: 'branding',
@@ -129,6 +139,13 @@ const googleReady = hostProvider({
   guide: googleGuide,
 });
 const googleBare = hostProvider({ id: 'google', guide: googleGuide });
+
+/** Google's guide as the Host serves it at an address the providers refuse: the warning opens the client step. */
+const warnedGuide: ConnectionGuide = {
+  steps: googleGuide.steps.map((guideStep) =>
+    guideStep.id === 'client' ? { ...guideStep, text: `${servedWarning} ${guideStep.text}` } : guideStep,
+  ),
+};
 const microsoft = hostProvider({ id: 'microsoft' });
 
 const authorizationUrl = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=123&state=abc';
@@ -293,6 +310,59 @@ describe('The set-up step', () => {
     wrapper.unmount();
   });
 
+  it('turns every API on with one link, names each to copy, and links each one too', async () => {
+    listConnectionProviders.mockResolvedValue([googleBare, microsoft]);
+    const wrapper = await mountConnections();
+    await chooseGoogle();
+    await click(button('Next'));
+
+    const apis = () => bodyFind('[data-guide-step="apis"]')!;
+    const all = () => apis().querySelectorAll('a[data-guide-link]');
+    expect(all()).toHaveLength(1);
+    // No project id yet: the flow opens without one, every API still named.
+    expect(all()[0]!.getAttribute('href')).toBe('https://console.cloud.google.com/flows/enableapi?apiid=gmail.googleapis.com,drive.googleapis.com');
+
+    expect(apis().textContent).toContain('Gmail API');
+    expect(apis().textContent).toContain('Google Drive API');
+    await click(apis().querySelector('button[aria-label="Copy Google Drive API"]'));
+    expect(copyText).toHaveBeenCalledWith('drive.googleapis.com');
+
+    await type('Project ID (optional)', 'my-project-42');
+    expect(all()[0]!.getAttribute('href')).toBe(
+      'https://console.cloud.google.com/flows/enableapi?apiid=gmail.googleapis.com,drive.googleapis.com&project=my-project-42',
+    );
+    const each = [...apis().querySelectorAll('[data-guide-api] a')].map((link) => link.getAttribute('href'));
+    expect(each).toEqual([
+      'https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=my-project-42',
+      'https://console.cloud.google.com/apis/library/drive.googleapis.com?project=my-project-42',
+    ]);
+
+    wrapper.unmount();
+  });
+
+  it('builds the guide for the ticked scopes', async () => {
+    listConnectionProviders.mockResolvedValue([googleBare, microsoft]);
+    const wrapper = await mountConnections();
+    await chooseGoogle();
+    await click(scopeLine(drive).querySelector('[role="checkbox"]'));
+
+    // The guide read for what is ticked lists only what is ticked.
+    const forTicked: ConnectionGuide = {
+      steps: googleGuide.steps.map((guideStep) =>
+        guideStep.id === 'data-access' ? { ...guideStep, copy: [{ label: 'Scope', value: odd }] } : guideStep,
+      ),
+    };
+    listConnectionProviders.mockResolvedValue([{ ...googleBare, guide: forTicked }, microsoft]);
+    await click(button('Next'));
+
+    expect(listConnectionProviders).toHaveBeenLastCalledWith([gmail, odd]);
+    expect(step()).toBe('setup');
+    expect(bodyFind('[data-guide-step="data-access"]')!.textContent).toContain(odd);
+    expect(bodyFind('[data-guide-step="data-access"]')!.textContent).not.toContain(gmail);
+
+    wrapper.unmount();
+  });
+
   it("checks the client ID's shape before saving, then saves it and goes on to sign in", async () => {
     listConnectionProviders.mockResolvedValue([googleBare, microsoft]);
     const wrapper = await mountConnections();
@@ -322,16 +392,18 @@ describe('The set-up step', () => {
   it("says first, on Google's client step, that this address will be refused", async () => {
     page.origin = 'http://172.31.242.154:8080';
     try {
-      listConnectionProviders.mockResolvedValue([googleBare, microsoft]);
+      listConnectionProviders.mockResolvedValue([{ ...googleBare, guide: warnedGuide }, microsoft]);
       const wrapper = await mountConnections();
       await chooseGoogle();
       await click(button('Next'));
 
       const client = bodyFind('[data-guide-step="client"]')!;
       const body = client.querySelector('[data-guide-body]')!;
-      expect(body.firstElementChild!.hasAttribute('data-redirect-warning')).toBe(true);
-      expect(body.firstElementChild!.textContent).toContain('http://localhost:8080');
-      expect(bodyFind('[data-guide-step="project"] [data-redirect-warning]')).toBeNull();
+      // Once, and before anything else the step says.
+      expect(body.textContent!.trim().startsWith('Google and Microsoft refuse a redirect URI')).toBe(true);
+      expect(client.textContent!.split('refuse a redirect URI').length - 1).toBe(1);
+      expect(client.textContent!.split('http://localhost:8080').length - 1).toBe(1);
+      expect(bodyFind('[data-guide-step="project"]')!.textContent).not.toContain('refuse a redirect URI');
 
       wrapper.unmount();
     } finally {
