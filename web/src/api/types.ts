@@ -1476,6 +1476,38 @@ export interface TeamActivity {
   members: ActivityMember[]
 }
 
+/**
+ * A TEAM'S RUNS AND THE TOKENS EACH USED, from `GET /api/teams/{team}/tokens/runs`. Mirrors
+ * `TeamTokenRunsAnswer` in `Harness.Host/TeamTokenRuns.cs`. `window` is `all` (the team's whole
+ * history, from its creation to now) or `requested`.
+ */
+export interface TeamTokenRuns {
+  from: string | null
+  to: string | null
+  serverNow: string
+  window: 'all' | 'requested'
+  runs: TeamTokenRun[]
+}
+
+/**
+ * ONE FINISHED RUN, at the instant it ended - when its tokens were measured. A figure the run did not
+ * report is ABSENT, never 0: an unmeasured run (`measured: false`) carries none, and a combined total
+ * carries `combined` and `billable` with no in/out split.
+ */
+export interface TeamTokenRun {
+  member: string
+  /** False for a member since removed. */
+  current: boolean
+  endedAt: string
+  measured: boolean
+  billable?: number
+  tokensIn?: number
+  tokensCachedIn?: number
+  tokensCacheCreation?: number
+  tokensOut?: number
+  combined?: number
+}
+
 /** Which period an `/activity` answer covers; see {@link TeamActivity}. */
 export type ActivityWindow = 'open' | 'latest' | 'requested' | 'none'
 
