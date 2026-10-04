@@ -311,7 +311,8 @@ const option = computed(() => {
       inactiveBorderColor: palette.off,
     },
     toolbox: { right: 0, top: 0, feature: { dataZoom: { yAxisIndex: false } } },
-    grid: { left: 72, right: 16, top: 40, height: ColumnsHeight },
+    // The columns start below the legend's row and far enough below the toolbox for a marker over the tallest one.
+    grid: { left: 92, right: 16, top: 56, height: ColumnsHeight },
     xAxis: {
       type: 'time',
       min: start,
@@ -320,7 +321,7 @@ const option = computed(() => {
       splitLine: { show: false },
       axisPointer: { show: true, snap: false, triggerEmphasis: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
     },
-    yAxis: { type: 'value', name: `${metricLabel} tokens`, nameTextStyle: { align: 'left' }, min: 0 },
+    yAxis: { type: 'value', name: `${metricLabel} tokens`, nameLocation: 'middle', nameGap: 76, min: 0 },
     dataZoom: [
       { type: 'inside', filterMode: 'none' },
       { type: 'slider', filterMode: 'none', height: 18, bottom: 4 },
@@ -441,7 +442,7 @@ watch([period, metric], () => void nextTick(fit));
 
 .tokens-chart-canvas {
   width: 100%;
-  height: 320px;
+  height: 336px;
 }
 
 .tokens-chart-note {

@@ -178,8 +178,10 @@ const pressed = (group: 'period' | 'metric') =>
   dialog()!.querySelector(`.tokens-${group} button[aria-pressed="true"]`)?.textContent?.trim();
 
 interface ChartOption {
-  legend: { data: string[] };
-  yAxis: { name?: string };
+  legend: { data: string[]; top?: number; padding?: number; itemHeight?: number };
+  toolbox: { top?: number; padding?: number; itemSize?: number };
+  grid: { top: number; height: number };
+  yAxis: { name?: string; nameLocation?: string; nameGap?: number; nameTextStyle?: { fontSize?: number } };
   series: { name: string; data: number[][] }[];
 }
 
@@ -391,6 +393,47 @@ describe('the columns', () => {
     await openDialog();
 
     expect(dialog()!.textContent).toContain('No runs in this period');
+  });
+});
+
+describe('the layout', () => {
+  // ECharts' own defaults where the option leaves them out.
+  const Padding = 5;
+  const LegendItemHeight = 14;
+  const ToolboxItemSize = 15;
+  const AxisNameGap = 15;
+  const AxisNameFontSize = 12;
+  /** How far a bucket's marker rises above its column's top. */
+  const MarkerRise = 13;
+
+  /** The bottom of the legend's row, from the chart's top. */
+  const legendBottom = (option: ChartOption) =>
+    (option.legend.top ?? 0) + 2 * (option.legend.padding ?? Padding) + (option.legend.itemHeight ?? LegendItemHeight);
+
+  /** The bottom of the toolbox: its icons, and under an icon the title shown on hover. */
+  const toolboxBottom = (option: ChartOption) =>
+    (option.toolbox.top ?? 0) + 2 * (option.toolbox.padding ?? Padding) + 2 * (option.toolbox.itemSize ?? ToolboxItemSize);
+
+  it('draws the axis name clear of the legend row', async () => {
+    await mountStrip();
+    await openDialog();
+
+    const option = chartOption();
+    const beside = option.yAxis.nameLocation === 'middle' || option.yAxis.nameLocation === 'center';
+    const nameTop = beside
+      ? option.grid.top
+      : option.grid.top - (option.yAxis.nameGap ?? AxisNameGap) - (option.yAxis.nameTextStyle?.fontSize ?? AxisNameFontSize);
+
+    expect(nameTop).toBeGreaterThanOrEqual(legendBottom(option));
+  });
+
+  it('leaves the tallest column\'s marker room below the toolbox', async () => {
+    await mountStrip();
+    await openDialog();
+
+    const option = chartOption();
+
+    expect(option.grid.top - MarkerRise).toBeGreaterThanOrEqual(toolboxBottom(option));
   });
 });
 
