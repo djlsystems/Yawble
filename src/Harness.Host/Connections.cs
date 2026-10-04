@@ -106,6 +106,11 @@ public sealed class Connections(ConnectionStore store, IOAuthEndpoints endpoints
         var clientId = change.ClientId?.Trim();
         if (string.IsNullOrEmpty(clientId)) return (null, "`clientId` is required.");
         if (clientId.Length > 512) return (null, "`clientId` is longer than 512 characters.");
+
+        if (id == ConnectionProviders.Google && !ConnectionProviders.IsGoogleClientId(clientId))
+        {
+            return (null, "`clientId` is not a Google OAuth client ID: it looks like <numbers>-<letters>.apps.googleusercontent.com. Copy it from the client's page.");
+        }
         if (change.ClientSecret is { Length: > 4096 }) return (null, "`clientSecret` is longer than 4096 characters.");
 
         string? tenant = null;
