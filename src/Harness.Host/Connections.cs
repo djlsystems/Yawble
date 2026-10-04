@@ -27,6 +27,13 @@ public sealed record DeviceStart(string FlowId, string UserCode, string Verifica
     public object Body() => new { flowId = FlowId, userCode = UserCode, verificationUri = VerificationUri, expiresAt = ExpiresAt };
 }
 
+/// <summary>A person's sign-in with a code still waiting, as a reopened dialog picks it back up.
+/// Never the device code.</summary>
+public sealed record OpenDeviceFlow(string FlowId, string Provider, string UserCode, string VerificationUri, DateTimeOffset ExpiresAt, string State)
+{
+    public object Body() => new { flowId = FlowId, provider = Provider, userCode = UserCode, verificationUri = VerificationUri, expiresAt = ExpiresAt, state = State };
+}
+
 /// <summary>A sign-in with a code as it stands: <c>waiting</c>, <c>done</c> (with the connection's
 /// id), <c>refused</c> or <c>expired</c>, and the sentence that says so.</summary>
 public sealed record DeviceFlowState(string State, string Sentence, string? ConnectionId);
@@ -473,14 +480,14 @@ public sealed class Connections(
         Sweep(now);
 
         var flow = new DeviceSignIn(
-            Random(24), actor, scopes!, string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(), reconnecting?.Id,
-            answer.DeviceCode!, answer.VerificationUri!,
+            Random(24), actor, provider.Id, scopes!, string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(), reconnecting?.Id,
+            answer.DeviceCode!, answer.UserCode!, answer.VerificationUri!,
             answer.ExpiresIn is > 0 ? now.AddSeconds(answer.ExpiresIn.Value) : now + FlowLifetime);
 
         _deviceFlows[flow.Id] = flow;
         _ = Task.Run(() => PollAsync(flow, provider, answer.Interval is > 0 ? TimeSpan.FromSeconds(answer.Interval.Value) : DefaultInterval));
 
-        return (new DeviceStart(flow.Id, answer.UserCode!, flow.VerificationUri, flow.ExpiresAt), null);
+        return (new DeviceStart(flow.Id, flow.UserCode, flow.VerificationUri, flow.ExpiresAt), null);
     }
 
     /// <summary>A sign-in with a code as its starter reads it, or null - for a flow that does not
@@ -489,6 +496,18 @@ public sealed class Connections(
         _deviceFlows.TryGetValue(flowId, out var flow) && string.Equals(flow.Actor.Id, actor.Id, StringComparison.Ordinal)
             ? flow.Read()
             : null;
+
+    /// <summary>The sign-ins with a code <paramref name="actor"/> started that are still waiting and
+    /// not past their expiry, soonest to expire first. Nobody else's, ever.</summary>
+    public IReadOnlyList<OpenDeviceFlow> OpenDeviceFlows(ConnectionActor actor)
+    {
+        var now = clock.GetUtcNow();
+
+        return [.. _deviceFlows.Values
+            .Where(f => string.Equals(f.Actor.Id, actor.Id, StringComparison.Ordinal) && f.ExpiresAt > now && f.Read().State == Waiting)
+            .OrderBy(f => f.ExpiresAt)
+            .Select(f => new OpenDeviceFlow(f.Id, f.Provider, f.UserCode, f.VerificationUri, f.ExpiresAt, Waiting))];
+    }
 
     /// <summary>
     /// Polls at the provider's interval, 5 s more after each <c>slow_down</c>, until the person
@@ -579,8 +598,8 @@ public sealed class Connections(
 
     /// <summary>One sign-in with a code, in memory. The device code goes when the flow settles.</summary>
     private sealed class DeviceSignIn(
-        string id, ConnectionActor actor, IReadOnlyList<string> scopes, string? name, string? reconnectId,
-        string deviceCode, string verificationUri, DateTimeOffset expiresAt)
+        string id, ConnectionActor actor, string provider, IReadOnlyList<string> scopes, string? name, string? reconnectId,
+        string deviceCode, string userCode, string verificationUri, DateTimeOffset expiresAt)
     {
         private readonly Lock _lock = new();
 
@@ -589,6 +608,10 @@ public sealed class Connections(
         public string Id => id;
 
         public ConnectionActor Actor => actor;
+
+        public string Provider => provider;
+
+        public string UserCode => userCode;
 
         public IReadOnlyList<string> Scopes => scopes;
 

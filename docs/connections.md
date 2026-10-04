@@ -107,6 +107,10 @@ which with `deviceFlow`.
   a missing flow gets) answers `{ state: "waiting" | "done" | "refused" | "expired", sentence,
   connection? }`, the connection only when `done`. Closing the dialog cancels nothing; reading again
   gives the same state. A flow is kept an hour past its expiry, and not across a Host restart.
+- `GET /api/connections/flows/open` (people only) lists the caller's own sign-ins with a code still
+  waiting and not past their expiry, soonest to expire first, so a reopened dialog picks one back up:
+  `[{ flowId, provider, userCode, verificationUri, expiresAt, state: "waiting" }]`. Another person's
+  are never listed, and neither the device code nor any secret or token is in it.
 - Approval runs the same completion as the web flow: the account from the ID token or userinfo, a
   reconnect must be the same account, the scopes merged, the tokens stored as ciphertext with the
   tenant row in the same transaction. Refusal and expiry store nothing.
@@ -117,6 +121,8 @@ Pinned by `ConnectionsTests` (`A_device_sign_in_answers_only_the_code_and_link_a
 `A_refused_device_sign_in_ends_with_a_sentence_and_stores_nothing`,
 `An_expired_device_sign_in_ends_with_a_sentence_and_stores_nothing`,
 `Another_person_reads_a_device_flow_exactly_as_a_missing_one`, `A_machine_principal_cannot_read_a_device_flow`,
+`A_person_lists_only_their_own_waiting_device_sign_ins_and_never_a_device_code`,
+`A_machine_principal_cannot_list_open_device_sign_ins`,
 `A_device_reconnect_that_signs_in_as_another_account_is_refused_and_changes_nothing`,
 `A_microsoft_public_client_is_saved_with_no_secret_and_its_exchange_and_refresh_send_none`,
 `The_microsoft_tenant_follows_who_can_sign_in`, `A_provider_with_no_device_endpoint_refuses_a_device_sign_in_with_a_sentence`
@@ -295,5 +301,13 @@ manifest declares, listing the connections of the providers the slot allows.
   already bound that same connection to a member of the same team.
 - A connection lacking a scope the slot asks for is refused at binding, offering **Reconnect** with
   the missing scope.
+- A connection made from a slot's **Connect** is bound through the same route a person's binding
+  uses, `PUT /api/teams/{team}/members/{member}/plugin-settings` with `connections: { <slot>: <id> }`:
+  the same scope check, the same `member.connections-changed` row in the same transaction. Pinned by
+  `ConnectionsTests.A_connection_just_signed_in_from_a_slot_binds_through_the_settings_route_and_one_missing_scopes_is_refused_there`.
+- Before an install, nothing of a package's plugin is installed, so the plan names what each connection
+  input's slot takes: `personConnections: [{ member, slot, description, required, plugin, providers,
+  scopes }]`, `scopes` keyed by provider as the manifest declares them. Pinned by
+  `SolutionCheckTests.Each_connection_input_carries_its_slots_plugin_providers_and_scopes_before_any_install`.
 - An unbound required slot blocks the member's runs with a sentence naming the slot.
 - Connecting, reconnecting and binding take effect without a restart.

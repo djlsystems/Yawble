@@ -176,6 +176,17 @@ public static class ConnectionEndpoints
                 + "code instead: answers only `{ flowId, userCode, verificationUri, expiresAt }`; the Host "
                 + "keeps the device code and polls the provider itself. Read it with `GET /api/connections/flows/{flowId}`.");
 
+        app.MapGet("/api/connections/flows/open", (Connections connections, HttpContext context) =>
+            Results.Ok(connections.OpenDeviceFlows(Actor(context)).Select(f => f.Body())))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("The caller's own sign-ins with a code still waiting")
+            .WithDescription(
+                "So a reopened dialog picks a waiting sign-in back up: each "
+                + "`{ flowId, provider, userCode, verificationUri, expiresAt, state }` the caller started that "
+                + "is still `waiting` and not past `expiresAt`, soonest to expire first. Another person's are "
+                + "never listed. Never the device code, a client secret or a token.");
+
         app.MapGet("/api/connections/flows/{flowId}", async (
             [Description("The flowId a sign-in with a code started with.")] string flowId,
             Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>

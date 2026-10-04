@@ -26,6 +26,10 @@ public sealed record SolutionPlan(
     /// has each set is the Host's, not the package's: the preview and the result add it.</summary>
     public IReadOnlyList<SolutionPlanSecret> Secrets { get; init; } = [];
 
+    /// <summary>Each connection the install asks for, with its slot's plugin, the providers it takes
+    /// and what it asks of each - from the package, so it is known before anything is installed.</summary>
+    public IReadOnlyList<SolutionPlanConnection> PersonConnections { get; init; } = [];
+
     /// <summary>What the solution's control panel and launcher tile take from the package.</summary>
     public SolutionPanel Panel { get; init; } = SolutionPanel.None;
 
@@ -82,6 +86,14 @@ public sealed record SolutionPlan(
                     m.Name, binding.Key, binding.Value, declared?.Description ?? "", declared?.Required ?? false,
                     declared?.When is { } when ? new SolutionPlanSecretWhen(when.Setting, when.Value) : null);
             }))],
+            PersonConnections = [.. manifest.Inputs.Connections.Select(input =>
+            {
+                var plugin = package.Plugin(manifest.Member(input.Member)?.PluginId)?.Manifest;
+                var slot = plugin?.Connections.GetValueOrDefault(input.Slot);
+                return new SolutionPlanConnection(
+                    input.Member, input.Slot, input.Description, input.Required, plugin?.Id,
+                    slot?.Providers ?? [], slot?.Scopes ?? new Dictionary<string, IReadOnlyList<string>>());
+            })],
             Panel = manifest.Panel,
         };
     }
@@ -139,3 +151,9 @@ public sealed record SolutionPlanSecret(
     string Member, string Field, string Key, string Description, bool Required, SolutionPlanSecretWhen? When);
 
 public sealed record SolutionPlanSecretWhen(string Setting, string Value);
+
+/// <summary>A connection slot the install asks a person to bind: <paramref name="Scopes"/> keyed by
+/// provider, as the plugin's manifest declares them. Never a connection or a token.</summary>
+public sealed record SolutionPlanConnection(
+    string Member, string Slot, string Description, bool Required, string? Plugin,
+    IReadOnlyList<string> Providers, IReadOnlyDictionary<string, IReadOnlyList<string>> Scopes);
