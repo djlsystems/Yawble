@@ -139,14 +139,22 @@ func TestConnectDeviceIsRefusedForAProviderWithNoDeviceEndpoint(t *testing.T) {
 }
 
 func TestConnectDeviceTakesNoPort(t *testing.T) {
-	h := deviceHost(t, map[string]any{"state": "waiting", "sentence": "Waiting."})
+	listens := cli.CountListens()
+	// Were the port taken, this Host would let the sign-in run to the end.
+	h := deviceHost(t, map[string]any{"state": "done", "sentence": "Connected person@example.test.", "connection": outlook})
 
-	code, _, errOut := run(t, stubbed(h), "connect", "microsoft", "--device", "--port", "8400")
+	code, out, errOut := run(t, stubbed(h), "connect", "microsoft", "--device", "--port", "8400")
 
-	if code != 2 || !strings.Contains(errOut, "--device") {
-		t.Fatalf("exit %d: %s", code, errOut)
+	if code != 2 || !strings.Contains(errOut, "--device signs in with a code and opens no port; leave out --port") {
+		t.Fatalf("exit %d, not refused with the sentence for --device with --port: %s", code, errOut)
 	}
-	if len(h.sent("start")) != 0 {
-		t.Error("started a flow for a refused command line")
+	if got := listens(); got != 0 {
+		t.Errorf("opened %d listener(s) for a refused command line", got)
+	}
+	if start := h.sent("start"); len(start) != 0 {
+		t.Errorf("started a flow for a refused command line: %v", start)
+	}
+	if strings.Contains(out, "FAKE-CODE") {
+		t.Errorf("printed a code for a refused command line:\n%s", out)
 	}
 }
