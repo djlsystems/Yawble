@@ -53,7 +53,7 @@ public sealed class AdmissionHoldsTests : IDisposable
         Assert.NotNull(running);
         Assert.Null(wip.TryEnterFor(Dev2, 42));
         Assert.Null(wip.TryEnterFor(Dev2, 42));
-        await writer.WrittenAsync(Ct);
+        await WrittenAsync(writer);
 
         var held = Assert.Single(await RowsAsync());
         Assert.Equal("Alpha", held.TeamId);
@@ -70,7 +70,7 @@ public sealed class AdmissionHoldsTests : IDisposable
         running.Dispose();
         using var started = wip.TryEnterFor(Dev2, 42);
         Assert.NotNull(started);
-        await writer.WrittenAsync(Ct);
+        await WrittenAsync(writer);
 
         var closed = Assert.Single(await RowsAsync());
         Assert.NotNull(closed.ReleasedAt);
@@ -81,7 +81,7 @@ public sealed class AdmissionHoldsTests : IDisposable
         var dev3 = new ContainerId("Alpha", "Dev3");
         Assert.Null(wip.TryEnter(dev3));
         wip.Withdraw(dev3);
-        await writer.WrittenAsync(Ct);
+        await WrittenAsync(writer);
 
         var withdrawn = (await RowsAsync()).Single(r => r.Member == "Dev3");
         Assert.Null(withdrawn.DeliverySeq);
@@ -106,7 +106,7 @@ public sealed class AdmissionHoldsTests : IDisposable
         // A new figure with the same reason kind is the same hold.
         headroom = "waiting for memory: 11.4 of 12.9 GB in use";
         wip.HeadroomChanged();
-        await writer.WrittenAsync(Ct);
+        await WrittenAsync(writer);
 
         var rows = await RowsAsync();
         Assert.Equal(
@@ -122,7 +122,7 @@ public sealed class AdmissionHoldsTests : IDisposable
         wip.HeadroomChanged();
         using var started = wip.TryEnterFor(Dev2, 7);
         Assert.NotNull(started);
-        await writer.WrittenAsync(Ct);
+        await WrittenAsync(writer);
 
         rows = await RowsAsync();
         Assert.Equal(
@@ -138,7 +138,7 @@ public sealed class AdmissionHoldsTests : IDisposable
         var wip = new WipLedger(2, new NoWorkers(), writer);
 
         Assert.Null(wip.TryEnter(Dev1));
-        await writer.WrittenAsync(Ct);
+        await WrittenAsync(writer);
 
         var row = Assert.Single(await RowsAsync());
         Assert.Equal(AdmissionHoldKinds.Worker, row.ReasonKind);
@@ -155,7 +155,7 @@ public sealed class AdmissionHoldsTests : IDisposable
         using var manager = wip.TryEnterFor(Manager, 3);
         Assert.NotNull(member);
         Assert.NotNull(manager);
-        await writer.WrittenAsync(Ct);
+        await WrittenAsync(writer);
 
         Assert.Empty(await RowsAsync());
     }
@@ -171,7 +171,7 @@ public sealed class AdmissionHoldsTests : IDisposable
         running!.Dispose();
         using var started = wip.TryEnter(Dev2);
         Assert.NotNull(started);
-        await writer.WrittenAsync(Ct);
+        await WrittenAsync(writer);
 
         Assert.Contains(_log.All, line => line.Contains("admission hold", StringComparison.Ordinal) && line.Contains("disk full", StringComparison.Ordinal));
 
@@ -185,6 +185,30 @@ public sealed class AdmissionHoldsTests : IDisposable
     }
 
     [Fact]
+    public async Task While_the_Host_stops_a_withdrawn_waiter_leaves_its_row_open_and_a_start_still_closes_its_own()
+    {
+        var writer = new AdmissionHoldWriter(_store, _log);
+        var wip = new WipLedger(1, holds: writer);
+        var dev3 = new ContainerId("Alpha", "Dev3");
+
+        var running = wip.TryEnterFor(Dev1, 10);
+        Assert.NotNull(running);
+        Assert.Null(wip.TryEnterFor(Dev2, 20));
+        Assert.Null(wip.TryEnterFor(dev3, 30));
+
+        wip.HostStopping();
+        running.Dispose();
+        using var started = wip.TryEnterFor(Dev2, 20);
+        Assert.NotNull(started);
+        wip.Withdraw(dev3);
+        await WrittenAsync(writer);
+
+        Assert.Equal(
+            ["Dev2|closed", "Dev3|open"],
+            (await RowsAsync()).OrderBy(r => r.Member).Select(r => $"{r.Member}|{(r.ReleasedAt is null ? "open" : "closed")}"));
+    }
+
+    [Fact]
     public async Task An_update_other_than_closing_once_and_any_delete_are_refused_and_a_log_purge_leaves_the_rows()
     {
         var heldAt = new DateTimeOffset(2026, 10, 4, 9, 0, 0, TimeSpan.Zero);
@@ -194,6 +218,8 @@ public sealed class AdmissionHoldsTests : IDisposable
         await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync("UPDATE admission_holds SET unfinished = 1"));
         await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync(
             "UPDATE admission_holds SET released_at = '2026-10-04T09:01:00.0000000+00:00', member = 'Dev9'"));
+        await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync(
+            "UPDATE admission_holds SET released_at = '2026-10-04T09:01:00.0000000+00:00', unfinished = 2"));
         await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync("DELETE FROM admission_holds"));
 
         await _store.CloseAsync("Alpha", "Dev1", heldAt.AddMinutes(4), Ct);
@@ -228,6 +254,11 @@ public sealed class AdmissionHoldsTests : IDisposable
             rows.OrderBy(r => r.Member).Select(r => $"{r.Member}|{r.ReasonKind}|{(r.ReleasedAt!.Value - heldAt).TotalMinutes}|{r.Unfinished}"));
         Assert.Equal(Memory, rows.Single(r => r.Member == "Dev1").Reason);
     }
+
+    /// <summary>Waits for the writer, bounded: a writer whose loop died fails the test instead of
+    /// hanging it.</summary>
+    private static Task WrittenAsync(AdmissionHoldWriter writer) =>
+        writer.WrittenAsync(Ct).WaitAsync(TimeSpan.FromSeconds(10), Ct);
 
     private Task<IReadOnlyList<AdmissionHoldRow>> RowsAsync() =>
         _store.ReadTeamAsync("Alpha", DateTimeOffset.MinValue, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, Ct);

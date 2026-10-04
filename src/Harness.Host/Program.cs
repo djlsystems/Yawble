@@ -1832,6 +1832,9 @@ builder.Services.AddMcpServer()
 var app = builder.Build();
 app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
 admissionHoldWriter.Logger = app.Services.GetRequiredService<ILogger<AdmissionHoldWriter>>();
+// A waiter withdrawn by the Host going down has not ended its hold: its row stays open for the next
+// start to close, marked unfinished.
+app.Lifetime.ApplicationStopping.Register(wip.HostStopping);
 
 {
     // A preset switched between home and issued reads as such at once, not after the probe's cache.

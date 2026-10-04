@@ -95,6 +95,7 @@ public sealed class WipLedger
     private readonly IAdmissionHolds? _holds;
     private readonly Dictionary<string, (string Kind, long? Seq)> _recorded = new(StringComparer.OrdinalIgnoreCase);
     private int _max;
+    private bool _hostStopping;
     private TaskCompletionSource _changed = NewSignal();
 
     /// <param name="maxRunning">The run limit; 0 or less is unlimited.</param>
@@ -261,8 +262,18 @@ public sealed class WipLedger
     {
         lock (_gate)
         {
-            if (RemoveWaiterLocked(id.ToString())) PulseLocked();
+            if (RemoveWaiterLocked(id.ToString(), withdrawn: true)) PulseLocked();
         }
+    }
+
+    /// <summary>
+    /// The Host is going down. A waiter withdrawn from now on - its claim loop cancelled by the
+    /// shutdown - has not ended its hold, so its recorded hold is left open: the next Host start closes
+    /// it, marked unfinished. A waiter that starts is still closed as started.
+    /// </summary>
+    public void HostStopping()
+    {
+        lock (_gate) _hostStopping = true;
     }
 
     public WipView View()
@@ -428,10 +439,11 @@ public sealed class WipLedger
         }
     }
 
-    /// <summary>Closes a waiter's recorded hold, when it has one: it started, or it withdrew.</summary>
-    private void ReleaseRecordLocked(string key, WipHold hold)
+    /// <summary>Closes a waiter's recorded hold, when it has one: it started, or it withdrew - except a
+    /// withdrawal while the Host stops, which leaves it open (<see cref="HostStopping"/>).</summary>
+    private void ReleaseRecordLocked(string key, WipHold hold, bool withdrawn)
     {
-        if (_holds is null || !_recorded.Remove(key)) return;
+        if (_holds is null || !_recorded.Remove(key) || (withdrawn && _hostStopping)) return;
 
         try
         {
@@ -443,11 +455,11 @@ public sealed class WipLedger
         }
     }
 
-    private bool RemoveWaiterLocked(string key)
+    private bool RemoveWaiterLocked(string key, bool withdrawn = false)
     {
         _heldForHeadroom.Remove(key);
         if (!_waiting.Remove(key, out var hold)) return false;
-        ReleaseRecordLocked(key, hold);
+        ReleaseRecordLocked(key, hold, withdrawn);
         _queue.RemoveAll(queued => string.Equals(queued, key, StringComparison.OrdinalIgnoreCase));
         return true;
     }
