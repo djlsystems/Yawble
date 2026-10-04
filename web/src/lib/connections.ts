@@ -253,3 +253,45 @@ export function when(iso: string | null): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
+
+/**
+ * A setup guide's deep link for the project the person named. A link holds `{projectId}` where the
+ * provider's console takes one; with none given, the query parameter that would carry it is left
+ * out, so the link opens on whatever project the console has chosen.
+ */
+export function guideLink(link: string, projectId: string): string {
+  const project = projectId.trim();
+  if (project !== '') return link.replaceAll('{projectId}', encodeURIComponent(project));
+
+  const [address, query] = link.split('?', 2) as [string, string | undefined];
+  const kept = (query ?? '').split('&').filter((pair) => pair !== '' && !pair.includes('{projectId}'));
+  return `${address.replaceAll('{projectId}', '')}${kept.length > 0 ? `?${kept.join('&')}` : ''}`;
+}
+
+/**
+ * Why a Google client ID will not do, or null when it has the shape Google gives one: the ID of a
+ * client ends in `.apps.googleusercontent.com`. Caught before saving, because the provider only
+ * says so after the person has been sent to sign in.
+ */
+export function googleClientIdProblem(clientId: string): string | null {
+  const id = clientId.trim();
+  if (id === '' || /^[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$/.test(id)) return null;
+  return 'A Google client ID ends in .apps.googleusercontent.com. Copy it from the client you created, not the project number or name.';
+}
+
+/**
+ * THE GUIDED SIGN-IN'S WAY BACK. The browser leaves the Console for the provider and returns to it
+ * through the Host's callback; this note in the tab's session storage is how the Connections dialog
+ * knows the round trip began in Add connection, and opens it again at its last step. Taken once.
+ */
+const GuidedKey = 'connections.guided';
+
+export function rememberGuidedConnect(provider: string, storage: Storage = sessionStorage): void {
+  storage.setItem(GuidedKey, provider);
+}
+
+export function takeGuidedConnect(storage: Storage = sessionStorage): string | null {
+  const provider = storage.getItem(GuidedKey);
+  storage.removeItem(GuidedKey);
+  return provider;
+}
