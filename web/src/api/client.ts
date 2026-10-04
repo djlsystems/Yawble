@@ -50,6 +50,9 @@ import type {
   ConnectionProviderSave,
   ConnectionStart,
   ConnectionStartRequest,
+  ConnectionDeviceStart,
+  ConnectionDeviceStartRequest,
+  ConnectionFlow,
   PluginList,
   PluginInstallResult,
   PluginRemoveResult,
@@ -1459,6 +1462,21 @@ export const startConnection = (body: ConnectionStartRequest) =>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
+
+/**
+ * Starts a sign-in with a code: the answer's `userCode` is entered at `verificationUri`, and the Host
+ * waits for it. `getConnectionFlow` reads how far it is.
+ */
+export const startDeviceConnection = (body: ConnectionDeviceStartRequest) =>
+  json<ConnectionDeviceStart>('/api/connections/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+/** A sign-in with a code: waiting, done (with the connection), refused or expired. Only its starter reads it. */
+export const getConnectionFlow = (flowId: string) =>
+  json<ConnectionFlow>(`/api/connections/flows/${encodeURIComponent(flowId)}`)
 
 export const renameConnection = (id: string, name: string) =>
   json<Connection>(`/api/connections/${encodeURIComponent(id)}`, {

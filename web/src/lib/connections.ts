@@ -295,3 +295,23 @@ export function takeGuidedConnect(storage: Storage = sessionStorage): string | n
   storage.removeItem(GuidedKey);
   return provider;
 }
+
+const Guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Why a Microsoft Application (client) ID or Directory (tenant) ID will not do, or null when it is
+ * a GUID, as Entra shows both on the app's overview. Caught before saving, for the same reason as
+ * Google's: the provider only says so once the person tries to sign in.
+ */
+export function microsoftIdProblem(value: string, what: 'Application (client) ID' | 'Directory (tenant) ID'): string | null {
+  const id = value.trim();
+  if (id === '' || Guid.test(id)) return null;
+  return `The ${what} is a GUID, such as 00000000-0000-0000-0000-000000000000. Copy it from the app's Overview page in Entra, not the app's name.`;
+}
+
+/** "14:59": what is left of a sign-in code's life, in minutes and seconds, never below 0:00. */
+export function countdown(expiresAt: string, now: number): string {
+  const left = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - now) / 1000));
+  if (Number.isNaN(left)) return '';
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}

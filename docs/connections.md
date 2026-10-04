@@ -19,7 +19,7 @@ credential ever leaves the Host.
 | Provider | What it is | Refresh token from | Account name from |
 |---|---|---|---|
 | `google` | Built in: Google's authorization and token endpoints, PKCE. | `access_type=offline`, `prompt=consent` | The ID token's `email`, else userinfo |
-| `microsoft` | Built in: the Microsoft identity platform (`common` tenant), PKCE. | the `offline_access` scope | The ID token's `preferred_username` |
+| `microsoft` | Built in: the Microsoft identity platform, PKCE, or a sign-in with a code (device flow) for a public client; the tenant follows who can sign in (`common` by default). | the `offline_access` scope | The ID token's `preferred_username` |
 | `custom` | Anything else that speaks OAuth 2.0 authorization code with PKCE: you give the authorization URL, token URL, an optional userinfo URL and default scopes. | whatever the service needs, in its scopes | userinfo, when given |
 
 Each provider needs its **client** - a client ID and a client secret you register at the provider -
@@ -66,10 +66,62 @@ Start here. Admin → **Connections** → **Add connection** opens a dialog in t
 
 ### Microsoft's setup steps
 
-Register an app in Microsoft Entra ID; add the Web platform with the redirect URI shown (and
-`http://localhost` for the CLI); add the Microsoft Graph delegated permissions listed; create a client
-secret and copy its Value; paste the Application (client) ID, the tenant (or `common`) and the
-secret. The details are under [Registering a Microsoft client](#registering-a-microsoft-client).
+Microsoft's guided app is a **public client**: you sign in with a code, so there is no client secret
+to copy, rotate or watch expire, and no redirect URI - it works the same from localhost, a LAN address
+or a tunnel.
+
+1. **Register the app and choose who can sign in** - the link opens Entra's new registration. The
+   *Supported account types* you pick there is the choice you make in the dialog, and it sets the
+   tenant: *personal and any work account* → `common`, *work accounts only* → `organizations`, *only my
+   organisation* → your Directory (tenant) ID. Leave Redirect URI empty.
+2. **Allow public client flows** - under Authentication, set **Allow public client flows: Yes**.
+3. **API permissions** - add the delegated Microsoft Graph permissions the ticked scopes need, plus
+   `offline_access`, each one copyable (`https://graph.microsoft.com/Mail.Read` is `Mail.Read`). In a
+   work or school tenant an admin may need to **grant consent** before anyone can sign in.
+4. **Paste the Application (client) ID** - checked as a GUID before saving and again by the Host; for
+   *only my organisation*, the Directory (tenant) ID too, also checked as a GUID. Saved with
+   `PUT /api/connections/providers/microsoft` `{ clientId, audience: "common" | "organizations" |
+   "tenant", tenantId? }`, which stores no secret (and clears one set before): the token exchange
+   and every refresh send no `client_secret`. A `clientSecret` with `audience` is refused.
+
+The **Sign in** step then shows a code and a link: open the link, enter the code, approve. The dialog
+moves on by itself.
+
+The redirect app with a client secret is unchanged, under **Advanced** (the `tenant` field and the
+secret); the long form is under [Registering a Microsoft client](#registering-a-microsoft-client).
+
+### Signing in with a code (the device flow)
+
+Any provider with a device authorization endpoint (Microsoft's:
+`https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode`) offers it; the provider list says
+which with `deviceFlow`.
+
+- `POST /api/connections/start` with `flow: "device"` asks the provider for a code and answers only
+  `{ flowId, userCode, verificationUri, expiresAt }`. The **device code stays on the Host**, in memory
+  only, spent once and bound to the person who started it, as the web flow keeps its PKCE verifier: it
+  never reaches the browser, a row, a log or a file.
+- The Host polls the token endpoint (`grant_type=urn:ietf:params:oauth:grant-type:device_code`) at the
+  provider's `interval`, 5 s longer after each `slow_down`, until the person approves, refuses
+  (`access_denied`), or the code expires (`expired_token`, or its `expiresAt` passes).
+- `GET /api/connections/flows/{flowId}` (people only, the starter only: anyone else gets exactly what
+  a missing flow gets) answers `{ state: "waiting" | "done" | "refused" | "expired", sentence,
+  connection? }`, the connection only when `done`. Closing the dialog cancels nothing; reading again
+  gives the same state. A flow is kept an hour past its expiry, and not across a Host restart.
+- Approval runs the same completion as the web flow: the account from the ID token or userinfo, a
+  reconnect must be the same account, the scopes merged, the tokens stored as ciphertext with the
+  tenant row in the same transaction. Refusal and expiry store nothing.
+
+Pinned by `ConnectionsTests` (`A_device_sign_in_answers_only_the_code_and_link_and_its_device_code_reaches_no_answer_row_or_file`,
+`Device_polling_waits_the_providers_interval_and_five_seconds_more_after_each_slow_down`,
+`An_approved_device_sign_in_stores_the_connection_with_its_tenant_row`,
+`A_refused_device_sign_in_ends_with_a_sentence_and_stores_nothing`,
+`An_expired_device_sign_in_ends_with_a_sentence_and_stores_nothing`,
+`Another_person_reads_a_device_flow_exactly_as_a_missing_one`, `A_machine_principal_cannot_read_a_device_flow`,
+`A_device_reconnect_that_signs_in_as_another_account_is_refused_and_changes_nothing`,
+`A_microsoft_public_client_is_saved_with_no_secret_and_its_exchange_and_refresh_send_none`,
+`The_microsoft_tenant_follows_who_can_sign_in`, `A_provider_with_no_device_endpoint_refuses_a_device_sign_in_with_a_sentence`
+and the CLI exchange tests below), `ConnectionNeedsTests.The_microsoft_guide_sets_up_a_public_client_signed_in_with_a_code`
+and, in the web, `web/src/components/__tests__/connect-dialog-device.mount.spec.ts`.
 
 No step of either guide carries a secret: the secret is pasted by you, stored encrypted, and never
 shown again.
@@ -130,6 +182,25 @@ yawble connect remove "Work mail"
 Without a browser on this computer, `connect` prints the URL to open by hand; the redirect still has
 to reach this computer's `127.0.0.1`.
 
+### Signing in with a code from the CLI
+
+```
+yawble connect microsoft --device --scopes https://graph.microsoft.com/Mail.Read --name "Outlook"
+```
+
+`--device` prints the code and the link and waits for the sign-in to finish: no port, no loopback
+listener, nothing to register. It is refused with a sentence for a provider with no device endpoint.
+Through the request file below it sends `{ op: "start", flow: "device", ... }`, answered
+`start: { flowId, userCode, verificationUri, expiresAt }`, then `{ op: "flow", flowId }`, answered
+`flow: { state, sentence, connection? }` (404 for a flow that is not the operator's, exactly as for a
+missing one). For a provider with no device endpoint the start answers status 400 with the sentence in
+`error`. The device code is in no report and no file under the data root. Pinned by `ConnectionsTests`
+(`The_cli_device_flow_starts_and_reads_through_the_operator_exchange`,
+`The_cli_device_code_reaches_no_exchange_answer_and_no_file_under_the_data_root`,
+`The_cli_reads_a_persons_device_flow_exactly_as_a_missing_one`,
+`The_cli_device_start_for_a_provider_with_no_device_endpoint_answers_400_with_the_sentence`) and, in the CLI,
+`cli/internal/cli/connect_device_test.go`.
+
 ### How the CLI reaches the Host
 
 The same way the other commands that talk to a running instance do (`yawble plugin install
@@ -180,6 +251,10 @@ issues after **7 days**, and every connection then turns `needs reconnect`. Publ
 - An *Internal* app (Workspace only) has no Testing status and no 7-day limit.
 
 ## Registering a Microsoft client
+
+The guided path (above) registers a public client signed in with a code, and needs only steps 1, 5
+and 6 here plus **Authentication → Allow public client flows: Yes**. What follows is the Advanced
+redirect app with a client secret, unchanged.
 
 1. In the [Microsoft Entra admin center](https://entra.microsoft.com/), **App registrations → New
    registration**.

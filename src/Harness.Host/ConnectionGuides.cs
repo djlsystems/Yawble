@@ -11,8 +11,8 @@ public sealed record GuideStep(string Id, string Title, string Text, string? Lin
 
 /// <summary>
 /// THE SETUP GUIDE OF EACH BUILT-IN PROVIDER: how a person registers the OAuth client the Host signs
-/// in with, in order, with the values to copy. Built for the scopes about to be asked and the
-/// redirect URI of the address in use. A custom provider has none.
+/// in with, in order, with the values to copy. Built for the scopes about to be asked and, for
+/// Google, the redirect URI of the address in use. A custom provider has none.
 ///
 /// NO STEP CARRIES A SECRET. The client secret is pasted by the person and only ever stored; the
 /// guide names where to find it, never what it is.
@@ -30,7 +30,7 @@ public static class ConnectionGuides
         return provider.Kind switch
         {
             ConnectionProviders.Google => Google(scopes, redirectUri, warning),
-            ConnectionProviders.Microsoft => Microsoft(scopes, redirectUri, warning),
+            ConnectionProviders.Microsoft => Microsoft(scopes),
             _ => null,
         };
     }
@@ -78,33 +78,49 @@ public static class ConnectionGuides
         ];
     }
 
-    private static IReadOnlyList<GuideStep> Microsoft(IReadOnlyList<string> scopes, string redirectUri, string? warning) =>
+    /// <summary>Microsoft's guided app is a PUBLIC CLIENT signed in with a code: no redirect URI and
+    /// no secret, only the client ID and who can sign in. The redirect app with a secret is Advanced.</summary>
+    private static IReadOnlyList<GuideStep> Microsoft(IReadOnlyList<string> scopes) =>
     [
-        new("register", "Register an app",
-            "In Microsoft Entra ID, register a new application. Choose who may sign in: accounts in any "
-            + "organization and personal Microsoft accounts work with the tenant common.",
+        new("register", "Register an app and choose who can sign in",
+            "In Microsoft Entra ID, register a new application. Under Supported account types, choose who can sign in "
+            + "and pick the same here: \"Accounts in any organizational directory and personal Microsoft accounts\" for "
+            + "personal and any work account, \"Accounts in any organizational directory\" for work accounts only, or "
+            + "\"Accounts in this organizational directory only\" for only your organisation. Leave Redirect URI empty: "
+            + "signing in with a code needs none.",
             "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/CreateApplicationBlade", []),
 
-        new("client", "Add the redirect URI",
-            Warned(warning, "Under Authentication, add the Web platform with this redirect URI, exactly as shown. "
-                + "Add http://localhost there too for the CLI's sign-in."),
-            null,
-            [new("Redirect URI", redirectUri), new("CLI redirect URI", "http://localhost")]),
+        new("public-client", "Allow public client flows",
+            "Under Authentication, set Allow public client flows to Yes and save. That is what lets you sign in with a code.",
+            null, []),
 
         new("data-access", "API permissions",
-            "Under API permissions, add these Microsoft Graph delegated permissions.",
+            "Under API permissions, choose Add a permission, then Microsoft Graph and Delegated permissions, and add each of "
+            + "these. In a work or school tenant an admin may need to grant consent for them (Grant admin consent); until "
+            + "then the sign-in stops and asks for an admin's approval.",
             null,
-            [.. scopes.Select(s => new GuideCopy(ConnectionNeeds.WordsFor(s) ?? s, s))]),
+            [.. GraphPermissions(scopes).Select(p => new GuideCopy(ConnectionNeeds.WordsFor(p.Scope) ?? p.Permission, p.Permission))]),
 
-        new("secret", "Create a client secret",
-            "Under Certificates & secrets, create a new client secret and copy its Value - Microsoft shows it only once.",
-            null, []),
-
-        new("credentials", "Paste the client ID and secret",
-            "Paste the Application (client) ID, the Directory (tenant) ID or common, and the secret's Value here. "
-            + "The secret is stored encrypted and never shown again.",
+        new("credentials", "Paste the Application (client) ID",
+            "Copy the Application (client) ID from the app's Overview - it looks like xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx - "
+            + "and paste it here. For only your organisation, paste the Directory (tenant) ID from the same page too. "
+            + "Nothing else is needed.",
             null, []),
     ];
+
+    /// <summary>The delegated Graph permission each scope needs - its name after the resource, so
+    /// <c>https://graph.microsoft.com/Mail.Read</c> is <c>Mail.Read</c> - the API ones first, then
+    /// the sign-in ones, <c>offline_access</c> always among them.</summary>
+    private static IEnumerable<(string Scope, string Permission)> GraphPermissions(IReadOnlyList<string> scopes)
+    {
+        var all = scopes.Contains("offline_access", StringComparer.Ordinal) ? scopes : [.. scopes, "offline_access"];
+
+        return all
+            .Select(s => (Scope: s, Permission: s.Contains('/') ? s[(s.LastIndexOf('/') + 1)..] : s))
+            .Where(p => p.Permission.Length > 0)
+            .DistinctBy(p => p.Permission, StringComparer.Ordinal)
+            .OrderBy(p => ConnectionProviders.IdentityScopes.Contains(p.Permission) ? 1 : 0);
+    }
 
     private static string Warned(string? warning, string text) => warning is null ? text : warning + " " + text;
 
