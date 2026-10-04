@@ -2388,6 +2388,7 @@ SiteApiEndpoints.Map(app);
 TenantSettingsEndpoints.Map(app);
 LedgerEndpoints.Map(app);
 TeamActivity.Map(app);
+TeamTokenRuns.Map(app);
 OutcomeEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
