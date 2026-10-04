@@ -247,6 +247,24 @@ describe('the Statistics tile', () => {
     expect(box.textContent).toContain('(<i>key</i>)');
   });
 
+  it('names the time under the pointer, not the nearest span edge the axis snaps to', async () => {
+    await mountStrip();
+
+    const chart = wrapper!.findComponent({ name: 'Echarts' });
+    const plot = tile().find('.stats-chart').element as HTMLElement;
+    plot.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 280, bottom: 42, width: 280, height: 42, toJSON: () => ({}) });
+
+    // Halfway across a window from 14:02 to 14:30; ECharts hands the formatter the nearest span start.
+    chart.vm.$emit('zr:mousemove', { offsetX: 140 });
+    await flushPromises();
+
+    const option = chart.props('option') as { tooltip: { formatter: (params: unknown) => string } };
+    const box = document.createElement('div');
+    box.innerHTML = option.tooltip.formatter([{ axisValue: at(14, 2) }]);
+
+    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(new Date(at(14, 16)).toLocaleTimeString());
+  });
+
   it('reads the time under the pointer as the browser\'s locale reads it', async () => {
     await mountStrip();
 

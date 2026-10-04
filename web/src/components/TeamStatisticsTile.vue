@@ -174,6 +174,22 @@ function besidePointer(point: number[], _params: unknown, _dom: unknown, _rect: 
   return tooltipBeside(point, size.contentSize, chart, { width: window.innerWidth, height: window.innerHeight }, TooltipGap);
 }
 
+/**
+ * THE INSTANT UNDER THE POINTER, from where it is across the lanes. An axis tooltip hands its
+ * formatter the NEAREST span edge instead, which would name a time the hover line is not on.
+ */
+const pointerAt = ref<number | null>(null);
+
+function notePointerX(event: { offsetX?: number }) {
+  const width = tileEl.value?.querySelector('.stats-chart')?.getBoundingClientRect().width ?? 0;
+  const start = from.value ?? end.value;
+  const stop = Math.max(end.value, start + 1);
+
+  pointerAt.value = width > 0 && event.offsetX !== undefined
+    ? start + (Math.min(Math.max(event.offsetX, 0), width) / width) * (stop - start)
+    : null;
+}
+
 /** ONE SPAN: a bar inside its lane, idle a pale track, blocked and failed notched (`stateShapes`). */
 function renderSpan(params: CustomSeriesRenderItemParams, api: CustomSeriesRenderItemAPI): CustomSeriesRenderItemReturn {
   const lane = Number(api.value(0));
@@ -229,7 +245,7 @@ const option = computed(() => {
       // THE TIME UNDER THE CURSOR comes from the axis; every line under it is escaped text.
       formatter: (params: unknown) => {
         const first = (Array.isArray(params) ? params[0] : params) as { axisValue?: number | string } | undefined;
-        const hovered = Number(first?.axisValue ?? end.value);
+        const hovered = pointerAt.value ?? Number(first?.axisValue ?? end.value);
 
         return tooltipHtml(lanes.value, hovered, withDate.value);
       },
@@ -306,6 +322,7 @@ function onTileClick() {
         :theme="dark ? 'dark' : ''"
         :init-options="{ renderer: 'svg' }"
         autoresize
+        @zr:mousemove="notePointerX"
       />
     </div>
 
