@@ -14,7 +14,14 @@
 // A PURE TEST CANNOT SEE ANY OF THIS. `budgetLine` can be correct and its own spec green while the
 // tile shows nothing - what matters here is which props reach it, which is a question only a
 // mounted component answers.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// The Statistics tile reads `/activity` when it mounts. Nothing here is about it, so the read never
+// answers, rather than reaching for a server that is not there.
+vi.mock('../../api/client', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTeamActivity: () => new Promise(() => {}),
+}));
 import { createPinia, setActivePinia } from 'pinia';
 import { mount, flushPromises } from '@vue/test-utils';
 

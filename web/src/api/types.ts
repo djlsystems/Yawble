@@ -1472,9 +1472,12 @@ export interface TeamActivity {
   from: string | null
   to: string | null
   serverNow: string
-  window: 'open' | 'latest' | 'requested' | 'none'
+  window: ActivityWindow
   members: ActivityMember[]
 }
+
+/** Which period an `/activity` answer covers; see {@link TeamActivity}. */
+export type ActivityWindow = 'open' | 'latest' | 'requested' | 'none'
 
 /**
  * EVERY WORKFLOW A TEAM HAS RUN, OPEN AND CLOSED ALIKE AND NEWEST FIRST, and one span over the open

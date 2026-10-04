@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ActivityMember, ActivitySpan, TeamActivity } from '../../api/types'
 import {
-  StatePalette,
   activityCaption,
   activityLanes,
   activitySummary,
   clockTime,
-  contrastRatio,
   escapeHtml,
   growSpans,
   laneInitials,
@@ -181,6 +179,10 @@ describe('the caption under the lanes', () => {
     expect(activityCaption('open', at(14, 2), 1, null)).toBe('since 14:02 · 1 open workflow')
   })
 
+  it('names only the start while the workflow list has not landed', () => {
+    expect(activityCaption('open', at(14, 2), null, null)).toBe('since 14:02')
+  })
+
   it('names when the latest workflow closed for the fallback', () => {
     expect(activityCaption('latest', at(9, 0), 0, at(9, 15))).toBe('latest workflow, closed 09:15')
   })
@@ -221,20 +223,5 @@ describe('the tooltip', () => {
 
   it('escapes the five characters markup reads', () => {
     expect(escapeHtml(`<a href="x">'&'</a>`)).toBe('&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;')
-  })
-})
-
-describe('state colours keep 3:1 against the tile in light and dark', () => {
-  for (const theme of ['light', 'dark'] as const) {
-    for (const state of ['running', 'waiting', 'blocked', 'failed'] as const) {
-      it(`${state} in ${theme}`, () => {
-        expect(contrastRatio(StatePalette[theme][state], StatePalette[theme].chrome)).toBeGreaterThanOrEqual(3)
-      })
-    }
-  }
-
-  it('measures contrast as WCAG does', () => {
-    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 5)
-    expect(contrastRatio('#ffffff', '#ffffff')).toBeCloseTo(1, 5)
   })
 })

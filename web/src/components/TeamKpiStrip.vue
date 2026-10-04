@@ -29,6 +29,7 @@ import { asTeamId } from '../api/types';
 import { closeWorkflow, nudgeWorkflow, resumeWorkflow, stopWorkflow } from '../api/client';
 import { useConsoleStore } from '../stores/console';
 import { vResizableColumns } from '../lib/resizableColumns';
+import TeamStatisticsTile from './TeamStatisticsTile.vue';
 
 const props = defineProps<{
   containers: ContainerSnapshot[];
@@ -642,6 +643,15 @@ function showThread(row: WorkflowRow) {
         <q-tooltip>Where the run time went — click for the breakdown</q-tooltip>
       </button>
     </div>
+
+    <!-- STATISTICS: a lane per member, between the workflow it describes and what it cost. -->
+    <TeamStatisticsTile
+      :team-id="teamId"
+      :containers="containers"
+      :workflows="workflows"
+      :clock="clock"
+      :clock-offset="clockOffset"
+    />
 
     <button type="button" class="team-kpi team-kpi--tokens" @click="tokensOpen = true">
       <div class="team-kpi-label">Tokens</div>

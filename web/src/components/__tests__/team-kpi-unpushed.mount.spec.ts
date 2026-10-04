@@ -3,6 +3,13 @@
 // THE BOARD'S TEAM SUMMARY SAYS WHEN A TEAM BRANCH IS NOT PUSHED, so a finished workflow whose work
 // is only in the team's clone shows without opening the Git dialog. The same words as the dialog.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// The Statistics tile reads `/activity` when it mounts. Nothing here is about it, so the read never
+// answers, rather than reaching for a server that is not there.
+vi.mock('../../api/client', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTeamActivity: () => new Promise(() => {}),
+}));
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 

@@ -1,4 +1,4 @@
-import type { ActivitySpan, ActivityState, TeamActivity } from '../api/types'
+import type { ActivitySpan, ActivityState, ActivityWindow, TeamActivity } from '../api/types'
 
 /**
  * WHAT THE STATISTICS TILE DRAWS FROM ONE `/activity` ANSWER, as plain functions so its initials,
@@ -173,7 +173,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
  * now is counted as such, never as idle.
  */
 export function activitySummary(
-  window: TeamActivity['window'],
+  window: ActivityWindow,
   lanes: readonly Lane[],
   from: number | null,
   now: number,
@@ -203,12 +203,13 @@ export function activitySummary(
 
 /**
  * THE CAPTION UNDER THE LANES: since when, and over how many open workflows; for the fallback, when
- * the latest workflow closed; for a team that never ran, that alone.
+ * the latest workflow closed; for a team that never ran, that alone. A null `openCount` is a
+ * workflow list not read yet, and names no count rather than a wrong one.
  */
 export function activityCaption(
-  window: TeamActivity['window'],
+  window: ActivityWindow,
   from: number | null,
-  openCount: number,
+  openCount: number | null,
   latestClosedAt: number | null,
 ): string {
   if (window === 'none') return 'No workflows yet'
@@ -217,9 +218,12 @@ export function activityCaption(
     return latestClosedAt === null ? 'latest workflow' : `latest workflow, closed ${clockTime(latestClosedAt)}`
   }
 
-  const since = from === null ? '' : `since ${clockTime(from)} · `
+  const parts = []
 
-  return `${since}${plural(openCount, 'open workflow', 'open workflows')}`
+  if (from !== null) parts.push(`since ${clockTime(from)}`)
+  if (openCount !== null) parts.push(plural(openCount, 'open workflow', 'open workflows'))
+
+  return parts.join(' · ')
 }
 
 /** Text made safe to place in markup: a name or a reason is characters, never tags. */
@@ -258,48 +262,4 @@ export function tooltipHtml(lanes: readonly Lane[], at: number): string {
   })
 
   return `<div class="stats-tip"><div class="stats-tip-time">${clockTime(at)}</div>${rows.join('')}</div>`
-}
-
-/**
- * THE STATE COLOURS, per theme, with the tile surface they are drawn on (`chrome`, the same value as
- * `--os-chrome` in `css/app.scss`). Running, waiting, blocked and failed each hold at least 3:1
- * against it in both themes, the contrast a graphical mark needs; idle is a pale track on purpose,
- * an empty lane rather than a mark. Blocked and failed also carry a notch, so no state is told
- * apart by hue alone.
- */
-export const StatePalette = {
-  light: {
-    running: '#2e7d4f',
-    waiting: '#5f7385',
-    blocked: '#b26a00',
-    failed: '#c62828',
-    idle: '#e4dfd8',
-    chrome: '#f4f1ec',
-  },
-  dark: {
-    running: '#5cb884',
-    waiting: '#8fa1b3',
-    blocked: '#e0a83a',
-    failed: '#ef6b6b',
-    idle: '#3a322c',
-    chrome: '#221c18',
-  },
-} as const
-
-/** Relative luminance of a `#rrggbb` colour, as WCAG defines it. */
-function luminance(hex: string): number {
-  const channel = (offset: number) => {
-    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255
-
-    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
-  }
-
-  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
-}
-
-/** The WCAG contrast ratio of two `#rrggbb` colours, from 1 to 21. */
-export function contrastRatio(a: string, b: string): number {
-  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number]
-
-  return (light + 0.05) / (dark + 0.05)
 }
