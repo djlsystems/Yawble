@@ -139,21 +139,40 @@ public sealed class TeamTokenRunsTests(TeamTokenRunsTests.Bed bed) : IClassFixtu
     }
 
     [Fact]
-    public async Task The_default_window_is_the_teams_whole_history_since_its_creation()
+    public async Task The_default_window_is_the_teams_workflow_stretch_and_lists_every_run_since_its_creation()
     {
         var team = await bed.TeamAsync("Token runs default", "Dev");
-        var created = await bed.CreatedAsync(team);
-        var ended = DateTimeOffset.UtcNow;
 
-        await bed.RunAsync(team, "Dev", started: ended.AddSeconds(-5), ended: ended, Split);
+        // A run written long before any workflow: still listed, so the totals keep the whole history.
+        await bed.RunAsync(team, "Dev", started: T(10), ended: T(20), Split);
+
+        var root = await bed.TellAsync(team, "Dev", "work");
+        await bed.AwaitRowAsync(m => m.Type == MessageTypes.Completed && m.Source == $"{team}/Dev" && m.CorrelationId == root.Seq, "Dev's run");
+        await bed.QuietAsync(team);
 
         var answer = await bed.RunsAsync(team);
 
-        Assert.Equal("all", answer.GetProperty("window").GetString());
-        Assert.Equal(created, answer.GetProperty("from").GetDateTimeOffset());
-        Assert.Equal(answer.GetProperty("serverNow").GetDateTimeOffset(), answer.GetProperty("to").GetDateTimeOffset());
-        Assert.True(answer.GetProperty("to").GetDateTimeOffset() >= ended);
-        Assert.Equal(ended.ToUnixTimeMilliseconds(), Assert.Single(Mine(answer, "Dev")).GetProperty("endedAt").GetDateTimeOffset().ToUnixTimeMilliseconds());
+        // The window is the Statistics tile's: the workflow's root to its newest row, never now.
+        var latest = (await bed.Log.ReadCorrelationAsync(root.Seq, Ct)).Max(m => m.OccurredAt);
+        Assert.Equal("workflows", answer.GetProperty("window").GetString());
+        Assert.Equal(root.OccurredAt, answer.GetProperty("from").GetDateTimeOffset());
+        Assert.Equal(latest, answer.GetProperty("to").GetDateTimeOffset());
+        Assert.True(answer.GetProperty("to").GetDateTimeOffset() < answer.GetProperty("serverNow").GetDateTimeOffset());
+        Assert.Contains(T(20).ToUnixTimeMilliseconds(), Mine(answer, "Dev").Select(r => r.GetProperty("endedAt").GetDateTimeOffset().ToUnixTimeMilliseconds()));
+    }
+
+    [Fact]
+    public async Task With_no_workflow_the_window_is_none_and_the_runs_are_still_listed()
+    {
+        var team = await bed.TeamAsync("Token runs none", "Dev");
+        await bed.RunAsync(team, "Dev", started: T(10), ended: T(20), Split);
+
+        var answer = await bed.RunsAsync(team);
+
+        Assert.Equal("none", answer.GetProperty("window").GetString());
+        Assert.Equal(JsonValueKind.Null, answer.GetProperty("from").ValueKind);
+        Assert.Equal(JsonValueKind.Null, answer.GetProperty("to").ValueKind);
+        Assert.Single(Mine(answer, "Dev"));
     }
 
     [Fact]
