@@ -65,7 +65,7 @@
 
   // THE STATISTICS TILE'S LANES: each state a mark of at least 3:1 on `--os-chrome`, the tile it is
   // drawn on (`statistics-tile-contrast.spec.ts` measures both themes). Idle is a pale empty track
-  // on purpose, the same in both themes.
+  // on purpose, each theme's own strong rule.
   --os-stat-running: #2e7d4f;
   --os-stat-waiting: #5f7385;
   --os-stat-blocked: #b26a00;
@@ -141,6 +141,9 @@ body.body--dark {
   --os-stat-waiting: #8fa1b3;
   --os-stat-blocked: var(--os-warn);
   --os-stat-failed: var(--os-error);
+  // Redeclared here, not inherited: a var() resolves where it is declared, so the :root one keeps
+  // the light rule colour.
+  --os-stat-idle: var(--os-rule-strong);
 
   --os-tint-ok: #16261c;
   --os-tint-warn: #2b2213;
