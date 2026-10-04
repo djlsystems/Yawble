@@ -1440,7 +1440,8 @@ export interface TeamRollupRow {
 }
 
 /** One state a member's lane can be in. "No data" is never a state: it is the absence of a span. */
-export type ActivityState = 'running' | 'waiting' | 'blocked' | 'failed' | 'idle'
+/** `held` is the part of a wait an admission hold covered: "waiting for a slot". */
+export type ActivityState = 'running' | 'waiting' | 'held' | 'blocked' | 'failed' | 'idle'
 
 /** One stretch of one state. `to` is null while it is still open at the answer's `serverNow`. */
 export interface ActivitySpan {
@@ -1449,8 +1450,13 @@ export interface ActivitySpan {
   to: string | null
   /** The workflow a run or its block belongs to, when it names one. */
   workflow?: number
-  /** A block's or failure's words while the log still holds them. Text, never markup. */
+  /**
+   * A block's or failure's words while the log still holds them, or a hold's sentence as admission
+   * worded it ("waiting for memory: 11.2 of 12.9 GB in use"). Text, never markup.
+   */
   reason?: string
+  /** A held span's reason in one word: `slot`, `memory`, `pressure` or `worker`. */
+  reasonKind?: string
 }
 
 /** One member's lane. `current` is false for a member since removed. */

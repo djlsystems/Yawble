@@ -26,6 +26,7 @@ import {
   bucketWords,
   columnTooltipHtml,
   stateShapes,
+  stateWords,
   tooltipBeside,
   windowBucket,
   windowEnd,
@@ -97,6 +98,7 @@ const colours = computed(() => {
   return {
     running: token('--os-stat-running'),
     waiting: token('--os-stat-waiting'),
+    held: token('--os-stat-held'),
     blocked: token('--os-stat-blocked'),
     failed: token('--os-stat-failed'),
     idle: token('--os-stat-idle'),
@@ -111,7 +113,7 @@ const loading = ref(false);
 const failed = ref(false);
 
 /** Every state the legend shows, toggled off by a click on it. */
-const shown = ref<Record<ActivityState, boolean>>({ running: true, waiting: true, blocked: true, failed: true, idle: true });
+const shown = ref<Record<ActivityState, boolean>>({ running: true, waiting: true, held: true, blocked: true, failed: true, idle: true });
 
 /**
  * THE TILE'S OWN WINDOW, READ ON OPENING AND NOTHING ELSE: from the team's earliest workflow root to
@@ -126,7 +128,7 @@ async function read() {
   loading.value = true;
   failed.value = false;
   activity.value = null;
-  shown.value = { running: true, waiting: true, blocked: true, failed: true, idle: true };
+  shown.value = { running: true, waiting: true, held: true, blocked: true, failed: true, idle: true };
 
   try {
     const answer = await getTeamActivity(asTeamId(props.teamId));
@@ -300,6 +302,7 @@ const option = computed(() => {
     animation: false,
     legend: {
       data: [...ActivityStates],
+      formatter: stateWords,
       selected: { ...shown.value },
       top: 0,
       left: 0,
@@ -380,7 +383,10 @@ const option = computed(() => {
         name: state,
         xAxisIndex: 1,
         yAxisIndex: 1,
-        itemStyle: { color: palette[state] },
+        // HELD IS STRIPED in its legend mark too, as its columns are, so it never depends on hue.
+        itemStyle: state === 'held'
+          ? { color: palette[state], decal: { symbol: 'rect', dashArrayX: [2, 4], dashArrayY: [1, 0], color: palette.chrome } }
+          : { color: palette[state] },
         renderItem: renderColumn(state),
         encode: { x: [0, 1], y: [2, 3] },
         data: stacks.value[state],

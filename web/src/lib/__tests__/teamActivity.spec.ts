@@ -22,6 +22,8 @@ import {
   laneInitials,
   memberInitials,
   memberTime,
+  stateShapes,
+  type StatePalette,
   tooltipHtml,
 } from '../teamActivity'
 import { crossesDays, localStretch, localTime } from '../localTime'
@@ -277,7 +279,7 @@ describe('bucketing member-time', () => {
   const utc = (text: string) => Date.parse(text)
   const minute = 60_000
   const hour = 60 * minute
-  const none = { running: 0, waiting: 0, blocked: 0, failed: 0, idle: 0 }
+  const none = { running: 0, waiting: 0, held: 0, blocked: 0, failed: 0, idle: 0 }
 
   function lane(name: string, spans: [ActivityState, string, string][]) {
     return { member: name, spans: spans.map(([state, from, to]) => ({ state, from: utc(from), to: utc(to), open: false })) }
@@ -435,10 +437,10 @@ describe('a column in words', () => {
     const column: Column = {
       from: start,
       to: start + 60_000,
-      totals: { running: 40_000, waiting: 0, blocked: 50_000, failed: 0, idle: 0 },
+      totals: { running: 40_000, waiting: 0, held: 0, blocked: 50_000, failed: 0, idle: 0 },
       members: [
-        { member: 'Ines', ms: { running: 40_000, waiting: 0, blocked: 20_000, failed: 0, idle: 0 } },
-        { member: 'Bold', ms: { running: 0, waiting: 0, blocked: 30_000, failed: 0, idle: 0 } },
+        { member: 'Ines', ms: { running: 40_000, waiting: 0, held: 0, blocked: 20_000, failed: 0, idle: 0 } },
+        { member: 'Bold', ms: { running: 0, waiting: 0, held: 0, blocked: 30_000, failed: 0, idle: 0 } },
       ],
     }
     const people = new Map([
@@ -463,11 +465,11 @@ describe('a column in words', () => {
     const column: Column = {
       from: start,
       to: start + 60_000,
-      totals: { running: 40_000, waiting: 0, blocked: 50_000, failed: 0, idle: 10_000 },
+      totals: { running: 40_000, waiting: 0, held: 0, blocked: 50_000, failed: 0, idle: 10_000 },
       members: [
-        { member: 'Ines', ms: { running: 40_000, waiting: 0, blocked: 20_000, failed: 0, idle: 0 } },
-        { member: 'Rhea', ms: { running: 0, waiting: 0, blocked: 30_000, failed: 0, idle: 10_000 } },
-        { member: 'Okon', ms: { running: 0, waiting: 0, blocked: 0, failed: 0, idle: 0 } },
+        { member: 'Ines', ms: { running: 40_000, waiting: 0, held: 0, blocked: 20_000, failed: 0, idle: 0 } },
+        { member: 'Rhea', ms: { running: 0, waiting: 0, held: 0, blocked: 30_000, failed: 0, idle: 10_000 } },
+        { member: 'Okon', ms: { running: 0, waiting: 0, held: 0, blocked: 0, failed: 0, idle: 0 } },
       ],
     }
     const people = new Map([
@@ -500,8 +502,8 @@ describe('a column in words', () => {
     const column: Column = {
       from: start,
       to: start + 60_000,
-      totals: { running: 300, waiting: 0, blocked: 0, failed: 15_000, idle: 0 },
-      members: [{ member: 'Ines', ms: { running: 300, waiting: 0, blocked: 0, failed: 15_000, idle: 0 } }],
+      totals: { running: 300, waiting: 0, held: 0, blocked: 0, failed: 15_000, idle: 0 },
+      members: [{ member: 'Ines', ms: { running: 300, waiting: 0, held: 0, blocked: 0, failed: 15_000, idle: 0 } }],
     }
     const html = columnTooltipHtml(column, 'minute', zone, new Map([['Ines', { name: 'Ines Lopez', initials: 'IL' }]]))
 
@@ -826,5 +828,79 @@ describe('a token bucket in words', () => {
     expect(text).toContain('Ines — 3 runs not measured')
     expect(text).not.toMatch(/\b0\b/)
     expect(text).toContain('Total not measured')
+  })
+})
+
+describe('a hold for a slot', () => {
+  const now = at(14, 32)
+  const memory = 'waiting for memory: 11.2 of 12.9 GB in use'
+
+  const held = (reasonKind: string, reason: string): ActivitySpan =>
+    ({ state: 'held', from: iso(at(14, 20)), to: iso(at(14, 24)), reason, reasonKind })
+
+  const tip = (span: ActivitySpan) =>
+    tooltipHtml(activityLanes(activity([member('Ines Lopez', [span])]), [], now), at(14, 22), false)
+
+  it('is a state of its own, between waiting and blocked', () => {
+    expect(ActivityStates).toEqual(['running', 'waiting', 'held', 'blocked', 'failed', 'idle'])
+  })
+
+  it('reads as waiting for a slot in the tooltip, with how long and what it waited for', () => {
+    const html = tip(held('memory', memory))
+
+    expect(html.replace(/<[^>]+>/g, '')).toContain('IL Ines Lopez — waiting for a slot 4 min (memory: 11.2 of 12.9 GB in use)')
+    expect(html).toContain('stats-chip--held')
+  })
+
+  it('says nothing more for the run limit, and names memory pressure and a missing worker', () => {
+    const text = (span: ActivitySpan) => tip(span).replace(/<[^>]+>/g, '')
+
+    expect(text(held('slot', 'waiting for a slot'))).toContain('IL Ines Lopez — waiting for a slot 4 min')
+    expect(text(held('slot', 'waiting for a slot'))).not.toContain('(')
+    expect(text(held('pressure', 'waiting for memory: work waited for memory 12% of the last 10 s')))
+      .toContain('waiting for a slot 4 min (memory: work waited for memory 12% of the last 10 s)')
+    expect(text(held('worker', 'waiting for a worker'))).toContain('waiting for a slot 4 min (no worker connected)')
+  })
+
+  it('is counted in the aria summary as waiting for a slot', () => {
+    const lanes = activityLanes(activity([
+      member('Manager', [{ state: 'running', from: iso(at(14, 2)), to: null }]),
+      member('Ines', [{ state: 'held', from: iso(at(14, 5)), to: null, reason: memory, reasonKind: 'memory' }]),
+    ]), [], now)
+
+    expect(activitySummary('workflows', lanes, at(14, 2), now))
+      .toBe(`Statistics ${localStretch(at(14, 2), now)}: 2 members - 1 running, 1 waiting for a slot`)
+  })
+
+  it('is named as waiting for a slot in a column\'s tooltip', () => {
+    const start = at(14, 20)
+    const column: Column = {
+      from: start,
+      to: start + 60_000,
+      totals: { running: 0, waiting: 10_000, held: 50_000, blocked: 0, failed: 0, idle: 0 },
+      members: [{ member: 'Ines', ms: { running: 0, waiting: 10_000, held: 50_000, blocked: 0, failed: 0, idle: 0 } }],
+    }
+    const text = columnTooltipHtml(column, 'minute', 'UTC', new Map([['Ines', { name: 'Ines Lopez', initials: 'IL' }]]))
+      .replace(/<[^>]+>/g, '')
+
+    expect(text).toContain('waiting for a slot 50 s')
+    expect(text).toContain('IL Ines Lopez — waiting 10 s, waiting for a slot 50 s')
+  })
+
+  it('is striped with the ground\'s colour, so it never depends on hue, and blocked keeps its notch', () => {
+    const palette: StatePalette = {
+      running: '#000001', waiting: '#000002', held: '#000003', blocked: '#000004', failed: '#000005', idle: '#000006', chrome: '#ffffff',
+    }
+    const shapes = stateShapes(0, 0, 30, 10, 'held', palette)
+
+    expect(shapes[0]).toEqual({ type: 'rect', shape: { x: 0, y: 0, width: 30, height: 10 }, style: { fill: '#000003' } })
+    expect(shapes.length).toBeGreaterThanOrEqual(3)
+    for (const stripe of shapes.slice(1)) {
+      expect(stripe.style.fill).toBe('#ffffff')
+      const { x, width } = stripe.shape as { x: number; width: number }
+      expect(x).toBeGreaterThanOrEqual(0)
+      expect(x + width).toBeLessThanOrEqual(30)
+    }
+    expect(stateShapes(0, 0, 30, 10, 'blocked', palette).map((shape) => shape.type)).toEqual(['rect', 'polygon'])
   })
 })

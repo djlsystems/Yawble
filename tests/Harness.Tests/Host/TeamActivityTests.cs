@@ -420,6 +420,87 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
         Assert.Equal(["running 60-70 w1604", "idle 70-100"], Spans(answer, "Dev"));
     }
 
+    [Fact]
+    public async Task A_waiting_stretch_is_held_where_a_hold_row_covers_it_and_waiting_elsewhere()
+    {
+        var team = await bed.TeamAsync("Activity held", "Dev");
+        await bed.CreatedAtAsync(team, T(-100));
+        await bed.RunAsync(team, "Dev", "completed", 1701, queued: T(10), started: T(60), ended: T(80));
+        await bed.HoldAsync(team, "Dev", "slot", "waiting for a slot", T(20), T(30));
+        await bed.HoldAsync(team, "Dev", "memory", "waiting for memory: 11.2 of 12.9 GB in use", T(30), T(70));
+
+        var answer = await bed.ActivityAsync(team, T(0), T(100));
+
+        // Running still wins: the memory hold's last ten seconds are the run's.
+        Assert.Equal(
+            ["waiting 10-20 w1701", "held 20-30 w1701", "held 30-60 w1701", "running 60-80 w1701", "idle 80-100"],
+            Spans(answer, "Dev"));
+
+        var held = Member(answer, "Dev").GetProperty("spans").EnumerateArray()
+            .Where(span => span.GetProperty("state").GetString() == "held")
+            .Select(span => $"{span.GetProperty("reasonKind").GetString()}|{span.GetProperty("reason").GetString()}")
+            .ToArray();
+        Assert.Equal(["slot|waiting for a slot", "memory|waiting for memory: 11.2 of 12.9 GB in use"], held);
+    }
+
+    [Fact]
+    public async Task A_hold_still_open_is_held_to_the_end_of_the_period()
+    {
+        var team = await bed.TeamAsync("Activity held open", "Dev");
+        await bed.CreatedAtAsync(team, T(-100));
+        await bed.RunAsync(team, "Dev", "completed", 1711, queued: null, started: T(10), ended: T(20));
+        await bed.HoldAsync(team, "Dev", "worker", "waiting for a worker", T(50), null);
+
+        var answer = await bed.ActivityAsync(team, T(0), T(100));
+
+        Assert.Equal(["running 10-20 w1711", "idle 20-50", "held 50-100"], Spans(answer, "Dev"));
+    }
+
+    [Fact]
+    public async Task With_no_hold_rows_of_its_own_a_members_spans_are_unchanged()
+    {
+        var team = await bed.TeamAsync("Activity unheld", "Dev", "Ops");
+        var other = await bed.TeamAsync("Activity unheld other", "Dev");
+        await bed.CreatedAtAsync(team, T(5));
+        await bed.CreatedAtAsync(other, T(-100));
+        await bed.RunAsync(team, "Dev", "completed", 1721, queued: T(10), started: T(20), ended: T(50));
+
+        // Another member's hold, another team's hold, and a hold from before this team existed - the
+        // team it replaced under the same name - change nothing of Dev's.
+        await bed.HoldAsync(team, "Ops", "slot", "waiting for a slot", T(10), T(20));
+        await bed.HoldAsync(other, "Dev", "slot", "waiting for a slot", T(10), T(20));
+        await bed.HoldAsync(team, "Dev", "slot", "waiting for a slot", T(2), T(18));
+
+        var answer = await bed.ActivityAsync(team, T(0), T(100));
+
+        Assert.Equal(["waiting 10-20 w1721", "running 20-50 w1721", "idle 50-100"], Spans(answer, "Dev"));
+        Assert.Equal(["held 10-20"], Spans(answer, "Ops"));
+    }
+
+    [Fact]
+    public async Task Hold_rows_survive_a_reset_that_deletes_memory()
+    {
+        var team = await bed.TeamAsync("Activity held reset", "Dev");
+        await bed.CreatedAtAsync(team, T(-100));
+        await bed.RunAsync(team, "Dev", "completed", 1731, queued: T(10), started: T(40), ended: T(50));
+        await bed.HoldAsync(team, "Dev", "slot", "waiting for a slot", T(20), T(40));
+        await bed.TellAndSettleAsync(team, "Dev", "look");
+
+        var before = await bed.ActivityAsync(team, T(0), T(100));
+        Assert.Contains("held 20-40 w1731", Spans(before, "Dev"));
+
+        var reset = await bed.Person.PostAsJsonAsync($"/api/teams/{team}/reset", new
+        {
+            members = new[] { "Dev", TeamRegistry.DefaultManagerName },
+            forgetHistory = true,
+            purge = true,
+            clearTranscripts = true,
+        }, Ct);
+        Assert.True(reset.IsSuccessStatusCode, await reset.Content.ReadAsStringAsync(Ct));
+
+        Assert.Equal(Spans(before, "Dev"), Spans(await bed.ActivityAsync(team, T(0), T(100)), "Dev"));
+    }
+
     private static string Url(string team, DateTimeOffset from, DateTimeOffset to) =>
         $"/api/teams/{team}/activity?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}";
 
@@ -578,6 +659,39 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
             insert.Parameters.AddWithValue("$started", (object?)started?.ToString("O") ?? DBNull.Value);
             insert.Parameters.AddWithValue("$ended", ended.ToString("O"));
             await insert.ExecuteNonQueryAsync(Ct);
+        }
+
+        /// <summary>One admission hold, written to <c>admission_holds</c> as its writer would.</summary>
+        public async Task HoldAsync(
+            string team, string member, string kind, string reason, DateTimeOffset heldAt, DateTimeOffset? releasedAt)
+        {
+            await using var connection = new SqliteConnection($"Data Source={Database};Pooling=false");
+            await connection.OpenAsync(Ct);
+            await using var insert = connection.CreateCommand();
+            insert.CommandText =
+                """
+                INSERT INTO admission_holds (team_id, team_name, member, held_at, released_at, reason_kind, reason)
+                VALUES ($team, $team, $member, $held, $released, $kind, $reason)
+                """;
+            insert.Parameters.AddWithValue("$team", team);
+            insert.Parameters.AddWithValue("$member", member);
+            insert.Parameters.AddWithValue("$held", heldAt.ToString("O"));
+            insert.Parameters.AddWithValue("$released", (object?)releasedAt?.ToString("O") ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$kind", kind);
+            insert.Parameters.AddWithValue("$reason", reason);
+            await insert.ExecuteNonQueryAsync(Ct);
+        }
+
+        /// <summary>Moves the team's creation back, so rows written at fixed instants fall after it.</summary>
+        public async Task CreatedAtAsync(string team, DateTimeOffset created)
+        {
+            await using var connection = new SqliteConnection($"Data Source={Database};Pooling=false");
+            await connection.OpenAsync(Ct);
+            await using var update = connection.CreateCommand();
+            update.CommandText = "UPDATE teams SET created_utc = $created WHERE id = $team";
+            update.Parameters.AddWithValue("$team", team);
+            update.Parameters.AddWithValue("$created", created.ToString("O"));
+            Assert.Equal(1, await update.ExecuteNonQueryAsync(Ct));
         }
 
         /// <summary>A log position no ledger row holds yet: a fresh row's own.</summary>
