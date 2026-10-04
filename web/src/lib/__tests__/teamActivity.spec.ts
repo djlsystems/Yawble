@@ -15,6 +15,7 @@ import {
   laneInitials,
   liveNow,
   memberInitials,
+  memberTime,
   tooltipHtml,
 } from '../teamActivity'
 
@@ -432,5 +433,25 @@ describe('a column in words', () => {
     expect(html).not.toContain('<b>')
     expect(text).toContain('&lt;b&gt;Bold&lt;/b&gt; (removed) — blocked 30 s')
     expect(html).not.toContain('style=')
+  })
+
+  it('reads time under a second as under a second, never as nothing', () => {
+    expect(memberTime(1)).toBe('<1 s')
+    expect(memberTime(499)).toBe('<1 s')
+    expect(memberTime(999)).toBe('<1 s')
+    expect(memberTime(1_000)).toBe('1 s')
+    expect(memberTime(1_400)).toBe('1 s')
+    expect(memberTime(40_000)).toBe('40 s')
+
+    const column: Column = {
+      from: start,
+      to: start + 60_000,
+      totals: { running: 300, waiting: 0, blocked: 0, failed: 15_000, idle: 0 },
+      members: [{ member: 'Ines', ms: { running: 300, waiting: 0, blocked: 0, failed: 15_000, idle: 0 } }],
+    }
+    const html = columnTooltipHtml(column, 'minute', zone, new Map([['Ines', { name: 'Ines Lopez', initials: 'IL' }]]))
+
+    expect(html).toContain('running &lt;1 s')
+    expect(html).toContain('IL</span> <span class="stats-tip-name">Ines Lopez</span> — running &lt;1 s, failed 15 s')
   })
 })

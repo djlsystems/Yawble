@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { init } from 'echarts/core';
 
 import TeamKpiStrip from '../TeamKpiStrip.vue';
 import { useConsoleStore } from '../../stores/console';
@@ -155,10 +156,9 @@ async function choose(label: string) {
 const pressed = () => dialog()!.querySelector('.stats-period button[aria-pressed="true"]')?.textContent?.trim();
 
 interface ChartOption {
-  legend: { data: string[] };
+  legend: { data: string[]; inactiveColor?: string; inactiveBorderColor?: string };
   yAxis: { name?: string; axisLabel?: { formatter: (value: number) => string } }[];
   series: { name: string; data: number[][] }[];
-  tooltip: { formatter: (params: unknown) => string };
 }
 
 /** The reference lanes' labels, read at each lane's middle. */
@@ -171,6 +171,38 @@ function dialogOption(): ChartOption {
   const charts = wrapper!.findAllComponents({ name: 'Echarts' });
 
   return charts[charts.length - 1]!.props('option') as ChartOption;
+}
+
+/**
+ * THE TOOLTIP ECHARTS SHOWS for a pointer at `at` over the columns: the dialog's option on a real
+ * chart of a fixed size, with the pointer moved there the way a mouse moves it. What ECharts hands
+ * the formatter is ECharts' own choice, so this is read from the tooltip it draws.
+ */
+function hoverText(option: ChartOption, at: number): string {
+  return hoverMarkup(option, at).textContent ?? '';
+}
+
+/** The same tooltip as markup, out of the chart it was drawn in. */
+function hoverMarkup(option: ChartOption, at: number): HTMLElement {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+
+  const chart = init(host, null, { renderer: 'svg', width: 1000, height: 600 });
+
+  try {
+    chart.setOption(option as never);
+
+    const [x, y] = chart.convertToPixel({ xAxisIndex: 1, yAxisIndex: 1 }, [at, 0.1]) as number[];
+    chart.getZr().handler.dispatch('mousemove', { zrX: x, zrY: y, offsetX: x, offsetY: y });
+
+    const tip = document.createElement('div');
+    tip.innerHTML = host.querySelector('.stats-tooltip')?.innerHTML ?? '';
+
+    return tip;
+  } finally {
+    chart.dispose();
+    host.remove();
+  }
 }
 
 describe('opening the Statistics dialog', () => {
@@ -299,6 +331,22 @@ describe('the columns', () => {
     expect(series.idle).toEqual([]);
   });
 
+  it('draws a state the legend has toggled off in the theme\'s faint ink, not the chart\'s own grey', async () => {
+    const theme = document.createElement('style');
+    theme.textContent = '.stats-dialog-card { --os-ink-faint: rgb(1, 2, 3); }';
+    document.head.appendChild(theme);
+
+    try {
+      await mountStrip();
+      await openFromTile();
+
+      expect(dialogOption().legend.inactiveColor).toBe('rgb(1, 2, 3)');
+      expect(dialogOption().legend.inactiveBorderColor).toBe('rgb(1, 2, 3)');
+    } finally {
+      theme.remove();
+    }
+  });
+
   it('draws a reference lane per member above the columns, on the same time axis', async () => {
     await mountStrip();
     await openFromTile();
@@ -318,15 +366,27 @@ describe('the columns', () => {
     await wrapper!.setProps({ containers: [...board, container('Bold', '<b>Bold</b>')] as never });
     await openFromTile();
 
-    const html = dialogOption().tooltip.formatter([{ axisValue: utc('14:05:30') }]);
-    const box = document.createElement('div');
-    box.innerHTML = html;
+    const text = hoverText(dialogOption(), utc('14:05:30'));
 
-    expect(box.querySelector('b')).toBeNull();
-    expect(box.textContent).toContain('running 1 min 30 s');
-    expect(box.textContent).toContain('M Manager — running 1 min');
-    expect(box.textContent).toContain('IL Ines Lopez — running 30 s, blocked 30 s');
-    expect(box.textContent).toContain('< <b>Bold</b> — failed 30 s');
+    expect(hoverMarkup(dialogOption(), utc('14:05:30')).querySelector('b')).toBeNull();
+    expect(text).toContain('running 1 min 30 s');
+    expect(text).toContain('M Manager — running 1 min');
+    expect(text).toContain('IL Ines Lopez — running 30 s, blocked 30 s');
+    expect(text).toContain('< <b>Bold</b> — failed 30 s');
+  });
+
+  it('names the column under the pointer across its whole width, not the nearest column start', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    const option = dialogOption();
+
+    // The 14:05 column, early and late in it; then 14:06, late in it, with no column after it.
+    expect(hoverText(option, utc('14:05:06'))).toContain('14:05–14:06');
+    expect(hoverText(option, utc('14:05:54'))).toContain('14:05–14:06');
+    expect(hoverText(option, utc('14:05:54'))).toContain('running 1 min 30 s');
+    expect(hoverText(option, utc('14:06:50'))).toContain('14:06–14:07');
+    expect(hoverText(option, utc('14:06:50'))).toContain('waiting 20 s');
   });
 
   it('reads No runs in this period when nothing was recorded', async () => {
@@ -358,9 +418,6 @@ describe('the columns', () => {
     expect(laneNames(option, 3)).toEqual(['Manager', 'Ines Lopez', 'Gone Member (removed)']);
     expect(option.series.find((s) => s.name === 'running')!.data).toEqual([[utc('14:05:00'), utc('14:06:00'), 0, 2]]);
 
-    const box = document.createElement('div');
-    box.innerHTML = option.tooltip.formatter([{ axisValue: utc('14:05:30') }]);
-
-    expect(box.textContent).toContain('GM Gone Member (removed) — running 30 s');
+    expect(hoverText(option, utc('14:05:30'))).toContain('GM Gone Member (removed) — running 30 s');
   });
 });

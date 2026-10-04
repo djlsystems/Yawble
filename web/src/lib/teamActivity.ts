@@ -486,8 +486,13 @@ export function bucketLabel(from: number, to: number, bucket: Bucket, timeZone: 
   return `${words.weekday} ${time(from)}–${time(to)}`
 }
 
-/** Member-time in words short enough for one tooltip line: "40 s", "3 min 20 s", "2 h 5 min". */
+/**
+ * Member-time in words short enough for one tooltip line: "40 s", "3 min 20 s", "2 h 5 min". Time
+ * under a second is "<1 s": a state listed with time in it never reads as none.
+ */
 export function memberTime(ms: number): string {
+  if (ms > 0 && ms < 1000) return '<1 s'
+
   const seconds = Math.round(ms / 1000)
 
   if (seconds < 60) return `${seconds} s`

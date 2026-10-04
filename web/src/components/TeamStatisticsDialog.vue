@@ -98,6 +98,7 @@ const colours = computed(() => {
     idle: token('--os-stat-idle'),
     chrome: token('--os-surface') || token('--os-chrome'),
     ink: token('--os-ink'),
+    off: token('--os-ink-faint'),
   };
 });
 
@@ -231,6 +232,24 @@ function renderLane(params: CustomSeriesRenderItemParams, api: CustomSeriesRende
   } as unknown as CustomSeriesRenderItemReturn;
 }
 
+/**
+ * ONE COLUMN'S HOVER AREA, drawn as nothing over its bucket's whole width and its grid's whole
+ * height: the pointer anywhere over a column, above its top too, is over this column and no other.
+ */
+function renderHover(params: CustomSeriesRenderItemParams, api: CustomSeriesRenderItemAPI): CustomSeriesRenderItemReturn {
+  const area = params.coordSys as unknown as { x: number; y: number; width: number; height: number };
+  const left = Math.max(api.coord([api.value(0), 0])[0]!, area.x);
+  const right = Math.min(api.coord([api.value(1), 0])[0]!, area.x + area.width);
+
+  if (right <= left) return { type: 'group', children: [] } as CustomSeriesRenderItemReturn;
+
+  return {
+    type: 'rect',
+    shape: { x: left, y: area.y, width: right - left, height: area.height },
+    style: { fill: 'transparent' },
+  } as unknown as CustomSeriesRenderItemReturn;
+}
+
 /** A lane's label sits at its middle, `n + 0.5`; the edges between lanes read nothing. */
 function laneLabel(value: number): string {
   return value % 1 === 0.5 ? lanes.value[Math.floor(value)]?.name ?? '' : '';
@@ -254,7 +273,7 @@ const option = computed(() => {
     axisLabel: { show: labels, hideOverlap: true },
     axisTick: { show: labels },
     splitLine: { show: false },
-    axisPointer: { snap: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
+    axisPointer: { show: true, snap: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
   });
 
   return {
@@ -265,6 +284,9 @@ const option = computed(() => {
       selected: { ...shown.value },
       top: 0,
       left: 0,
+      // OFF READS DIMMER THAN ON in either theme, not ECharts' own light grey.
+      inactiveColor: palette.off,
+      inactiveBorderColor: palette.off,
     },
     toolbox: {
       right: 0,
@@ -303,17 +325,17 @@ const option = computed(() => {
       { type: 'slider', xAxisIndex: [0, 1], filterMode: 'none', height: 18, bottom: 4 },
     ],
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    // THE COLUMN UNDER THE POINTER, from the hover area it is over. An axis trigger would hand the
+    // formatter the nearest column's start, which in a column's right half is the next column.
     tooltip: {
-      trigger: 'axis',
+      trigger: 'item',
       triggerOn: 'mousemove|click',
-      axisPointer: { type: 'line' },
       confine: true,
       transitionDuration: 0,
       className: 'stats-tooltip',
       formatter: (params: unknown) => {
-        const first = (Array.isArray(params) ? params[0] : params) as { axisValue?: number | string } | undefined;
-        const at = Number(first?.axisValue ?? NaN);
-        const column = columns.value.find((c) => c.from <= at && at < c.to);
+        const from = Number((params as { value?: number[] } | undefined)?.value?.[0] ?? NaN);
+        const column = columns.value.find((c) => c.from === from);
 
         return column ? columnTooltipHtml(column, bucket.value, timeZone, people.value) : '';
       },
@@ -350,6 +372,18 @@ const option = computed(() => {
         encode: { x: [0, 1], y: [2, 3] },
         data: [[start, end, 0, 0]],
       },
+      // Over the lanes and over the columns alike, on top of what they cover.
+      ...[0, 1].map((grid) => ({
+        type: 'custom',
+        name: 'hover',
+        z: 10,
+        xAxisIndex: grid,
+        yAxisIndex: grid,
+        emphasis: { disabled: true },
+        renderItem: renderHover,
+        encode: { x: [0, 1] },
+        data: columns.value.map((column) => [column.from, column.to]),
+      })),
     ],
   };
 });
