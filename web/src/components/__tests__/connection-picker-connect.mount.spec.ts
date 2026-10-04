@@ -411,6 +411,21 @@ describe('a slot with a connection to choose', () => {
   });
 });
 
+describe('a slot that takes only a custom provider', () => {
+  it('offers no Connect, and still says where such a connection is made', async () => {
+    // Add connection signs in to Google and Microsoft only: a custom provider's account is connected
+    // in Admin → Connections, and with nothing to choose the slot must still say so.
+    const custom = hostSlot({ providers: ['custom-crm'], scopes: { 'custom-crm': ['read'] }, required: true });
+    const wrapper = await mountMember(custom);
+
+    const slot = bodyFind('[data-connection-slot="mail"]')!;
+    expect(slot.querySelector('[data-slot-connect]')).toBeNull();
+    expect(slot.querySelector('[data-no-connections]')?.textContent).toContain('Admin → Connections');
+
+    wrapper.unmount();
+  });
+});
+
 describe('a slot at hire, before the member exists', () => {
   it('selects the new connection in the picker, and the hire binds it', async () => {
     listPlugins.mockResolvedValue(hostList([mailer(microsoftOnly)]));
