@@ -21,7 +21,8 @@ public sealed record OAuthProvider(
     string? RevokeUrl,
     IReadOnlyList<string> DefaultScopes,
     IReadOnlyDictionary<string, string> AuthorizeParameters,
-    string Help)
+    string Help,
+    string? DeviceAuthorizationUrl = null)
 {
     public bool Configured => !string.IsNullOrWhiteSpace(ClientId)
         && !string.IsNullOrWhiteSpace(AuthorizeUrl) && !string.IsNullOrWhiteSpace(TokenUrl);
@@ -39,6 +40,8 @@ public sealed record OAuthProvider(
         clientSecretSet = ClientSecretSet,
         configured = Configured,
         tenant = Kind == ConnectionProviders.Microsoft ? Tenant ?? ConnectionProviders.MicrosoftDefaultTenant : null,
+        audience = Kind == ConnectionProviders.Microsoft ? ConnectionProviders.AudienceOf(Tenant) : null,
+        deviceFlow = DeviceAuthorizationUrl is not null,
         authorizeUrl = AuthorizeUrl,
         tokenUrl = TokenUrl,
         userinfoUrl = UserinfoUrl,
@@ -74,6 +77,27 @@ public static class ConnectionProviders
     public const string CustomPrefix = "custom-";
 
     public const string MicrosoftDefaultTenant = "common";
+
+    /// <summary>Who can sign in to a Microsoft public client, as the guided setup asks it: personal and
+    /// any work account (<c>common</c>), work accounts only (<c>organizations</c>), or one tenant.</summary>
+    public const string AudienceCommon = "common";
+
+    public const string AudienceOrganizations = "organizations";
+
+    public const string AudienceTenant = "tenant";
+
+    /// <summary>The who-can-sign-in choice a stored tenant reads as, or null for one set under Advanced
+    /// that is none of them (a domain, <c>consumers</c>).</summary>
+    public static string? AudienceOf(string? tenant) => tenant switch
+    {
+        null or "" or MicrosoftDefaultTenant => AudienceCommon,
+        AudienceOrganizations => AudienceOrganizations,
+        _ when Guid.TryParse(tenant, out _) => AudienceTenant,
+        _ => null,
+    };
+
+    /// <summary>A GUID as Entra writes one: 8-4-4-4-12 hex digits.</summary>
+    public static bool IsGuid(string? text) => Guid.TryParseExact(text?.Trim(), "D", out _);
 
     /// <summary>The OpenID Connect scopes that are not an API's: granted with an ID token or a
     /// refresh token, and often left out of a token response's <c>scope</c>.</summary>
@@ -147,8 +171,10 @@ public static class ConnectionProviders
                     null,
                     ["openid", "email", "offline_access"],
                     new Dictionary<string, string>(StringComparer.Ordinal),
-                    "Register an app in Microsoft Entra ID. Under the \"Web\" platform, add two redirect URIs: the web "
-                    + "callback URL shown here, and http://localhost for the CLI (Entra ignores the port on a loopback address).");
+                    "Register an app in Microsoft Entra ID with public client flows allowed, and paste its Application "
+                    + "(client) ID: you sign in with a code, and no secret or redirect URI is needed. Under Advanced, a "
+                    + "\"Web\" app with a client secret and the redirect URIs shown here works as before.",
+                    authority + "/devicecode");
 
             default:
                 return new OAuthProvider(

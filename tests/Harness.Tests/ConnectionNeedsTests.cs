@@ -206,10 +206,11 @@ public sealed class ConnectionNeedsTests : IAsyncLifetime
                 Assert.Equal(JsonValueKind.Array, s.GetProperty("copy").ValueKind);
             });
 
-            // The redirect URI to register is a value to copy, in the client step.
-            var client = steps.Single(s => s.GetProperty("id").GetString() == "client");
-            Assert.Contains(client.GetProperty("copy").EnumerateArray(), c => c.GetProperty("value").GetString()!.EndsWith(Connections.CallbackPath, StringComparison.Ordinal));
         }
+
+        // Google's redirect URI to register is a value to copy, in the client step.
+        var client = providers["google"].GetProperty("guide").GetProperty("steps").EnumerateArray().Single(s => s.GetProperty("id").GetString() == "client");
+        Assert.Contains(client.GetProperty("copy").EnumerateArray(), c => c.GetProperty("value").GetString()!.EndsWith(Connections.CallbackPath, StringComparison.Ordinal));
 
         Assert.Equal(
             ["project", "apis", "branding", "data-access", "client", "credentials"],
@@ -218,6 +219,38 @@ public sealed class ConnectionNeedsTests : IAsyncLifetime
         var branding = providers["google"].GetProperty("guide").GetProperty("steps")[2].GetProperty("text").GetString()!;
         Assert.Contains("Publish app", branding, StringComparison.Ordinal);
         Assert.Contains("7 days", branding, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_microsoft_guide_sets_up_a_public_client_signed_in_with_a_code()
+    {
+        const string GraphMail = "https://graph.microsoft.com/Mail.Read";
+        var providers = await GetAsync($"/api/connections/providers?scopes={Uri.EscapeDataString(GraphMail)}");
+        var microsoft = providers.EnumerateArray().Single(p => p.GetProperty("id").GetString() == "microsoft");
+        var steps = microsoft.GetProperty("guide").GetProperty("steps").EnumerateArray().ToList();
+
+        Assert.Equal(["register", "public-client", "data-access", "credentials"], steps.Select(s => s.GetProperty("id").GetString()!));
+
+        // 1: Entra's new registration, and who can sign in.
+        Assert.Equal("https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/CreateApplicationBlade", steps[0].GetProperty("link").GetString());
+        Assert.Contains("who can sign in", steps[0].GetProperty("text").GetString()!, StringComparison.OrdinalIgnoreCase);
+
+        // 2: public client flows on.
+        Assert.Contains("Allow public client flows", steps[1].GetProperty("text").GetString()!, StringComparison.Ordinal);
+
+        // 3: the delegated Graph permissions the scopes need, plus offline_access, each copyable,
+        // and that a work tenant may need an admin's consent.
+        Assert.Equal(["Mail.Read", "offline_access"], Strings(steps[2].GetProperty("copy"), "value").Where(v => v is "Mail.Read" or "offline_access"));
+        Assert.Contains("admin", steps[2].GetProperty("text").GetString()!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Strings(steps[2].GetProperty("copy"), "value"), v => v.StartsWith("https://", StringComparison.Ordinal));
+
+        // 4: only the client ID, no secret and no redirect URI anywhere.
+        Assert.Contains("Application (client) ID", steps[3].GetProperty("text").GetString()!, StringComparison.Ordinal);
+        Assert.DoesNotContain(steps, s => s.GetProperty("copy").EnumerateArray().Any(c => c.GetProperty("value").GetString()!.Contains(Connections.CallbackPath, StringComparison.Ordinal)));
+        Assert.DoesNotContain(steps, s => s.GetProperty("title").GetString()!.Contains("secret", StringComparison.OrdinalIgnoreCase));
+
+        Assert.True(microsoft.GetProperty("deviceFlow").GetBoolean());
+        Assert.False(providers.EnumerateArray().Single(p => p.GetProperty("id").GetString() == "google").GetProperty("deviceFlow").GetBoolean());
     }
 
     [Fact]
@@ -308,6 +341,12 @@ public sealed class ConnectionNeedsTests : IAsyncLifetime
             throw new InvalidOperationException("No provider is called in these tests.");
 
         public Task<string?> RevokeAsync(OAuthProvider provider, string token, CancellationToken ct) =>
+            throw new InvalidOperationException("No provider is called in these tests.");
+
+        public Task<DeviceAuthorizationAnswer> DeviceAuthorizationAsync(OAuthProvider provider, IReadOnlyList<string> scopes, CancellationToken ct) =>
+            throw new InvalidOperationException("No provider is called in these tests.");
+
+        public Task<OAuthTokenAnswer> DeviceTokenAsync(OAuthProvider provider, string? clientSecret, string deviceCode, CancellationToken ct) =>
             throw new InvalidOperationException("No provider is called in these tests.");
     }
 }
