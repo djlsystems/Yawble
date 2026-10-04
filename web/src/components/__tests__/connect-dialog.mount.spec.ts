@@ -363,6 +363,54 @@ describe('The set-up step', () => {
     wrapper.unmount();
   });
 
+  // The guide read for the ticked scopes, with only these APIs on its APIs step.
+  function guideWithApis(apis: { label: string; value: string }[]): ConnectionGuide {
+    const ids = apis.map((api) => api.value).join(',');
+    return {
+      steps: googleGuide.steps.map((guideStep) =>
+        guideStep.id === 'apis'
+          ? { ...guideStep, link: ids ? `https://console.cloud.google.com/flows/enableapi?apiid=${ids}&project={projectId}` : null, copy: apis }
+          : guideStep,
+      ),
+    };
+  }
+
+  const apiLinks = () =>
+    [...bodyFind('[data-guide-step="apis"]')!.querySelectorAll('[data-guide-api] a')].map((link) => link.textContent!.trim());
+
+  it('links each API only for the ticked scopes', async () => {
+    listConnectionProviders.mockResolvedValue([googleBare, microsoft]);
+    const wrapper = await mountConnections();
+    await chooseGoogle();
+    await click(scopeLine(drive).querySelector('[role="checkbox"]'));
+
+    listConnectionProviders.mockResolvedValue([
+      { ...googleBare, guide: guideWithApis([{ label: 'Gmail API', value: 'gmail.googleapis.com' }]) },
+      microsoft,
+    ]);
+    await click(button('Next'));
+
+    expect(step()).toBe('setup');
+    expect(apiLinks()).toEqual(['gmail.googleapis.com']);
+
+    wrapper.unmount();
+  });
+
+  it('links no API when nothing is ticked', async () => {
+    listConnectionProviders.mockResolvedValue([googleBare, microsoft]);
+    const wrapper = await mountConnections();
+    await chooseGoogle();
+    for (const scope of [gmail, drive, odd]) await click(scopeLine(scope).querySelector('[role="checkbox"]'));
+
+    listConnectionProviders.mockResolvedValue([{ ...googleBare, guide: guideWithApis([]) }, microsoft]);
+    await click(button('Next'));
+
+    expect(step()).toBe('setup');
+    expect(apiLinks()).toEqual([]);
+
+    wrapper.unmount();
+  });
+
   it("checks the client ID's shape before saving, then saves it and goes on to sign in", async () => {
     listConnectionProviders.mockResolvedValue([googleBare, microsoft]);
     const wrapper = await mountConnections();
