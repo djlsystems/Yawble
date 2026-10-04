@@ -254,8 +254,10 @@ describe('the Statistics tile keeps itself current', () => {
     await mountStrip();
     expect(activityReads()).toBe(1);
 
-    // A board left open for ten minutes with nothing changing reads nothing more.
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    // A board left open with nothing changing reads nothing more. Two minutes, not ten: every
+    // simulated second re-renders the strip on its clock tick, and ten minutes twice ran past the
+    // test timeout on a busy machine while proving nothing more than two do.
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
     expect(activityReads()).toBe(1);
 
     await wrapper!.setProps({
@@ -264,7 +266,7 @@ describe('the Statistics tile keeps itself current', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(activityReads()).toBe(2);
 
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
     expect(activityReads()).toBe(2);
   });
 
