@@ -113,8 +113,11 @@ beforeEach(() => {
 
 afterEach(resetBody);
 
+/** Mounts it with Advanced open: what these specs read is today's Providers tab and Connect form. */
 async function mountConnections(props: Record<string, unknown> = {}) {
   const wrapper = await mountDialog(ConnectionsDialog, props);
+  await settle();
+  (bodyFind('[data-connections-advanced]') as HTMLElement).click();
   await settle();
   return wrapper;
 }

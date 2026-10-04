@@ -13,6 +13,7 @@ import {
 import type { Connection, ConnectionProvider, ConnectionProviderSave, ConnectionUse } from '../api/types';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { productCli } from '../presentation/product';
+import ConnectDialog from './ConnectDialog.vue';
 import {
   parseScopes,
   providerHelp,
@@ -20,6 +21,7 @@ import {
   redirectUriFor,
   redirectUriWarning,
   statusLabel,
+  takeGuidedConnect,
   usedByLabels,
   when,
   type CallbackOutcome,
@@ -32,6 +34,10 @@ import {
  * refreshed, its status (`ok`, or `needs reconnect` with the provider's reason) and the members
  * using it, with Reconnect, Rename and Disconnect. Disconnect is refused by the Host while a member
  * uses it; the refusal names them.
+ *
+ * ADD CONNECTION, at the top, is the guided way: `ConnectDialog` walks a person through the service,
+ * setting its app up and signing in, with the scopes the plugins ask for. Everything below it as it
+ * was before - the Providers tab and Connect an account - is under ADVANCED.
  *
  * CONNECT AN ACCOUNT picks a provider - or sets up its client first - and scopes, and sends the
  * browser to the provider's consent page. The provider returns to the Host's callback, which answers
@@ -57,19 +63,54 @@ async function load() {
   try {
     [connections.value, providers.value] = await Promise.all([listConnections(), listConnectionProviders()]);
     loaded.value = true;
+    return true;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     loading.value = false;
   }
+  return false;
 }
 
 /** Which tab shows: the accounts, or the providers they are connected through. */
 const tab = ref<'connections' | 'providers'>('connections');
 
-watch(open, (showing) => {
-  if (showing) void load();
+/** Today's Providers tab and Connect form, out of the way of the guided Add connection. */
+const advanced = ref(false);
+
+watch(advanced, (showing) => {
+  if (!showing) tab.value = 'connections';
 });
+
+watch(open, async (showing) => {
+  if (!showing) return;
+  if (!(await load())) return;
+
+  // Back from a sign-in that Add connection began: it opens again at its last step.
+  const notice = props.notice;
+  if (notice && takeGuidedConnect() !== null) {
+    guidedReturned.value = notice.outcome === 'refused' ? { refused: notice.reason } : { id: notice.id };
+    guidedOpen.value = true;
+  }
+});
+
+// --- Add connection, the guided way ----------------------------------------------------------------
+
+const guidedOpen = ref(false);
+const guidedReturned = ref<{ id: string | null } | { refused: string } | null>(null);
+
+function addConnection() {
+  guidedReturned.value = null;
+  guidedOpen.value = true;
+}
+
+/** The guided dialog hands a provider it does not walk through yet to Advanced's Connect form. */
+function connectInAdvanced(provider: string) {
+  advanced.value = true;
+  tab.value = 'connections';
+  startConnect();
+  connectProvider.value = provider;
+}
 
 /** How many of the accounts go through a provider, for its tile. */
 function connectionsOf(provider: ConnectionProvider) {
@@ -332,6 +373,22 @@ async function removeProvider(provider: ConnectionProvider) {
         to a member in the member's settings.
       </q-card-section>
 
+      <q-card-section class="row items-center q-gutter-x-sm q-py-sm">
+        <q-btn color="primary" no-caps icon="add" label="Add connection" :disable="!loaded" @click="addConnection" />
+        <q-space />
+        <q-btn
+          flat
+          dense
+          no-caps
+          icon="tune"
+          label="Advanced"
+          :color="advanced ? 'primary' : undefined"
+          :aria-pressed="advanced ? 'true' : 'false'"
+          data-connections-advanced
+          @click="advanced = !advanced"
+        />
+      </q-card-section>
+
       <q-card-section v-if="noticeText || error" class="q-py-none">
         <q-banner
           v-if="noticeText"
@@ -350,13 +407,13 @@ async function removeProvider(provider: ConnectionProvider) {
       <!-- TWO TABS: the accounts, and the providers whose clients they are connected through. -->
       <q-tabs v-model="tab" dense align="left" no-caps class="q-px-md" active-color="primary" indicator-color="primary">
         <q-tab name="connections" :label="`Connections (${connections.length})`" data-connections-tab="connections" />
-        <q-tab name="providers" :label="`Providers (${providers.length})`" data-connections-tab="providers" />
+        <q-tab v-if="advanced" name="providers" :label="`Providers (${providers.length})`" data-connections-tab="providers" />
       </q-tabs>
       <q-separator />
 
       <q-tab-panels v-model="tab" class="connections-body">
         <q-tab-panel name="connections" data-connections-panel="connections">
-          <div class="row items-center q-mb-sm">
+          <div v-if="advanced" class="row items-center q-mb-sm">
             <q-space />
             <q-btn flat dense no-caps icon="add" label="Connect an account…" :disable="!loaded" @click="startConnect" />
           </div>
@@ -519,6 +576,15 @@ async function removeProvider(provider: ConnectionProvider) {
       </q-tab-panels>
     </q-card>
   </q-dialog>
+
+  <ConnectDialog
+    v-model="guidedOpen"
+    :providers="providers"
+    :connections="connections"
+    :returned="guidedReturned"
+    @advanced="connectInAdvanced"
+    @changed="load"
+  />
 
   <!-- CONNECT AN ACCOUNT -->
   <q-dialog v-model="connectOpen">
