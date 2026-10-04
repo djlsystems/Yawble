@@ -16,6 +16,7 @@ import { useConsoleStore } from '../../stores/console';
 import { asTeamId } from '../../api/types';
 import type { ActivityMember, TeamActivity, TeamWorkflows } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
+import { ActivityStates } from '../../lib/teamActivity';
 
 const teamId = asTeamId('alpha');
 
@@ -212,6 +213,48 @@ async function hoverMarkup(option: ChartOption, ...at: number[]): Promise<HTMLEl
   }
 }
 
+/**
+ * THE COLUMNS ECHARTS LIGHTS UP while the pointer moves over the columns to each instant in turn,
+ * on the same real chart: every highlight ECharts asks for along the way, as the start of the
+ * column each highlighted state belongs to. What lights a column up is ECharts' own choice, so this
+ * is read from the highlights it raises, not from the option.
+ */
+async function highlightedColumns(option: ChartOption, ...at: number[]): Promise<number[]> {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+
+  const chart = init(host, null, { renderer: 'svg', width: 1000, height: 600 });
+  const lit: number[] = [];
+
+  try {
+    chart.setOption(option as never);
+    chart.on('highlight', (event: unknown) => {
+      const raised = event as { batch?: { seriesIndex?: number; dataIndex?: number | number[] }[] };
+
+      for (const item of raised.batch ?? []) {
+        const series = option.series[item.seriesIndex ?? -1];
+        if (!series || !(ActivityStates as readonly string[]).includes(series.name)) continue;
+
+        for (const index of [item.dataIndex ?? []].flat()) {
+          const from = series.data[index]?.[0];
+          if (from !== undefined) lit.push(from);
+        }
+      }
+    });
+
+    for (const instant of at) {
+      const [x, y] = chart.convertToPixel({ xAxisIndex: 1, yAxisIndex: 1 }, [instant, 0.1]) as number[];
+      chart.getZr().handler.dispatch('mousemove', { zrX: x, zrY: y, offsetX: x, offsetY: y });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    return lit;
+  } finally {
+    chart.dispose();
+    host.remove();
+  }
+}
+
 describe('opening the Statistics dialog', () => {
   it('opens from a click on the tile, on Open workflows by minute, reading the team\'s own window', async () => {
     await mountStrip();
@@ -397,6 +440,24 @@ describe('the columns', () => {
     // Into the 14:05 column's right half from its left half, and on into the gap after 14:06.
     expect(await hoverText(option, utc('14:05:10'), utc('14:05:50'))).toContain('14:05–14:06');
     expect(await hoverText(option, utc('14:06:30'), utc('14:07:30'))).toBe('');
+  });
+
+  it('never lights up a column the pointer is not over, so the highlight agrees with the tooltip', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    const option = dialogOption();
+    const column = (at: number) => [utc('14:05:00'), utc('14:06:00')].filter((from) => from <= at).pop();
+
+    // Early and late in the 14:05 column, late in 14:06; over the gap after it, none.
+    for (const at of [utc('14:05:06'), utc('14:05:54'), utc('14:06:50')]) {
+      for (const from of await highlightedColumns(option, at)) expect(iso(from)).toBe(iso(column(at)!));
+    }
+
+    expect(await highlightedColumns(option, utc('14:07:30'))).toEqual([]);
+    for (const from of await highlightedColumns(option, utc('14:05:10'), utc('14:05:50'))) {
+      expect(iso(from)).toBe(iso(utc('14:05:00')));
+    }
   });
 
   it('reads No runs in this period when nothing was recorded', async () => {

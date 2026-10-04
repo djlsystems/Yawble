@@ -273,7 +273,9 @@ const option = computed(() => {
     axisLabel: { show: labels, hideOverlap: true },
     axisTick: { show: labels },
     splitLine: { show: false },
-    axisPointer: { show: true, snap: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
+    // The hover line lights up nothing: it would light the item NEAREST the pointer, which in a
+    // column's right half is the next column, and disagree with the tooltip.
+    axisPointer: { show: true, snap: false, triggerEmphasis: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
   });
 
   return {
