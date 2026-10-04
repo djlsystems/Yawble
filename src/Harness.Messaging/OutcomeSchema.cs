@@ -237,5 +237,14 @@ public static class OutcomeSchema
             CREATE TRIGGER workflow_outcome_links_no_delete BEFORE DELETE ON workflow_outcome_links
             BEGIN SELECT RAISE(ABORT, 'workflow_outcome_links is append-only'); END;
             """),
+
+        // A TEAM'S RUNS BY WHEN THEY ENDED: what the team activity read asks for, a period of up to a
+        // year and each member's run either side of it (`SqliteUsageLedger.ReadTeamRunsAsync`), so it
+        // reads that team's rows in that period rather than scanning the ledger.
+        new MigrationStep(
+            "outcome-005",
+            """
+            CREATE INDEX ix_usage_ledger_team_ended ON usage_ledger(team_id, ended_at);
+            """),
     ];
 }

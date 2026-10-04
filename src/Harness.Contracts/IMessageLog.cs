@@ -319,6 +319,13 @@ public interface IMessageLog
     /// </summary>
     Task<long> HighestSeqAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// The highest seq written before <paramref name="at"/>, or 0 when none was: the log position an
+    /// instant falls at, so a time can scope rows that carry a seq. Found by halving the seq range,
+    /// a handful of key lookups, because <c>occurred_at</c> has no index.
+    /// </summary>
+    Task<long> LastSeqBeforeAsync(DateTimeOffset at, CancellationToken ct = default);
+
     /// <summary>Every message in one workflow, oldest first. What the UI groups by and a human follows.</summary>
     Task<IReadOnlyList<Message>> ReadCorrelationAsync(long correlationId, CancellationToken ct = default);
 

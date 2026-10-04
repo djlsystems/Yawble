@@ -1785,6 +1785,47 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             : new ContainerMarks(blocked, needsDecision, failed);
     }
 
+    public async Task<long> LastSeqBeforeAsync(DateTimeOffset at, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        // The first row at or after $seq: rows are appended in time order, so whether it was written
+        // before `at` only ever turns from yes to no as $seq rises, gaps from deletion included.
+        command.CommandText = "SELECT seq, occurred_at FROM messages WHERE seq >= $seq ORDER BY seq LIMIT 1";
+        var seqParameter = command.Parameters.AddWithValue("$seq", 0L);
+
+        async Task<long?> FirstAtOrAfterAsync(long seq)
+        {
+            seqParameter.Value = seq;
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct)) return null;
+            return MessageRows.ReadStamp(reader.GetString(1)) < at ? reader.GetInt64(0) : null;
+        }
+
+        // The highest seq whose first row at or after it was written before `at`.
+        var low = 0L;
+        var high = await HighestSeqAsync(ct);
+        var found = 0L;
+
+        while (low <= high)
+        {
+            var mid = low + (high - low) / 2;
+
+            if (await FirstAtOrAfterAsync(mid) is { } before)
+            {
+                found = before;
+                low = before + 1;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        return found;
+    }
+
     public async Task<Message?> FindAsync(long seq, CancellationToken ct = default)
     {
         await using var connection = Open();

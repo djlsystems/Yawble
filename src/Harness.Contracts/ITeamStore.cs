@@ -278,6 +278,10 @@ public interface ITeamStore
 
     Task<IReadOnlyList<PersistedTeam>> TeamsAsync(CancellationToken ct = default);
 
+    /// <summary>When <paramref name="team"/> was created - its <c>created_utc</c>, which a re-save
+    /// leaves alone and a delete takes with the row - or null for no such team.</summary>
+    Task<DateTimeOffset?> CreatedAtAsync(string team, CancellationToken ct = default);
+
     Task<IReadOnlyList<PersistedMember>> MembersAsync(CancellationToken ct = default);
 
     /// <summary>Removes a team and, through the foreign key's ON DELETE CASCADE, every one of its

@@ -128,6 +128,72 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
             page.Count == take ? floor : null);
     }
 
+    public async Task<IReadOnlyList<UsageLedgerRow>> ReadTeamRunsAsync(
+        string team, long floor, DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection<string> members,
+        CancellationToken ct = default)
+    {
+        await using var connection = Open();
+
+        // Every read here walks `ix_usage_ledger_team_ended` (`outcome-005`), so a year-long period
+        // reads the rows that ended since its start and each edge row is one step from its ends.
+        var start = Stamp(from);
+        var end = Stamp(to);
+
+        // EVERY RUN THAT OVERLAPS the period: it ended at or after its start, and began before its
+        // end. The beginning is tested here rather than in SQL because `queued_at` is not stored in
+        // the "O" form `ended_at` is, so the two do not compare as text.
+        await using var inside = connection.CreateCommand();
+        inside.CommandText =
+            $"""
+             SELECT {RunColumns} FROM usage_ledger
+             WHERE team_id = $team AND run_seq > $floor AND ended_at >= $from
+             """;
+        inside.Parameters.AddWithValue("$team", team);
+        inside.Parameters.AddWithValue("$floor", floor);
+        inside.Parameters.AddWithValue("$from", start);
+
+        var rows = new Dictionary<long, UsageLedgerRow>();
+        foreach (var row in await ReadRunsAsync(inside, ct))
+        {
+            if ((row.QueuedAt ?? row.StartedAt ?? row.EndedAt) < to) rows[row.RunSeq] = row;
+        }
+
+        var named = members
+            .Concat(rows.Values.Select(r => r.Member))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var member in named)
+        {
+            foreach (var edge in new[]
+                     {
+                         "ended_at < $from ORDER BY ended_at DESC, run_seq DESC",
+                         "ended_at >= $to ORDER BY ended_at, run_seq",
+                     })
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText =
+                    $"""
+                     SELECT {RunColumns} FROM usage_ledger
+                     WHERE team_id = $team AND member = $member AND run_seq > $floor AND {edge}
+                     LIMIT 1
+                     """;
+                command.Parameters.AddWithValue("$team", team);
+                command.Parameters.AddWithValue("$floor", floor);
+                command.Parameters.AddWithValue("$member", member);
+                command.Parameters.AddWithValue("$from", start);
+                command.Parameters.AddWithValue("$to", end);
+
+                foreach (var row in await ReadRunsAsync(command, ct)) rows[row.RunSeq] = row;
+            }
+        }
+
+        return [.. rows.Values.OrderBy(r => r.RunSeq)];
+    }
+
+    private static string Stamp(DateTimeOffset at) =>
+        at.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+
     private static async Task<IReadOnlyList<UsageLedgerRow>> ReadRunsAsync(SqliteCommand command, CancellationToken ct)
     {
         var rows = new List<UsageLedgerRow>();
