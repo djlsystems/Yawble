@@ -115,6 +115,8 @@ body.body--dark {
   --os-ink: #ece7e3;
   --os-ink-muted: #b3aaa3;
   --os-ink-faint: #8a7f77;
+  // Said again here: an alias declared only in :root is resolved there, to the LIGHT muted ink.
+  --os-muted: var(--os-ink-muted);
 
   --os-paper: #14110f;
   --os-surface: #1b1613;
