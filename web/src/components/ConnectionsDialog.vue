@@ -104,14 +104,6 @@ function addConnection() {
   guidedOpen.value = true;
 }
 
-/** The guided dialog hands a provider it does not walk through yet to Advanced's Connect form. */
-function connectInAdvanced(provider: string) {
-  advanced.value = true;
-  tab.value = 'connections';
-  startConnect();
-  connectProvider.value = provider;
-}
-
 /** How many of the accounts go through a provider, for its tile. */
 function connectionsOf(provider: ConnectionProvider) {
   const count = connections.value.filter((connection) => connection.provider === provider.id).length;
@@ -582,7 +574,6 @@ async function removeProvider(provider: ConnectionProvider) {
     :providers="providers"
     :connections="connections"
     :returned="guidedReturned"
-    @advanced="connectInAdvanced"
     @changed="load"
   />
 

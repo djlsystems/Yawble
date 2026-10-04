@@ -145,6 +145,12 @@ public static class ConnectionEndpoints
         app.MapPost("/api/connections/start", async (
             StartConnection request, Connections connections, HttpContext context, CancellationToken ct) =>
         {
+            if (request.Flow?.Trim() == Connections.DeviceFlow)
+            {
+                var (device, refusal) = await connections.StartDeviceAsync(Actor(context), request, ct);
+                return refusal is not null ? Results.BadRequest(new { error = refusal }) : Results.Ok(device!.Body());
+            }
+
             var (start, error) = await connections.StartAsync(Actor(context), request, Origin(context), ct);
             if (error is not null) return Results.BadRequest(new { error });
 
@@ -160,12 +166,31 @@ public static class ConnectionEndpoints
             .HumansOnly()
             .WithSummary("Start connecting an account")
             .WithDescription(
-                "Body `{ provider, scopes, name?, reconnectId?, redirectUri? }`. Answers the provider's "
+                "Body `{ provider, scopes, name?, reconnectId?, redirectUri?, flow? }`. Answers the provider's "
                 + "`authorizationUrl`, the `state` (issued to the caller, single use, 10 minutes), the "
                 + "`redirectUri` and `expiresAt`. With no `redirectUri` the Host's own "
                 + "`/api/connections/callback` at the address the request came to is used; a loopback "
                 + "`http://127.0.0.1:<port>` starts the CLI flow, finished with `complete`. The PKCE "
-                + "verifier stays on the Host. A reconnect asks the old scopes plus `scopes`.");
+                + "verifier stays on the Host. A reconnect asks the old scopes plus `scopes`. With "
+                + "`flow: \"device\"` (a provider with a device endpoint: Microsoft) it is a sign-in with a "
+                + "code instead: answers only `{ flowId, userCode, verificationUri, expiresAt }`; the Host "
+                + "keeps the device code and polls the provider itself. Read it with `GET /api/connections/flows/{flowId}`.");
+
+        app.MapGet("/api/connections/flows/{flowId}", async (
+            [Description("The flowId a sign-in with a code started with.")] string flowId,
+            Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
+        {
+            if (connections.DeviceFlowOf(flowId, Actor(context)) is not { } flow) return Results.NotFound(new { error = MissingFlow });
+
+            return Results.Ok(await FlowViewAsync(connections, flow, c => View(c.Connection, c.Uses, teams), ct));
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Read a sign-in with a code")
+            .WithDescription(
+                "The starter's only: anyone else gets exactly what a missing flow gets (404). Answers "
+                + "`{ state: waiting|done|refused|expired, sentence, connection? }`, the connection only when "
+                + "`done`. Closing the dialog cancels nothing: reading again gives the same state.");
 
         app.MapGet(Connections.CallbackPath, async (
             [Description("The provider's authorization code.")] string? code,
@@ -277,6 +302,21 @@ public static class ConnectionEndpoints
                 "Refused 409 while a member binds it, naming them (`usedBy`). Otherwise deletes the tokens "
                 + "and the connection, then revokes at the provider where it supports that, best effort: "
                 + "the result is a `connections.revoked` tenant row, and a failed revoke never blocks. 204.");
+    }
+
+    /// <summary>What a flow nobody may read answers: the same for a missing flow and another person's.</summary>
+    public const string MissingFlow = "There is no such sign-in, or it was not started by you. Start again.";
+
+    /// <summary>A sign-in with a code as the route and the operator exchange answer it.</summary>
+    public static async Task<object> FlowViewAsync(
+        Connections connections, DeviceFlowState flow, Func<(ConnectionRecord Connection, IReadOnlyList<ConnectionUse> Uses), object> view,
+        CancellationToken ct)
+    {
+        var connection = flow is { State: Connections.Done, ConnectionId: { } id } ? await connections.Store.GetAsync(id, ct) : null;
+
+        return connection is null
+            ? new { state = flow.State, sentence = flow.Sentence }
+            : new { state = flow.State, sentence = flow.Sentence, connection = view((connection, await connections.Store.UsedByAsync(connection.Id, ct))) };
     }
 
     /// <summary>The route's and the operator exchange's disconnect: (204, null), or a status and body.</summary>

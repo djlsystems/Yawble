@@ -1,4 +1,5 @@
 import { outcomeLabel } from '../api/outcomes';
+import { localTime } from './localTime';
 import type {
   ContainerSnapshot,
   Message,
@@ -817,7 +818,7 @@ function instant(raw: string | null): number | null {
 function stamp(raw: string | null): string {
   const parsed = instant(raw);
 
-  return parsed === null ? '—' : new Date(parsed).toLocaleString();
+  return parsed === null ? '—' : localTime(parsed, { date: true });
 }
 
 const Unmeasured: WorkflowExecution = {

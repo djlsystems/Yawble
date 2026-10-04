@@ -1464,9 +1464,10 @@ export interface ActivityMember {
 
 /**
  * WHAT EACH MEMBER WAS DOING, AND WHEN, from `GET /api/teams/{team}/activity`. Mirrors
- * `TeamActivityAnswer` in `Harness.Host/TeamActivity.cs`. `window` is `open` (from the oldest open
- * workflow), `latest` (from the most recent one, none open), `requested`, or `none` for a team that
- * has never run - which carries no members and null `from` / `to`.
+ * `TeamActivityAnswer` in `Harness.Host/TeamActivity.cs`. `window` is `workflows` (from the root of
+ * the team's earliest workflow, open or closed, to the latest activity of any of them - never the
+ * clock), `requested`, or `none` for a team that has never run - which carries no members and null
+ * `from` / `to`.
  */
 export interface TeamActivity {
   from: string | null
@@ -1478,14 +1479,16 @@ export interface TeamActivity {
 
 /**
  * A TEAM'S RUNS AND THE TOKENS EACH USED, from `GET /api/teams/{team}/tokens/runs`. Mirrors
- * `TeamTokenRunsAnswer` in `Harness.Host/TeamTokenRuns.cs`. `window` is `all` (the team's whole
- * history, from its creation to now) or `requested`.
+ * `TeamTokenRunsAnswer` in `Harness.Host/TeamTokenRuns.cs`. With no period asked for, `runs` is
+ * every run since the team's creation and `window` is `workflows` (`from`/`to` the activity read's
+ * own window: earliest workflow root to latest workflow activity) or `none` (no workflow, no
+ * `from`/`to`); with one, `requested`.
  */
 export interface TeamTokenRuns {
   from: string | null
   to: string | null
   serverNow: string
-  window: 'all' | 'requested'
+  window: 'workflows' | 'requested' | 'none'
   runs: TeamTokenRun[]
 }
 
@@ -1509,7 +1512,7 @@ export interface TeamTokenRun {
 }
 
 /** Which period an `/activity` answer covers; see {@link TeamActivity}. */
-export type ActivityWindow = 'open' | 'latest' | 'requested' | 'none'
+export type ActivityWindow = 'workflows' | 'requested' | 'none'
 
 /**
  * EVERY WORKFLOW A TEAM HAS RUN, OPEN AND CLOSED ALIKE AND NEWEST FIRST, and one span over the open
@@ -3069,6 +3072,14 @@ export interface ConnectionProviderSave {
   clientId: string
   clientSecret?: string
   tenant?: string
+  /**
+   * Microsoft's guided setup: who can sign in. `common` is personal and any work account,
+   * `organizations` work accounts only, `tenant` only the organisation `tenantId` names. Saved with
+   * no secret: a public client.
+   */
+  audience?: MicrosoftAudience
+  /** With `audience: 'tenant'`: the Directory (tenant) ID, a GUID. */
+  tenantId?: string
   name?: string
   authorizeUrl?: string
   tokenUrl?: string
@@ -3100,6 +3111,9 @@ export interface Connection {
 }
 
 /** `POST /api/connections/start`. */
+/** Who can sign in through a Microsoft app the guided setup saved. */
+export type MicrosoftAudience = 'common' | 'organizations' | 'tenant'
+
 export interface ConnectionStartRequest {
   provider?: string
   scopes: string[]
@@ -3114,6 +3128,30 @@ export interface ConnectionStart {
   state: string
   redirectUri: string
   expiresAt: string
+}
+
+/** `POST /api/connections/start` for sign-in with a code, at a provider with a device endpoint. */
+export interface ConnectionDeviceStartRequest extends Omit<ConnectionStartRequest, 'redirectUri'> {
+  flow: 'device'
+}
+
+/**
+ * Its answer: the code the person enters at `verificationUri`, until `expiresAt`. The provider's
+ * device code stays on the Host, which waits for the sign-in itself.
+ */
+export interface ConnectionDeviceStart {
+  flowId: string
+  userCode: string
+  verificationUri: string
+  expiresAt: string
+}
+
+/** `GET /api/connections/flows/{flowId}`: where a sign-in with a code is, in a sentence. */
+export interface ConnectionFlow {
+  state: 'waiting' | 'done' | 'refused' | 'expired'
+  sentence: string
+  /** When `done`: the connection it stored. */
+  connection?: Connection | null
 }
 
 /**

@@ -27,6 +27,30 @@ public interface IOAuthEndpoints
     /// <summary>Revokes <paramref name="token"/> where the provider supports it. Returns null on
     /// success, else why not.</summary>
     Task<string?> RevokeAsync(OAuthProvider provider, string token, CancellationToken ct);
+
+    /// <summary>The provider's device authorization endpoint: a device code the Host keeps, and the
+    /// user code and link the person is shown.</summary>
+    Task<DeviceAuthorizationAnswer> DeviceAuthorizationAsync(OAuthProvider provider, IReadOnlyList<string> scopes, CancellationToken ct);
+
+    /// <summary>One poll of the token endpoint with the device code grant. Still waiting is an
+    /// answer with <c>authorization_pending</c> or <c>slow_down</c> as its error.</summary>
+    Task<OAuthTokenAnswer> DeviceTokenAsync(OAuthProvider provider, string? clientSecret, string deviceCode, CancellationToken ct);
+}
+
+/// <summary>A device authorization endpoint's answer. <see cref="DeviceCode"/> stays on the Host;
+/// only the user code, the link and the expiry are shown.</summary>
+public sealed record DeviceAuthorizationAnswer(
+    string? DeviceCode,
+    string? UserCode,
+    string? VerificationUri,
+    int? ExpiresIn,
+    int? Interval,
+    string? Error,
+    string? ErrorDescription)
+{
+    public bool Ok => Error is null && !string.IsNullOrEmpty(DeviceCode) && !string.IsNullOrEmpty(UserCode) && !string.IsNullOrEmpty(VerificationUri);
+
+    public string Reason => ErrorDescription is { Length: > 0 } description ? $"{Error}: {description}" : Error ?? "no device code";
 }
 
 /// <summary>
@@ -72,68 +96,114 @@ public sealed class HttpOAuthEndpoints(HttpClient http) : IOAuthEndpoints
             ["refresh_token"] = refreshToken,
         }, ct);
 
+    public Task<OAuthTokenAnswer> DeviceTokenAsync(OAuthProvider provider, string? clientSecret, string deviceCode, CancellationToken ct) =>
+        TokenAsync(provider, clientSecret, new Dictionary<string, string>
+        {
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+            ["device_code"] = deviceCode,
+        }, ct);
+
+    public async Task<DeviceAuthorizationAnswer> DeviceAuthorizationAsync(OAuthProvider provider, IReadOnlyList<string> scopes, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(provider.DeviceAuthorizationUrl))
+        {
+            return new DeviceAuthorizationAnswer(null, null, null, null, null, "the provider has no device authorization endpoint", null);
+        }
+
+        var (status, root, unreachable) = await PostAsync(provider.DeviceAuthorizationUrl, new Dictionary<string, string>
+        {
+            ["client_id"] = provider.ClientId ?? "",
+            ["scope"] = string.Join(' ', scopes),
+        }, ct);
+
+        if (unreachable is not null) return new DeviceAuthorizationAnswer(null, null, null, null, null, unreachable, null);
+
+        var error = Text(root, "error");
+        if (error is not null || status is < 200 or >= 300)
+        {
+            return new DeviceAuthorizationAnswer(null, null, null, null, null, error ?? $"HTTP {status}", Text(root, "error_description"));
+        }
+
+        return new DeviceAuthorizationAnswer(
+            Text(root, "device_code"),
+            Text(root, "user_code"),
+            // RFC 8628 names it verification_uri; some providers still say verification_url.
+            Text(root, "verification_uri") ?? Text(root, "verification_url"),
+            Seconds(root, "expires_in"),
+            Seconds(root, "interval"),
+            null, null);
+    }
+
     private async Task<OAuthTokenAnswer> TokenAsync(
         OAuthProvider provider, string? clientSecret, Dictionary<string, string> form, CancellationToken ct)
     {
         form["client_id"] = provider.ClientId ?? "";
         if (!string.IsNullOrEmpty(clientSecret)) form["client_secret"] = clientSecret;
 
+        var (status, root, unreachable) = await PostAsync(provider.TokenUrl, form, ct);
+        if (unreachable is not null) return OAuthTokenAnswer.Transient(unreachable);
+
+        var error = Text(root, "error");
+
+        if (error is not null || status is < 200 or >= 300)
+        {
+            return new OAuthTokenAnswer(
+                null, null, null, null, null, error ?? $"HTTP {status}", Text(root, "error_description"),
+                Refused: error is not null && status is >= 400 and < 500);
+        }
+
+        return new OAuthTokenAnswer(
+            Text(root, "access_token"),
+            Text(root, "refresh_token"),
+            Seconds(root, "expires_in"),
+            Text(root, "scope"),
+            Text(root, "id_token"),
+            null, null, false);
+    }
+
+    /// <summary>A form POST answered with a JSON object: its status and body, or why there is none.</summary>
+    private async Task<(int Status, JsonElement Root, string? Unreachable)> PostAsync(
+        string url, Dictionary<string, string> form, CancellationToken ct)
+    {
         HttpResponseMessage response;
         string body;
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, provider.TokenUrl) { Content = new FormUrlEncodedContent(form) };
+            using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = new FormUrlEncodedContent(form) };
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             response = await http.SendAsync(request, ct);
             body = await response.Content.ReadAsStringAsync(ct);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
-            return OAuthTokenAnswer.Transient($"the provider could not be reached ({exception.GetType().Name})");
+            return (0, default, $"the provider could not be reached ({exception.GetType().Name})");
         }
 
         using (response)
         {
-            JsonElement root;
+            var status = (int)response.StatusCode;
 
             try
             {
-                root = JsonDocument.Parse(body).RootElement.Clone();
+                var root = JsonDocument.Parse(body).RootElement.Clone();
+                return root.ValueKind == JsonValueKind.Object
+                    ? (status, root, null)
+                    : (status, default, $"the provider answered {status} with no token");
             }
             catch (JsonException)
             {
-                return OAuthTokenAnswer.Transient($"the provider answered {(int)response.StatusCode} with no JSON");
+                return (status, default, $"the provider answered {status} with no JSON");
             }
-
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                return OAuthTokenAnswer.Transient($"the provider answered {(int)response.StatusCode} with no token");
-            }
-
-            var error = Text(root, "error");
-
-            if (error is not null || !response.IsSuccessStatusCode)
-            {
-                var status = (int)response.StatusCode;
-                return new OAuthTokenAnswer(
-                    null, null, null, null, null, error ?? $"HTTP {status}", Text(root, "error_description"),
-                    Refused: error is not null && status is >= 400 and < 500);
-            }
-
-            return new OAuthTokenAnswer(
-                Text(root, "access_token"),
-                Text(root, "refresh_token"),
-                root.TryGetProperty("expires_in", out var expires)
-                    ? expires.ValueKind == JsonValueKind.Number && expires.TryGetInt32(out var seconds) ? seconds
-                    : expires.ValueKind == JsonValueKind.String && int.TryParse(expires.GetString(), out var parsed) ? parsed
-                    : null
-                    : null,
-                Text(root, "scope"),
-                Text(root, "id_token"),
-                null, null, false);
         }
     }
+
+    private static int? Seconds(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value)
+            ? value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var seconds) ? seconds
+            : value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsed) ? parsed
+            : null
+            : null;
 
     public async Task<JsonElement?> UserInfoAsync(OAuthProvider provider, string accessToken, CancellationToken ct)
     {

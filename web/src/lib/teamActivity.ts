@@ -1,20 +1,22 @@
 import type { ActivitySpan, ActivityState, ActivityWindow, TeamActivity, TeamTokenRun } from '../api/types'
+import { localDate, localStretch, localTime } from './localTime'
 
 /**
  * WHAT THE STATISTICS TILE DRAWS FROM ONE `/activity` ANSWER, as plain functions so its initials,
  * its lanes, its words and its colours are pinned without mounting a chart.
  *
  * NO STATE IS DECIDED HERE. The server says which state each stretch was in; these only order the
- * lanes, grow a still-open stretch to now and put the result into words. A stretch nothing recorded
+ * lanes, draw a still-open stretch to the window's end and put the result into words. NOTHING READS
+ * THE CLOCK: the window is the server's, and it moves only when something happens in a workflow. A stretch nothing recorded
  * stays absent - it is never drawn, and never counted as idle.
  */
 
-/** A span with its instants as milliseconds, an open one already grown to now. */
+/** A span with its instants as milliseconds, an open one drawn to the window's end. */
 export interface GrownSpan {
   state: ActivityState
   from: number
   to: number
-  /** Still open at the answer's `serverNow`: its `to` is now and moves with the board's clock. */
+  /** Still in this state at the window's end: its `to` is that end. */
   open: boolean
   workflow?: number
   reason?: string
@@ -71,26 +73,21 @@ export function laneInitials(names: readonly string[]): string[] {
 }
 
 /**
- * THE SERVER'S NOW, BETWEEN FETCHES: the board's own ticking clock corrected by `clockOffset`, and
- * never earlier than the answer's `serverNow` - an open span is never drawn shorter than the server
- * already said it was.
+ * WHERE AN ANSWER'S LANES END: its window's `to`, never past its `serverNow`. A span the server left
+ * open is drawn to here and no further, however long ago the answer was read.
  */
-export function liveNow(serverNow: string, clock: number, clockOffset: number): number {
-  const server = Date.parse(serverNow)
-  const corrected = clock + clockOffset
+export function windowEnd(activity: TeamActivity): number {
+  const now = Date.parse(activity.serverNow)
+  const to = activity.to === null ? now : Date.parse(activity.to)
 
-  return Number.isNaN(server) ? corrected : Math.max(server, corrected)
+  return Number.isNaN(now) ? to : Math.min(to, now)
 }
 
-/** The spans as instants, an open one (`to: null`) drawn to `now`. */
-export function growSpans(spans: readonly ActivitySpan[], now: number): GrownSpan[] {
+/** The spans as instants, an open one (`to: null`) drawn to `end`; one reaching `end` is open there. */
+export function growSpans(spans: readonly ActivitySpan[], end: number): GrownSpan[] {
   return spans.map((span) => {
-    const grown: GrownSpan = {
-      state: span.state,
-      from: Date.parse(span.from),
-      to: span.to === null ? now : Date.parse(span.to),
-      open: span.to === null,
-    }
+    const to = span.to === null ? end : Date.parse(span.to)
+    const grown: GrownSpan = { state: span.state, from: Date.parse(span.from), to, open: to >= end }
 
     if (span.workflow !== undefined) grown.workflow = span.workflow
     if (span.reason !== undefined) grown.reason = span.reason
@@ -109,7 +106,7 @@ export function growSpans(spans: readonly ActivitySpan[], now: number): GrownSpa
 export function activityLanes(
   activity: TeamActivity,
   containers: readonly { id: string; name: string }[],
-  now: number,
+  end: number,
   options: { removed?: boolean } = {},
 ): Lane[] {
   const boardIndex = (member: string) => {
@@ -139,20 +136,13 @@ export function activityLanes(
     member: member.member,
     name: member.current ? names[index]! : `${names[index]!} (removed)`,
     initials: initials[index]!,
-    spans: growSpans(member.spans, now),
+    spans: growSpans(member.spans, end),
   }))
 }
 
 /** The span a lane is in at an instant, or null when nothing was recorded then. */
 export function spanAt(lane: Lane, at: number): GrownSpan | null {
   return lane.spans.find((span) => span.from <= at && (at < span.to || (span.open && at <= span.to))) ?? null
-}
-
-/** An instant as the board shows one: local 24-hour HH:MM. */
-export function clockTime(ms: number): string {
-  const date = new Date(ms)
-
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
 /** How long a stretch lasted, in words short enough for one tooltip line. */
@@ -174,15 +164,15 @@ export function stretchLength(ms: number): string {
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
 /**
- * THE TILE'S `aria-label`: since when the lanes run, once at the front, then how many lanes and each
- * member's state now counted by state - "Statistics since 14:20: 3 members - 2 running, 1 blocked".
- * A member with no span now is counted as such, never as idle.
+ * THE TILE'S `aria-label`: the window once at the front, then how many lanes and each member's
+ * state at the window's end counted by state - "Statistics 11:38:02 AM – 3:41:17 PM: 3 members - 2
+ * running, 1 blocked". A member with no span there is counted as such, never as idle.
  */
 export function activitySummary(
   window: ActivityWindow,
   lanes: readonly Lane[],
   from: number | null,
-  now: number,
+  end: number,
 ): string {
   if (window === 'none') return 'Statistics: No workflows yet'
 
@@ -190,7 +180,7 @@ export function activitySummary(
   let nothing = 0
 
   for (const lane of lanes) {
-    const span = spanAt(lane, now)
+    const span = spanAt(lane, end)
 
     if (span) counts.set(span.state, (counts.get(span.state) ?? 0) + 1)
     else nothing++
@@ -200,34 +190,30 @@ export function activitySummary(
     .filter((state) => counts.has(state))
     .map((state) => `${counts.get(state)} ${state}`)
 
-  if (nothing > 0) parts.push(`${nothing} with no runs now`)
+  if (nothing > 0) parts.push(`${nothing} with no runs at the end`)
 
-  const since = from === null ? '' : ` since ${clockTime(from)}`
+  const stretch = from === null ? '' : ` ${localStretch(from, end)}`
 
-  return `Statistics${since}: ${plural(lanes.length, 'member', 'members')} - ${parts.join(', ')}`
+  return `Statistics${stretch}: ${plural(lanes.length, 'member', 'members')} - ${parts.join(', ')}`
 }
 
 /**
- * THE CAPTION UNDER THE LANES: since when, and over how many open workflows; for the fallback, when
- * the latest workflow closed; for a team that never ran, that alone. A null `openCount` is a
- * workflow list not read yet, and names no count rather than a wrong one.
+ * THE CAPTION UNDER THE LANES: the window's stretch, and how many workflows are open when any are;
+ * for a team that never ran, that alone. A null `openCount` is a workflow list not read yet, and
+ * names no count rather than a wrong one.
  */
 export function activityCaption(
   window: ActivityWindow,
   from: number | null,
+  to: number | null,
   openCount: number | null,
-  latestClosedAt: number | null,
 ): string {
   if (window === 'none') return 'No workflows yet'
 
-  if (window === 'latest') {
-    return latestClosedAt === null ? 'latest workflow' : `latest workflow, closed ${clockTime(latestClosedAt)}`
-  }
-
   const parts = []
 
-  if (from !== null) parts.push(`since ${clockTime(from)}`)
-  if (openCount !== null) parts.push(plural(openCount, 'open workflow', 'open workflows'))
+  if (from !== null && to !== null) parts.push(localStretch(from, to))
+  if (openCount !== null && openCount > 0) parts.push(plural(openCount, 'open workflow', 'open workflows'))
 
   return parts.join(' · ')
 }
@@ -250,7 +236,7 @@ export function escapeHtml(text: string): string {
  * EVERY NAME AND REASON IS ESCAPED, and the markup carries CLASSES, NEVER A `style` ATTRIBUTE: the
  * app's CSP refuses inline styles, so a styled chip would arrive unstyled and log a violation.
  */
-export function tooltipHtml(lanes: readonly Lane[], at: number): string {
+export function tooltipHtml(lanes: readonly Lane[], at: number, withDate: boolean): string {
   const rows = lanes.map((lane) => {
     const span = spanAt(lane, at)
     const chip = `<span class="stats-chip stats-chip--${span ? span.state : 'none'}"></span>`
@@ -267,7 +253,7 @@ export function tooltipHtml(lanes: readonly Lane[], at: number): string {
     return `<div class="stats-tip-row">${chip}${who} — ${escapeHtml(what)}</div>`
   })
 
-  return `<div class="stats-tip"><div class="stats-tip-time">${clockTime(at)}</div>${rows.join('')}</div>`
+  return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(localTime(at, { date: withDate }))}</div>${rows.join('')}</div>`
 }
 
 /** How wide one column of the Statistics dialog is: a local minute, hour, day or month. */
@@ -453,37 +439,29 @@ export function bucketActivity(
     }))
 }
 
-const labelFormats = new Map<string, Intl.DateTimeFormat>()
+/**
+ * A BUCKET AS THE TOOLTIP NAMES IT, in the browser's locale and the given zone: a minute or an hour
+ * by its two ends' times of day ("2:20:00 PM – 2:21:00 PM"), each with its date when the window
+ * crosses days; a day by its date; a month by its month and year.
+ */
+export function bucketLabel(from: number, to: number, bucket: Bucket, timeZone: string, withDate: boolean): string {
+  if (bucket === 'day') return localDate(from, timeZone)
+  if (bucket === 'month') return new Date(from).toLocaleDateString(undefined, { timeZone, year: 'numeric', month: 'long' })
 
-/** A zone's weekday, day, month name and year at an instant, in English. */
-function calendarWords(ms: number, timeZone: string) {
-  let format = labelFormats.get(timeZone)
-
-  if (!format) {
-    format = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-    labelFormats.set(timeZone, format)
-  }
-
-  const parts = format.formatToParts(ms)
-  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
-
-  return { weekday: part('weekday'), day: part('day'), month: part('month'), year: part('year') }
+  return `${localTime(from, { date: withDate, timeZone })} – ${localTime(to, { date: withDate, timeZone })}`
 }
 
-/** A bucket as the tooltip names it: "Tue 14:20–14:21", "Tue 14:00–15:00", "Tue 6 Oct", "Oct 2026". */
-export function bucketLabel(from: number, to: number, bucket: Bucket, timeZone: string): string {
-  const words = calendarWords(from, timeZone)
+/**
+ * A TIME AXIS LABEL as the locale reads it: within minute and hour columns a time of day, or the
+ * date where the axis crosses a local midnight; within day columns the date; within months the month.
+ */
+export function axisTimeLabel(ms: number, bucket: Bucket, timeZone: string): string {
+  if (bucket === 'month') return new Date(ms).toLocaleDateString(undefined, { timeZone, year: 'numeric', month: 'long' })
+  if (bucket === 'day') return localDate(ms, timeZone)
 
-  if (bucket === 'day') return `${words.weekday} ${words.day} ${words.month}`
-  if (bucket === 'month') return `${words.month} ${words.year}`
+  const wall = wallClock(ms, timeZone)
 
-  const time = (ms: number) => {
-    const wall = wallClock(ms, timeZone)
-
-    return `${String(wall.hour).padStart(2, '0')}:${String(wall.minute).padStart(2, '0')}`
-  }
-
-  return `${words.weekday} ${time(from)}–${time(to)}`
+  return wall.hour === 0 && wall.minute === 0 && wall.second === 0 ? localDate(ms, timeZone) : localTime(ms, { timeZone })
 }
 
 /**
@@ -516,71 +494,41 @@ export function columnTooltipHtml(
   bucket: Bucket,
   timeZone: string,
   people: ReadonlyMap<string, { name: string; initials: string }>,
+  options: { hidden?: ReadonlySet<ActivityState>; withDate?: boolean } = {},
 ): string {
-  const split = (ms: StateTime) => ActivityStates
+  // A STATE HIDDEN IN THE LEGEND is left out of the totals and the splits: the hover says what is drawn.
+  const shown = ActivityStates.filter((state) => !options.hidden?.has(state))
+  const split = (ms: StateTime) => shown
     .filter((state) => ms[state] > 0)
     .map((state) => `${state} ${memberTime(ms[state])}`)
 
-  const totals = ActivityStates
+  const totals = shown
     .filter((state) => column.totals[state] > 0)
     .map((state) => `<div class="stats-tip-row"><span class="stats-chip stats-chip--${state}"></span>`
       + `${escapeHtml(`${state} ${memberTime(column.totals[state])}`)}</div>`)
 
-  const members = column.members.map((share) => {
+  const members = column.members.flatMap((share) => {
     const person = people.get(share.member) ?? { name: share.member, initials: memberInitials(share.member) }
+    const parts = split(share.ms)
 
-    return `<div class="stats-tip-row"><span class="stats-tip-initials">${escapeHtml(person.initials)}</span> `
-      + `<span class="stats-tip-name">${escapeHtml(person.name)}</span> — ${escapeHtml(split(share.ms).join(', '))}</div>`
+    return parts.length === 0
+      ? []
+      : [`<div class="stats-tip-row"><span class="stats-tip-initials">${escapeHtml(person.initials)}</span> `
+        + `<span class="stats-tip-name">${escapeHtml(person.name)}</span> — ${escapeHtml(parts.join(', '))}</div>`]
   })
 
-  return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(bucketLabel(column.from, column.to, bucket, timeZone))}</div>`
+  const label = bucketLabel(column.from, column.to, bucket, timeZone, options.withDate ?? false)
+
+  return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(label)}</div>`
     + `${totals.join('')}<div class="stats-tip-members">${members.join('')}</div></div>`
 }
 
-/** The Statistics dialog's periods, in the order its picker lists them. */
-export type ActivityPeriod = 'open' | 'hour' | 'day' | 'month' | 'year'
-
-/** Each period's words and the bucket its columns are. */
-export const ActivityPeriods: readonly { value: ActivityPeriod; label: string; bucket: Bucket }[] = [
-  { value: 'open', label: 'Open workflows', bucket: 'minute' },
-  { value: 'hour', label: 'Last hour', bucket: 'minute' },
-  { value: 'day', label: 'Last day', bucket: 'hour' },
-  { value: 'month', label: 'Last month', bucket: 'day' },
-  { value: 'year', label: 'Last year', bucket: 'month' },
-]
-
 /**
- * THE INSTANTS A PERIOD ASKS ITS READ FOR, ending at `now`; null for Open workflows and All workflows,
- * which are the read's own window and ask for none. A month and a year step back by the UTC calendar,
- * as the server measures its one-year limit, so "Last year" is never refused for being an hour too long.
+ * THE COLUMN SIZE THAT FITS A WINDOW, for the Statistics dialog and the Tokens chart alike: the
+ * minute up to two hours, the hour up to three days, the day up to three months by the UTC calendar,
+ * the month beyond.
  */
-export function periodRange(period: ActivityPeriod | TokenPeriod, now: number): { from: string; to: string } | null {
-  if (period === 'open' || period === 'all') return null
-
-  const from = new Date(now)
-
-  if (period === 'hour') from.setTime(now - 3_600_000)
-  else if (period === 'day') from.setTime(now - 86_400_000)
-  else if (period === 'month') from.setUTCMonth(from.getUTCMonth() - 1)
-  else from.setUTCFullYear(from.getUTCFullYear() - 1)
-
-  return { from: from.toISOString(), to: new Date(now).toISOString() }
-}
-
-/** The Tokens dialog's periods: All workflows, the team's whole history, then the Statistics ones. */
-export type TokenPeriod = 'all' | Exclude<ActivityPeriod, 'open'>
-
-/** Each period's words and its bucket; All workflows' bucket fits its span (see {@link allWorkflowsBucket}). */
-export const TokenPeriods: readonly { value: TokenPeriod; label: string; bucket: Bucket | null }[] = [
-  { value: 'all', label: 'All workflows', bucket: null },
-  ...ActivityPeriods.filter((p) => p.value !== 'open') as { value: TokenPeriod; label: string; bucket: Bucket }[],
-]
-
-/**
- * ALL WORKFLOWS' BUCKET, chosen to fit the span it covers: the minute up to two hours, the hour up to
- * three days, the day up to three months by the UTC calendar, the month beyond.
- */
-export function allWorkflowsBucket(from: number, to: number): Bucket {
+export function windowBucket(from: number, to: number): Bucket {
   const span = to - from
 
   if (span <= 2 * 3_600_000) return 'minute'
@@ -596,6 +544,39 @@ export function allWorkflowsBucket(from: number, to: number): Bucket {
     start.getUTCHours(), start.getUTCMinutes(), start.getUTCSeconds(), start.getUTCMilliseconds())
 
   return to <= threeMonths ? 'day' : 'month'
+}
+
+/** The words for a column size in a subtitle: "per minute", "per hour", "per day", "per month". */
+export function bucketWords(bucket: Bucket): string {
+  return `per ${bucket}`
+}
+
+/**
+ * WHERE THE HOVER BOX GOES, in the chart's own pixels as an ECharts `tooltip.position` answers: BESIDE
+ * the pointer, never over it, so the hover line stays in sight - `gap` to its right, or `gap` to its
+ * left where the box would run off the screen's right edge. Vertically centred on the pointer and
+ * held on the screen. It may reach past the chart's own bounds: the box is appended to the body.
+ */
+export function tooltipBeside(
+  point: readonly number[],
+  box: readonly number[],
+  chart: { left: number; top: number },
+  viewport: { width: number; height: number },
+  gap: number,
+): [number, number] {
+  const [x, y] = [point[0] ?? 0, point[1] ?? 0]
+  const [width, height] = [box[0] ?? 0, box[1] ?? 0]
+
+  const right = x + gap
+  const left = x - gap - width
+  const fitsRight = chart.left + right + width <= viewport.width
+  const fitsLeft = chart.left + left >= 0
+
+  // The screen's top in the chart's pixels; written as a subtraction so a chart at 0 reads 0, not -0.
+  const screenTop = 0 - chart.top
+  const top = Math.max(Math.min(y - height / 2, viewport.height - chart.top - height), screenTop)
+
+  return [fitsRight || !fitsLeft ? right : left, top]
 }
 
 /** Which figure of a run the Tokens chart sums. */
@@ -747,22 +728,35 @@ export function figureTooltipHtml(
   bucket: Bucket,
   timeZone: string,
   people: ReadonlyMap<string, { name: string }>,
+  options: { hidden?: ReadonlySet<string>; gapsHidden?: boolean; withDate?: boolean } = {},
 ): string {
-  const members = column.members.map((share) => {
+  // A MEMBER HIDDEN IN THE LEGEND is left out of the lines and of the total, and with the
+  // not-measured markers hidden so are the runs with no figure: the hover says what is drawn.
+  const gaps = (unmeasured: number, unsplit: number) => (options.gapsHidden ? [] : gapWords(unmeasured, unsplit))
+  const shown = column.members.filter((share) => !options.hidden?.has(share.member))
+  const sum = (pick: (share: MemberFigure) => number) => shown.reduce((total, share) => total + pick(share), 0)
+  const visible = options.hidden?.size
+    ? { total: sum((m) => m.value), measured: sum((m) => m.measured), unmeasured: sum((m) => m.unmeasured), unsplit: sum((m) => m.unsplit) }
+    : column
+
+  const members = shown.flatMap((share) => {
     const name = people.get(share.member)?.name ?? share.member
-    const parts = [...(share.measured > 0 ? [tokenCount(share.value)] : []), ...gapWords(share.unmeasured, share.unsplit)]
+    const parts = [...(share.measured > 0 ? [tokenCount(share.value)] : []), ...gaps(share.unmeasured, share.unsplit)]
+
+    if (parts.length === 0) return []
 
     return `<div class="stats-tip-row"><span class="tokens-chip tokens-chip--${seriesSlot(share.member, people)}"></span>`
       + `<span class="stats-tip-name">${escapeHtml(name)}</span> — ${escapeHtml(parts.join(', '))}</div>`
   })
 
-  const total = column.measured > 0 ? `Total ${tokenCount(column.total)}` : 'Total not measured'
-  const gaps = gapWords(column.unmeasured, column.unsplit)
+  const total = visible.measured > 0 ? `Total ${tokenCount(visible.total)}` : 'Total not measured'
+  const gapRows = gaps(visible.unmeasured, visible.unsplit)
     .map((words) => `<div class="stats-tip-row tokens-tip-gap">${escapeHtml(words)}</div>`)
+  const label = bucketLabel(column.from, column.to, bucket, timeZone, options.withDate ?? false)
 
-  return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(bucketLabel(column.from, column.to, bucket, timeZone))}</div>`
+  return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(label)}</div>`
     + `<div class="stats-tip-members">${members.join('')}</div>`
-    + `<div class="stats-tip-row tokens-tip-total">${escapeHtml(total)}</div>${gaps.join('')}</div>`
+    + `<div class="stats-tip-row tokens-tip-total">${escapeHtml(total)}</div>${gapRows.join('')}</div>`
 }
 
 /** How many member colours the theme has (`--os-series-1` to `--os-series-8`). */
@@ -811,3 +805,4 @@ export function stateShapes(x: number, y: number, width: number, height: number,
 
   return children
 }
+

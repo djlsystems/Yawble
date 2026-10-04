@@ -131,7 +131,8 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
             var started = await bed.AwaitRowAsync(
                 m => m.Type == MessageTypes.Started && m.Source == $"{team}/Dev" && m.CorrelationId == root.Seq, "Dev's start");
 
-            var answer = await bed.ActivityAsync(team);
+            // A requested period that reaches past now: the run is open at now.
+            var answer = await bed.ActivityAsync(team, started.OccurredAt.AddMinutes(-1), started.OccurredAt.AddHours(1));
 
             var span = Assert.Single(Member(answer, "Dev").GetProperty("spans").EnumerateArray());
             Assert.Equal("running", span.GetProperty("state").GetString());
@@ -162,31 +163,81 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
     }
 
     [Fact]
-    public async Task The_default_window_is_the_oldest_open_workflows_root_falling_back_to_the_latest()
+    public async Task The_default_window_runs_from_the_earliest_workflow_start_to_the_latest_workflow_activity()
     {
         var team = await bed.TeamAsync("Activity window", "Dev");
 
         var first = await bed.TellAndSettleAsync(team, "Dev", "first");
         var second = await bed.TellAndSettleAsync(team, "Dev", "second");
-
-        var open = await bed.ActivityAsync(team);
-        Assert.Equal("open", open.GetProperty("window").GetString());
-        Assert.Equal(first.OccurredAt, open.GetProperty("from").GetDateTimeOffset());
-        Assert.True(open.GetProperty("to").GetDateTimeOffset() >= second.OccurredAt);
-        Assert.Equal(open.GetProperty("serverNow").GetDateTimeOffset(), open.GetProperty("to").GetDateTimeOffset());
-
         await bed.DeclareAsync(team, first);
+        await bed.QuietAsync(team);
 
-        var secondOpen = await bed.ActivityAsync(team);
-        Assert.Equal("open", secondOpen.GetProperty("window").GetString());
-        Assert.Equal(second.OccurredAt, secondOpen.GetProperty("from").GetDateTimeOffset());
+        var answer = await bed.ActivityAsync(team);
 
+        // From the earliest workflow's root, open or closed, to the newest row of any of them.
+        Assert.Equal("workflows", answer.GetProperty("window").GetString());
+        Assert.Equal(first.OccurredAt, answer.GetProperty("from").GetDateTimeOffset());
+        Assert.Equal(await bed.LatestActivityAsync(first, second), answer.GetProperty("to").GetDateTimeOffset());
+        Assert.True(answer.GetProperty("to").GetDateTimeOffset() < answer.GetProperty("serverNow").GetDateTimeOffset());
+
+        // Every span lies inside it, and the last one ends at its end.
+        var spans = Member(answer, "Dev").GetProperty("spans").EnumerateArray().ToList();
+        Assert.All(spans, span =>
+        {
+            Assert.True(span.GetProperty("from").GetDateTimeOffset() >= answer.GetProperty("from").GetDateTimeOffset());
+            Assert.True(span.GetProperty("to").GetDateTimeOffset() <= answer.GetProperty("to").GetDateTimeOffset());
+        });
+        Assert.Equal(answer.GetProperty("to").GetDateTimeOffset(), spans[^1].GetProperty("to").GetDateTimeOffset());
+    }
+
+    [Fact]
+    public async Task The_window_never_ends_at_the_clock_while_nothing_happens()
+    {
+        var team = await bed.TeamAsync("Activity still", "Dev");
+
+        // An open workflow whose runs have all ended: nothing happens in it while time passes.
+        await bed.TellAndSettleAsync(team, "Dev", "work");
+        await bed.QuietAsync(team);
+
+        var before = await bed.ActivityAsync(team);
+        await Task.Delay(TimeSpan.FromSeconds(1.5), Ct);
+        var after = await bed.ActivityAsync(team);
+
+        Assert.Equal("workflows", after.GetProperty("window").GetString());
+        Assert.Equal(before.GetProperty("to").GetDateTimeOffset(), after.GetProperty("to").GetDateTimeOffset());
+        Assert.True(after.GetProperty("to").GetDateTimeOffset() < after.GetProperty("serverNow").GetDateTimeOffset().AddSeconds(-1));
+
+        // The idle after Dev's run is drawn to the window's end, not left open to now.
+        var last = Member(after, "Dev").GetProperty("spans").EnumerateArray().Last();
+        Assert.Equal("idle", last.GetProperty("state").GetString());
+        Assert.Equal(after.GetProperty("to").GetDateTimeOffset(), last.GetProperty("to").GetDateTimeOffset());
+        Assert.Equal(Spans(before, "Dev"), Spans(after, "Dev"));
+    }
+
+    [Fact]
+    public async Task A_closed_workflow_counts_for_the_window_as_an_open_one_does()
+    {
+        var team = await bed.TeamAsync("Activity all closed", "Dev");
+
+        var first = await bed.TellAndSettleAsync(team, "Dev", "first");
+        var second = await bed.TellAndSettleAsync(team, "Dev", "second");
+        await bed.DeclareAsync(team, first);
         await bed.DeclareAsync(team, second);
+        await bed.QuietAsync(team);
 
-        var latest = await bed.ActivityAsync(team);
-        Assert.Equal("latest", latest.GetProperty("window").GetString());
-        Assert.Equal(second.OccurredAt, latest.GetProperty("from").GetDateTimeOffset());
-        Assert.Contains("running", Spans(latest, "Dev").Select(s => s.Split(' ')[0]));
+        var answer = await bed.ActivityAsync(team);
+
+        // Nothing is open: the window still runs from the first workflow's root to the second's end.
+        Assert.Equal("workflows", answer.GetProperty("window").GetString());
+        Assert.Equal(first.OccurredAt, answer.GetProperty("from").GetDateTimeOffset());
+        Assert.Equal(await bed.LatestActivityAsync(first, second), answer.GetProperty("to").GetDateTimeOffset());
+
+        var workflows = Member(answer, "Dev").GetProperty("spans").EnumerateArray()
+            .Where(s => s.GetProperty("state").GetString() == "running")
+            .Select(s => s.GetProperty("workflow").GetInt64())
+            .ToList();
+        Assert.Contains(first.Seq, workflows);
+        Assert.Contains(second.Seq, workflows);
     }
 
     [Fact]
@@ -208,14 +259,14 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
     {
         var team = await bed.TeamAsync("Activity closed", "Dev");
 
-        // The open workflow sets the window; a workflow begun and declared inside it still shows.
+        // The earliest workflow sets the window's start; one begun and declared inside it still shows.
         var open = await bed.TellAndSettleAsync(team, "Dev", "long job");
         var closed = await bed.TellAndSettleAsync(team, "Dev", "short job");
         await bed.DeclareAsync(team, closed);
 
         var answer = await bed.ActivityAsync(team);
 
-        Assert.Equal("open", answer.GetProperty("window").GetString());
+        Assert.Equal("workflows", answer.GetProperty("window").GetString());
         Assert.Equal(open.OccurredAt, answer.GetProperty("from").GetDateTimeOffset());
 
         var workflows = Member(answer, "Dev").GetProperty("spans").EnumerateArray()
@@ -593,6 +644,22 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
             }
 
             throw new TimeoutException($"No row: {what}.");
+        }
+
+        /// <summary>The newest row of any of these workflows: a closed one's end, an open one's latest.</summary>
+        public async Task<DateTimeOffset> LatestActivityAsync(params Message[] roots)
+        {
+            var latest = DateTimeOffset.MinValue;
+
+            foreach (var root in roots)
+            {
+                foreach (var row in await Log.ReadCorrelationAsync(root.Seq, Ct))
+                {
+                    if (row.OccurredAt > latest) latest = row.OccurredAt;
+                }
+            }
+
+            return latest;
         }
 
         /// <summary>Waits until no member of <paramref name="team"/> has a run going and none has

@@ -220,6 +220,20 @@ public interface IMessageLog
         string team, long sinceSeq, CancellationToken ct = default);
 
     /// <summary>
+    /// THE STRETCH THIS TEAM'S WORKFLOWS COVER since its floor: from the earliest row of any of them
+    /// (the earliest root) to the newest row of any of them (a closed workflow's end, an open one's
+    /// latest activity), open and closed alike and uncapped. Null when the team has run none.
+    ///
+    /// <para>
+    /// Every row of each correlation counts, not only the team's own, exactly as a workflow's
+    /// timing reads its root and its last activity. Never the clock: nothing here moves while
+    /// nothing happens.
+    /// </para>
+    /// </summary>
+    Task<TeamWorkflowStretch?> WorkflowStretchForTeamAsync(
+        string team, long sinceSeq, CancellationToken ct = default);
+
+    /// <summary>
     /// ONE NAMED WORKFLOW OF THIS TEAM, described exactly as each row of
     /// <see cref="WorkflowsForTeamAsync"/> is - the same projection and the same state ranking,
     /// asked of a correlation the caller already holds rather than of the newest fifty.

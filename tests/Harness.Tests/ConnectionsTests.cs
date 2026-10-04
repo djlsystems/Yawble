@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using System.Web;
 using Harness.Contracts;
 using Harness.Host;
@@ -30,12 +31,16 @@ public sealed class ConnectionsTests : IAsyncLifetime
     private const string ClientSecret = "gsecret-never-leaves-the-host-7Qx";
     private const string MailScope = "https://mail.google.com/";
     private const string Account = "mailbox@example.com";
+    private const string GraphMail = "https://graph.microsoft.com/Mail.Read";
+    private const string MicrosoftClientId = "8f3c2a71-0b6e-4d2a-9c11-5e7f4a2b9d03";
+    private const string TenantGuid = "3b9e1c55-7a20-4f61-8d4e-2c6a9f0b1e77";
 
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-connections-{Guid.NewGuid():N}");
     private readonly string _outside = Path.Combine(Path.GetTempPath(), $"harness-connections-out-{Guid.NewGuid():N}");
     private readonly FakeProvider _provider = new();
     private readonly Clock _clock = new();
     private readonly List<string> _responses = [];
+    private readonly List<TimeSpan> _delays = [];
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _person = null!;
     private HttpClient _anonymous = null!;
@@ -71,8 +76,15 @@ public sealed class ConnectionsTests : IAsyncLifetime
             {
                 services.AddSingleton<IAgentRunner>(new FakeAgent());
                 services.AddSingleton<IOAuthEndpoints>(_provider);
+                // THE POLL'S WAIT, faked: noted and passed on the clock at once, so no test sleeps.
                 services.AddSingleton(sp => new Connections(
-                    sp.GetRequiredService<ConnectionStore>(), _provider, _clock, sp.GetRequiredService<IUserStore>()));
+                    sp.GetRequiredService<ConnectionStore>(), _provider, _clock, sp.GetRequiredService<IUserStore>(),
+                    delay: (wait, _) =>
+                    {
+                        lock (_delays) _delays.Add(wait);
+                        _clock.Advance(wait);
+                        return Task.CompletedTask;
+                    }));
             }));
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
@@ -829,6 +841,385 @@ public sealed class ConnectionsTests : IAsyncLifetime
         Assert.Equal(2, (await GetAsync("/api/connections")).GetArrayLength());
     }
 
+    // ---- sign in with a code (device flow) ----------------------------------------------------------
+
+    [Fact]
+    public async Task A_device_sign_in_answers_only_the_code_and_link_and_its_device_code_reaches_no_answer_row_or_file()
+    {
+        await SetUpMicrosoftAsync();
+
+        var start = await StartDeviceAsync();
+        Assert.Equal(["expiresAt", "flowId", "userCode", "verificationUri"], start.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal("U1-WXYZ", start.GetProperty("userCode").GetString());
+        Assert.Equal("https://microsoft.com/devicelogin", start.GetProperty("verificationUri").GetString());
+        var flowId = start.GetProperty("flowId").GetString()!;
+
+        var waiting = await FlowAsync(flowId);
+        Assert.Equal("waiting", waiting.GetProperty("state").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(waiting.GetProperty("sentence").GetString()));
+
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+        await FlowAsync(flowId, until: "done");
+
+        // And through the operator's exchange, whose report is a file under the data root.
+        var cli = await ExchangeAsync(new { op = "start", provider = "microsoft", scopes = new[] { GraphMail }, flow = "device" });
+        Assert.Equal(200, cli.GetProperty("status").GetInt32());
+        _provider.DeviceAnswers.Writer.TryWrite("access_denied");
+        await ExchangeFlowAsync(cli.GetProperty("start").GetProperty("flowId").GetString()!, until: "refused");
+
+        await GetAsync("/api/connections");
+        await GetAsync("/api/tenant-log");
+        await GetAsync("/api/diagnostics");
+
+        Assert.Equal(2, _provider.DeviceCodes.Count);
+        foreach (var code in _provider.DeviceCodes)
+        {
+            Assert.DoesNotContain(_responses, r => r.Contains(code, StringComparison.Ordinal));
+            Assert.DoesNotContain(await TenantDetailsAsync(TenantActions.ConnectionConnected), d => d.Contains(code, StringComparison.Ordinal));
+        }
+
+        SqliteConnection.ClearAllPools();
+        foreach (var file in Directory.EnumerateFiles(_dataRoot, "*", SearchOption.AllDirectories))
+        {
+            if (file.StartsWith(PluginInstall.PluginsRoot(_dataRoot), StringComparison.Ordinal)) continue;
+
+            byte[] bytes;
+            try { bytes = await File.ReadAllBytesAsync(file, Ct); }
+            catch (IOException) { continue; }
+
+            var text = Encoding.Latin1.GetString(bytes);
+            foreach (var code in _provider.DeviceCodes)
+            {
+                Assert.False(text.Contains(code, StringComparison.Ordinal), $"{Path.GetRelativePath(_dataRoot, file)} holds a device code.");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Device_polling_waits_the_providers_interval_and_five_seconds_more_after_each_slow_down()
+    {
+        await SetUpMicrosoftAsync();
+        _provider.DeviceInterval = 7;
+
+        var flowId = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        foreach (var answer in new[] { "pending", "slow_down", "pending", "slow_down", "approve" }) _provider.DeviceAnswers.Writer.TryWrite(answer);
+        await FlowAsync(flowId, until: "done");
+
+        lock (_delays) Assert.Equal([7, 7, 12, 12, 17], _delays.Select(d => d.TotalSeconds));
+        Assert.Equal(5, _provider.DevicePolls.Count);
+        Assert.All(_provider.DevicePolls, p => Assert.Equal(_provider.DeviceCodes[0], p.DeviceCode));
+    }
+
+    [Fact]
+    public async Task An_approved_device_sign_in_stores_the_connection_with_its_tenant_row()
+    {
+        await SetUpMicrosoftAsync();
+
+        var flowId = (await StartDeviceAsync(name: "Outlook")).GetProperty("flowId").GetString()!;
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+
+        var done = await FlowAsync(flowId, until: "done");
+        Assert.False(string.IsNullOrWhiteSpace(done.GetProperty("sentence").GetString()));
+        var connection = done.GetProperty("connection");
+        Assert.Equal("microsoft", connection.GetProperty("provider").GetString());
+        Assert.Equal(Account, connection.GetProperty("account").GetString());
+        Assert.Equal("Outlook", connection.GetProperty("name").GetString());
+        var scopes = connection.GetProperty("scopes").EnumerateArray().Select(s => s.GetString()).ToList();
+        Assert.Contains(GraphMail, scopes);
+        Assert.Contains("offline_access", scopes);
+
+        // Closing the dialog cancels nothing: reading again gives the same.
+        var again = await FlowAsync(flowId);
+        Assert.Equal("done", again.GetProperty("state").GetString());
+        Assert.Equal(connection.GetProperty("id").GetString(), again.GetProperty("connection").GetProperty("id").GetString());
+
+        var id = connection.GetProperty("id").GetString()!;
+        Assert.Equal(id, Assert.Single((await GetAsync("/api/connections")).EnumerateArray()).GetProperty("id").GetString());
+        Assert.Contains(await TenantRowsAsync(), r => r.Action == TenantActions.ConnectionConnected && r.Subject == id && r.ActorEmail == Email);
+
+        var tokens = (await Services.GetRequiredService<ConnectionStore>().TokensAsync(id, Ct))!;
+        Assert.Equal(_provider.Issued[0].Refresh, tokens.RefreshToken);
+        Assert.Equal(_provider.Issued[0].Access, tokens.AccessToken);
+    }
+
+    [Fact]
+    public async Task A_refused_device_sign_in_ends_with_a_sentence_and_stores_nothing()
+    {
+        await SetUpMicrosoftAsync();
+
+        var flowId = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        _provider.DeviceAnswers.Writer.TryWrite("access_denied");
+
+        var refused = await FlowAsync(flowId, until: "refused");
+        Assert.False(string.IsNullOrWhiteSpace(refused.GetProperty("sentence").GetString()));
+        Assert.False(refused.TryGetProperty("connection", out var none) && none.ValueKind != JsonValueKind.Null);
+
+        Assert.Empty((await GetAsync("/api/connections")).EnumerateArray());
+        Assert.DoesNotContain(TenantActions.ConnectionConnected, await TenantActionsAsync());
+        Assert.Single(_provider.DevicePolls);
+    }
+
+    [Fact]
+    public async Task An_expired_device_sign_in_ends_with_a_sentence_and_stores_nothing()
+    {
+        await SetUpMicrosoftAsync();
+
+        // Past its expiry the Host stops polling by itself: two polls fit in 12 seconds at 5.
+        _provider.DeviceExpiresIn = 12;
+        var first = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        _provider.DeviceAnswers.Writer.TryWrite("pending");
+        _provider.DeviceAnswers.Writer.TryWrite("pending");
+        var expired = await FlowAsync(first, until: "expired");
+        Assert.False(string.IsNullOrWhiteSpace(expired.GetProperty("sentence").GetString()));
+        Assert.Equal(2, _provider.DevicePolls.Count);
+
+        // And when the provider says so first.
+        _provider.DeviceExpiresIn = 900;
+        var second = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        _provider.DeviceAnswers.Writer.TryWrite("expired_token");
+        Assert.False(string.IsNullOrWhiteSpace((await FlowAsync(second, until: "expired")).GetProperty("sentence").GetString()));
+
+        Assert.Empty((await GetAsync("/api/connections")).EnumerateArray());
+        Assert.DoesNotContain(TenantActions.ConnectionConnected, await TenantActionsAsync());
+    }
+
+    [Fact]
+    public async Task Another_person_reads_a_device_flow_exactly_as_a_missing_one()
+    {
+        await SetUpMicrosoftAsync();
+        var flowId = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+
+        const string Other = "other@example.test";
+        await Services.GetRequiredService<IUserStore>().CreateAsync(Other, Password, ct: Ct);
+        using var other = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        (await other.PostAsJsonAsync("/api/auth/login", new { email = Other, password = Password }, Ct)).EnsureSuccessStatusCode();
+
+        using var theirs = await other.GetAsync($"/api/connections/flows/{flowId}", Ct);
+        using var missing = await other.GetAsync("/api/connections/flows/no-such-flow", Ct);
+
+        Assert.Equal(HttpStatusCode.NotFound, theirs.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        Assert.Equal(await missing.Content.ReadAsStringAsync(Ct), await theirs.Content.ReadAsStringAsync(Ct));
+
+        // Still the starter's.
+        Assert.Equal("waiting", (await FlowAsync(flowId)).GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task A_machine_principal_cannot_read_a_device_flow()
+    {
+        await SetUpMicrosoftAsync();
+        var flowId = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+
+        using var manager = _factory.CreateClient();
+        manager.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.Header, await ManagerKeyAsync());
+
+        using var response = await manager.GetAsync($"/api/connections/flows/{flowId}", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.DoesNotContain("U1-WXYZ", await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task A_device_reconnect_that_signs_in_as_another_account_is_refused_and_changes_nothing()
+    {
+        await SetUpMicrosoftAsync();
+        var first = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+        var id = (await FlowAsync(first, until: "done")).GetProperty("connection").GetProperty("id").GetString()!;
+
+        var reconnect = (await StartDeviceAsync(reconnectId: id)).GetProperty("flowId").GetString()!;
+        _provider.Account = "someone-else@example.com";
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+
+        var refused = await FlowAsync(reconnect, until: "refused");
+        Assert.Contains("someone-else@example.com", refused.GetProperty("sentence").GetString());
+
+        var listed = Assert.Single((await GetAsync("/api/connections")).EnumerateArray());
+        Assert.Equal(Account, listed.GetProperty("account").GetString());
+        Assert.Equal(_provider.Issued[0].Refresh, (await Services.GetRequiredService<ConnectionStore>().TokensAsync(id, Ct))!.RefreshToken);
+        Assert.DoesNotContain(TenantActions.ConnectionReconnected, await TenantActionsAsync());
+    }
+
+    [Fact]
+    public async Task A_microsoft_public_client_is_saved_with_no_secret_and_its_exchange_and_refresh_send_none()
+    {
+        // The redirect flow with a secret, under Advanced, is as it was.
+        var advanced = await SendAsync(HttpMethod.Put, "/api/connections/providers/microsoft",
+            new { clientId = "advanced-client", clientSecret = "msecret-advanced-9Kz", tenant = "contoso.onmicrosoft.com" });
+        Assert.True(advanced.Status == HttpStatusCode.OK, advanced.Body);
+        Assert.True(JsonDocument.Parse(advanced.Body).RootElement.GetProperty("clientSecretSet").GetBoolean());
+
+        // The guided save takes the client ID and who can sign in, and no secret.
+        var withSecret = await SendAsync(HttpMethod.Put, "/api/connections/providers/microsoft",
+            new { clientId = MicrosoftClientId, audience = "common", clientSecret = "msecret-guided-3Qw" });
+        Assert.Equal(HttpStatusCode.BadRequest, withSecret.Status);
+
+        var notGuid = await SendAsync(HttpMethod.Put, "/api/connections/providers/microsoft", new { clientId = "advanced-client", audience = "common" });
+        Assert.Equal(HttpStatusCode.BadRequest, notGuid.Status);
+        Assert.Contains("clientId", notGuid.Body);
+
+        var saved = await SetUpMicrosoftAsync();
+        Assert.False(saved.GetProperty("clientSecretSet").GetBoolean());
+        Assert.Equal(MicrosoftClientId, saved.GetProperty("clientId").GetString());
+        Assert.Null(await Services.GetRequiredService<ConnectionStore>().ClientSecretAsync("microsoft", Ct));
+
+        var flowId = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+        var id = (await FlowAsync(flowId, until: "done")).GetProperty("connection").GetProperty("id").GetString()!;
+        Assert.All(_provider.DevicePolls, p => Assert.Null(p.Secret));
+
+        _clock.Advance(TimeSpan.FromHours(2));
+        var (grant, refusal) = await Services.GetRequiredService<Connections>().GrantAsync(id, "mail", Ct);
+        Assert.Null(refusal);
+        Assert.NotNull(grant);
+        Assert.Null(Assert.Single(_provider.Refreshes).Secret);
+    }
+
+    [Fact]
+    public async Task The_microsoft_tenant_follows_who_can_sign_in()
+    {
+        foreach (var (audience, tenantId, tenant) in new[]
+        {
+            ("common", (string?)null, "common"),
+            ("organizations", null, "organizations"),
+            ("tenant", TenantGuid, TenantGuid),
+        })
+        {
+            var saved = await SetUpMicrosoftAsync(audience, tenantId);
+            Assert.Equal(tenant, saved.GetProperty("tenant").GetString());
+            Assert.Equal(audience, saved.GetProperty("audience").GetString());
+
+            await StartDeviceAsync();
+            Assert.Equal($"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode", _provider.DeviceStarts[^1].Url);
+        }
+
+        foreach (var body in new object[]
+        {
+            new { clientId = MicrosoftClientId, audience = "tenant" },
+            new { clientId = MicrosoftClientId, audience = "tenant", tenantId = "contoso.onmicrosoft.com" },
+            new { clientId = MicrosoftClientId, audience = "everyone" },
+        })
+        {
+            var refused = await SendAsync(HttpMethod.Put, "/api/connections/providers/microsoft", body);
+            Assert.True(refused.Status == HttpStatusCode.BadRequest, refused.Body);
+        }
+
+        // A refused save leaves the last choice standing.
+        Assert.Equal(TenantGuid, (await GetAsync("/api/connections/providers")).EnumerateArray()
+            .Single(p => p.GetProperty("id").GetString() == "microsoft").GetProperty("tenant").GetString());
+    }
+
+    [Fact]
+    public async Task A_provider_with_no_device_endpoint_refuses_a_device_sign_in_with_a_sentence()
+    {
+        var (status, body) = await SendAsync(HttpMethod.Post, "/api/connections/start",
+            new { provider = "google", scopes = new[] { MailScope }, flow = "device" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Contains("Google", JsonDocument.Parse(body).RootElement.GetProperty("error").GetString());
+        Assert.Empty(_provider.DeviceStarts);
+
+        var unknown = await SendAsync(HttpMethod.Post, "/api/connections/start", new { provider = "google", scopes = new[] { MailScope }, flow = "carrier-pigeon" });
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.Status);
+    }
+
+    [Fact]
+    public async Task The_cli_device_flow_starts_and_reads_through_the_operator_exchange()
+    {
+        await SetUpMicrosoftAsync();
+        var folder = Path.Combine(_dataRoot, ConnectRequests.Folder);
+        await WaitUntilAsync(() => Directory.Exists(folder));
+
+        var started = await ExchangeAsync(new { op = "start", provider = "microsoft", scopes = new[] { GraphMail }, name = "Outlook", flow = "device" });
+        Assert.Equal(200, started.GetProperty("status").GetInt32());
+        var start = started.GetProperty("start");
+        Assert.Equal(["expiresAt", "flowId", "userCode", "verificationUri"], start.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        var flowId = start.GetProperty("flowId").GetString()!;
+
+        Assert.Equal("waiting", (await ExchangeFlowAsync(flowId)).GetProperty("state").GetString());
+
+        // The operator's flow is not a person's to read.
+        Assert.Equal(HttpStatusCode.NotFound, (await SendAsync(HttpMethod.Get, $"/api/connections/flows/{flowId}", null)).Status);
+
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+        var done = await ExchangeFlowAsync(flowId, until: "done");
+        Assert.Equal("Outlook", done.GetProperty("connection").GetProperty("name").GetString());
+        Assert.Contains(await TenantRowsAsync(), r => r.Action == TenantActions.ConnectionConnected && r.ActorEmail == ConnectionActor.Operator.Email);
+
+        var missing = await ExchangeAsync(new { op = "flow", flowId = "no-such-flow" });
+        Assert.Equal(404, missing.GetProperty("status").GetInt32());
+    }
+
+    [Fact]
+    public async Task The_cli_device_code_reaches_no_exchange_answer_and_no_file_under_the_data_root()
+    {
+        await SetUpMicrosoftAsync();
+        var folder = Path.Combine(_dataRoot, ConnectRequests.Folder);
+        await WaitUntilAsync(() => Directory.Exists(folder));
+
+        // No redirectUri: the CLI opens no port for a sign-in with a code.
+        var started = await ExchangeAsync(new { op = "start", provider = "microsoft", scopes = new[] { GraphMail }, flow = "device" });
+        Assert.Equal(200, started.GetProperty("status").GetInt32());
+        var start = started.GetProperty("start");
+        Assert.Equal(["expiresAt", "flowId", "userCode", "verificationUri"], start.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        var flowId = start.GetProperty("flowId").GetString()!;
+
+        var reports = new List<string> { started.GetRawText() };
+        reports.Add(File.ReadAllText(Path.Combine(folder, ConnectRequests.ReportFile)));
+        reports.Add((await ExchangeAsync(new { op = "flow", flowId })).GetRawText());
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+        reports.Add((await ExchangeFlowAsync(flowId, until: "done")).GetRawText());
+        reports.Add(File.ReadAllText(Path.Combine(folder, ConnectRequests.ReportFile)));
+
+        var code = Assert.Single(_provider.DeviceCodes);
+        Assert.DoesNotContain(reports, r => r.Contains(code, StringComparison.Ordinal));
+
+        SqliteConnection.ClearAllPools();
+        foreach (var file in Directory.EnumerateFiles(_dataRoot, "*", SearchOption.AllDirectories))
+        {
+            if (file.StartsWith(PluginInstall.PluginsRoot(_dataRoot), StringComparison.Ordinal)) continue;
+
+            byte[] bytes;
+            try { bytes = await File.ReadAllBytesAsync(file, Ct); }
+            catch (IOException) { continue; }
+
+            Assert.False(Encoding.Latin1.GetString(bytes).Contains(code, StringComparison.Ordinal), $"{Path.GetRelativePath(_dataRoot, file)} holds a device code.");
+        }
+    }
+
+    [Fact]
+    public async Task The_cli_reads_a_persons_device_flow_exactly_as_a_missing_one()
+    {
+        await SetUpMicrosoftAsync();
+        var folder = Path.Combine(_dataRoot, ConnectRequests.Folder);
+        await WaitUntilAsync(() => Directory.Exists(folder));
+
+        var flowId = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        Assert.Equal("waiting", (await FlowAsync(flowId)).GetProperty("state").GetString());
+
+        var theirs = await ExchangeAsync(new { op = "flow", flowId });
+        var missing = await ExchangeAsync(new { op = "flow", flowId = "no-such-flow" });
+
+        Assert.Equal(404, theirs.GetProperty("status").GetInt32());
+        Assert.Equal(missing.GetProperty("status").GetInt32(), theirs.GetProperty("status").GetInt32());
+        Assert.Equal(missing.GetProperty("error").GetString(), theirs.GetProperty("error").GetString());
+        Assert.False(theirs.TryGetProperty("flow", out _));
+    }
+
+    [Fact]
+    public async Task The_cli_device_start_for_a_provider_with_no_device_endpoint_answers_400_with_the_sentence()
+    {
+        var folder = Path.Combine(_dataRoot, ConnectRequests.Folder);
+        await WaitUntilAsync(() => Directory.Exists(folder));
+
+        var refused = await ExchangeAsync(new { op = "start", provider = "google", scopes = new[] { MailScope }, flow = "device" });
+
+        Assert.Equal(400, refused.GetProperty("status").GetInt32());
+        Assert.Contains("Google", refused.GetProperty("error").GetString());
+        Assert.False(refused.TryGetProperty("start", out var start) && start.ValueKind != JsonValueKind.Null);
+        Assert.Empty(_provider.DeviceStarts);
+    }
+
     // ---- no leaks ---------------------------------------------------------------------------------
 
     [Fact]
@@ -892,6 +1283,52 @@ public sealed class ConnectionsTests : IAsyncLifetime
     }
 
     // ---- helpers ----------------------------------------------------------------------------------
+
+    /// <summary>Microsoft as the guided setup saves it: a public client, no secret.</summary>
+    private async Task<JsonElement> SetUpMicrosoftAsync(string audience = "common", string? tenantId = null)
+    {
+        var (status, body) = await SendAsync(HttpMethod.Put, "/api/connections/providers/microsoft",
+            new { clientId = MicrosoftClientId, audience, tenantId });
+        Assert.True(status == HttpStatusCode.OK, body);
+        return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    private async Task<JsonElement> StartDeviceAsync(string? reconnectId = null, string? name = null)
+    {
+        var (status, body) = await SendAsync(HttpMethod.Post, "/api/connections/start",
+            new { provider = reconnectId is null ? "microsoft" : null, scopes = new[] { GraphMail }, name, reconnectId, flow = "device" });
+        Assert.True(status == HttpStatusCode.OK, body);
+        return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    /// <summary>The flow as its starter reads it; with <paramref name="until"/>, read until it is in that state.</summary>
+    private async Task<JsonElement> FlowAsync(string flowId, string? until = null)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+
+        while (true)
+        {
+            var flow = await GetAsync($"/api/connections/flows/{flowId}");
+            if (until is null || flow.GetProperty("state").GetString() == until) return flow;
+            if (DateTime.UtcNow > deadline) throw new TimeoutException($"The flow stayed {flow.GetProperty("state").GetString()}, not {until}.");
+            await Task.Delay(20, Ct);
+        }
+    }
+
+    private async Task<JsonElement> ExchangeFlowAsync(string flowId, string? until = null)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+
+        while (true)
+        {
+            var report = await ExchangeAsync(new { op = "flow", flowId });
+            Assert.Equal(200, report.GetProperty("status").GetInt32());
+            var flow = report.GetProperty("flow");
+            if (until is null || flow.GetProperty("state").GetString() == until) return flow;
+            if (DateTime.UtcNow > deadline) throw new TimeoutException($"The flow stayed {flow.GetProperty("state").GetString()}, not {until}.");
+            await Task.Delay(20, Ct);
+        }
+    }
 
     private async Task<string> ConnectAsync(IReadOnlyList<string>? scopes = null)
     {
@@ -1168,7 +1605,50 @@ public sealed class ConnectionsTests : IAsyncLifetime
         public readonly List<(string? Secret, string RefreshToken)> Refreshes = [];
         public readonly List<string> Revoked = [];
 
+        public int DeviceInterval = 5;
+        public int DeviceExpiresIn = 900;
+        public readonly List<string> DeviceCodes = [];
+        public readonly List<(string? Url, IReadOnlyList<string> Scopes)> DeviceStarts = [];
+        public readonly List<(string? Secret, string DeviceCode, string TokenUrl)> DevicePolls = [];
+
+        /// <summary>What each poll of the token endpoint is answered, in turn: <c>pending</c>,
+        /// <c>slow_down</c>, <c>approve</c>, or an OAuth error. A poll with nothing queued waits.</summary>
+        public readonly Channel<string> DeviceAnswers = Channel.CreateUnbounded<string>();
+
         private readonly Lock _lock = new();
+
+        public Task<DeviceAuthorizationAnswer> DeviceAuthorizationAsync(OAuthProvider provider, IReadOnlyList<string> scopes, CancellationToken ct)
+        {
+            lock (_lock)
+            {
+                DeviceStarts.Add((provider.DeviceAuthorizationUrl, scopes));
+                var code = $"devicecode-{Guid.NewGuid():N}";
+                DeviceCodes.Add(code);
+                return Task.FromResult(new DeviceAuthorizationAnswer(
+                    code, $"U{DeviceCodes.Count}-WXYZ", "https://microsoft.com/devicelogin", DeviceExpiresIn, DeviceInterval, null, null));
+            }
+        }
+
+        public async Task<OAuthTokenAnswer> DeviceTokenAsync(OAuthProvider provider, string? clientSecret, string deviceCode, CancellationToken ct)
+        {
+            var answer = await DeviceAnswers.Reader.ReadAsync(ct);
+
+            lock (_lock)
+            {
+                DevicePolls.Add((clientSecret, deviceCode, provider.TokenUrl));
+
+                switch (answer)
+                {
+                    case "approve":
+                        var (access, refresh) = Issue(newRefresh: true);
+                        return new OAuthTokenAnswer(access, refresh, 3600, null, IdToken(), null, null, false);
+                    case "pending":
+                        return new OAuthTokenAnswer(null, null, null, null, null, "authorization_pending", "The user has not yet finished.", true);
+                    default:
+                        return new OAuthTokenAnswer(null, null, null, null, null, answer, $"The provider said {answer}.", true);
+                }
+            }
+        }
 
         public Task<OAuthTokenAnswer> ExchangeCodeAsync(
             OAuthProvider provider, string? clientSecret, string code, string redirectUri, string codeVerifier, CancellationToken ct)
