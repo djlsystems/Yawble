@@ -30,6 +30,7 @@ import { closeWorkflow, nudgeWorkflow, resumeWorkflow, stopWorkflow } from '../a
 import { useConsoleStore } from '../stores/console';
 import { vResizableColumns } from '../lib/resizableColumns';
 import TeamStatisticsTile from './TeamStatisticsTile.vue';
+import TeamTokensChart from './TeamTokensChart.vue';
 
 const props = defineProps<{
   containers: ContainerSnapshot[];
@@ -1026,6 +1027,17 @@ function showThread(row: WorkflowRow) {
         <div v-if="tokens.available" class="text-caption q-mt-xs">
           Team total from the message log.
         </div>
+      </q-card-section>
+
+      <!-- WHEN THE TEAM SPENT, AND WHO: the ledger's runs at the time each ended, above the totals,
+           which stay as they were. -->
+      <q-card-section v-if="!pluginOnly">
+        <TeamTokensChart
+          :team-id="teamId"
+          :containers="containers"
+          :clock-offset="clockOffset"
+          :log-billable="tokens.available ? tokens.billable : null"
+        />
       </q-card-section>
 
       <q-card-section v-if="tokens.available">

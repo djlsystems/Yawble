@@ -45,6 +45,15 @@ public interface IUsageLedger
     Task<IReadOnlyList<UsageLedgerRow>> ReadTeamRunsAsync(
         string team, long floor, DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection<string> members,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// <paramref name="team"/>'s runs above <paramref name="floor"/> - the log position the team was
+    /// created at - that ENDED in [<paramref name="from"/>, <paramref name="to"/>), or every one of
+    /// them when neither is given, in order of their end. One row per run. What the team's tokens
+    /// over time read.
+    /// </summary>
+    Task<IReadOnlyList<UsageLedgerRow>> ReadTeamRunsEndedAsync(
+        string team, long floor, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default);
 }
 
 /// <summary>One <c>usage_ledger</c> row: one finished run. NULL token figures are "not measured",

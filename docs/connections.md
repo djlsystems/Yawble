@@ -28,9 +28,59 @@ instance's Data Protection keys (`<dataRoot>/keys`); it is never in plain text, 
 environment, and never returned by any route: the dialog shows only that it is **set**. Changing it
 means typing a new one.
 
-## Connecting an account from the web
+## Connecting an account: the guided path
 
-1. Admin → **Connections** → **Connect an account**.
+Start here. Admin → **Connections** → **Add connection** opens a dialog in three steps:
+
+1. **Service** - Google or Microsoft. The dialog shows what will be asked, in words, each line naming
+   the plugin that wants it ("Read, change and send your Gmail - mailer"); the raw scope is behind
+   **details**, and a scope the Host has no words for reads as itself. Every line is ticked; untick
+   any you do not want. Nothing is typed: the scopes come from the installed plugins' connection
+   slots (`GET /api/connections/needs?provider=<id>`, or `&plugin=<id>&slot=<name>` for one slot).
+2. **Set up the app** - only when the provider's client is not set up yet: the provider's setup
+   guide as a checklist, with links into the provider's console and buttons to copy each value (the
+   redirect URI, the scopes, the APIs). The guide is served with the provider by
+   `GET /api/connections/providers` (`guide.steps`), so the dialog and this page say the same thing.
+3. **Sign in** - the provider's consent page, then back to the dialog, where you may name the
+   connection.
+
+### Google's setup steps
+
+1. **Project** - create one in the Google Cloud console, or pick one. Type its project id into the
+   dialog and every later link opens in it.
+2. **APIs** - turn on the APIs the scopes need, one link per API: Gmail (`gmail.googleapis.com`),
+   Drive (`drive.googleapis.com`), Calendar (`calendar-json.googleapis.com`), Sheets
+   (`sheets.googleapis.com`), Docs (`docs.googleapis.com`), People (`people.googleapis.com`).
+3. **Branding and audience** - the app's name and a support email, Audience **External**, then
+   **Publish app**. Left in Testing, Google ends the sign-in after 7 days (see below). Signing in,
+   Google shows "Google hasn't verified this app": that is expected for your own app - choose
+   **Advanced → Go to <app>**.
+4. **Data access** - add exactly the scopes the dialog lists, each one copyable.
+5. **Client** - type **Web application**, with the redirect URI the dialog shows registered under
+   Authorized redirect URIs. When the address you are using is one Google will refuse (an IP address,
+   http on anything but localhost, a name with no public top-level domain), this step says so first:
+   open the web UI at `http://localhost:<port>` on the machine running the container and register
+   that, or connect with `yawble connect`.
+6. **Paste the client ID and secret** - the ID must end in `.apps.googleusercontent.com`, checked
+   before saving and again by the Host. Saved with `PUT /api/connections/providers/google`.
+
+### Microsoft's setup steps
+
+Register an app in Microsoft Entra ID; add the Web platform with the redirect URI shown (and
+`http://localhost` for the CLI); add the Microsoft Graph delegated permissions listed; create a client
+secret and copy its Value; paste the Application (client) ID, the tenant (or `common`) and the
+secret. The details are under [Registering a Microsoft client](#registering-a-microsoft-client).
+
+No step of either guide carries a secret: the secret is pasted by you, stored encrypted, and never
+shown again.
+
+## Advanced: the full form
+
+Admin → **Connections** → **Advanced** holds the Providers tab and the Connect form as they were:
+custom providers, free-text scopes, the Microsoft tenant, the client secret. Use it for a custom
+provider, for scopes no installed plugin asks for, or to set a client by hand.
+
+1. Admin → **Connections** → **Advanced** → **Connect an account**.
 2. Pick the provider. If its client is not set up yet, the dialog asks for it first.
 3. Choose the scopes. A plugin's slot lists the scopes it needs; connect with at least those.
 4. The browser goes to the provider's consent page and comes back to `/api/connections/callback` on
@@ -98,6 +148,9 @@ The same way the other commands that talk to a running instance do (`yawble plug
   `yawble update` brings the instance current.
 
 ## Registering a Google client
+
+The guided path above walks these same steps; this is the long form, including the Desktop app
+client for the CLI.
 
 1. In the [Google Cloud console](https://console.cloud.google.com/), pick or create a project.
 2. **APIs & Services → Library**: enable the APIs the plugins will use (Gmail API, Google Drive

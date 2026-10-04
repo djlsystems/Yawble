@@ -191,6 +191,33 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
         return [.. rows.Values.OrderBy(r => r.RunSeq)];
     }
 
+    public async Task<IReadOnlyList<UsageLedgerRow>> ReadTeamRunsEndedAsync(
+        string team, long floor, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        // `ended_at` is stored in the "O" form, so the period's edges compare as text in that form,
+        // along `ix_usage_ledger_team_ended`.
+        var period = from is not null && to is not null ? "AND ended_at >= $from AND ended_at < $to" : "";
+        command.CommandText =
+            $"""
+             SELECT {RunColumns} FROM usage_ledger
+             WHERE team_id = $team AND run_seq > $floor {period}
+             ORDER BY ended_at, run_seq
+             """;
+        command.Parameters.AddWithValue("$team", team);
+        command.Parameters.AddWithValue("$floor", floor);
+
+        if (from is { } start && to is { } end)
+        {
+            command.Parameters.AddWithValue("$from", Stamp(start));
+            command.Parameters.AddWithValue("$to", Stamp(end));
+        }
+
+        return await ReadRunsAsync(command, ct);
+    }
+
     private static string Stamp(DateTimeOffset at) =>
         at.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture);
 

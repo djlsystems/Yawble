@@ -23,6 +23,10 @@ const teamId = asTeamId('alpha');
 /** The board's clock for every case here: Sun 4 Oct 2026, 14:30 UTC. */
 const now = Date.parse('2026-10-04T14:30:00Z');
 const utc = (time: string) => Date.parse(`2026-10-04T${time}Z`);
+// A column's label is in the browser's own zone, so the expected label is too: the suite runs in
+// UTC in a container and in the person's zone on their machine.
+const hm = (at: number) => new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(at);
+const span = (from: string, to: string) => `${hm(utc(from))}–${hm(utc(to))}`;
 const iso = (ms: number) => new Date(ms).toISOString();
 
 function container(id: string, name: string) {
@@ -432,13 +436,13 @@ describe('the columns', () => {
     const option = dialogOption();
 
     // The 14:05 column, early and late in it; then 14:06, late in it, with no column after it.
-    expect(await hoverText(option, utc('14:05:06'))).toContain('14:05–14:06');
-    expect(await hoverText(option, utc('14:05:54'))).toContain('14:05–14:06');
+    expect(await hoverText(option, utc('14:05:06'))).toContain(span('14:05:00', '14:06:00'));
+    expect(await hoverText(option, utc('14:05:54'))).toContain(span('14:05:00', '14:06:00'));
     expect(await hoverText(option, utc('14:05:54'))).toContain('running 1 min 30 s');
-    expect(await hoverText(option, utc('14:06:50'))).toContain('14:06–14:07');
+    expect(await hoverText(option, utc('14:06:50'))).toContain(span('14:06:00', '14:07:00'));
     expect(await hoverText(option, utc('14:06:50'))).toContain('waiting 20 s');
     // Into the 14:05 column's right half from its left half, and on into the gap after 14:06.
-    expect(await hoverText(option, utc('14:05:10'), utc('14:05:50'))).toContain('14:05–14:06');
+    expect(await hoverText(option, utc('14:05:10'), utc('14:05:50'))).toContain(span('14:05:00', '14:06:00'));
     expect(await hoverText(option, utc('14:06:30'), utc('14:07:30'))).toBe('');
   });
 

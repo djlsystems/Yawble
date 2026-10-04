@@ -72,6 +72,18 @@
   --os-stat-failed: #c62828;
   --os-stat-idle: var(--os-rule-strong);
 
+  // ONE COLOUR PER MEMBER in the Tokens dialog's chart, in this fixed order, never by rank. Eight
+  // hues checked for colour-blind separation on each theme's surface; under 3:1 on white for three
+  // of them, so the legend and the tooltip name every member and the tables below repeat the figures.
+  --os-series-1: #2a78d6;
+  --os-series-2: #eb6834;
+  --os-series-3: #1baf7a;
+  --os-series-4: #eda100;
+  --os-series-5: #e87ba4;
+  --os-series-6: #008300;
+  --os-series-7: #4a3aa7;
+  --os-series-8: #e34948;
+
   // PALE GROUNDS for a banner or a chip, one per state, replacing Quasar's `bg-*-1` classes - which
   // are fixed light pastels and paint a white-hot box on a dark page.
   --os-tint-ok: #e8f4ed;
@@ -146,6 +158,15 @@ body.body--dark {
   // Redeclared here, not inherited: a var() resolves where it is declared, so the :root one keeps
   // the light rule colour.
   --os-stat-idle: var(--os-rule-strong);
+
+  --os-series-1: #3987e5;
+  --os-series-2: #d95926;
+  --os-series-3: #199e70;
+  --os-series-4: #c98500;
+  --os-series-5: #d55181;
+  --os-series-6: #008300;
+  --os-series-7: #9085e9;
+  --os-series-8: #e66767;
 
   --os-tint-ok: #16261c;
   --os-tint-warn: #2b2213;

@@ -18,24 +18,67 @@ public static class ConnectionEndpoints
 
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/connections/providers", async (Connections connections, CancellationToken ct) =>
-                Results.Ok((await connections.ProvidersAsync(ct)).Select(p => p.View())))
+        app.MapGet("/api/connections/providers", async (
+            [Description("The scopes about to be asked, repeated; the guide is built for them. Omitted: every installed slot's for that provider.")] string[]? scopes,
+            Connections connections, PluginCatalog plugins, HttpContext context, CancellationToken ct) =>
+        {
+            var asked = Connections.Scopes(scopes);
+            if (asked is null) return Results.BadRequest(new { error = "`scopes` must be scope strings with no spaces." });
+
+            return Results.Ok((await connections.ProvidersAsync(ct)).Select(p => p.View(Guide(p, asked, plugins, context))));
+        })
             .WithTags(Area)
             .HumansOnly()
             .WithSummary("The OAuth providers a connection can belong to")
             .WithDescription(
                 "Google and Microsoft (built in, configured or not), then every custom provider: its "
                 + "endpoints, its client ID, `clientSecretSet` (the secret itself is never answered), "
-                + "`configured`, `revokes`, `defaultScopes` and one line of `help`.");
+                + "`configured`, `revokes`, `defaultScopes`, one line of `help`, and a built-in's setup "
+                + "`guide`: `{ steps: [{ id, title, text, link, copy: [{ label, value }] }] }`, in order. A "
+                + "`link` may hold `{projectId}`, the person's Google project id or empty. The client step "
+                + "says first when the address in use gives a redirect URI the provider will refuse. No step "
+                + "carries a secret. A custom provider's `guide` is null.");
+
+        app.MapGet("/api/connections/needs", (
+            [Description("google, microsoft, or custom-<id>.")] string? provider,
+            [Description("A plugin id; with `slot`, only that slot.")] string? plugin,
+            [Description("A slot name of `plugin`.")] string? slot,
+            PluginCatalog plugins) =>
+        {
+            provider = provider?.Trim();
+            if (string.IsNullOrEmpty(provider)) return Results.BadRequest(new { error = "`provider` is required: google, microsoft or a custom provider's id." });
+
+            if (string.IsNullOrWhiteSpace(plugin) != string.IsNullOrWhiteSpace(slot))
+            {
+                return Results.BadRequest(new { error = "`plugin` and `slot` go together: name both for one slot, or neither for every slot." });
+            }
+
+            var needs = ConnectionNeeds.For(
+                plugins.Plugins.Select(p => p.Manifest), provider,
+                string.IsNullOrWhiteSpace(plugin) ? null : plugin.Trim(), string.IsNullOrWhiteSpace(slot) ? null : slot.Trim());
+
+            return Results.Ok(ConnectionNeeds.View(provider, needs));
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("What a connection of a provider should ask for")
+            .WithDescription(
+                "From the installed plugins' connection slots, never typed: `needs` (each slot admitting "
+                + "`provider`: `plugin`, `slot`, `description`, `scopes`), `scopes` (merged, once each: "
+                + "`scope`, `words` or null when the Host has none, `plugins`) and `apis` (the Google APIs "
+                + "those scopes need, each with an enable `link` that may hold `{projectId}`; empty for "
+                + "other providers). `plugin` and `slot` together narrow it to one slot.");
 
         app.MapPut("/api/connections/providers/{id}", async (
             [Description("google, microsoft, or custom-<id> (created when new).")] string id,
-            ProviderChange request, Connections connections, HttpContext context, CancellationToken ct) =>
+            ProviderChange request, Connections connections, PluginCatalog plugins, HttpContext context, CancellationToken ct) =>
         {
             try
             {
                 var (provider, error) = await connections.SaveProviderAsync(id, request, Actor(context), ct);
-                return error is not null ? Results.BadRequest(new { error }) : Results.Ok(provider!.View());
+                return error is not null
+                    ? Results.BadRequest(new { error })
+                    : Results.Ok(provider!.View(Guide(provider, [], plugins, context)));
             }
             catch (SqliteException exception)
             {
@@ -49,7 +92,8 @@ public static class ConnectionEndpoints
                 "Body `{ clientId, clientSecret?, tenant? (microsoft), name?, authorizeUrl, tokenUrl, "
                 + "userinfoUrl?, defaultScopes (custom) }`. `clientSecret` omitted keeps the stored one, "
                 + "`\"\"` clears it. The secret is stored encrypted with the instance's Data Protection "
-                + "keys and never answered. 400 naming the field. Saved with a "
+                + "keys and never answered. Google's `clientId` must end in `.apps.googleusercontent.com`. Answers "
+                + "the provider as the list does, guide included. 400 naming the field. Saved with a "
                 + "`connections.provider-saved` tenant row in the same transaction.");
 
         app.MapDelete("/api/connections/providers/{id}", async (
@@ -336,6 +380,20 @@ public static class ConnectionEndpoints
     public static ConnectionActor Actor(HttpContext context) => new(
         context.User.FindFirstValue(PrincipalClaims.OwnerClaim) ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "",
         context.User.FindFirstValue(ClaimTypes.Email));
+
+    /// <summary>A provider's setup guide for <paramref name="asked"/> - or, when none are named, every
+    /// installed slot's scopes for it - under its default scopes, at the address in use.</summary>
+    private static object? Guide(OAuthProvider provider, IReadOnlyList<string> asked, PluginCatalog plugins, HttpContext context)
+    {
+        if (!ConnectionProviders.IsBuiltIn(provider.Kind)) return null;
+
+        var scopes = asked.Count > 0
+            ? asked
+            : ConnectionNeeds.Merge(ConnectionNeeds.For(plugins.Plugins.Select(p => p.Manifest), provider.Id)).Select(s => s.Scope).ToList();
+
+        return ConnectionGuides.View(ConnectionGuides.For(
+            provider, [.. provider.DefaultScopes.Union(scopes, StringComparer.Ordinal)], Origin(context)));
+    }
 
     /// <summary>The address the request came to, as the browser wrote it.</summary>
     private static string Origin(HttpContext context) => $"{context.Request.Scheme}://{context.Request.Host.Value}";

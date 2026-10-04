@@ -1476,6 +1476,38 @@ export interface TeamActivity {
   members: ActivityMember[]
 }
 
+/**
+ * A TEAM'S RUNS AND THE TOKENS EACH USED, from `GET /api/teams/{team}/tokens/runs`. Mirrors
+ * `TeamTokenRunsAnswer` in `Harness.Host/TeamTokenRuns.cs`. `window` is `all` (the team's whole
+ * history, from its creation to now) or `requested`.
+ */
+export interface TeamTokenRuns {
+  from: string | null
+  to: string | null
+  serverNow: string
+  window: 'all' | 'requested'
+  runs: TeamTokenRun[]
+}
+
+/**
+ * ONE FINISHED RUN, at the instant it ended - when its tokens were measured. A figure the run did not
+ * report is ABSENT, never 0: an unmeasured run (`measured: false`) carries none, and a combined total
+ * carries `combined` and `billable` with no in/out split.
+ */
+export interface TeamTokenRun {
+  member: string
+  /** False for a member since removed. */
+  current: boolean
+  endedAt: string
+  measured: boolean
+  billable?: number
+  tokensIn?: number
+  tokensCachedIn?: number
+  tokensCacheCreation?: number
+  tokensOut?: number
+  combined?: number
+}
+
 /** Which period an `/activity` answer covers; see {@link TeamActivity}. */
 export type ActivityWindow = 'open' | 'latest' | 'requested' | 'none'
 
@@ -2995,6 +3027,38 @@ export interface ConnectionProvider {
   help: string
   /** Microsoft's tenant, when one is set. */
   tenant?: string | null
+  /** How to set its client up, step by step. A built-in provider has one; no step carries a secret. */
+  guide?: ConnectionGuide | null
+}
+
+/** A provider's setup guide: its steps in the order a person takes them. */
+export interface ConnectionGuide {
+  steps: ConnectionGuideStep[]
+}
+
+export interface ConnectionGuideStep {
+  /** Google's, in order: `project`, `apis`, `branding`, `data-access`, `client`, `credentials`. */
+  id: string
+  title: string
+  /** One or two sentences. */
+  text: string
+  /** A deep link, which may hold `{projectId}`. */
+  link: string | null
+  /** Values to copy at the provider: the redirect URI, a scope, an API. */
+  copy: { label: string; value: string }[]
+}
+
+/**
+ * `GET /api/connections/needs`: what the installed plugins' connection slots ask of a provider -
+ * each slot with its scopes, the scopes merged with the plugins that want each, and the APIs to
+ * turn on for them.
+ */
+export interface ConnectionNeeds {
+  provider: string
+  needs: { plugin: string; slot: string; description: string | null; scopes: string[] }[]
+  /** `words` null: the Host has no wording, and the scope is shown as itself. */
+  scopes: { scope: string; words: string | null; plugins: string[] }[]
+  apis: { api: string; link: string }[]
 }
 
 /**
