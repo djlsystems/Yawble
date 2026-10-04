@@ -1678,6 +1678,49 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         return new TeamWorkflows(true, openCount, totalCount, earliest, serverNow, timings);
     }
 
+    /// <summary>
+    /// FROM THE EARLIEST ROW TO THE NEWEST over every correlation this team has published in since
+    /// its floor. See <see cref="IMessageLog.WorkflowStretchForTeamAsync"/>.
+    /// </summary>
+    public async Task<TeamWorkflowStretch?> WorkflowStretchForTeamAsync(
+        string team, long sinceSeq, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(team)) return null;
+
+        await using var connection = Open();
+
+        var (prefix, nested) = TeamSourcePattern(team);
+
+        await using var stretch = connection.CreateCommand();
+
+        // THE SAME TEAM SCOPE AS `WorkflowsForTeamAsync`'s pick, UNCAPPED AND WITH NO OPEN FILTER:
+        // the fifty-entry cap drops the oldest correlations first, which is where the earliest root
+        // lives. MIN/MAX over the stored round-trip stamps, as the per-workflow bounds query reads
+        // them, so no seq-to-time ordering is assumed.
+        stretch.CommandText =
+            """
+            SELECT MIN(occurred_at), MAX(occurred_at)
+            FROM messages
+            WHERE seq > $since
+              AND correlation_id IN (
+                  SELECT DISTINCT m.correlation_id
+                  FROM messages m
+                  WHERE m.source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                    AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
+                    AND m.seq > $since)
+            """;
+
+        stretch.Parameters.AddWithValue("$prefix", prefix);
+        stretch.Parameters.AddWithValue("$nested", nested);
+        stretch.Parameters.AddWithValue("$since", sinceSeq);
+
+        await using var reader = await stretch.ExecuteReaderAsync(ct);
+
+        return await reader.ReadAsync(ct) && !reader.IsDBNull(0)
+            ? new TeamWorkflowStretch(MessageRows.ReadStamp(reader.GetString(0)), MessageRows.ReadStamp(reader.GetString(1)))
+            : null;
+    }
+
     /// <summary>Runs accumulated for one member while the pairing query is read.</summary>
     private sealed class MemberRuns
     {
