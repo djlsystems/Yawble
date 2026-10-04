@@ -28,8 +28,9 @@ public sealed record OAuthProvider(
 
     public bool Revokes => RevokeUrl is not null;
 
-    /// <summary>What a route answers: never the secret, only whether one is set.</summary>
-    public object View() => new
+    /// <summary>What a route answers: never the secret, only whether one is set. <paramref name="guide"/>
+    /// is the provider's setup guide (<see cref="ConnectionGuides.View"/>), or null.</summary>
+    public object View(object? guide = null) => new
     {
         id = Id,
         kind = Kind,
@@ -44,6 +45,7 @@ public sealed record OAuthProvider(
         revokes = Revokes,
         defaultScopes = DefaultScopes,
         help = Help,
+        guide,
     };
 }
 
@@ -88,6 +90,14 @@ public static class ConnectionProviders
         && id.Length is > 7 and <= 40
         && id[CustomPrefix.Length..].All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '-')
         && char.IsAsciiLetterOrDigit(id[CustomPrefix.Length]);
+
+    /// <summary>The shape of a Google OAuth client ID: a name, then <c>.apps.googleusercontent.com</c>.</summary>
+    public static bool IsGoogleClientId(string clientId) =>
+        clientId.EndsWith(GoogleClientIdSuffix, StringComparison.Ordinal)
+        && clientId.Length > GoogleClientIdSuffix.Length
+        && clientId[..^GoogleClientIdSuffix.Length].All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+
+    public const string GoogleClientIdSuffix = ".apps.googleusercontent.com";
 
     public static bool IsKnownId(string id) => IsBuiltIn(id) || IsCustomId(id);
 

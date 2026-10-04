@@ -46,6 +46,7 @@ import type {
   PluginHire,
   Connection,
   ConnectionProvider,
+  ConnectionNeeds,
   ConnectionProviderSave,
   ConnectionStart,
   ConnectionStartRequest,
@@ -1398,8 +1399,14 @@ export const savePluginSettings = (team: string, member: string, settings: Plugi
 
 // --- Connections: OAuth accounts the Host holds for plugins. Every route is a person's. ----------
 
-/** Google, Microsoft (always listed, set up or not), then each custom provider. Never a client secret. */
-export const listConnectionProviders = () => json<ConnectionProvider[]>('/api/connections/providers')
+/** Google, Microsoft (always listed, set up or not), then each custom provider. Never a client secret.
+ * Each built-in one's guide is built for `scopes` when given, else for every installed plugin's. */
+export const listConnectionProviders = (scopes?: string[]) => {
+  const query = new URLSearchParams()
+  for (const scope of scopes ?? []) query.append('scopes', scope)
+  const search = query.toString()
+  return json<ConnectionProvider[]>(`/api/connections/providers${search === '' ? '' : `?${search}`}`)
+}
 
 /** Sets up a provider's client, or creates a custom provider. An omitted `clientSecret` keeps the stored one. */
 export const saveConnectionProvider = (id: string, body: ConnectionProviderSave) =>
@@ -1412,6 +1419,16 @@ export const saveConnectionProvider = (id: string, body: ConnectionProviderSave)
 /** Removes a custom provider; refused (409) while any of its connections exists. */
 export const deleteConnectionProvider = (id: string) =>
   send(`/api/connections/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => undefined)
+
+/** What the installed plugins' slots ask of a provider - or of one plugin's slot - with its scopes in words. */
+export const getConnectionNeeds = (provider: string, slot?: { plugin: string; slot: string }) => {
+  const query = new URLSearchParams({ provider })
+  if (slot) {
+    query.set('plugin', slot.plugin)
+    query.set('slot', slot.slot)
+  }
+  return json<ConnectionNeeds>(`/api/connections/needs?${query.toString()}`)
+}
 
 /** Every connected account, with its status and the members that use it. */
 export const listConnections = () => json<Connection[]>('/api/connections')
