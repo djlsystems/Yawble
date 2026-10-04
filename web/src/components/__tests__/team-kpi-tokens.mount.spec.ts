@@ -4,6 +4,13 @@
 // than by reading `TeamKpiStrip.vue`'s source, including the tooltip, which is
 // opened through QTooltip's own `show()` because it is absent from the DOM until then.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// The Statistics tile reads `/activity` when it mounts. Nothing here is about it, so the read never
+// answers, rather than reaching for a server that is not there.
+vi.mock('../../api/client', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTeamActivity: () => new Promise(() => {}),
+}));
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 
