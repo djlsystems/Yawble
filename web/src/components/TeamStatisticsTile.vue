@@ -16,8 +16,10 @@ import {
   activityLanes,
   activitySummary,
   liveNow,
+  stateShapes,
   tooltipHtml,
 } from '../lib/teamActivity';
+import TeamStatisticsDialog from './TeamStatisticsDialog.vue';
 
 /**
  * TREE-SHAKEN: the custom series the lanes are drawn with, the grid and its time axis, the tooltip
@@ -160,11 +162,7 @@ const caption = computed(() =>
 const summary = computed(() =>
   activity.value ? activitySummary(activity.value.window, lanes.value, from.value, now.value) : 'Statistics');
 
-/**
- * ONE SPAN: a bar inside its lane, idle a pale track. Blocked and failed carry a notch cut from the
- * tile's own colour - one corner for blocked, both left corners for failed - so neither is told by
- * hue alone.
- */
+/** ONE SPAN: a bar inside its lane, idle a pale track, blocked and failed notched (`stateShapes`). */
 function renderSpan(params: CustomSeriesRenderItemParams, api: CustomSeriesRenderItemAPI): CustomSeriesRenderItemReturn {
   const lane = Number(api.value(0));
   const start = api.coord([api.value(1), lane]);
@@ -178,25 +176,7 @@ function renderSpan(params: CustomSeriesRenderItemParams, api: CustomSeriesRende
   const y = start[1]! + 1;
   const width = Math.max(right - left, 1);
   const height = Math.max(end[1]! - start[1]! - 2, 1);
-  const palette = colours.value;
-
-  const children: CustomSeriesRenderItemReturn[] = [
-    { type: 'rect', shape: { x, y, width, height }, style: { fill: palette[state] } },
-  ];
-
-  const notch = Math.min(6, height, width);
-
-  if (state === 'blocked' || state === 'failed') {
-    children.push({ type: 'polygon', shape: { points: [[x, y], [x + notch, y], [x, y + notch]] }, style: { fill: palette.chrome } });
-  }
-
-  if (state === 'failed') {
-    children.push({
-      type: 'polygon',
-      shape: { points: [[x, y + height], [x + notch, y + height], [x, y + height - notch]] },
-      style: { fill: palette.chrome },
-    });
-  }
+  const children = stateShapes(x, y, width, height, state, colours.value);
 
   return { type: 'group', children } as CustomSeriesRenderItemReturn;
 }
@@ -262,8 +242,8 @@ const option = computed(() => {
 const chartHeight = computed(() => `${lanes.value.length * LaneHeight}px`);
 
 /**
- * A CLICK ANYWHERE OPENS THE STATISTICS DIALOG, which has not landed yet: until it does this does
- * nothing. On touch, a tap on the lanes shows the tooltip instead, and the label opens the dialog.
+ * A CLICK ANYWHERE OPENS THE STATISTICS DIALOG. On touch, a tap on the lanes shows the tooltip
+ * instead, and the label opens the dialog.
  */
 let lastTapWasTouch = false;
 
@@ -271,8 +251,10 @@ function notePointer(event: PointerEvent) {
   lastTapWasTouch = event.pointerType === 'touch';
 }
 
+const statisticsOpen = ref(false);
+
 function openStatistics() {
-  // The dialog is wired here when it exists.
+  statisticsOpen.value = true;
 }
 
 function onTileClick() {
@@ -313,6 +295,13 @@ function onTileClick() {
     </div>
 
     <div class="stats-caption">{{ caption }}</div>
+
+    <TeamStatisticsDialog
+      v-model="statisticsOpen"
+      :team-id="teamId"
+      :containers="containers"
+      :clock-offset="clockOffset"
+    />
   </div>
 </template>
 
