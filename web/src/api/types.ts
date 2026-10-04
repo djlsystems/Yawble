@@ -1464,9 +1464,10 @@ export interface ActivityMember {
 
 /**
  * WHAT EACH MEMBER WAS DOING, AND WHEN, from `GET /api/teams/{team}/activity`. Mirrors
- * `TeamActivityAnswer` in `Harness.Host/TeamActivity.cs`. `window` is `open` (from the oldest open
- * workflow), `latest` (from the most recent one, none open), `requested`, or `none` for a team that
- * has never run - which carries no members and null `from` / `to`.
+ * `TeamActivityAnswer` in `Harness.Host/TeamActivity.cs`. `window` is `workflows` (from the root of
+ * the team's earliest workflow, open or closed, to the latest activity of any of them - never the
+ * clock), `requested`, or `none` for a team that has never run - which carries no members and null
+ * `from` / `to`.
  */
 export interface TeamActivity {
   from: string | null
@@ -1478,14 +1479,16 @@ export interface TeamActivity {
 
 /**
  * A TEAM'S RUNS AND THE TOKENS EACH USED, from `GET /api/teams/{team}/tokens/runs`. Mirrors
- * `TeamTokenRunsAnswer` in `Harness.Host/TeamTokenRuns.cs`. `window` is `all` (the team's whole
- * history, from its creation to now) or `requested`.
+ * `TeamTokenRunsAnswer` in `Harness.Host/TeamTokenRuns.cs`. With no period asked for, `runs` is
+ * every run since the team's creation and `window` is `workflows` (`from`/`to` the activity read's
+ * own window: earliest workflow root to latest workflow activity) or `none` (no workflow, no
+ * `from`/`to`); with one, `requested`.
  */
 export interface TeamTokenRuns {
   from: string | null
   to: string | null
   serverNow: string
-  window: 'all' | 'requested'
+  window: 'workflows' | 'requested' | 'none'
   runs: TeamTokenRun[]
 }
 
@@ -1509,7 +1512,7 @@ export interface TeamTokenRun {
 }
 
 /** Which period an `/activity` answer covers; see {@link TeamActivity}. */
-export type ActivityWindow = 'open' | 'latest' | 'requested' | 'none'
+export type ActivityWindow = 'workflows' | 'requested' | 'none'
 
 /**
  * EVERY WORKFLOW A TEAM HAS RUN, OPEN AND CLOSED ALIKE AND NEWEST FIRST, and one span over the open

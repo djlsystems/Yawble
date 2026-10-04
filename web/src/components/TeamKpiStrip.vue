@@ -650,8 +650,6 @@ function showThread(row: WorkflowRow) {
       :team-id="teamId"
       :containers="containers"
       :workflows="workflows"
-      :clock="clock"
-      :clock-offset="clockOffset"
     />
 
     <button type="button" class="team-kpi team-kpi--tokens" @click="tokensOpen = true">
@@ -1035,7 +1033,6 @@ function showThread(row: WorkflowRow) {
         <TeamTokensChart
           :team-id="teamId"
           :containers="containers"
-          :clock-offset="clockOffset"
           :log-billable="tokens.available ? tokens.billable : null"
         />
       </q-card-section>

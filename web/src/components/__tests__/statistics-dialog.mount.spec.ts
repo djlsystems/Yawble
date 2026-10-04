@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 //
-// THE STATISTICS DIALOG, opened from the Statistics tile on the team board: which period it opens
-// on, what each period asks `/activity` for, how its columns stack, what its tooltip says, and how
-// it reads an empty period and a member since removed.
+// THE STATISTICS DIALOG, opened from the Statistics tile on the team board: that it shows the tile's
+// own window with no period picker, the column size that fits it, how its columns stack, what its
+// tooltip says and where, and how it reads an empty window and a member since removed.
 //
 // The bucketing and the words are pinned without a DOM in `lib/__tests__/teamActivity.spec.ts`;
-// this file pins that the dialog asks for the right period and draws what those functions decide.
+// this file pins that the dialog reads the tile's window and draws what those functions decide.
+// Run it in more than one zone: every time here is expected in the browser's own locale and zone.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -23,10 +24,10 @@ const teamId = asTeamId('alpha');
 /** The board's clock for every case here: Sun 4 Oct 2026, 14:30 UTC. */
 const now = Date.parse('2026-10-04T14:30:00Z');
 const utc = (time: string) => Date.parse(`2026-10-04T${time}Z`);
-// A column's label is in the browser's own zone, so the expected label is too: the suite runs in
-// UTC in a container and in the person's zone on their machine.
-const hm = (at: number) => new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(at);
-const span = (from: string, to: string) => `${hm(utc(from))}–${hm(utc(to))}`;
+// A column's label is the browser's own locale and zone, so the expected label is too: the suite runs
+// in UTC in a container and in the person's zone on their machine.
+const time = (at: number) => new Date(at).toLocaleTimeString();
+const span = (from: string, to: string) => `${time(utc(from))} – ${time(utc(to))}`;
 const iso = (ms: number) => new Date(ms).toISOString();
 
 function container(id: string, name: string) {
@@ -57,9 +58,9 @@ function member(name: string, spans: ActivityMember['spans'], over: Partial<Acti
 function activity(over: Partial<TeamActivity> = {}): TeamActivity {
   return {
     from: iso(utc('14:02:00')),
-    to: iso(now),
+    to: iso(utc('14:07:00')),
     serverNow: iso(now),
-    window: 'open',
+    window: 'workflows',
     members: [
       member('Manager', [{ state: 'running', from: iso(utc('14:05:00')), to: iso(utc('14:06:00')) }]),
       member('DeveloperInes', [
@@ -148,21 +149,18 @@ async function openFromTile() {
   await settle();
 }
 
-/** The period button a person clicks, by its words. */
-async function choose(label: string) {
-  const button = [...dialog()!.querySelectorAll<HTMLButtonElement>('.stats-period button')]
-    .find((b) => b.textContent?.trim() === label);
-
-  expect(button, `a period button reading "${label}"`).toBeTruthy();
-  button!.click();
-  await settle();
-}
-
-const pressed = () => dialog()!.querySelector('.stats-period button[aria-pressed="true"]')?.textContent?.trim();
+/** The dialog's subtitle: the window and the column size. */
+const subtitle = () => dialog()!.querySelector('.stats-dialog-subtitle')?.textContent?.trim();
 
 interface ChartOption {
-  legend: { data: string[]; inactiveColor?: string; inactiveBorderColor?: string };
+  legend: { data: string[]; selected?: Record<string, boolean>; inactiveColor?: string; inactiveBorderColor?: string };
+  xAxis: { min: number; max: number; axisLabel: { show: boolean; formatter?: (value: number) => string } }[];
   yAxis: { name?: string; axisLabel?: { formatter: (value: number) => string } }[];
+  tooltip: {
+    confine: boolean
+    appendTo: string
+    position: (point: number[], params: unknown, dom: unknown, rect: unknown, size: { contentSize: number[]; viewSize: number[] }) => number[]
+  };
   series: { name: string; data: number[][] }[];
 }
 
@@ -189,11 +187,12 @@ async function hoverText(option: ChartOption, ...at: number[]): Promise<string> 
   return (await hoverMarkup(option, ...at)).textContent ?? '';
 }
 
-/** The same tooltip as markup, out of the chart it was drawn in. */
+/** The same tooltip as markup, out of the chart it was drawn in - appended to the body, not the chart. */
 async function hoverMarkup(option: ChartOption, ...at: number[]): Promise<HTMLElement> {
   const host = document.createElement('div');
   document.body.appendChild(host);
 
+  const before = new Set(document.querySelectorAll('.stats-tooltip'));
   const chart = init(host, null, { renderer: 'svg', width: 1000, height: 600 });
 
   try {
@@ -205,7 +204,7 @@ async function hoverMarkup(option: ChartOption, ...at: number[]): Promise<HTMLEl
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
 
-    const shown = host.querySelector<HTMLElement>('.stats-tooltip');
+    const shown = [...document.querySelectorAll<HTMLElement>('.stats-tooltip')].find((el) => !before.has(el)) ?? null;
     const tip = document.createElement('div');
 
     if (shown && shown.style.display !== 'none' && shown.style.visibility !== 'hidden') tip.innerHTML = shown.innerHTML;
@@ -260,7 +259,7 @@ async function highlightedColumns(option: ChartOption, ...at: number[]): Promise
 }
 
 describe('opening the Statistics dialog', () => {
-  it('opens from a click on the tile, on Open workflows by minute, reading the team\'s own window', async () => {
+  it('opens from a click on the tile, reading the tile\'s own window', async () => {
     await mountStrip();
     const before = activityUrls().length;
 
@@ -269,7 +268,6 @@ describe('opening the Statistics dialog', () => {
     await openFromTile();
 
     expect(dialog()).not.toBeNull();
-    expect(pressed()).toBe('Open workflows');
     expect(activityUrls().slice(before)).toEqual([`/api/teams/${teamId}/activity`]);
     expect(dialogOption().yAxis[1]!.name).toBe('member-minutes');
   });
@@ -281,7 +279,6 @@ describe('opening the Statistics dialog', () => {
     await settle();
 
     expect(dialog()).not.toBeNull();
-    expect(pressed()).toBe('Open workflows');
   });
 
   it('stays shut on a touch tap on the lanes, which shows the tooltip instead', async () => {
@@ -297,40 +294,74 @@ describe('opening the Statistics dialog', () => {
   });
 });
 
-describe('the period picker', () => {
-  const periodUrl = (from: string, to: number) =>
-    `/api/teams/${teamId}/activity?from=${encodeURIComponent(from)}&to=${encodeURIComponent(iso(to))}`;
-
-  it('sends each period\'s from and to, and reads its unit', async () => {
+describe('the window', () => {
+  it('has no period picker and no Fit: it shows the tile\'s window', async () => {
     await mountStrip();
     await openFromTile();
 
-    const cases: [string, string, string][] = [
-      ['Last hour', '2026-10-04T13:30:00.000Z', 'member-minutes'],
-      ['Last day', '2026-10-03T14:30:00.000Z', 'member-minutes'],
-      ['Last month', '2026-09-04T14:30:00.000Z', 'member-hours'],
-      ['Last year', '2025-10-04T14:30:00.000Z', 'member-hours'],
-    ];
+    expect(dialog()!.querySelector('.stats-period')).toBeNull();
+    expect(dialog()!.querySelector('.stats-fit')).toBeNull();
 
-    for (const [label, from, unit] of cases) {
-      const before = activityUrls().length;
-
-      await choose(label);
-
-      expect(activityUrls().slice(before), label).toEqual([periodUrl(from, now)]);
-      expect(pressed()).toBe(label);
-      expect(dialogOption().yAxis[1]!.name, label).toBe(unit);
+    for (const words of ['Open workflows', 'Last hour', 'Last day', 'Last month', 'Last year', 'Fit']) {
+      expect([...dialog()!.querySelectorAll('button')].map((b) => b.textContent?.trim())).not.toContain(words);
     }
   });
 
-  it('refetches on a period change and on nothing else the board does', async () => {
+  it('draws the window the Host gives, from its start to its end, never to the clock', async () => {
     await mountStrip();
     await openFromTile();
-    await choose('Last hour');
 
-    const dialogReads = () => activityUrls().filter((url) => url.includes('from=')).length;
+    expect(dialogOption().xAxis[1]!.min).toBe(utc('14:02:00'));
+    expect(dialogOption().xAxis[1]!.max).toBe(utc('14:07:00'));
 
-    expect(dialogReads()).toBe(1);
+    vi.setSystemTime(now + 3_600_000);
+    await settle();
+
+    expect(dialogOption().xAxis[1]!.max).toBe(utc('14:07:00'));
+  });
+
+  it('names the stretch and the column size in its subtitle', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    expect(subtitle()).toBe(`${time(utc('14:02:00'))} – ${time(utc('14:07:00'))}, member-minutes per minute`);
+  });
+
+  it('chooses the column size to fit the window', async () => {
+    const cases: [string, string, string, string][] = [
+      ['2026-10-04T12:00:00Z', '2026-10-04T14:00:00Z', 'member-minutes', 'per minute'],
+      ['2026-10-04T08:00:00Z', '2026-10-04T14:00:00Z', 'member-minutes', 'per hour'],
+      ['2026-09-24T14:00:00Z', '2026-10-04T14:00:00Z', 'member-hours', 'per day'],
+      ['2025-10-04T14:00:00Z', '2026-10-04T14:00:00Z', 'member-hours', 'per month'],
+    ];
+
+    for (const [from, to, unit, per] of cases) {
+      answer = activity({ from, to });
+      wrapper?.unmount();
+      resetBody();
+
+      await mountStrip();
+      await openFromTile();
+
+      expect(dialogOption().yAxis[1]!.name, `${from} to ${to}`).toBe(unit);
+      expect(subtitle(), `${from} to ${to}`).toContain(`${unit} ${per}`);
+    }
+  });
+
+  it('labels the time axis as the browser\'s locale reads a time', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    const label = dialogOption().xAxis[1]!.axisLabel.formatter!;
+
+    expect(label(utc('14:05:30'))).toBe(time(utc('14:05:30')));
+  });
+
+  it('reads on opening and on nothing else the board does', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    const reads = activityUrls().length;
 
     vi.useRealTimers();
     await wrapper!.setProps({
@@ -340,24 +371,33 @@ describe('the period picker', () => {
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     await settle();
 
-    expect(dialogReads()).toBe(1);
+    // The tile may read again on the change; the dialog does not, and keeps what it drew.
+    expect(activityUrls().length - reads).toBeLessThanOrEqual(1);
+    expect(dialogOption().xAxis[1]!.max).toBe(utc('14:07:00'));
   });
 
-  it('opens on Open workflows again after another period was chosen', async () => {
-    await mountStrip();
-    await openFromTile();
-    await choose('Last day');
+  it('puts the hover box beside the pointer, never over it, at the left edge, middle and right edge', async () => {
+    const screen = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
 
-    await wrapper!.find('.stats-label').trigger('click');
-    await settle();
-    expect(pressed()).toBe('Last day');
+    try {
+      await mountStrip();
+      await openFromTile();
 
-    (dialog()!.querySelector('.stats-done') as HTMLButtonElement).click();
-    await settle();
-    await wrapper!.find('.stats-label').trigger('click');
-    await settle();
+      const tooltip = dialogOption().tooltip;
 
-    expect(pressed()).toBe('Open workflows');
+      expect(tooltip.confine).toBe(false);
+      expect(tooltip.appendTo).toBe('body');
+
+      for (const x of [0, 500, 1000]) {
+        const [left] = tooltip.position([x, 100], [], null, null, { contentSize: [220, 140], viewSize: [1000, 600] });
+
+        expect(x < left! || x > left! + 220, `pointer at ${x}`).toBe(true);
+      }
+    } finally {
+      if (screen) Object.defineProperty(window, 'innerWidth', screen);
+      else delete (window as { innerWidth?: number }).innerWidth;
+    }
   });
 });
 
@@ -429,6 +469,24 @@ describe('the columns', () => {
     expect(text).toContain('< <b>Bold</b> — failed 30 s');
   });
 
+  it('leaves a state hidden in the legend out of the hover and its totals', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    const charts = wrapper!.findAllComponents({ name: 'Echarts' });
+    charts[charts.length - 1]!.vm.$emit('legendselectchanged', {
+      selected: { running: true, waiting: true, blocked: false, failed: true, idle: true },
+    });
+    await settle();
+
+    const text = await hoverText(dialogOption(), utc('14:05:30'));
+
+    expect(dialogOption().legend.selected!.blocked).toBe(false);
+    expect(text).toContain('running 1 min 30 s');
+    expect(text).not.toContain('blocked');
+    expect(text).toContain('IL Ines Lopez — running 30 s');
+  });
+
   it('names the column under the pointer across its whole width, not the nearest column start', async () => {
     await mountStrip();
     await openFromTile();
@@ -464,13 +522,13 @@ describe('the columns', () => {
     }
   });
 
-  it('reads No runs in this period when nothing was recorded', async () => {
+  it('reads No runs in this window when nothing was recorded', async () => {
     answer = activity({ members: [member('Manager', []), member('DeveloperInes', [])] });
 
     await mountStrip();
     await openFromTile();
 
-    expect(dialog()!.textContent).toContain('No runs in this period');
+    expect(dialog()!.textContent).toContain('No runs in this window');
     expect(dialog()!.querySelector('.stats-dialog-chart')).toBeNull();
   });
 

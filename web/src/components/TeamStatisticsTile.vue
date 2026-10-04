@@ -15,10 +15,12 @@ import {
   activityCaption,
   activityLanes,
   activitySummary,
-  liveNow,
   stateShapes,
+  tooltipBeside,
   tooltipHtml,
+  windowEnd,
 } from '../lib/teamActivity';
+import { crossesDays } from '../lib/localTime';
 import TeamStatisticsDialog from './TeamStatisticsDialog.vue';
 
 /**
@@ -34,10 +36,6 @@ const props = defineProps<{
   containers: ContainerSnapshot[];
   /** The team's workflow list: the open count for the caption, and a change in it refetches. */
   workflows: TeamWorkflows | null;
-  /** The board's ticking clock, so open spans grow between reads with no traffic. */
-  clock: number;
-  /** Milliseconds from this browser's clock to the server's. */
-  clockOffset: number;
 }>();
 
 /** A lane is never shorter than this, so its initials stay legible. */
@@ -45,6 +43,9 @@ const LaneHeight = 14;
 
 /** The tile reads `/activity` at most this often, however fast the board changes. */
 const MinReadGap = 1000;
+
+/** Room between the pointer and the hover box, so the hover line stays in sight beside it. */
+const TooltipGap = 12;
 
 const $q = useQuasar();
 const dark = computed(() => $q.dark?.isActive === true);
@@ -138,29 +139,40 @@ watch([memberKey, openKey], scheduleRead);
 
 onBeforeUnmount(cancelRead);
 
-const now = computed(() =>
-  activity.value ? liveNow(activity.value.serverNow, props.clock, props.clockOffset) : props.clock + props.clockOffset);
+/**
+ * THE WINDOW THE SERVER GAVE, AND NOTHING ELSE: from its earliest workflow's root to the latest
+ * activity of any of them. No clock is read here, so nothing grows between reads; the window moves
+ * when a read answers a later end.
+ */
+const end = computed(() => (activity.value ? windowEnd(activity.value) : 0));
 
-const lanes = computed(() => (activity.value ? activityLanes(activity.value, props.containers, now.value) : []));
+const lanes = computed(() => (activity.value ? activityLanes(activity.value, props.containers, end.value) : []));
 
 const from = computed(() => (activity.value?.from ? Date.parse(activity.value.from) : null));
+
+/** A time of day alone is ambiguous once the window crosses midnight: then every time has its date. */
+const withDate = computed(() => from.value !== null && crossesDays(from.value, end.value));
 
 const hasChart = computed(() =>
   activity.value !== null && activity.value.window !== 'none' && from.value !== null && lanes.value.length > 0);
 
-const latestClosedAt = computed(() => {
-  const ended = props.workflows?.workflows.find((w) => w.endedAt !== null)?.endedAt;
-
-  return ended ? Date.parse(ended) : null;
-});
-
 const caption = computed(() =>
   activity.value
-    ? activityCaption(activity.value.window, from.value, props.workflows?.openCount ?? null, latestClosedAt.value)
+    ? activityCaption(activity.value.window, from.value, activity.value.to ? end.value : null, props.workflows?.openCount ?? null)
     : '—');
 
 const summary = computed(() =>
-  activity.value ? activitySummary(activity.value.window, lanes.value, from.value, now.value) : 'Statistics');
+  activity.value ? activitySummary(activity.value.window, lanes.value, from.value, end.value) : 'Statistics');
+
+/**
+ * THE HOVER BOX BESIDE THE POINTER, never over it: ECharts asks with the pointer in the chart's
+ * pixels; the box is appended to the body, so it is placed against the screen, not the tile.
+ */
+function besidePointer(point: number[], _params: unknown, _dom: unknown, _rect: unknown, size: { contentSize: number[] }) {
+  const chart = tileEl.value?.querySelector('.stats-chart')?.getBoundingClientRect() ?? { left: 0, top: 0 };
+
+  return tooltipBeside(point, size.contentSize, chart, { width: window.innerWidth, height: window.innerHeight }, TooltipGap);
+}
 
 /** ONE SPAN: a bar inside its lane, idle a pale track, blocked and failed notched (`stateShapes`). */
 function renderSpan(params: CustomSeriesRenderItemParams, api: CustomSeriesRenderItemAPI): CustomSeriesRenderItemReturn {
@@ -182,8 +194,8 @@ function renderSpan(params: CustomSeriesRenderItemParams, api: CustomSeriesRende
 }
 
 const option = computed(() => {
-  const start = from.value ?? now.value;
-  const end = Math.max(now.value, start + 1);
+  const start = from.value ?? end.value;
+  const stop = Math.max(end.value, start + 1);
   const ink = colours.value.ink;
 
   const data = lanes.value.flatMap((lane, index) =>
@@ -196,7 +208,7 @@ const option = computed(() => {
     xAxis: {
       type: 'time',
       min: start,
-      max: end,
+      max: stop,
       axisLine: { show: false },
       axisTick: { show: false },
       axisLabel: { show: false },
@@ -208,15 +220,18 @@ const option = computed(() => {
       trigger: 'axis',
       triggerOn: 'mousemove|click',
       axisPointer: { type: 'line' },
-      confine: true,
+      // OUTSIDE THE TILE, beside the pointer: the box may reach past the tile's edges, never over the line.
+      confine: false,
+      appendTo: 'body',
+      position: besidePointer,
       transitionDuration: 0,
       className: 'stats-tooltip',
       // THE TIME UNDER THE CURSOR comes from the axis; every line under it is escaped text.
       formatter: (params: unknown) => {
         const first = (Array.isArray(params) ? params[0] : params) as { axisValue?: number | string } | undefined;
-        const hovered = Number(first?.axisValue ?? now.value);
+        const hovered = Number(first?.axisValue ?? end.value);
 
-        return tooltipHtml(lanes.value, hovered);
+        return tooltipHtml(lanes.value, hovered, withDate.value);
       },
     },
     series: [
@@ -233,7 +248,7 @@ const option = computed(() => {
         silent: true,
         renderItem: () => ({ type: 'group', children: [] }),
         encode: { x: [1, 2], y: 0 },
-        data: [[0, start, end]],
+        data: [[0, start, stop]],
       },
     ],
   };
@@ -300,7 +315,6 @@ function onTileClick() {
       v-model="statisticsOpen"
       :team-id="teamId"
       :containers="containers"
-      :clock-offset="clockOffset"
     />
   </div>
 </template>
@@ -363,33 +377,4 @@ function onTileClick() {
   color: var(--os-ink-muted);
 }
 
-/* THE TOOLTIP is markup ECharts places inside this tile, so it is reached with `:deep`. Classes
-   only: the CSP refuses a `style` attribute in that markup. */
-.team-kpi--statistics :deep(.stats-tip-time) {
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.team-kpi--statistics :deep(.stats-tip-row) {
-  white-space: nowrap;
-}
-
-.team-kpi--statistics :deep(.stats-tip-initials) {
-  font-weight: 600;
-}
-
-.team-kpi--statistics :deep(.stats-chip) {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  margin-right: 0.4em;
-  border-radius: 2px;
-}
-
-.team-kpi--statistics :deep(.stats-chip--running) { background: var(--os-stat-running); }
-.team-kpi--statistics :deep(.stats-chip--waiting) { background: var(--os-stat-waiting); }
-.team-kpi--statistics :deep(.stats-chip--blocked) { background: var(--os-stat-blocked); }
-.team-kpi--statistics :deep(.stats-chip--failed) { background: var(--os-stat-failed); }
-.team-kpi--statistics :deep(.stats-chip--idle) { background: var(--os-stat-idle); }
-.team-kpi--statistics :deep(.stats-chip--none) { border: 1px dashed currentColor; }
 </style>
