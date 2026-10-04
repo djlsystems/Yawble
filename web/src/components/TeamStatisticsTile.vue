@@ -323,12 +323,18 @@ function onTileClick() {
   cursor: pointer;
 }
 
+/* The strip's own label look: `.team-kpi-label` there is scoped to the strip and does not reach
+   inside this component. */
 .stats-label {
   align-self: flex-start;
   padding: 0;
   border: 0;
   background: none;
   font-family: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--os-ink-faint);
   cursor: pointer;
 }
 
