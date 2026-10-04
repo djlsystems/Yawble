@@ -62,11 +62,14 @@ public static class TeamActivity
                 "Per member, ordered non-overlapping `spans` of `running`, `waiting`, `blocked` (a block "
                 + "or a question for a person), `failed` or `idle`, clipped to the period, derived from "
                 + "the usage ledger and the run in progress. A stretch nothing recorded has no span: no "
-                + "data is never a state. A span's `to` is null when it is still open at `serverNow`; "
+                + "data is never a state. A span's `to` is null when it is still open at `serverNow` "
+                + "inside a requested period; "
                 + "`workflow` names the workflow a run or its block belongs to; `reason` is a block's or "
                 + "failure's words while the log still holds them.\n\n"
-                + "With no `from` and `to`, the team's own window: from the root of its oldest open "
-                + "workflow (`window: \"open\"`), else of its most recent one (`\"latest\"`), to now; a "
+                + "With no `from` and `to`, the team's own window (`window: \"workflows\"`): from the root "
+                + "of its earliest workflow, open or closed, to the latest activity of any of them - a "
+                + "closed workflow's end, an open one's newest row - and never to the clock, so it does "
+                + "not move while nothing happens; a span still open there ends at the window's end. A "
                 + "team that has never run answers `\"none\"` and no members. With both, that period "
                 + "(`\"requested\"`), at most one year.\n\n"
                 + "`members`: the Manager first, then the team's members in board order, then any "
@@ -107,13 +110,14 @@ public static class TeamActivity
         }
         else
         {
-            var workflows = await log.WorkflowsForTeamAsync(team, floor, ct);
+            // THE TEAM'S WHOLE WORKFLOW STRETCH: from its earliest workflow's root, open or closed, to
+            // the newest row of any of them. Never the clock: while nothing happens the end stays.
+            if (await log.WorkflowStretchForTeamAsync(team, floor, ct) is not { } stretch)
+            {
+                return new TeamActivityAnswer(null, null, now, "none", []);
+            }
 
-            if (workflows.EarliestStartedAt is { } open) (window, start) = ("open", open);
-            else if (workflows.Workflows.FirstOrDefault()?.StartedAt is { } latest) (window, start) = ("latest", latest);
-            else return new TeamActivityAnswer(null, null, now, "none", []);
-
-            end = now;
+            (window, start, end) = ("workflows", stretch.From, stretch.To);
         }
 
         // THE CURRENT MEMBERS, the Manager first and the rest as the board lists them.

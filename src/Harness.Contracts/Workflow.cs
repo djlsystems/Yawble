@@ -363,6 +363,10 @@ public sealed record TeamRollupRow(
     public const string WaitingForASlot = "waiting for a slot";
 }
 
+/// <summary>From the earliest row of a team's workflows to the newest; see
+/// <see cref="IMessageLog.WorkflowStretchForTeamAsync"/>.</summary>
+public sealed record TeamWorkflowStretch(DateTimeOffset From, DateTimeOffset To);
+
 /// <summary>
 /// EVERY WORKFLOW A TEAM HAS RUN SINCE ITS FLOOR, open and closed alike, and one duration over the
 /// open ones.

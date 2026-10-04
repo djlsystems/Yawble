@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE STATISTICS TILE'S DRAWING: open spans that keep growing between reads, the notch that tells
+// THE STATISTICS TILE'S DRAWING: open spans drawn to the window's end and never grown by the clock, the notch that tells
 // blocked and failed apart without hue, lanes tall enough to read, the hover line, and an SVG chart
 // that follows the dark theme.
 import { readFileSync } from 'node:fs';
@@ -60,9 +60,9 @@ const activityReads = () =>
 beforeEach(() => {
   answer = {
     from: iso(at(14, 2)),
-    to: iso(at(14, 30)),
+    to: iso(at(14, 20)),
     serverNow: iso(at(14, 30)),
-    window: 'open',
+    window: 'workflows',
     members: [
       member('Manager', [{ state: 'running', from: iso(at(14, 2)), to: null }]),
       member('Ines', [
@@ -109,42 +109,45 @@ type Datum = [number, number, number, number];
 
 interface Option {
   tooltip: { trigger: string; triggerOn: string; axisPointer: { type: string } };
-  xAxis: { axisPointer: { snap: boolean } };
+  xAxis: { min: number; max: number; axisPointer: { snap: boolean } };
   series: { data: Datum[]; renderItem: (params: unknown, api: unknown) => { children: { type: string }[] } }[];
 }
 
 const chart = () => wrapper!.findComponent({ name: 'Echarts' });
 const option = () => chart().props('option') as Option;
 
-/** The end every open span is drawn to right now. */
-const openEnds = () => option().series[0]!.data.filter(([, from]) => from === at(14, 10) || from === at(14, 2)).map(([, , to]) => to);
-
 describe('open spans between reads', () => {
-  it('grow with the board clock and make no read', async () => {
+  // The workflows' latest activity was 14:20; the server answered at 14:30.
+  const blockedEnd = () => option().series[0]!.data.find(([lane, from]) => lane === 1 && from === at(14, 10))![2];
+
+  it('end at the window\'s end the Host gives, not at now', async () => {
     vi.useFakeTimers({ now: at(14, 30), toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
 
     await mountStrip();
-    const blockedEnd = () => option().series[0]!.data.find(([lane, from]) => lane === 1 && from === at(14, 10))![2];
 
-    expect(blockedEnd()).toBe(at(14, 30));
+    expect(blockedEnd()).toBe(at(14, 20));
+    expect(option().xAxis.min).toBe(at(14, 2));
+    expect(option().xAxis.max).toBe(at(14, 20));
+  });
 
+  it('never grow with the board clock, and make no read', async () => {
+    vi.useFakeTimers({ now: at(14, 30), toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+
+    await mountStrip();
     await vi.advanceTimersByTimeAsync(60_000);
 
-    expect(blockedEnd()).toBe(at(14, 31));
-    expect(openEnds()).toContain(at(14, 31));
+    expect(blockedEnd()).toBe(at(14, 20));
+    expect(option().xAxis.max).toBe(at(14, 20));
     expect(activityReads()).toBe(1);
   });
 
-  it('are corrected by clockOffset when the browser clock is wrong', async () => {
-    // The browser is ten minutes slow; the store's offset puts that right.
+  it('take nothing from the browser clock\'s offset either', async () => {
     vi.useFakeTimers({ now: at(14, 20), toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
 
     await mountStrip({ clockOffset: 10 * 60_000 });
     await vi.advanceTimersByTimeAsync(45_000);
 
-    const blocked = option().series[0]!.data.find(([lane, from]) => lane === 1 && from === at(14, 10))!;
-
-    expect(blocked[2]).toBe(at(14, 30, 45));
+    expect(blockedEnd()).toBe(at(14, 20));
   });
 
   it('leave a closed span where it ended', async () => {
@@ -219,6 +222,39 @@ describe('hover and chart setup', () => {
     expect(option().tooltip.trigger).toBe('axis');
     expect(option().tooltip.axisPointer.type).toBe('line');
     expect(option().tooltip.triggerOn.split('|')).toContain('click');
+  });
+
+  it('puts the hover box beside the pointer, never over it, at the tile\'s left edge, middle and right edge', async () => {
+    const screen = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 700 })
+
+    try {
+      await mountStrip();
+
+      const tooltip = option().tooltip as unknown as {
+        confine: boolean
+        appendTo: string
+        className: string
+        position: (point: number[], params: unknown, dom: unknown, rect: unknown, size: { contentSize: number[]; viewSize: number[] }) => number[]
+      };
+
+      // Drawn outside the tile, so it may reach past its edges.
+      expect(tooltip.confine).toBe(false);
+      expect(tooltip.appendTo).toBe('body');
+      expect(tooltip.className).toContain('stats-tooltip');
+
+      const width = 600;
+      const box = [180, 90];
+
+      for (const x of [0, width / 2, width]) {
+        const [left] = tooltip.position([x, 7], [], null, null, { contentSize: box, viewSize: [width, 28] });
+
+        expect(x < left! || x > left! + box[0]!, `pointer at ${x}`).toBe(true);
+      }
+    } finally {
+      if (screen) Object.defineProperty(window, 'innerWidth', screen);
+      else delete (window as { innerWidth?: number }).innerWidth;
+    }
   });
 
   it('renders SVG with the light theme, and the dark theme while dark mode is on', async () => {

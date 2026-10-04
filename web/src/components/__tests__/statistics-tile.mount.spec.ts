@@ -15,11 +15,12 @@ import { useConsoleStore } from '../../stores/console';
 import { asTeamId } from '../../api/types';
 import type { ActivityMember, TeamActivity, TeamWorkflowTiming, TeamWorkflows } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
+import { localStretch } from '../../lib/localTime';
 
 const teamId = asTeamId('alpha');
 
-/** A local wall-clock instant, so the HH:MM the caption shows is the one written here. */
-const at = (hours: number, minutes: number) => new Date(2026, 9, 4, hours, minutes).getTime();
+/** A local wall-clock instant; the words for it are computed with the browser's own locale. */
+const at = (hours: number, minutes: number, seconds = 0) => new Date(2026, 9, 4, hours, minutes, seconds).getTime();
 const iso = (ms: number) => new Date(ms).toISOString();
 
 function container(id: string, name: string, over: Record<string, unknown> = {}) {
@@ -61,7 +62,7 @@ function activity(over: Partial<TeamActivity> = {}): TeamActivity {
     from: iso(at(14, 2)),
     to: iso(at(14, 30)),
     serverNow: iso(at(14, 30)),
-    window: 'open',
+    window: 'workflows',
     members: [
       member('Manager'),
       member('DeveloperInes'),
@@ -189,25 +190,25 @@ describe('the Statistics tile', () => {
     expect(tile().text()).not.toContain('Gone');
   });
 
-  it('captions an open window with its start and the open workflows', async () => {
+  it('captions the window with its stretch, in the browser\'s locale, and the open workflows', async () => {
     await mountStrip();
 
-    expect(tile().find('.stats-caption').text()).toBe('since 14:02 · 2 open workflows');
+    expect(tile().find('.stats-caption').text()).toBe(`${localStretch(at(14, 2), at(14, 30))} · 2 open workflows`);
     expect(tile().find('.stats-chart').exists()).toBe(true);
   });
 
-  it('captions the fallback with when the latest workflow closed', async () => {
-    answer = activity({ window: 'latest', from: iso(at(9, 0)) });
+  it('captions a window of closed workflows by its stretch alone', async () => {
+    answer = activity({ from: iso(at(9, 0, 5)), to: iso(at(9, 15, 40)) });
 
     await mountStrip({
       workflows: workflows({
         openCount: 0,
         earliestStartedAt: null,
-        workflows: [closedWorkflow(iso(at(9, 0)), iso(at(9, 15)))],
+        workflows: [closedWorkflow(iso(at(9, 0, 5)), iso(at(9, 15, 40)))],
       }),
     });
 
-    expect(tile().find('.stats-caption').text()).toBe('latest workflow, closed 09:15');
+    expect(tile().find('.stats-caption').text()).toBe(localStretch(at(9, 0, 5), at(9, 15, 40)));
   });
 
   it('reads No workflows yet and draws no chart for a team that never ran', async () => {
@@ -223,7 +224,7 @@ describe('the Statistics tile', () => {
   it('summarises itself in its aria-label', async () => {
     await mountStrip();
 
-    expect(tile().attributes('aria-label')).toBe('Statistics since 14:02: 3 members - 3 running');
+    expect(tile().attributes('aria-label')).toBe(`Statistics ${localStretch(at(14, 2), at(14, 30))}: 3 members - 3 running`);
   });
 
   it('escapes a name in the tooltip, so markup shows as characters', async () => {
@@ -244,6 +245,35 @@ describe('the Statistics tile', () => {
     expect(box.querySelector('i')).toBeNull();
     expect(box.textContent).toContain('<b>Bold</b> — blocked');
     expect(box.textContent).toContain('(<i>key</i>)');
+  });
+
+  it('names the time under the pointer, not the nearest span edge the axis snaps to', async () => {
+    await mountStrip();
+
+    const chart = wrapper!.findComponent({ name: 'Echarts' });
+    const plot = tile().find('.stats-chart').element as HTMLElement;
+    plot.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 280, bottom: 42, width: 280, height: 42, toJSON: () => ({}) });
+
+    // Halfway across a window from 14:02 to 14:30; ECharts hands the formatter the nearest span start.
+    chart.vm.$emit('zr:mousemove', { offsetX: 140 });
+    await flushPromises();
+
+    const option = chart.props('option') as { tooltip: { formatter: (params: unknown) => string } };
+    const box = document.createElement('div');
+    box.innerHTML = option.tooltip.formatter([{ axisValue: at(14, 2) }]);
+
+    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(new Date(at(14, 16)).toLocaleTimeString());
+  });
+
+  it('reads the time under the pointer as the browser\'s locale reads it', async () => {
+    await mountStrip();
+
+    const chart = wrapper!.findComponent({ name: 'Echarts' });
+    const option = chart.props('option') as { tooltip: { formatter: (params: unknown) => string } };
+    const box = document.createElement('div');
+    box.innerHTML = option.tooltip.formatter([{ axisValue: at(14, 10, 7) }]);
+
+    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(new Date(at(14, 10, 7)).toLocaleTimeString());
   });
 });
 

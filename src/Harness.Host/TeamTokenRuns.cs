@@ -29,7 +29,7 @@ public static class TeamTokenRuns
         app.MapGet("/api/teams/{team}/tokens/runs", async (
                 [Description(Describe.Team)] string team,
                 [Description("Start of the period, a UTC instant. Give it with `to`, or neither for the "
-                    + "team's whole history.")] DateTimeOffset? from,
+                    + "team's workflow window.")] DateTimeOffset? from,
                 [Description("End of the period, a UTC instant, at most a year after `from`.")] DateTimeOffset? to,
                 TeamRegistry teams, ITeamStore store, IMessageLog log, IUsageLedger ledger,
                 TimeProvider clock, CancellationToken ct) =>
@@ -52,9 +52,12 @@ public static class TeamTokenRuns
                 + "`measured: false` is a run that reported no usage and carries no figures - never 0. "
                 + "A combined total carries `combined` and `billable` and no in/out split. `current` is "
                 + "false for a member since removed.\n\n"
-                + "With no `from` and `to`, the team's whole history: from its creation to now "
-                + "(`window: \"all\"`), surviving a Reset that deletes memory. With both, the runs that "
-                + "ended in that period (`\"requested\"`), at most one year.");
+                + "With no `from` and `to`, every run since the team's creation, surviving a Reset that "
+                + "deletes memory, and the window to draw them in (`window: \"workflows\"`): from the root "
+                + "of the team's earliest workflow to the latest activity of any of them, never to the "
+                + "clock - the Statistics tile's own window. A team with no workflow answers `\"none\"` "
+                + "and no `from` or `to`. With both, the runs that ended in that period "
+                + "(`\"requested\"`), at most one year.");
     }
 
     public static async Task<TeamTokenRunsAnswer> ReadAsync(
@@ -65,9 +68,14 @@ public static class TeamTokenRuns
         var created = await store.CreatedAtAsync(team, ct);
         var floor = created is { } at ? await log.LastSeqBeforeAsync(at, ct) : 0;
 
+        // THE STATISTICS TILE'S WINDOW when none is asked for: the team's earliest workflow root to
+        // the latest activity of any of its workflows, never the clock. The runs are every run since
+        // the team's creation all the same, so the dialog's totals keep the whole history.
         var (window, start, end) = from is { } f && to is { } t
-            ? ("requested", f, t)
-            : ("all", created, (DateTimeOffset?)now);
+            ? ("requested", (DateTimeOffset?)f, (DateTimeOffset?)t)
+            : await log.WorkflowStretchForTeamAsync(team, floor, ct) is { } stretch
+                ? ("workflows", stretch.From, stretch.To)
+                : ("none", null, null);
 
         var runs = await ledger.ReadTeamRunsEndedAsync(team, floor, from, to, ct);
         var current = teams.ContainerIdsOf(team).Select(id => id.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -87,7 +95,7 @@ public static class TeamTokenRuns
 }
 
 /// <summary>The answer of <c>GET /api/teams/{team}/tokens/runs</c>; see <see cref="TeamTokenRuns"/>.
-/// <see cref="From"/> is null only for a team with no recorded creation.</summary>
+/// <see cref="From"/> and <see cref="To"/> are null for a team with no workflow.</summary>
 public sealed record TeamTokenRunsAnswer(
     DateTimeOffset? From,
     DateTimeOffset? To,

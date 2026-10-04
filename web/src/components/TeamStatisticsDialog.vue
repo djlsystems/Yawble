@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { use } from 'echarts/core';
 import { CustomChart } from 'echarts/charts';
@@ -18,16 +18,19 @@ import type { ActivityState, ContainerSnapshot, TeamActivity } from '../api/type
 import { asTeamId } from '../api/types';
 import { getTeamActivity } from '../api/client';
 import {
-  ActivityPeriods,
   ActivityStates,
-  type ActivityPeriod,
   activityLanes,
+  axisTimeLabel,
   bucketActivity,
   bucketUnit,
+  bucketWords,
   columnTooltipHtml,
-  periodRange,
   stateShapes,
+  tooltipBeside,
+  windowBucket,
+  windowEnd,
 } from '../lib/teamActivity';
+import { crossesDays, localStretch } from '../lib/localTime';
 
 /**
  * TREE-SHAKEN: the custom series the lanes and columns are drawn with, two grids on one time axis,
@@ -50,8 +53,6 @@ const props = defineProps<{
   teamId: string;
   /** The board's members: a lane's label is the board's name for the member. */
   containers: ContainerSnapshot[];
-  /** Milliseconds from this browser's clock to the server's: a period ends at the server's now. */
-  clockOffset: number;
 }>();
 
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>();
@@ -72,6 +73,9 @@ const GridLeft = 128;
 
 /** Room between the lanes and the columns for the y axis's unit. */
 const ColumnsGap = 32;
+
+/** Room between the pointer and the hover box, so the hover line stays in sight beside it. */
+const TooltipGap = 16;
 
 /** Bucket edges fall on this browser's own timezone. */
 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -102,11 +106,6 @@ const colours = computed(() => {
   };
 });
 
-const period = ref<ActivityPeriod>('open');
-const periodOptions = ActivityPeriods.map((p) => ({ value: p.value, label: p.label }));
-const bucket = computed(() => ActivityPeriods.find((p) => p.value === period.value)!.bucket);
-const unit = computed(() => bucketUnit(bucket.value));
-
 const activity = ref<TeamActivity | null>(null);
 const loading = ref(false);
 const failed = ref(false);
@@ -114,27 +113,23 @@ const failed = ref(false);
 /** Every state the legend shows, toggled off by a click on it. */
 const shown = ref<Record<ActivityState, boolean>>({ running: true, waiting: true, blocked: true, failed: true, idle: true });
 
-/** EVERY OPENING STARTS ON OPEN WORKFLOWS, the tile's own window. */
-watch(() => props.modelValue, (isOpen) => {
-  if (isOpen) period.value = 'open';
-}, { flush: 'sync' });
-
 /**
- * READ ON OPENING AND ON A PERIOD CHANGE, AND NOTHING ELSE: zooming, toggling a state or the board
- * moving underneath never re-reads or re-buckets.
+ * THE TILE'S OWN WINDOW, READ ON OPENING AND NOTHING ELSE: from the team's earliest workflow root to
+ * the latest activity of any workflow. Zooming, toggling a state or the board moving underneath
+ * never re-reads or re-buckets.
  */
 let readSeq = 0;
 
 async function read() {
   const seq = ++readSeq;
-  const range = periodRange(period.value, Date.now() + props.clockOffset);
 
   loading.value = true;
   failed.value = false;
   activity.value = null;
+  shown.value = { running: true, waiting: true, blocked: true, failed: true, idle: true };
 
   try {
-    const answer = await getTeamActivity(asTeamId(props.teamId), range ?? undefined);
+    const answer = await getTeamActivity(asTeamId(props.teamId));
 
     if (seq === readSeq) activity.value = answer;
   } catch {
@@ -144,25 +139,47 @@ async function read() {
   }
 }
 
-watch([() => props.modelValue, period], ([isOpen]) => {
+watch(() => props.modelValue, (isOpen) => {
   if (isOpen) void read();
 }, { immediate: true });
 
-/** The answer's own now: a snapshot, so open spans count up to the moment the period was read. */
-const serverNow = computed(() => (activity.value ? Date.parse(activity.value.serverNow) : 0));
+/** The window's end as the server gave it: open spans are drawn to here, never to the clock. */
+const periodTo = computed(() => (activity.value ? windowEnd(activity.value) : 0));
+const periodFrom = computed(() => (activity.value?.from ? Date.parse(activity.value.from) : null));
+
+/** THE COLUMN SIZE THAT FITS THE WINDOW: the minute, hour, day or month (`windowBucket`). */
+const bucket = computed(() => windowBucket(periodFrom.value ?? periodTo.value, periodTo.value));
+const unit = computed(() => bucketUnit(bucket.value));
+
+/** A time of day alone is ambiguous once the window crosses midnight: then every time has its date. */
+const withDate = computed(() => periodFrom.value !== null && crossesDays(periodFrom.value, periodTo.value));
+
+/** The subtitle: the stretch and the column size, "11:38:02 AM – 3:41:17 PM, member-minutes per minute". */
+const subtitle = computed(() => {
+  const what = `${unit.value.name} ${bucketWords(bucket.value)}`;
+
+  return periodFrom.value === null ? `Member-time by state, in ${what}.` : `${localStretch(periodFrom.value, periodTo.value)}, ${what}`;
+});
 
 /** Every member with a lane - a member since removed too, marked so, in this dialog only. */
 const lanes = computed(() =>
-  activity.value ? activityLanes(activity.value, props.containers, serverNow.value, { removed: true }) : []);
+  activity.value ? activityLanes(activity.value, props.containers, periodTo.value, { removed: true }) : []);
 
 const columns = computed(() => bucketActivity(lanes.value, bucket.value, timeZone));
 
 const people = computed(() => new Map(lanes.value.map((lane) => [lane.member, { name: lane.name, initials: lane.initials }])));
 
-const periodFrom = computed(() => (activity.value?.from ? Date.parse(activity.value.from) : null));
-const periodTo = computed(() => (activity.value?.to ? Date.parse(activity.value.to) : serverNow.value));
-
 const hasChart = computed(() => columns.value.length > 0 && periodFrom.value !== null);
+
+/** The states the legend has turned off: left out of the hover, as they are out of the drawing. */
+const hiddenStates = computed(() => new Set(ActivityStates.filter((state) => !shown.value[state])));
+
+/** THE HOVER BOX BESIDE THE POINTER, never over it, placed against the screen: it is on the body. */
+function besidePointer(point: number[], _params: unknown, _dom: unknown, _rect: unknown, size: { contentSize: number[] }) {
+  const chart = cardEl.value?.$el.querySelector('.stats-dialog-chart')?.getBoundingClientRect() ?? { left: 0, top: 0 };
+
+  return tooltipBeside(point, size.contentSize, chart, { width: window.innerWidth, height: window.innerHeight }, TooltipGap);
+}
 
 /**
  * EACH STATE'S SERIES: one entry per column it has time in, `[from, to, base, top]` in the y unit,
@@ -258,7 +275,7 @@ function laneLabel(value: number): string {
 const lanesHeight = computed(() => lanes.value.length * LaneHeight);
 
 const option = computed(() => {
-  const start = periodFrom.value ?? serverNow.value;
+  const start = periodFrom.value ?? periodTo.value;
   const end = Math.max(periodTo.value, start + 1);
   const palette = colours.value;
   const laneTop = 36;
@@ -270,7 +287,7 @@ const option = computed(() => {
     min: start,
     max: end,
     axisLine: { show: labels },
-    axisLabel: { show: labels, hideOverlap: true },
+    axisLabel: { show: labels, hideOverlap: true, formatter: (value: number) => axisTimeLabel(value, bucket.value, timeZone) },
     axisTick: { show: labels },
     splitLine: { show: false },
     // The hover line lights up nothing: it would light the item NEAREST the pointer, which in a
@@ -332,14 +349,19 @@ const option = computed(() => {
     tooltip: {
       trigger: 'item',
       triggerOn: 'mousemove|click',
-      confine: true,
+      // OUTSIDE THE CARD, beside the pointer: never over the hover line.
+      confine: false,
+      appendTo: 'body',
+      position: besidePointer,
       transitionDuration: 0,
       className: 'stats-tooltip',
       formatter: (params: unknown) => {
         const from = Number((params as { value?: number[] } | undefined)?.value?.[0] ?? NaN);
         const column = columns.value.find((c) => c.from === from);
 
-        return column ? columnTooltipHtml(column, bucket.value, timeZone, people.value) : '';
+        return column
+          ? columnTooltipHtml(column, bucket.value, timeZone, people.value, { hidden: hiddenStates.value, withDate: withDate.value })
+          : '';
       },
     },
     series: [
@@ -391,18 +413,6 @@ const option = computed(() => {
 });
 
 const chartHeight = computed(() => `${36 + lanesHeight.value + ColumnsGap + ColumnsHeight + 64}px`);
-
-const chart = ref<InstanceType<typeof VChart> | null>(null);
-
-/** FIT: the whole period again, after any zoom. */
-function fit() {
-  chart.value?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
-}
-
-watch(period, () => {
-  shown.value = { running: true, waiting: true, blocked: true, failed: true, idle: true };
-  void nextTick(fit);
-});
 </script>
 
 <template>
@@ -410,35 +420,15 @@ watch(period, () => {
     <q-card ref="cardEl" class="stats-dialog-card os-dialog-xl">
       <q-card-section class="q-pb-none">
         <div class="os-dialog-title">Statistics</div>
-        <div class="text-caption os-text-muted q-mt-xs">
-          Member-time by state, in {{ unit.name }} per {{ bucket }}.
-        </div>
-      </q-card-section>
-
-      <q-card-section class="stats-dialog-controls">
-        <q-btn-toggle
-          v-model="period"
-          :options="periodOptions"
-          class="stats-period"
-          dense no-caps unelevated
-          toggle-color="primary"
-        />
-        <q-btn
-          flat dense no-caps
-          class="stats-fit"
-          label="Fit"
-          :disable="!hasChart"
-          @click="fit"
-        />
+        <div class="text-caption os-text-muted q-mt-xs stats-dialog-subtitle">{{ subtitle }}</div>
       </q-card-section>
 
       <q-card-section>
         <div v-if="loading" class="stats-dialog-note os-text-muted">Reading…</div>
         <div v-else-if="failed" class="stats-dialog-note os-text-muted">The activity could not be read.</div>
-        <div v-else-if="!hasChart" class="stats-dialog-note os-text-muted">No runs in this period</div>
+        <div v-else-if="!hasChart" class="stats-dialog-note os-text-muted">No runs in this window</div>
         <v-chart
           v-else
-          ref="chart"
           class="stats-dialog-chart"
           :style="{ height: chartHeight }"
           :option="option"
@@ -457,13 +447,6 @@ watch(period, () => {
 </template>
 
 <style scoped>
-.stats-dialog-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 .stats-dialog-chart {
   width: 100%;
 }
@@ -472,37 +455,4 @@ watch(period, () => {
   padding: 24px 0;
   text-align: center;
 }
-
-/* THE TOOLTIP is markup ECharts places inside this card, so it is reached with `:deep`. Classes
-   only: the CSP refuses a `style` attribute in that markup. */
-.stats-dialog-card :deep(.stats-tip-time) {
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.stats-dialog-card :deep(.stats-tip-members) {
-  margin-top: 4px;
-}
-
-.stats-dialog-card :deep(.stats-tip-row) {
-  white-space: nowrap;
-}
-
-.stats-dialog-card :deep(.stats-tip-initials) {
-  font-weight: 600;
-}
-
-.stats-dialog-card :deep(.stats-chip) {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  margin-right: 0.4em;
-  border-radius: 2px;
-}
-
-.stats-dialog-card :deep(.stats-chip--running) { background: var(--os-stat-running); }
-.stats-dialog-card :deep(.stats-chip--waiting) { background: var(--os-stat-waiting); }
-.stats-dialog-card :deep(.stats-chip--blocked) { background: var(--os-stat-blocked); }
-.stats-dialog-card :deep(.stats-chip--failed) { background: var(--os-stat-failed); }
-.stats-dialog-card :deep(.stats-chip--idle) { background: var(--os-stat-idle); }
 </style>

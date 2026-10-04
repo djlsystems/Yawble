@@ -701,3 +701,52 @@ table.os-cols-fixed {
     overflow-wrap: anywhere;
   }
 }
+
+/* THE STATISTICS AND TOKENS HOVER BOXES. ECharts appends them to the body, outside every tile and
+   dialog, so they are styled here and not in a component's scoped styles. Classes only: the CSP
+   refuses a `style` attribute in their markup. */
+.stats-tooltip .stats-tip-time,
+.stats-tooltip .tokens-tip-total {
+  font-weight: 600;
+}
+
+.stats-tooltip .stats-tip-time {
+  margin-bottom: 2px;
+}
+
+.stats-tooltip .stats-tip-members {
+  margin-top: 4px;
+}
+
+.stats-tooltip .stats-tip-row {
+  white-space: nowrap;
+}
+
+.stats-tooltip .stats-tip-initials {
+  font-weight: 600;
+}
+
+.stats-tooltip .stats-chip,
+.stats-tooltip .tokens-chip {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 0.4em;
+  border-radius: 2px;
+}
+
+.stats-tooltip .stats-chip--running { background: var(--os-stat-running); }
+.stats-tooltip .stats-chip--waiting { background: var(--os-stat-waiting); }
+.stats-tooltip .stats-chip--blocked { background: var(--os-stat-blocked); }
+.stats-tooltip .stats-chip--failed { background: var(--os-stat-failed); }
+.stats-tooltip .stats-chip--idle { background: var(--os-stat-idle); }
+.stats-tooltip .stats-chip--none { border: 1px dashed currentColor; }
+
+.stats-tooltip .tokens-chip--1 { background: var(--os-series-1); }
+.stats-tooltip .tokens-chip--2 { background: var(--os-series-2); }
+.stats-tooltip .tokens-chip--3 { background: var(--os-series-3); }
+.stats-tooltip .tokens-chip--4 { background: var(--os-series-4); }
+.stats-tooltip .tokens-chip--5 { background: var(--os-series-5); }
+.stats-tooltip .tokens-chip--6 { background: var(--os-series-6); }
+.stats-tooltip .tokens-chip--7 { background: var(--os-series-7); }
+.stats-tooltip .tokens-chip--8 { background: var(--os-series-8); }

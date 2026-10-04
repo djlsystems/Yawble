@@ -6,25 +6,25 @@ import {
   type FigureColumn,
   type InstantFigure,
   activityCaption,
-  allWorkflowsBucket,
+  axisTimeLabel,
   bucketFigures,
   figureTooltipHtml,
-  periodRange,
   runFigure,
+  tooltipBeside,
+  windowBucket,
   activityLanes,
   activitySummary,
   bucketActivity,
   bucketLabel,
   columnTooltipHtml,
-  clockTime,
   escapeHtml,
   growSpans,
   laneInitials,
-  liveNow,
   memberInitials,
   memberTime,
   tooltipHtml,
 } from '../teamActivity'
+import { crossesDays, localStretch, localTime } from '../localTime'
 
 /** A local wall-clock instant, so the HH:MM a person reads is the one written here. */
 const at = (hours: number, minutes: number, seconds = 0) =>
@@ -41,7 +41,7 @@ function activity(members: ActivityMember[], over: Partial<TeamActivity> = {}): 
     from: iso(at(14, 2)),
     to: iso(at(14, 30)),
     serverNow: iso(at(14, 30)),
-    window: 'open',
+    window: 'workflows',
     members,
     ...over,
   }
@@ -79,33 +79,33 @@ describe('initials before each lane', () => {
   })
 })
 
-describe('open spans grow to now', () => {
-  it('is the server clock advanced by the board tick and corrected by the offset', () => {
-    const server = at(14, 30)
-    // The browser is ten minutes slow: offset +10 min. Its clock has ticked 45 s since the answer.
-    const offset = 10 * 60_000
-    const browser = server - offset + 45_000
-
-    expect(liveNow(iso(server), browser, offset)).toBe(server + 45_000)
-  })
-
-  it('never moves now before the answer\'s own serverNow', () => {
-    const server = at(14, 30)
-
-    expect(liveNow(iso(server), server - 60_000, 0)).toBe(server)
-  })
-
-  it('draws an open span to now and keeps a closed span where it ended', () => {
-    const now = at(14, 31)
+describe('spans reach the window\'s end and never the clock', () => {
+  it('draws an open span to the window\'s end and keeps a closed span where it ended', () => {
+    const end = at(14, 31)
     const spans = growSpans([
       { state: 'running', from: iso(at(14, 2)), to: iso(at(14, 10)), workflow: 7 },
       { state: 'blocked', from: iso(at(14, 20)), to: null, workflow: 7, reason: 'needs the API key' },
-    ], now)
+    ], end)
 
     expect(spans).toEqual([
       { state: 'running', from: at(14, 2), to: at(14, 10), open: false, workflow: 7 },
-      { state: 'blocked', from: at(14, 20), to: now, open: true, workflow: 7, reason: 'needs the API key' },
+      { state: 'blocked', from: at(14, 20), to: end, open: true, workflow: 7, reason: 'needs the API key' },
     ])
+  })
+
+  it('reads a span the server ended at the window\'s end as still in its state there', () => {
+    const end = at(14, 31)
+    const [span] = growSpans([{ state: 'idle', from: iso(at(14, 20)), to: iso(end) }], end)
+
+    expect(span).toEqual({ state: 'idle', from: at(14, 20), to: end, open: true })
+  })
+
+  it('draws the lanes to the answer\'s own end, however long ago that was', () => {
+    // The answer's window ended at 14:30; the board has ticked on for an hour since.
+    const answer = activity([member('Manager', [{ state: 'idle', from: iso(at(14, 10)), to: iso(at(14, 30)) }])])
+    const lanes = activityLanes(answer, [], Date.parse(answer.to!))
+
+    expect(lanes[0]!.spans.map((span) => span.to)).toEqual([at(14, 30)])
   })
 })
 
@@ -165,70 +165,71 @@ describe('one lane per current member, Manager first, then board order', () => {
 })
 
 describe('the aria summary', () => {
-  const now = at(14, 30)
+  const end = at(14, 30)
 
-  it('counts each member\'s state now, since the window began', () => {
+  it('names the window, then counts each member\'s state at its end', () => {
     const lanes = activityLanes(activity([
-      member('Manager', [{ state: 'running', from: iso(at(14, 2)), to: null }]),
+      member('Manager', [{ state: 'running', from: iso(at(14, 2)), to: iso(end) }]),
       member('Ines', [{ state: 'running', from: iso(at(14, 5)), to: null }]),
       member('Okon', [
         { state: 'running', from: iso(at(14, 5)), to: iso(at(14, 20)) },
-        { state: 'blocked', from: iso(at(14, 20)), to: null, reason: 'needs the API key' },
+        { state: 'blocked', from: iso(at(14, 20)), to: iso(end), reason: 'needs the API key' },
       ]),
-    ], { from: iso(at(14, 20)) }), [], now)
+    ], { from: iso(at(14, 20)) }), [], end)
 
-    expect(activitySummary('open', lanes, at(14, 20), now))
-      .toBe('Statistics since 14:20: 3 members - 2 running, 1 blocked')
+    expect(activitySummary('workflows', lanes, at(14, 20), end))
+      .toBe(`Statistics ${localStretch(at(14, 20), end)}: 3 members - 2 running, 1 blocked`)
   })
 
-  it('says how many have no span now', () => {
+  it('says how many have no span at the end', () => {
     const lanes = activityLanes(activity([
-      member('Manager', [{ state: 'idle', from: iso(at(14, 2)), to: null }]),
+      member('Manager', [{ state: 'idle', from: iso(at(14, 2)), to: iso(end) }]),
       member('Ines', [{ state: 'running', from: iso(at(14, 5)), to: iso(at(14, 6)) }]),
-    ]), [], now)
+    ]), [], end)
 
-    expect(activitySummary('open', lanes, at(14, 2), now))
-      .toBe('Statistics since 14:02: 2 members - 1 idle, 1 with no runs now')
+    expect(activitySummary('workflows', lanes, at(14, 2), end))
+      .toBe(`Statistics ${localStretch(at(14, 2), end)}: 2 members - 1 idle, 1 with no runs at the end`)
   })
 
   it('says one member in the singular', () => {
     const lanes = activityLanes(activity([
       member('Manager', [{ state: 'failed', from: iso(at(14, 2)), to: null }]),
-    ]), [], now)
+    ]), [], end)
 
-    expect(activitySummary('open', lanes, at(14, 2), now))
-      .toBe('Statistics since 14:02: 1 member - 1 failed')
+    expect(activitySummary('workflows', lanes, at(14, 2), end))
+      .toBe(`Statistics ${localStretch(at(14, 2), end)}: 1 member - 1 failed`)
   })
 
-  it('names no start when the window has none', () => {
+  it('names no window when the answer has none', () => {
     const lanes = activityLanes(activity([
       member('Manager', [{ state: 'running', from: iso(at(14, 2)), to: null }]),
-    ]), [], now)
+    ]), [], end)
 
-    expect(activitySummary('open', lanes, null, now)).toBe('Statistics: 1 member - 1 running')
+    expect(activitySummary('workflows', lanes, null, end)).toBe('Statistics: 1 member - 1 running')
   })
 
   it('says there are no workflows yet when the team never ran', () => {
-    expect(activitySummary('none', [], null, now)).toBe('Statistics: No workflows yet')
+    expect(activitySummary('none', [], null, end)).toBe('Statistics: No workflows yet')
   })
 })
 
 describe('the caption under the lanes', () => {
-  it('names the window start and the open workflows', () => {
-    expect(activityCaption('open', at(14, 2), 2, null)).toBe('since 14:02 · 2 open workflows')
-    expect(activityCaption('open', at(14, 2), 1, null)).toBe('since 14:02 · 1 open workflow')
+  it('names the window\'s stretch and the open workflows', () => {
+    expect(activityCaption('workflows', at(11, 38, 2), at(15, 41, 17), 2))
+      .toBe(`${localTime(at(11, 38, 2))} – ${localTime(at(15, 41, 17))} · 2 open workflows`)
+    expect(activityCaption('workflows', at(11, 38, 2), at(15, 41, 17), 1))
+      .toBe(`${localTime(at(11, 38, 2))} – ${localTime(at(15, 41, 17))} · 1 open workflow`)
   })
 
-  it('names only the start while the workflow list has not landed', () => {
-    expect(activityCaption('open', at(14, 2), null, null)).toBe('since 14:02')
-  })
-
-  it('names when the latest workflow closed for the fallback', () => {
-    expect(activityCaption('latest', at(9, 0), 0, at(9, 15))).toBe('latest workflow, closed 09:15')
+  it('names only the stretch while the workflow list has not landed, or when nothing is open', () => {
+    expect(activityCaption('workflows', at(11, 38, 2), at(15, 41, 17), null))
+      .toBe(`${localTime(at(11, 38, 2))} – ${localTime(at(15, 41, 17))}`)
+    expect(activityCaption('workflows', at(11, 38, 2), at(15, 41, 17), 0))
+      .toBe(`${localTime(at(11, 38, 2))} – ${localTime(at(15, 41, 17))}`)
   })
 
   it('reads No workflows yet when there is none', () => {
-    expect(activityCaption('none', null, 0, null)).toBe('No workflows yet')
+    expect(activityCaption('none', null, null, 0)).toBe('No workflows yet')
   })
 })
 
@@ -241,19 +242,25 @@ describe('the tooltip', () => {
   ]), [], now)
 
   it('gives the time under the cursor, then one line per member with state and how long it has lasted', () => {
-    const html = tooltipHtml(lanes(), at(14, 25))
+    const html = tooltipHtml(lanes(), at(14, 25, 7), false)
     const text = html.replace(/<[^>]+>/g, '')
 
-    expect(text).toContain(clockTime(at(14, 25)))
+    expect(text.startsWith(new Date(at(14, 25, 7)).toLocaleTimeString())).toBe(true)
     expect(text).toContain('M Manager — no runs in this window')
     expect(text).toContain('IL Ines Lopez — blocked 12 min (needs the API key)')
     expect(html).toContain('stats-chip--blocked')
   })
 
+  it('gives the date too when the window crosses days', () => {
+    const text = tooltipHtml(lanes(), at(14, 25, 7), true).replace(/<[^>]+>/g, '')
+
+    expect(text.startsWith(new Date(at(14, 25, 7)).toLocaleString())).toBe(true)
+  })
+
   it('escapes every name and reason, so markup reads as characters', () => {
     const html = tooltipHtml(activityLanes(activity([
       member('<b>Bold</b>', [{ state: 'failed', from: iso(at(14, 2)), to: null, reason: '<img src=x onerror=alert(1)>' }]),
-    ]), [], now), at(14, 3))
+    ]), [], now), at(14, 3), false)
 
     expect(html).not.toContain('<b>')
     expect(html).not.toContain('<img')
@@ -404,14 +411,24 @@ describe('a column in words', () => {
   // Tue 6 Oct 2026, 14:20 in Berlin.
   const start = Date.parse('2026-10-06T12:20:00Z')
 
-  it('labels each bucket size in the given zone', () => {
-    expect(bucketLabel(start, start + 60_000, 'minute', zone)).toBe('Tue 14:20–14:21')
-    expect(bucketLabel(Date.parse('2026-10-06T12:00:00Z'), Date.parse('2026-10-06T13:00:00Z'), 'hour', zone))
-      .toBe('Tue 14:00–15:00')
-    expect(bucketLabel(Date.parse('2026-10-05T22:00:00Z'), Date.parse('2026-10-06T22:00:00Z'), 'day', zone))
-      .toBe('Tue 6 Oct')
-    expect(bucketLabel(Date.parse('2026-09-30T22:00:00Z'), Date.parse('2026-10-31T23:00:00Z'), 'month', zone))
-      .toBe('Oct 2026')
+  const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { timeZone: zone })
+  const stamp = (ms: number) => new Date(ms).toLocaleString(undefined, { timeZone: zone })
+
+  it('labels each bucket size in the browser\'s locale, in the given zone', () => {
+    const hour = [Date.parse('2026-10-06T12:00:00Z'), Date.parse('2026-10-06T13:00:00Z')] as const
+    const day = Date.parse('2026-10-05T22:00:00Z')
+    const month = Date.parse('2026-09-30T22:00:00Z')
+
+    expect(bucketLabel(start, start + 60_000, 'minute', zone, false)).toBe(`${time(start)} – ${time(start + 60_000)}`)
+    expect(bucketLabel(hour[0], hour[1], 'hour', zone, false)).toBe(`${time(hour[0])} – ${time(hour[1])}`)
+    expect(bucketLabel(day, Date.parse('2026-10-06T22:00:00Z'), 'day', zone, false))
+      .toBe(new Date(day).toLocaleDateString(undefined, { timeZone: zone }))
+    expect(bucketLabel(month, Date.parse('2026-10-31T23:00:00Z'), 'month', zone, false))
+      .toBe(new Date(month).toLocaleDateString(undefined, { timeZone: zone, year: 'numeric', month: 'long' }))
+  })
+
+  it('gives a minute or an hour its date too when the window crosses days', () => {
+    expect(bucketLabel(start, start + 60_000, 'minute', zone, true)).toBe(`${stamp(start)} – ${stamp(start + 60_000)}`)
   })
 
   it('gives the bucket, each state\'s total, then each member with initials, escaped', () => {
@@ -432,7 +449,7 @@ describe('a column in words', () => {
     const html = columnTooltipHtml(column, 'minute', zone, people)
     const text = html.replace(/<[^>]+>/g, '')
 
-    expect(text).toContain('Tue 14:20–14:21')
+    expect(text).toContain(`${time(start)} – ${time(start + 60_000)}`)
     expect(text).toContain('running 40 s')
     expect(text).toContain('blocked 50 s')
     expect(text).not.toContain('waiting')
@@ -440,6 +457,36 @@ describe('a column in words', () => {
     expect(html).not.toContain('<b>')
     expect(text).toContain('&lt;b&gt;Bold&lt;/b&gt; (removed) — blocked 30 s')
     expect(html).not.toContain('style=')
+  })
+
+  it('leaves a state hidden in the legend out of the totals and every member\'s split', () => {
+    const column: Column = {
+      from: start,
+      to: start + 60_000,
+      totals: { running: 40_000, waiting: 0, blocked: 50_000, failed: 0, idle: 10_000 },
+      members: [
+        { member: 'Ines', ms: { running: 40_000, waiting: 0, blocked: 20_000, failed: 0, idle: 0 } },
+        { member: 'Rhea', ms: { running: 0, waiting: 0, blocked: 30_000, failed: 0, idle: 10_000 } },
+        { member: 'Okon', ms: { running: 0, waiting: 0, blocked: 0, failed: 0, idle: 0 } },
+      ],
+    }
+    const people = new Map([
+      ['Ines', { name: 'Ines Lopez', initials: 'IL' }],
+      ['Rhea', { name: 'Rhea', initials: 'R' }],
+    ])
+
+    const text = columnTooltipHtml(column, 'minute', zone, people, { hidden: new Set(['blocked']) }).replace(/<[^>]+>/g, '')
+
+    expect(text).not.toContain('blocked')
+    expect(text).toContain('running 40 s')
+    expect(text).toContain('IL Ines Lopez — running 40 s')
+    expect(text).toContain('R Rhea — idle 10 s')
+
+    // A member with nothing left to show has no line at all.
+    const runningOnly = columnTooltipHtml(column, 'minute', zone, people, { hidden: new Set(['blocked', 'idle']) })
+      .replace(/<[^>]+>/g, '')
+
+    expect(runningOnly).not.toContain('Rhea')
   })
 
   it('reads time under a second as under a second, never as nothing', () => {
@@ -590,29 +637,113 @@ describe('a run\'s figure for the chosen metric', () => {
   })
 })
 
-describe('the All workflows bucket', () => {
+describe('the column size that fits the window', () => {
   const from = Date.parse('2026-01-31T10:00:00Z')
   const hour = 3_600_000
 
   it('is the minute up to two hours', () => {
-    expect(allWorkflowsBucket(from, from + 2 * hour)).toBe('minute')
-    expect(allWorkflowsBucket(from, from + 2 * hour + 1)).toBe('hour')
+    expect(windowBucket(from, from + 1)).toBe('minute')
+    expect(windowBucket(from, from + 2 * hour)).toBe('minute')
+    expect(windowBucket(from, from + 2 * hour + 1)).toBe('hour')
   })
 
   it('is the hour up to three days', () => {
-    expect(allWorkflowsBucket(from, from + 72 * hour)).toBe('hour')
-    expect(allWorkflowsBucket(from, from + 72 * hour + 1)).toBe('day')
+    expect(windowBucket(from, from + 72 * hour)).toBe('hour')
+    expect(windowBucket(from, from + 72 * hour + 1)).toBe('day')
   })
 
   it('is the day up to three months, by the calendar', () => {
     const threeMonths = Date.parse('2026-04-30T10:00:00Z')
 
-    expect(allWorkflowsBucket(from, threeMonths)).toBe('day')
-    expect(allWorkflowsBucket(from, threeMonths + 1)).toBe('month')
+    expect(windowBucket(from, threeMonths)).toBe('day')
+    expect(windowBucket(from, threeMonths + 1)).toBe('month')
   })
 
-  it('asks for no period: the read\'s whole history', () => {
-    expect(periodRange('all', from)).toBeNull()
+  it('is the month beyond', () => {
+    expect(windowBucket(from, Date.parse('2027-01-31T10:00:00Z'))).toBe('month')
+  })
+})
+
+describe('times read as the browser\'s locale reads them', () => {
+  const morning = at(11, 38, 2)
+  const afternoon = at(15, 41, 17)
+  const nextDay = new Date(2026, 9, 5, 9, 0, 0).getTime()
+
+  it('reads a time of day with seconds, exactly as toLocaleTimeString does', () => {
+    expect(localTime(morning)).toBe(new Date(morning).toLocaleTimeString())
+    expect(localTime(afternoon)).toBe(new Date(afternoon).toLocaleTimeString())
+  })
+
+  it('adds the date, exactly as the Workflows dialog\'s stamp does', () => {
+    expect(localTime(afternoon, { date: true })).toBe(new Date(afternoon).toLocaleString())
+  })
+
+  it('names a stretch by its two ends, with dates only when it crosses days', () => {
+    expect(crossesDays(morning, afternoon)).toBe(false)
+    expect(crossesDays(morning, nextDay)).toBe(true)
+    expect(localStretch(morning, afternoon))
+      .toBe(`${new Date(morning).toLocaleTimeString()} – ${new Date(afternoon).toLocaleTimeString()}`)
+    expect(localStretch(morning, nextDay))
+      .toBe(`${new Date(morning).toLocaleString()} – ${new Date(nextDay).toLocaleString()}`)
+  })
+
+  it('labels the time axis as the locale does: a time of day, a date at midnight, a date or a month', () => {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const midnight = new Date(2026, 9, 5).getTime()
+
+    expect(axisTimeLabel(afternoon, 'minute', zone)).toBe(new Date(afternoon).toLocaleTimeString())
+    expect(axisTimeLabel(afternoon, 'hour', zone)).toBe(new Date(afternoon).toLocaleTimeString())
+    expect(axisTimeLabel(midnight, 'hour', zone)).toBe(new Date(midnight).toLocaleDateString())
+    expect(axisTimeLabel(afternoon, 'day', zone)).toBe(new Date(afternoon).toLocaleDateString())
+    expect(axisTimeLabel(afternoon, 'month', zone))
+      .toBe(new Date(afternoon).toLocaleDateString(undefined, { year: 'numeric', month: 'long' }))
+  })
+})
+
+describe('the hover box beside the pointer', () => {
+  const box = [180, 90] as const
+  const gap = 12
+  const viewport = { width: 1200, height: 800 }
+
+  /** Where the box's left and right edges fall, in the chart's own pixels. */
+  function edges(pointer: number, chartLeft: number, chartWidth: number) {
+    const [x] = tooltipBeside([pointer, 20], [...box], { left: chartLeft, top: 300 }, viewport, gap)
+
+    return { left: x, right: x + box[0], width: chartWidth }
+  }
+
+  it('sits to the pointer\'s right with a gap, never over it, at the left edge and the middle', () => {
+    for (const pointer of [0, 2, 300]) {
+      const { left } = edges(pointer, 100, 600)
+
+      expect(left).toBe(pointer + gap)
+    }
+  })
+
+  it('flips to the pointer\'s left near the right edge, with the same gap', () => {
+    for (const pointer of [598, 600]) {
+      const { right } = edges(pointer, 600, 600)
+
+      expect(right).toBe(pointer - gap)
+    }
+  })
+
+  it('never covers the pointer\'s x anywhere across the chart', () => {
+    for (const chartLeft of [0, 100, 600, 1000]) {
+      for (let pointer = 0; pointer <= 200; pointer += 10) {
+        const { left, right } = edges(pointer, chartLeft, 200)
+
+        expect(pointer < left || pointer > right).toBe(true)
+      }
+    }
+  })
+
+  it('may reach past the chart\'s own edges but stays on the screen vertically', () => {
+    const [, top] = tooltipBeside([10, 0], [...box], { left: 100, top: 0 }, viewport, gap)
+    const [, low] = tooltipBeside([10, 40], [...box], { left: 100, top: 760 }, viewport, gap)
+
+    expect(top).toBe(0)
+    expect(760 + low + box[1]).toBeLessThanOrEqual(viewport.height)
   })
 })
 
@@ -641,8 +772,9 @@ describe('a token bucket in words', () => {
     ])
     const html = figureTooltipHtml(column, 'hour', zone, people)
     const text = html.replace(/<[^>]+>/g, '')
+    const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { timeZone: zone })
 
-    expect(text).toContain('Tue 14:00–15:00')
+    expect(text).toContain(`${time(start)} – ${time(start + 3_600_000)}`)
     expect(text).toContain(`Ines Lopez — ${(1200).toLocaleString()}`)
     expect(text).toContain(`&lt;b&gt;Bold&lt;/b&gt; (removed) — ${(300).toLocaleString()}, 2 runs not measured`)
     expect(text).toContain('Rhea — 1 run: split not reported')
@@ -651,6 +783,37 @@ describe('a token bucket in words', () => {
     expect(text).toContain('1 run: split not reported')
     expect(html).not.toContain('<b>')
     expect(html).not.toContain('style=')
+  })
+
+  it('leaves a member hidden in the legend out of the lines and the total', () => {
+    const column: FigureColumn = {
+      from: start,
+      to: start + 3_600_000,
+      total: 1500,
+      measured: 3,
+      unmeasured: 2,
+      unsplit: 1,
+      members: [
+        { member: 'Ines', value: 1200, measured: 2, unmeasured: 0, unsplit: 0 },
+        { member: 'Bold', value: 300, measured: 1, unmeasured: 2, unsplit: 0 },
+        { member: 'Rhea', value: 0, measured: 0, unmeasured: 0, unsplit: 1 },
+      ],
+    }
+    const people = new Map([['Ines', { name: 'Ines Lopez' }], ['Bold', { name: 'Bold' }], ['Rhea', { name: 'Rhea' }]])
+
+    const text = figureTooltipHtml(column, 'hour', zone, people, { hidden: new Set(['Ines']) }).replace(/<[^>]+>/g, '')
+
+    expect(text).not.toContain('Ines')
+    expect(text).toContain(`Total ${(300).toLocaleString()}`)
+    expect(text).toContain('2 runs not measured')
+    expect(text).toContain('1 run: split not reported')
+
+    const onlyRhea = figureTooltipHtml(column, 'hour', zone, people, { hidden: new Set(['Ines', 'Bold']) })
+      .replace(/<[^>]+>/g, '')
+
+    expect(onlyRhea).toContain('Total not measured')
+    expect(onlyRhea).not.toContain('not measured,')
+    expect(onlyRhea).not.toContain('2 runs')
   })
 
   it('never reads a bucket of only unmeasured runs as a total of zero', () => {
