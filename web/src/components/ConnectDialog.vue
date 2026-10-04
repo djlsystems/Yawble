@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { getConnectionNeeds, renameConnection, saveConnectionProvider, startConnection } from '../api/client';
-import type { Connection, ConnectionGuideStep, ConnectionNeeds, ConnectionProvider, ConnectionProviderSave } from '../api/types';
+import { getConnectionNeeds, listConnectionProviders, renameConnection, saveConnectionProvider, startConnection } from '../api/client';
+import type { Connection, ConnectionGuide, ConnectionGuideStep, ConnectionNeeds, ConnectionProvider, ConnectionProviderSave } from '../api/types';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { copyText } from '../lib/clipboard';
 import {
@@ -19,7 +19,8 @@ import { productCli } from '../presentation/product';
  * 1. SERVICE - Google or Microsoft, and what the installed plugins will ask of it, in words, each
  *    line naming the plugin that wants it. All are ticked; any may be unticked. Nothing is typed:
  *    the scopes come from the plugins' connection slots, through the Host's needs read.
- * 2. SET UP THE APP - only when the provider's client is not set up: the provider's own guide as a
+ * 2. SET UP THE APP - only when the provider's client is not set up: the provider's own guide, read
+ *    for the ticked scopes, as a
  *    checklist, with deep links (into the person's project, once they name it), values to copy and
  *    a Done tick per step. Its last step takes the client ID and secret and saves them.
  * 3. SIGN IN - the existing web flow with the ticked scopes. The browser leaves for the provider and
@@ -77,6 +78,7 @@ watch(open, (showing) => {
   unticked.value = new Set();
   detailed.value = new Set();
   setUpNow.value = false;
+  guide.value = null;
   projectId.value = '';
   done.value = new Set();
   clientId.value = '';
@@ -124,20 +126,41 @@ function toggle(which: 'unticked' | 'detailed' | 'done', key: string) {
 /** The scopes to ask for: every one the plugins want, less those unticked, in the Host's order. */
 const chosenScopes = computed(() => (needs.value?.scopes ?? []).map((line) => line.scope).filter((scope) => !unticked.value.has(scope)));
 
-function next() {
+const guideLoading = ref(false);
+
+async function next() {
   problem.value = '';
-  step.value = needsSetUp.value ? 'setup' : 'signin';
+  if (!needsSetUp.value) {
+    step.value = 'signin';
+    return;
+  }
+
+  // The guide is read again for what is ticked: its APIs and data access are those scopes' own.
+  // With nothing ticked, the provider's default scopes stand for "nothing more".
+  const chosen = provider.value!;
+  const scopes = chosenScopes.value.length > 0 ? chosenScopes.value : chosen.defaultScopes;
+  guideLoading.value = true;
+  try {
+    const read = await listConnectionProviders(scopes);
+    guide.value = read.find((candidate) => candidate.id === chosen.id)?.guide ?? chosen.guide ?? null;
+    step.value = 'setup';
+  } catch (cause) {
+    problem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    guideLoading.value = false;
+  }
 }
 
 // --- 2. Set up the app ----------------------------------------------------------------------------
 
+const guide = ref<ConnectionGuide | null>(null);
 const projectId = ref('');
 const done = ref<Set<string>>(new Set());
 const clientId = ref('');
 const clientSecret = ref('');
 const clientBusy = ref(false);
 
-const steps = computed<ConnectionGuideStep[]>(() => provider.value?.guide?.steps ?? []);
+const steps = computed<ConnectionGuideStep[]>(() => guide.value?.steps ?? []);
 const redirectWarning = computed(() => redirectUriWarning(currentOrigin(), productCli));
 const clientIdProblem = computed(() => (provider.value?.kind === 'google' ? googleClientIdProblem(clientId.value) : null));
 
@@ -346,14 +369,8 @@ const stepLabels = computed(() => [
             </div>
 
             <div class="connect-guide-body" data-guide-body>
-              <div
-                v-if="item.id === 'client' && redirectWarning"
-                class="text-warning"
-                data-redirect-warning
-              >
-                {{ redirectWarning }}
-              </div>
-              <div>{{ item.text }}</div>
+              <!-- When this address will be refused, the Host's text for the client step opens with why. -->
+              <div :class="{ 'text-warning': item.id === 'client' && redirectWarning }">{{ item.text }}</div>
 
               <q-input
                 v-if="item.id === 'project'"
@@ -467,7 +484,14 @@ const stepLabels = computed(() => [
       <q-card-actions align="right">
         <template v-if="step === 'service'">
           <q-btn v-close-popup flat no-caps label="Cancel" />
-          <q-btn color="primary" no-caps label="Next" :disable="!provider || needsLoading || needs === null" @click="next" />
+          <q-btn
+            color="primary"
+            no-caps
+            label="Next"
+            :loading="guideLoading"
+            :disable="!provider || needsLoading || needs === null || guideLoading"
+            @click="next"
+          />
         </template>
         <template v-else-if="step === 'setup'">
           <q-btn flat no-caps label="Back" @click="step = 'service'" />
