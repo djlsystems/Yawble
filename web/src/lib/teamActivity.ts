@@ -1,4 +1,4 @@
-import type { ActivitySpan, ActivityState, ActivityWindow, TeamActivity } from '../api/types'
+import type { ActivitySpan, ActivityState, ActivityWindow, TeamActivity, TeamTokenRun } from '../api/types'
 
 /**
  * WHAT THE STATISTICS TILE DRAWS FROM ONE `/activity` ANSWER, as plain functions so its initials,
@@ -550,12 +550,12 @@ export const ActivityPeriods: readonly { value: ActivityPeriod; label: string; b
 ]
 
 /**
- * THE INSTANTS A PERIOD ASKS `/activity` FOR, ending at `now`; null for Open workflows, which is the
- * team's own window and asks for none. A month and a year step back by the UTC calendar, as the
- * server measures its one-year limit, so "Last year" is never refused for being an hour too long.
+ * THE INSTANTS A PERIOD ASKS ITS READ FOR, ending at `now`; null for Open workflows and All workflows,
+ * which are the read's own window and ask for none. A month and a year step back by the UTC calendar,
+ * as the server measures its one-year limit, so "Last year" is never refused for being an hour too long.
  */
-export function periodRange(period: ActivityPeriod, now: number): { from: string; to: string } | null {
-  if (period === 'open') return null
+export function periodRange(period: ActivityPeriod | TokenPeriod, now: number): { from: string; to: string } | null {
+  if (period === 'open' || period === 'all') return null
 
   const from = new Date(now)
 
@@ -565,6 +565,214 @@ export function periodRange(period: ActivityPeriod, now: number): { from: string
   else from.setUTCFullYear(from.getUTCFullYear() - 1)
 
   return { from: from.toISOString(), to: new Date(now).toISOString() }
+}
+
+/** The Tokens dialog's periods: All workflows, the team's whole history, then the Statistics ones. */
+export type TokenPeriod = 'all' | Exclude<ActivityPeriod, 'open'>
+
+/** Each period's words and its bucket; All workflows' bucket fits its span (see {@link allWorkflowsBucket}). */
+export const TokenPeriods: readonly { value: TokenPeriod; label: string; bucket: Bucket | null }[] = [
+  { value: 'all', label: 'All workflows', bucket: null },
+  ...ActivityPeriods.filter((p) => p.value !== 'open') as { value: TokenPeriod; label: string; bucket: Bucket }[],
+]
+
+/**
+ * ALL WORKFLOWS' BUCKET, chosen to fit the span it covers: the minute up to two hours, the hour up to
+ * three days, the day up to three months by the UTC calendar, the month beyond.
+ */
+export function allWorkflowsBucket(from: number, to: number): Bucket {
+  const span = to - from
+
+  if (span <= 2 * 3_600_000) return 'minute'
+  if (span <= 3 * 86_400_000) return 'hour'
+
+  // THREE CALENDAR MONTHS ON, held to the last day of that month: 31 January runs to 30 April, not
+  // on into May as `setUTCMonth` would carry it.
+  const start = new Date(from)
+  const month = start.getUTCMonth() + 3
+  const lastDay = new Date(Date.UTC(start.getUTCFullYear(), month + 1, 0)).getUTCDate()
+  const threeMonths = Date.UTC(
+    start.getUTCFullYear(), month, Math.min(start.getUTCDate(), lastDay),
+    start.getUTCHours(), start.getUTCMinutes(), start.getUTCSeconds(), start.getUTCMilliseconds())
+
+  return to <= threeMonths ? 'day' : 'month'
+}
+
+/** Which figure of a run the Tokens chart sums. */
+export type TokenMetric = 'billable' | 'in' | 'cacheRead' | 'cacheWrite' | 'out'
+
+/** The metric picker's choices, in its order: Billable first, the default. */
+export const TokenMetrics: readonly { value: TokenMetric; label: string }[] = [
+  { value: 'billable', label: 'Billable' },
+  { value: 'in', label: 'In' },
+  { value: 'cacheRead', label: 'Cache read' },
+  { value: 'cacheWrite', label: 'Cache write' },
+  { value: 'out', label: 'Out' },
+]
+
+/** Why a run has no figure: it reported no usage, or only a combined total with no split. */
+export type FigureGap = 'unmeasured' | 'split'
+
+/**
+ * A RUN'S FIGURE FOR A METRIC, or why it has none. An unmeasured run has none for any metric; a
+ * combined total has its billable and no In, Cache read, Cache write or Out - "split not reported".
+ * A figure a measured run did not report is not measured either: nothing is read as 0.
+ */
+export function runFigure(run: TeamTokenRun, metric: TokenMetric): { value: number } | { gap: FigureGap } {
+  if (!run.measured) return { gap: 'unmeasured' }
+
+  const value = {
+    billable: run.billable,
+    in: run.tokensIn,
+    cacheRead: run.tokensCachedIn,
+    cacheWrite: run.tokensCacheCreation,
+    out: run.tokensOut,
+  }[metric]
+
+  if (value !== undefined) return { value }
+
+  return metric !== 'billable' && run.combined !== undefined ? { gap: 'split' } : { gap: 'unmeasured' }
+}
+
+/** One run's figure at the instant it ended; `value` null with the `gap` that explains it. */
+export interface InstantFigure {
+  member: string
+  at: number
+  value: number | null
+  gap?: FigureGap
+}
+
+/** One member's share of a token bucket: its summed figure, and how many of its runs had one or not. */
+export interface MemberFigure {
+  member: string
+  value: number
+  measured: number
+  unmeasured: number
+  unsplit: number
+}
+
+/**
+ * ONE TOKEN BUCKET: its edges, the figure summed over the runs that ended in it, how many runs had a
+ * figure, how many were not measured and how many reported no split - and the same per member.
+ */
+export interface FigureColumn {
+  from: number
+  to: number
+  total: number
+  measured: number
+  unmeasured: number
+  unsplit: number
+  members: MemberFigure[]
+}
+
+/**
+ * FIGURES AT AN INSTANT, PER BUCKET: each run's figure placed in the local bucket of `timeZone` its
+ * end fell in - an instant on an edge belongs to the bucket that starts there - and summed, per
+ * member in `order` (members not in it after, as met). A run with no figure is COUNTED, never added
+ * as 0, and a bucket holding only such runs still has a column so it can say so. A bucket where no
+ * run ended has none.
+ */
+export function bucketFigures(
+  points: readonly InstantFigure[],
+  order: readonly string[],
+  bucket: Bucket,
+  timeZone: string,
+): FigureColumn[] {
+  const columns = new Map<number, FigureColumn>()
+
+  for (const point of points) {
+    const start = bucketStart(point.at, bucket, timeZone)
+    let column = columns.get(start)
+
+    if (!column) {
+      column = { from: start, to: nextBucket(start, bucket, timeZone), total: 0, measured: 0, unmeasured: 0, unsplit: 0, members: [] }
+      columns.set(start, column)
+    }
+
+    let mine = column.members.find((m) => m.member === point.member)
+
+    if (!mine) {
+      mine = { member: point.member, value: 0, measured: 0, unmeasured: 0, unsplit: 0 }
+      column.members.push(mine)
+    }
+
+    if (point.value !== null) {
+      column.total += point.value
+      column.measured++
+      mine.value += point.value
+      mine.measured++
+    } else if (point.gap === 'split') {
+      column.unsplit++
+      mine.unsplit++
+    } else {
+      column.unmeasured++
+      mine.unmeasured++
+    }
+  }
+
+  const rank = (member: string) => {
+    const index = order.indexOf(member)
+
+    return index < 0 ? order.length : index
+  }
+
+  return [...columns.values()]
+    .sort((a, b) => a.from - b.from)
+    .map((column) => ({ ...column, members: column.members.sort((a, b) => rank(a.member) - rank(b.member)) }))
+}
+
+/** A token count as a person reads it, grouped in their locale. */
+export function tokenCount(value: number): string {
+  return value.toLocaleString()
+}
+
+/** The words for runs with no figure: "2 runs not measured", "1 run: split not reported". */
+function gapWords(unmeasured: number, unsplit: number): string[] {
+  const words: string[] = []
+
+  if (unmeasured > 0) words.push(`${plural(unmeasured, 'run', 'runs')} not measured`)
+  if (unsplit > 0) words.push(`${plural(unsplit, 'run', 'runs')}: split not reported`)
+
+  return words
+}
+
+/**
+ * ONE TOKEN BUCKET'S HOVER TOOLTIP AS MARKUP: the bucket, each member's figure and its runs with no
+ * figure, the bucket's total and its runs with no figure. A member or a bucket whose runs all lack a
+ * figure reads so, never as 0. Escaped text in classed markup, never a `style` attribute, as in
+ * {@link tooltipHtml}.
+ */
+export function figureTooltipHtml(
+  column: FigureColumn,
+  bucket: Bucket,
+  timeZone: string,
+  people: ReadonlyMap<string, { name: string }>,
+): string {
+  const members = column.members.map((share) => {
+    const name = people.get(share.member)?.name ?? share.member
+    const parts = [...(share.measured > 0 ? [tokenCount(share.value)] : []), ...gapWords(share.unmeasured, share.unsplit)]
+
+    return `<div class="stats-tip-row"><span class="tokens-chip tokens-chip--${seriesSlot(share.member, people)}"></span>`
+      + `<span class="stats-tip-name">${escapeHtml(name)}</span> — ${escapeHtml(parts.join(', '))}</div>`
+  })
+
+  const total = column.measured > 0 ? `Total ${tokenCount(column.total)}` : 'Total not measured'
+  const gaps = gapWords(column.unmeasured, column.unsplit)
+    .map((words) => `<div class="stats-tip-row tokens-tip-gap">${escapeHtml(words)}</div>`)
+
+  return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(bucketLabel(column.from, column.to, bucket, timeZone))}</div>`
+    + `<div class="stats-tip-members">${members.join('')}</div>`
+    + `<div class="stats-tip-row tokens-tip-total">${escapeHtml(total)}</div>${gaps.join('')}</div>`
+}
+
+/** How many member colours the theme has (`--os-series-1` to `--os-series-8`). */
+export const SeriesSlots = 8
+
+/** A member's colour slot, 1-based, by its place among `people` (board order): fixed, never by rank. */
+function seriesSlot(member: string, people: ReadonlyMap<string, unknown>): number {
+  const index = [...people.keys()].indexOf(member)
+
+  return index < 0 ? 1 : (index % SeriesSlots) + 1
 }
 
 /** The y axis's unit for a bucket, and how many milliseconds one of it is. */

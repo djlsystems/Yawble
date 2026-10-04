@@ -80,6 +80,7 @@ import type {
   RepositoryResetPreview,
   TeamWorkflowTiming,
   TeamActivity,
+  TeamTokenRuns,
   TeamWorkflows,
   TenantApiKey,
   TenantLogPage,
@@ -365,6 +366,17 @@ export const getTeamWorkflows = (team: TeamId) =>
 export const getTeamActivity = (team: TeamId, period?: { from: string; to: string }) =>
   json<TeamActivity>(
     `/api/teams/${encodeURIComponent(team)}/activity`
+      + (period ? `?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}` : ''),
+  )
+
+/**
+ * A team's runs and the tokens each used, at the time each ended, over its whole history since its
+ * creation. With `period`, the runs that ended in that period (at most a year). The Tokens dialog's
+ * chart reads it.
+ */
+export const getTeamTokenRuns = (team: TeamId, period?: { from: string; to: string }) =>
+  json<TeamTokenRuns>(
+    `/api/teams/${encodeURIComponent(team)}/tokens/runs`
       + (period ? `?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}` : ''),
   )
 

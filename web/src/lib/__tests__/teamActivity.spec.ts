@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { ActivityMember, ActivitySpan, ActivityState, TeamActivity } from '../../api/types'
+import type { ActivityMember, ActivitySpan, ActivityState, TeamActivity, TeamTokenRun } from '../../api/types'
 import {
   ActivityStates,
   type Column,
+  type FigureColumn,
+  type InstantFigure,
   activityCaption,
+  allWorkflowsBucket,
+  bucketFigures,
+  figureTooltipHtml,
+  periodRange,
+  runFigure,
   activityLanes,
   activitySummary,
   bucketActivity,
@@ -453,5 +460,208 @@ describe('a column in words', () => {
 
     expect(html).toContain('running &lt;1 s')
     expect(html).toContain('IL</span> <span class="stats-tip-name">Ines Lopez</span> — running &lt;1 s, failed 15 s')
+  })
+})
+
+describe('bucketing a figure at an instant', () => {
+  const utc = (text: string) => Date.parse(text)
+  const point = (member: string, at: string, value: number | null, gap?: InstantFigure['gap']): InstantFigure =>
+    gap ? { member, at: utc(at), value, gap } : { member, at: utc(at), value }
+  const edges = (columns: FigureColumn[]) => columns.map((c) => [new Date(c.from).toISOString(), new Date(c.to).toISOString()])
+
+  it('puts each figure in the local minute it fell in, an edge belonging to the minute it starts', () => {
+    const columns = bucketFigures([
+      point('Ines', '2026-10-04T12:00:59.999Z', 10),
+      point('Ines', '2026-10-04T12:01:00Z', 20),
+      point('Ines', '2026-10-04T12:01:30Z', 5),
+    ], ['Ines'], 'minute', 'Europe/Berlin')
+
+    expect(edges(columns)).toEqual([
+      ['2026-10-04T12:00:00.000Z', '2026-10-04T12:01:00.000Z'],
+      ['2026-10-04T12:01:00.000Z', '2026-10-04T12:02:00.000Z'],
+    ])
+    expect(columns.map((c) => c.total)).toEqual([10, 25])
+  })
+
+  it('puts hour edges on the local hour of a half-hour zone, not the UTC hour', () => {
+    // 10:29 and 10:30 UTC are 15:59 and 16:00 in Kolkata: two hours, not one.
+    const columns = bucketFigures([
+      point('Ines', '2026-10-04T10:29:59Z', 7),
+      point('Ines', '2026-10-04T10:30:00Z', 8),
+    ], ['Ines'], 'hour', 'Asia/Kolkata')
+
+    expect(edges(columns)).toEqual([
+      ['2026-10-04T09:30:00.000Z', '2026-10-04T10:30:00.000Z'],
+      ['2026-10-04T10:30:00.000Z', '2026-10-04T11:30:00.000Z'],
+    ])
+    expect(columns.map((c) => c.total)).toEqual([7, 8])
+  })
+
+  it('puts day edges on local midnight', () => {
+    // 21:59 and 22:00 UTC are 23:59 on the 4th and midnight on the 5th in Berlin summer time.
+    const columns = bucketFigures([
+      point('Ines', '2026-10-04T21:59:59Z', 1),
+      point('Ines', '2026-10-04T22:00:00Z', 2),
+    ], ['Ines'], 'day', 'Europe/Berlin')
+
+    expect(edges(columns)).toEqual([
+      ['2026-10-03T22:00:00.000Z', '2026-10-04T22:00:00.000Z'],
+      ['2026-10-04T22:00:00.000Z', '2026-10-05T22:00:00.000Z'],
+    ])
+    expect(columns.map((c) => c.total)).toEqual([1, 2])
+  })
+
+  it('puts month edges on local midnight of the first', () => {
+    const columns = bucketFigures([
+      point('Ines', '2026-09-30T21:59:59Z', 3),
+      point('Ines', '2026-09-30T22:00:00Z', 4),
+    ], ['Ines'], 'month', 'Europe/Berlin')
+
+    expect(edges(columns)).toEqual([
+      ['2026-08-31T22:00:00.000Z', '2026-09-30T22:00:00.000Z'],
+      ['2026-09-30T22:00:00.000Z', '2026-10-31T23:00:00.000Z'],
+    ])
+    expect(columns.map((c) => c.total)).toEqual([3, 4])
+  })
+
+  it('sums per member in the order given, and the members add up to the column', () => {
+    const [column] = bucketFigures([
+      point('Rhea', '2026-10-04T12:00:10Z', 30),
+      point('Ines', '2026-10-04T12:00:20Z', 10),
+      point('Rhea', '2026-10-04T12:00:30Z', 5),
+    ], ['Ines', 'Rhea'], 'minute', 'Europe/Berlin')
+
+    expect(column!.members.map((m) => [m.member, m.value])).toEqual([['Ines', 10], ['Rhea', 35]])
+    expect(column!.total).toBe(45)
+  })
+
+  it('counts unmeasured runs and unsplit runs per bucket, never as zero, and keeps a bucket of only those', () => {
+    const columns = bucketFigures([
+      point('Ines', '2026-10-04T12:00:10Z', 10),
+      point('Ines', '2026-10-04T12:00:20Z', null, 'unmeasured'),
+      point('Rhea', '2026-10-04T12:00:30Z', null, 'split'),
+      point('Rhea', '2026-10-04T12:05:00Z', null, 'unmeasured'),
+      point('Rhea', '2026-10-04T12:05:40Z', null, 'unmeasured'),
+    ], ['Ines', 'Rhea'], 'minute', 'Europe/Berlin')
+
+    expect(columns.map((c) => [c.total, c.measured, c.unmeasured, c.unsplit])).toEqual([[10, 1, 1, 1], [0, 0, 2, 0]])
+    expect(columns[0]!.members.map((m) => [m.member, m.measured, m.unmeasured, m.unsplit])).toEqual([['Ines', 1, 1, 0], ['Rhea', 0, 0, 1]])
+    expect(edges(columns)[1]).toEqual(['2026-10-04T12:05:00.000Z', '2026-10-04T12:06:00.000Z'])
+  })
+
+  it('makes no bucket where no run ended', () => {
+    const columns = bucketFigures([
+      point('Ines', '2026-10-04T12:00:10Z', 1),
+      point('Ines', '2026-10-04T12:09:10Z', 1),
+    ], ['Ines'], 'minute', 'Europe/Berlin')
+
+    expect(columns).toHaveLength(2)
+  })
+})
+
+describe('a run\'s figure for the chosen metric', () => {
+  const run = (over: Partial<TeamTokenRun>): TeamTokenRun =>
+    ({ member: 'Ines', current: true, endedAt: '2026-10-04T12:00:00Z', measured: true, ...over })
+
+  it('reads each metric from its own field', () => {
+    const split = run({ billable: 380, tokensIn: 100, tokensCachedIn: 2000, tokensCacheCreation: 40, tokensOut: 30 })
+
+    expect(runFigure(split, 'billable')).toEqual({ value: 380 })
+    expect(runFigure(split, 'in')).toEqual({ value: 100 })
+    expect(runFigure(split, 'cacheRead')).toEqual({ value: 2000 })
+    expect(runFigure(split, 'cacheWrite')).toEqual({ value: 40 })
+    expect(runFigure(split, 'out')).toEqual({ value: 30 })
+  })
+
+  it('gives an unmeasured run no figure for any metric', () => {
+    for (const metric of ['billable', 'in', 'cacheRead', 'cacheWrite', 'out'] as const) {
+      expect(runFigure(run({ measured: false }), metric)).toEqual({ gap: 'unmeasured' })
+    }
+  })
+
+  it('counts a combined total in billable and as split not reported for the rest', () => {
+    const combined = run({ billable: 900, combined: 900 })
+
+    expect(runFigure(combined, 'billable')).toEqual({ value: 900 })
+
+    for (const metric of ['in', 'cacheRead', 'cacheWrite', 'out'] as const) {
+      expect(runFigure(combined, metric)).toEqual({ gap: 'split' })
+    }
+  })
+})
+
+describe('the All workflows bucket', () => {
+  const from = Date.parse('2026-01-31T10:00:00Z')
+  const hour = 3_600_000
+
+  it('is the minute up to two hours', () => {
+    expect(allWorkflowsBucket(from, from + 2 * hour)).toBe('minute')
+    expect(allWorkflowsBucket(from, from + 2 * hour + 1)).toBe('hour')
+  })
+
+  it('is the hour up to three days', () => {
+    expect(allWorkflowsBucket(from, from + 72 * hour)).toBe('hour')
+    expect(allWorkflowsBucket(from, from + 72 * hour + 1)).toBe('day')
+  })
+
+  it('is the day up to three months, by the calendar', () => {
+    const threeMonths = Date.parse('2026-04-30T10:00:00Z')
+
+    expect(allWorkflowsBucket(from, threeMonths)).toBe('day')
+    expect(allWorkflowsBucket(from, threeMonths + 1)).toBe('month')
+  })
+
+  it('asks for no period: the read\'s whole history', () => {
+    expect(periodRange('all', from)).toBeNull()
+  })
+})
+
+describe('a token bucket in words', () => {
+  const zone = 'Europe/Berlin'
+  const start = Date.parse('2026-10-06T12:00:00Z')
+
+  it('gives the bucket, each member\'s figure, the total and the runs not measured, escaped', () => {
+    const column: FigureColumn = {
+      from: start,
+      to: start + 3_600_000,
+      total: 1500,
+      measured: 3,
+      unmeasured: 2,
+      unsplit: 1,
+      members: [
+        { member: 'Ines', value: 1200, measured: 2, unmeasured: 0, unsplit: 0 },
+        { member: 'Bold', value: 300, measured: 1, unmeasured: 2, unsplit: 0 },
+        { member: 'Rhea', value: 0, measured: 0, unmeasured: 0, unsplit: 1 },
+      ],
+    }
+    const people = new Map([
+      ['Ines', { name: 'Ines Lopez' }],
+      ['Bold', { name: '<b>Bold</b> (removed)' }],
+      ['Rhea', { name: 'Rhea' }],
+    ])
+    const html = figureTooltipHtml(column, 'hour', zone, people)
+    const text = html.replace(/<[^>]+>/g, '')
+
+    expect(text).toContain('Tue 14:00–15:00')
+    expect(text).toContain(`Ines Lopez — ${(1200).toLocaleString()}`)
+    expect(text).toContain(`&lt;b&gt;Bold&lt;/b&gt; (removed) — ${(300).toLocaleString()}, 2 runs not measured`)
+    expect(text).toContain('Rhea — 1 run: split not reported')
+    expect(text).toContain(`Total ${(1500).toLocaleString()}`)
+    expect(text).toContain('2 runs not measured')
+    expect(text).toContain('1 run: split not reported')
+    expect(html).not.toContain('<b>')
+    expect(html).not.toContain('style=')
+  })
+
+  it('never reads a bucket of only unmeasured runs as a total of zero', () => {
+    const column: FigureColumn = {
+      from: start, to: start + 3_600_000, total: 0, measured: 0, unmeasured: 3, unsplit: 0,
+      members: [{ member: 'Ines', value: 0, measured: 0, unmeasured: 3, unsplit: 0 }],
+    }
+    const text = figureTooltipHtml(column, 'hour', zone, new Map()).replace(/<[^>]+>/g, '')
+
+    expect(text).toContain('Ines — 3 runs not measured')
+    expect(text).not.toMatch(/\b0\b/)
+    expect(text).toContain('Total not measured')
   })
 })
