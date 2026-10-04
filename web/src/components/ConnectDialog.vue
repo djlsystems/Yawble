@@ -158,6 +158,12 @@ const projectId = ref('');
 const done = ref<Set<string>>(new Set());
 const clientId = ref('');
 const clientSecret = ref('');
+
+/** Each API's own link, for just the APIs the guide (read for the ticked scopes) names on this step. */
+function apisFor(item: ConnectionGuide['steps'][number]) {
+  const named = new Set(item.copy.map((value) => value.value));
+  return (needs.value?.apis ?? []).filter((api) => named.has(api.api));
+}
 const clientBusy = ref(false);
 
 const steps = computed<ConnectionGuideStep[]>(() => guide.value?.steps ?? []);
@@ -391,8 +397,8 @@ const stepLabels = computed(() => [
                 data-guide-link
               >Open in {{ provider.name }}</a>
 
-              <template v-if="item.id === 'apis' && needs">
-                <div v-for="api in needs.apis" :key="api.api" data-guide-api>
+              <template v-if="item.id === 'apis'">
+                <div v-for="api in apisFor(item)" :key="api.api" data-guide-api>
                   <a :href="guideLink(api.link, projectId)" target="_blank" rel="noopener noreferrer" class="mono">{{ api.api }}</a>
                 </div>
               </template>
