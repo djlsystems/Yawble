@@ -1150,6 +1150,76 @@ public sealed class ConnectionsTests : IAsyncLifetime
         Assert.Equal(404, missing.GetProperty("status").GetInt32());
     }
 
+    [Fact]
+    public async Task The_cli_device_code_reaches_no_exchange_answer_and_no_file_under_the_data_root()
+    {
+        await SetUpMicrosoftAsync();
+        var folder = Path.Combine(_dataRoot, ConnectRequests.Folder);
+        await WaitUntilAsync(() => Directory.Exists(folder));
+
+        // No redirectUri: the CLI opens no port for a sign-in with a code.
+        var started = await ExchangeAsync(new { op = "start", provider = "microsoft", scopes = new[] { GraphMail }, flow = "device" });
+        Assert.Equal(200, started.GetProperty("status").GetInt32());
+        var start = started.GetProperty("start");
+        Assert.Equal(["expiresAt", "flowId", "userCode", "verificationUri"], start.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        var flowId = start.GetProperty("flowId").GetString()!;
+
+        var reports = new List<string> { started.GetRawText() };
+        reports.Add(File.ReadAllText(Path.Combine(folder, ConnectRequests.ReportFile)));
+        reports.Add((await ExchangeAsync(new { op = "flow", flowId })).GetRawText());
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+        reports.Add((await ExchangeFlowAsync(flowId, until: "done")).GetRawText());
+        reports.Add(File.ReadAllText(Path.Combine(folder, ConnectRequests.ReportFile)));
+
+        var code = Assert.Single(_provider.DeviceCodes);
+        Assert.DoesNotContain(reports, r => r.Contains(code, StringComparison.Ordinal));
+
+        SqliteConnection.ClearAllPools();
+        foreach (var file in Directory.EnumerateFiles(_dataRoot, "*", SearchOption.AllDirectories))
+        {
+            if (file.StartsWith(PluginInstall.PluginsRoot(_dataRoot), StringComparison.Ordinal)) continue;
+
+            byte[] bytes;
+            try { bytes = await File.ReadAllBytesAsync(file, Ct); }
+            catch (IOException) { continue; }
+
+            Assert.False(Encoding.Latin1.GetString(bytes).Contains(code, StringComparison.Ordinal), $"{Path.GetRelativePath(_dataRoot, file)} holds a device code.");
+        }
+    }
+
+    [Fact]
+    public async Task The_cli_reads_a_persons_device_flow_exactly_as_a_missing_one()
+    {
+        await SetUpMicrosoftAsync();
+        var folder = Path.Combine(_dataRoot, ConnectRequests.Folder);
+        await WaitUntilAsync(() => Directory.Exists(folder));
+
+        var flowId = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        Assert.Equal("waiting", (await FlowAsync(flowId)).GetProperty("state").GetString());
+
+        var theirs = await ExchangeAsync(new { op = "flow", flowId });
+        var missing = await ExchangeAsync(new { op = "flow", flowId = "no-such-flow" });
+
+        Assert.Equal(404, theirs.GetProperty("status").GetInt32());
+        Assert.Equal(missing.GetProperty("status").GetInt32(), theirs.GetProperty("status").GetInt32());
+        Assert.Equal(missing.GetProperty("error").GetString(), theirs.GetProperty("error").GetString());
+        Assert.False(theirs.TryGetProperty("flow", out _));
+    }
+
+    [Fact]
+    public async Task The_cli_device_start_for_a_provider_with_no_device_endpoint_answers_400_with_the_sentence()
+    {
+        var folder = Path.Combine(_dataRoot, ConnectRequests.Folder);
+        await WaitUntilAsync(() => Directory.Exists(folder));
+
+        var refused = await ExchangeAsync(new { op = "start", provider = "google", scopes = new[] { MailScope }, flow = "device" });
+
+        Assert.Equal(400, refused.GetProperty("status").GetInt32());
+        Assert.Contains("Google", refused.GetProperty("error").GetString());
+        Assert.False(refused.TryGetProperty("start", out var start) && start.ValueKind != JsonValueKind.Null);
+        Assert.Empty(_provider.DeviceStarts);
+    }
+
     // ---- no leaks ---------------------------------------------------------------------------------
 
     [Fact]

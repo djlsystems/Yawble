@@ -111,6 +111,18 @@ which with `deviceFlow`.
   reconnect must be the same account, the scopes merged, the tokens stored as ciphertext with the
   tenant row in the same transaction. Refusal and expiry store nothing.
 
+Pinned by `ConnectionsTests` (`A_device_sign_in_answers_only_the_code_and_link_and_its_device_code_reaches_no_answer_row_or_file`,
+`Device_polling_waits_the_providers_interval_and_five_seconds_more_after_each_slow_down`,
+`An_approved_device_sign_in_stores_the_connection_with_its_tenant_row`,
+`A_refused_device_sign_in_ends_with_a_sentence_and_stores_nothing`,
+`An_expired_device_sign_in_ends_with_a_sentence_and_stores_nothing`,
+`Another_person_reads_a_device_flow_exactly_as_a_missing_one`, `A_machine_principal_cannot_read_a_device_flow`,
+`A_device_reconnect_that_signs_in_as_another_account_is_refused_and_changes_nothing`,
+`A_microsoft_public_client_is_saved_with_no_secret_and_its_exchange_and_refresh_send_none`,
+`The_microsoft_tenant_follows_who_can_sign_in`, `A_provider_with_no_device_endpoint_refuses_a_device_sign_in_with_a_sentence`
+and the CLI exchange tests below), `ConnectionNeedsTests.The_microsoft_guide_sets_up_a_public_client_signed_in_with_a_code`
+and, in the web, `web/src/components/__tests__/connect-dialog-device.mount.spec.ts`.
+
 No step of either guide carries a secret: the secret is pasted by you, stored encrypted, and never
 shown again.
 
@@ -180,7 +192,14 @@ yawble connect microsoft --device --scopes https://graph.microsoft.com/Mail.Read
 listener, nothing to register. It is refused with a sentence for a provider with no device endpoint.
 Through the request file below it sends `{ op: "start", flow: "device", ... }`, answered
 `start: { flowId, userCode, verificationUri, expiresAt }`, then `{ op: "flow", flowId }`, answered
-`flow: { state, sentence, connection? }` (404 for a flow that is not the operator's).
+`flow: { state, sentence, connection? }` (404 for a flow that is not the operator's, exactly as for a
+missing one). For a provider with no device endpoint the start answers status 400 with the sentence in
+`error`. The device code is in no report and no file under the data root. Pinned by `ConnectionsTests`
+(`The_cli_device_flow_starts_and_reads_through_the_operator_exchange`,
+`The_cli_device_code_reaches_no_exchange_answer_and_no_file_under_the_data_root`,
+`The_cli_reads_a_persons_device_flow_exactly_as_a_missing_one`,
+`The_cli_device_start_for_a_provider_with_no_device_endpoint_answers_400_with_the_sentence`) and, in the CLI,
+`cli/internal/cli/connect_device_test.go`.
 
 ### How the CLI reaches the Host
 
