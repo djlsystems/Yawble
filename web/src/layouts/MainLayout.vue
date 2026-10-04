@@ -38,6 +38,8 @@ import VersionTag from '../components/VersionTag.vue';
 import CapacityMonitor from '../components/CapacityMonitor.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
+import { announceProviderReturn, leaveForProvider } from '../lib/providerReturn';
+import { goTo } from '../lib/browserNavigation';
 import {
   ConnectionsAction,
   DocumentsAction,
@@ -144,13 +146,40 @@ const connectionNotice = ref<CallbackOutcome | null>(null);
  * `watch(open)` sees the opening edge and loads.
  */
 onMounted(() => {
+  const signin = router.currentRoute.value.query.signin;
+  if (typeof signin === 'string' && signin !== '') {
+    void leaveForSignin(signin);
+    return;
+  }
+
   const returned = callbackOutcome(router.currentRoute.value.query);
   if (!returned) return;
 
   connectionNotice.value = returned;
   connectionsOpen.value = true;
   void router.replace({ query: {} });
+
+  // A slot's Add connection sent this tab to the provider and waits in its own: once it has taken
+  // what came back, this tab closes. A tab the browser will not close shows the notice as before.
+  void announceProviderReturn(returned).then((taken) => {
+    if (taken) window.close();
+  });
 });
+
+/** Opened from a slot's Add connection: on to the provider that tab started, or why not. */
+async function leaveForSignin(tag: string) {
+  void router.replace({ query: {} });
+  const url = await leaveForProvider(tag);
+  if (url) {
+    goTo(url);
+    return;
+  }
+  connectionNotice.value = {
+    outcome: 'refused',
+    reason: 'The page that started this sign-in is no longer waiting for it. Start it again there.',
+  };
+  connectionsOpen.value = true;
+}
 const repositoriesOpen = ref(false);
 const outcomesOpen = ref(false);
 /** Admin > Sites, and Active Team > Sites, which is the same screen with `sitesTeam` set. */

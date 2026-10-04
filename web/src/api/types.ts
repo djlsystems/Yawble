@@ -3146,6 +3146,19 @@ export interface ConnectionDeviceStart {
   expiresAt: string
 }
 
+/**
+ * One of `GET /api/connections/flows/open`: a sign-in with a code the caller started that the Host
+ * still holds - the code the person types, never the provider's device code.
+ */
+export interface ConnectionOpenFlow {
+  flowId: string
+  provider: string
+  userCode: string
+  verificationUri: string
+  expiresAt: string
+  state: ConnectionFlow['state']
+}
+
 /** `GET /api/connections/flows/{flowId}`: where a sign-in with a code is, in a sentence. */
 export interface ConnectionFlow {
   state: 'waiting' | 'done' | 'refused' | 'expired'
@@ -3356,7 +3369,24 @@ export interface SolutionPlan {
     documents: SolutionDocumentInput[]
   }
   personSettings: SolutionPersonSetting[]
+  /**
+   * Each connection input with its slot as the package's plugin declares it - known before the
+   * plugin is installed, which the installed plugins and the needs read are not.
+   */
+  personConnections: SolutionPersonConnection[]
   ignored: string[]
+}
+
+/** One connection input of a plan: its member's plugin, and the providers and scopes the slot takes. */
+export interface SolutionPersonConnection {
+  member: string
+  slot: string
+  description: string
+  required: boolean
+  plugin: string | null
+  providers: string[]
+  /** Provider -> the scopes the slot asks of a connection of it. */
+  scopes: Record<string, string[]>
 }
 
 /** `POST /api/solutions/check`. A 400 (a refused folder) is thrown with the Host's sentence. */

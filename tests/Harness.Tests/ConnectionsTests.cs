@@ -256,6 +256,7 @@ public sealed class ConnectionsTests : IAsyncLifetime
         {
             (HttpMethod.Get, "/api/connections"),
             (HttpMethod.Get, "/api/connections/providers"),
+            (HttpMethod.Get, "/api/connections/flows/open"),
             (HttpMethod.Post, "/api/connections/start"),
             (HttpMethod.Post, "/api/connections/complete"),
             (HttpMethod.Delete, $"/api/connections/{id}"),
@@ -395,6 +396,42 @@ public sealed class ConnectionsTests : IAsyncLifetime
         var reconnect = await StartAsync([MailScope], reconnectId: id);
         await CallbackLocationAsync(reconnect.GetProperty("state").GetString()!);
         await HireAsync("Inbox", id);
+    }
+
+    [Fact]
+    public async Task A_connection_just_signed_in_from_a_slot_binds_through_the_settings_route_and_one_missing_scopes_is_refused_there()
+    {
+        var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name = "Inbox", agent = "plugin:mailer" }, Ct);
+        Assert.Equal(HttpStatusCode.OK, hired.StatusCode);
+        var settings = $"/api/teams/{_team}/members/Inbox/plugin-settings";
+
+        // Signed in without the slot's scope: refused with its sentence and Reconnect, nothing bound, no row.
+        var narrow = await ConnectAsync(scopes: []);
+        var refused = await SendAsync(HttpMethod.Put, settings, new
+        {
+            config = new { }, secrets = new { }, connections = new Dictionary<string, string> { ["mail"] = narrow },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.Status);
+        var body = JsonDocument.Parse(refused.Body).RootElement;
+        Assert.Contains($"was not granted the scope `{MailScope}` that slot `mail` needs. Reconnect it from Admin", body.GetProperty("error").GetString());
+        Assert.Equal(narrow, body.GetProperty("reconnect").GetProperty("connectionId").GetString());
+        Assert.Equal(JsonValueKind.Object, (await GetAsync(settings)).GetProperty("connections").ValueKind);
+        Assert.False((await GetAsync(settings)).GetProperty("connections").TryGetProperty("mail", out _));
+        Assert.DoesNotContain(TenantActions.MemberConnectionsChanged, await TenantActionsAsync());
+
+        // A Microsoft sign-in with a code, just done, binds to the same slot, with its row.
+        await SetUpMicrosoftAsync();
+        var flowId = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+        var id = (await FlowAsync(flowId, until: "done")).GetProperty("connection").GetProperty("id").GetString()!;
+
+        var bound = await SendAsync(HttpMethod.Put, settings, new
+        {
+            config = new { }, secrets = new { }, connections = new Dictionary<string, string> { ["mail"] = id },
+        });
+        Assert.True(bound.Status == HttpStatusCode.OK, bound.Body);
+        Assert.Equal(id, (await GetAsync(settings)).GetProperty("connections").GetProperty("mail").GetString());
+        Assert.Contains(await TenantRowsAsync(), r => r.Action == TenantActions.MemberConnectionsChanged && r.ActorEmail == Email);
     }
 
     [Fact]
@@ -1015,6 +1052,67 @@ public sealed class ConnectionsTests : IAsyncLifetime
         manager.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.Header, await ManagerKeyAsync());
 
         using var response = await manager.GetAsync($"/api/connections/flows/{flowId}", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.DoesNotContain("U1-WXYZ", await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task A_person_lists_only_their_own_waiting_device_sign_ins_and_never_a_device_code()
+    {
+        await SetUpMicrosoftAsync();
+
+        var settled = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        _provider.DeviceAnswers.Writer.TryWrite("approve");
+        await FlowAsync(settled, until: "done");
+
+        // The poll now waits on the provider, so this one stays waiting.
+        var start = await StartDeviceAsync();
+        var waiting = start.GetProperty("flowId").GetString()!;
+
+        const string Other = "other@example.test";
+        await Services.GetRequiredService<IUserStore>().CreateAsync(Other, Password, ct: Ct);
+        using var other = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        (await other.PostAsJsonAsync("/api/auth/login", new { email = Other, password = Password }, Ct)).EnsureSuccessStatusCode();
+        using var theirStart = await other.PostAsJsonAsync("/api/connections/start",
+            new { provider = "microsoft", scopes = new[] { GraphMail }, flow = "device" }, Ct);
+        Assert.Equal(HttpStatusCode.OK, theirStart.StatusCode);
+        var theirs = JsonDocument.Parse(await theirStart.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("flowId").GetString()!;
+
+        var open = Assert.Single((await GetAsync("/api/connections/flows/open")).EnumerateArray());
+        Assert.Equal(
+            ["expiresAt", "flowId", "provider", "state", "userCode", "verificationUri"],
+            open.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(waiting, open.GetProperty("flowId").GetString());
+        Assert.Equal("microsoft", open.GetProperty("provider").GetString());
+        Assert.Equal(start.GetProperty("userCode").GetString(), open.GetProperty("userCode").GetString());
+        Assert.Equal(start.GetProperty("verificationUri").GetString(), open.GetProperty("verificationUri").GetString());
+        Assert.Equal(start.GetProperty("expiresAt").GetDateTimeOffset(), open.GetProperty("expiresAt").GetDateTimeOffset());
+        Assert.Equal("waiting", open.GetProperty("state").GetString());
+
+        using var theirList = await other.GetAsync("/api/connections/flows/open", Ct);
+        var theirOpen = Assert.Single(JsonDocument.Parse(await theirList.Content.ReadAsStringAsync(Ct)).RootElement.EnumerateArray());
+        Assert.Equal(theirs, theirOpen.GetProperty("flowId").GetString());
+
+        // Past its expiry a flow is no longer open, even before its poll has noticed.
+        _clock.Advance(TimeSpan.FromSeconds(_provider.DeviceExpiresIn + 1));
+        Assert.Empty((await GetAsync("/api/connections/flows/open")).EnumerateArray());
+
+        foreach (var code in _provider.DeviceCodes)
+        {
+            Assert.DoesNotContain(_responses, r => r.Contains(code, StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task A_machine_principal_cannot_list_open_device_sign_ins()
+    {
+        await SetUpMicrosoftAsync();
+        await StartDeviceAsync();
+
+        using var manager = _factory.CreateClient();
+        manager.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.Header, await ManagerKeyAsync());
+
+        using var response = await manager.GetAsync("/api/connections/flows/open", Ct);
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.DoesNotContain("U1-WXYZ", await response.Content.ReadAsStringAsync(Ct));
     }

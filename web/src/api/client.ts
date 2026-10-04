@@ -53,6 +53,7 @@ import type {
   ConnectionDeviceStart,
   ConnectionDeviceStartRequest,
   ConnectionFlow,
+  ConnectionOpenFlow,
   PluginList,
   PluginInstallResult,
   PluginRemoveResult,
@@ -1477,6 +1478,9 @@ export const startDeviceConnection = (body: ConnectionDeviceStartRequest) =>
 /** A sign-in with a code: waiting, done (with the connection), refused or expired. Only its starter reads it. */
 export const getConnectionFlow = (flowId: string) =>
   json<ConnectionFlow>(`/api/connections/flows/${encodeURIComponent(flowId)}`)
+
+/** The caller's own sign-ins with a code still open at the Host, so Add connection can pick one back up. */
+export const listOpenConnectionFlows = () => json<ConnectionOpenFlow[]>('/api/connections/flows/open')
 
 export const renameConnection = (id: string, name: string) =>
   json<Connection>(`/api/connections/${encodeURIComponent(id)}`, {

@@ -8,6 +8,7 @@ import {
   type Agent,
   type ContainerSnapshot,
   type MemberDetail,
+  type PluginHire,
 } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -31,7 +32,8 @@ import {
   type PluginFieldValues,
   type PluginSettingsShape,
 } from '../lib/pluginSettings';
-import { initialBindings } from '../lib/connections';
+import { bindingsBody, initialBindings } from '../lib/connections';
+import { bindSlot } from '../lib/slotBinding';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 
 
@@ -147,6 +149,20 @@ const pluginSecrets = ref<Record<string, string>>({});
 const pluginConnections = ref<Record<string, string>>({});
 const pluginSaved = ref('');
 const pluginProblem = ref<string | null>(null);
+/** The plugin it runs, for a slot's Connect. */
+const pluginId = ref('');
+
+/**
+ * A sign-in from a slot completed: the new connection is bound now, through the settings route, and
+ * counted as saved - the rest of the form stays as the person left it.
+ */
+async function bindPluginSlot(slot: string, connectionId: string) {
+  await bindSlot(props.snapshot.team, props.snapshot.id, slot, connectionId);
+  pluginConnections.value = { ...pluginConnections.value, [slot]: connectionId };
+  const saved = JSON.parse(pluginSaved.value) as PluginHire;
+  saved.connections = bindingsBody(pluginShape.value?.connections, { ...(saved.connections ?? {}), [slot]: connectionId });
+  pluginSaved.value = JSON.stringify(saved);
+}
 
 const pluginMissing = computed(() =>
   pluginShape.value ? missingRequired(pluginShape.value, pluginConfig.value, pluginSecrets.value) : [],
@@ -176,6 +192,7 @@ async function loadPluginSettings() {
   try {
     // A plugin that is no longer installed is the route's 409, whose sentence lands below.
     const settings = await getPluginSettings(props.snapshot.team, props.snapshot.id);
+    pluginId.value = settings.plugin;
     const shape: PluginSettingsShape = {
       config: settings.fields,
       secrets: settings.secretFields,
@@ -431,6 +448,8 @@ async function submit() {
             v-model:secrets="pluginSecrets"
             v-model:connections="pluginConnections"
             :shape="pluginShape"
+            :plugin="pluginId"
+            :bind-slot="bindPluginSlot"
           />
           <div v-else-if="pluginProblem" class="text-negative text-caption">{{ pluginProblem }}</div>
           <div v-else class="text-caption os-text-muted">Reading its settings…</div>
