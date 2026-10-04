@@ -348,6 +348,19 @@ public sealed class SqliteTeamStore : ITeamStore
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task<DateTimeOffset?> CreatedAtAsync(string team, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText = "SELECT created_utc FROM teams WHERE id = $id";
+        command.Parameters.AddWithValue("$id", team);
+
+        return await command.ExecuteScalarAsync(ct) is string created
+            ? DateTimeOffset.Parse(created, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
+            : null;
+    }
+
     public async Task<IReadOnlyList<PersistedTeam>> TeamsAsync(CancellationToken ct = default)
     {
         await using var connection = Open();
