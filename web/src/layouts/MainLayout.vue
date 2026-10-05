@@ -533,6 +533,9 @@ async function signOut() {
 
     <q-page-container>
       <router-view />
+      <!-- The screen an address opens over the Console (the install review, the Solutions
+           launcher, a control panel): see `routes.ts`. -->
+      <router-view name="overlay" />
     </q-page-container>
 
     <!-- The bubble is available with no active team AND with no teams at all: an empty

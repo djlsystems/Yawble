@@ -8,6 +8,16 @@ import type { RouteRecordRaw } from 'vue-router';
  * `publicRoute` in the meta is what the guard reads. Marking it here rather than listing paths in
  * the guard keeps the two from drifting when a route is added.
  */
+/**
+ * THE CONSOLE, ONE COPY UNDER EVERY CONSOLE ADDRESS. `/console`, the install link and the Solutions
+ * screens all show the board as their default view, and the screen an address opens - the install
+ * review, the launcher, a control panel - in the layout's `overlay` view over it. Following a link
+ * between them therefore leaves the board as it is and only opens or closes the screen. Each used to
+ * render a board of its own, so a link tore the whole Console down and built it again, and a fault
+ * in that teardown left the old view up with the new address and nothing else (B003V).
+ */
+const Console = () => import('@/pages/IndexPage.vue');
+
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
@@ -25,7 +35,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/console',
     component: () => import('@/layouts/MainLayout.vue'),
-    children: [{ path: '', component: () => import('@/pages/IndexPage.vue') }],
+    children: [{ path: '', component: Console }],
   },
 
   // THE INSTALL DEEP LINK: `#/solutions/install?folder=<absolute path>` opens the solution wizard over
@@ -34,7 +44,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/solutions/install',
     component: () => import('@/layouts/MainLayout.vue'),
-    children: [{ path: '', component: () => import('@/pages/SolutionInstallPage.vue') }],
+    children: [{ path: '', components: { default: Console, overlay: () => import('@/pages/SolutionInstallPage.vue') } }],
   },
 
   // THE SOLUTIONS LAUNCHER, `#/solutions`, and ONE SOLUTION'S CONTROL PANEL, `#/solutions/<team>`: the
@@ -45,8 +55,8 @@ const routes: RouteRecordRaw[] = [
     path: '/solutions',
     component: () => import('@/layouts/MainLayout.vue'),
     children: [
-      { path: '', component: () => import('@/pages/SolutionsPage.vue') },
-      { path: ':team', component: () => import('@/pages/SolutionsPage.vue') },
+      { path: '', components: { default: Console, overlay: () => import('@/pages/SolutionsPage.vue') } },
+      { path: ':team', components: { default: Console, overlay: () => import('@/pages/SolutionsPage.vue') } },
     ],
   },
 

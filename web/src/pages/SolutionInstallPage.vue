@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import IndexPage from './IndexPage.vue';
 import SolutionWizard from '../components/SolutionWizard.vue';
 
 /**
- * THE INSTALL DEEP LINK, `#/solutions/install?folder=<absolute path>`: the Console, with the solution
- * wizard open over it and filled in with that folder.
+ * THE INSTALL DEEP LINK, `#/solutions/install?folder=<absolute path>`: the solution wizard, filled in
+ * with that folder, in the layout's `overlay` view over the Console (which the route keeps as it is).
  *
  * The check is sent with `from: 'link'`, so the Host also refuses a folder outside the instance's
  * documents and every team's folder; that refusal is the wizard's first screen and nothing else
@@ -48,6 +47,5 @@ watch(open, (showing) => {
 </script>
 
 <template>
-  <IndexPage />
   <SolutionWizard v-model="open" :folder="folder" from="link" />
 </template>

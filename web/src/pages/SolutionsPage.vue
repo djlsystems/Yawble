@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import IndexPage from './IndexPage.vue';
 import SolutionsLauncher from '../components/SolutionsLauncher.vue';
 import SolutionPanel from '../components/SolutionPanel.vue';
 import { LauncherPath, panelPath } from '../lib/solutionPanel';
 
 /**
  * THE SOLUTIONS SCREENS AS ADDRESSES: `#/solutions` is the Console with the launcher open over it,
- * `#/solutions/<team>` the same with that solution's control panel open. The ribbon button, a tile's
- * Manage, the board header's "Manage solution" and a link the Concierge gives all land here, and a
- * reload stays where it was.
+ * `#/solutions/<team>` the same with that solution's control panel open. This page is only the
+ * screens, in the layout's `overlay` view; the route keeps the Console under them. The ribbon
+ * button, a tile's Manage, the board header's "Manage solution" and a link the Concierge gives all
+ * land here, and a reload stays where it was.
  *
  * Closing either screen leaves for the plain Console; the panel's back arrow and a finished
  * uninstall go to the launcher.
@@ -49,7 +49,6 @@ watch([launcherOpen, panelOpen], ([launcher, panel]) => {
 </script>
 
 <template>
-  <IndexPage />
   <SolutionsLauncher v-model="launcherOpen" @manage="(next: string) => go(panelPath(next))" />
   <SolutionPanel v-if="team" v-model="panelOpen" :team="team" @launcher="go(LauncherPath)" />
 </template>
