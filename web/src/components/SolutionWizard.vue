@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import ChipListInput from './ChipListInput.vue';
-import SlotConnect from './SlotConnect.vue';
+import ConnectionPicker from './ConnectionPicker.vue';
+import SlotReconnect from './SlotReconnect.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   checkSolution,
   installSolution,
   listConnectionProviders,
+  listConnections,
   previewSolution,
   solutionsInstalled,
   teamSolution,
@@ -20,6 +22,7 @@ import {
   type ConnectionSlot,
   type InstalledSolution,
   type SolutionCheck,
+  type SolutionConnectionOption,
   type SolutionDiff,
   type SolutionDiffSection,
   type SolutionInstallResult,
@@ -33,6 +36,8 @@ import {
   type SolutionStep,
 } from '../api/types';
 import { firstProblem, teamLabel } from '../lib/rules';
+import { named, providerName } from '../lib/connections';
+import { refusedReconnect } from '../lib/slotBinding';
 import {
   SolutionStepTitles,
   capWords,
@@ -131,6 +136,8 @@ function reset() {
   files.value = {};
   result.value = null;
   installError.value = '';
+  installReconnect.value = null;
+  retryNote.value = '';
   uploads.value = [];
   missing.value = null;
   missingProblem.value = '';
@@ -341,43 +348,89 @@ function connectionWords(id: string | null): string {
   return connectionOptions.value.find((option) => option.value === id)?.label ?? id;
 }
 
-// CONNECT BESIDE EACH PICKER: the slot as the plan's personConnections name it - a bundled plugin is
-// not installed before the install, so only the package knows its slots - and the providers to sign
-// in to. A connection made here is selected in that picker; the install binds it, as it binds one
-// chosen there.
+// EACH CONNECTION INPUT IS A CONNECTION PICKER, for the slot as the plan's personConnections name it
+// - a bundled plugin is not installed before the install, so only the package knows its slots. It
+// offers Connect for the slot, and says before the install when the chosen connection lacks a scope
+// the slot needs, with Reconnect for exactly those scopes (in another tab: the wizard stays). A
+// connection made or reconnected here is chosen in that picker; the install binds it, as it binds
+// one chosen there.
+//
+// The preview lists the connections without their scopes, so they are read whole from the
+// connections list; when that cannot be read, the pickers offer the preview's list and leave the
+// scope check to the Host's install.
 const providers = ref<ConnectionProvider[]>([]);
+const listedConnections = ref<Connection[] | null>(null);
 const connectedHere = ref<Connection[]>([]);
 
 async function loadSlots(from: SolutionPlan) {
+  listedConnections.value = null;
   if (from.inputs.connections.length === 0) return;
-  try {
-    providers.value = await listConnectionProviders();
-  } catch {
-    // Without them there is no Connect; the pickers are as they were.
-  }
+  await Promise.all([
+    listConnectionProviders()
+      .then((read) => (providers.value = read))
+      // Without them there is no Connect; the pickers are as they were.
+      .catch(() => undefined),
+    listConnections()
+      .then((read) => (listedConnections.value = read))
+      .catch(() => undefined),
+  ]);
 }
 
-/** The plugin and slot a connection input is for, or null when the plan does not say. */
-function slotOf(input: { member: string; slot: string }): { plugin: string; name: string; spec: ConnectionSlot } | null {
-  const named = plan.value?.personConnections.find((entry) => slotKey(entry) === slotKey(input));
-  if (!named?.plugin || providers.value.length === 0) return null;
+/** A connection as the preview names it, where the connections list could not be read. */
+function fromOption(option: SolutionConnectionOption): Connection {
   return {
-    plugin: named.plugin,
-    name: plan.value?.plugins.find((plugin) => plugin.id === named.plugin)?.name ?? named.plugin,
-    spec: { description: named.description, providers: named.providers, scopes: named.scopes, required: named.required, summary: '' },
+    ...option,
+    providerKind: option.provider === 'google' || option.provider === 'microsoft' ? option.provider : 'custom',
+    scopes: [],
+    connectedAt: '',
+    refreshedAt: null,
+    status: option.status === 'ok' ? 'ok' : 'needs-reconnect',
+    statusReason: null,
+    usedBy: [],
   };
 }
 
-function connectedFor(input: { member: string; slot: string }, connection: Connection) {
+/** Every connection a picker can offer: one made or reconnected here wins over its listed self. */
+const wizardConnections = computed<Connection[]>(() => {
+  const here = new Map(connectedHere.value.map((connection) => [connection.id, connection]));
+  const listed = new Map((listedConnections.value ?? []).map((connection) => [connection.id, connection]));
+  const offered = (okPreview.value?.connections ?? []).map(
+    (option) => here.get(option.id) ?? listed.get(option.id) ?? fromOption(option),
+  );
+  return [...offered, ...connectedHere.value.filter((made) => !offered.some((listed) => listed.id === made.id))];
+});
+
+/** The slot a connection input is for: the plan's, else one taking any connection. */
+function slotSpec(input: { member: string; slot: string; description: string; required: boolean }): ConnectionSlot {
+  const named = plan.value?.personConnections.find((entry) => slotKey(entry) === slotKey(input));
+  return {
+    description: input.description,
+    providers: named?.providers ?? [...new Set([...wizardConnections.value.map((connection) => connection.provider), 'custom'])],
+    // Scopes are checked only against connections read whole.
+    scopes: named && listedConnections.value ? named.scopes : {},
+    required: input.required,
+    summary: '',
+  };
+}
+
+/** The plugin declaring a connection input's slot, for Connect: null when the plan does not say. */
+function slotPlugin(input: { member: string; slot: string }): { id: string; name: string } | null {
+  const named = plan.value?.personConnections.find((entry) => slotKey(entry) === slotKey(input));
+  if (!named?.plugin || providers.value.length === 0) return null;
+  return { id: named.plugin, name: plan.value?.plugins.find((plugin) => plugin.id === named.plugin)?.name ?? named.plugin };
+}
+
+function rememberConnection(connection: Connection) {
   connectedHere.value = [...connectedHere.value.filter((made) => made.id !== connection.id), connection];
+}
+
+function connectedFor(input: { member: string; slot: string }, connection: Connection) {
+  rememberConnection(connection);
   bindings.value = { ...bindings.value, [slotKey(input)]: connection.id };
 }
 
 const connectionOptions = computed(() =>
-  [
-    ...(okPreview.value?.connections ?? []),
-    ...connectedHere.value.filter((made) => !(okPreview.value?.connections ?? []).some((listed) => listed.id === made.id)),
-  ].map((connection) => ({
+  wizardConnections.value.map((connection) => ({
     value: connection.id,
     label: `${connection.name} - ${connection.account} (${connection.provider})${connection.status === 'ok' ? '' : `, ${connection.status}`}`,
   })),
@@ -465,6 +518,23 @@ function connectionsBody(): Record<string, Record<string, string>> {
 const installing = ref(false);
 const result = ref<SolutionInstallResult | null>(null);
 const installError = ref('');
+/** A refusal for missing scopes: the connection to reconnect and the scopes to ask for. */
+const installReconnect = ref<{ connectionId: string; scopes: string[] } | null>(null);
+const retryNote = ref('');
+
+function installProviderName(connectionId: string): string {
+  const connection = wizardConnections.value.find((candidate) => candidate.id === connectionId);
+  return connection ? providerName(connection.provider, providers.value) : 'the provider';
+}
+
+/** Reconnected from the refusal: with every scope granted, the refusal goes and Install is pressed again. */
+function installReconnected(connection: Connection, lacking: string[]) {
+  rememberConnection(connection);
+  if (lacking.length > 0) return;
+  installError.value = '';
+  installReconnect.value = null;
+  retryNote.value = `Reconnected ${named(connection)}. Press Install again.`;
+}
 
 interface Upload {
   folder: string;
@@ -522,6 +592,8 @@ async function install() {
   installing.value = true;
   result.value = null;
   installError.value = '';
+  installReconnect.value = null;
+  retryNote.value = '';
 
   const settings = settingsBody(askedSettings.value, values.value);
   const connections = connectionsBody();
@@ -540,6 +612,8 @@ async function install() {
   } catch (cause) {
     // A 409 (the name was taken meanwhile) or a 400 (the folder refused): the Host's sentence.
     installError.value = cause instanceof Error ? cause.message : String(cause);
+    // Refused for missing scopes: the Host names the connection and the scopes to ask for.
+    installReconnect.value = refusedReconnect(cause);
   } finally {
     installing.value = false;
   }
@@ -901,38 +975,21 @@ function next() {
                     {{ input.description }} The update keeps this; change it in the member's settings.
                   </div>
                 </div>
-                <template v-else>
-                <div class="row items-center q-gutter-sm no-wrap">
-                  <q-select
-                    class="col"
-                    :model-value="bindings[slotKey(input)] || null"
-                    :options="connectionOptions"
-                    emit-value
-                    map-options
-                    outlined
-                    dense
-                    clearable
-                    :label="`Connection for ${input.member}: ${input.slot}`"
-                    @update:model-value="(value: string | null) => (bindings = { ...bindings, [slotKey(input)]: value ?? '' })"
-                  />
-                  <SlotConnect
-                    v-if="slotOf(input)"
-                    :plugin="slotOf(input)!.plugin"
-                    :slot-name="input.slot"
-                    :spec="slotOf(input)!.spec"
-                    :plugin-name="slotOf(input)!.name"
-                    :providers="providers"
-                    :connections="connectedHere"
-                    @connected="(connection: Connection) => connectedFor(input, connection)"
-                  />
-                </div>
-                <div class="text-caption os-text-muted">
-                  {{ input.description }} {{ input.required ? 'Required.' : 'Optional.' }}
-                </div>
-                <div v-if="connectionOptions.length === 0" class="text-caption os-text-muted" data-no-connections>
-                  No connection yet. A person connects one in Admin → Connections.
-                </div>
-                </template>
+                <ConnectionPicker
+                  v-else
+                  :model-value="bindings[slotKey(input)] ?? ''"
+                  :slot-name="input.slot"
+                  :spec="slotSpec(input)"
+                  :connections="wizardConnections"
+                  :providers="providers"
+                  :plugin="slotPlugin(input)?.id"
+                  :plugin-name="slotPlugin(input)?.name"
+                  :label="`Connection for ${input.member}: ${input.slot}`"
+                  :hint="`${input.description} ${input.required ? 'Required.' : 'Optional.'}`"
+                  reconnect-in-tab
+                  @update:model-value="(value: string) => (bindings = { ...bindings, [slotKey(input)]: value })"
+                  @connected="(connection: Connection) => connectedFor(input, connection)"
+                />
               </div>
             </section>
 
@@ -1013,7 +1070,15 @@ function next() {
             <q-banner v-if="installError" dense class="os-bg-tint-error text-negative q-mb-sm" data-install-error>
               <template #avatar><q-icon name="error" /></template>
               {{ installError }}
+              <SlotReconnect
+                v-if="installReconnect"
+                :connection-id="installReconnect.connectionId"
+                :scopes="installReconnect.scopes"
+                :provider-name="installProviderName(installReconnect.connectionId)"
+                @reconnected="installReconnected"
+              />
             </q-banner>
+            <div v-if="retryNote" class="q-mb-sm" data-install-retry>{{ retryNote }}</div>
 
             <ol v-if="installing || result" class="q-my-sm" data-install-steps>
               <li v-for="item in shownSteps" :key="item.step" :data-install-step="item.step" :data-done="item.done">

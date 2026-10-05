@@ -92,7 +92,7 @@ describe('Solution wizard - Your part', () => {
     const wrapper = await yourPart();
 
     const picker = selectLabelled(wrapper, 'Connection for Scout: mail');
-    expect(picker.props('options')).toEqual([{ value: 'conn-1', label: 'Work mail - dana@example.com (google)' }]);
+    expect(picker.props('options')).toEqual([{ value: 'conn-1', label: 'Work mail - dana@example.com (Microsoft)' }]);
     expect(bodyFind('[data-connection-input="Scout/mail"]')!.textContent).toContain('Where postings are emailed from.');
   });
 
@@ -214,7 +214,7 @@ describe('Solution wizard - Your part, on an update', () => {
     expect(bodyFind('[data-person-setting="Scout/limit"] [data-kept-setting]')!.textContent).toContain('kept: not set');
     expect(wrapper.findAllComponents(QSelect).find((select) => select.props('label') === 'Scout: sources')).toBeUndefined();
     expect(bodyFind('[data-connection-input="Scout/mail"] [data-kept-connection]')!.textContent).toContain(
-      'kept: Work mail - dana@example.com (google)',
+      'kept: Work mail - dana@example.com (microsoft)',
     );
     expect(bodyFind('[data-document-input="Resume"] [data-kept-files]')!.textContent).toContain('Already in Resume/: resume.pdf.');
 

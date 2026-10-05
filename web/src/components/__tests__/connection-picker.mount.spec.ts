@@ -186,7 +186,7 @@ describe('the binding picker, at hire', () => {
 
     expect(refusal()).toContain(
       "Connection 'Read only' (reader@example.com) was not granted the scope `https://mail.google.com/` that slot `mail` needs. " +
-        'Reconnect it from Admin → Connections with that scope, then bind it again.',
+        'Press Reconnect to grant that scope.',
     );
 
     const reconnect = [...bodyFind('[data-connection-slot="mail"]')!.querySelectorAll('button')].find(
