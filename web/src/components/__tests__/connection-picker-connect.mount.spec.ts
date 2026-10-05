@@ -327,7 +327,7 @@ describe("a plugin member's slot with nothing suitable bound", () => {
   it('shows the sentence of a binding the Host refuses, and offers Reconnect', async () => {
     const sentence =
       "Connection 'person@example.test' was not granted the scope `https://graph.microsoft.com/Mail.Send` that slot `mail` needs. " +
-      'Reconnect it from Admin → Connections with that scope, then bind it again.';
+      'Press Reconnect to grant that scope.';
     savePluginSettings.mockRejectedValue(
       Object.assign(new ActionRefused(sentence, { error: sentence, reconnect: { connectionId: 'conn-new', scopes: [mailSend] } }), {
         status: 400,

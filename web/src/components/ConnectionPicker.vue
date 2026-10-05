@@ -5,6 +5,7 @@ import type { Connection, ConnectionProvider, ConnectionSlot } from '../api/type
 import { goTo } from '../lib/browserNavigation';
 import { refusedReconnect } from '../lib/slotBinding';
 import SlotConnect from './SlotConnect.vue';
+import SlotReconnect from './SlotReconnect.vue';
 import {
   connectionsForSlot,
   goneRefusal,
@@ -34,6 +35,10 @@ import {
  * binds the new connection through the member's settings route and the opener shows it bound; with
  * no `bind` (a hire, an install) the connection is chosen here and the save binds it. A binding the
  * Host refuses is shown in its words, with Reconnect when only scopes are missing.
+ *
+ * With `reconnectInTab` (the solution wizard, whose answers a trip away would lose) Reconnect opens
+ * the provider in another tab and waits here; the reconnected connection comes back as `connected`
+ * and stays the binding, and a sign-in that granted fewer scopes than asked says so.
  */
 const props = defineProps<{
   slotName: string;
@@ -44,6 +49,14 @@ const props = defineProps<{
   plugin?: string | undefined;
   /** Binds a connection to this slot at the Host, throwing its refusal. */
   bind?: ((connectionId: string) => Promise<void>) | undefined;
+  /** The picker's label, when the slot's name alone does not say whose it is. */
+  label?: string | undefined;
+  /** The line under the picker, in place of the slot's own description and summary. */
+  hint?: string | undefined;
+  /** The plugin's name, for a slot whose plugin is not installed yet. */
+  pluginName?: string | undefined;
+  /** Reconnect in another tab, leaving this page as it is. */
+  reconnectInTab?: boolean | undefined;
 }>();
 
 const bound = defineModel<string>({ required: true });
@@ -76,6 +89,21 @@ const refusal = computed(() => {
   if (missing.value.length > 0) return scopeRefusal(props.slotName, chosen.value, missing.value);
   return '';
 });
+
+/** The name of a connection's provider, for Reconnect's link. */
+function providerOf(connectionId: string): string {
+  const connection = props.connections.find((candidate) => candidate.id === connectionId);
+  return connection ? providerName(connection.provider, props.providers) : 'the provider';
+}
+
+/** Reconnected in another tab: the lists are read again, and the binding stays the same connection. */
+function reconnectedHere(connection: Connection) {
+  emit('connected', connection);
+  if (bindReconnect.value?.connectionId === connection.id && missingScopes(props.spec, connection).length === 0) {
+    bindRefusal.value = '';
+    bindReconnect.value = null;
+  }
+}
 
 const reconnecting = ref(false);
 const reconnectProblem = ref('');
@@ -137,6 +165,7 @@ async function connected(connection: Connection) {
       v-if="plugin"
       class="q-mb-xs"
       :plugin="plugin"
+      :plugin-name="pluginName"
       :slot-name="slotName"
       :spec="spec"
       :providers="providers"
@@ -157,8 +186,8 @@ async function connected(connection: Connection) {
       outlined
       dense
       clearable
-      :label="`Connection for ${slotName}`"
-      :hint="`${spec.description ? spec.description + ' ' : ''}${slotSummary(spec, providers)}${spec.required ? '' : ' Optional.'}`"
+      :label="label ?? `Connection for ${slotName}`"
+      :hint="hint ?? `${spec.description ? spec.description + ' ' : ''}${slotSummary(spec, providers)}${spec.required ? '' : ' Optional.'}`"
       @update:model-value="(value: string | null) => (bound = value ?? '')"
     >
       <template #no-option>
@@ -176,8 +205,15 @@ async function connected(connection: Connection) {
 
     <div v-if="refusal" class="text-caption text-negative q-mt-xs row items-center q-gutter-x-sm" data-binding-refusal>
       <span>{{ refusal }}</span>
+      <SlotReconnect
+        v-if="missing.length > 0 && chosen && reconnectInTab"
+        :connection-id="chosen.id"
+        :scopes="missing"
+        :provider-name="providerOf(chosen.id)"
+        @reconnected="reconnectedHere"
+      />
       <q-btn
-        v-if="missing.length > 0"
+        v-else-if="missing.length > 0"
         flat
         dense
         no-caps
@@ -190,8 +226,15 @@ async function connected(connection: Connection) {
     </div>
     <div v-if="bindRefusal" class="text-caption text-negative q-mt-xs row items-center q-gutter-x-sm" data-bind-refused>
       <span>{{ bindRefusal }}</span>
+      <SlotReconnect
+        v-if="bindReconnect && reconnectInTab"
+        :connection-id="bindReconnect.connectionId"
+        :scopes="bindReconnect.scopes"
+        :provider-name="providerOf(bindReconnect.connectionId)"
+        @reconnected="reconnectedHere"
+      />
       <q-btn
-        v-if="bindReconnect"
+        v-else-if="bindReconnect"
         flat
         dense
         no-caps
