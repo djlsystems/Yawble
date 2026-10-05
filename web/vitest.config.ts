@@ -27,6 +27,11 @@ export default defineConfig({
       sassVariables: fileURLToPath(new URL('./src/css/quasar.variables.scss', import.meta.url)),
     }),
   ],
+  // `@/` as the app's tsconfig paths and Quasar's build resolve it, so a spec can load the real
+  // `router/routes.ts` rather than a hand-copied route table.
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   test: {
     environment: 'node',
     include: ['src/**/*.spec.ts'],
