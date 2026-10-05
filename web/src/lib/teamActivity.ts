@@ -280,28 +280,6 @@ export function tooltipHtml(lanes: readonly Lane[], at: number, withDate: boolea
 /** How wide one column of the Statistics dialog is: a local minute, hour, day or month. */
 export type Bucket = 'minute' | 'hour' | 'day' | 'month'
 
-/** Milliseconds per state. */
-export type StateTime = Record<ActivityState, number>
-
-/** One member's share of a column. */
-export interface MemberTime {
-  member: string
-  ms: StateTime
-}
-
-/**
- * ONE COLUMN: a bucket's edges as instants, the member-time recorded in it per state, and the same
- * per member - only the members with any time in it, in the order the lanes were given.
- */
-export interface Column {
-  from: number
-  to: number
-  totals: StateTime
-  members: MemberTime[]
-}
-
-const noTime = (): StateTime => ({ running: 0, waiting: 0, held: 0, blocked: 0, failed: 0, idle: 0 })
-
 const zoneFormats = new Map<string, Intl.DateTimeFormat>()
 
 /** A zone's wall clock at an instant, as numbers. */
@@ -406,61 +384,6 @@ function nextBucket(start: number, bucket: Bucket, timeZone: string): number {
 }
 
 /**
- * MEMBER-TIME PER BUCKET: every span split at the bucket edges of `timeZone` - local minute, hour,
- * midnight or the first of the month - and summed per state, and per member for the tooltip. An
- * open span counts up to the `to` it was grown to. A bucket nothing was recorded in has no column:
- * no data adds nothing, and is never idle.
- */
-export function bucketActivity(
-  lanes: readonly { member: string; spans: readonly GrownSpan[] }[],
-  bucket: Bucket,
-  timeZone: string,
-): Column[] {
-  const columns = new Map<number, Column>()
-
-  lanes.forEach((lane) => {
-    for (const span of lane.spans) {
-      let start = bucketStart(span.from, bucket, timeZone)
-
-      while (start < span.to) {
-        const end = nextBucket(start, bucket, timeZone)
-        const time = Math.min(end, span.to) - Math.max(start, span.from)
-
-        if (time > 0) {
-          let column = columns.get(start)
-
-          if (!column) {
-            column = { from: start, to: end, totals: noTime(), members: [] }
-            columns.set(start, column)
-          }
-
-          let mine = column.members.find((m) => m.member === lane.member)
-
-          if (!mine) {
-            mine = { member: lane.member, ms: noTime() }
-            column.members.push(mine)
-          }
-
-          column.totals[span.state] += time
-          mine.ms[span.state] += time
-        }
-
-        start = end
-      }
-    }
-  })
-
-  const order = new Map(lanes.map((lane, index) => [lane.member, index]))
-
-  return [...columns.values()]
-    .sort((a, b) => a.from - b.from)
-    .map((column) => ({
-      ...column,
-      members: column.members.sort((a, b) => order.get(a.member)! - order.get(b.member)!),
-    }))
-}
-
-/**
  * A BUCKET AS THE TOOLTIP NAMES IT, in the browser's locale and the given zone: a minute or an hour
  * by its two ends' times of day ("2:20:00 PM – 2:21:00 PM"), each with its date when the window
  * crosses days; a day by its date; a month by its month and year.
@@ -486,65 +409,6 @@ export function axisTimeLabel(ms: number, bucket: Bucket, timeZone: string): str
 }
 
 /**
- * Member-time in words short enough for one tooltip line: "40 s", "3 min 20 s", "2 h 5 min". Time
- * under a second is "<1 s": a state listed with time in it never reads as none.
- */
-export function memberTime(ms: number): string {
-  if (ms > 0 && ms < 1000) return '<1 s'
-
-  const seconds = Math.round(ms / 1000)
-
-  if (seconds < 60) return `${seconds} s`
-
-  const minutes = Math.floor(seconds / 60)
-
-  if (minutes < 60) return seconds % 60 === 0 ? `${minutes} min` : `${minutes} min ${seconds % 60} s`
-
-  const hours = Math.floor(minutes / 60)
-
-  return minutes % 60 === 0 ? `${hours} h` : `${hours} h ${minutes % 60} min`
-}
-
-/**
- * ONE COLUMN'S HOVER TOOLTIP AS MARKUP: the bucket, each state's total, then each member's split
- * with the lane's initials ("IL Ines Lopez — running 40 s, blocked 20 s"). States with no time are
- * left out. Escaped text in classed markup, never a `style` attribute, as in {@link tooltipHtml}.
- */
-export function columnTooltipHtml(
-  column: Column,
-  bucket: Bucket,
-  timeZone: string,
-  people: ReadonlyMap<string, { name: string; initials: string }>,
-  options: { hidden?: ReadonlySet<ActivityState>; withDate?: boolean } = {},
-): string {
-  // A STATE HIDDEN IN THE LEGEND is left out of the totals and the splits: the hover says what is drawn.
-  const shown = ActivityStates.filter((state) => !options.hidden?.has(state))
-  const split = (ms: StateTime) => shown
-    .filter((state) => ms[state] > 0)
-    .map((state) => `${stateWords(state)} ${memberTime(ms[state])}`)
-
-  const totals = shown
-    .filter((state) => column.totals[state] > 0)
-    .map((state) => `<div class="stats-tip-row"><span class="stats-chip stats-chip--${state}"></span>`
-      + `${escapeHtml(`${stateWords(state)} ${memberTime(column.totals[state])}`)}</div>`)
-
-  const members = column.members.flatMap((share) => {
-    const person = people.get(share.member) ?? { name: share.member, initials: memberInitials(share.member) }
-    const parts = split(share.ms)
-
-    return parts.length === 0
-      ? []
-      : [`<div class="stats-tip-row"><span class="stats-tip-initials">${escapeHtml(person.initials)}</span> `
-        + `<span class="stats-tip-name">${escapeHtml(person.name)}</span> — ${escapeHtml(parts.join(', '))}</div>`]
-  })
-
-  const label = bucketLabel(column.from, column.to, bucket, timeZone, options.withDate ?? false)
-
-  return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(label)}</div>`
-    + `${totals.join('')}<div class="stats-tip-members">${members.join('')}</div></div>`
-}
-
-/**
  * THE COLUMN SIZE THAT FITS A WINDOW, for the Statistics dialog and the Tokens chart alike: the
  * minute up to two hours, the hour up to three days, the day up to three months by the UTC calendar,
  * the month beyond.
@@ -565,11 +429,6 @@ export function windowBucket(from: number, to: number): Bucket {
     start.getUTCHours(), start.getUTCMinutes(), start.getUTCSeconds(), start.getUTCMilliseconds())
 
   return to <= threeMonths ? 'day' : 'month'
-}
-
-/** The words for a column size in a subtitle: "per minute", "per hour", "per day", "per month". */
-export function bucketWords(bucket: Bucket): string {
-  return `per ${bucket}`
 }
 
 /**
@@ -788,13 +647,6 @@ function seriesSlot(member: string, people: ReadonlyMap<string, unknown>): numbe
   const index = [...people.keys()].indexOf(member)
 
   return index < 0 ? 1 : (index % SeriesSlots) + 1
-}
-
-/** The y axis's unit for a bucket, and how many milliseconds one of it is. */
-export function bucketUnit(bucket: Bucket): { name: string; ms: number } {
-  return bucket === 'minute' || bucket === 'hour'
-    ? { name: 'member-minutes', ms: 60_000 }
-    : { name: 'member-hours', ms: 3_600_000 }
 }
 
 /** The colours a state is drawn in, and the tile's own colour its notches are cut from. */

@@ -1,33 +1,31 @@
 // @vitest-environment happy-dom
 //
 // THE STATISTICS DIALOG, opened from the Statistics tile on the team board: that it shows the tile's
-// own window with no period picker, the column size that fits it, how its columns stack, what its
-// tooltip says and where, and how it reads an empty window and a member since removed.
+// own window with no period picker, one lane per member and nothing under them, and that its hover
+// behaves as the tile's - the exact instant under the pointer, zoomed or not, and what each member
+// was doing then - and how it reads an empty window and a member since removed.
 //
-// The bucketing and the words are pinned without a DOM in `lib/__tests__/teamActivity.spec.ts`;
+// The lanes and the words are pinned without a DOM in `lib/__tests__/teamActivity.spec.ts`;
 // this file pins that the dialog reads the tile's window and draws what those functions decide.
 // Run it in more than one zone: every time here is expected in the browser's own locale and zone.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { init } from 'echarts/core';
 
 import TeamKpiStrip from '../TeamKpiStrip.vue';
 import { useConsoleStore } from '../../stores/console';
 import { asTeamId } from '../../api/types';
 import type { ActivityMember, TeamActivity, TeamWorkflows } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
-import { ActivityStates } from '../../lib/teamActivity';
 
 const teamId = asTeamId('alpha');
 
 /** The board's clock for every case here: Sun 4 Oct 2026, 14:30 UTC. */
 const now = Date.parse('2026-10-04T14:30:00Z');
 const utc = (time: string) => Date.parse(`2026-10-04T${time}Z`);
-// A column's label is the browser's own locale and zone, so the expected label is too: the suite runs
-// in UTC in a container and in the person's zone on their machine.
+// Times read in the browser's own locale and zone, so the expected text is too: the suite runs in
+// UTC in a container and in the person's zone on their machine.
 const time = (at: number) => new Date(at).toLocaleTimeString();
-const span = (from: string, to: string) => `${time(utc(from))} – ${time(utc(to))}`;
 const iso = (ms: number) => new Date(ms).toISOString();
 
 function container(id: string, name: string) {
@@ -52,8 +50,8 @@ function member(name: string, spans: ActivityMember['spans'], over: Partial<Acti
 }
 
 /**
- * In the 14:05 minute the Manager runs all of it and Ines runs half and is blocked half: 1.5
- * member-minutes running under 0.5 blocked. In the 14:06 minute only Ines, waiting 20 s.
+ * A window from 14:02 to 14:07. The Manager runs 14:05-14:06; Ines runs 14:05-14:05:30, is blocked
+ * to 14:06, then waits 20 s.
  */
 function activity(over: Partial<TeamActivity> = {}): TeamActivity {
   return {
@@ -149,113 +147,58 @@ async function openFromTile() {
   await settle();
 }
 
-/** The dialog's subtitle: the window and the column size. */
+/** The dialog's subtitle: the window. */
 const subtitle = () => dialog()!.querySelector('.stats-dialog-subtitle')?.textContent?.trim();
 
 interface ChartOption {
-  legend: { data: string[]; selected?: Record<string, boolean>; inactiveColor?: string; inactiveBorderColor?: string };
-  xAxis: { min: number; max: number; axisLabel: { show: boolean; formatter?: (value: number) => string } }[];
-  yAxis: { name?: string; axisLabel?: { formatter: (value: number) => string } }[];
+  legend: { data: string[]; selectedMode?: boolean; formatter: (name: string) => string };
+  grid: unknown;
+  xAxis: { min: number; max: number; axisLabel: { formatter?: (value: number) => string } };
+  yAxis: { name?: string; axisLabel: { formatter: (value: number) => string } };
   tooltip: {
+    trigger: string
     confine: boolean
     appendTo: string
     position: (point: number[], params: unknown, dom: unknown, rect: unknown, size: { contentSize: number[]; viewSize: number[] }) => number[]
+    formatter: (params: unknown) => string
   };
-  series: { name: string; data: number[][]; itemStyle?: { color?: string; decal?: unknown } }[];
+  series: { name: string; data: unknown[]; itemStyle?: { color?: string; decal?: unknown } }[];
 }
 
-/** The reference lanes' labels, read at each lane's middle. */
-function laneNames(option: ChartOption, count: number): string[] {
-  return Array.from({ length: count }, (_, lane) => option.yAxis[0]!.axisLabel!.formatter(lane + 0.5));
-}
-
-/** The option the dialog's chart was given: the dialog's chart is the second on the page. */
-function dialogOption(): ChartOption {
+/** The dialog's chart: the second on the page, after the tile's. */
+function dialogChart() {
   const charts = wrapper!.findAllComponents({ name: 'Echarts' });
 
-  return charts[charts.length - 1]!.props('option') as ChartOption;
+  return charts[charts.length - 1]!;
 }
 
-/**
- * THE TOOLTIP ECHARTS SHOWS for a pointer moved over the columns to each instant in turn: the
- * dialog's option on a real chart of a fixed size, with the pointer moved the way a mouse moves it,
- * read after each move has had time to settle - ECharts throttles its hover line, and whatever that
- * hands the tooltip arrives late. Empty when no tooltip shows. What ECharts hands the formatter is
- * ECharts' own choice, so this is read from the tooltip it draws.
- */
-async function hoverText(option: ChartOption, ...at: number[]): Promise<string> {
-  return (await hoverMarkup(option, ...at)).textContent ?? '';
+const dialogOption = () => dialogChart().props('option') as ChartOption;
+
+/** The lanes' labels, read at each lane's middle. */
+function laneNames(option: ChartOption, count: number): string[] {
+  return Array.from({ length: count }, (_, lane) => option.yAxis.axisLabel.formatter(lane + 0.5));
 }
 
-/** The same tooltip as markup, out of the chart it was drawn in - appended to the body, not the chart. */
-async function hoverMarkup(option: ChartOption, ...at: number[]): Promise<HTMLElement> {
-  const host = document.createElement('div');
-  document.body.appendChild(host);
+/** The dialog's lanes start this far in, and end this far from the right: the plot is between. */
+const GridLeft = 128;
+const GridRight = 16;
 
-  const before = new Set(document.querySelectorAll('.stats-tooltip'));
-  const chart = init(host, null, { renderer: 'svg', width: 1000, height: 600 });
-
-  try {
-    chart.setOption(option as never);
-
-    for (const instant of at) {
-      const [x, y] = chart.convertToPixel({ xAxisIndex: 1, yAxisIndex: 1 }, [instant, 0.1]) as number[];
-      chart.getZr().handler.dispatch('mousemove', { zrX: x, zrY: y, offsetX: x, offsetY: y });
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-
-    const shown = [...document.querySelectorAll<HTMLElement>('.stats-tooltip')].find((el) => !before.has(el)) ?? null;
-    const tip = document.createElement('div');
-
-    if (shown && shown.style.display !== 'none' && shown.style.visibility !== 'hidden') tip.innerHTML = shown.innerHTML;
-
-    return tip;
-  } finally {
-    chart.dispose();
-    host.remove();
-  }
+/** The chart is laid out 1000 px of plot wide, so a pointer's x reads as a share of the window. */
+function layOutChart() {
+  const plot = dialog()!.querySelector('.stats-dialog-chart') as HTMLElement;
+  const width = GridLeft + 1000 + GridRight;
+  plot.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: 200, width, height: 200, toJSON: () => ({}) });
 }
 
-/**
- * THE COLUMNS ECHARTS LIGHTS UP while the pointer moves over the columns to each instant in turn,
- * on the same real chart: every highlight ECharts asks for along the way, as the start of the
- * column each highlighted state belongs to. What lights a column up is ECharts' own choice, so this
- * is read from the highlights it raises, not from the option.
- */
-async function highlightedColumns(option: ChartOption, ...at: number[]): Promise<number[]> {
-  const host = document.createElement('div');
-  document.body.appendChild(host);
+/** The hover box's text for a pointer at `x` px into the plot, with the axis naming `axisValue`. */
+async function hoverAt(x: number, axisValue: number): Promise<HTMLElement> {
+  dialogChart().vm.$emit('zr:mousemove', { offsetX: GridLeft + x });
+  await flushPromises();
 
-  const chart = init(host, null, { renderer: 'svg', width: 1000, height: 600 });
-  const lit: number[] = [];
+  const box = document.createElement('div');
+  box.innerHTML = dialogOption().tooltip.formatter([{ axisValue }]);
 
-  try {
-    chart.setOption(option as never);
-    chart.on('highlight', (event: unknown) => {
-      const raised = event as { batch?: { seriesIndex?: number; dataIndex?: number | number[] }[] };
-
-      for (const item of raised.batch ?? []) {
-        const series = option.series[item.seriesIndex ?? -1];
-        if (!series || !(ActivityStates as readonly string[]).includes(series.name)) continue;
-
-        for (const index of [item.dataIndex ?? []].flat()) {
-          const from = series.data[index]?.[0];
-          if (from !== undefined) lit.push(from);
-        }
-      }
-    });
-
-    for (const instant of at) {
-      const [x, y] = chart.convertToPixel({ xAxisIndex: 1, yAxisIndex: 1 }, [instant, 0.1]) as number[];
-      chart.getZr().handler.dispatch('mousemove', { zrX: x, zrY: y, offsetX: x, offsetY: y });
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-
-    return lit;
-  } finally {
-    chart.dispose();
-    host.remove();
-  }
+  return box;
 }
 
 describe('opening the Statistics dialog', () => {
@@ -269,7 +212,6 @@ describe('opening the Statistics dialog', () => {
 
     expect(dialog()).not.toBeNull();
     expect(activityUrls().slice(before)).toEqual([`/api/teams/${teamId}/activity`]);
-    expect(dialogOption().yAxis[1]!.name).toBe('member-minutes');
   });
 
   it('opens from a click on the tile\'s label', async () => {
@@ -311,50 +253,27 @@ describe('the window', () => {
     await mountStrip();
     await openFromTile();
 
-    expect(dialogOption().xAxis[1]!.min).toBe(utc('14:02:00'));
-    expect(dialogOption().xAxis[1]!.max).toBe(utc('14:07:00'));
+    expect(dialogOption().xAxis.min).toBe(utc('14:02:00'));
+    expect(dialogOption().xAxis.max).toBe(utc('14:07:00'));
 
     vi.setSystemTime(now + 3_600_000);
     await settle();
 
-    expect(dialogOption().xAxis[1]!.max).toBe(utc('14:07:00'));
+    expect(dialogOption().xAxis.max).toBe(utc('14:07:00'));
   });
 
-  it('names the stretch and the column size in its subtitle', async () => {
+  it('names the stretch in its subtitle and no column size', async () => {
     await mountStrip();
     await openFromTile();
 
-    expect(subtitle()).toBe(`${time(utc('14:02:00'))} – ${time(utc('14:07:00'))}, member-minutes per minute`);
-  });
-
-  it('chooses the column size to fit the window', async () => {
-    const cases: [string, string, string, string][] = [
-      ['2026-10-04T12:00:00Z', '2026-10-04T14:00:00Z', 'member-minutes', 'per minute'],
-      ['2026-10-04T08:00:00Z', '2026-10-04T14:00:00Z', 'member-minutes', 'per hour'],
-      ['2026-09-24T14:00:00Z', '2026-10-04T14:00:00Z', 'member-hours', 'per day'],
-      ['2025-10-04T14:00:00Z', '2026-10-04T14:00:00Z', 'member-hours', 'per month'],
-    ];
-
-    for (const [from, to, unit, per] of cases) {
-      answer = activity({ from, to });
-      wrapper?.unmount();
-      resetBody();
-
-      await mountStrip();
-      await openFromTile();
-
-      expect(dialogOption().yAxis[1]!.name, `${from} to ${to}`).toBe(unit);
-      expect(subtitle(), `${from} to ${to}`).toContain(`${unit} ${per}`);
-    }
+    expect(subtitle()).toBe(`${time(utc('14:02:00'))} – ${time(utc('14:07:00'))}`);
   });
 
   it('labels the time axis as the browser\'s locale reads a time', async () => {
     await mountStrip();
     await openFromTile();
 
-    const label = dialogOption().xAxis[1]!.axisLabel.formatter!;
-
-    expect(label(utc('14:05:30'))).toBe(time(utc('14:05:30')));
+    expect(dialogOption().xAxis.axisLabel.formatter!(utc('14:05:30'))).toBe(time(utc('14:05:30')));
   });
 
   it('reads on opening and on nothing else the board does', async () => {
@@ -373,7 +292,110 @@ describe('the window', () => {
 
     // The tile may read again on the change; the dialog does not, and keeps what it drew.
     expect(activityUrls().length - reads).toBeLessThanOrEqual(1);
-    expect(dialogOption().xAxis[1]!.max).toBe(utc('14:07:00'));
+    expect(dialogOption().xAxis.max).toBe(utc('14:07:00'));
+  });
+
+  it('reads No runs in this window when nothing was recorded', async () => {
+    answer = activity({ members: [member('Manager', []), member('DeveloperInes', [])] });
+
+    await mountStrip();
+    await openFromTile();
+
+    expect(dialog()!.textContent).toContain('No runs in this window');
+    expect(dialog()!.querySelector('.stats-dialog-chart')).toBeNull();
+  });
+});
+
+describe('the lanes', () => {
+  it('draws one lane per member and no member-time columns under them', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    const option = dialogOption();
+
+    expect(laneNames(option, 3)).toEqual(['Manager', 'Ines Lopez', '']);
+    // One grid, one y axis naming members: no second chart of member-minutes.
+    expect(Array.isArray(option.grid)).toBe(false);
+    expect(Array.isArray(option.yAxis)).toBe(false);
+    expect(option.yAxis.name).toBeUndefined();
+    // Only the lanes carry spans; the per-state series are empty and only key the legend.
+    expect(option.series.filter((s) => s.data.length > 0 && s.name !== 'period').map((s) => s.name)).toEqual(['lanes']);
+  });
+
+  it('keys each state in the legend, held as waiting for a slot and striped, and filters nothing', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    const option = dialogOption();
+
+    expect(option.legend.data).toEqual(['running', 'waiting', 'held', 'blocked', 'failed', 'idle']);
+    expect(option.legend.selectedMode).toBe(false);
+    expect(option.legend.formatter('held')).toBe('waiting for a slot');
+    expect(option.series.find((s) => s.name === 'held')!.itemStyle?.decal).toBeTruthy();
+    expect(option.series.find((s) => s.name === 'blocked')!.itemStyle?.decal).toBeUndefined();
+  });
+
+  it('gives a member since removed its own lane, marked removed, in the dialog only', async () => {
+    answer = activity({
+      members: [
+        ...activity().members,
+        member('Gone Member', [{ state: 'running', from: iso(utc('14:05:00')), to: iso(utc('14:05:30')) }], { current: false }),
+      ],
+    });
+
+    await mountStrip();
+
+    expect(wrapper!.find('.team-kpi--statistics').text()).not.toContain('Gone');
+
+    await openFromTile();
+
+    expect(laneNames(dialogOption(), 3)).toEqual(['Manager', 'Ines Lopez', 'Gone Member (removed)']);
+  });
+});
+
+describe('the hover, as on the tile', () => {
+  it('draws one line across the lanes and names the instant, as the tile does', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    const tooltip = dialogOption().tooltip;
+
+    expect(tooltip.trigger).toBe('axis');
+
+    // Halfway across 14:02-14:07 is 14:04:30; ECharts hands the formatter the nearest span edge.
+    layOutChart();
+    const box = await hoverAt(500, utc('14:05:00'));
+
+    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(time(utc('14:04:30')));
+  });
+
+  it('names what each member was doing at that instant, escaped', async () => {
+    await mountStrip();
+    await wrapper!.setProps({ containers: [board[0], container('DeveloperInes', '<b>Ines</b>')] as never });
+    await openFromTile();
+    layOutChart();
+
+    // 14:05:45: the Manager running, Ines blocked.
+    const box = await hoverAt(750, utc('14:05:30'));
+
+    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(time(utc('14:05:45')));
+    expect(box.querySelector('b')).toBeNull();
+    expect(box.textContent).toContain('Manager — running 1 min');
+    expect(box.textContent).toContain('<b>Ines</b> — blocked under a minute (needs a key)');
+  });
+
+  it('names the instant under the pointer in the range the zoom shows', async () => {
+    await mountStrip();
+    await openFromTile();
+    layOutChart();
+
+    // The slider shows the second half, 14:04:30-14:07: halfway across it is 14:05:45.
+    dialogChart().vm.$emit('datazoom', { start: 50, end: 100 });
+    expect((await hoverAt(500, utc('14:05:30'))).querySelector('.stats-tip-time')!.textContent).toBe(time(utc('14:05:45')));
+
+    // The toolbox's brush names times: 14:05-14:06, halfway is 14:05:30.
+    dialogChart().vm.$emit('datazoom', { batch: [{ startValue: utc('14:05:00'), endValue: utc('14:06:00') }] });
+    expect((await hoverAt(500, utc('14:06:00'))).querySelector('.stats-tip-time')!.textContent).toBe(time(utc('14:05:30')));
   });
 
   it('puts the hover box beside the pointer, never over it, at the left edge, middle and right edge', async () => {
@@ -398,188 +420,5 @@ describe('the window', () => {
       if (screen) Object.defineProperty(window, 'innerWidth', screen);
       else delete (window as { innerWidth?: number }).innerWidth;
     }
-  });
-});
-
-describe('the columns', () => {
-  it('stacks each column in state order, in member-minutes', async () => {
-    await mountStrip();
-    await openFromTile();
-
-    const option = dialogOption();
-    const states = ['running', 'waiting', 'held', 'blocked', 'failed', 'idle'];
-
-    expect(option.legend.data).toEqual(states);
-
-    const series = Object.fromEntries(
-      option.series.filter((s) => states.includes(s.name)).map((s) => [s.name, s.data]));
-
-    expect(Object.keys(series)).toEqual(states);
-
-    // [from, to, base, top]: running sits on the axis, blocked on running; the 14:06 column is
-    // waiting only, and a state with no time in a column draws nothing there.
-    expect(series.running).toEqual([[utc('14:05:00'), utc('14:06:00'), 0, 1.5]]);
-    expect(series.blocked).toEqual([[utc('14:05:00'), utc('14:06:00'), 1.5, 2]]);
-    expect(series.waiting).toEqual([[utc('14:06:00'), utc('14:07:00'), 0, 1 / 3]]);
-    expect(series.failed).toEqual([]);
-    expect(series.idle).toEqual([]);
-  });
-
-  it('draws held as its own series, striped, and names it waiting for a slot in the legend', async () => {
-    answer = activity({
-      members: [
-        member('Manager', []),
-        member('DeveloperInes', [
-          { state: 'waiting', from: iso(utc('14:06:00')), to: iso(utc('14:06:20')) },
-          { state: 'held', from: iso(utc('14:06:20')), to: iso(utc('14:06:50')), reason: 'waiting for a slot', reasonKind: 'slot' },
-        ]),
-      ],
-    });
-
-    await mountStrip();
-    await openFromTile();
-
-    const option = dialogOption() as ChartOption & { legend: { formatter: (name: string) => string } };
-
-    expect(option.legend.data).toContain('held');
-    expect(option.legend.formatter('held')).toBe('waiting for a slot');
-    expect(option.legend.formatter('waiting')).toBe('waiting');
-
-    // Held sits on waiting in the 14:06 column: 20 s waiting, then 30 s held.
-    const held = option.series.find((s) => s.name === 'held')!;
-    expect(held.data).toEqual([[utc('14:06:00'), utc('14:07:00'), 1 / 3, 1 / 3 + 0.5]]);
-    expect(held.itemStyle?.decal).toBeTruthy();
-    expect(option.series.find((s) => s.name === 'blocked')!.itemStyle?.decal).toBeUndefined();
-
-    expect(await hoverText(option, utc('14:06:30'))).toContain('waiting for a slot 30 s');
-  });
-
-  it('draws a state the legend has toggled off in the theme\'s faint ink, not the chart\'s own grey', async () => {
-    const theme = document.createElement('style');
-    theme.textContent = '.stats-dialog-card { --os-ink-faint: rgb(1, 2, 3); }';
-    document.head.appendChild(theme);
-
-    try {
-      await mountStrip();
-      await openFromTile();
-
-      expect(dialogOption().legend.inactiveColor).toBe('rgb(1, 2, 3)');
-      expect(dialogOption().legend.inactiveBorderColor).toBe('rgb(1, 2, 3)');
-    } finally {
-      theme.remove();
-    }
-  });
-
-  it('draws a reference lane per member above the columns, on the same time axis', async () => {
-    await mountStrip();
-    await openFromTile();
-
-    expect(laneNames(dialogOption(), 3)).toEqual(['Manager', 'Ines Lopez', '']);
-  });
-
-  it('lists each member with initials in the tooltip, escaped', async () => {
-    answer = activity({
-      members: [
-        ...activity().members,
-        member('Bold', [{ state: 'failed', from: iso(utc('14:05:10')), to: iso(utc('14:05:40')) }]),
-      ],
-    });
-
-    await mountStrip();
-    await wrapper!.setProps({ containers: [...board, container('Bold', '<b>Bold</b>')] as never });
-    await openFromTile();
-
-    const text = await hoverText(dialogOption(), utc('14:05:30'));
-
-    expect((await hoverMarkup(dialogOption(), utc('14:05:30'))).querySelector('b')).toBeNull();
-    expect(text).toContain('running 1 min 30 s');
-    expect(text).toContain('M Manager — running 1 min');
-    expect(text).toContain('IL Ines Lopez — running 30 s, blocked 30 s');
-    expect(text).toContain('< <b>Bold</b> — failed 30 s');
-  });
-
-  it('leaves a state hidden in the legend out of the hover and its totals', async () => {
-    await mountStrip();
-    await openFromTile();
-
-    const charts = wrapper!.findAllComponents({ name: 'Echarts' });
-    charts[charts.length - 1]!.vm.$emit('legendselectchanged', {
-      selected: { running: true, waiting: true, blocked: false, failed: true, idle: true },
-    });
-    await settle();
-
-    const text = await hoverText(dialogOption(), utc('14:05:30'));
-
-    expect(dialogOption().legend.selected!.blocked).toBe(false);
-    expect(text).toContain('running 1 min 30 s');
-    expect(text).not.toContain('blocked');
-    expect(text).toContain('IL Ines Lopez — running 30 s');
-  });
-
-  it('names the column under the pointer across its whole width, not the nearest column start', async () => {
-    await mountStrip();
-    await openFromTile();
-
-    const option = dialogOption();
-
-    // The 14:05 column, early and late in it; then 14:06, late in it, with no column after it.
-    expect(await hoverText(option, utc('14:05:06'))).toContain(span('14:05:00', '14:06:00'));
-    expect(await hoverText(option, utc('14:05:54'))).toContain(span('14:05:00', '14:06:00'));
-    expect(await hoverText(option, utc('14:05:54'))).toContain('running 1 min 30 s');
-    expect(await hoverText(option, utc('14:06:50'))).toContain(span('14:06:00', '14:07:00'));
-    expect(await hoverText(option, utc('14:06:50'))).toContain('waiting 20 s');
-    // Into the 14:05 column's right half from its left half, and on into the gap after 14:06.
-    expect(await hoverText(option, utc('14:05:10'), utc('14:05:50'))).toContain(span('14:05:00', '14:06:00'));
-    expect(await hoverText(option, utc('14:06:30'), utc('14:07:30'))).toBe('');
-  });
-
-  it('never lights up a column the pointer is not over, so the highlight agrees with the tooltip', async () => {
-    await mountStrip();
-    await openFromTile();
-
-    const option = dialogOption();
-    const column = (at: number) => [utc('14:05:00'), utc('14:06:00')].filter((from) => from <= at).pop();
-
-    // Early and late in the 14:05 column, late in 14:06; over the gap after it, none.
-    for (const at of [utc('14:05:06'), utc('14:05:54'), utc('14:06:50')]) {
-      for (const from of await highlightedColumns(option, at)) expect(iso(from)).toBe(iso(column(at)!));
-    }
-
-    expect(await highlightedColumns(option, utc('14:07:30'))).toEqual([]);
-    for (const from of await highlightedColumns(option, utc('14:05:10'), utc('14:05:50'))) {
-      expect(iso(from)).toBe(iso(utc('14:05:00')));
-    }
-  });
-
-  it('reads No runs in this window when nothing was recorded', async () => {
-    answer = activity({ members: [member('Manager', []), member('DeveloperInes', [])] });
-
-    await mountStrip();
-    await openFromTile();
-
-    expect(dialog()!.textContent).toContain('No runs in this window');
-    expect(dialog()!.querySelector('.stats-dialog-chart')).toBeNull();
-  });
-
-  it('counts a member since removed under its name, marked removed, with a lane in the dialog only', async () => {
-    answer = activity({
-      members: [
-        ...activity().members,
-        member('Gone Member', [{ state: 'running', from: iso(utc('14:05:00')), to: iso(utc('14:05:30')) }], { current: false }),
-      ],
-    });
-
-    await mountStrip();
-
-    expect(wrapper!.find('.team-kpi--statistics').text()).not.toContain('Gone');
-
-    await openFromTile();
-
-    const option = dialogOption();
-
-    expect(laneNames(option, 3)).toEqual(['Manager', 'Ines Lopez', 'Gone Member (removed)']);
-    expect(option.series.find((s) => s.name === 'running')!.data).toEqual([[utc('14:05:00'), utc('14:06:00'), 0, 2]]);
-
-    expect(await hoverText(option, utc('14:05:30'))).toContain('GM Gone Member (removed) — running 30 s');
   });
 });

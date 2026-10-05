@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { ActivityMember, ActivitySpan, ActivityState, TeamActivity, TeamTokenRun } from '../../api/types'
 import {
   ActivityStates,
-  type Column,
   type FigureColumn,
   type InstantFigure,
   activityCaption,
@@ -14,14 +13,11 @@ import {
   windowBucket,
   activityLanes,
   activitySummary,
-  bucketActivity,
   bucketLabel,
-  columnTooltipHtml,
   escapeHtml,
   growSpans,
   laneInitials,
   memberInitials,
-  memberTime,
   stateShapes,
   type StatePalette,
   tooltipHtml,
@@ -275,139 +271,6 @@ describe('the tooltip', () => {
   })
 })
 
-describe('bucketing member-time', () => {
-  const utc = (text: string) => Date.parse(text)
-  const minute = 60_000
-  const hour = 60 * minute
-  const none = { running: 0, waiting: 0, held: 0, blocked: 0, failed: 0, idle: 0 }
-
-  function lane(name: string, spans: [ActivityState, string, string][]) {
-    return { member: name, spans: spans.map(([state, from, to]) => ({ state, from: utc(from), to: utc(to), open: false })) }
-  }
-
-  const edges = (columns: Column[]) => columns.map((c) => [new Date(c.from).toISOString(), new Date(c.to).toISOString()])
-
-  it('splits a span at local minute edges, exactly', () => {
-    const columns = bucketActivity(
-      [lane('Ines', [['running', '2026-10-04T12:00:30Z', '2026-10-04T12:02:15Z']])], 'minute', 'Europe/Berlin')
-
-    expect(edges(columns)).toEqual([
-      ['2026-10-04T12:00:00.000Z', '2026-10-04T12:01:00.000Z'],
-      ['2026-10-04T12:01:00.000Z', '2026-10-04T12:02:00.000Z'],
-      ['2026-10-04T12:02:00.000Z', '2026-10-04T12:03:00.000Z'],
-    ])
-    expect(columns.map((c) => c.totals.running)).toEqual([30_000, 60_000, 15_000])
-  })
-
-  it('puts hour edges on the local hour of a half-hour zone, not the UTC hour', () => {
-    // 10:00Z-11:00Z is 15:30-16:30 in Kolkata: half in the 15:00 hour, half in the 16:00 hour.
-    const columns = bucketActivity(
-      [lane('Ines', [['blocked', '2026-10-04T10:00:00Z', '2026-10-04T11:00:00Z']])], 'hour', 'Asia/Kolkata')
-
-    expect(edges(columns)).toEqual([
-      ['2026-10-04T09:30:00.000Z', '2026-10-04T10:30:00.000Z'],
-      ['2026-10-04T10:30:00.000Z', '2026-10-04T11:30:00.000Z'],
-    ])
-    expect(columns.map((c) => c.totals.blocked)).toEqual([30 * minute, 30 * minute])
-  })
-
-  it('puts day edges on local midnight', () => {
-    // 23:00-02:00 Berlin summer time: one hour on the 4th, two on the 5th.
-    const columns = bucketActivity(
-      [lane('Ines', [['waiting', '2026-10-04T21:00:00Z', '2026-10-05T00:00:00Z']])], 'day', 'Europe/Berlin')
-
-    expect(edges(columns)).toEqual([
-      ['2026-10-03T22:00:00.000Z', '2026-10-04T22:00:00.000Z'],
-      ['2026-10-04T22:00:00.000Z', '2026-10-05T22:00:00.000Z'],
-    ])
-    expect(columns.map((c) => c.totals.waiting)).toEqual([hour, 2 * hour])
-  })
-
-  it('puts month edges on local midnight of the first', () => {
-    const columns = bucketActivity(
-      [lane('Ines', [['failed', '2026-09-30T21:00:00Z', '2026-09-30T23:00:00Z']])], 'month', 'Europe/Berlin')
-
-    expect(edges(columns)).toEqual([
-      ['2026-08-31T22:00:00.000Z', '2026-09-30T22:00:00.000Z'],
-      ['2026-09-30T22:00:00.000Z', '2026-10-31T23:00:00.000Z'],
-    ])
-    expect(columns.map((c) => c.totals.failed)).toEqual([hour, hour])
-  })
-
-  it('gives the day clocks go back 25 hours and the day they go forward 23', () => {
-    const autumn = bucketActivity(
-      [lane('Ines', [['running', '2026-10-24T22:00:00Z', '2026-10-25T23:00:00Z']])], 'day', 'Europe/Berlin')
-    const spring = bucketActivity(
-      [lane('Ines', [['running', '2026-03-28T23:00:00Z', '2026-03-29T22:00:00Z']])], 'day', 'Europe/Berlin')
-
-    expect(autumn).toHaveLength(1)
-    expect(autumn[0]!.to - autumn[0]!.from).toBe(25 * hour)
-    expect(autumn[0]!.totals.running).toBe(25 * hour)
-    expect(spring).toHaveLength(1)
-    expect(spring[0]!.to - spring[0]!.from).toBe(23 * hour)
-    expect(spring[0]!.totals.running).toBe(23 * hour)
-  })
-
-  it('gives the hour that happens twice when clocks go back two columns of an hour each', () => {
-    // 00:00Z-02:00Z on 25 Oct is 02:00 summer time, then 02:00 winter time, in Berlin.
-    const columns = bucketActivity(
-      [lane('Ines', [['idle', '2026-10-25T00:00:00Z', '2026-10-25T02:00:00Z']])], 'hour', 'Europe/Berlin')
-
-    expect(edges(columns)).toEqual([
-      ['2026-10-25T00:00:00.000Z', '2026-10-25T01:00:00.000Z'],
-      ['2026-10-25T01:00:00.000Z', '2026-10-25T02:00:00.000Z'],
-    ])
-    expect(columns.map((c) => c.totals.idle)).toEqual([hour, hour])
-  })
-
-  it('counts an open span up to now and no further', () => {
-    const now = utc('2026-10-04T12:01:40Z')
-    const spans = growSpans([{ state: 'running', from: '2026-10-04T12:00:20Z', to: null }], now)
-
-    const columns = bucketActivity([{ member: 'Ines', spans }], 'minute', 'Europe/Berlin')
-
-    expect(columns.map((c) => c.totals.running)).toEqual([40_000, 40_000])
-  })
-
-  it('makes no column where nothing was recorded, and never counts the gap as idle', () => {
-    const columns = bucketActivity([lane('Ines', [
-      ['running', '2026-10-04T12:00:00Z', '2026-10-04T12:01:00Z'],
-      ['running', '2026-10-04T12:05:00Z', '2026-10-04T12:06:00Z'],
-    ])], 'minute', 'Europe/Berlin')
-
-    expect(columns).toHaveLength(2)
-    expect(columns.map((c) => c.totals)).toEqual([{ ...none, running: minute }, { ...none, running: minute }])
-  })
-
-  it('splits each column per member, and the members add up to the column', () => {
-    const columns = bucketActivity([
-      lane('Manager', [
-        ['running', '2026-10-04T12:00:00Z', '2026-10-04T12:00:40Z'],
-        ['idle', '2026-10-04T12:00:40Z', '2026-10-04T12:02:00Z'],
-      ]),
-      lane('Ines', [
-        ['running', '2026-10-04T12:00:10Z', '2026-10-04T12:00:50Z'],
-        ['blocked', '2026-10-04T12:00:50Z', '2026-10-04T12:01:30Z'],
-      ]),
-    ], 'minute', 'Europe/Berlin')
-
-    expect(columns[0]!.members).toEqual([
-      { member: 'Manager', ms: { ...none, running: 40_000, idle: 20_000 } },
-      { member: 'Ines', ms: { ...none, running: 40_000, blocked: 10_000 } },
-    ])
-    expect(columns[1]!.members).toEqual([
-      { member: 'Manager', ms: { ...none, idle: minute } },
-      { member: 'Ines', ms: { ...none, blocked: 30_000 } },
-    ])
-
-    for (const column of columns) {
-      for (const state of ActivityStates) {
-        expect(column.members.reduce((sum, m) => sum + m.ms[state], 0)).toBe(column.totals[state])
-      }
-    }
-  })
-})
-
 describe('a column in words', () => {
   const zone = 'Europe/Berlin'
   // Tue 6 Oct 2026, 14:20 in Berlin.
@@ -432,84 +295,6 @@ describe('a column in words', () => {
   it('gives a minute or an hour its date too when the window crosses days', () => {
     expect(bucketLabel(start, start + 60_000, 'minute', zone, true)).toBe(`${stamp(start)} – ${stamp(start + 60_000)}`)
   })
-
-  it('gives the bucket, each state\'s total, then each member with initials, escaped', () => {
-    const column: Column = {
-      from: start,
-      to: start + 60_000,
-      totals: { running: 40_000, waiting: 0, held: 0, blocked: 50_000, failed: 0, idle: 0 },
-      members: [
-        { member: 'Ines', ms: { running: 40_000, waiting: 0, held: 0, blocked: 20_000, failed: 0, idle: 0 } },
-        { member: 'Bold', ms: { running: 0, waiting: 0, held: 0, blocked: 30_000, failed: 0, idle: 0 } },
-      ],
-    }
-    const people = new Map([
-      ['Ines', { name: 'Ines Lopez', initials: 'IL' }],
-      ['Bold', { name: '<b>Bold</b> (removed)', initials: 'BB' }],
-    ])
-
-    const html = columnTooltipHtml(column, 'minute', zone, people)
-    const text = html.replace(/<[^>]+>/g, '')
-
-    expect(text).toContain(`${time(start)} – ${time(start + 60_000)}`)
-    expect(text).toContain('running 40 s')
-    expect(text).toContain('blocked 50 s')
-    expect(text).not.toContain('waiting')
-    expect(text).toContain('IL Ines Lopez — running 40 s, blocked 20 s')
-    expect(html).not.toContain('<b>')
-    expect(text).toContain('&lt;b&gt;Bold&lt;/b&gt; (removed) — blocked 30 s')
-    expect(html).not.toContain('style=')
-  })
-
-  it('leaves a state hidden in the legend out of the totals and every member\'s split', () => {
-    const column: Column = {
-      from: start,
-      to: start + 60_000,
-      totals: { running: 40_000, waiting: 0, held: 0, blocked: 50_000, failed: 0, idle: 10_000 },
-      members: [
-        { member: 'Ines', ms: { running: 40_000, waiting: 0, held: 0, blocked: 20_000, failed: 0, idle: 0 } },
-        { member: 'Rhea', ms: { running: 0, waiting: 0, held: 0, blocked: 30_000, failed: 0, idle: 10_000 } },
-        { member: 'Okon', ms: { running: 0, waiting: 0, held: 0, blocked: 0, failed: 0, idle: 0 } },
-      ],
-    }
-    const people = new Map([
-      ['Ines', { name: 'Ines Lopez', initials: 'IL' }],
-      ['Rhea', { name: 'Rhea', initials: 'R' }],
-    ])
-
-    const text = columnTooltipHtml(column, 'minute', zone, people, { hidden: new Set(['blocked']) }).replace(/<[^>]+>/g, '')
-
-    expect(text).not.toContain('blocked')
-    expect(text).toContain('running 40 s')
-    expect(text).toContain('IL Ines Lopez — running 40 s')
-    expect(text).toContain('R Rhea — idle 10 s')
-
-    // A member with nothing left to show has no line at all.
-    const runningOnly = columnTooltipHtml(column, 'minute', zone, people, { hidden: new Set(['blocked', 'idle']) })
-      .replace(/<[^>]+>/g, '')
-
-    expect(runningOnly).not.toContain('Rhea')
-  })
-
-  it('reads time under a second as under a second, never as nothing', () => {
-    expect(memberTime(1)).toBe('<1 s')
-    expect(memberTime(499)).toBe('<1 s')
-    expect(memberTime(999)).toBe('<1 s')
-    expect(memberTime(1_000)).toBe('1 s')
-    expect(memberTime(1_400)).toBe('1 s')
-    expect(memberTime(40_000)).toBe('40 s')
-
-    const column: Column = {
-      from: start,
-      to: start + 60_000,
-      totals: { running: 300, waiting: 0, held: 0, blocked: 0, failed: 15_000, idle: 0 },
-      members: [{ member: 'Ines', ms: { running: 300, waiting: 0, held: 0, blocked: 0, failed: 15_000, idle: 0 } }],
-    }
-    const html = columnTooltipHtml(column, 'minute', zone, new Map([['Ines', { name: 'Ines Lopez', initials: 'IL' }]]))
-
-    expect(html).toContain('running &lt;1 s')
-    expect(html).toContain('IL</span> <span class="stats-tip-name">Ines Lopez</span> — running &lt;1 s, failed 15 s')
-  })
 })
 
 describe('bucketing a figure at an instant', () => {
@@ -530,6 +315,27 @@ describe('bucketing a figure at an instant', () => {
       ['2026-10-04T12:01:00.000Z', '2026-10-04T12:02:00.000Z'],
     ])
     expect(columns.map((c) => c.total)).toEqual([10, 25])
+  })
+
+  it('gives the day clocks go back 25 hours and the day they go forward 23', () => {
+    const autumn = bucketFigures([point('Ines', '2026-10-25T12:00:00Z', 1)], ['Ines'], 'day', 'Europe/Berlin')
+    const spring = bucketFigures([point('Ines', '2026-03-29T12:00:00Z', 1)], ['Ines'], 'day', 'Europe/Berlin')
+
+    expect(autumn[0]!.to - autumn[0]!.from).toBe(25 * 3_600_000)
+    expect(spring[0]!.to - spring[0]!.from).toBe(23 * 3_600_000)
+  })
+
+  it('gives the hour that happens twice when clocks go back two columns of an hour each', () => {
+    // 00:00Z-02:00Z on 25 Oct is 02:00 summer time, then 02:00 winter time, in Berlin.
+    const columns = bucketFigures([
+      point('Ines', '2026-10-25T00:30:00Z', 1),
+      point('Ines', '2026-10-25T01:30:00Z', 2),
+    ], ['Ines'], 'hour', 'Europe/Berlin')
+
+    expect(edges(columns)).toEqual([
+      ['2026-10-25T00:00:00.000Z', '2026-10-25T01:00:00.000Z'],
+      ['2026-10-25T01:00:00.000Z', '2026-10-25T02:00:00.000Z'],
+    ])
   })
 
   it('puts hour edges on the local hour of a half-hour zone, not the UTC hour', () => {
@@ -870,21 +676,6 @@ describe('a hold for a slot', () => {
 
     expect(activitySummary('workflows', lanes, at(14, 2), now))
       .toBe(`Statistics ${localStretch(at(14, 2), now)}: 2 members - 1 running, 1 waiting for a slot`)
-  })
-
-  it('is named as waiting for a slot in a column\'s tooltip', () => {
-    const start = at(14, 20)
-    const column: Column = {
-      from: start,
-      to: start + 60_000,
-      totals: { running: 0, waiting: 10_000, held: 50_000, blocked: 0, failed: 0, idle: 0 },
-      members: [{ member: 'Ines', ms: { running: 0, waiting: 10_000, held: 50_000, blocked: 0, failed: 0, idle: 0 } }],
-    }
-    const text = columnTooltipHtml(column, 'minute', 'UTC', new Map([['Ines', { name: 'Ines Lopez', initials: 'IL' }]]))
-      .replace(/<[^>]+>/g, '')
-
-    expect(text).toContain('waiting for a slot 50 s')
-    expect(text).toContain('IL Ines Lopez — waiting 10 s, waiting for a slot 50 s')
   })
 
   it('is striped with the ground\'s colour, so it never depends on hue, and blocked keeps its notch', () => {

@@ -14,28 +14,25 @@ import {
 import { SVGRenderer } from 'echarts/renderers';
 import type { CustomSeriesRenderItemAPI, CustomSeriesRenderItemParams, CustomSeriesRenderItemReturn } from 'echarts';
 import VChart from 'vue-echarts';
-import type { ActivityState, ContainerSnapshot, TeamActivity } from '../api/types';
+import type { ContainerSnapshot, TeamActivity } from '../api/types';
 import { asTeamId } from '../api/types';
 import { getTeamActivity } from '../api/client';
 import {
   ActivityStates,
   activityLanes,
   axisTimeLabel,
-  bucketActivity,
-  bucketUnit,
-  bucketWords,
-  columnTooltipHtml,
   stateShapes,
   stateWords,
   tooltipBeside,
+  tooltipHtml,
   windowBucket,
   windowEnd,
 } from '../lib/teamActivity';
 import { crossesDays, localStretch } from '../lib/localTime';
 
 /**
- * TREE-SHAKEN: the custom series the lanes and columns are drawn with, two grids on one time axis,
- * the legend that toggles each state, the zoom - dragged on the axis, wheeled, or brushed with the
+ * TREE-SHAKEN: the custom series the lanes are drawn with, the grid and its time axis, the legend
+ * that names each state's look, the zoom - dragged on the axis, wheeled, or brushed with the
  * toolbox - and the tooltip with its hover line. SVG, as on the tile.
  */
 use([
@@ -63,28 +60,32 @@ const open = computed({
   set: (value: boolean) => emit('update:modelValue', value),
 });
 
-/** A reference lane's height. */
-const LaneHeight = 16;
+/** A lane's height: taller than the tile's, the dialog has the room. */
+const LaneHeight = 22;
 
-/** The columns' own height, under the lanes. */
-const ColumnsHeight = 240;
-
-/** THE SAME LEFT EDGE FOR BOTH GRIDS, so a lane and the columns under it share one time axis. */
+/** The lanes' left edge: room for each member's full name. */
 const GridLeft = 128;
 
-/** Room between the lanes and the columns for the y axis's unit. */
-const ColumnsGap = 32;
+/** The lanes' right edge. */
+const GridRight = 16;
+
+/** Room above the lanes for the legend and the toolbox. */
+const LanesTop = 36;
 
 /** Room between the pointer and the hover box, so the hover line stays in sight beside it. */
 const TooltipGap = 16;
 
-/** Bucket edges fall on this browser's own timezone. */
+/** Axis labels fall on this browser's own timezone. */
 const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 const $q = useQuasar();
 const dark = computed(() => $q.dark?.isActive === true);
 
 const cardEl = ref<{ $el: HTMLElement } | null>(null);
+
+const activity = ref<TeamActivity | null>(null);
+const loading = ref(false);
+const failed = ref(false);
 
 /** The theme's `--os-stat-*` tokens as the browser resolves them, read again when the theme flips. */
 const colours = computed(() => {
@@ -104,21 +105,22 @@ const colours = computed(() => {
     idle: token('--os-stat-idle'),
     chrome: token('--os-surface') || token('--os-chrome'),
     ink: token('--os-ink'),
-    off: token('--os-ink-faint'),
   };
 });
 
-const activity = ref<TeamActivity | null>(null);
-const loading = ref(false);
-const failed = ref(false);
+/** What the zoom shows now, as times; null shows the whole window. */
+const zoom = ref<{ start: number; end: number } | null>(null);
 
-/** Every state the legend shows, toggled off by a click on it. */
-const shown = ref<Record<ActivityState, boolean>>({ running: true, waiting: true, held: true, blocked: true, failed: true, idle: true });
+/**
+ * THE INSTANT UNDER THE POINTER, from where it is across the lanes and what the zoom shows, as on
+ * the tile. An axis tooltip hands its formatter the NEAREST span edge instead, which would name a
+ * time the hover line is not on.
+ */
+const pointerAt = ref<number | null>(null);
 
 /**
  * THE TILE'S OWN WINDOW, READ ON OPENING AND NOTHING ELSE: from the team's earliest workflow root to
- * the latest activity of any workflow. Zooming, toggling a state or the board moving underneath
- * never re-reads or re-buckets.
+ * the latest activity of any workflow. Zooming or the board moving underneath never re-reads.
  */
 let readSeq = 0;
 
@@ -128,7 +130,8 @@ async function read() {
   loading.value = true;
   failed.value = false;
   activity.value = null;
-  shown.value = { running: true, waiting: true, held: true, blocked: true, failed: true, idle: true };
+  zoom.value = null;
+  pointerAt.value = null;
 
   try {
     const answer = await getTeamActivity(asTeamId(props.teamId));
@@ -149,32 +152,57 @@ watch(() => props.modelValue, (isOpen) => {
 const periodTo = computed(() => (activity.value ? windowEnd(activity.value) : 0));
 const periodFrom = computed(() => (activity.value?.from ? Date.parse(activity.value.from) : null));
 
-/** THE COLUMN SIZE THAT FITS THE WINDOW: the minute, hour, day or month (`windowBucket`). */
+/** The axis's labels are as fine as the window needs: a time of day, or a date. */
 const bucket = computed(() => windowBucket(periodFrom.value ?? periodTo.value, periodTo.value));
-const unit = computed(() => bucketUnit(bucket.value));
 
 /** A time of day alone is ambiguous once the window crosses midnight: then every time has its date. */
 const withDate = computed(() => periodFrom.value !== null && crossesDays(periodFrom.value, periodTo.value));
 
-/** The subtitle: the stretch and the column size, "11:38:02 AM – 3:41:17 PM, member-minutes per minute". */
-const subtitle = computed(() => {
-  const what = `${unit.value.name} ${bucketWords(bucket.value)}`;
-
-  return periodFrom.value === null ? `Member-time by state, in ${what}.` : `${localStretch(periodFrom.value, periodTo.value)}, ${what}`;
-});
+/** The subtitle: the stretch the lanes cover, "11:38:02 AM – 3:41:17 PM". */
+const subtitle = computed(() =>
+  periodFrom.value === null ? 'Member time by state.' : localStretch(periodFrom.value, periodTo.value));
 
 /** Every member with a lane - a member since removed too, marked so, in this dialog only. */
 const lanes = computed(() =>
   activity.value ? activityLanes(activity.value, props.containers, periodTo.value, { removed: true }) : []);
 
-const columns = computed(() => bucketActivity(lanes.value, bucket.value, timeZone));
+/** Something to draw: a member was other than idle at some point in the window. */
+const hasChart = computed(() =>
+  periodFrom.value !== null && lanes.value.some((lane) => lane.spans.some((span) => span.state !== 'idle')));
 
-const people = computed(() => new Map(lanes.value.map((lane) => [lane.member, { name: lane.name, initials: lane.initials }])));
+/** The whole window, as the axis draws it before any zoom. */
+const axisRange = computed(() => {
+  const start = periodFrom.value ?? periodTo.value;
 
-const hasChart = computed(() => columns.value.length > 0 && periodFrom.value !== null);
+  return { start, end: Math.max(periodTo.value, start + 1) };
+});
 
-/** The states the legend has turned off: left out of the hover, as they are out of the drawing. */
-const hiddenStates = computed(() => new Set(ActivityStates.filter((state) => !shown.value[state])));
+/**
+ * KEEPS THE ZOOM'S RANGE AS TIMES, whichever control moved it: the slider and the wheel say percents
+ * of the window, the toolbox's brush says times.
+ */
+function onZoom(event: unknown) {
+  type Range = { start?: number; end?: number; startValue?: number; endValue?: number };
+  const raised = event as Range & { batch?: Range[] };
+  const item = raised.batch?.[0] ?? raised;
+  const { start, end } = axisRange.value;
+
+  if (item.startValue !== undefined && item.endValue !== undefined) {
+    zoom.value = { start: Number(item.startValue), end: Number(item.endValue) };
+  } else if (item.start !== undefined && item.end !== undefined) {
+    zoom.value = { start: start + (item.start / 100) * (end - start), end: start + (item.end / 100) * (end - start) };
+  }
+}
+
+function notePointerX(event: { offsetX?: number }) {
+  const width = cardEl.value?.$el.querySelector('.stats-dialog-chart')?.getBoundingClientRect().width ?? 0;
+  const plot = width - GridLeft - GridRight;
+  const { start, end } = zoom.value ?? axisRange.value;
+
+  pointerAt.value = plot > 0 && event.offsetX !== undefined
+    ? start + (Math.min(Math.max(event.offsetX - GridLeft, 0), plot) / plot) * (end - start)
+    : null;
+}
 
 /** THE HOVER BOX BESIDE THE POINTER, never over it, placed against the screen: it is on the body. */
 function besidePointer(point: number[], _params: unknown, _dom: unknown, _rect: unknown, size: { contentSize: number[] }) {
@@ -183,56 +211,7 @@ function besidePointer(point: number[], _params: unknown, _dom: unknown, _rect: 
   return tooltipBeside(point, size.contentSize, chart, { width: window.innerWidth, height: window.innerHeight }, TooltipGap);
 }
 
-/**
- * EACH STATE'S SERIES: one entry per column it has time in, `[from, to, base, top]` in the y unit,
- * stacked in state order over the states the legend shows - a hidden state takes no room, so the
- * ones above it settle down onto the ones below.
- */
-const stacks = computed(() => {
-  const series = Object.fromEntries(ActivityStates.map((state) => [state, [] as number[][]])) as Record<ActivityState, number[][]>;
-
-  for (const column of columns.value) {
-    let base = 0;
-
-    for (const state of ActivityStates) {
-      const height = column.totals[state] / unit.value.ms;
-
-      if (height <= 0) continue;
-
-      series[state].push([column.from, column.to, base, base + height]);
-      if (shown.value[state]) base += height;
-    }
-  }
-
-  return series;
-});
-
-function onLegend(event: unknown) {
-  const selected = (event as { selected?: Record<string, boolean> }).selected ?? {};
-
-  shown.value = { ...shown.value, ...selected } as Record<ActivityState, boolean>;
-}
-
-/** ONE STATE OF ONE COLUMN: its bucket's full width, from its base to its top, notched as on the tile. */
-function renderColumn(state: ActivityState) {
-  return (params: CustomSeriesRenderItemParams, api: CustomSeriesRenderItemAPI): CustomSeriesRenderItemReturn => {
-    const low = api.coord([api.value(0), api.value(2)]);
-    const high = api.coord([api.value(1), api.value(3)]);
-    const area = params.coordSys as unknown as { x: number; width: number };
-
-    const left = Math.max(low[0]!, area.x);
-    const right = Math.min(high[0]!, area.x + area.width);
-
-    if (right <= area.x || left >= area.x + area.width) return { type: 'group', children: [] } as CustomSeriesRenderItemReturn;
-
-    const width = Math.max(right - left - 1, 1);
-    const height = Math.max(low[1]! - high[1]!, 1);
-
-    return { type: 'group', children: stateShapes(left, high[1]!, width, height, state, colours.value) } as unknown as CustomSeriesRenderItemReturn;
-  };
-}
-
-/** ONE SPAN OF A REFERENCE LANE, as on the tile: lane `n` runs from `n` to `n + 1` on its axis. */
+/** ONE SPAN OF A LANE, as on the tile: lane `n` runs from `n` to `n + 1` on its axis. */
 function renderLane(params: CustomSeriesRenderItemParams, api: CustomSeriesRenderItemAPI): CustomSeriesRenderItemReturn {
   const lane = Number(api.value(0));
   const start = api.coord([api.value(1), lane]);
@@ -251,24 +230,6 @@ function renderLane(params: CustomSeriesRenderItemParams, api: CustomSeriesRende
   } as unknown as CustomSeriesRenderItemReturn;
 }
 
-/**
- * ONE COLUMN'S HOVER AREA, drawn as nothing over its bucket's whole width and its grid's whole
- * height: the pointer anywhere over a column, above its top too, is over this column and no other.
- */
-function renderHover(params: CustomSeriesRenderItemParams, api: CustomSeriesRenderItemAPI): CustomSeriesRenderItemReturn {
-  const area = params.coordSys as unknown as { x: number; y: number; width: number; height: number };
-  const left = Math.max(api.coord([api.value(0), 0])[0]!, area.x);
-  const right = Math.min(api.coord([api.value(1), 0])[0]!, area.x + area.width);
-
-  if (right <= left) return { type: 'group', children: [] } as CustomSeriesRenderItemReturn;
-
-  return {
-    type: 'rect',
-    shape: { x: left, y: area.y, width: right - left, height: area.height },
-    style: { fill: 'transparent' },
-  } as unknown as CustomSeriesRenderItemReturn;
-}
-
 /** A lane's label sits at its middle, `n + 0.5`; the edges between lanes read nothing. */
 function laneLabel(value: number): string {
   return value % 1 === 0.5 ? lanes.value[Math.floor(value)]?.name ?? '' : '';
@@ -277,81 +238,55 @@ function laneLabel(value: number): string {
 const lanesHeight = computed(() => lanes.value.length * LaneHeight);
 
 const option = computed(() => {
-  const start = periodFrom.value ?? periodTo.value;
-  const end = Math.max(periodTo.value, start + 1);
+  const { start, end } = axisRange.value;
   const palette = colours.value;
-  const laneTop = 36;
-  const columnsTop = laneTop + lanesHeight.value + ColumnsGap;
-
-  const timeAxis = (gridIndex: number, labels: boolean) => ({
-    type: 'time',
-    gridIndex,
-    min: start,
-    max: end,
-    axisLine: { show: labels },
-    axisLabel: { show: labels, hideOverlap: true, formatter: (value: number) => axisTimeLabel(value, bucket.value, timeZone) },
-    axisTick: { show: labels },
-    splitLine: { show: false },
-    // The hover line lights up nothing: it would light the item NEAREST the pointer, which in a
-    // column's right half is the next column, and disagree with the tooltip.
-    axisPointer: { show: true, snap: false, triggerEmphasis: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
-  });
 
   return {
     backgroundColor: 'transparent',
     animation: false,
+    // A KEY TO THE STATES, not a filter: each lane is its member's whole time.
     legend: {
       data: [...ActivityStates],
       formatter: stateWords,
-      selected: { ...shown.value },
+      selectedMode: false,
       top: 0,
       left: 0,
-      // OFF READS DIMMER THAN ON in either theme, not ECharts' own light grey.
-      inactiveColor: palette.off,
-      inactiveBorderColor: palette.off,
     },
     toolbox: {
       right: 0,
       top: 0,
-      feature: { dataZoom: { xAxisIndex: [0, 1], yAxisIndex: false } },
+      feature: { dataZoom: { xAxisIndex: [0], yAxisIndex: false } },
     },
-    grid: [
-      { left: GridLeft, right: 16, top: laneTop, height: lanesHeight.value },
-      { left: GridLeft, right: 16, top: columnsTop, height: ColumnsHeight },
-    ],
-    xAxis: [timeAxis(0, false), timeAxis(1, true)],
-    yAxis: [
-      {
-        type: 'value',
-        gridIndex: 0,
-        inverse: true,
-        min: 0,
-        max: Math.max(lanes.value.length, 1),
-        interval: 0.5,
-        splitLine: { show: false },
-        axisLine: { show: false },
-        axisTick: { show: false },
-        axisLabel: { fontSize: 10, formatter: laneLabel, width: GridLeft - 12, overflow: 'truncate' },
-      },
-      {
-        type: 'value',
-        gridIndex: 1,
-        name: unit.value.name,
-        nameTextStyle: { align: 'right' },
-        min: 0,
-      },
-    ],
-    // ZOOM ONLY: the columns stay the buckets they were read as, and the lanes follow the range.
+    grid: { left: GridLeft, right: GridRight, top: LanesTop, height: lanesHeight.value },
+    xAxis: {
+      type: 'time',
+      min: start,
+      max: end,
+      axisLabel: { hideOverlap: true, formatter: (value: number) => axisTimeLabel(value, bucket.value, timeZone) },
+      splitLine: { show: false },
+      axisPointer: { snap: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
+    },
+    yAxis: {
+      type: 'value',
+      inverse: true,
+      min: 0,
+      max: Math.max(lanes.value.length, 1),
+      interval: 0.5,
+      splitLine: { show: false },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { fontSize: 11, formatter: laneLabel, width: GridLeft - 12, overflow: 'truncate' },
+    },
     dataZoom: [
-      { type: 'inside', xAxisIndex: [0, 1], filterMode: 'none' },
-      { type: 'slider', xAxisIndex: [0, 1], filterMode: 'none', height: 18, bottom: 4 },
+      { type: 'inside', xAxisIndex: [0], filterMode: 'none' },
+      { type: 'slider', xAxisIndex: [0], filterMode: 'none', height: 18, bottom: 4 },
     ],
-    axisPointer: { link: [{ xAxisIndex: 'all' }] },
-    // THE COLUMN UNDER THE POINTER, from the hover area it is over. An axis trigger would hand the
-    // formatter the nearest column's start, which in a column's right half is the next column.
+    // THE TILE'S HOVER: one line across every lane, and the box names the instant under it and
+    // what each member was doing then.
     tooltip: {
-      trigger: 'item',
+      trigger: 'axis',
       triggerOn: 'mousemove|click',
+      axisPointer: { type: 'line' },
       // OUTSIDE THE CARD, beside the pointer: never over the hover line.
       confine: false,
       appendTo: 'body',
@@ -359,66 +294,48 @@ const option = computed(() => {
       transitionDuration: 0,
       className: 'stats-tooltip',
       formatter: (params: unknown) => {
-        const from = Number((params as { value?: number[] } | undefined)?.value?.[0] ?? NaN);
-        const column = columns.value.find((c) => c.from === from);
+        const first = (Array.isArray(params) ? params[0] : params) as { axisValue?: number | string } | undefined;
+        const hovered = pointerAt.value ?? Number(first?.axisValue ?? end);
 
-        return column
-          ? columnTooltipHtml(column, bucket.value, timeZone, people.value, { hidden: hiddenStates.value, withDate: withDate.value })
-          : '';
+        return tooltipHtml(lanes.value, hovered, withDate.value);
       },
     },
     series: [
       {
         type: 'custom',
         name: 'lanes',
-        xAxisIndex: 0,
-        yAxisIndex: 0,
         renderItem: renderLane,
         encode: { x: [1, 2], y: 0 },
         data: lanes.value.flatMap((lane, index) =>
           lane.spans.map((span) => [index, span.from, span.to, ActivityStates.indexOf(span.state)])),
       },
+      // ONE EMPTY SERIES PER STATE, only so the legend has each state's look to show.
       ...ActivityStates.map((state) => ({
         type: 'custom',
         name: state,
-        xAxisIndex: 1,
-        yAxisIndex: 1,
-        // HELD IS STRIPED in its legend mark too, as its columns are, so it never depends on hue.
+        silent: true,
+        // HELD IS STRIPED in its legend mark too, as its spans are, so it never depends on hue.
         itemStyle: state === 'held'
           ? { color: palette[state], decal: { symbol: 'rect', dashArrayX: [2, 4], dashArrayY: [1, 0], color: palette.chrome } }
           : { color: palette[state] },
-        renderItem: renderColumn(state),
-        encode: { x: [0, 1], y: [2, 3] },
-        data: stacks.value[state],
+        renderItem: () => ({ type: 'group', children: [] }),
+        data: [],
       })),
       {
-        // THE WHOLE PERIOD, drawn as nothing, so the hover line has something to stand on.
+        // THE WHOLE WINDOW, drawn as nothing, so the hover line has something to stand on.
         type: 'custom',
         name: 'period',
         silent: true,
-        xAxisIndex: 1,
-        yAxisIndex: 1,
         renderItem: () => ({ type: 'group', children: [] }),
-        encode: { x: [0, 1], y: [2, 3] },
-        data: [[start, end, 0, 0]],
+        encode: { x: [1, 2], y: 0 },
+        data: [[0, start, end]],
       },
-      // Over the lanes and over the columns alike, on top of what they cover.
-      ...[0, 1].map((grid) => ({
-        type: 'custom',
-        name: 'hover',
-        z: 10,
-        xAxisIndex: grid,
-        yAxisIndex: grid,
-        emphasis: { disabled: true },
-        renderItem: renderHover,
-        encode: { x: [0, 1] },
-        data: columns.value.map((column) => [column.from, column.to]),
-      })),
     ],
   };
 });
 
-const chartHeight = computed(() => `${36 + lanesHeight.value + ColumnsGap + ColumnsHeight + 64}px`);
+/** The legend, the lanes, the axis labels under them and the zoom slider. */
+const chartHeight = computed(() => `${LanesTop + lanesHeight.value + 64}px`);
 </script>
 
 <template>
@@ -441,7 +358,8 @@ const chartHeight = computed(() => `${36 + lanesHeight.value + ColumnsGap + Colu
           :theme="dark ? 'dark' : ''"
           :init-options="{ renderer: 'svg' }"
           autoresize
-          @legendselectchanged="onLegend"
+          @datazoom="onZoom"
+          @zr:mousemove="notePointerX"
         />
       </q-card-section>
 
