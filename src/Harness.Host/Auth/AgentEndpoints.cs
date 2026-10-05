@@ -590,9 +590,11 @@ public static class AgentEndpoints
         var labels = withConsoles.ToDictionary(
             t => t.Id, t => t.Name ?? t.Id, StringComparer.OrdinalIgnoreCase);
 
+        // A PLUGIN MEMBER RUNS NO AGENT: its `plugin:<id>` is never a catalog name, so no catalog can
+        // leave it without a command, and checking it would refuse every save on an instance with one.
         var members = await teams.MembersAsync(ct);
         var orphanedMember = members.FirstOrDefault(
-            m => byName.GetValueOrDefault(m.Agent) is not { Mode: AgentMode.Headless });
+            m => !MemberRef.IsPlugin(m.Agent) && byName.GetValueOrDefault(m.Agent) is not { Mode: AgentMode.Headless });
 
         if (orphanedMember is { } member)
         {
