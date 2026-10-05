@@ -1,4 +1,5 @@
 using System.Globalization;
+using Harness.Containers;
 
 namespace Harness.Host.Capacity;
 
@@ -83,7 +84,7 @@ public sealed class HeadroomGate(
             && figures.MemoryPressure?.Some.Avg10 is { } avg10
             && avg10 >= pressureLimit)
         {
-            return "waiting for memory: work waited for memory "
+            return WipLedger.PressureReasonStart
                 + avg10.ToString("0.#", CultureInfo.InvariantCulture) + "% of the last 10 s";
         }
 

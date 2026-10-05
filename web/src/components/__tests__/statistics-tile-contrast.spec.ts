@@ -54,9 +54,34 @@ function contrast(a: string, b: string): number {
   return (hi! + 0.05) / (lo! + 0.05);
 }
 
+/** A colour's hue in degrees. */
+function hue(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
+  const max = Math.max(r, g, b);
+  const span = max - Math.min(r, g, b);
+
+  if (span === 0) return 0;
+
+  const h = max === r ? ((g - b) / span) % 6 : max === g ? (b - r) / span + 2 : (r - g) / span + 4;
+
+  return (h * 60 + 360) % 360;
+}
+
+describe('the held colour', () => {
+  it('is declared in both theme blocks, not inherited by dark from light', () => {
+    expect(tokens(':root')['--os-stat-held']).toMatch(/^#[0-9a-f]{6}$|^var\(--[\w-]+\)$/);
+    expect(tokens('body.body--dark')['--os-stat-held']).toMatch(/^#[0-9a-f]{6}$|^var\(--[\w-]+\)$/);
+  });
+
+  it('has a tooltip chip that is coloured and striped', () => {
+    expect(css).toMatch(/\.stats-tooltip \.stats-chip--held \{[^}]*background[^}]*var\(--os-stat-held\)/);
+    expect(css).toMatch(/\.stats-tooltip \.stats-chip--held \{[^}]*repeating-linear-gradient/);
+  });
+});
+
 describe('the Statistics tile state colours', () => {
   for (const [name, theme] of Object.entries(themes)) {
-    for (const state of ['running', 'waiting', 'blocked', 'failed']) {
+    for (const state of ['running', 'waiting', 'held', 'blocked', 'failed']) {
       it(`${state} reaches 3:1 on --os-chrome in ${name}`, () => {
         const mark = resolve(`--os-stat-${state}`, theme);
         const ground = resolve('--os-chrome', theme);
@@ -64,6 +89,16 @@ describe('the Statistics tile state colours', () => {
         expect(contrast(mark, ground), `${mark} on ${ground}`).toBeGreaterThanOrEqual(3);
       });
     }
+
+    it(`draws held apart from blocked's amber and failed's red in ${name}`, () => {
+      const held = hue(resolve('--os-stat-held', theme));
+
+      for (const other of ['blocked', 'failed']) {
+        const apart = Math.abs(held - hue(resolve(`--os-stat-${other}`, theme)));
+
+        expect(Math.min(apart, 360 - apart), `held against ${other}`).toBeGreaterThanOrEqual(12);
+      }
+    });
 
     it(`has a pale idle track in ${name}`, () => {
       expect(resolve('--os-stat-idle', theme)).toMatch(/^#[0-9a-f]{6}$/);

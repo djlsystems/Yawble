@@ -1052,7 +1052,7 @@ public sealed class ContainerHost : IAsyncDisposable
     /// PAUSE IS THE ONLY REFUSAL, and it is not a resource bound - it is a person saying stop.
     /// </para>
     /// </summary>
-    public IDisposable? TryClaimStart(ContainerId id)
+    public IDisposable? TryClaimStart(ContainerId id, long deliverySeq)
     {
         if (IsPaused(id.Team))
         {
@@ -1065,7 +1065,7 @@ public sealed class ContainerHost : IAsyncDisposable
         // No ledger means unlimited, which is what every fixture that does not pass one gets.
         // A configured ledger is the instance-wide cap. Null from it means "held", and the
         // consumer waits rather than failing the run.
-        return _wip is null ? ExemptSlot.Instance : _wip.TryEnter(id);
+        return _wip is null ? ExemptSlot.Instance : _wip.TryEnterFor(id, deliverySeq);
     }
 
 

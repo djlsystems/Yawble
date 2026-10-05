@@ -67,7 +67,7 @@ public sealed class MemberRuntime : IAsyncDisposable
     ///
     /// Null is a container nothing bounds, which is what a fixture with no host-level cap wants.
     /// </summary>
-    private readonly Func<ContainerId, IDisposable?>? _claimStart;
+    private readonly Func<ContainerId, long, IDisposable?>? _claimStart;
 
     /// <summary>
     /// WHAT A REFUSED CLAIM WAITS ON: a task that completes when a claim might now succeed -
@@ -319,7 +319,7 @@ public sealed class MemberRuntime : IAsyncDisposable
         IMessageLog log,
         ITranscriptStore? transcripts = null,
         IPendingDeliveries? pending = null,
-        Func<ContainerId, IDisposable?>? claimStart = null,
+        Func<ContainerId, long, IDisposable?>? claimStart = null,
         long sinceSeq = 0,
         Func<ContainerId, long?, bool, CancellationToken, Task<bool>>? onRunEnding = null,
         Func<Task>? claimSignal = null,
@@ -1028,7 +1028,7 @@ public sealed class MemberRuntime : IAsyncDisposable
                             {
                                 var signal = _claimSignal?.Invoke();
 
-                                if ((slot = _claimStart(Id)) is not null) break;
+                                if ((slot = _claimStart(Id, first.Seq)) is not null) break;
 
                                 if (!_held)
                                 {

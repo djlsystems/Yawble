@@ -77,6 +77,10 @@ public sealed class WipLedger
     /// <summary>What a run the limit has room for waits for while no worker is connected to run it on.</summary>
     public const string WorkerReason = "waiting for a worker";
 
+    /// <summary>How the headroom gate's sentence for memory pressure begins, which tells it apart from
+    /// memory in use: "waiting for memory: work waited for memory 12% of the last 10 s".</summary>
+    public const string PressureReasonStart = "waiting for memory: work waited for memory ";
+
     /// <summary>How a Manager's running hold ends when it was placed over a worker's bound: "over w1's
     /// bound of 1: every worker is at its own bound".</summary>
     public const string OverBoundReason = "every worker is at its own bound";
@@ -88,15 +92,18 @@ public sealed class WipLedger
     private readonly HashSet<string> _heldForHeadroom = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WorkerId> _placed = new(StringComparer.OrdinalIgnoreCase);
     private readonly IRunPlacement _placement;
+    private readonly IAdmissionHolds? _holds;
+    private readonly Dictionary<string, (string Kind, long? Seq)> _recorded = new(StringComparer.OrdinalIgnoreCase);
     private int _max;
+    private bool _hostStopping;
     private TaskCompletionSource _changed = NewSignal();
 
     /// <param name="maxRunning">The run limit; 0 or less is unlimited.</param>
     /// <param name="headroom">Null when the instance has room for another run, otherwise the reason
     /// it waits. Read under the ledger's lock on every claim the limit would admit, so it must answer
     /// from figures already measured and never do I/O. Absent, only the run limit admits.</param>
-    public WipLedger(int maxRunning, Func<string?>? headroom = null)
-        : this(maxRunning, new OneWorker(headroom))
+    public WipLedger(int maxRunning, Func<string?>? headroom = null, IAdmissionHolds? holds = null)
+        : this(maxRunning, new OneWorker(headroom), holds)
     {
     }
 
@@ -104,8 +111,9 @@ public sealed class WipLedger
     /// <param name="placement">The workers a run may go on and each one's headroom, read under the
     /// ledger's lock on every claim the limit would admit: answered from figures already measured,
     /// never by I/O.</param>
-    public WipLedger(int maxRunning, IRunPlacement placement)
+    public WipLedger(int maxRunning, IRunPlacement placement, IAdmissionHolds? holds = null)
     {
+        _holds = holds;
         _max = maxRunning;
         _placement = placement;
     }
@@ -155,7 +163,13 @@ public sealed class WipLedger
     /// container as waiting, at the tail of the queue the first time, so a colleague can see who is
     /// blocked and who holds the slots.
     /// </summary>
-    public IDisposable? TryEnter(ContainerId id)
+    public IDisposable? TryEnter(ContainerId id) => Enter(id, null);
+
+    /// <inheritdoc cref="TryEnter(ContainerId)"/>
+    /// <param name="deliverySeq">The delivery this claim would run, recorded on its hold.</param>
+    public IDisposable? TryEnterFor(ContainerId id, long deliverySeq) => Enter(id, deliverySeq);
+
+    private IDisposable? Enter(ContainerId id, long? deliverySeq)
     {
         var key = id.ToString();
 
@@ -169,7 +183,7 @@ public sealed class WipLedger
 
             if (!AdmitsLocked(key, IsManager(id)))
             {
-                WaitLocked(id, key, SlotReason, headroom: false);
+                WaitLocked(id, key, SlotReason, headroom: false, deliverySeq);
                 return null;
             }
 
@@ -178,7 +192,7 @@ public sealed class WipLedger
             var (worker, reason, overBound) = PlaceLocked(IsManager(id));
             if (reason is not null)
             {
-                WaitLocked(id, key, reason, headroom: true);
+                WaitLocked(id, key, reason, headroom: true, deliverySeq);
                 return null;
             }
 
@@ -213,7 +227,10 @@ public sealed class WipLedger
 
             foreach (var key in _heldForHeadroom)
             {
-                if (_waiting.TryGetValue(key, out var hold)) _waiting[key] = hold with { Reason = reason };
+                if (!_waiting.TryGetValue(key, out var hold)) continue;
+
+                _waiting[key] = hold with { Reason = reason };
+                RecordLocked(key, hold.Team, hold.Member, reason, _recorded.GetValueOrDefault(key).Seq);
             }
         }
     }
@@ -247,6 +264,17 @@ public sealed class WipLedger
         {
             if (RemoveWaiterLocked(id.ToString())) PulseLocked();
         }
+    }
+
+    /// <summary>
+    /// The Host is going down. No recorded hold is closed from now on: a waiter withdrawn by the
+    /// shutdown has not ended its hold, and one admitted to a slot the shutdown freed (its run
+    /// cancelled) never starts. Each is left open, and the next Host start closes it, marked
+    /// unfinished. A reason that changes kind meanwhile keeps the open row.
+    /// </summary>
+    public void HostStopping()
+    {
+        lock (_gate) _hostStopping = true;
     }
 
     public WipView View()
@@ -354,7 +382,7 @@ public sealed class WipLedger
 
     /// <summary>Records <paramref name="key"/> as waiting - at the tail the first time, keeping its
     /// place and its <c>Since</c> after that - with what it waits for.</summary>
-    private void WaitLocked(ContainerId id, string key, string reason, bool headroom)
+    private void WaitLocked(ContainerId id, string key, string reason, bool headroom, long? deliverySeq)
     {
         if (_waiting.TryGetValue(key, out var hold))
         {
@@ -368,12 +396,71 @@ public sealed class WipLedger
 
         if (headroom) _heldForHeadroom.Add(key);
         else _heldForHeadroom.Remove(key);
+
+        RecordLocked(key, id.Team, id.Name, reason, deliverySeq ?? _recorded.GetValueOrDefault(key).Seq);
+    }
+
+    /// <summary>
+    /// What kind of wait a waiter's reason names: the run limit (a worker's bound included), no worker
+    /// connected, memory pressure, or memory in use - the headroom gate's other sentence.
+    /// </summary>
+    public static string ReasonKind(string reason) => reason switch
+    {
+        SlotReason => AdmissionHoldKinds.Slot,
+        WorkerReason => AdmissionHoldKinds.Worker,
+        _ when reason.StartsWith(PressureReasonStart, StringComparison.Ordinal) => AdmissionHoldKinds.Pressure,
+        _ => AdmissionHoldKinds.Memory,
+    };
+
+    /// <summary>
+    /// Records a waiter's hold: opened the first time it is held, and when its reason changes kind,
+    /// closed and opened again, so each row has one reason. A new figure in the same kind of reason
+    /// is the same hold. The recorder only queues; one that throws is passed over, because admission
+    /// never waits on its record (the recorder reports its own failures).
+    /// </summary>
+    private void RecordLocked(string key, string team, string member, string reason, long? deliverySeq)
+    {
+        if (_holds is null) return;
+
+        var kind = ReasonKind(reason);
+        if (_recorded.TryGetValue(key, out var open) && (open.Kind == kind || _hostStopping)) return;
+
+        var now = DateTimeOffset.UtcNow;
+        var since = _waiting.TryGetValue(key, out var hold) && !_recorded.ContainsKey(key) ? hold.Since : now;
+
+        try
+        {
+            if (_recorded.ContainsKey(key)) _holds.Released(team, member, now);
+            _recorded[key] = (kind, deliverySeq);
+            _holds.Held(team, member, deliverySeq, since, kind, reason);
+        }
+        catch (Exception)
+        {
+            // Passed over: see the summary.
+        }
+    }
+
+    /// <summary>Closes a waiter's recorded hold, when it has one: it started, or it withdrew - except
+    /// while the Host stops, which leaves it open (<see cref="HostStopping"/>).</summary>
+    private void ReleaseRecordLocked(string key, WipHold hold)
+    {
+        if (_holds is null || !_recorded.Remove(key) || _hostStopping) return;
+
+        try
+        {
+            _holds.Released(hold.Team, hold.Member, DateTimeOffset.UtcNow);
+        }
+        catch (Exception)
+        {
+            // Passed over, as in RecordLocked.
+        }
     }
 
     private bool RemoveWaiterLocked(string key)
     {
         _heldForHeadroom.Remove(key);
-        if (!_waiting.Remove(key)) return false;
+        if (!_waiting.Remove(key, out var hold)) return false;
+        ReleaseRecordLocked(key, hold);
         _queue.RemoveAll(queued => string.Equals(queued, key, StringComparison.OrdinalIgnoreCase));
         return true;
     }
