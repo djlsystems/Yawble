@@ -55,7 +55,7 @@ public static class TeamTokenRuns
                 + "With no `from` and `to`, every run since the team's creation, surviving a Reset that "
                 + "deletes memory, and the window to draw them in (`window: \"workflows\"`): from the root "
                 + "of the team's earliest workflow to the latest activity of any of them, never to the "
-                + "clock - the Statistics tile's own window. A team with no workflow answers `\"none\"` "
+                + "clock - the Activity tile's own window. A team with no workflow answers `\"none\"` "
                 + "and no `from` or `to`. With both, the runs that ended in that period "
                 + "(`\"requested\"`), at most one year.");
     }
@@ -68,7 +68,7 @@ public static class TeamTokenRuns
         var created = await store.CreatedAtAsync(team, ct);
         var floor = created is { } at ? await log.LastSeqBeforeAsync(at, ct) : 0;
 
-        // THE STATISTICS TILE'S WINDOW when none is asked for: the team's earliest workflow root to
+        // THE ACTIVITY TILE'S WINDOW when none is asked for: the team's earliest workflow root to
         // the latest activity of any of its workflows, never the clock. The runs are every run since
         // the team's creation all the same, so the dialog's totals keep the whole history.
         var (window, start, end) = from is { } f && to is { } t

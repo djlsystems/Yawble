@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
 // THE TOKENS DIALOG'S CHART, opened from the Tokens tile on the team board: that it draws the
-// Statistics tile's window with no period picker, how the metric picker changes the figures, one
+// Activity tile's window with no period picker, how the metric picker changes the figures, one
 // series per member, a bucket of runs with no figure, the hover, the source line - and that the
 // totals and tables under it are as they were.
 //
@@ -291,7 +291,7 @@ describe('the window', () => {
     expect(chartOption().xAxis.max).toBe(utc('14:10:00'));
   });
 
-  it('chooses the column size by the same function as the Statistics dialog', async () => {
+  it('chooses the column size by the same function as the Activity dialog', async () => {
     answer = runs({ from: iso(utc('08:00:00')), to: iso(utc('14:09:20')) });
 
     await mountStrip();

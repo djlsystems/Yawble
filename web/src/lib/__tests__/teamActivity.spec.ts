@@ -176,7 +176,7 @@ describe('the aria summary', () => {
     ], { from: iso(at(14, 20)) }), [], end)
 
     expect(activitySummary('workflows', lanes, at(14, 20), end))
-      .toBe(`Statistics ${localStretch(at(14, 20), end)}: 3 members - 2 running, 1 blocked`)
+      .toBe(`Activity ${localStretch(at(14, 20), end)}: 3 members - 2 running, 1 blocked`)
   })
 
   it('says how many have no span at the end', () => {
@@ -186,7 +186,7 @@ describe('the aria summary', () => {
     ]), [], end)
 
     expect(activitySummary('workflows', lanes, at(14, 2), end))
-      .toBe(`Statistics ${localStretch(at(14, 2), end)}: 2 members - 1 idle, 1 with no runs at the end`)
+      .toBe(`Activity ${localStretch(at(14, 2), end)}: 2 members - 1 idle, 1 with no runs at the end`)
   })
 
   it('says one member in the singular', () => {
@@ -195,7 +195,7 @@ describe('the aria summary', () => {
     ]), [], end)
 
     expect(activitySummary('workflows', lanes, at(14, 2), end))
-      .toBe(`Statistics ${localStretch(at(14, 2), end)}: 1 member - 1 failed`)
+      .toBe(`Activity ${localStretch(at(14, 2), end)}: 1 member - 1 failed`)
   })
 
   it('names no window when the answer has none', () => {
@@ -203,11 +203,11 @@ describe('the aria summary', () => {
       member('Manager', [{ state: 'running', from: iso(at(14, 2)), to: null }]),
     ]), [], end)
 
-    expect(activitySummary('workflows', lanes, null, end)).toBe('Statistics: 1 member - 1 running')
+    expect(activitySummary('workflows', lanes, null, end)).toBe('Activity: 1 member - 1 running')
   })
 
   it('says there are no workflows yet when the team never ran', () => {
-    expect(activitySummary('none', [], null, end)).toBe('Statistics: No workflows yet')
+    expect(activitySummary('none', [], null, end)).toBe('Activity: No workflows yet')
   })
 })
 
@@ -675,7 +675,7 @@ describe('a hold for a slot', () => {
     ]), [], now)
 
     expect(activitySummary('workflows', lanes, at(14, 2), now))
-      .toBe(`Statistics ${localStretch(at(14, 2), now)}: 2 members - 1 running, 1 waiting for a slot`)
+      .toBe(`Activity ${localStretch(at(14, 2), now)}: 2 members - 1 running, 1 waiting for a slot`)
   })
 
   it('is striped with the ground\'s colour, so it never depends on hue, and blocked keeps its notch', () => {

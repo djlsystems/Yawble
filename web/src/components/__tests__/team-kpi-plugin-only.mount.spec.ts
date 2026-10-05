@@ -6,7 +6,7 @@
 // it still says what it said before.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// The Statistics tile reads `/activity` when it mounts, and the Tokens dialog's chart reads
+// The Activity tile reads `/activity` when it mounts, and the Tokens dialog's chart reads
 // `/tokens/runs` when it opens. Nothing here is about either, so neither read ever answers,
 // rather than reaching for a server that is not there.
 vi.mock('../../api/client', async (importOriginal) => ({

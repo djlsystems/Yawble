@@ -20,7 +20,7 @@
 // a bar and a pump come to disagree about the same workflow.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// The Statistics tile reads `/activity` when it mounts. Nothing here is about it, so the read never
+// The Activity tile reads `/activity` when it mounts. Nothing here is about it, so the read never
 // answers, rather than reaching for a server that is not there.
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

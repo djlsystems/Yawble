@@ -645,7 +645,7 @@ function showThread(row: WorkflowRow) {
       </button>
     </div>
 
-    <!-- STATISTICS: a lane per member, between the workflow it describes and what it cost. -->
+    <!-- ACTIVITY: a lane per member, between the workflow it describes and what it cost. -->
     <TeamStatisticsTile
       :team-id="teamId"
       :containers="containers"

@@ -152,7 +152,7 @@ public sealed class TeamTokenRunsTests(TeamTokenRunsTests.Bed bed) : IClassFixtu
 
         var answer = await bed.RunsAsync(team);
 
-        // The window is the Statistics tile's: the workflow's root to its newest row, never now.
+        // The window is the Activity tile's: the workflow's root to its newest row, never now.
         var latest = (await bed.Log.ReadCorrelationAsync(root.Seq, Ct)).Max(m => m.OccurredAt);
         Assert.Equal("workflows", answer.GetProperty("window").GetString());
         Assert.Equal(root.OccurredAt, answer.GetProperty("from").GetDateTimeOffset());

@@ -327,7 +327,7 @@ const chartHeight = computed(() => `${LanesTop + lanesHeight.value + 32}px`);
   <q-dialog v-model="open" @show="fitChart">
     <q-card ref="cardEl" class="stats-dialog-card os-dialog-xl">
       <q-card-section class="q-pb-none">
-        <div class="os-dialog-title">Statistics</div>
+        <div class="os-dialog-title">Activity</div>
         <div class="text-caption os-text-muted q-mt-xs stats-dialog-subtitle">{{ subtitle }}</div>
       </q-card-section>
 

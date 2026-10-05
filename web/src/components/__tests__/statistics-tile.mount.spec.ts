@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE STATISTICS TILE ON THE TEAM BOARD: where it sits in the strip, which lanes it draws, what its
+// THE ACTIVITY TILE ON THE TEAM BOARD: where it sits in the strip, which lanes it draws, what its
 // caption and tooltip say, and when it reads `/activity` again.
 //
 // The words and the order are pinned without a DOM in `lib/__tests__/teamActivity.spec.ts`; this
@@ -168,13 +168,13 @@ async function mountStrip(props: Record<string, unknown> = {}) {
 
 const tile = () => wrapper!.find('.team-kpi--statistics');
 
-describe('the Statistics tile', () => {
+describe('the Activity tile', () => {
   it('sits between the Workflow tile and the Tokens tile', async () => {
     await mountStrip();
 
     const tiles = wrapper!.findAll('.team-kpi-strip > .team-kpi').map((t) => t.find('.team-kpi-label').text());
 
-    expect(tiles.map((label) => label.split(/\s/)[0])).toEqual(['Workflow', 'Statistics', 'Tokens']);
+    expect(tiles.map((label) => label.split(/\s/)[0])).toEqual(['Workflow', 'Activity', 'Tokens']);
   });
 
   it('draws one lane per current member with its initials, the Manager first, then board order', async () => {
@@ -224,7 +224,7 @@ describe('the Statistics tile', () => {
   it('summarises itself in its aria-label', async () => {
     await mountStrip();
 
-    expect(tile().attributes('aria-label')).toBe(`Statistics ${localStretch(at(14, 2), at(14, 30))}: 3 members - 3 running`);
+    expect(tile().attributes('aria-label')).toBe(`Activity ${localStretch(at(14, 2), at(14, 30))}: 3 members - 3 running`);
   });
 
   it('counts a member waiting for a slot in its aria-label, and gives the reason in the tooltip', async () => {
@@ -240,7 +240,7 @@ describe('the Statistics tile', () => {
     await mountStrip({ containers: [container('Manager', 'Manager'), container('DeveloperInes', 'Ines Lopez'), container('Tester', 'Tester Okon')] });
 
     expect(tile().attributes('aria-label'))
-      .toBe(`Statistics ${localStretch(at(14, 2), at(14, 30))}: 3 members - 2 running, 1 waiting for a slot`);
+      .toBe(`Activity ${localStretch(at(14, 2), at(14, 30))}: 3 members - 2 running, 1 waiting for a slot`);
 
     const chart = wrapper!.findComponent({ name: 'Echarts' });
     const option = chart.props('option') as { tooltip: { formatter: (params: unknown) => string } };
@@ -300,7 +300,7 @@ describe('the Statistics tile', () => {
   });
 });
 
-describe('the Statistics tile keeps itself current', () => {
+describe('the Activity tile keeps itself current', () => {
   it('refetches when a member changes state, and never on a timer', async () => {
     vi.useFakeTimers({ now: at(14, 30), toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
 

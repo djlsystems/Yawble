@@ -2,7 +2,7 @@ import type { ActivitySpan, ActivityState, ActivityWindow, TeamActivity, TeamTok
 import { localDate, localStretch, localTime } from './localTime'
 
 /**
- * WHAT THE STATISTICS TILE DRAWS FROM ONE `/activity` ANSWER, as plain functions so its initials,
+ * WHAT THE ACTIVITY TILE DRAWS FROM ONE `/activity` ANSWER, as plain functions so its initials,
  * its lanes, its words and its colours are pinned without mounting a chart.
  *
  * NO STATE IS DECIDED HERE. The server says which state each stretch was in; these only order the
@@ -185,7 +185,7 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 
 /**
  * THE TILE'S `aria-label`: the window once at the front, then how many lanes and each member's
- * state at the window's end counted by state - "Statistics 11:38:02 AM – 3:41:17 PM: 3 members - 2
+ * state at the window's end counted by state - "Activity 11:38:02 AM – 3:41:17 PM: 3 members - 2
  * running, 1 blocked". A member with no span there is counted as such, never as idle.
  */
 export function activitySummary(
@@ -194,7 +194,7 @@ export function activitySummary(
   from: number | null,
   end: number,
 ): string {
-  if (window === 'none') return 'Statistics: No workflows yet'
+  if (window === 'none') return 'Activity: No workflows yet'
 
   const counts = new Map<ActivityState, number>()
   let nothing = 0
@@ -214,7 +214,7 @@ export function activitySummary(
 
   const stretch = from === null ? '' : ` ${localStretch(from, end)}`
 
-  return `Statistics${stretch}: ${plural(lanes.length, 'member', 'members')} - ${parts.join(', ')}`
+  return `Activity${stretch}: ${plural(lanes.length, 'member', 'members')} - ${parts.join(', ')}`
 }
 
 /**
@@ -277,7 +277,7 @@ export function tooltipHtml(lanes: readonly Lane[], at: number, withDate: boolea
   return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(localTime(at, { date: withDate }))}</div>${rows.join('')}</div>`
 }
 
-/** How wide one column of the Statistics dialog is: a local minute, hour, day or month. */
+/** How wide one column of the Activity dialog is: a local minute, hour, day or month. */
 export type Bucket = 'minute' | 'hour' | 'day' | 'month'
 
 const zoneFormats = new Map<string, Intl.DateTimeFormat>()
@@ -409,7 +409,7 @@ export function axisTimeLabel(ms: number, bucket: Bucket, timeZone: string): str
 }
 
 /**
- * THE COLUMN SIZE THAT FITS A WINDOW, for the Statistics dialog and the Tokens chart alike: the
+ * THE COLUMN SIZE THAT FITS A WINDOW, for the Activity dialog and the Tokens chart alike: the
  * minute up to two hours, the hour up to three days, the day up to three months by the UTC calendar,
  * the month beyond.
  */

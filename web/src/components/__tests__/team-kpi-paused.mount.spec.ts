@@ -29,7 +29,7 @@ vi.mock('quasar', async (importOriginal) => ({
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   resumeWorkflow,
-  // The Statistics tile's read; nothing here is about it, so it never answers.
+  // The Activity tile's read; nothing here is about it, so it never answers.
   getTeamActivity: () => new Promise(() => {}),
 }));
 

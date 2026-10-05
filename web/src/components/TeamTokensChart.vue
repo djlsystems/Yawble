@@ -27,9 +27,9 @@ import { crossesDays } from '../lib/localTime';
 /**
  * THE TOKENS DIALOG'S CHART: when the team spent, and who, as stacked columns per bucket - one
  * series per member - over the team's runs from the usage ledger, each at the instant it ended,
- * drawn over the Statistics tile's own window: the team's earliest workflow root to the latest
+ * drawn over the Activity tile's own window: the team's earliest workflow root to the latest
  * activity of any workflow, never the clock.
- * Tree-shaken and drawn as in the Statistics dialog: custom series, the legend that toggles each
+ * Tree-shaken and drawn as in the Activity dialog: custom series, the legend that toggles each
  * member and the tooltip, SVG. No zoom: the chart always shows the whole window.
  *
  * NOTHING IS DRAWN AS ZERO. A run with no figure for the chosen metric adds nothing to a column; a
@@ -131,7 +131,7 @@ const periodTo = computed(() => {
   return last ? Date.parse(last.endedAt) : periodFrom.value ?? 0;
 });
 
-/** THE COLUMN SIZE THAT FITS THE WINDOW, by the Statistics dialog's own function. */
+/** THE COLUMN SIZE THAT FITS THE WINDOW, by the Activity dialog's own function. */
 const bucket = computed(() => windowBucket(periodFrom.value ?? periodTo.value, periodTo.value));
 
 /** A time of day alone is ambiguous once the window crosses midnight: then every time has its date. */

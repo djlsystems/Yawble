@@ -63,7 +63,7 @@
   // `--os-surface`, 5.26:1 on `--os-chrome`. Dark lifts it to `--os-warn`.
   --os-warn-ink: #8a5a00;
 
-  // THE STATISTICS TILE'S LANES: each state a mark of at least 3:1 on `--os-chrome`, the tile it is
+  // THE ACTIVITY TILE'S LANES: each state a mark of at least 3:1 on `--os-chrome`, the tile it is
   // drawn on (`statistics-tile-contrast.spec.ts` measures both themes). Idle is a pale empty track
   // on purpose, each theme's own strong rule.
   --os-stat-running: #2e7d4f;
@@ -706,7 +706,7 @@ table.os-cols-fixed {
   }
 }
 
-/* THE STATISTICS AND TOKENS HOVER BOXES. ECharts appends them to the body, outside every tile and
+/* THE ACTIVITY AND TOKENS HOVER BOXES. ECharts appends them to the body, outside every tile and
    dialog, so they are styled here and not in a component's scoped styles. Classes only: the CSP
    refuses a `style` attribute in their markup. */
 .stats-tooltip .stats-tip-time,

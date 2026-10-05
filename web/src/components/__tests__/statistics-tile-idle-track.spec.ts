@@ -54,7 +54,7 @@ function onRoot(token: string): string {
   return reference ? onRoot(reference[1]!) : value;
 }
 
-describe('the Statistics tile idle track', () => {
+describe('the Activity tile idle track', () => {
   it('is the light rule colour in light', () => {
     expect(onRoot('--os-stat-idle')).toBe(onRoot('--os-rule-strong'));
   });

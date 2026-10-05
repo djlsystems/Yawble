@@ -364,8 +364,8 @@ export const getTeamWorkflows = (team: TeamId) =>
 
 /**
  * What each member of a team was doing, and when, over the team's own window: from its oldest open
- * workflow, else its most recent one, to now. The Statistics tile reads it. With `period`, over that
- * period instead (both instants, at most a year apart): the Statistics dialog's longer periods.
+ * workflow, else its most recent one, to now. The Activity tile reads it. With `period`, over that
+ * period instead (both instants, at most a year apart): the Activity dialog's longer periods.
  */
 export const getTeamActivity = (team: TeamId, period?: { from: string; to: string }) =>
   json<TeamActivity>(

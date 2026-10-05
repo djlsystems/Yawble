@@ -5,7 +5,7 @@
 // opened through QTooltip's own `show()` because it is absent from the DOM until then.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// The Statistics tile reads `/activity` when it mounts, and the Tokens dialog's chart reads
+// The Activity tile reads `/activity` when it mounts, and the Tokens dialog's chart reads
 // `/tokens/runs` when it opens. Nothing here is about either, so neither read ever answers,
 // rather than reaching for a server that is not there.
 vi.mock('../../api/client', async (importOriginal) => ({

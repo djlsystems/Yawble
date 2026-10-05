@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE STATISTICS DIALOG, opened from the Statistics tile on the team board: that it shows the tile's
+// THE ACTIVITY DIALOG, opened from the Activity tile on the team board: that it shows the tile's
 // own window with no period picker, one lane per member and nothing under them, and that its hover
 // behaves as the tile's - the exact instant under the pointer and what each member
 // was doing then - and how it reads an empty window and a member since removed.
@@ -227,7 +227,7 @@ async function hoverAt(x: number, axisValue: number): Promise<HTMLElement> {
   return box;
 }
 
-describe('opening the Statistics dialog', () => {
+describe('opening the Activity dialog', () => {
   it('opens from a click on the tile, reading the tile\'s own window', async () => {
     await mountStrip();
     const before = activityUrls().length;

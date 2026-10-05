@@ -163,7 +163,7 @@ const caption = computed(() =>
     : '—');
 
 const summary = computed(() =>
-  activity.value ? activitySummary(activity.value.window, lanes.value, from.value, end.value) : 'Statistics');
+  activity.value ? activitySummary(activity.value.window, lanes.value, from.value, end.value) : 'Activity');
 
 /**
  * THE HOVER BOX BESIDE THE POINTER, never over it: ECharts asks with the pointer in the chart's
@@ -274,7 +274,7 @@ const option = computed(() => {
 const chartHeight = computed(() => `${lanes.value.length * LaneHeight}px`);
 
 /**
- * A CLICK ANYWHERE OPENS THE STATISTICS DIALOG. On touch, a tap on the lanes shows the tooltip
+ * A CLICK ANYWHERE OPENS THE ACTIVITY DIALOG. On touch, a tap on the lanes shows the tooltip
  * instead, and the label opens the dialog.
  */
 let lastTapWasTouch = false;
@@ -285,14 +285,14 @@ function notePointer(event: PointerEvent) {
 
 const statisticsOpen = ref(false);
 
-function openStatistics() {
+function openActivity() {
   statisticsOpen.value = true;
 }
 
 function onTileClick() {
   if (lastTapWasTouch) return;
 
-  openStatistics();
+  openActivity();
 }
 </script>
 
@@ -305,7 +305,7 @@ function onTileClick() {
     @pointerdown="notePointer"
     @click="onTileClick"
   >
-    <button type="button" class="team-kpi-label stats-label" @click.stop="openStatistics">Statistics</button>
+    <button type="button" class="team-kpi-label stats-label" @click.stop="openActivity">Activity</button>
 
     <div v-if="hasChart" class="stats-body">
       <div class="stats-initials" aria-hidden="true">

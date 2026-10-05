@@ -4,7 +4,7 @@ import { compileString } from 'sass';
 import { describe, expect, it } from 'vitest';
 
 /**
- * THE STATISTICS TILE'S STATE COLOURS HOLD 3:1 AGAINST THE TILE, IN BOTH THEMES.
+ * THE ACTIVITY TILE'S STATE COLOURS HOLD 3:1 AGAINST THE TILE, IN BOTH THEMES.
  *
  * A span is a graphical mark, so WCAG asks 3:1 of it against what it sits on: the tile's
  * `--os-chrome`. The colours are theme tokens in `app.scss`; this resolves each through the compiled
@@ -79,7 +79,7 @@ describe('the held colour', () => {
   });
 });
 
-describe('the Statistics tile state colours', () => {
+describe('the Activity tile state colours', () => {
   for (const [name, theme] of Object.entries(themes)) {
     for (const state of ['running', 'waiting', 'held', 'blocked', 'failed']) {
       it(`${state} reaches 3:1 on --os-chrome in ${name}`, () => {

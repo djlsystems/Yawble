@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE STATISTICS TILE'S DRAWING: open spans drawn to the window's end and never grown by the clock, the notch that tells
+// THE ACTIVITY TILE'S DRAWING: open spans drawn to the window's end and never grown by the clock, the notch that tells
 // blocked and failed apart without hue, lanes tall enough to read, the hover line, and an SVG chart
 // that follows the dark theme.
 import { readFileSync } from 'node:fs';
