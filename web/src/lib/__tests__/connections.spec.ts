@@ -85,6 +85,14 @@ describe('connections', () => {
     expect(scopeRefusal('mail', renamed, ['s'])).toMatch(/^Connection 'Work mail' \(person@example.com\) was not granted/)
   })
 
+  it('sends a person to the Reconnect shown beside the refusal, never to Admin → Connections', () => {
+    const own = hostConnection({ id: 'c1', provider: 'google', name: 'person@example.com' })
+
+    expect(scopeRefusal('mail', own, ['s'])).toContain('Press Reconnect to grant that scope.')
+    expect(scopeRefusal('mail', own, ['s', 't'])).toContain('Press Reconnect to grant those scopes.')
+    expect(scopeRefusal('mail', own, ['s'])).not.toContain('Admin')
+  })
+
   it("moves the provider's return from the search into the hash route, and leaves anything else alone", () => {
     expect(providerReturnAddress({ pathname: '/console', search: '?connection=refused&reason=No+refresh+token' })).toBe(
       '/#/console?connection=refused&reason=No+refresh+token',

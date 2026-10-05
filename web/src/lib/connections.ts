@@ -125,8 +125,10 @@ export function missingScopes(slot: ConnectionSlot, connection: Connection): str
 const quoted = (scopes: string[]) => scopes.map((scope) => `\`${scope}\``).join(', ');
 
 /**
- * The Host's refusal of a binding without a scope the slot needs, which offers Reconnect. The
- * connection's own name and account are in it, so a person knows which one to reconnect.
+ * The Host's refusal of a binding without a scope the slot needs. It is shown with Reconnect beside
+ * it, which asks for exactly the missing scopes, so it sends the person there - not to Admin →
+ * Connections, whose Reconnect asks for no new scope. The connection's own name and account are in
+ * it, so a person knows which one is meant.
  */
 export function scopeRefusal(slotName: string, connection: Connection, missing: string[]): string {
   const what = missing.length === 1 ? `the scope ${quoted(missing)}` : `the scopes ${quoted(missing)}`;
@@ -134,7 +136,7 @@ export function scopeRefusal(slotName: string, connection: Connection, missing: 
 
   return (
     `Connection ${named(connection)} was not granted ${what} that slot \`${slotName}\` needs. ` +
-    `Reconnect it from Admin → Connections with ${those}, then bind it again.`
+    `Press Reconnect to grant ${those}.`
   );
 }
 

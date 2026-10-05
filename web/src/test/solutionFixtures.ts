@@ -221,7 +221,7 @@ export function okCheck(plan = hostPlan()): SolutionCheck {
 }
 
 export const Connections = [
-  { id: 'conn-1', name: 'Work mail', provider: 'google', account: 'dana@example.com', status: 'ok' },
+  { id: 'conn-1', name: 'Work mail', provider: 'microsoft', account: 'dana@example.com', status: 'ok' },
 ];
 
 export function installPreview(
