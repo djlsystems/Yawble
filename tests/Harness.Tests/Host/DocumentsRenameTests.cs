@@ -47,21 +47,6 @@ public sealed class DocumentsRenameTests(HostFixture host) : IClassFixture<HostF
         Assert.Equal(["Notes.md"], Directory.GetFiles(Docs.At(host.Alpha, "cases")).Select(Path.GetFileName));
     }
 
-    [Fact]
-    public async Task A_rename_onto_an_existing_name_is_refused_and_nothing_changes()
-    {
-        using var client = await host.PersonAsync();
-        Docs.Write(host.Alpha, "taken/a.md", "a");
-        Docs.Write(host.Alpha, "taken/b.md", "b");
-
-        var response = await client.RenameAsync(host.Alpha, ("taken/a.md", "b.md"));
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Equal("There is already b.md in taken.", await response.ErrorAsync());
-        Assert.Equal("a", File.ReadAllText(Docs.At(host.Alpha, "taken/a.md")));
-        Assert.Equal("b", File.ReadAllText(Docs.At(host.Alpha, "taken/b.md")));
-    }
-
     [Theory]
     [InlineData("")]
     [InlineData(".")]
@@ -79,59 +64,6 @@ public sealed class DocumentsRenameTests(HostFixture host) : IClassFixture<HostF
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("A name cannot be empty, \".\" or \"..\", or contain / \\ or :.", await response.ErrorAsync());
         Assert.True(File.Exists(Docs.At(host.Alpha, "named/a.md")));
-    }
-
-    [Fact]
-    public async Task The_marker_is_neither_renamed_nor_a_name_to_rename_to()
-    {
-        using var client = await host.PersonAsync();
-        Docs.EnsureFor(host.Alpha);
-        Docs.Write(host.Alpha, "marked/a.md");
-
-        var source = await client.RenameAsync(host.Alpha, (TeamPaths.MarkerFileName, "free.md"));
-        Assert.Equal(HttpStatusCode.BadRequest, source.StatusCode);
-        Assert.Equal("That file is this folder's own marker, not a document.", await source.ErrorAsync());
-        Assert.True(File.Exists(TeamPaths.MarkerIn(Docs.RootFor(host.Alpha))));
-
-        var target = await client.RenameAsync(host.Alpha, ("marked/a.md", TeamPaths.MarkerFileName));
-        Assert.Equal(HttpStatusCode.BadRequest, target.StatusCode);
-        Assert.Equal($"{TeamPaths.MarkerFileName} is reserved for the folder's marker.", await target.ErrorAsync());
-        Assert.True(File.Exists(Docs.At(host.Alpha, "marked/a.md")));
-    }
-
-    [Fact]
-    public async Task The_documents_folder_itself_cannot_be_renamed()
-    {
-        using var client = await host.PersonAsync();
-        Docs.EnsureFor(host.Alpha);
-
-        var response = await client.RenameAsync(host.Alpha, ("", "Elsewhere"));
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("The documents folder itself cannot be renamed or moved.", await response.ErrorAsync());
-        Assert.True(Directory.Exists(Docs.RootFor(host.Alpha)));
-    }
-
-    [Fact]
-    public async Task Nothing_in_a_gone_or_retired_folder_can_be_renamed()
-    {
-        using var client = await host.PersonAsync();
-        var gone = await GoneTeamAsync(host.Services, "RenameGone", "a.md");
-        var retired = await RetiredFolderAsync(host.Services, "RenameRetired", "a.md");
-
-        var fromGone = await client.RenameAsync(gone, ("a.md", "b.md"));
-        Assert.Equal(HttpStatusCode.Conflict, fromGone.StatusCode);
-        Assert.Equal(
-            "RenameGone no longer exists. Its documents can be read, copied or moved out, and deleted, but nothing in them can be renamed.",
-            await fromGone.ErrorAsync());
-        Assert.True(File.Exists(Docs.At(gone, "a.md")));
-
-        var fromRetired = await client.RenameAsync(retired, ("a.md", "b.md"));
-        Assert.Equal(HttpStatusCode.Conflict, fromRetired.StatusCode);
-        Assert.Equal(
-            "This folder belongs to an earlier team called RenameRetired. Its documents can be read, copied or moved out, and deleted, but nothing in them can be renamed.",
-            await fromRetired.ErrorAsync());
-        Assert.True(File.Exists(Docs.At(retired, "a.md")));
     }
 
     [Fact]

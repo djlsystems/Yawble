@@ -82,6 +82,19 @@ describe('the ribbon', () => {
     expect(needsActiveWorkTeam(DocumentsAction, undefined)).toBe(false)
   })
 
+  /**
+   * ONE Documents item on the whole ribbon. An item in one group with a copy in another would
+   * render two Documents controls that disagree about which folder they meant. Found by ACTION,
+   * not kind: a filter on `kind` would silently match nothing if the item's kind changed.
+   */
+  it('has exactly one Documents item on the whole ribbon', () => {
+    const all = Ribbon.tabs
+      .flatMap((tab) => tab.items)
+      .filter((item) => item.action === DocumentsAction)
+
+    expect(all).toHaveLength(1)
+  })
+
   it('names the documents action for what it needs rather than for its tab or its team', () => {
     const projects = Ribbon.tabs.find((tab) => tab.id === 'projects')!.items.map((item) => item.action)
 

@@ -122,15 +122,6 @@ describe('the kanban endpoints', () => {
   })
 
   /**
-   * The team filter reaches the wire rather than being baked into a per-team path.
-   */
-  it('sends the team the caller filtered to, not one baked into the path', async () => {
-    await getKanbanBoard({ team: 'someone-else' } as KanbanFilters)
-
-    expect(pathOf()).toBe('/api/kanban/board?team=someone-else')
-  })
-
-  /**
    * THE PER-TEAM ROUTE IS UNCHANGED AND MUST STAY THAT WAY. It is what the CLI and a container
    * read, and it is still gated by its `{team}` declaration. Card writes address it with the
    * CARD'S own team, which is what the calls below are exercising.

@@ -55,11 +55,34 @@ func TestRunBuildsTheWholeCommandLineInAFixedOrder(t *testing.T) {
 	}
 }
 
-func TestRunOmitsLimitsThatAreNotSet(t *testing.T) {
-	s := engine.NewScripted()
-	_ = engine.NewPodman(s).Run(context.Background(), engine.RunSpec{Name: "y", Pod: "y", Image: "img"})
-	if s.Calls[0] != "podman run -d --name y --pod y --restart unless-stopped img" {
-		t.Errorf("got %q", s.Calls[0])
+func TestRunBuildsTheCommandLineFromTheSpec(t *testing.T) {
+	cases := []struct {
+		name string
+		spec engine.RunSpec
+		want string
+	}{
+		{"omits limits that are not set",
+			engine.RunSpec{Name: "y", Pod: "y", Image: "img"},
+			"podman run -d --name y --pod y --restart unless-stopped img"},
+		{"carries cap-drop and cap-add",
+			engine.RunSpec{Name: "y", Pod: "y", Image: "img", CapDrop: []string{"ALL"}, CapAdd: []string{"CHOWN", "KILL"}},
+			"podman run -d --name y --pod y --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add KILL img"},
+		{"passes every env file in order, skipping an empty one",
+			engine.RunSpec{Name: "y", Pod: "y", Image: "img", EnvFiles: []string{"/c/env", "", "/c/worker.env"}},
+			"podman run -d --name y --pod y --restart unless-stopped --env-file /c/env --env-file /c/worker.env img"},
+		// Podman's pod already shares one network namespace; a Docker-only Network never reaches its line.
+		{"joins a worker to the pod and ignores Network",
+			engine.RunSpec{Name: "yawble-worker-1", Pod: "yawble", Network: "container:yawble", Image: "img"},
+			"podman run -d --name yawble-worker-1 --pod yawble --restart unless-stopped img"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := engine.NewScripted()
+			_ = engine.NewPodman(s).Run(context.Background(), c.spec)
+			if s.Calls[0] != c.want {
+				t.Errorf("got %q\nwant %q", s.Calls[0], c.want)
+			}
+		})
 	}
 }
 
@@ -353,31 +376,6 @@ func TestStopWithinGivesTheGraceOnTheLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	if s.Calls[0] != "podman stop -t 30 yawble-worker-3" {
-		t.Errorf("got %q", s.Calls[0])
-	}
-}
-
-func TestRunCarriesCapDropAndCapAdd(t *testing.T) {
-	s := engine.NewScripted()
-	_ = engine.NewPodman(s).Run(context.Background(), engine.RunSpec{Name: "y", Pod: "y", Image: "img", CapDrop: []string{"ALL"}, CapAdd: []string{"CHOWN", "KILL"}})
-	if s.Calls[0] != "podman run -d --name y --pod y --restart unless-stopped --cap-drop ALL --cap-add CHOWN --cap-add KILL img" {
-		t.Errorf("got %q", s.Calls[0])
-	}
-}
-
-func TestRunPassesEveryEnvFileInOrder(t *testing.T) {
-	s := engine.NewScripted()
-	_ = engine.NewPodman(s).Run(context.Background(), engine.RunSpec{Name: "y", Pod: "y", Image: "img", EnvFiles: []string{"/c/env", "", "/c/worker.env"}})
-	if s.Calls[0] != "podman run -d --name y --pod y --restart unless-stopped --env-file /c/env --env-file /c/worker.env img" {
-		t.Errorf("got %q", s.Calls[0])
-	}
-}
-
-// Podman's pod already shares one network namespace; a Docker-only Network never reaches its line.
-func TestPodmanWorkerRunJoinsThePodAndIgnoresNetwork(t *testing.T) {
-	s := engine.NewScripted()
-	_ = engine.NewPodman(s).Run(context.Background(), engine.RunSpec{Name: "yawble-worker-1", Pod: "yawble", Network: "container:yawble", Image: "img"})
-	if s.Calls[0] != "podman run -d --name yawble-worker-1 --pod yawble --restart unless-stopped img" {
 		t.Errorf("got %q", s.Calls[0])
 	}
 }

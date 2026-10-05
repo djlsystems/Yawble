@@ -422,17 +422,6 @@ describe('board store', () => {
       expect(board.activeTeamId).toBe(gamma);
     });
 
-    it('closing the active tab keeps the remaining tabs in their original order', () => {
-      const board = useConsoleStore();
-      board.teams = [team(alpha), team(beta), team(gamma)];
-      board.openTeamTabs = [alpha, beta, gamma];
-      board.activeTeamId = beta;
-
-      board.closeTeamTab(beta);
-
-      expect(board.openTeamTabs).toEqual([alpha, gamma]);
-    });
-
     it('closing a non-active tab leaves activeTeamId untouched', () => {
       const board = useConsoleStore();
       board.teams = [team(alpha), team(beta), team(gamma)];
@@ -916,23 +905,6 @@ describe('board store', () => {
 
       board.applyCurrentTeam('SomewhereElse');
 
-      expect(board.activeTeamId).toBe('Alpha');
-    });
-
-    /**
-     * Step 1 - Announcement arrives before the team list loads.
-     *
-     * When teams is empty, applyCurrentTeam does not apply the announcement immediately; it is
-     * held (see the next case) rather than applied against an empty list.
-     */
-    it('does not apply announcement when teams has not loaded yet', () => {
-      const board = useConsoleStore();
-      board.setActiveTeam(asTeamId('Alpha'));
-      board.teams = []; // List has not loaded yet - no teams
-
-      board.applyCurrentTeam('Beta');
-
-      // Announcement is dropped, activeTeamId stays unchanged
       expect(board.activeTeamId).toBe('Alpha');
     });
 

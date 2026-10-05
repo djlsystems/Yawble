@@ -158,38 +158,17 @@ describe('the Workflows dialog, row by row', () => {
    * `woke` subquery treats that as RE-OPENING the workflow — so the button would wake a Manager on
    * already-delivered work. Re-engaging finished work is the Concierge's job.
    */
-  it('offers Show thread and NOT Nudge on a COMPLETED row WITH findings', async () => {
-    const wrapper = await openDialog(payload(), ['StaleBranch']);
-
-    expect(rowActions()).toEqual(['Show thread']);
-
-    wrapper.unmount();
-  });
-
-  /** The same row without findings — kept so the pair reads as one rule
-   *  rather than as a special case that happens to agree. */
-  it('offers Show thread and NOT Nudge on a COMPLETED row WITHOUT findings', async () => {
-    const wrapper = await openDialog(payload(), []);
-
-    expect(rowActions()).toEqual(['Show thread']);
-
-    wrapper.unmount();
-  });
-
-  /** A null `findings` prop is the third spelling of "none" and must not behave as a fourth thing. */
-  it('offers Show thread and NOT Nudge on a COMPLETED row with a null findings prop', async () => {
-    const wrapper = await openDialog(payload(), null);
-
-    expect(rowActions()).toEqual(['Show thread']);
-
-    wrapper.unmount();
-  });
-
-  /** A CLOSED row is terminal for the same reason and gets the same answer. */
-  it('offers Show thread and NOT Nudge on a CLOSED row with findings', async () => {
+  // With findings, without, and with a null prop - the third spelling of "none", which must not
+  // behave as a fourth thing - and a CLOSED row, terminal for the same reason: one answer.
+  it.each([
+    ['COMPLETED', 'with findings', ['StaleBranch']],
+    ['COMPLETED', 'without findings', []],
+    ['COMPLETED', 'with a null findings prop', null],
+    ['Closed', 'with findings', ['StaleBranch']],
+  ] as const)('offers Show thread and NOT Nudge on a %s row %s', async (state, _how, findings) => {
     const wrapper = await openDialog(
-      payload({ workflows: [timing({ state: 'Closed' })] }),
-      ['StaleBranch'],
+      state === 'Closed' ? payload({ workflows: [timing({ state: 'Closed' })] }) : payload(),
+      findings === null ? null : [...findings],
     );
 
     expect(rowActions()).toEqual(['Show thread']);

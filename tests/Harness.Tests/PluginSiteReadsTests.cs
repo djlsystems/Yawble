@@ -163,7 +163,12 @@ public sealed class PluginSiteReadsTests : IAsyncLifetime
     [InlineData("""[{"site":"board","collection":"items"},{"site":"board","collection":"items"}]""", "`reads[1]` repeats board/items.")]
     public void A_reads_declaration_that_is_not_a_site_and_collection_list_is_refused_with_a_sentence(string reads, string expected)
     {
-        Assert.Equal(expected, Refusal(reads));
+        // The CLI's pre-check refuses in these same words (cli/internal/plugin, TestReadsRefusals).
+        var (manifest, refusal) = PluginManifest.Parse(
+            PluginInstall.Manifest("fixture", edit: m => m["reads"] = JsonNode.Parse(reads)).ToJsonString());
+
+        Assert.Null(manifest);
+        Assert.Equal(expected, refusal);
     }
 
     [Fact]

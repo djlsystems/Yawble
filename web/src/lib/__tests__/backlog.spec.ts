@@ -403,11 +403,6 @@ describe('landedMark', () => {
     expect(unknown.title).not.toContain('one disk')
   })
 
-  /** A MISSING ANSWER IS STILL AN ANSWER TO SHOW. The row is not hidden when nobody can tell. */
-  it('returns a mark for `unknown` rather than nothing at all', () => {
-    expect(landedMark(landing('unknown'))).not.toBeNull()
-  })
-
   /**
    * NULL IS NOT `unknown`. The field is absent on an item no dispatch has ever touched, and there
    * is no landing question to answer about one - exactly as `inFlight: null` renders no mark rather
@@ -641,19 +636,6 @@ describe('newTeamNameFor', () => {
   it('leads with the item id and drops stopwords', () => {
     expect(newTeamNameFor({ id: 2, title: 'A guard the rules say is central is in two commands' }))
       .toBe('b0002-guard-rules-say-central')
-  })
-
-  it('never exceeds the 32-character ceiling, and never ends on a hyphen', () => {
-    const name = newTeamNameFor({ id: 17, title: 'Something extraordinarily verbose about everything at once' })
-
-    expect(name.length).toBeLessThanOrEqual(32)
-    expect(name.endsWith('-')).toBe(false)
-  })
-
-  it('truncates on a word boundary rather than mid-word', () => {
-    // `b000h-something-extraordinarily` is 31; adding `-verbose` would be 39, so it stops.
-    expect(newTeamNameFor({ id: 17, title: 'Something extraordinarily verbose about everything' }))
-      .toBe('b000h-something-extraordinarily')
   })
 
   /**

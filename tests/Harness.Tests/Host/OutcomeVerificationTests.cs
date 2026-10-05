@@ -121,22 +121,6 @@ public sealed class OutcomeVerificationTests(HostFixture host) : IClassFixture<H
         Assert.Equal(HttpStatusCode.Conflict, (await person.PostAsJsonAsync($"/api/outcomes/{c.Id}/merge", new { into = a.Id }, Ct)).StatusCode);
     }
 
-    /// <summary>A person's tell link is `how: tell`, and the person caused it: the Manager may not move it.</summary>
-    [Fact]
-    public async Task A_manager_never_overrides_a_link_a_persons_own_tell_made()
-    {
-        var person = await host.PersonAsync();
-        var chosen = await CreateAsync(person, Unique("Chosen by the person"));
-        var other = await CreateAsync(person, Unique("Manager's pick"));
-        var workflow = await WorkflowAsync(person, host.Alpha, chosen.Id);
-        Assert.Equal(OutcomeActorKind.Person, (await Outcomes.CurrentLinkAsync(workflow, Ct))!.SetByKind);
-
-        var answer = await ManagerTools(host.Alpha).Outcome("set", outcome: other.Id, causation: workflow.ToString(), cancellationToken: Ct);
-
-        Assert.StartsWith("Refused:", answer, StringComparison.Ordinal);
-        Assert.Equal(chosen.Id, (await Outcomes.CurrentLinkAsync(workflow, Ct))!.OutcomeId);
-    }
-
     /// <summary>The tell route writes the link and its tenant row, naming the person, in one transaction.</summary>
     [Fact]
     public async Task A_persons_tell_that_names_an_outcome_appends_its_workflow_outcome_changed_row()

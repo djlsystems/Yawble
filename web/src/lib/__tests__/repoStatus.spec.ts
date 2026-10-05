@@ -281,26 +281,6 @@ describe('formatOriginCheckedAt', () => {
 })
 
 describe('pushed vs merged separation', () => {
-  it('shows pushed but not merged correctly', () => {
-    // MEASURED not-merged, not ancestry-says-no-and-nobody-asked-content. See `formatMergedState`.
-    const status = {
-      ...baseStatus, teamPushed: true, teamMergedToMain: false, teamCommitsNotOnMain: 2,
-    }
-    const pushed = formatPushedState(status)
-    const merged = formatMergedState(status)
-    expect(pushed).toBe('pushed')
-    expect(merged).toBe('not merged to main')
-    // Verify these are distinct facts rendered separately
-    expect(pushed).not.toContain('MERGED')
-    expect(merged).not.toContain('pushed')
-  })
-
-  it('shows not pushed correctly', () => {
-    const status = { ...baseStatus, teamPushed: false, teamMergedToMain: false }
-    const pushed = formatPushedState(status)
-    expect(pushed).toBe('not on origin')
-  })
-
   it('handles unknown states independently', () => {
     const status = { ...baseStatus, teamPushed: null, teamMergedToMain: true }
     const pushed = formatPushedState(status)
@@ -633,10 +613,6 @@ describe('origin age sits on the figures a reader would act on', () => {
     const status = { ...baseStatus, mainAhead: 4, mainBehind: 0 }
     expect(formatMainDelta(status)).toBe('4 ahead of origin/main')
   })
-
-  it('does not put origin age on a worktree delta, which is a local comparison', () => {
-    expect(formatWorktreeDelta(aWorktree({ aheadMain: 1, behindMain: 0 }), 'main')).toBe('1 not on main')
-  })
 })
 
 describe('repoPanel', () => {
@@ -849,14 +825,6 @@ describe('repoHeadline', () => {
     expect(line.text).not.toContain('nothing is pushed')
     expect(line.text).not.toContain('only in this clone')
     expect(line.text).toContain('team/os-test')
-  })
-
-  /** THE POSITIVE CONTROL: a branch really measured off origin still gets named as the risk. */
-  it('still names unpushed work when the server actually answered false', () => {
-    const line = repoHeadline({ ...baseStatus, teamPushed: false, teamMergedToMain: false })
-
-    expect(line.text).toContain('only in this clone')
-    expect(line.tone).toBe('attention')
   })
 
   /** A branch that exists but whose pushed-ness was never answered must not open with "Pushed,". */

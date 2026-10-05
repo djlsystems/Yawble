@@ -8,18 +8,31 @@ import (
 	"testing"
 )
 
-// The sample in the repository is what the docs install; it must pass as it is.
-func TestTheSampleManifestIsAccepted(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "samples", "plugins", "sample-echo", "plugin.json"))
-	if err != nil {
-		t.Fatal(err)
+// The samples in the repository are what the docs install; each must pass as it is. The Go
+// template names one static binary per processor, both marked executable; the connections sample
+// binds a Google slot. An empty version or executables is not checked for that sample.
+func TestTheSampleManifestsAreAccepted(t *testing.T) {
+	cases := []struct{ sample, version, executables string }{
+		{"sample-echo", "0.1.0", "sample-echo"},
+		{"sample-echo-go", "", "bin/linux-x64/sample-echo-go,bin/linux-arm64/sample-echo-go,bin/linux-x64/sample-echo-go"},
+		{"sample-whoami-go", "", ""},
 	}
-	m, skills, err := Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.ID != "sample-echo" || m.Version != "0.1.0" || len(m.Executables) != 1 || m.Executables[0] != "sample-echo" || len(skills) != 1 {
-		t.Errorf("%+v %v", m, skills)
+	for _, c := range cases {
+		t.Run(c.sample, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("..", "..", "..", "samples", "plugins", c.sample, "plugin.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			m, skills, err := Parse(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.ID != c.sample || len(skills) != 1 ||
+				(c.version != "" && m.Version != c.version) ||
+				(c.executables != "" && strings.Join(m.Executables, ",") != c.executables) {
+				t.Errorf("%+v %v", m, skills)
+			}
+		})
 	}
 }
 
@@ -49,21 +62,6 @@ func TestRelativePaths(t *testing.T) {
 	}
 }
 
-// The Go template names one static binary per processor; both are marked executable.
-func TestTheGoSampleManifestIsAccepted(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "samples", "plugins", "sample-echo-go", "plugin.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, skills, err := Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.ID != "sample-echo-go" || strings.Join(m.Executables, ",") != "bin/linux-x64/sample-echo-go,bin/linux-arm64/sample-echo-go,bin/linux-x64/sample-echo-go" || len(skills) != 1 {
-		t.Errorf("%+v %v", m, skills)
-	}
-}
-
 func TestListSettingsAndRequires(t *testing.T) {
 	manifest := func(extra string) []byte {
 		return []byte(`{"schemaVersion":1,"id":"p","name":"n","description":"d","version":"1","protocol":"harness.member/1",
@@ -88,21 +86,6 @@ func TestListSettingsAndRequires(t *testing.T) {
 		if (want == "" && got != "") || (want != "" && !strings.Contains(got, want)) {
 			t.Errorf("%s: got %q, want %q", extra, got, want)
 		}
-	}
-}
-
-// The connections sample binds a Google slot; the install accepts it as it is.
-func TestTheWhoamiSampleManifestIsAccepted(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "samples", "plugins", "sample-whoami-go", "plugin.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, skills, err := Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.ID != "sample-whoami-go" || len(skills) != 1 {
-		t.Errorf("%+v %v", m, skills)
 	}
 }
 

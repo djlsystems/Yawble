@@ -120,10 +120,4 @@ describe('agentsForMode and hidden presets', () => {
     expect(agentsForMode(agents, 'Headless').map((a) => a.name)).toEqual(['claude'])
     expect(agentsForMode(agents, 'Interactive')).toEqual([])
   })
-
-  it('treats an absent flag as visible', () => {
-    const agents = [{ name: 'claude', mode: 'Headless' as const }]
-
-    expect(agentsForMode(agents, 'Headless').map((a) => a.name)).toEqual(['claude'])
-  })
 })

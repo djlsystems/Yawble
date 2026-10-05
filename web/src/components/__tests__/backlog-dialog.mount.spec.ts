@@ -421,27 +421,23 @@ describe('BacklogDialog landing', () => {
       .find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
   }
 
-  it('says on main when the work is on main', async () => {
-    await openWith({ state: 'declared', landed: landing('landed', 'Merged into main.') });
+  /**
+   * ONE MARK PER ROW, IN THE STATE'S OWN WORDS. `local` is the near-miss that raised the item: one
+   * disk, no remote, a deletion away from gone. `unknown` is shown, never hidden: dropping the mark
+   * would leave a `declared` item looking like today's screen, and rendering it as a negative
+   * would have the product assert something nobody measured.
+   */
+  it.each([
+    ['landed', 'Merged into main.', 'On the default branch'],
+    ['pushed', 'On origin, not on main.', 'Pushed, not merged'],
+    ['local', 'No branch on origin.', "Only in the team's clone"],
+    ['unknown', 'No repository on this team.', 'Cannot tell'],
+  ] as const)('marks a %s item with its own words', async (state, detail, words) => {
+    await openWith({ state: 'declared', landed: landing(state, detail) });
 
     expect(landingMarks()).toHaveLength(1);
-    expect(landingMarks()[0]!.getAttribute('data-landed')).toBe('landed');
-    expect(landingMarks()[0]!.textContent).toContain('On the default branch');
-  });
-
-  it('says pushed but not merged', async () => {
-    await openWith({ state: 'declared', landed: landing('pushed', 'On origin, not on main.') });
-
-    expect(landingMarks()[0]!.getAttribute('data-landed')).toBe('pushed');
-    expect(landingMarks()[0]!.textContent).toContain('Pushed, not merged');
-  });
-
-  /** THE NEAR-MISS THAT RAISED THE ITEM. One disk, no remote, a deletion away from gone. */
-  it("says the work is only in the team's clone", async () => {
-    await openWith({ state: 'declared', landed: landing('local', 'No branch on origin.') });
-
-    expect(landingMarks()[0]!.getAttribute('data-landed')).toBe('local');
-    expect(landingMarks()[0]!.textContent).toContain("Only in the team's clone");
+    expect(landingMarks()[0]!.getAttribute('data-landed')).toBe(state);
+    expect(landingMarks()[0]!.textContent).toContain(words);
   });
 
   /**
@@ -469,19 +465,6 @@ describe('BacklogDialog landing', () => {
 
     // AND THE ROW STILL SAYS WHOSE WORK IT IS.
     expect(mark.closest('tr')!.textContent).toContain('Alpha');
-  });
-
-  /**
-   * THE ROW IS NOT HIDDEN WHEN NOBODY CAN TELL, and the mark is not a quieter `local`. Both halves
-   * matter: dropping the mark would leave a `declared` item looking exactly like today's screen,
-   * and rendering it as a negative would have the product assert something nobody measured.
-   */
-  it('shows `cannot tell` rather than hiding the row', async () => {
-    await openWith({ state: 'declared', landed: landing('unknown', 'No repository on this team.') });
-
-    expect(landingMarks()).toHaveLength(1);
-    expect(landingMarks()[0]!.getAttribute('data-landed')).toBe('unknown');
-    expect(landingMarks()[0]!.textContent).toContain('Cannot tell');
   });
 
   /**

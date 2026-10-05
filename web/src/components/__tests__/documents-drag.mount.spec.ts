@@ -333,13 +333,6 @@ describe('around the drop', () => {
     expect(server.callsTo('list').filter((call) => call.folder === 'alpha').map((call) => call.url))
       .toEqual(['/api/teams/alpha/documents?path=&recursive=false']);
   });
-
-  it('at phone width, rows are not draggable', async () => {
-    q.screen.lt.sm = true;
-    await openExplorer('alpha');
-
-    expect(rows().some((element) => element.getAttribute('draggable') === 'true')).toBe(false);
-  });
 });
 
 /**

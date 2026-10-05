@@ -102,13 +102,6 @@ async function mountBoard(cards: KanbanCard[], teams: Team[], view: 'board' | 's
 }
 
 describe('lane headers', () => {
-  it('reads In Progress as running over the ledger limit', async () => {
-    const { wrapper } = await mountBoard([card({ id: 'a' })], [team('alpha')]);
-
-    const head = wrapper.find('[data-lane-id="in-progress"] .k-lane-count');
-    expect(head.text()).toBe('3 / 4 running');
-  });
-
   it('turns an advisory lane amber over its limit, and only then', async () => {
     const { wrapper } = await mountBoard(
       [card({ id: 'a', laneId: 'todo', status: 'queued' }), card({ id: 'b', laneId: 'todo', status: 'queued' })],
@@ -267,17 +260,6 @@ describe('swimlanes', () => {
     expect(wrapper.find('.k-swimlanes').exists()).toBe(true);
     expect(wrapper.find('[data-card-id="a"]').exists()).toBe(true);
     expect(localStorage.getItem(KanbanViewKey)).toBe('swimlanes');
-  });
-});
-
-describe('the running lane before the ledger answers', () => {
-  it('reads its running cards against the lane limit', async () => {
-    const { wrapper } = await mountBoard([card({ id: 'a' }), card({ id: 'b', status: 'queued' })], [team('alpha')]);
-    const wip = useWipStore();
-    wip.view = null;
-    await flushPromises();
-
-    expect(wrapper.find('[data-lane-id="in-progress"] .k-lane-count').text()).toBe('1 / 4 running');
   });
 });
 

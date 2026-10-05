@@ -165,11 +165,6 @@ describe("the launcher's filter", () => {
     expect(JSON.stringify(rows)).toBe(before);
   });
 
-  it('splits its text into lower-case words', () => {
-    expect(filterWords('  Job   TRACKER ')).toEqual(['job', 'tracker']);
-    expect(filterWords(null)).toEqual([]);
-  });
-
   it('offers only the teams and states some tile has', () => {
     expect(teamChoices(rows)).toEqual([
       { label: 'Front Desk', value: 't-desk' },

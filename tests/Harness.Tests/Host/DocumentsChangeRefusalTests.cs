@@ -121,6 +121,8 @@ public sealed class DocumentsChangeRefusalTests(DocumentsRefusalHost fixture) : 
         ["move R19 empty"] = new("move", s => Transfer("Beta", null), HttpStatusCode.BadRequest, _ => "Name at least one document."),
         ["move R19 1001"] = new("move", s => Transfer("Beta", null, [.. Enumerable.Range(0, 1001).Select(i => (object)$"{s.P}/{i}.md")]),
             HttpStatusCode.BadRequest, _ => "At most 1000 documents at a time."),
+        ["move R21 spelled two ways"] = new("move", s => { s.File("a.md"); return Transfer("Beta", null, $"{s.P}/a.md", $"{s.P}/./a.md"); },
+            HttpStatusCode.BadRequest, s => $"{s.P}/a.md is named twice."),
         ["move R21 twice"] = new("move", s => { s.File("a.md"); return Transfer("Beta", null, $"{s.P}/a.md", $"{s.P}/a.md"); },
             HttpStatusCode.BadRequest, s => $"{s.P}/a.md is named twice."),
         ["move R21 onto one"] = new("move", s => { s.File("x/a.md"); s.File("y/a.md"); s.Dir("to"); return Transfer("Alpha", $"{s.P}/to", $"{s.P}/x/a.md", $"{s.P}/y/a.md"); },

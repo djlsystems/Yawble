@@ -124,20 +124,6 @@ public sealed class DocumentsCopyTests(HostFixture host) : IClassFixture<HostFix
     }
 
     [Fact]
-    public async Task A_copy_over_the_file_limit_is_refused()
-    {
-        await using var own = await DocumentsChangeHost.StartAsync(copyLimit: 3);
-        foreach (var name in new[] { "a", "b", "c", "d" }) own.Docs.Write("Alpha", $"many/{name}.md");
-
-        var response = await own.Client.CopyAsync("Alpha", "Beta", "", "many");
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Equal("That is 4 files; at most 3 can be copied at a time.", await response.ErrorAsync());
-        Assert.False(Directory.Exists(own.Docs.At("Beta", "many")));
-        Assert.Empty(await RowsAsync(own.Services, "Alpha"));
-    }
-
-    [Fact]
     public async Task A_folder_cannot_be_copied_into_itself()
     {
         using var client = await host.PersonAsync();

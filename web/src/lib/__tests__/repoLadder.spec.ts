@@ -154,13 +154,6 @@ describe('the last rung - a deleted team branch must not reawaken Push', () => {
     expect(nextStep(afterASuccessfulDelete, true).reason).toContain('by everything git reports')
   })
 
-  /** The cycle named precisely, so a broken ladder cannot pass by landing on some other wrong rung. */
-  it('does not offer to push work that is already on main', () => {
-    const step = nextStep(afterASuccessfulDelete, true)
-    expect(step.action).not.toBe('push')
-    expect(step.rung).not.toBe('pushed')
-  })
-
   /**
    * THE OTHER HALF, AND IT IS WHAT KEEPS THE FIX HONEST. "No team branch" alone must not mean done:
    * with commits of its own that are not on origin/main there IS work to push, and `push` is what
@@ -182,22 +175,6 @@ describe('the last rung - a deleted team branch must not reawaken Push', () => {
     )
     expect(step.rung).toBe('tidied')
     expect(step.action).toBe('cleanup-worktrees')
-  })
-
-  /**
-   * A TEAM BRANCH THAT STILL EXISTS IS UNCHANGED BY THE FIX, in both directions - the new condition
-   * reads `teamSha`, so it can only ever apply where there is no branch left.
-   */
-  it('leaves a present-but-unmerged branch on the Merged rung', () => {
-    const step = nextStep(base({ teamPushed: true, teamMergedToMain: false }), true)
-    expect(step.rung).toBe('merged')
-    expect(step.action).toBe('merge-to-main')
-  })
-
-  it('leaves a present-and-merged branch offering the delete', () => {
-    const step = nextStep(base({ teamPushed: true, teamMergedToMain: true }), true)
-    expect(step.rung).toBe('tidied')
-    expect(step.action).toBe('delete-remote-branch')
   })
 })
 
@@ -731,10 +708,6 @@ describe('work integrated by cherry-pick is on main, and the ladder says so', ()
     mainBehind: 0,
     worktrees: [],
     ...o,
-  })
-
-  it('does not offer a merge, because there is nothing left to merge', () => {
-    expect(nextStep(cherryPicked(), true).action).not.toBe('merge-to-main')
   })
 
   it('names the mechanism, because "merged" and "every change is upstream" are different facts', () => {

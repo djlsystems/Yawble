@@ -76,31 +76,6 @@ public sealed class DocumentsMoveTests(HostFixture host) : IClassFixture<HostFix
     }
 
     [Fact]
-    public async Task Moving_into_a_gone_teams_or_retired_folder_is_refused()
-    {
-        using var client = await host.PersonAsync();
-        var gone = await GoneTeamAsync(host.Services, "MoveIntoGone", "was.md");
-        var retired = await RetiredFolderAsync(host.Services, "MoveIntoRetired", "was.md");
-        Docs.Write(host.Alpha, "stays/a.md");
-
-        var intoGone = await client.MoveAsync(host.Alpha, gone, "", "stays/a.md");
-        Assert.Equal(HttpStatusCode.Conflict, intoGone.StatusCode);
-        Assert.Equal(
-            "MoveIntoGone no longer exists. Its documents can be read, copied or moved out, and deleted, but nothing can be added to them.",
-            await intoGone.ErrorAsync());
-
-        var intoRetired = await client.MoveAsync(host.Alpha, retired, "", "stays/a.md");
-        Assert.Equal(HttpStatusCode.Conflict, intoRetired.StatusCode);
-        Assert.Equal(
-            "This folder belongs to an earlier team called MoveIntoRetired. Its documents can be read, copied or moved out, and deleted, but nothing can be added to them.",
-            await intoRetired.ErrorAsync());
-
-        Assert.True(File.Exists(Docs.At(host.Alpha, "stays/a.md")));
-        Assert.False(File.Exists(Docs.At(gone, "a.md")));
-        Assert.False(File.Exists(Docs.At(retired, "a.md")));
-    }
-
-    [Fact]
     public async Task A_folder_cannot_be_moved_into_itself_or_its_own_subfolder()
     {
         using var client = await host.PersonAsync();
@@ -268,39 +243,6 @@ public sealed class DocumentsMoveTests(HostFixture host) : IClassFixture<HostFix
             (await response.BodyAsync()).Results());
         Assert.Equal("mine", File.ReadAllText(Docs.At(host.Alpha, "skip/from/a.md")));
         Assert.Equal("theirs", File.ReadAllText(Docs.At(host.Alpha, "skip/to/a.md")));
-    }
-
-    public static TheoryData<string, object, HttpStatusCode, string> Refusals => new()
-    {
-        { "R2 unknown destination", new { to = new { folder = "Nowhere" }, items = new[] { new { path = "refuse/a.md" } } }, HttpStatusCode.NotFound, "No documents folder 'Nowhere'." },
-        { "R7 missing", new { to = new { folder = "Alpha", path = "refuse/to" }, items = new[] { new { path = "refuse/none.md" } } }, HttpStatusCode.NotFound, "No such document: refuse/none.md." },
-        { "R14 missing folder", new { to = new { folder = "Alpha", path = "refuse/nope" }, items = new[] { new { path = "refuse/a.md" } } }, HttpStatusCode.NotFound, "No such folder: refuse/nope." },
-        { "R14 a file", new { to = new { folder = "Alpha", path = "refuse/a.md" }, items = new[] { new { path = "refuse/b.md" } } }, HttpStatusCode.Conflict, "refuse/a.md is a file, not a folder." },
-        { "R18 onClash", new { to = new { folder = "Alpha", path = "refuse/to" }, items = new[] { new { path = "refuse/a.md", onClash = "merge" } } }, HttpStatusCode.BadRequest, "onClash is keep-both, replace or skip." },
-        { "R19 empty", new { to = new { folder = "Alpha", path = "refuse/to" }, items = Array.Empty<object>() }, HttpStatusCode.BadRequest, "Name at least one document." },
-        { "R21 twice", new { to = new { folder = "Alpha", path = "refuse/to" }, items = new[] { new { path = "refuse/a.md" }, new { path = "refuse/./a.md" } } }, HttpStatusCode.BadRequest, "refuse/a.md is named twice." },
-    };
-
-    [Theory]
-    [MemberData(nameof(Refusals))]
-    public async Task Every_refusal_is_a_sentence_and_nothing_is_written(string name, object body, HttpStatusCode status, string sentence)
-    {
-        _ = name;
-        using var client = await host.PersonAsync();
-        Docs.Write(host.Alpha, "refuse/a.md", "a");
-        Docs.Write(host.Alpha, "refuse/b.md", "b");
-        Docs.Folder(host.Alpha, "refuse/to");
-        var rows = (await RowsAsync(host.Services, host.Alpha)).Count;
-
-        var response = await client.PostAsync(
-            $"/api/teams/{host.Alpha}/documents/move", System.Net.Http.Json.JsonContent.Create(body), Ct);
-
-        Assert.Equal(status, response.StatusCode);
-        Assert.Equal(sentence, await response.ErrorAsync());
-        Assert.Equal("a", File.ReadAllText(Docs.At(host.Alpha, "refuse/a.md")));
-        Assert.Equal("b", File.ReadAllText(Docs.At(host.Alpha, "refuse/b.md")));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(Docs.At(host.Alpha, "refuse/to")));
-        Assert.Equal(rows, (await RowsAsync(host.Services, host.Alpha)).Count);
     }
 
     [Fact]

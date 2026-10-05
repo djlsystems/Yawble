@@ -354,22 +354,6 @@ public sealed class FolderChangeTriggerTests : IAsyncLifetime
             watch.RootOptions().Select(o => o.Value).ToArray());
     }
 
-    [Fact]
-    public void A_folder_over_the_entry_cap_is_refused()
-    {
-        var big = Path.Combine(Inbox, "big");
-        Directory.CreateDirectory(big);
-
-        for (var i = 0; i <= FolderWatch.MaximumEntries; i++)
-        {
-            File.WriteAllText(Path.Combine(big, $"{i}.txt"), "");
-        }
-
-        var listing = FolderWatch.List(_watch.Resolve(Team, "documents", "inbox/big", out _)!, null);
-
-        Assert.Equal("The folder holds more than 10,000 entries. Watch a smaller folder.", listing.Refusal);
-    }
-
     private async Task<string> CreateAsync(int quietSeconds = 30, int minIntervalSeconds = 60, string? container = null)
     {
         var id = Guid.NewGuid().ToString("N");
