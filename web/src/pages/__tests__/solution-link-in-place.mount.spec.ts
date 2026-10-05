@@ -183,6 +183,9 @@ describe('a Review and install link followed from the Console', () => {
     expect(bodyFind('[data-folder]')!.textContent).toBe('/data/documents/gone-1.0.0');
     expect(bodyFind('[data-folder-refusal]')!.textContent).toContain(missing);
     expect(bodyText()).not.toContain('Checking the package');
-    expect(sent(calls, 'POST', '/api/solutions/preview')).toHaveLength(0);
+    // By folder: the previous case's wizard may still be finishing its own preview through this
+    // case's fake Host, and that call is not this folder's.
+    expect(sent(calls, 'POST', '/api/solutions/preview')
+      .filter((call) => (call.body as { folder?: string } | undefined)?.folder === '/data/documents/gone-1.0.0')).toHaveLength(0);
   });
 });
