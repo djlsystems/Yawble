@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE CONSOLE ADDRESSES WITH THE OVERLAY VIEW (B003V), through the app's real routes and real layout:
+// THE CONSOLE ADDRESSES WITH THE OVERLAY VIEW, through the app's real routes and real layout:
 // a fresh load of each address opens its screen over the team view, and closing a screen goes back
 // to the same team view, never torn down and built again. The stand-in team view faults on teardown,
 // as in `solution-link-in-place.mount.spec.ts`, so any rebuild of the Console fails the test.

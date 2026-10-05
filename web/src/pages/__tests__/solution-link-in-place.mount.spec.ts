@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
-// AN IN-APP LINK TO THE INSTALL REVIEW, `#/solutions/install?folder=…`, FOLLOWED FROM THE CONSOLE
-// (B003V). The feed row's "Review and install", the board notice's and the backlog item notice's are
+// AN IN-APP LINK TO THE INSTALL REVIEW, `#/solutions/install?folder=…`, FOLLOWED FROM THE CONSOLE.
+// The feed row's "Review and install", the board notice's and the backlog item notice's are
 // all the same plain hash link (`installHref`): the browser changes the hash and the router follows.
 //
 // THE CONSOLE MUST STAY UP WHILE THE REVIEW OPENS OVER IT. It used to be torn down and built again

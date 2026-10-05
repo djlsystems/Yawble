@@ -14,7 +14,7 @@ import type { RouteRecordRaw } from 'vue-router';
  * review, the launcher, a control panel - in the layout's `overlay` view over it. Following a link
  * between them therefore leaves the board as it is and only opens or closes the screen. Each used to
  * render a board of its own, so a link tore the whole Console down and built it again, and a fault
- * in that teardown left the old view up with the new address and nothing else (B003V).
+ * in that teardown left the old view up with the new address and nothing else.
  */
 const Console = () => import('@/pages/IndexPage.vue');
 
