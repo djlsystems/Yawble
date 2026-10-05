@@ -3,14 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { use } from 'echarts/core';
 import { CustomChart } from 'echarts/charts';
-import {
-  AxisPointerComponent,
-  DataZoomComponent,
-  GridComponent,
-  LegendComponent,
-  ToolboxComponent,
-  TooltipComponent,
-} from 'echarts/components';
+import { AxisPointerComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
 import type { CustomSeriesRenderItemAPI, CustomSeriesRenderItemParams, CustomSeriesRenderItemReturn } from 'echarts';
 import VChart from 'vue-echarts';
@@ -32,19 +25,10 @@ import { crossesDays, localStretch } from '../lib/localTime';
 
 /**
  * TREE-SHAKEN: the custom series the lanes are drawn with, the grid and its time axis, the legend
- * that names each state's look, the zoom - dragged on the axis, wheeled, or brushed with the
- * toolbox - and the tooltip with its hover line. SVG, as on the tile.
+ * that names each state's look, and the tooltip with its hover line. No zoom: the dialog always
+ * shows the whole window. SVG, as on the tile.
  */
-use([
-  CustomChart,
-  GridComponent,
-  LegendComponent,
-  DataZoomComponent,
-  ToolboxComponent,
-  TooltipComponent,
-  AxisPointerComponent,
-  SVGRenderer,
-]);
+use([CustomChart, GridComponent, LegendComponent, TooltipComponent, AxisPointerComponent, SVGRenderer]);
 
 const props = defineProps<{
   modelValue: boolean;
@@ -69,7 +53,7 @@ const GridLeft = 128;
 /** The lanes' right edge. */
 const GridRight = 16;
 
-/** Room above the lanes for the legend and the toolbox. */
+/** Room above the lanes for the legend. */
 const LanesTop = 36;
 
 /** Room between the pointer and the hover box, so the hover line stays in sight beside it. */
@@ -108,19 +92,15 @@ const colours = computed(() => {
   };
 });
 
-/** What the zoom shows now, as times; null shows the whole window. */
-const zoom = ref<{ start: number; end: number } | null>(null);
-
 /**
- * THE INSTANT UNDER THE POINTER, from where it is across the lanes and what the zoom shows, as on
- * the tile. An axis tooltip hands its formatter the NEAREST span edge instead, which would name a
+ * THE INSTANT UNDER THE POINTER, from where it is across the lanes, as on the tile. An axis tooltip hands its formatter the NEAREST span edge instead, which would name a
  * time the hover line is not on.
  */
 const pointerAt = ref<number | null>(null);
 
 /**
  * THE TILE'S OWN WINDOW, READ ON OPENING AND NOTHING ELSE: from the team's earliest workflow root to
- * the latest activity of any workflow. Zooming or the board moving underneath never re-reads.
+ * the latest activity of any workflow. The board moving underneath never re-reads.
  */
 let readSeq = 0;
 
@@ -130,7 +110,6 @@ async function read() {
   loading.value = true;
   failed.value = false;
   activity.value = null;
-  zoom.value = null;
   pointerAt.value = null;
 
   try {
@@ -170,34 +149,17 @@ const lanes = computed(() =>
 const hasChart = computed(() =>
   periodFrom.value !== null && lanes.value.some((lane) => lane.spans.some((span) => span.state !== 'idle')));
 
-/** The whole window, as the axis draws it before any zoom. */
+/** The whole window, as the axis draws it: the dialog never zooms. */
 const axisRange = computed(() => {
   const start = periodFrom.value ?? periodTo.value;
 
   return { start, end: Math.max(periodTo.value, start + 1) };
 });
 
-/**
- * KEEPS THE ZOOM'S RANGE AS TIMES, whichever control moved it: the slider and the wheel say percents
- * of the window, the toolbox's brush says times.
- */
-function onZoom(event: unknown) {
-  type Range = { start?: number; end?: number; startValue?: number; endValue?: number };
-  const raised = event as Range & { batch?: Range[] };
-  const item = raised.batch?.[0] ?? raised;
-  const { start, end } = axisRange.value;
-
-  if (item.startValue !== undefined && item.endValue !== undefined) {
-    zoom.value = { start: Number(item.startValue), end: Number(item.endValue) };
-  } else if (item.start !== undefined && item.end !== undefined) {
-    zoom.value = { start: start + (item.start / 100) * (end - start), end: start + (item.end / 100) * (end - start) };
-  }
-}
-
 function notePointerX(event: { offsetX?: number }) {
   const width = cardEl.value?.$el.querySelector('.stats-dialog-chart')?.getBoundingClientRect().width ?? 0;
   const plot = width - GridLeft - GridRight;
-  const { start, end } = zoom.value ?? axisRange.value;
+  const { start, end } = axisRange.value;
 
   pointerAt.value = plot > 0 && event.offsetX !== undefined
     ? start + (Math.min(Math.max(event.offsetX - GridLeft, 0), plot) / plot) * (end - start)
@@ -252,11 +214,6 @@ const option = computed(() => {
       top: 0,
       left: 0,
     },
-    toolbox: {
-      right: 0,
-      top: 0,
-      feature: { dataZoom: { xAxisIndex: [0], yAxisIndex: false } },
-    },
     grid: { left: GridLeft, right: GridRight, top: LanesTop, height: lanesHeight.value },
     xAxis: {
       type: 'time',
@@ -264,7 +221,7 @@ const option = computed(() => {
       max: end,
       axisLabel: { hideOverlap: true, formatter: (value: number) => axisTimeLabel(value, bucket.value, timeZone) },
       splitLine: { show: false },
-      axisPointer: { snap: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
+      axisPointer: { snap: false, triggerEmphasis: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
     },
     yAxis: {
       type: 'value',
@@ -277,10 +234,6 @@ const option = computed(() => {
       axisTick: { show: false },
       axisLabel: { fontSize: 11, formatter: laneLabel, width: GridLeft - 12, overflow: 'truncate' },
     },
-    dataZoom: [
-      { type: 'inside', xAxisIndex: [0], filterMode: 'none' },
-      { type: 'slider', xAxisIndex: [0], filterMode: 'none', height: 18, bottom: 4 },
-    ],
     // THE TILE'S HOVER: one line across every lane, and the box names the instant under it and
     // what each member was doing then.
     tooltip: {
@@ -304,6 +257,8 @@ const option = computed(() => {
       {
         type: 'custom',
         name: 'lanes',
+        // NO HOVER HIGHLIGHT: a span lightening under the pointer reads as a state it is not in.
+        emphasis: { disabled: true },
         renderItem: renderLane,
         encode: { x: [1, 2], y: 0 },
         data: lanes.value.flatMap((lane, index) =>
@@ -334,8 +289,8 @@ const option = computed(() => {
   };
 });
 
-/** The legend, the lanes, the axis labels under them and the zoom slider. */
-const chartHeight = computed(() => `${LanesTop + lanesHeight.value + 64}px`);
+/** The legend, the lanes and the axis labels under them. */
+const chartHeight = computed(() => `${LanesTop + lanesHeight.value + 32}px`);
 </script>
 
 <template>
@@ -358,7 +313,6 @@ const chartHeight = computed(() => `${LanesTop + lanesHeight.value + 64}px`);
           :theme="dark ? 'dark' : ''"
           :init-options="{ renderer: 'svg' }"
           autoresize
-          @datazoom="onZoom"
           @zr:mousemove="notePointerX"
         />
       </q-card-section>

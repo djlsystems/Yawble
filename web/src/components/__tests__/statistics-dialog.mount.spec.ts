@@ -2,7 +2,7 @@
 //
 // THE STATISTICS DIALOG, opened from the Statistics tile on the team board: that it shows the tile's
 // own window with no period picker, one lane per member and nothing under them, and that its hover
-// behaves as the tile's - the exact instant under the pointer, zoomed or not, and what each member
+// behaves as the tile's - the exact instant under the pointer and what each member
 // was doing then - and how it reads an empty window and a member since removed.
 //
 // The lanes and the words are pinned without a DOM in `lib/__tests__/teamActivity.spec.ts`;
@@ -384,18 +384,25 @@ describe('the hover, as on the tile', () => {
     expect(box.textContent).toContain('<b>Ines</b> — blocked under a minute (needs a key)');
   });
 
-  it('names the instant under the pointer in the range the zoom shows', async () => {
+  it('has no zoom: no slider, no wheel zoom and no zoom buttons, so the whole window always shows', async () => {
     await mountStrip();
     await openFromTile();
-    layOutChart();
 
-    // The slider shows the second half, 14:04:30-14:07: halfway across it is 14:05:45.
-    dialogChart().vm.$emit('datazoom', { start: 50, end: 100 });
-    expect((await hoverAt(500, utc('14:05:30'))).querySelector('.stats-tip-time')!.textContent).toBe(time(utc('14:05:45')));
+    const option = dialogOption() as ChartOption & { dataZoom?: unknown; toolbox?: unknown };
 
-    // The toolbox's brush names times: 14:05-14:06, halfway is 14:05:30.
-    dialogChart().vm.$emit('datazoom', { batch: [{ startValue: utc('14:05:00'), endValue: utc('14:06:00') }] });
-    expect((await hoverAt(500, utc('14:06:00'))).querySelector('.stats-tip-time')!.textContent).toBe(time(utc('14:05:30')));
+    expect(option.dataZoom).toBeUndefined();
+    expect(option.toolbox).toBeUndefined();
+  });
+
+  it('lightens no span under the pointer: nothing reads as a state it is not in', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    const option = dialogOption() as ChartOption & { xAxis: { axisPointer: { triggerEmphasis?: boolean } } };
+    const lanes = option.series.find((s) => s.name === 'lanes') as { emphasis?: { disabled?: boolean } };
+
+    expect(lanes.emphasis?.disabled).toBe(true);
+    expect(option.xAxis.axisPointer.triggerEmphasis).toBe(false);
   });
 
   it('puts the hover box beside the pointer, never over it, at the left edge, middle and right edge', async () => {
