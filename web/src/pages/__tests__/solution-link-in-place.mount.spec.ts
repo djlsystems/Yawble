@@ -52,6 +52,11 @@ import { useSessionStore } from '../../stores/session';
 import { bodyFind, bodyText, resetBody } from '../../test/mountQuasar';
 import { settle } from '../../test/formProbe';
 import { Folder, fakeHost, reply, sent, wizardRoutes, type Call, type Route } from '../../test/solutionFixtures';
+// Loaded up front so the routes' lazy imports resolve at once: run alone, the first link otherwise
+// lands before the review's page has been transformed, and the test fails on timing, not on the app.
+import '../../layouts/MainLayout.vue';
+import '../SolutionInstallPage.vue';
+import '../SolutionsPage.vue';
 
 let calls: Call[] = [];
 let router: Router;
