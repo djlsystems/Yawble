@@ -19,8 +19,9 @@ param(
     # keeps the toolchain layers between releases, so its operating-system packages age; run with
     # -NoCache now and then (monthly, or for a security fix) to take the current ones.
     [switch]$NoCache,
-    # The running container the Linux .NET suite is run in.
-    [string]$Container = 'yawble'
+    # The running container the Linux .NET suite is run in. Empty: the instance's first worker when it
+    # has one (the control image carries no .NET SDK), else the single-process container.
+    [string]$Container = ''
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-functions.ps1')
@@ -101,6 +102,10 @@ try {
 # scratch folder so its hosts do not share /tmp with the live one. The commit goes in as a
 # bundle, so the container needs no access to origin. The test dll is run directly: `dotnet test`
 # can report zero tests on this repository.
+if (-not $Container) {
+    $running = @(podman ps --format '{{.Names}}')
+    $Container = if ($running -contains 'yawble-worker-1') { 'yawble-worker-1' } else { 'yawble' }
+}
 Write-Host "== .NET suite (scratch clone in container '$Container') =="
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $scratch = "/tmp/release-$stamp"
@@ -109,14 +114,21 @@ Invoke-Checked 'git bundle' { git bundle create $bundle HEAD }
 try {
     Invoke-Checked 'Creating the scratch folder' { podman exec $Container mkdir -p "$scratch/tmp" }
     Invoke-Checked 'Copying the commit into the container' { podman cp $bundle "${Container}:$scratch/src.bundle" }
+    # A worker container carries its own HARNESS_ settings (HARNESS_ROLE=worker, its key file, ...);
+    # left set, every test Host would start as a worker, so all but the data root are cleared. The
+    # clone, TMPDIR and the build output are opened to other users, so the root-only tests that
+    # start control or a worker as another user can read them; stdin is closed.
     $suite = @(
         'set -e',
+        'for v in $(env | grep -o ''^HARNESS_[A-Z_]*'' | grep -vx HARNESS_DATA_ROOT); do unset $v; done',
+        'export ASPNETCORE_URLS=http://0.0.0.0:8080',
         "export TMPDIR=$scratch/tmp",
         "git clone -q $scratch/src.bundle $scratch/src",
         "cd $scratch/src",
         "git checkout -q --detach $head",
         'dotnet build tests/Harness.Tests/Harness.Tests.csproj -c Debug -nologo -v quiet',
-        'dotnet tests/Harness.Tests/bin/Debug/net10.0/Harness.Tests.dll'
+        "chmod 1777 $scratch/tmp && chmod o+rx $scratch $scratch/src && chmod -R o+rX tests/Harness.Tests/bin",
+        'dotnet tests/Harness.Tests/bin/Debug/net10.0/Harness.Tests.dll < /dev/null'
     ) -join "`n"
     Invoke-Checked 'The .NET suite' { podman exec $Container sh -c (ConvertTo-ShArgument $suite) }
 } finally {
