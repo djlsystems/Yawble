@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { getInstanceByDom } from 'echarts/core';
 
 import TeamKpiStrip from '../TeamKpiStrip.vue';
 import { useConsoleStore } from '../../stores/console';
@@ -183,11 +184,36 @@ function laneNames(option: ChartOption, count: number): string[] {
 const GridLeft = 128;
 const GridRight = 16;
 
-/** The chart is laid out 1000 px of plot wide, so a pointer's x reads as a share of the window. */
+/** The window every case here draws: 14:02 to 14:07. */
+const windowFrom = utc('14:02:00');
+const windowTo = utc('14:07:00');
+
+/** The ECharts instance that drew the dialog's chart. */
+function drawnChart() {
+  const el = dialog()!.querySelector<HTMLElement>('.stats-dialog-chart')!;
+  const chart = getInstanceByDom(el) ?? getInstanceByDom(el.firstElementChild as HTMLElement);
+
+  if (!chart) throw new Error('the dialog drew no chart');
+
+  return chart;
+}
+
+/** Gives the chart element a width of its own: `plot` px between the lanes' margins. */
+function sizeElement(plot: number) {
+  const el = dialog()!.querySelector('.stats-dialog-chart') as HTMLElement;
+  const width = GridLeft + plot + GridRight;
+  el.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: 200, width, height: 200, toJSON: () => ({}) });
+}
+
+/**
+ * THE CHART AS ECHARTS LAID IT OUT, 1000 px of plot wide, answering a pixel as a time - while the
+ * element is another width, as it is while the dialog's zoom-in runs. The box must name the time
+ * the chart drew the line at, not one measured from the element.
+ */
 function layOutChart() {
-  const plot = dialog()!.querySelector('.stats-dialog-chart') as HTMLElement;
-  const width = GridLeft + 1000 + GridRight;
-  plot.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: 200, width, height: 200, toJSON: () => ({}) });
+  sizeElement(1300);
+  vi.spyOn(drawnChart(), 'convertFromPixel')
+    .mockImplementation(((_finder: unknown, x: number) => windowFrom + ((x - GridLeft) / 1000) * (windowTo - windowFrom)) as never);
 }
 
 /** The hover box's text for a pointer at `x` px into the plot, with the axis naming `axisValue`. */
@@ -369,6 +395,16 @@ describe('the hover, as on the tile', () => {
     expect(box.querySelector('.stats-tip-time')!.textContent).toBe(time(utc('14:04:30')));
   });
 
+  it('measures from the element\'s own width only when the chart cannot say', async () => {
+    await mountStrip();
+    await openFromTile();
+
+    sizeElement(1000);
+    vi.spyOn(drawnChart(), 'convertFromPixel').mockReturnValue(Number.NaN as never);
+
+    expect((await hoverAt(500, utc('14:05:00'))).querySelector('.stats-tip-time')!.textContent).toBe(time(utc('14:04:30')));
+  });
+
   it('names what each member was doing at that instant, escaped', async () => {
     await mountStrip();
     await wrapper!.setProps({ containers: [board[0], container('DeveloperInes', '<b>Ines</b>')] as never });
@@ -399,8 +435,10 @@ describe('the hover, as on the tile', () => {
     await openFromTile();
 
     const option = dialogOption() as ChartOption & { xAxis: { axisPointer: { triggerEmphasis?: boolean } } };
-    const lanes = option.series.find((s) => s.name === 'lanes') as { emphasis?: { disabled?: boolean } };
+    const lanes = option.series.find((s) => s.name === 'lanes') as { silent?: boolean; emphasis?: { disabled?: boolean } };
 
+    // Seen in a browser: emphasis off alone still lightened the span under the pointer.
+    expect(lanes.silent).toBe(true);
     expect(lanes.emphasis?.disabled).toBe(true);
     expect(option.xAxis.axisPointer.triggerEmphasis).toBe(false);
   });

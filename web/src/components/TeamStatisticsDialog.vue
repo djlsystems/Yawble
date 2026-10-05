@@ -156,14 +156,42 @@ const axisRange = computed(() => {
   return { start, end: Math.max(periodTo.value, start + 1) };
 });
 
-function notePointerX(event: { offsetX?: number }) {
-  const width = cardEl.value?.$el.querySelector('.stats-dialog-chart')?.getBoundingClientRect().width ?? 0;
-  const plot = width - GridLeft - GridRight;
+const chartEl = ref<InstanceType<typeof VChart> | null>(null);
+
+/**
+ * THE POINTER'S x AS A TIME, asked of the chart that drew the axis, so the box names the time the
+ * line is on even when the chart was laid out at another width than the element has now (the
+ * dialog opens with a zoom-in). Where the chart cannot answer, from the element's own width.
+ */
+function notePointerX(event: { offsetX?: number; offsetY?: number }) {
   const { start, end } = axisRange.value;
 
-  pointerAt.value = plot > 0 && event.offsetX !== undefined
-    ? start + (Math.min(Math.max(event.offsetX - GridLeft, 0), plot) / plot) * (end - start)
-    : null;
+  if (event.offsetX === undefined) {
+    pointerAt.value = null;
+    return;
+  }
+
+  let at = Number.NaN;
+
+  try {
+    at = Number(chartEl.value?.convertFromPixel({ xAxisIndex: 0 }, event.offsetX));
+  } catch {
+    // No chart to ask: measured from the element below.
+  }
+
+  if (!Number.isFinite(at)) {
+    const width = cardEl.value?.$el.querySelector('.stats-dialog-chart')?.getBoundingClientRect().width ?? 0;
+    const plot = width - GridLeft - GridRight;
+
+    at = plot > 0 ? start + ((event.offsetX - GridLeft) / plot) * (end - start) : Number.NaN;
+  }
+
+  pointerAt.value = Number.isFinite(at) ? Math.min(Math.max(at, start), end) : null;
+}
+
+/** Once the dialog has finished opening, the chart fits the width it now has. */
+function fitChart() {
+  chartEl.value?.resize();
 }
 
 /** THE HOVER BOX BESIDE THE POINTER, never over it, placed against the screen: it is on the body. */
@@ -258,6 +286,8 @@ const option = computed(() => {
         type: 'custom',
         name: 'lanes',
         // NO HOVER HIGHLIGHT: a span lightening under the pointer reads as a state it is not in.
+        // Silent, so the spans take no hover of their own; the axis still drives the line and box.
+        silent: true,
         emphasis: { disabled: true },
         renderItem: renderLane,
         encode: { x: [1, 2], y: 0 },
@@ -294,7 +324,7 @@ const chartHeight = computed(() => `${LanesTop + lanesHeight.value + 32}px`);
 </script>
 
 <template>
-  <q-dialog v-model="open">
+  <q-dialog v-model="open" @show="fitChart">
     <q-card ref="cardEl" class="stats-dialog-card os-dialog-xl">
       <q-card-section class="q-pb-none">
         <div class="os-dialog-title">Statistics</div>
@@ -307,6 +337,7 @@ const chartHeight = computed(() => `${LanesTop + lanesHeight.value + 32}px`);
         <div v-else-if="!hasChart" class="stats-dialog-note os-text-muted">No runs in this window</div>
         <v-chart
           v-else
+          ref="chartEl"
           class="stats-dialog-chart"
           :style="{ height: chartHeight }"
           :option="option"
