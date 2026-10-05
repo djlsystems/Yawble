@@ -335,7 +335,15 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         using var caller = new CancellationTokenSource();
         var request = call(caller.Token);
 
-        await Clone.Started.Task.WaitAsync(Patience, Ct);
+        // A CALL THAT ENDS BEFORE ITS CLONE STARTS says why, rather than leaving a bare timeout:
+        // this test has failed with a timeout here, and the call's own answer is the evidence.
+        var first = await Task.WhenAny(Clone.Started.Task, request).WaitAsync(Patience, Ct);
+        if (first == request)
+        {
+            var answer = request.IsCompletedSuccessfully ? $"{request.Result}" : $"{request.Exception?.GetBaseException()}";
+            Assert.Fail($"The call to {route} ended before its clone started: {answer}");
+        }
+
         await caller.CancelAsync();
 
         try { await request.WaitAsync(Patience, Ct); }

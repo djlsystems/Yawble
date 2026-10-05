@@ -17,7 +17,6 @@ namespace Harness.Tests;
 /// Manager's credential is refused. Deleting a team never removes a plugin, and a team installed from
 /// a package carries that package on its summary for the delete dialog to say so.
 /// </summary>
-[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PluginRemoveRouteTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";

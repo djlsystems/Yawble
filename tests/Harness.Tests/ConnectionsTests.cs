@@ -23,7 +23,6 @@ namespace Harness.Tests;
 /// token on stdin; refreshes, rotation, a refused refresh, the binding rules, the callback's refusals
 /// and the no-leak rule are each pinned here.
 /// </summary>
-[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class ConnectionsTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";

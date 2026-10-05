@@ -5,7 +5,10 @@ using Harness.Host;
 
 namespace Harness.Tests;
 
-[CollectionDefinition("worker processes", DisableParallelization = true)]
+/// <summary>The tests that start control and workers as real processes run one class at a time, but
+/// beside the rest of the suite: each picks free ports and a data root of its own, and every wait is a
+/// bounded poll of what it can observe, so other tests running alongside only slow it down.</summary>
+[CollectionDefinition("worker processes")]
 public sealed class WorkerProcessesCollection;
 
 /// <summary>

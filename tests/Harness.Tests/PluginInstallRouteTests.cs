@@ -18,7 +18,6 @@ namespace Harness.Tests;
 /// <see cref="PluginInstaller"/>), and edits a plugin member's settings after hire. Both are a
 /// person's acts: a Manager's credential is refused.
 /// </summary>
-[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PluginInstallRouteTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";

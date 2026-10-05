@@ -792,7 +792,9 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
                 var going = rows.GroupBy(m => m.Source).Any(g => g.MaxBy(m => m.Seq)!.Type == MessageTypes.Started);
                 var newest = rows.Count == 0 ? 0 : rows.Max(m => m.Seq);
 
-                if (!going && newest == last) return;
+                // QUIET AS THE PLATFORM JUDGES IT: nothing queued and nothing appended but not yet
+                // handed out, as well as no run going (see TeamQuiet).
+                if (!going && newest == last && await TeamQuiet.IsQuietAsync(_factory.Services, team, Ct)) return;
 
                 last = going ? null : newest;
                 await Task.Delay(300, Ct);

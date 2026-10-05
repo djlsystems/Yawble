@@ -485,8 +485,8 @@ public sealed class TeamTokenRunsTests(TeamTokenRunsTests.Bed bed) : IClassFixtu
             throw new TimeoutException($"No row: {what}.");
         }
 
-        /// <summary>Waits until no member of <paramref name="team"/> has a run going and none has
-        /// started one for a moment.</summary>
+        /// <summary>Waits until <paramref name="team"/> is quiet as <see cref="TeamQuiet"/> judges it
+        /// and none of its members has started a run for a moment.</summary>
         public async Task QuietAsync(string team)
         {
             var deadline = DateTime.UtcNow.AddSeconds(30);
@@ -500,7 +500,9 @@ public sealed class TeamTokenRunsTests(TeamTokenRunsTests.Bed bed) : IClassFixtu
                 var going = rows.GroupBy(m => m.Source).Any(g => g.MaxBy(m => m.Seq)!.Type == MessageTypes.Started);
                 var newest = rows.Count == 0 ? 0 : rows.Max(m => m.Seq);
 
-                if (!going && newest == last) return;
+                // QUIET AS THE PLATFORM JUDGES IT: nothing queued and nothing appended but not yet
+                // handed out, as well as no run going (see TeamQuiet).
+                if (!going && newest == last && await TeamQuiet.IsQuietAsync(_factory.Services, team, Ct)) return;
 
                 last = going ? null : newest;
                 await Task.Delay(300, Ct);

@@ -3,8 +3,11 @@ using Harness.Host;
 
 namespace Harness.Tests;
 
-/// <summary>Tests that change this process's own environment - PATH, HOME, provider keys - run
-/// alone, because every other test in the assembly shares that environment.</summary>
+/// <summary>Tests that change a variable of this process's own environment that other tests read -
+/// PATH, HOME, a provider key - run alone, after everything else, because every other test in the
+/// assembly shares that environment. Only those: a test that reads the environment, starts processes
+/// or sets a variable no other test uses (a key of its own name) runs in parallel like any other, and
+/// putting it here costs the suite its whole duration one test at a time.</summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class ProcessEnvironmentCollection
 {

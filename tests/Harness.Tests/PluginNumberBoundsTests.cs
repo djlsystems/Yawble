@@ -17,7 +17,6 @@ namespace Harness.Tests;
 /// is kept as it is and reported on the settings read, never rewritten. The solution install and
 /// update are in <c>Host/SolutionNumberBoundsTests</c>.
 /// </summary>
-[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PluginNumberBoundsTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";

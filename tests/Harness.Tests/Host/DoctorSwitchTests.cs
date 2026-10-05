@@ -11,7 +11,6 @@ namespace Harness.Tests.Host;
 /// the Host is serving the same data root, so the second test holds the data-root lock from THIS
 /// process and expects the spawned doctor to answer anyway.
 /// </summary>
-[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class DoctorSwitchTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"harness-doctor-switch-{Guid.NewGuid():N}");

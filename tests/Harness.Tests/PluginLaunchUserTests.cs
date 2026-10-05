@@ -11,7 +11,6 @@ namespace Harness.Tests;
 /// as `agent` (no such user, no capability, no setpriv) it skips and says which. The release suite
 /// runs as root in the product image, where it runs for real.
 /// </summary>
-[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PluginLaunchUserTests : IDisposable
 {
     private readonly string _dataRoot = Directory.CreateTempSubdirectory("harness-plugin-runas-").FullName;

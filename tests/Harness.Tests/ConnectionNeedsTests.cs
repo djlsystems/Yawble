@@ -17,7 +17,6 @@ namespace Harness.Tests;
 /// provider - no test calls a real one. The scopes come from the installed plugins' connection slots,
 /// never typed; each built-in provider serves its own setup guide, and no step carries a secret.
 /// </summary>
-[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class ConnectionNeedsTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";
