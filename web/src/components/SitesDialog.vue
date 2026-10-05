@@ -256,36 +256,47 @@ function pretty(doc: unknown) {
           No sites yet.
         </div>
 
-        <q-markup-table v-else v-resizable-columns="'sites'" flat bordered dense separator="horizontal">
-          <thead>
-            <tr>
-              <th class="text-left">Name</th>
-              <th class="text-left">Team</th>
-              <th class="text-left">Live version</th>
-              <th class="text-left">Published</th>
-              <th class="text-right">Data</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="site in shown" :key="key(site)" :data-site="key(site)">
-              <td class="text-left mono">{{ site.name }}</td>
-              <td class="text-left">{{ teamName(site.team) }}</td>
-              <td class="text-left">
-                <template v-if="site.liveVersion !== null">v{{ site.liveVersion }}</template>
-                <span v-else class="os-text-muted">Not published</span>
-              </td>
-              <td class="text-left">
-                <template v-if="site.liveVersion !== null">
-                  {{ when(site.publishedAt) }}
-                  <div v-if="site.publishedBy" class="text-caption os-text-muted">by {{ site.publishedBy }}</div>
-                </template>
-              </td>
-              <td class="text-right">
-                {{ documents(site.documents) }}
-                <div class="text-caption os-text-muted">{{ size(site.dataBytes) }}</div>
-              </td>
-              <td class="text-right text-no-wrap">
+        <!-- ONE TILE PER SITE, as Plugins and Agents lay out theirs: whether it is live on the
+             head, its team, publisher and data in the body, the actions at the foot. -->
+        <div v-else class="os-tiles site-tiles">
+          <div v-for="site in shown" :key="key(site)" class="os-tile site-tile" :data-site="key(site)">
+            <div class="os-tile-head">
+              <q-icon name="language" size="18px" class="site-icon" aria-hidden="true" />
+              <span class="text-weight-medium mono">{{ site.name }}</span>
+              <q-space />
+              <q-badge
+                data-site-state
+                :color="site.liveVersion !== null ? 'positive' : 'grey-6'"
+                :label="site.liveVersion !== null ? `Live v${site.liveVersion}` : 'Not published'"
+              />
+            </div>
+
+            <!-- THE TEAM NARROWS THE LIST TO IT, the way Active Team opens this dialog. Plain text
+                 once the list is already that team's. -->
+            <div class="os-tile-line">
+              <a
+                v-if="!only"
+                href="#"
+                class="site-team-link"
+                data-site-team
+                @click.prevent="only = site.team"
+              >{{ teamName(site.team) }}</a>
+              <span v-else data-site-team>{{ teamName(site.team) }}</span>
+            </div>
+
+            <div v-if="site.liveVersion !== null" class="os-tile-line os-text-muted" data-site-published>
+              Published {{ when(site.publishedAt) }}<template v-if="site.publishedBy"> by {{ site.publishedBy }}</template>
+            </div>
+
+            <div class="os-tile-line os-text-muted" data-site-data>
+              {{ documents(site.documents) }} · {{ size(site.dataBytes) }}
+            </div>
+
+            <!-- ACTIONS, icons with their words in a tooltip and an aria-label. The tooltip lives on
+                 a wrapper because a disabled q-btn swallows pointer events, and the disabled ones
+                 are exactly the ones whose reason a person wants to read. -->
+            <div class="site-tile-actions">
+              <span class="row-btn-wrap">
                 <q-btn
                   flat
                   dense
@@ -294,9 +305,10 @@ function pretty(doc: unknown) {
                   :aria-label="`Open ${site.name}`"
                   :disable="site.liveVersion === null"
                   @click="openSite(site)"
-                >
-                  <q-tooltip>Open the live site in a new tab</q-tooltip>
-                </q-btn>
+                />
+                <q-tooltip>{{ site.liveVersion === null ? 'Not published, so there is nothing to open' : 'Open the live site in a new tab' }}</q-tooltip>
+              </span>
+              <span class="row-btn-wrap">
                 <q-btn
                   flat
                   dense
@@ -304,9 +316,10 @@ function pretty(doc: unknown) {
                   icon="history"
                   :aria-label="`Versions of ${site.name}`"
                   @click="showDetail(site, 'versions')"
-                >
-                  <q-tooltip>The kept versions, and rolling back to one</q-tooltip>
-                </q-btn>
+                />
+                <q-tooltip>The kept versions, and rolling back to one</q-tooltip>
+              </span>
+              <span class="row-btn-wrap">
                 <q-btn
                   flat
                   dense
@@ -314,9 +327,10 @@ function pretty(doc: unknown) {
                   icon="dataset"
                   :aria-label="`Data of ${site.name}`"
                   @click="showDetail(site, 'data')"
-                >
-                  <q-tooltip>The site's collections, read-only</q-tooltip>
-                </q-btn>
+                />
+                <q-tooltip>The site's collections, read-only</q-tooltip>
+              </span>
+              <span class="row-btn-wrap">
                 <q-btn
                   flat
                   dense
@@ -326,9 +340,10 @@ function pretty(doc: unknown) {
                   :disable="site.liveVersion === null || busy !== ''"
                   :loading="busy === key(site)"
                   @click="unpublish(site)"
-                >
-                  <q-tooltip>Take the site down. Its files and data are kept</q-tooltip>
-                </q-btn>
+                />
+                <q-tooltip>{{ site.liveVersion === null ? 'Not published' : 'Take the site down. Its files and data are kept' }}</q-tooltip>
+              </span>
+              <span class="row-btn-wrap">
                 <q-btn
                   flat
                   dense
@@ -338,13 +353,12 @@ function pretty(doc: unknown) {
                   :aria-label="`Delete ${site.name}`"
                   :disable="busy !== ''"
                   @click="askDelete(site)"
-                >
-                  <q-tooltip>Delete the site, its versions and its data</q-tooltip>
-                </q-btn>
-              </td>
-            </tr>
-          </tbody>
-        </q-markup-table>
+                />
+                <q-tooltip>Delete the site, its versions and its data</q-tooltip>
+              </span>
+            </div>
+          </div>
+        </div>
       </q-card-section>
     </q-card>
   </q-dialog>
@@ -464,6 +478,33 @@ function pretty(doc: unknown) {
 </template>
 
 <style scoped>
+/* The grid itself is `os-tiles` (css/tiles.scss); this only says how narrow a column may get. */
+.site-tiles {
+  --os-tile-min: 20rem;
+}
+
+.site-icon {
+  color: var(--q-primary);
+}
+
+.site-team-link {
+  color: inherit;
+}
+
+.site-tile-actions {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+/* The tooltip lives on this WRAPPER because a disabled q-btn swallows pointer events. */
+.row-btn-wrap {
+  display: inline-flex;
+}
+
 .site-detail-body {
   max-height: 70vh;
   overflow-y: auto;

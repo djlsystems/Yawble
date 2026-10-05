@@ -148,6 +148,34 @@ describe('Admin > Sites', () => {
     expect(unpublished).toContain('900 B');
   });
 
+  it('lays the sites out as tiles, as Plugins and Agents do, each saying whether it is live', async () => {
+    await open();
+
+    expect(bodyFind('[data-sites-dialog] .os-tiles')).not.toBeNull();
+    expect(bodyFind('[data-sites-dialog] table')).toBeNull();
+
+    const live = row('alpha/shop')!;
+    expect(live.classList.contains('os-tile')).toBe(true);
+    expect(live.querySelector('[data-site-state]')?.textContent?.trim()).toBe('Live v3');
+    expect(live.querySelector('[data-site-data]')?.textContent).toContain('12 documents · 5.0 MB');
+
+    const unpublished = row('beta/draft')!;
+    expect(unpublished.classList.contains('os-tile')).toBe(true);
+    expect(unpublished.querySelector('[data-site-state]')?.textContent?.trim()).toBe('Not published');
+    expect(unpublished.querySelector('[data-site-published]')).toBeNull();
+  });
+
+  it('narrows to a tile\'s team from its team name', async () => {
+    await open();
+
+    (row('beta/draft')!.querySelector('[data-site-team]') as HTMLElement).click();
+    await settle();
+
+    expect(bodyText()).toContain('Sites · Beta Team');
+    expect(row('alpha/shop')).toBeNull();
+    expect(row('beta/draft')).not.toBeNull();
+  });
+
   it('opens a published site in a new tab, and offers nothing to open or unpublish when it is not', async () => {
     const opened = vi.spyOn(window, 'open').mockReturnValue(null);
     await open();
