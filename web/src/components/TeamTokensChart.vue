@@ -1,16 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useQuasar } from 'quasar';
 import { use } from 'echarts/core';
 import { CustomChart } from 'echarts/charts';
-import {
-  AxisPointerComponent,
-  DataZoomComponent,
-  GridComponent,
-  LegendComponent,
-  ToolboxComponent,
-  TooltipComponent,
-} from 'echarts/components';
+import { AxisPointerComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
 import type { CustomSeriesRenderItemAPI, CustomSeriesRenderItemParams, CustomSeriesRenderItemReturn } from 'echarts';
 import VChart from 'vue-echarts';
@@ -37,21 +30,12 @@ import { crossesDays } from '../lib/localTime';
  * drawn over the Statistics tile's own window: the team's earliest workflow root to the latest
  * activity of any workflow, never the clock.
  * Tree-shaken and drawn as in the Statistics dialog: custom series, the legend that toggles each
- * member, the zoom and the tooltip, SVG.
+ * member and the tooltip, SVG. No zoom: the chart always shows the whole window.
  *
  * NOTHING IS DRAWN AS ZERO. A run with no figure for the chosen metric adds nothing to a column; a
  * bucket holding such runs carries a marker and its tooltip counts them.
  */
-use([
-  CustomChart,
-  GridComponent,
-  LegendComponent,
-  DataZoomComponent,
-  ToolboxComponent,
-  TooltipComponent,
-  AxisPointerComponent,
-  SVGRenderer,
-]);
+use([CustomChart, GridComponent, LegendComponent, TooltipComponent, AxisPointerComponent, SVGRenderer]);
 
 const props = defineProps<{
   teamId: string;
@@ -105,7 +89,7 @@ const hidden = ref<Set<string>>(new Set());
 /** Whether the legend has turned the not-measured markers off: then the hover leaves them out too. */
 const gapsHidden = ref(false);
 
-/** READ ON OPENING ONLY: the metric, the legend and zooming re-read nothing. */
+/** READ ON OPENING ONLY: the metric and the legend re-read nothing. */
 let readSeq = 0;
 
 async function read() {
@@ -322,13 +306,12 @@ const option = computed(() => {
       },
       top: 0,
       left: 0,
-      right: 64,
+      right: 0,
       type: 'scroll',
       inactiveColor: palette.off,
       inactiveBorderColor: palette.off,
     },
-    toolbox: { right: 0, top: 0, feature: { dataZoom: { yAxisIndex: false } } },
-    // The columns start below the legend's row and far enough below the toolbox for a marker over the tallest one.
+    // The columns start below the legend's row, far enough below it for a marker over the tallest one.
     grid: { left: 92, right: 16, top: 56, height: ColumnsHeight },
     xAxis: {
       type: 'time',
@@ -339,10 +322,6 @@ const option = computed(() => {
       axisPointer: { show: true, snap: false, triggerEmphasis: false, label: { show: false }, lineStyle: { color: palette.ink, width: 1 } },
     },
     yAxis: { type: 'value', name: `${metricLabel} tokens`, nameLocation: 'middle', nameGap: 76, min: 0 },
-    dataZoom: [
-      { type: 'inside', filterMode: 'none' },
-      { type: 'slider', filterMode: 'none', height: 18, bottom: 4 },
-    ],
     // THE COLUMN UNDER THE POINTER, from the hover area it is over, never the nearest column start.
     tooltip: {
       trigger: 'item',
@@ -392,11 +371,6 @@ const option = computed(() => {
     ],
   };
 });
-
-const chart = ref<InstanceType<typeof VChart> | null>(null);
-
-/** A new metric shows the whole window again, after any zoom. */
-watch(metric, () => void nextTick(() => chart.value?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 })));
 </script>
 
 <template>
@@ -416,7 +390,6 @@ watch(metric, () => void nextTick(() => chart.value?.dispatchAction({ type: 'dat
     <div v-else-if="!hasChart" class="tokens-chart-note os-text-muted">No runs in this window</div>
     <v-chart
       v-else
-      ref="chart"
       class="tokens-chart-canvas"
       :option="option"
       :theme="dark ? 'dark' : ''"
@@ -446,7 +419,7 @@ watch(metric, () => void nextTick(() => chart.value?.dispatchAction({ type: 'dat
 
 .tokens-chart-canvas {
   width: 100%;
-  height: 336px;
+  height: 312px;
 }
 
 .tokens-chart-note {

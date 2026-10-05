@@ -185,7 +185,8 @@ interface ChartOption {
     appendTo: string
     position: (point: number[], params: unknown, dom: unknown, rect: unknown, size: { contentSize: number[]; viewSize: number[] }) => number[]
   };
-  toolbox: { top?: number; padding?: number; itemSize?: number };
+  toolbox?: unknown;
+  dataZoom?: unknown;
   grid: { top: number; height: number };
   yAxis: { name?: string; nameLocation?: string; nameGap?: number; nameTextStyle?: { fontSize?: number } };
   series: { name: string; data: number[][] }[];
@@ -450,7 +451,6 @@ describe('the layout', () => {
   // ECharts' own defaults where the option leaves them out.
   const Padding = 5;
   const LegendItemHeight = 14;
-  const ToolboxItemSize = 15;
   const AxisNameGap = 15;
   const AxisNameFontSize = 12;
   /** How far a bucket's marker rises above its column's top. */
@@ -460,9 +460,6 @@ describe('the layout', () => {
   const legendBottom = (option: ChartOption) =>
     (option.legend.top ?? 0) + 2 * (option.legend.padding ?? Padding) + (option.legend.itemHeight ?? LegendItemHeight);
 
-  /** The bottom of the toolbox: its icons, and under an icon the title shown on hover. */
-  const toolboxBottom = (option: ChartOption) =>
-    (option.toolbox.top ?? 0) + 2 * (option.toolbox.padding ?? Padding) + 2 * (option.toolbox.itemSize ?? ToolboxItemSize);
 
   it('draws the axis name clear of the legend row', async () => {
     await mountStrip();
@@ -477,13 +474,23 @@ describe('the layout', () => {
     expect(nameTop).toBeGreaterThanOrEqual(legendBottom(option));
   });
 
-  it('leaves the tallest column\'s marker room below the toolbox', async () => {
+  it('leaves the tallest column\'s marker room below the legend', async () => {
     await mountStrip();
     await openDialog();
 
     const option = chartOption();
 
-    expect(option.grid.top - MarkerRise).toBeGreaterThanOrEqual(toolboxBottom(option));
+    expect(option.grid.top - MarkerRise).toBeGreaterThanOrEqual(legendBottom(option));
+  });
+
+  it('has no zoom: no slider, no wheel zoom and no zoom buttons, so the whole window always shows', async () => {
+    await mountStrip();
+    await openDialog();
+
+    const option = chartOption();
+
+    expect(option.dataZoom).toBeUndefined();
+    expect(option.toolbox).toBeUndefined();
   });
 });
 
