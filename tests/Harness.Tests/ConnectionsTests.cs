@@ -387,7 +387,8 @@ public sealed class ConnectionsTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.BadRequest, hired.StatusCode);
         var body = JsonDocument.Parse(await hired.Content.ReadAsStringAsync(Ct)).RootElement;
-        Assert.Contains($"was not granted the scope `{MailScope}` that slot `mail` needs. Reconnect it from Admin", body.GetProperty("error").GetString());
+        Assert.Contains($"was not granted the scope `{MailScope}` that slot `mail` needs. Press Reconnect to grant it, then bind it again.", body.GetProperty("error").GetString());
+        Assert.DoesNotContain(Connections.Where, body.GetProperty("error").GetString());
         Assert.Equal(id, body.GetProperty("reconnect").GetProperty("connectionId").GetString());
         Assert.Equal([MailScope], body.GetProperty("reconnect").GetProperty("scopes").EnumerateArray().Select(s => s.GetString()));
 
@@ -395,6 +396,45 @@ public sealed class ConnectionsTests : IAsyncLifetime
         var reconnect = await StartAsync([MailScope], reconnectId: id);
         await CallbackLocationAsync(reconnect.GetProperty("state").GetString()!);
         await HireAsync("Inbox", id);
+    }
+
+    [Fact]
+    public async Task A_solution_install_binding_a_connection_without_a_slots_scopes_is_refused_offering_reconnect_for_exactly_the_missing_ones()
+    {
+        // A package whose member's slot asks Google for two scopes; the connection holds only one.
+        const string ComposeScope = "https://www.googleapis.com/auth/gmail.compose";
+        var package = SolutionSamples.JobTracker(parent: Path.Combine(_dataRoot, "packages"));
+        SolutionSamples.EditJson(Path.Combine(package, "plugins", "job-board", "plugin.json"), p => p["connections"] = JsonNode.Parse(
+            """{"mailbox":{"description":"The mailbox.","providers":["google"],"scopes":{"google":["MAIL_SCOPE","COMPOSE_SCOPE"]},"required":true}}"""
+                .Replace("MAIL_SCOPE", MailScope).Replace("COMPOSE_SCOPE", ComposeScope)));
+        SolutionSamples.Edit(package, m => m["inputs"]!["connections"] = new JsonArray(
+            new JsonObject { ["member"] = "Scout", ["slot"] = "mailbox", ["description"] = "The mailbox to read." }));
+
+        var narrow = await ConnectAsync(scopes: [MailScope]);
+
+        var (status, text) = await SendAsync(HttpMethod.Post, "/api/solutions/install", new
+        {
+            folder = package,
+            teamName = "Mail install",
+            connections = new Dictionary<string, Dictionary<string, string>> { ["Scout"] = new() { ["mailbox"] = narrow } },
+        });
+
+        // THE BINDING RULE STANDS: refused before anything is made.
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        var body = JsonDocument.Parse(text).RootElement;
+        var error = body.GetProperty("error").GetString()!;
+        Assert.Contains($"'Scout': Connection '{Account}' was not granted the scope `{ComposeScope}` that slot `mailbox` needs.", error);
+        Assert.DoesNotContain(MailScope + "`", error);
+
+        // The sentence names the Reconnect offered beside it, never a place whose Reconnect asks for no scopes.
+        Assert.Contains("Press Reconnect to grant it, then press Install again.", error);
+        Assert.DoesNotContain(Connections.Where, error);
+
+        // What the web acts on: that connection, and exactly the scope it lacks.
+        var reconnect = body.GetProperty("reconnect");
+        Assert.Equal(narrow, reconnect.GetProperty("connectionId").GetString());
+        Assert.Equal([ComposeScope], reconnect.GetProperty("scopes").EnumerateArray().Select(s => s.GetString()));
+        Assert.Null(Services.GetRequiredService<TeamRegistry>().TeamAnsweringTo("Mail install"));
     }
 
     [Fact]
@@ -412,7 +452,8 @@ public sealed class ConnectionsTests : IAsyncLifetime
         });
         Assert.Equal(HttpStatusCode.BadRequest, refused.Status);
         var body = JsonDocument.Parse(refused.Body).RootElement;
-        Assert.Contains($"was not granted the scope `{MailScope}` that slot `mail` needs. Reconnect it from Admin", body.GetProperty("error").GetString());
+        Assert.Contains($"was not granted the scope `{MailScope}` that slot `mail` needs. Press Reconnect to grant it, then bind it again.", body.GetProperty("error").GetString());
+        Assert.DoesNotContain(Connections.Where, body.GetProperty("error").GetString());
         Assert.Equal(narrow, body.GetProperty("reconnect").GetProperty("connectionId").GetString());
         Assert.Equal(JsonValueKind.Object, (await GetAsync(settings)).GetProperty("connections").ValueKind);
         Assert.False((await GetAsync(settings)).GetProperty("connections").TryGetProperty("mail", out _));

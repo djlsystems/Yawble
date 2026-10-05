@@ -733,13 +733,14 @@ public sealed class Connections(
 
     /// <summary>
     /// Why <paramref name="bindings"/> (slot to connection id) cannot be bound on a member of
-    /// <paramref name="manifest"/>, or null. <paramref name="agentTeam"/> is set for an agent's hire
+    /// <paramref name="manifest"/>, or null. <paramref name="boundOnTeam"/> is set for an agent's hire
     /// (a Manager or a Concierge): each connection must then be one a person already bound on that
-    /// team.
+    /// team. <paramref name="retry"/> ends a missing-scope refusal: what the person does after the
+    /// Reconnect offered beside it.
     /// </summary>
     public async Task<BindingRefusal?> BindingRefusalAsync(
         PluginManifest manifest, IReadOnlyDictionary<string, string> bindings, IReadOnlySet<string>? boundOnTeam,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string retry = BindAgain)
     {
         foreach (var (slot, connectionId) in bindings)
         {
@@ -761,15 +762,21 @@ public sealed class Connections(
                 return new BindingRefusal($"There is no connection '{connectionId}'. A person connects an account in {Where}.");
             }
 
-            if (ScopeRefusal(slot, declared, connection) is { } refusal) return refusal;
+            if (ScopeRefusal(slot, declared, connection, retry) is { } refusal) return refusal;
         }
 
         return null;
     }
 
+    /// <summary>How a missing-scope refusal ends where a binding is saved.</summary>
+    public const string BindAgain = "bind it again";
+
     /// <summary>Why <paramref name="connection"/> cannot serve <paramref name="slot"/>: the wrong
-    /// provider, or a scope it was not granted (offering Reconnect).</summary>
-    public static BindingRefusal? ScopeRefusal(string slot, PluginConnectionSlot declared, ConnectionRecord connection)
+    /// provider, or a scope it was not granted. That one offers Reconnect with exactly the missing
+    /// scopes, and its sentence names that Reconnect - not Admin → Connections, whose Reconnect asks
+    /// for no scopes. With no <paramref name="retry"/> there is no Reconnect beside the sentence (a
+    /// run refused), so it names the member's settings, whose Reconnect asks for them.</summary>
+    public static BindingRefusal? ScopeRefusal(string slot, PluginConnectionSlot declared, ConnectionRecord connection, string? retry = BindAgain)
     {
         if (!declared.Admits(connection.Provider))
         {
@@ -785,7 +792,10 @@ public sealed class Connections(
             return new BindingRefusal(
                 $"Connection {connection.Named} was not granted the scope{(missing.Count == 1 ? "" : "s")} "
                 + string.Join(", ", missing.Select(s => $"`{s}`"))
-                + $" that slot `{slot}` needs. Reconnect it from {Where} with {(missing.Count == 1 ? "that scope" : "those scopes")}, then bind it again.",
+                + $" that slot `{slot}` needs. "
+                + (retry is null
+                    ? $"Reconnect it from the member's settings, which asks for {(missing.Count == 1 ? "it" : "them")}."
+                    : $"Press Reconnect to grant {(missing.Count == 1 ? "it" : "them")}, then {retry}."),
                 connection.Id, missing);
         }
 

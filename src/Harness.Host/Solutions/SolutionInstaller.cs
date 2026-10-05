@@ -626,7 +626,7 @@ public sealed class SolutionInstaller(
         var answers = request.Answers ?? new SolutionAnswers();
         if (AnswersRefusal(package, answers, update: false) is { } answersRefusal) return new(400, new { error = answersRefusal });
 
-        if (await BindingsRefusalAsync(package, answers, ct) is { } bindingRefusal) return new(400, new { error = bindingRefusal });
+        if (await BindingsRefusalAsync(package, answers, "press Install again", ct) is { } bindingRefusal) return new(400, bindingRefusal.Body());
 
         var agent = string.IsNullOrWhiteSpace(request.Agent) ? defaultAgent() : request.Agent.Trim();
         if (agent is null)
@@ -1020,7 +1020,7 @@ public sealed class SolutionInstaller(
         var answers = request.Answers ?? new SolutionAnswers();
         if (AnswersRefusal(package, answers, update: true) is { } answersRefusal) return new(400, new { error = answersRefusal });
 
-        if (await BindingsRefusalAsync(package, answers, ct) is { } bindingRefusal) return new(400, new { error = bindingRefusal });
+        if (await BindingsRefusalAsync(package, answers, "press Update again", ct) is { } bindingRefusal) return new(400, bindingRefusal.Body());
 
         var (old, _) = SolutionManifest.Parse(row!.Manifest);
         if (old is null) return new(409, new { error = $"The record of what '{teams.LabelFor(stored)}' was installed from cannot be read; it cannot be updated." });
@@ -1682,8 +1682,9 @@ public sealed class SolutionInstaller(
     }
 
     /// <summary>Each connection the person chose must suit its slot's providers and hold its
-    /// scopes, as a person's own hire is checked.</summary>
-    private async Task<string?> BindingsRefusalAsync(SolutionPackage package, SolutionAnswers answers, CancellationToken ct)
+    /// scopes, as a person's own hire is checked. The first refusal is answered, naming its member;
+    /// a missing-scope one keeps its <c>reconnect</c>, as the plugin-settings route answers it.</summary>
+    private async Task<BindingRefusal?> BindingsRefusalAsync(SolutionPackage package, SolutionAnswers answers, string retry, CancellationToken ct)
     {
         if (connections is null) return null;
 
@@ -1692,9 +1693,9 @@ public sealed class SolutionInstaller(
             if (bindings.Count == 0) continue;
             if (package.Plugin(package.Manifest.Member(memberName)?.PluginId) is not { } plugin) continue;
 
-            if (await connections.BindingRefusalAsync(plugin.Manifest, bindings, null, ct) is { } refusal)
+            if (await connections.BindingRefusalAsync(plugin.Manifest, bindings, null, ct, retry) is { } refusal)
             {
-                return $"'{memberName}': {refusal.Error}";
+                return refusal with { Error = $"'{memberName}': {refusal.Error}" };
             }
         }
 

@@ -741,7 +741,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             }
 
             if (await connections.Store.GetAsync(connectionId, ct) is { } record
-                && Connections.ScopeRefusal(slot, declared, record) is { } scopeRefusal)
+                && Connections.ScopeRefusal(slot, declared, record, retry: null) is { } scopeRefusal)
             {
                 return (grants, scopeRefusal.Error);
             }

@@ -103,8 +103,9 @@ public static class SolutionEndpoints
                 + "person skipped, which the team shows until provided. A step that fails: 200 `{ ok: "
                 + "false, step, stepNumber, title, reason, undone, notUndone, steps }`, everything made "
                 + "undone in reverse order. 200 `{ ok: false, refusals }` for a package that fails its "
-                + "check; 400 for a refused folder or answer; 409 for a team name that is taken. A person "
-                + "only.");
+                + "check; 400 `{ error }` for a refused folder or answer - a connection lacking scopes its "
+                + "slot needs adds `reconnect: { connectionId, scopes }`, the first such binding and exactly "
+                + "the scopes it lacks; 409 for a team name that is taken. A person only.");
 
         app.MapPost("/api/solutions/update", async (
             SolutionUpdateBody request, SolutionInstaller installer, HttpContext context, CancellationToken ct) =>
