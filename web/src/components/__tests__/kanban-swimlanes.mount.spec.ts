@@ -359,7 +359,8 @@ describe('swimlanes show every team', () => {
     expect(wrapper!.findAll('.k-swim-team').map((row) => row.text())).toEqual(['ALPHA', 'BETA', 'GAMMA']);
     expect(cardIds()).toEqual(['a', 'b', 'c']);
     expect(teamField().classes()).toContain('q-field--disabled');
-    expect(wrapper!.find('[data-filter="team"]').text()).toContain('Swimlanes show every team');
+    // SAID IN THE TOOLTIP ONLY: a caption under the box threw the filter row out of line.
+    expect(wrapper!.find('[data-filter="team"]').text()).not.toContain('Swimlanes show every team');
     expect(wrapper!.find('[data-filter="team"]').attributes('title')).toBe('Swimlanes show every team');
     expect(kanban.filters).toEqual({ team: 'beta' });
   });

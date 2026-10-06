@@ -91,7 +91,8 @@ const filterCount = computed(() => activeFilterCount(kanban.effectiveFilters, ka
 
 /**
  * SWIMLANES SHOW EVERY TEAM, so the Team filter does not apply there. It stays on the bar, greyed
- * out and holding the team kept for Board, with a caption saying why rather than vanishing.
+ * out and holding the team kept for Board, and says why in its tooltip rather than vanishing. NOT
+ * A CAPTION UNDER IT: a hint lines the Team box up a line taller than every other filter.
  */
 const teamLocked = computed(() => kanban.view === 'swimlanes');
 </script>
@@ -104,7 +105,6 @@ const teamLocked = computed(() => kanban.view === 'swimlanes');
         :model-value="kanban.filters.team ?? null"
         :options="teamOptions"
         :disable="teamLocked"
-        :hint="teamLocked ? SwimlanesTeamCaption : undefined"
         dense
         outlined
         clearable
