@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests.Host;
 
 /// <summary>
-/// THE OUTCOMES DASHBOARD (docs/specs/2026-10-05-outcomes-dashboard-design.md): a backlog item takes
+/// THE OUTCOMES DASHBOARD: a backlog item takes
 /// the outcome its dispatch workflow is linked to when it has none, and never otherwise; an outcome's
 /// figures carry its backlog by where it stands, the time it was blocked on a person, its efficiency,
 /// its last eight weeks and its cost at the instance's rate; and each outcome carries a value.
