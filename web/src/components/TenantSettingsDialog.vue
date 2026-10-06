@@ -33,6 +33,7 @@ import ConciergeAgentForm from './ConciergeAgentForm.vue';
 import ConciergeSessions from './ConciergeSessions.vue';
 import ConciergeDisplayForm from './ConciergeDisplayForm.vue';
 import TenantSettingField from './TenantSettingField.vue';
+import DialogTabs from './DialogTabs.vue';
 
 /**
  * ADMIN > SETTINGS: every instance-wide setting in one place.
@@ -342,9 +343,9 @@ function holdText(hold: { team: string; member: string }) {
         Could not read the settings: {{ loadError }}
       </q-banner>
 
-      <q-tabs v-model="tab" dense no-caps align="left" class="text-primary" outside-arrows mobile-arrows>
+      <DialogTabs v-model="tab">
         <q-tab v-for="entry in Tabs" :key="entry.name" :name="entry.name" :label="entry.label" />
-      </q-tabs>
+      </DialogTabs>
 
       <q-separator />
 

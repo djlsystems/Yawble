@@ -54,6 +54,7 @@ import {
 import { itemLabel } from '../lib/backlog';
 import { vResizableColumns } from '../lib/resizableColumns';
 import BacklogDialog from './BacklogDialog.vue';
+import DialogTabs from './DialogTabs.vue';
 
 /**
  * OUTCOMES, AS A PRODUCT OWNER READS THEM: a tile per outcome - what it has cost against what it is
@@ -732,11 +733,11 @@ const history = computed<HistoryLine[]>(() => {
         <q-card-section class="q-pt-none">
           <div v-if="accountingNote" class="os-body os-text-muted q-mb-sm" data-accounting-since>{{ accountingNote }}</div>
 
-          <q-tabs v-model="tab" dense no-caps align="left" active-color="primary" indicator-color="primary">
+          <DialogTabs v-model="tab">
             <q-tab name="active" label="Active" data-outcome-tab="active" />
             <q-tab name="proposed" :label="`Proposed (${proposedCount})`" data-outcome-tab="proposed" />
             <q-tab name="ended" label="Retired & merged" data-outcome-tab="ended" />
-          </q-tabs>
+          </DialogTabs>
 
           <div v-if="error" class="os-body text-negative q-mt-sm">Could not list the outcomes: {{ error }}</div>
 

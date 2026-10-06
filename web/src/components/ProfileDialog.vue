@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useSessionStore } from '../stores/session';
 import PasswordField from './PasswordField.vue';
+import DialogTabs from './DialogTabs.vue';
 import { listKeys, mintKey, revokeKey } from '../api/client';
 import type { ApiKey, MintedKey } from '../api/types';
 import { MINIMUM_PASSWORD_LENGTH, email as emailRule, password as passwordRule, required } from '../lib/rules';
@@ -241,11 +242,11 @@ function copyCredential() {
         </div>
       </q-card-section>
 
-      <q-tabs v-model="tab" dense no-caps align="justify" class="text-primary">
+      <DialogTabs v-model="tab">
         <q-tab name="email" label="Email" />
         <q-tab name="password" label="Password" />
         <q-tab name="keys" label="API keys" />
-      </q-tabs>
+      </DialogTabs>
 
       <q-separator />
 

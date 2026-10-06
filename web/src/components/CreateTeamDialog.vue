@@ -36,6 +36,7 @@ import HostPathPicker from './HostPathPicker.vue';
 import ForkItForMe from './ForkItForMe.vue';
 import LocalRepoPicker from './LocalRepoPicker.vue';
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
+import DialogTabs from './DialogTabs.vue';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
 import type { ForkResult } from '../api/types';
 
@@ -615,20 +616,10 @@ async function submit() {
       </q-card-section>
 
       <q-form lazy-rules="ondemand" @submit="submit" @validation-error="showFailingTab">
-        <!-- `:breakpoint="0"`: under 600px wide Quasar stretches every tab across the strip, which
-             with two tabs reads as two halves rather than the left-hand row Team Settings shows. -->
-        <q-tabs
-          v-model="tab"
-          dense
-          no-caps
-          align="left"
-          :breakpoint="0"
-          active-color="primary"
-          class="os-text-muted"
-        >
+        <DialogTabs v-model="tab">
           <q-tab name="general" label="General" />
           <q-tab name="code" label="Code" />
-        </q-tabs>
+        </DialogTabs>
 
         <q-separator />
 

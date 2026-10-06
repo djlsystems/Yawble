@@ -14,6 +14,7 @@ import type { Connection, ConnectionProvider, ConnectionProviderSave, Connection
 import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { productCli } from '../presentation/product';
 import ConnectDialog from './ConnectDialog.vue';
+import DialogTabs from './DialogTabs.vue';
 import {
   parseScopes,
   providerHelp,
@@ -397,10 +398,10 @@ async function removeProvider(provider: ConnectionProvider) {
       </q-card-section>
 
       <!-- TWO TABS: the accounts, and the providers whose clients they are connected through. -->
-      <q-tabs v-model="tab" dense align="left" no-caps class="q-px-md" active-color="primary" indicator-color="primary">
+      <DialogTabs v-model="tab" class="q-px-md">
         <q-tab name="connections" :label="`Connections (${connections.length})`" data-connections-tab="connections" />
         <q-tab v-if="advanced" name="providers" :label="`Providers (${providers.length})`" data-connections-tab="providers" />
-      </q-tabs>
+      </DialogTabs>
       <q-separator />
 
       <q-tab-panels v-model="tab" class="connections-body">

@@ -59,6 +59,7 @@ import ForkItForMe from './ForkItForMe.vue';
 import TeamSkillsPanel from './TeamSkillsPanel.vue';
 import LocalRepoPicker from './LocalRepoPicker.vue';
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
+import DialogTabs from './DialogTabs.vue';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
 import type { ForkResult, RepoCheckRefusal as RepoCheckRefused, RepoChoice } from '../api/types';
 
@@ -819,22 +820,23 @@ watch(open, (showing) => {
     :snapshot="settingsSnapshot"
   />
 
+  <!-- `lg`, not `md`: six tabs need about 600px, and at `md` (544px) Environment sat past the edge. -->
   <q-dialog v-model="open">
-    <q-card class="team-card os-dialog-md">
+    <q-card class="team-card os-dialog-lg">
       <q-form lazy-rules="ondemand" @submit="save">
         <q-card-section class="q-pb-none">
           <div class="os-dialog-title">Team settings</div>
           <div class="text-caption os-text-muted">{{ team?.name ?? 'No team selected' }}</div>
         </q-card-section>
 
-        <q-tabs v-model="tab" dense no-caps align="left" active-color="primary" class="os-text-muted">
+        <DialogTabs v-model="tab">
           <q-tab name="general" label="General" />
           <q-tab name="members" :label="`Members (${containers.length})`" />
           <q-tab name="instructions" :label="TeamInstructionsTab" />
           <q-tab name="skills" label="Skills" />
           <q-tab name="repos" label="Code" />
           <q-tab name="env" label="Environment" />
-        </q-tabs>
+        </DialogTabs>
 
         <q-separator />
 

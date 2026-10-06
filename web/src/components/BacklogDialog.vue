@@ -36,6 +36,7 @@ import {
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
 import { carriesOnMessage, creatingLine, waitWasCutOff } from '../lib/slowCreate';
 import OutcomePicker from './OutcomePicker.vue';
+import DialogTabs from './DialogTabs.vue';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
 import { applyDefaults, readRemembered, remember } from '../lib/newTeamDefaults';
 import {
@@ -1032,10 +1033,10 @@ function down(index: number) {
         </div>
       </q-card-section>
 
-      <q-tabs v-model="tab" dense align="left" class="text-primary">
+      <DialogTabs v-model="tab">
         <q-tab name="backlog" label="Backlog" />
         <q-tab name="archived" label="Archived" />
-      </q-tabs>
+      </DialogTabs>
 
       <q-separator />
 

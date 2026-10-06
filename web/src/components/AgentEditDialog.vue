@@ -10,6 +10,7 @@ import {
 } from '../lib/agentDefinitionDraft';
 import { validateTags } from '../lib/tenantSettings';
 import ChipListInput from './ChipListInput.vue';
+import DialogTabs from './DialogTabs.vue';
 import {
   agentNameTaken,
   envLines,
@@ -294,11 +295,11 @@ function submit() {
         save it as your own Agent.
       </q-card-section>
 
-      <q-tabs v-model="tab" dense no-caps align="left" class="text-primary q-px-md" data-agent-tabs>
+      <DialogTabs v-model="tab" class="q-px-md" data-agent-tabs>
         <q-tab name="general" label="General" />
         <q-tab name="isolation" label="Isolation" />
         <q-tab name="gaps" :label="gaps.length ? `Gaps (${gaps.length})` : 'Gaps'" />
-      </q-tabs>
+      </DialogTabs>
       <q-separator />
 
       <q-form lazy-rules="ondemand" @submit="submit">

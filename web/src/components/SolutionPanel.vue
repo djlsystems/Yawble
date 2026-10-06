@@ -58,6 +58,7 @@ import { guidedProviders } from '../lib/connections';
 import HostPathPicker from './HostPathPicker.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 import SolutionWizard from './SolutionWizard.vue';
+import DialogTabs from './DialogTabs.vue';
 
 /**
  * ONE SOLUTION'S CONTROL PANEL, built from its `solution.json` and the team's live state
@@ -552,12 +553,12 @@ function closeUninstall() {
           <div v-if="panel.description" class="os-body q-mt-xs" data-panel-description>{{ panel.description }}</div>
         </q-card-section>
 
-        <q-tabs v-model="section" dense no-caps align="left" class="q-px-md" active-color="primary" indicator-color="primary">
+        <DialogTabs v-model="section" class="q-px-md">
           <q-tab name="status" label="Status" data-section-tab="status" />
           <q-tab name="controls" label="Controls" data-section-tab="controls" />
           <q-tab name="results" label="Results" data-section-tab="results" />
           <q-tab name="maintenance" label="Maintenance" data-section-tab="maintenance" />
-        </q-tabs>
+        </DialogTabs>
         <q-separator />
 
         <q-card-section v-if="problem" class="os-body text-negative q-pb-none" data-control-problem>{{ problem }}</q-card-section>
