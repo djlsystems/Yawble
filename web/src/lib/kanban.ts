@@ -271,6 +271,14 @@ export function cardsInLane(
  * predicate is explicit rather than `.filter(Boolean)` because that also drops `''`, and empty is
  * not a state a member has.
  */
+/**
+ * A board filter's values: the comma-separated string the store, the query string and the route
+ * carry (`KanbanFilter.Values` on the server), as a list. Empty parts are dropped.
+ */
+export function filterValues(value: string | undefined): string[] {
+  return (value ?? '').split(',').map((part) => part.trim()).filter(Boolean)
+}
+
 export function membersOf(board: Pick<KanbanBoard, 'cards'>): string[] {
   const named = board.cards
     .map((card) => card.member)

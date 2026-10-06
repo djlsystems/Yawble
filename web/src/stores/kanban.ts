@@ -27,7 +27,7 @@ import {
   defaultKanbanFilters,
   effectiveFilters,
   lanesToRender,
-  membersOf,
+  filterValues,
   swimlaneTeams,
   sameFilters,
   teamsOf,
@@ -103,6 +103,13 @@ export const useKanbanStore = defineStore('kanban', {
     revealTeam: '' as string,
 
     board: null as KanbanBoard | null,
+
+    /**
+     * EVERY (team, member) A BOARD HAS SHOWN THIS SESSION, as `team/member`. The Member filter offers
+     * these, not the members on the board now: the server narrows the board to the members picked,
+     * so reading the options off it left only those - and no way to add a second one.
+     */
+    seenMembers: [] as string[],
 
     loading: false,
     error: '' as string,
@@ -191,8 +198,25 @@ export const useKanbanStore = defineStore('kanban', {
     },
 
     /** The member filter's options, taken from the cards actually on the board. */
+    /**
+     * THE MEMBERS THE FILTER OFFERS: every member a board has shown this session and every member
+     * on a team's roster, narrowed to the teams the Team filter picks (none picked: every team), and
+     * always each member already picked, so it can be removed. Never read off the narrowed board.
+     */
     memberOptions(state): string[] {
-      return state.board ? membersOf(state.board) : []
+      const pairs = new Set(state.seenMembers)
+      for (const team of useConsoleStore().teams) {
+        for (const container of team.containers ?? []) pairs.add(`${team.id}/${container.id}`)
+      }
+
+      const teams = new Set(filterValues(effectiveFilters(state.filters, state.view).team).map((t) => t.toLowerCase()))
+      const names = new Set(filterValues(state.filters.member))
+      for (const pair of pairs) {
+        const slash = pair.indexOf('/')
+        if (teams.size === 0 || teams.has(pair.slice(0, slash).toLowerCase())) names.add(pair.slice(slash + 1))
+      }
+
+      return [...names].sort()
     },
 
     teamOptions(state): string[] {
@@ -343,6 +367,13 @@ export const useKanbanStore = defineStore('kanban', {
      * response that arrived after a team switch: a slow answer to an old filter must not repaint
      * over a fast answer to the new one.
      */
+    /** Adds the board's (team, member) pairs to what the Member filter offers. */
+    rememberMembers(board: KanbanBoard) {
+      const seen = new Set(this.seenMembers)
+      for (const card of board.cards) if (card.member && card.team) seen.add(`${card.team}/${card.member}`)
+      if (seen.size !== this.seenMembers.length) this.seenMembers = [...seen]
+    },
+
     async load() {
       const ticket = ++this.fetchSeq
       this.loading = true
@@ -354,6 +385,7 @@ export const useKanbanStore = defineStore('kanban', {
 
         this.board = board
         this.error = ''
+        this.rememberMembers(board)
       } catch (cause) {
         if (ticket !== this.fetchSeq) return
 

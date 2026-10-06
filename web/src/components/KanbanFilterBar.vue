@@ -6,7 +6,7 @@ import { KanbanStatusLabel, SwimlanesTeamCaption } from '../lib/kanban';
 import { KanbanStatuses, NoOutcome, type KanbanFilters } from '../api/kanban';
 import { outcomeLabel } from '../api/outcomes';
 import { useEndedOutcomeOption } from '../lib/currentOutcome';
-import { activeFilterCount } from '../lib/kanban';
+import { activeFilterCount, filterValues } from '../lib/kanban';
 
 /**
  * The filter bar: four filters the SERVER resolves, and one box this browser resolves.
@@ -71,9 +71,7 @@ const statusOptions = computed(() =>
  * not offered. The names are the q-select's labels, rendered as text.
  */
 /** A filter's values: the comma-separated string the store holds, as the select's list. */
-function listOf(value: string | undefined): string[] {
-  return (value ?? '').split(',').map((part) => part.trim()).filter(Boolean);
-}
+const listOf = filterValues;
 
 /** The one picked outcome that is no longer on offer (retired or merged), shown by name. */
 const endedOutcomeId = computed(() =>

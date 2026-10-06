@@ -575,6 +575,39 @@ describe('filters', () => {
     await vi.waitFor(() => expect(getKanbanBoard).toHaveBeenCalledWith({}));
   });
 
+  it('keeps offering every member after one is picked, so a second can be added', async () => {
+    const kanban = useKanbanStore();
+    await kanban.load();
+
+    // THE SERVER NARROWS THE BOARD to the member picked, so its cards name that member only.
+    getKanbanBoard.mockImplementation(async () => ({ ...board, cards: board.cards.filter((c) => c.member === 'ResearcherRosa') }));
+    kanban.setFilters({ member: 'ResearcherRosa' });
+    await vi.waitFor(() => expect(kanban.board!.cards).toHaveLength(1));
+
+    expect(kanban.memberOptions).toEqual(['DeveloperDorian', 'OpsOona', 'ResearcherRosa']);
+  });
+
+  it('offers the members of the teams picked, and each team\'s roster as well as its cards', async () => {
+    const console_ = useConsoleStore();
+    console_.$patch({
+      teams: [
+        { id: 'researchkanban', name: 'Research', containers: [{ id: 'NewNina', team: 'researchkanban' }] },
+        { id: 'otherteam', name: 'Other', containers: [] },
+      ] as never,
+    });
+    const kanban = useKanbanStore();
+    await kanban.load();
+
+    expect(kanban.memberOptions).toEqual(['DeveloperDorian', 'NewNina', 'OpsOona', 'ResearcherRosa']);
+
+    kanban.filters = { team: 'otherteam' };
+    expect(kanban.memberOptions).toEqual(['OpsOona']);
+
+    // A MEMBER STILL PICKED stays offered, so it can be removed, whatever the team says.
+    kanban.filters = { team: 'otherteam', member: 'ResearcherRosa' };
+    expect(kanban.memberOptions).toEqual(['OpsOona', 'ResearcherRosa']);
+  });
+
   it('offers the members and teams that are actually on the board', async () => {
     const kanban = useKanbanStore();
     await kanban.load();
