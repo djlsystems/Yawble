@@ -806,12 +806,14 @@ async function submit() {
           </div>
 
 
-          <!-- DYNAMIC MEMBERS: the same heading and the same allowlist as Team Settings → General,
-               deliberately - a person who has met one has met the other. Not preselected: a team
-               created on whatever sorted first is a team hiring on a CLI nobody chose. -->
-          <div class="text-subtitle2 q-mt-sm">Dynamic members</div>
+          <!-- THE TEAM'S AGENT ALLOWLIST: the same heading and the same allowlist as Team Settings →
+               General, deliberately - a person who has met one has met the other. It is every member's
+               list, not only a Manager's hire: the member settings and Add member dialogs offer only
+               these, so the heading says so. Not preselected: a team created on whatever sorted first
+               is a team hiring on a CLI nobody chose. -->
+          <div class="text-subtitle2 q-mt-sm" data-member-agents-heading>Agents this team's members may use</div>
           <div class="text-caption os-text-muted">
-            What a member the manager hires gets when nobody is here to choose.
+            Applies when you hire a member or change its agent, and when a Manager hires one. The first is used when nobody chooses.
           </div>
 
           <div>
@@ -896,8 +898,8 @@ async function submit() {
             </div>
           </div>
 
-          <!-- TEAM INSTRUCTIONS: their own section, after Dynamic members and not inside it. Every
-               agent member reads them - the Manager too - so under Dynamic members they read as a
+          <!-- TEAM INSTRUCTIONS: their own section, after the agent allowlist and not inside it. Every
+               agent member reads them - the Manager too - so under the allowlist they read as a
                setting for hired members only. Same heading and hint as Team Settings. -->
           <section data-section="team-instructions">
             <div class="text-subtitle2 q-mt-sm">{{ TeamInstructionsLabel }}</div>

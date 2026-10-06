@@ -168,7 +168,7 @@ describe('TeamSettingsDialog, mounted, and the removed team rename', () => {
 
 /**
  * TEAM INSTRUCTIONS HAVE A TAB OF THEIR OWN, right after Members: every agent member reads them, the
- * Manager too, so a box on General beside Dynamic members read as a setting for hired members only.
+ * Manager too, so a box on General beside the agent allowlist read as a setting for hired members only.
  */
 describe('TeamSettingsDialog, Team instructions', () => {
   it('orders the tabs General, Members, Team instructions, Skills, GitHub Repos, Environment', async () => {
@@ -186,7 +186,8 @@ describe('TeamSettingsDialog, Team instructions', () => {
   it('no longer has the box on General', async () => {
     const { wrapper } = await mountSettings('general');
 
-    expect(document.body.textContent).toContain('Dynamic members');
+    expect(document.body.textContent).toContain("Agents this team's members may use");
+    expect(document.body.textContent).toContain('Applies when you hire a member or change its agent, and when a Manager hires one.');
     expect(instructionsBox(wrapper)).toBeUndefined();
     expect(document.body.querySelector('textarea')).toBeNull();
     expect(document.body.textContent).not.toContain(TeamInstructionsLabel);

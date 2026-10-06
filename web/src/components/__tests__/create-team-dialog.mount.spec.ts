@@ -311,21 +311,21 @@ describe('CreateTeamDialog prompts', () => {
     wrapper.unmount();
   });
 
-  it('gives Team instructions a section of their own, after Dynamic members, with the shared hint', async () => {
+  it('gives Team instructions a section of their own, after the agent allowlist, with the shared hint', async () => {
     const wrapper = await open();
 
     const section = document.body.querySelector('[data-section="team-instructions"]');
     expect(section, 'no Team instructions section in the rendered dialog').not.toBeNull();
     expect(section!.textContent).toContain('Team instructions (optional)');
-    expect(section!.textContent).not.toContain('Dynamic members');
+    expect(section!.textContent).not.toContain("Agents this team's members may use");
 
     const text = bodyText();
-    expect(text.indexOf('Dynamic members')).toBeGreaterThan(-1);
-    expect(text.indexOf('Team instructions (optional)')).toBeGreaterThan(text.indexOf('Dynamic members'));
+    expect(text.indexOf("Agents this team's members may use")).toBeGreaterThan(-1);
+    expect(text.indexOf('Team instructions (optional)')).toBeGreaterThan(text.indexOf("Agents this team's members may use"));
 
-    // DIRECTLY after: the Dynamic members allowlist is the last control before the section.
+    // DIRECTLY after: the agent allowlist is the last control before the section.
     const heading = [...document.body.querySelectorAll('.text-subtitle2')].map((node) => node.textContent?.trim());
-    expect(heading.indexOf('Team instructions (optional)')).toBe(heading.indexOf('Dynamic members') + 1);
+    expect(heading.indexOf('Team instructions (optional)')).toBe(heading.indexOf("Agents this team's members may use") + 1);
 
     const box = field(wrapper, TeamInstructionsLabel);
     expect(section!.contains(box.element)).toBe(true);

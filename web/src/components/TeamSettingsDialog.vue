@@ -883,17 +883,19 @@ watch(open, (showing) => {
               hint="Where everything this team owns lives. Chosen when the team was created and fixed after that."
             />
 
-            <!-- DYNAMIC MEMBERS: which Agents a member a manager hires while nobody is watching may
-                 run. The same heading and the same allowlist as New Team, deliberately - a person who
-                 has met one has met the other.
+            <!-- THE TEAM'S AGENT ALLOWLIST: which Agents this team's members may run - a member a
+                 person hires or changes, and one a manager hires while nobody is watching, which gets
+                 the first entry. The member settings and Add member dialogs offer only these, so the
+                 heading says it is every member's list. The same heading and the same allowlist as New
+                 Team, deliberately - a person who has met one has met the other.
 
                  This is a setting rather than a literal inside the manager's own prompt, because a
                  manager copies what it is shown: a literal there would have a team deliberately put
                  on one CLI hire workers on another. What a member is told is not
                  chosen here: it is the built-in Member prompt. -->
-            <div class="text-subtitle2 q-mt-lg">Dynamic members</div>
+            <div class="text-subtitle2 q-mt-lg" data-member-agents-heading>Agents this team's members may use</div>
             <div class="os-body os-text-muted q-mb-sm">
-              What a member a manager hires gets when nobody is here to choose.
+              Applies when you hire a member or change its agent, and when a Manager hires one. The first is used when nobody chooses.
             </div>
 
             <div>
@@ -1091,7 +1093,7 @@ watch(open, (showing) => {
           </q-tab-panel>
 
           <!-- TEAM INSTRUCTIONS, a tab of their own and not a box on General: every agent member
-               reads them, the Manager too, so they are not a setting of Dynamic members. The same
+               reads them, the Manager too, so they are not a setting of the agent allowlist. The same
                heading and hint as New Team. Saved by Save, like everything else here. -->
           <q-tab-panel name="instructions">
             <div class="text-subtitle2">{{ TeamInstructionsLabel }}</div>
