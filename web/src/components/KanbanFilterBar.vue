@@ -11,6 +11,11 @@ import { activeFilterCount } from '../lib/kanban';
 /**
  * The filter bar: four filters the SERVER resolves, and one box this browser resolves.
  *
+ * EACH OF THE FOUR TAKES SEVERAL VALUES. A dropdown is a multiple select; what it holds is sent as
+ * one comma-separated value (`KanbanFilter.Values` on the server), so the store, the query string
+ * and the board request keep one string per filter. Within a dropdown any value keeps a card;
+ * across dropdowns every one must hold. Nothing picked is no filter.
+ *
  * Each of the three writes through `setFilters`, which drops anything that became empty and
  * refetches - so "cleared" has ONE spelling and the query string, the store and this bar always
  * agree. Nothing narrows the fetched cards here: the board is a server-side projection and
@@ -65,14 +70,22 @@ const statusOptions = computed(() =>
  * outcome by id. A retired or merged outcome filtered on is shown by name with its status, and is
  * not offered. The names are the q-select's labels, rendered as text.
  */
+/** A filter's values: the comma-separated string the store holds, as the select's list. */
+function listOf(value: string | undefined): string[] {
+  return (value ?? '').split(',').map((part) => part.trim()).filter(Boolean);
+}
+
+/** The one picked outcome that is no longer on offer (retired or merged), shown by name. */
+const endedOutcomeId = computed(() =>
+  listOf(kanban.filters.outcome).find((id) => id !== NoOutcome && !kanban.outcomes.some((outcome) => outcome.id === id)) ?? null);
+
 const endedOutcome = useEndedOutcomeOption(
-  () => kanban.filters.outcome,
+  () => endedOutcomeId.value,
   () => kanban.outcomes,
-  { known: () => kanban.board?.cards.find((card) => card.outcome?.id === kanban.filters.outcome)?.outcome },
+  { known: () => kanban.board?.cards.find((card) => card.outcome?.id === endedOutcomeId.value)?.outcome },
 );
 
 const outcomeOptions = computed(() => [
-  { label: 'All', value: '' },
   { label: 'No outcome', value: NoOutcome },
   ...kanban.outcomes.map((outcome) => ({ label: outcomeLabel(outcome), value: outcome.id })),
   ...endedOutcome.value,
@@ -81,6 +94,11 @@ const outcomeOptions = computed(() => [
 /** One writer for every control. `null` from a cleared q-select becomes an absent key. */
 function set(patch: KanbanFilters) {
   kanban.setFilters(patch);
+}
+
+/** A multiple select's answer as the store's one string: values comma-separated, cleared is empty. */
+function joined(values: unknown): string {
+  return Array.isArray(values) ? values.map(String).join(',') : '';
 }
 
 /**
@@ -102,22 +120,26 @@ const teamLocked = computed(() => kanban.view === 'swimlanes');
     <!-- The tooltip is on a wrapper: a disabled field takes no pointer events of its own. -->
     <div class="k-filter k-filter--wide" data-filter="team" :title="teamLocked ? SwimlanesTeamCaption : undefined">
       <q-select
-        :model-value="kanban.filters.team ?? null"
+        :model-value="listOf(kanban.filters.team)"
         :options="teamOptions"
         :disable="teamLocked"
+        multiple
+        use-chips
         dense
         outlined
         clearable
         emit-value
         map-options
         label="Team"
-        @update:model-value="(value) => set({ team: value ?? '' })"
+        @update:model-value="(value) => set({ team: joined(value) })"
       />
     </div>
 
     <q-select
-      :model-value="kanban.filters.member ?? null"
+      :model-value="listOf(kanban.filters.member)"
       :options="memberOptions"
+      multiple
+      use-chips
       dense
       outlined
       clearable
@@ -125,12 +147,15 @@ const teamLocked = computed(() => kanban.view === 'swimlanes');
       map-options
       label="Member"
       class="k-filter k-filter--wide"
-      @update:model-value="(value) => set({ member: value ?? '' })"
+      data-filter="member"
+      @update:model-value="(value) => set({ member: joined(value) })"
     />
 
     <q-select
-      :model-value="kanban.filters.status ?? null"
+      :model-value="listOf(kanban.filters.status)"
       :options="statusOptions"
+      multiple
+      use-chips
       dense
       outlined
       clearable
@@ -138,23 +163,27 @@ const teamLocked = computed(() => kanban.view === 'swimlanes');
       map-options
       label="Status"
       class="k-filter"
-      @update:model-value="(value) => set({ status: value ?? '' })"
+      data-filter="status"
+      @update:model-value="(value) => set({ status: joined(value) })"
     />
 
     <q-select
-      :model-value="kanban.filters.outcome ?? ''"
+      :model-value="listOf(kanban.filters.outcome)"
       :options="outcomeOptions"
+      multiple
+      use-chips
       dense
       outlined
+      clearable
       emit-value
       map-options
       label="Outcome"
       class="k-filter k-filter--wide"
       data-filter="outcome"
-      @update:model-value="(value) => set({ outcome: value ?? '' })"
+      @update:model-value="(value) => set({ outcome: joined(value) })"
     />
 
-    <!-- NOT DEBOUNCED, because it fetches nothing. The three above are debounced where they are
+    <!-- NOT DEBOUNCED, because it fetches nothing. The four above are debounced where they are
          typed rather than chosen, since a board fetch per character is wasted projections; this one
          narrows the cards already on screen, so per-keystroke IS the feature.
 

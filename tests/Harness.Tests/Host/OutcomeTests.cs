@@ -935,6 +935,38 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
     }
 
     [Fact]
+    public async Task The_board_takes_several_outcomes_and_none_comma_separated_and_keeps_a_card_matching_any()
+    {
+        var person = await host.PersonAsync();
+        var first = await CreateAsync(person, Unique("First board"));
+        var second = await CreateAsync(person, Unique("Second board"));
+        var third = await CreateAsync(person, Unique("Third board"));
+        var one = await WorkflowAsync(person, host.Alpha, first.Id);
+        var two = await WorkflowAsync(person, host.Alpha, second.Id);
+        var three = await WorkflowAsync(person, host.Alpha, third.Id);
+        var unlinked = await WorkflowAsync(person, host.Alpha);
+
+        async Task<List<long>> BoardAsync(string query) =>
+            (await JsonAsync(await person.GetAsync($"/api/kanban/board?{query}", Ct))).GetProperty("cards")
+                .EnumerateArray().Select(c => c.GetProperty("workflowSeq").GetInt64()).ToList();
+
+        var both = await BoardAsync($"team={host.Alpha}&outcome={first.Id},{second.Id}");
+        Assert.Contains(one, both);
+        Assert.Contains(two, both);
+        Assert.DoesNotContain(three, both);
+        Assert.DoesNotContain(unlinked, both);
+
+        var withNone = await BoardAsync($"team={host.Alpha}&outcome={first.Id},none");
+        Assert.Contains(one, withNone);
+        Assert.Contains(unlinked, withNone);
+        Assert.DoesNotContain(two, withNone);
+
+        // SEVERAL TEAMS: the scope is every team named that the caller reaches.
+        var teams = await BoardAsync($"team={host.Alpha},no-such-team&outcome={first.Id}");
+        Assert.Equal([one], teams);
+    }
+
+    [Fact]
     public async Task Every_card_carries_its_outcome_a_proposed_one_with_its_status_a_merged_one_as_its_target_and_none_as_null()
     {
         var person = await host.PersonAsync();

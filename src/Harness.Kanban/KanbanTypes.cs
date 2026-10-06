@@ -246,4 +246,16 @@ public sealed record KanbanFilter(
 {
     /// <summary>The value of <see cref="Outcome"/> that keeps the cards with no outcome.</summary>
     public const string NoOutcome = "none";
+
+    /// <summary>
+    /// EACH FILTER MAY NAME SEVERAL VALUES, comma-separated, and a card is kept when it matches ANY
+    /// of them; across filters every one must hold. A comma never appears inside a value: team and
+    /// member names are letters, digits, <c>-</c> and <c>_</c> (<c>ContainerId.IsLegalName</c>),
+    /// statuses are a fixed set, and an outcome is a GUID or <see cref="NoOutcome"/>. A single value
+    /// is a list of one, so every caller that passes one is unchanged.
+    /// </summary>
+    public static IReadOnlyList<string> Values(string? field) =>
+        string.IsNullOrWhiteSpace(field)
+            ? []
+            : field.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 }

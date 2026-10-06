@@ -82,19 +82,23 @@ public static class KanbanProjector
 
         var matching = States(cardStates);
 
-        if (!string.IsNullOrEmpty(filter.Team))
+        // Each filter is a list (`KanbanFilter.Values`): ANY of its values keeps a card.
+        if (KanbanFilter.Values(filter.Team) is { Count: > 0 } teams)
         {
-            matching = matching.Where(c => string.Equals(c.Team, filter.Team, StringComparison.OrdinalIgnoreCase));
+            var wanted = teams.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            matching = matching.Where(c => c.Team is not null && wanted.Contains(c.Team));
         }
 
-        if (!string.IsNullOrEmpty(filter.Member))
+        if (KanbanFilter.Values(filter.Member) is { Count: > 0 } members)
         {
-            matching = matching.Where(c => string.Equals(c.Member, filter.Member, StringComparison.OrdinalIgnoreCase));
+            var wanted = members.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            matching = matching.Where(c => c.Member is not null && wanted.Contains(c.Member));
         }
 
-        if (!string.IsNullOrEmpty(filter.Status))
+        if (KanbanFilter.Values(filter.Status) is { Count: > 0 } statuses)
         {
-            matching = matching.Where(c => string.Equals(c.Status, filter.Status, StringComparison.OrdinalIgnoreCase));
+            var wanted = statuses.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            matching = matching.Where(c => c.Status is not null && wanted.Contains(c.Status));
         }
 
         // No date range and no correlation id; see `KanbanFilter` for why, and for what

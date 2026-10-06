@@ -358,9 +358,17 @@ describe('the filter bar', () => {
   it('refetches on a select, and narrows only the view on search', async () => {
     const board = await mountBoard([card({ id: '1', title: 'Read spec' }), card({ id: '2', title: 'Write test' })]);
 
-    board.findAllComponents({ name: 'QSelect' }).find((s) => s.props('label') === 'Team')!
-      .vm.$emit('update:modelValue', 'alpha');
+    // A MULTIPLE SELECT: its list goes to the store as one comma-separated value.
+    const team = board.findAllComponents({ name: 'QSelect' }).find((s) => s.props('label') === 'Team')!;
+    for (const label of ['Team', 'Member', 'Status', 'Outcome']) {
+      expect(board.findAllComponents({ name: 'QSelect' }).find((s) => s.props('label') === label)!.props('multiple')).toBe(true);
+    }
+    team.vm.$emit('update:modelValue', ['alpha']);
     expect(kanban.setFilters).toHaveBeenCalledWith({ team: 'alpha' });
+    team.vm.$emit('update:modelValue', ['alpha', 'beta']);
+    expect(kanban.setFilters).toHaveBeenLastCalledWith({ team: 'alpha,beta' });
+    team.vm.$emit('update:modelValue', null);
+    expect(kanban.setFilters).toHaveBeenLastCalledWith({ team: '' });
 
     await typeInto('Search', 'Read');
     expect(kanban.text).toBe('Read');

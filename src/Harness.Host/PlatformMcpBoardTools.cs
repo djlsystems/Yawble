@@ -19,9 +19,9 @@ public sealed partial class PlatformMcpTools
         [Description("board, show, move, comment, edit, plan, or filter.")] string action,
         [Description("Team id. Required for a Concierge. Omit for a member of a team.")] string? team = null,
         [Description("Card id, for show, move, edit, and comment.")] string? card = null,
-        [Description("Board filter: one member's identifier.")] string? member = null,
-        [Description("Board filter, or the new status on edit.")] string? status = null,
-        [Description("Board filter: an outcome's id, or none for cards with no outcome.")] string? outcome = null,
+        [Description("Board filter: a member's identifier, or several comma-separated (any of them).")] string? member = null,
+        [Description("Board filter (several comma-separated: any of them), or the new status on edit.")] string? status = null,
+        [Description("Board filter: an outcome's id, or none for cards with no outcome; several comma-separated keep any of them.")] string? outcome = null,
         [Description("Lane id, for move: todo, in-progress, blocked, or done.")] string? lane = null,
         [Description("New title, for edit or plan.")] string? title = null,
         [Description("Card body, for plan.")] string? body = null,
@@ -38,6 +38,8 @@ public sealed partial class PlatformMcpTools
             return "The board takes four filters: team, member, status, and outcome (an outcome's id "
                 + "from the outcome tool's list, or none for cards with no outcome; a card's outcome "
                 + "is the one its open workflow serves, else its latest workflow's). "
+                + "Each takes several values comma-separated, and a card is kept when it matches any "
+                + "of them; across filters every one must hold. "
                 + "A date range is not a filter. A workflow is workflow_show. "
                 + "Searching a card's text is not a flag; read the board.";
         }

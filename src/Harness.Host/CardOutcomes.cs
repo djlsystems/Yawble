@@ -44,20 +44,36 @@ public static class CardOutcomes
         IReadOnlyList<T> cards, string? outcome, IOutcomeStore outcomes, CancellationToken ct = default)
         where T : KanbanCard
     {
-        if (string.IsNullOrWhiteSpace(outcome)) return cards;
+        // SEVERAL MAY BE ASKED (`KanbanFilter.Values`): a card is kept when its tag is any of them,
+        // and `none` among them keeps the cards with no tag as well.
+        var asked = KanbanFilter.Values(outcome);
+        if (asked.Count == 0) return cards;
 
-        var wanted = outcome.Trim();
-        if (string.Equals(wanted, KanbanFilter.NoOutcome, StringComparison.OrdinalIgnoreCase))
-            return cards.Where(card => card.Outcome is null).ToList();
+        var none = false;
+        var wanted = new HashSet<string>(StringComparer.Ordinal);
 
-        // Only a merged id asks again, and only when that id is asked for.
-        for (var hop = 0; hop < 64 && await outcomes.FindAsync(wanted, ct) is
-             { Status: OutcomeStatus.Merged, MergedInto: { } next }; hop++)
+        foreach (var value in asked)
         {
-            wanted = next;
+            if (string.Equals(value, KanbanFilter.NoOutcome, StringComparison.OrdinalIgnoreCase))
+            {
+                none = true;
+                continue;
+            }
+
+            // Only a merged id asks again, and only when that id is asked for.
+            var id = value;
+            for (var hop = 0; hop < 64 && await outcomes.FindAsync(id, ct) is
+                 { Status: OutcomeStatus.Merged, MergedInto: { } next }; hop++)
+            {
+                id = next;
+            }
+
+            wanted.Add(id);
         }
 
-        return cards.Where(card => card.Outcome?.Id == wanted).ToList();
+        return cards
+            .Where(card => card.Outcome is null ? none : wanted.Contains(card.Outcome.Id))
+            .ToList();
     }
 
     /// <summary>The workflow whose outcome <paramref name="card"/> shows.</summary>

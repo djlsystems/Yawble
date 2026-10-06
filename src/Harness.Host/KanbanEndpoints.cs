@@ -233,7 +233,7 @@ public static class KanbanEndpoints
 
     private const string OutcomeFilterDescription =
         "Only cards whose outcome is this one (its id; a merged outcome's work is its target's), "
-        + "or `none` for cards with no outcome. A card's outcome is its open workflow's, else its "
+        + "or `none` for cards with no outcome; several, comma-separated, keep a card serving any of them. A card's outcome is its open workflow's, else its "
         + "latest workflow's, and each card carries it as `outcome` (id, name, status).";
 
     /// <summary>
@@ -255,8 +255,8 @@ public static class KanbanEndpoints
         TeamRegistry teams,
         TenantSettings settings,
         IOutcomeStore outcomes,
-        [Description("Filter by member")] string? member = null,
-        [Description("Filter by status")] string? status = null,
+        [Description("Filter by member; several, comma-separated, keep a card of any of them.")] string? member = null,
+        [Description("Filter by status; several, comma-separated, keep a card in any of them.")] string? status = null,
         [Description(OutcomeFilterDescription)] string? outcome = null,
         CancellationToken ct = default)
     {
@@ -313,9 +313,9 @@ public static class KanbanEndpoints
         TeamAccess access,
         TenantSettings settings,
         IOutcomeStore outcomes,
-        [Description("Narrow to one team. Absent means every team the caller reaches.")] string? team = null,
-        [Description("Filter by member")] string? member = null,
-        [Description("Filter by status")] string? status = null,
+        [Description("Narrow to a team, or several comma-separated. Absent means every team the caller reaches.")] string? team = null,
+        [Description("Filter by member; several, comma-separated, keep a card of any of them.")] string? member = null,
+        [Description("Filter by status; several, comma-separated, keep a card in any of them.")] string? status = null,
         [Description(OutcomeFilterDescription)] string? outcome = null,
         CancellationToken ct = default)
     {
@@ -333,11 +333,11 @@ public static class KanbanEndpoints
             // NARROWING ONLY. An intersection rather than a replacement, so a `team` the caller
             // does not reach leaves an EMPTY scope - no cards - instead of reaching outside the
             // set, and instead of a refusal that would say whether that team exists.
-            if (!string.IsNullOrWhiteSpace(team))
+            // SEVERAL MAY BE NAMED, comma-separated: the scope is the teams named that the caller reaches.
+            if (KanbanFilter.Values(team) is { Count: > 0 } named)
             {
-                scope = scope
-                    .Where(id => string.Equals(id, team, StringComparison.OrdinalIgnoreCase))
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var asked = named.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                scope = scope.Where(asked.Contains).ToHashSet(StringComparer.OrdinalIgnoreCase);
             }
 
             var filter = new KanbanFilter(Member: member, Status: status, Outcome: outcome);

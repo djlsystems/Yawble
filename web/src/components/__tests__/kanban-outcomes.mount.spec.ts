@@ -108,13 +108,13 @@ const clearLabel = () =>
   [...document.body.querySelectorAll('button .block')].map((b) => b.textContent?.trim() ?? '').find((t) => t.startsWith('Clear'));
 
 describe('the Outcome filter', () => {
-  it('offers All, No outcome and each active and proposed outcome, by name as text', async () => {
+  it('offers No outcome and each active and proposed outcome, by name as text, to pick several of', async () => {
     const { board } = await mountBoard([]);
 
     const options = outcomeFilter(board).props('options') as { label: string; value: string }[];
 
+    expect(outcomeFilter(board).props('multiple')).toBe(true);
     expect(options).toEqual([
-      { label: 'All', value: '' },
       { label: 'No outcome', value: 'none' },
       { label: 'Ship <b>the release</b>', value: shipping.id },
       { label: 'Faster onboarding (proposed)', value: faster.id },
@@ -122,28 +122,28 @@ describe('the Outcome filter', () => {
     expect(requests.some((r) => decodeURIComponent(r.url) === '/api/outcomes?status=active,proposed')).toBe(true);
   });
 
-  it('sends the chosen outcome as the board query, and Clear counts it', async () => {
+  it('sends the chosen outcomes as one comma-separated board query, and Clear counts the filter once', async () => {
     const { board } = await mountBoard([]);
     expect(clearLabel()).toBeUndefined();
 
-    outcomeFilter(board).vm.$emit('update:modelValue', shipping.id);
+    outcomeFilter(board).vm.$emit('update:modelValue', [shipping.id]);
     await flushPromises();
 
     expect(lastBoardRequest()).toBe(`/api/kanban/board?outcome=${shipping.id}`);
     expect(clearLabel()).toBe('Clear (1)');
 
-    outcomeFilter(board).vm.$emit('update:modelValue', 'none');
+    outcomeFilter(board).vm.$emit('update:modelValue', [shipping.id, 'none']);
     await flushPromises();
 
-    expect(lastBoardRequest()).toBe('/api/kanban/board?outcome=none');
+    expect(decodeURIComponent(lastBoardRequest()!)).toBe(`/api/kanban/board?outcome=${shipping.id},none`);
     expect(clearLabel()).toBe('Clear (1)');
   });
 
-  it('sends nothing for All', async () => {
+  it('sends nothing when every outcome is removed', async () => {
     const { board, kanban } = await mountBoard([]);
     kanban.filters = { outcome: faster.id };
 
-    outcomeFilter(board).vm.$emit('update:modelValue', '');
+    outcomeFilter(board).vm.$emit('update:modelValue', []);
     await flushPromises();
 
     expect(lastBoardRequest()).toBe('/api/kanban/board');
@@ -154,14 +154,13 @@ describe('the Outcome filter', () => {
 describe('a retired or merged outcome as the current value', () => {
   const optionsOf = (select: { props: (name: string) => unknown }) => select.props('options') as { label: string; value: string; disable?: boolean }[];
 
-  it('shows the filter\'s retired outcome by name with its status, not as a new choice, and drops it for All', async () => {
+  it('shows the filter\'s retired outcome by name with its status, not as a new choice, and drops it once removed', async () => {
     const { board, kanban } = await mountBoard([]);
     kanban.filters = { outcome: oldGoal.id };
     await flushPromises();
 
     const filter = outcomeFilter(board);
     expect(optionsOf(filter)).toEqual([
-      { label: 'All', value: '' },
       { label: 'No outcome', value: 'none' },
       { label: 'Ship <b>the release</b>', value: shipping.id },
       { label: 'Faster onboarding (proposed)', value: faster.id },
@@ -170,9 +169,9 @@ describe('a retired or merged outcome as the current value', () => {
     expect(filter.text()).toContain('Old goal (retired)');
     expect(filter.text()).not.toContain(oldGoal.id);
 
-    filter.vm.$emit('update:modelValue', '');
+    filter.vm.$emit('update:modelValue', []);
     await flushPromises();
-    expect(optionsOf(filter).map((option) => option.value)).toEqual(['', 'none', shipping.id, faster.id]);
+    expect(optionsOf(filter).map((option) => option.value)).toEqual(['none', shipping.id, faster.id]);
   });
 
   it('shows the filter\'s merged outcome as "(merged)"', async () => {
