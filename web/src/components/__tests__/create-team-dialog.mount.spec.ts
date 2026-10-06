@@ -110,6 +110,20 @@ function chip(label: string): HTMLElement {
   return found;
 }
 
+/** Brings a tab of the dialog forward: the repositories are on Code, everything else on General. */
+async function showTab(label: 'General' | 'Code') {
+  const tab = [...document.body.querySelectorAll<HTMLElement>('.q-tab')].find((candidate) => candidate.textContent?.trim() === label);
+  if (!tab) throw new Error(`no ${label} tab in the rendered dialog`);
+  tab.click();
+  await flushPromises();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await flushPromises();
+}
+
+function activeTab(): string | undefined {
+  return document.body.querySelector<HTMLElement>('.q-tab--active')?.textContent?.trim();
+}
+
 async function validated() {
   await flushPromises();
   await new Promise((resolve) => setTimeout(resolve, 10));
@@ -142,6 +156,7 @@ describe('CreateTeamDialog validation', () => {
     const wrapper = await open();
     await field(wrapper, 'Team name').setValue('Beta');
 
+    await showTab('Code');
     await field(wrapper, 'GitHub Repos').setValue('git@github.com:owner/repo.git');
     await validated();
 
@@ -160,6 +175,7 @@ describe('CreateTeamDialog validation', () => {
     const wrapper = await open();
     await field(wrapper, 'Team name').setValue('Beta');
 
+    await showTab('Code');
     await field(wrapper, 'GitHub Repos').setValue('https://github.com/owner/app.git');
     button('Add').click();
     await validated();
@@ -186,6 +202,7 @@ describe('CreateTeamDialog validation', () => {
     await field(wrapper, 'Team name').setValue('Beta');
 
     for (const url of ['https://github.com/owner/app.git', 'https://github.com/owner/web.git']) {
+      await showTab('Code');
       await field(wrapper, 'GitHub Repos').setValue(url);
       button('Add').click();
       await validated();
@@ -209,6 +226,7 @@ describe('CreateTeamDialog validation', () => {
   it('creates with valid input and sends the listed repos', async () => {
     const wrapper = await open();
     await field(wrapper, 'Team name').setValue('Beta');
+    await showTab('Code');
     await field(wrapper, 'GitHub Repos').setValue('https://github.com/owner/app.git');
     button('Add').click();
     await validated();
@@ -225,6 +243,7 @@ describe('CreateTeamDialog validation', () => {
   it('sends a repository\'s upstream inside the create, and refuses the fork as its own upstream', async () => {
     const wrapper = await open();
     await field(wrapper, 'Team name').setValue('Beta');
+    await showTab('Code');
     await field(wrapper, 'GitHub Repos').setValue('https://github.com/fork-owner/app.git');
     button('Add').click();
     await validated();
@@ -255,6 +274,7 @@ describe('CreateTeamDialog validation', () => {
     await field(wrapper, 'Team name').setValue('Beta');
     await validated();
 
+    await showTab('Code');
     chip('Attach local:widget').click();
     await validated();
     expect(chip('local:widget is attached').classList.contains('disabled')).toBe(true);
@@ -276,6 +296,7 @@ describe('CreateTeamDialog validation', () => {
 
   it('refuses an illegal local repository name on the field and creates nothing', async () => {
     const wrapper = await open();
+    await showTab('Code');
     await field(wrapper, 'Create a local repository').setValue('../escape');
     await validated();
 
@@ -283,6 +304,32 @@ describe('CreateTeamDialog validation', () => {
     expect(bodyText()).toContain("with no '..'");
     expect(button('Create').hasAttribute('disabled')).toBe(true);
     expect(createLocalRepo).not.toHaveBeenCalled();
+  });
+
+  it('puts the repositories on a Code tab after General, with the local repository ticked by default', async () => {
+    const wrapper = await open();
+
+    expect([...document.body.querySelectorAll('.q-tab')].map((tab) => tab.textContent?.trim())).toEqual(['General', 'Code']);
+    expect(activeTab()).toBe('General');
+    expect(() => field(wrapper, 'GitHub Repos')).toThrow();
+
+    await showTab('Code');
+
+    expect(field(wrapper, 'GitHub Repos')).toBeTruthy();
+    expect(document.body.querySelector('[data-local-repository-checkbox] [aria-checked="true"], [data-local-repository-checkbox][aria-checked="true"]')).not.toBeNull();
+  });
+
+  it('brings General forward when a taken name is answered while Code shows', async () => {
+    createTeam.mockRejectedValue(new Error("A team called 'Beta' already exists."));
+
+    const wrapper = await open();
+    await field(wrapper, 'Team name').setValue('Beta');
+    await showTab('Code');
+    button('Create team').click();
+    await validated();
+
+    expect(activeTab()).toBe('General');
+    expect(field(wrapper, 'Team name').props('error')).toBe(true);
   });
 
   it('shows a taken name in the dialog and marks the name field', async () => {

@@ -315,8 +315,23 @@ async function loadDefaults() {
   budgetTokens.value = board.workflowSpendLimit;
 }
 
+/**
+ * TWO TABS: General (the team itself) and Code (its repositories), the same split Team Settings
+ * makes. The panels are `keep-alive`, so a field on Code that was visited stays registered with
+ * the form while General shows and its rules still run on Create; one never visited holds nothing
+ * to check. A failing field, or a repository the Host refused, brings its own tab forward rather
+ * than leaving the error on a tab nobody is looking at.
+ */
+const tab = ref<'general' | 'code'>('general');
+const codePanel = ref<HTMLElement | null>(null);
+
+function showFailingTab(component: { $el?: Element }) {
+  tab.value = component.$el && codePanel.value?.contains(component.$el) ? 'code' : 'general';
+}
+
 watch(open, (showing) => {
   if (showing) {
+    tab.value = 'general';
     carriesOn.value = '';
     void loadDefaults();
   }
@@ -561,6 +576,7 @@ async function submit() {
     if (refused) {
       repoChoices.value = afterRefusal(repoChoices.value, refused);
       refusal.value = refused;
+      tab.value = 'code';
       return;
     }
 
@@ -571,9 +587,11 @@ async function submit() {
       return;
     }
 
-    // In the dialog, verbatim, and the dialog stays open - see `serverError`.
+    // In the dialog, verbatim, and the dialog stays open - see `serverError`. A taken name is
+    // marked on the name field, so General comes forward if Code was showing.
     refusal.value = null;
     serverError.value = cause instanceof Error ? cause.message : String(cause);
+    if (nameTaken.value) tab.value = 'general';
   } finally {
     busy.value = false;
   }
@@ -596,347 +614,379 @@ async function submit() {
         </div>
       </q-card-section>
 
-      <q-form lazy-rules="ondemand" @submit="submit">
-        <q-card-section class="q-gutter-md">
-          <q-input
-            v-model="name"
-            autofocus
-            outlined
-            dense
-            label="Team name"
-            :rules="nameRules"
-            :maxlength="MaximumLength"
-            :error="nameTaken"
-            :error-message="nameTaken ? serverError : undefined"
-            hint="Whatever you want to call it — spaces and accents are fine."
-            @update:model-value="serverError = ''"
-          />
+      <q-form lazy-rules="ondemand" @submit="submit" @validation-error="showFailingTab">
+        <!-- `:breakpoint="0"`: under 600px wide Quasar stretches every tab across the strip, which
+             with two tabs reads as two halves rather than the left-hand row Team Settings shows. -->
+        <q-tabs
+          v-model="tab"
+          dense
+          no-caps
+          align="left"
+          :breakpoint="0"
+          active-color="primary"
+          class="os-text-muted"
+        >
+          <q-tab name="general" label="General" />
+          <q-tab name="code" label="Code" />
+        </q-tabs>
 
-          <!-- Where this team's files go. NO q-col-gutter here: that class gives every child
-               `padding-top: 8px` and a `q-btn`'s own padding rule beats it on source order at equal
-               specificity, so the input takes the 8px and the button rides above it. `row items-center
-               no-wrap` plus a plain `q-ml-sm` margin on the button, matching ProfileDialog's key row,
-               does not lose that fight. -->
-          <div>
-            <div class="row items-center no-wrap">
+        <q-separator />
+
+        <q-tab-panels v-model="tab" animated keep-alive class="os-tab-panels create-panels">
+          <q-tab-panel name="general">
+            <div class="q-gutter-md">
               <q-input
-                v-model="root"
-                class="col"
+                v-model="name"
+                autofocus
                 outlined
                 dense
-                hide-bottom-space
-                label="Place team in"
-                :placeholder="instanceRootPath ?? ''"
+                label="Team name"
+                :rules="nameRules"
+                :maxlength="MaximumLength"
+                :error="nameTaken"
+                :error-message="nameTaken ? serverError : undefined"
+                hint="Whatever you want to call it — spaces and accents are fine."
+                @update:model-value="serverError = ''"
               />
-              <q-btn
-                class="col-auto q-ml-sm"
-                outlined
-                dense
-                no-caps
-                label="Browse…"
-                @click="pickerOpen = true"
-              />
-            </div>
-            <!-- THE FAILURE IS RENDERED, not swallowed. Without this line a failed
-                 `GET /api/fs/roots` leaves the placeholder blank and `folderLine` blank, and the
-                 person is in front of an empty box with nothing at all saying why. Only while the box is empty: once somebody has typed
-                 or browsed a path there IS a preview, and the instance root is no longer what they
-                 are getting. -->
-            <div
-              v-if="instanceRootError && !root.trim()"
-              class="os-body text-negative q-mt-xs"
-            >
-              Could not read this host's folders, so there is nothing to preview:
-              {{ instanceRootError }} Leaving this blank still puts the team in the default place.
-            </div>
-            <div v-else class="text-caption os-text-muted q-mt-xs">
-              {{ folderLine }}
-            </div>
-          </div>
 
-          <div>
-            <div class="row items-center no-wrap">
-              <q-input
-                v-model="repoInput"
-                class="col"
-                outlined
-                dense
-                hide-bottom-space
-                label="GitHub Repos"
-                placeholder="https://github.com/owner/repo.git"
-                :rules="repoInputRules"
-                @keydown.enter.prevent="addRepo"
-              />
-              <q-btn
-                class="col-auto q-ml-sm"
-                outlined
-                dense
-                no-caps
-                label="Add"
-                :disable="!canAddRepo"
-                @click="addRepo"
-              />
-            </div>
-
-            <ForkItForMe @forked="addFork" />
-
-            <LocalRepoPicker :attached="repos" @attach="attachLocal" />
-
-            <div v-if="repoSuggestions.length > 0" class="q-mt-sm">
-              <div class="text-caption os-text-muted">Recent repositories:</div>
-              <div class="row q-gutter-xs q-mt-xs">
-                <q-chip
-                  v-for="repo in repoSuggestions"
-                  :key="repo"
-                  clickable
-                  dense
-                  class="mono"
-                  @click="applyRepoSuggestion(repo)"
+              <!-- Where this team's files go. NO q-col-gutter here: that class gives every child
+                   `padding-top: 8px` and a `q-btn`'s own padding rule beats it on source order at equal
+                   specificity, so the input takes the 8px and the button rides above it. `row items-center
+                   no-wrap` plus a plain `q-ml-sm` margin on the button, matching ProfileDialog's key row,
+                   does not lose that fight. -->
+              <div>
+                <div class="row items-center no-wrap">
+                  <q-input
+                    v-model="root"
+                    class="col"
+                    outlined
+                    dense
+                    hide-bottom-space
+                    label="Place team in"
+                    :placeholder="instanceRootPath ?? ''"
+                  />
+                  <q-btn
+                    class="col-auto q-ml-sm"
+                    outlined
+                    dense
+                    no-caps
+                    label="Browse…"
+                    @click="pickerOpen = true"
+                  />
+                </div>
+                <!-- THE FAILURE IS RENDERED, not swallowed. Without this line a failed
+                     `GET /api/fs/roots` leaves the placeholder blank and `folderLine` blank, and the
+                     person is in front of an empty box with nothing at all saying why. Only while the box is empty: once somebody has typed
+                     or browsed a path there IS a preview, and the instance root is no longer what they
+                     are getting. -->
+                <div
+                  v-if="instanceRootError && !root.trim()"
+                  class="os-body text-negative q-mt-xs"
                 >
-                  {{ repo }}
-                </q-chip>
+                  Could not read this host's folders, so there is nothing to preview:
+                  {{ instanceRootError }} Leaving this blank still puts the team in the default place.
+                </div>
+                <div v-else class="text-caption os-text-muted q-mt-xs">
+                  {{ folderLine }}
+                </div>
+              </div>
+
+              <!-- Which CLI the Manager runs. What it is told is the built-in Manager prompt.
+
+                   The Concierge has no picker here — it belongs to the instance, not to a team, and
+                   lives on Admin → Concierge. -->
+              <div>
+                <q-select v-model="agent" :options="agents" outlined dense label="Manager agent" />
+                <div v-if="agent && getAgentStatus(agent)" class="q-mt-xs">
+                  <q-icon
+                    :name="getAgentStatus(agent)!.icon"
+                    size="14px"
+                    class="q-mr-xs"
+                    aria-hidden="true"
+                    :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn' }"
+                  />
+                  <span :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn', 'os-text-muted': getAgentStatus(agent)!.tone !== 'warn' }">
+                    {{ getAgentStatus(agent)!.text }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Only when there is no default to fall back on - see `agent`'s own comment. -->
+              <div v-if="agent === null" class="text-caption os-text-muted">
+                A team must be created with a manager. Choose its Agent above.
+              </div>
+
+
+              <!-- THE TEAM'S AGENT ALLOWLIST: the same heading and the same allowlist as Team Settings →
+                   General, deliberately - a person who has met one has met the other. It is every member's
+                   list, not only a Manager's hire: the member settings and Add member dialogs offer only
+                   these, so the heading says so. Not preselected: a team created on whatever sorted first
+                   is a team hiring on a CLI nobody chose. -->
+              <div class="text-subtitle2 q-mt-sm" data-member-agents-heading>Agents this team's members may use</div>
+              <div class="text-caption os-text-muted">
+                Applies when you hire a member or change its agent, and when a Manager hires one. The first is used when nobody chooses.
+              </div>
+
+              <div>
+                <div class="row items-center no-wrap">
+                  <q-select
+                    v-model="memberAgentToAdd"
+                    :options="memberAgentOptions"
+                    class="col"
+                    outlined
+                    dense
+                    label="Allowlist: add Agent"
+                    hint="Headless presets only."
+                  />
+                  <q-btn
+                    class="col-auto q-ml-sm"
+                    outlined
+                    dense
+                    no-caps
+                    label="Add"
+                    :disable="!canAddMemberAgent"
+                    @click="addMemberAgent"
+                  />
+                </div>
+
+                <div v-if="memberAgentToAdd && getAgentStatus(memberAgentToAdd)" class="q-mt-xs">
+                  <q-icon
+                    :name="getAgentStatus(memberAgentToAdd)!.icon"
+                    size="14px"
+                    class="q-mr-xs"
+                    aria-hidden="true"
+                    :class="{ 'text-warning': getAgentStatus(memberAgentToAdd)!.tone === 'warn' }"
+                  />
+                  <span :class="{ 'text-warning': getAgentStatus(memberAgentToAdd)!.tone === 'warn', 'os-text-muted': getAgentStatus(memberAgentToAdd)!.tone !== 'warn' }">
+                    {{ getAgentStatus(memberAgentToAdd)!.text }}
+                  </span>
+                </div>
+
+                <q-list v-if="memberAgents.length > 0" bordered separator class="q-mt-sm">
+                  <q-item v-for="(entry, index) in memberAgents" :key="`${entry}-${index}`">
+                    <q-item-section>
+                      <q-item-label class="mono">{{ entry }}</q-item-label>
+                      <q-item-label caption>
+                        {{ index === 0 ? 'Default when no tag is requested' : `Priority ${index + 1}` }}
+                      </q-item-label>
+                    </q-item-section>
+                    <q-item-section side>
+                      <div class="row items-center no-wrap q-gutter-xs">
+                        <q-btn
+                          flat
+                          dense
+                          round
+                          icon="arrow_upward"
+                          :disable="index === 0"
+                          :aria-label="`Move ${entry} up`"
+                          @click="moveMemberAgent(index, -1)"
+                        />
+                        <q-btn
+                          flat
+                          dense
+                          round
+                          icon="arrow_downward"
+                          :disable="index === memberAgents.length - 1"
+                          :aria-label="`Move ${entry} down`"
+                          @click="moveMemberAgent(index, 1)"
+                        />
+                        <q-btn
+                          flat
+                          dense
+                          round
+                          color="negative"
+                          icon="delete"
+                          :aria-label="`Remove ${entry}`"
+                          @click="removeMemberAgent(index)"
+                        />
+                      </div>
+                    </q-item-section>
+                  </q-item>
+                </q-list>
+
+                <div v-else class="os-body text-negative q-mt-xs">
+                  Choose at least one Agent. An empty allowlist cannot be saved.
+                </div>
+              </div>
+
+              <!-- TEAM INSTRUCTIONS: their own section, after the agent allowlist and not inside it. Every
+                   agent member reads them - the Manager too - so under the allowlist they read as a
+                   setting for hired members only. Same heading and hint as Team Settings. -->
+              <section data-section="team-instructions">
+                <div class="text-subtitle2 q-mt-sm">{{ TeamInstructionsLabel }}</div>
+                <q-input
+                  v-model="additionalInstructions"
+                  type="textarea"
+                  autogrow
+                  :input-style="{ minHeight: '9em' }"
+                  outlined
+                  dense
+                  class="q-mt-xs"
+                  :aria-label="TeamInstructionsLabel"
+                  :hint="TeamInstructionsHint"
+                />
+              </section>
+
+              <!-- THE PER-WORKFLOW BUDGET. Last on the dialog and prefilled, which is the shape the
+                   argument needs: nobody has to answer it to make a team, and anybody who wants to can.
+
+                   THE HINT SAYS WHAT THE NUMBER BOUNDS, because the obvious misreading is that it is a
+                   total for the team. It is not: a team on this figure with three workflows open has
+                   three budgets of it, one each, and nothing is shared between them.
+
+                   AND IT SAYS WHAT EMPTY AND 0 MEAN, because they are different answers and neither is
+                   guessable. -->
+              <q-input
+                v-model.number="budgetTokens"
+                type="number"
+                outlined
+                dense
+                min="0"
+                step="1"
+                :rules="budgetRules"
+                label="Budget for one workflow (tokens)"
+                hint="What ONE workflow on this team may spend before it pauses — not a total across the team. Empty follows the instance figure; 0 is unlimited."
+              />
+            </div>
+          </q-tab-panel>
+
+          <q-tab-panel name="code">
+            <div ref="codePanel">
+              <div>
+                <div class="row items-center no-wrap">
+                  <q-input
+                    v-model="repoInput"
+                    class="col"
+                    outlined
+                    dense
+                    hide-bottom-space
+                    label="GitHub Repos"
+                    placeholder="https://github.com/owner/repo.git"
+                    :rules="repoInputRules"
+                    @keydown.enter.prevent="addRepo"
+                  />
+                  <q-btn
+                    class="col-auto q-ml-sm"
+                    outlined
+                    dense
+                    no-caps
+                    label="Add"
+                    :disable="!canAddRepo"
+                    @click="addRepo"
+                  />
+                </div>
+
+                <ForkItForMe @forked="addFork" />
+
+                <LocalRepoPicker :attached="repos" @attach="attachLocal" />
+
+                <div v-if="repoSuggestions.length > 0" class="q-mt-sm">
+                  <div class="text-caption os-text-muted">Recent repositories:</div>
+                  <div class="row q-gutter-xs q-mt-xs">
+                    <q-chip
+                      v-for="repo in repoSuggestions"
+                      :key="repo"
+                      clickable
+                      dense
+                      class="mono"
+                      @click="applyRepoSuggestion(repo)"
+                    >
+                      {{ repo }}
+                    </q-chip>
+                  </div>
+                </div>
+
+                <q-list v-if="repos.length > 0" bordered separator class="q-mt-sm">
+                  <!-- Keyed by POSITION: keyed by the URL, every keystroke in a row would remount it and
+                       drop the focus. Each row is a field with its own rules, duplicates included, so a
+                       remembered URL that no longer passes is marked where it sits. -->
+                  <q-item v-for="(repo, index) in repos" :key="index">
+                    <q-item-section>
+                      <q-input
+                        :model-value="repo"
+                        class="mono"
+                        dense
+                        borderless
+                        hide-bottom-space
+                        :aria-label="index === 0 ? 'Primary repo URL' : `Repo ${index + 1} URL`"
+                        :rules="repoUrlRules(repos, index)"
+                        @update:model-value="setRepo(index, $event)"
+                      />
+                      <q-item-label caption>
+                        {{ index === 0 ? 'Primary repo' : `Repo ${index + 1}` }}
+                      </q-item-label>
+                      <!-- Blank: the team owns this repository. Set: the URL above is its fork. A
+                           local repository has no upstream: contributor mode does not apply to it. -->
+                      <q-input
+                        v-if="!isLocalRepoReference(repo)"
+                        :model-value="upstreams[index] ?? ''"
+                        class="mono"
+                        dense
+                        hide-bottom-space
+                        label="Upstream URL (if this is your fork)"
+                        placeholder="https://github.com/project/repo.git"
+                        :aria-label="`Upstream URL for ${repo}`"
+                        :rules="upstreamRules(index)"
+                        @update:model-value="setUpstream(index, $event)"
+                      />
+                    </q-item-section>
+                    <q-item-section side>
+                      <div class="row items-center no-wrap q-gutter-xs">
+                        <q-btn
+                          flat
+                          dense
+                          round
+                          icon="arrow_upward"
+                          :disable="index === 0"
+                          :aria-label="`Move ${repo} up`"
+                          @click="moveRepo(index, -1)"
+                        />
+                        <q-btn
+                          flat
+                          dense
+                          round
+                          icon="arrow_downward"
+                          :disable="index === repos.length - 1"
+                          :aria-label="`Move ${repo} down`"
+                          @click="moveRepo(index, 1)"
+                        />
+                        <q-btn
+                          flat
+                          dense
+                          round
+                          color="negative"
+                          icon="delete"
+                          :aria-label="`Remove ${repo}`"
+                          @click="removeRepo(index)"
+                        />
+                      </div>
+                    </q-item-section>
+                  </q-item>
+                </q-list>
+
+                <div v-else class="text-caption os-text-muted q-mt-xs">
+                  Optional. Add repositories in priority order; the first entry is the team's primary repo.
+                </div>
+
+                <q-checkbox
+                  v-if="offerLocalRepository"
+                  v-model="localRepository"
+                  dense
+                  class="q-mt-sm"
+                  label="Create a local repository for this team"
+                  data-local-repository-checkbox
+                />
               </div>
             </div>
+          </q-tab-panel>
+        </q-tab-panels>
 
-            <q-list v-if="repos.length > 0" bordered separator class="q-mt-sm">
-              <!-- Keyed by POSITION: keyed by the URL, every keystroke in a row would remount it and
-                   drop the focus. Each row is a field with its own rules, duplicates included, so a
-                   remembered URL that no longer passes is marked where it sits. -->
-              <q-item v-for="(repo, index) in repos" :key="index">
-                <q-item-section>
-                  <q-input
-                    :model-value="repo"
-                    class="mono"
-                    dense
-                    borderless
-                    hide-bottom-space
-                    :aria-label="index === 0 ? 'Primary repo URL' : `Repo ${index + 1} URL`"
-                    :rules="repoUrlRules(repos, index)"
-                    @update:model-value="setRepo(index, $event)"
-                  />
-                  <q-item-label caption>
-                    {{ index === 0 ? 'Primary repo' : `Repo ${index + 1}` }}
-                  </q-item-label>
-                  <!-- Blank: the team owns this repository. Set: the URL above is its fork. A
-                       local repository has no upstream: contributor mode does not apply to it. -->
-                  <q-input
-                    v-if="!isLocalRepoReference(repo)"
-                    :model-value="upstreams[index] ?? ''"
-                    class="mono"
-                    dense
-                    hide-bottom-space
-                    label="Upstream URL (if this is your fork)"
-                    placeholder="https://github.com/project/repo.git"
-                    :aria-label="`Upstream URL for ${repo}`"
-                    :rules="upstreamRules(index)"
-                    @update:model-value="setUpstream(index, $event)"
-                  />
-                </q-item-section>
-                <q-item-section side>
-                  <div class="row items-center no-wrap q-gutter-xs">
-                    <q-btn
-                      flat
-                      dense
-                      round
-                      icon="arrow_upward"
-                      :disable="index === 0"
-                      :aria-label="`Move ${repo} up`"
-                      @click="moveRepo(index, -1)"
-                    />
-                    <q-btn
-                      flat
-                      dense
-                      round
-                      icon="arrow_downward"
-                      :disable="index === repos.length - 1"
-                      :aria-label="`Move ${repo} down`"
-                      @click="moveRepo(index, 1)"
-                    />
-                    <q-btn
-                      flat
-                      dense
-                      round
-                      color="negative"
-                      icon="delete"
-                      :aria-label="`Remove ${repo}`"
-                      @click="removeRepo(index)"
-                    />
-                  </div>
-                </q-item-section>
-              </q-item>
-            </q-list>
-
-            <div v-else class="text-caption os-text-muted q-mt-xs">
-              Optional. Add repositories in priority order; the first entry is the team's primary repo.
-            </div>
-
-            <q-checkbox
-              v-if="offerLocalRepository"
-              v-model="localRepository"
-              dense
-              class="q-mt-sm"
-              label="Create a local repository for this team"
-              data-local-repository-checkbox
-            />
-          </div>
-
-          <!-- Which CLI the Manager runs. What it is told is the built-in Manager prompt.
-
-               The Concierge has no picker here — it belongs to the instance, not to a team, and
-               lives on Admin → Concierge. -->
-          <div>
-            <q-select v-model="agent" :options="agents" outlined dense label="Manager agent" />
-            <div v-if="agent && getAgentStatus(agent)" class="q-mt-xs">
-              <q-icon
-                :name="getAgentStatus(agent)!.icon"
-                size="14px"
-                class="q-mr-xs"
-                aria-hidden="true"
-                :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn' }"
-              />
-              <span :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn', 'os-text-muted': getAgentStatus(agent)!.tone !== 'warn' }">
-                {{ getAgentStatus(agent)!.text }}
-              </span>
-            </div>
-          </div>
-
-          <!-- Only when there is no default to fall back on - see `agent`'s own comment. -->
-          <div v-if="agent === null" class="text-caption os-text-muted">
-            A team must be created with a manager. Choose its Agent above.
-          </div>
-
-
-          <!-- THE TEAM'S AGENT ALLOWLIST: the same heading and the same allowlist as Team Settings →
-               General, deliberately - a person who has met one has met the other. It is every member's
-               list, not only a Manager's hire: the member settings and Add member dialogs offer only
-               these, so the heading says so. Not preselected: a team created on whatever sorted first
-               is a team hiring on a CLI nobody chose. -->
-          <div class="text-subtitle2 q-mt-sm" data-member-agents-heading>Agents this team's members may use</div>
-          <div class="text-caption os-text-muted">
-            Applies when you hire a member or change its agent, and when a Manager hires one. The first is used when nobody chooses.
-          </div>
-
-          <div>
-            <div class="row items-center no-wrap">
-              <q-select
-                v-model="memberAgentToAdd"
-                :options="memberAgentOptions"
-                class="col"
-                outlined
-                dense
-                label="Allowlist: add Agent"
-                hint="Headless presets only."
-              />
-              <q-btn
-                class="col-auto q-ml-sm"
-                outlined
-                dense
-                no-caps
-                label="Add"
-                :disable="!canAddMemberAgent"
-                @click="addMemberAgent"
-              />
-            </div>
-
-            <div v-if="memberAgentToAdd && getAgentStatus(memberAgentToAdd)" class="q-mt-xs">
-              <q-icon
-                :name="getAgentStatus(memberAgentToAdd)!.icon"
-                size="14px"
-                class="q-mr-xs"
-                aria-hidden="true"
-                :class="{ 'text-warning': getAgentStatus(memberAgentToAdd)!.tone === 'warn' }"
-              />
-              <span :class="{ 'text-warning': getAgentStatus(memberAgentToAdd)!.tone === 'warn', 'os-text-muted': getAgentStatus(memberAgentToAdd)!.tone !== 'warn' }">
-                {{ getAgentStatus(memberAgentToAdd)!.text }}
-              </span>
-            </div>
-
-            <q-list v-if="memberAgents.length > 0" bordered separator class="q-mt-sm">
-              <q-item v-for="(entry, index) in memberAgents" :key="`${entry}-${index}`">
-                <q-item-section>
-                  <q-item-label class="mono">{{ entry }}</q-item-label>
-                  <q-item-label caption>
-                    {{ index === 0 ? 'Default when no tag is requested' : `Priority ${index + 1}` }}
-                  </q-item-label>
-                </q-item-section>
-                <q-item-section side>
-                  <div class="row items-center no-wrap q-gutter-xs">
-                    <q-btn
-                      flat
-                      dense
-                      round
-                      icon="arrow_upward"
-                      :disable="index === 0"
-                      :aria-label="`Move ${entry} up`"
-                      @click="moveMemberAgent(index, -1)"
-                    />
-                    <q-btn
-                      flat
-                      dense
-                      round
-                      icon="arrow_downward"
-                      :disable="index === memberAgents.length - 1"
-                      :aria-label="`Move ${entry} down`"
-                      @click="moveMemberAgent(index, 1)"
-                    />
-                    <q-btn
-                      flat
-                      dense
-                      round
-                      color="negative"
-                      icon="delete"
-                      :aria-label="`Remove ${entry}`"
-                      @click="removeMemberAgent(index)"
-                    />
-                  </div>
-                </q-item-section>
-              </q-item>
-            </q-list>
-
-            <div v-else class="os-body text-negative q-mt-xs">
-              Choose at least one Agent. An empty allowlist cannot be saved.
-            </div>
-          </div>
-
-          <!-- TEAM INSTRUCTIONS: their own section, after the agent allowlist and not inside it. Every
-               agent member reads them - the Manager too - so under the allowlist they read as a
-               setting for hired members only. Same heading and hint as Team Settings. -->
-          <section data-section="team-instructions">
-            <div class="text-subtitle2 q-mt-sm">{{ TeamInstructionsLabel }}</div>
-            <q-input
-              v-model="additionalInstructions"
-              type="textarea"
-              autogrow
-              :input-style="{ minHeight: '9em' }"
-              outlined
-              dense
-              class="q-mt-xs"
-              :aria-label="TeamInstructionsLabel"
-              :hint="TeamInstructionsHint"
-            />
-          </section>
-
-          <!-- THE PER-WORKFLOW BUDGET. Last on the dialog and prefilled, which is the shape the
-               argument needs: nobody has to answer it to make a team, and anybody who wants to can.
-
-               THE HINT SAYS WHAT THE NUMBER BOUNDS, because the obvious misreading is that it is a
-               total for the team. It is not: a team on this figure with three workflows open has
-               three budgets of it, one each, and nothing is shared between them.
-
-               AND IT SAYS WHAT EMPTY AND 0 MEAN, because they are different answers and neither is
-               guessable. -->
-          <q-input
-            v-model.number="budgetTokens"
-            type="number"
-            outlined
-            dense
-            min="0"
-            step="1"
-            :rules="budgetRules"
-            label="Budget for one workflow (tokens)"
-            hint="What ONE workflow on this team may spend before it pauses — not a total across the team. Empty follows the instance figure; 0 is unlimited."
-          />
-
+        <!-- OUTSIDE THE TABS: a refusal, the progress line and an error are about the whole create,
+             so they show whichever tab is open. -->
+        <q-card-section
+          v-if="refusal || busy || carriesOn || serverError"
+          class="q-gutter-md"
+        >
           <RepoCheckRefusal
             v-if="refusal"
             :refusal="refusal"
@@ -987,3 +1037,12 @@ async function submit() {
        than assumed. -->
   <HostPathPicker v-model="pickerOpen" mode="folder" @chose="pathChosen" />
 </template>
+
+<style scoped>
+/* ONE HEIGHT FOR BOTH TABS, as Team Settings has: General is the long form and Code may be
+   nearly empty, and a card that resized on every switch would move the tab strip under the
+   pointer that clicked it. See `.os-tab-panels` in `css/app.scss`. */
+.create-panels {
+  --os-tab-panels-height: 30rem;
+}
+</style>

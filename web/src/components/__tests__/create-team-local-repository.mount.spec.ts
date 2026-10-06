@@ -72,6 +72,7 @@ async function open() {
   const wrapper = await mountDialog(CreateTeamDialog, {}, { pinia: false });
   await field(wrapper, 'Team name').setValue('Beta');
   await settled();
+  await showTab('Code');
   return wrapper;
 }
 
@@ -108,6 +109,20 @@ async function addRepo(wrapper: VueWrapper, url: string) {
   await field(wrapper, 'GitHub Repos').setValue(url);
   button('Add').click();
   await settled();
+}
+
+/** Brings a tab of the dialog forward: the repositories are on Code, everything else on General. */
+async function showTab(label: 'General' | 'Code') {
+  const tab = [...document.body.querySelectorAll<HTMLElement>('.q-tab')].find((candidate) => candidate.textContent?.trim() === label);
+  if (!tab) throw new Error(`no ${label} tab in the rendered dialog`);
+  tab.click();
+  await flushPromises();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await flushPromises();
+}
+
+function activeTab(): string | undefined {
+  return document.body.querySelector<HTMLElement>('.q-tab--active')?.textContent?.trim();
 }
 
 async function settled() {
@@ -284,6 +299,21 @@ describe('New Team: a refused repository check', () => {
 
     expect(createTeam.mock.calls[1]![REPO_CHOICES]).toEqual({ [OTHER]: 'attach-anyway' });
     expect(wrapper.emitted('created')).toEqual([['beta']]);
+  });
+
+  it('brings the Code tab forward when a refused repository is answered while General shows', async () => {
+    createTeam.mockRejectedValueOnce(refused('GitHub refused the create.', [
+      { url: MISSING, failure: 'not-found', reason: 'GitHub refused.', choices: ['use-local'] },
+    ]));
+
+    const wrapper = await open();
+    await addRepo(wrapper, MISSING);
+    await showTab('General');
+    button('Create team').click();
+    await settled();
+
+    expect(activeTab()).toBe('Code');
+    expect(offered()).toEqual(['use-local']);
   });
 
   it('offers only a local repository when that is all the Host lists', async () => {

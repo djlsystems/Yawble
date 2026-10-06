@@ -832,7 +832,7 @@ watch(open, (showing) => {
           <q-tab name="members" :label="`Members (${containers.length})`" />
           <q-tab name="instructions" :label="TeamInstructionsTab" />
           <q-tab name="skills" label="Skills" />
-          <q-tab name="repos" label="GitHub Repos" />
+          <q-tab name="repos" label="Code" />
           <q-tab name="env" label="Environment" />
         </q-tabs>
 
