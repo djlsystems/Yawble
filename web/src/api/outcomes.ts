@@ -79,7 +79,7 @@ export type OutcomeBucket = 'notStarted' | 'inProgress' | 'achieved'
 
 /** One backlog item an outcome counts, with where it stands. */
 export interface OutcomeBacklogItem {
-  /** The citation, `B003P`, as a person reads it. */
+  /** The citation, as a person reads it. */
   id: string
   /** The number the backlog routes take; the client never parses a citation. */
   number: number | null

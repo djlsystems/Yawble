@@ -399,9 +399,9 @@ describe('Manage Outcomes: an outcome opened', () => {
       });
       detail.money = { currency: 'USD', agentHourlyRate: 90, declaredCountsAs: 'achieved' };
       detail.backlogItems = [
-        { id: 'B0041', number: 129, title: 'Retry a failed clone', state: 'ready', archived: false, bucket: 'notStarted', team: null, teamName: null, workflow: null, dispatchedAt: null, landedAt: null },
-        { id: 'B003X', number: 125, title: 'Undo a half-made team', state: 'ready', archived: false, bucket: 'inProgress', team: 'b003x', teamName: 'B003X team', workflow: 9801, dispatchedAt: '2026-10-01T00:00:00Z', landedAt: null },
-        { id: 'B001F', number: 47, title: 'Forgiving repositories', state: 'implemented', archived: true, bucket: 'achieved', team: 'b001f', teamName: 'B001F team', workflow: 8000, dispatchedAt: '2026-09-01T00:00:00Z', landedAt: '2026-09-30T00:00:00Z' },
+        { id: 'B0ZA1', number: 129, title: 'Retry a failed clone', state: 'ready', archived: false, bucket: 'notStarted', team: null, teamName: null, workflow: null, dispatchedAt: null, landedAt: null },
+        { id: 'B0ZB2', number: 125, title: 'Undo a half-made team', state: 'ready', archived: false, bucket: 'inProgress', team: 'rescue', teamName: 'Rescue team', workflow: 9801, dispatchedAt: '2026-10-01T00:00:00Z', landedAt: null },
+        { id: 'B0ZC3', number: 47, title: 'Forgiving repositories', state: 'implemented', archived: true, bucket: 'achieved', team: 'repos', teamName: 'Repos team', workflow: 8000, dispatchedAt: '2026-09-01T00:00:00Z', landedAt: '2026-09-30T00:00:00Z' },
       ];
       return detail;
     });
@@ -423,7 +423,7 @@ describe('Manage Outcomes: an outcome opened', () => {
     const column = (key: string) => bodyFind(`[data-outcome-bucket="${key}"]`)?.textContent ?? '';
     expect(column('notStarted')).toContain('Not started (1)');
     expect(column('notStarted')).toContain('Retry a failed clone');
-    expect(column('inProgress')).toContain('B003X team · workflow 9801');
+    expect(column('inProgress')).toContain('Rescue team · workflow 9801');
     expect(column('achieved')).toContain('implemented · landed');
 
     // THE SETTINGS, WORKFLOWS AND HISTORY ARE BUTTONS THAT OPEN DIALOGS, not sections of the page.
