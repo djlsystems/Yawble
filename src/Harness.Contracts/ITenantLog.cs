@@ -107,6 +107,12 @@ public static class TenantActions
     /// citation; detail names the state it moved from and whether a Concierge wrote it for them.</summary>
     public const string BacklogItemImplemented = "backlog.item-implemented";
 
+    /// <summary>An item with no outcome took the outcome its dispatch workflow was just linked to
+    /// (<c>OutcomeLinks.WriteAsync</c>), or was back-filled from one at start. Subject is the
+    /// citation; the actor is whoever made the link; detail names the outcome, the workflow and the
+    /// link.</summary>
+    public const string BacklogItemOutcomeInherited = "backlog.item-outcome-inherited";
+
     public const string BacklogItemArchived = "backlog.item-archived";
     public const string BacklogItemRestored = "backlog.item-restored";
 

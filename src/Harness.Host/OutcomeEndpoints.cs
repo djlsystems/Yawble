@@ -13,12 +13,14 @@ internal sealed record CreateOutcome(
     [property: Description("What the result means, in a sentence or two.")] string? Description = null,
     [property: Description("Optional text: what is measured, such as open roles tracked.")] string? TargetMetric = null,
     [property: Description("Optional text: its unit, such as roles.")] string? TargetUnit = null,
-    [property: Description("Optional text: the target, such as 40. Nothing records a measured value against it.")] string? TargetValue = null);
+    [property: Description("Optional text: the target, such as 40. Nothing records a measured value against it.")] string? TargetValue = null,
+    [property: Description("Optional: its budget, what it may spend, an amount of `outcomes.currency`, 0 or more, such as 20000.")] string? Value = null);
 
 /// <summary>A person's edit. Absent leaves a field alone; an empty target clears it.</summary>
 internal sealed record EditOutcome(
     string? Name = null, string? Description = null,
-    string? TargetMetric = null, string? TargetUnit = null, string? TargetValue = null);
+    string? TargetMetric = null, string? TargetUnit = null, string? TargetValue = null,
+    string? Value = null);
 
 internal sealed record MergeOutcome(
     [property: Description("The id of the active or proposed outcome this one's figures move to.")] string? Into);
@@ -49,7 +51,7 @@ public static class OutcomeEndpoints
                 [Description("Only work in the window from this UTC instant: runs that ended, workflows closed or linked. Omit for no lower bound.")] DateTimeOffset? from,
                 [Description("Only work before this UTC instant. Omit for no upper bound.")] DateTimeOffset? to,
                 [Description("A team id: the outcomes that team's workflows serve come first, each with `teamWorkflows`.")] string? team,
-                IOutcomeStore outcomes, IMessageLog log, LedgerIdentity ledger, CancellationToken ct) =>
+                IOutcomeStore outcomes, IMessageLog log, LedgerIdentity ledger, TenantSettings settings, CancellationToken ct) =>
             {
                 var statuses = (status ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
                 if (statuses.FirstOrDefault(s => !OutcomeStatus.All.Contains(s)) is { } unknown)
@@ -60,6 +62,11 @@ public static class OutcomeEndpoints
                 var all = await outcomes.ListAsync(ct);
                 var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(from, to, ct), all, from, to);
                 var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
+
+                // THE DASHBOARD READS EVERY WORKFLOW: the weekly series is the last weeks whatever the
+                // period, and a blocked span ends at the member's next run, which may be after it.
+                var whole = from is null && to is null ? book : OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
+                var dashboard = Dashboard.Of(settings, all, whole, await outcomes.ReadBacklogAsync(ct), from, to);
 
                 var shown = all.Where(o => statuses.Length == 0 ? o.Status != OutcomeStatus.Merged : statuses.Contains(o.Status));
 
@@ -83,17 +90,18 @@ public static class OutcomeEndpoints
                     .OrderByDescending(e => e.teamWorkflows > 0)
                     .ThenByDescending(e => e.teamWorkflows)
                     .ThenBy(e => e.outcome.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(e => Shape(e.outcome, OutcomeFigures.For(book, e.outcome.Id, open), team is null ? null : e.teamWorkflows))
+                    .Select(e => Shape(e.outcome, dashboard.Figures(OutcomeFigures.For(book, e.outcome.Id, open), e.outcome.Id), team is null ? null : e.teamWorkflows))
                     .ToList();
 
                 return Results.Ok(new
                 {
                     ledgerStartedAt = ledger.LedgerStartedAt,
+                    money = dashboard.Money,
                     outcomes = list,
                     noOutcome = new
                     {
                         name = OutcomeFigures.NoOutcomeName,
-                        figures = OutcomeFigures.For(book, null, open),
+                        figures = dashboard.Figures(OutcomeFigures.For(book, null, open), null),
                     },
                 });
             })
@@ -107,7 +115,13 @@ public static class OutcomeEndpoints
                 + "`medianSeconds` and `longestSeconds` of the closed ones; never summed), `tokens` "
                 + "(`billable` over measured runs, and `unmeasuredRuns`, counted and never zero), "
                 + "`runs`, `teams` (a team that is gone is named from the snapshot, with `deleted`) "
-                + "and `lastWorkedAt`. A workflow counts toward the outcome its newest link names, "
+                + "and `lastWorkedAt`; and the dashboard's `backlog` (`notStarted`, `inProgress`, `achieved`: "
+                + "its backlog items, `declared` counted as `outcomes.declaredCountsAs` says), `blockedSeconds` "
+                + "(time its workflows were blocked on a person, from the ledger), `efficiency` (agent time over "
+                + "agent time plus blocked time, null when both are 0), `weekly` (the last 8 weeks, Monday-start "
+                + "UTC, whatever the period) and `cost` (agent hours times `outcomes.agentHourlyRate`; `amount` "
+                + "null when no rate is set). `money` names the currency, the rate and `declaredCountsAs`. "
+                + "A workflow counts toward the outcome its newest link names, "
                 + "followed through `mergedInto`. `noOutcome` carries every workflow with no link. "
                 + "`ledgerStartedAt` is when the ledger began: work before it was recovered from the log.\n\n"
                 + "With `team`, the outcomes that team's workflows serve come first, each with "
@@ -115,7 +129,7 @@ public static class OutcomeEndpoints
 
         app.MapGet("/api/outcomes/{id}", async (
                 [Description("The outcome's id.")] string id,
-                IOutcomeStore outcomes, IMessageLog log, LedgerIdentity ledger, CancellationToken ct) =>
+                IOutcomeStore outcomes, IMessageLog log, LedgerIdentity ledger, TenantSettings settings, CancellationToken ct) =>
             {
                 if (await outcomes.FindAsync(id, ct) is not { } outcome) return Results.NotFound(new { error = $"No outcome '{id}'." });
 
@@ -124,6 +138,8 @@ public static class OutcomeEndpoints
                 var holder = resolution.GetValueOrDefault(outcome.Id, outcome.Id);
                 var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
                 var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
+                var items = await outcomes.ReadBacklogAsync(ct);
+                var dashboard = Dashboard.Of(settings, all, book, items, null, null);
 
                 var lines = new List<OutcomeFigures.WorkflowLine>();
                 foreach (var correlation in book.WorkflowsOf(holder).Order())
@@ -170,7 +186,26 @@ public static class OutcomeEndpoints
 
                 return Results.Ok(new
                 {
-                    outcome = Shape(outcome, OutcomeFigures.For(book, holder, open), null),
+                    outcome = Shape(outcome, dashboard.Figures(OutcomeFigures.For(book, holder, open), holder), null),
+                    money = dashboard.Money,
+                    backlogItems = OutcomeFigures.ItemsOf(items, holder, resolution)
+                        .Select(i => new
+                        {
+                            i.Id,
+                            // THE NUMBER THE BACKLOG ROUTES TAKE: the client never parses a citation.
+                            number = PlatformBacklogId.TryParse(i.Id, out var number) ? number : (long?)null,
+                            i.Title,
+                            i.State,
+                            i.Archived,
+                            bucket = OutcomeFigures.Bucket(i, dashboard.Pricing.DeclaredCountsAs),
+                            team = i.Team,
+                            teamName = i.TeamName,
+                            workflow = i.Correlation,
+                            i.DispatchedAt,
+                            i.LandedAt,
+                        })
+                        .Where(i => i.bucket is not null)
+                        .ToList(),
                     resolvedTo = holder == outcome.Id ? null : holder,
                     mergedFrom = all.Where(o => o.Id != holder && resolution[o.Id] == holder).Select(o => new { o.Id, o.Name }),
                     workflows = lines,
@@ -191,7 +226,10 @@ public static class OutcomeEndpoints
                 + "`events`, every `outcome.*` tenant row about it or an outcome merged into it, oldest "
                 + "first: `action`, `at`, `by` (the actor's email, or id), `name` (its name after the act), "
                 + "`from` (a rename's previous name, when a row before it recorded one) and `detail`. "
-                + "A merged outcome answers with `resolvedTo`, the outcome holding its figures now.");
+                + "A merged outcome answers with `resolvedTo`, the outcome holding its figures now. "
+                + "`backlogItems` lists its backlog items with the `bucket` each is counted in "
+                + "(`notStarted`, `inProgress`, `achieved`), its team, workflow and landing; an archived "
+                + "item never finished is not listed. `money` is as the list gives it.");
 
         app.MapPost("/api/outcomes", async (
                 CreateOutcome request, HttpContext context, IOutcomeStore outcomes, CancellationToken ct) =>
@@ -199,7 +237,7 @@ public static class OutcomeEndpoints
                 var person = PersonOf(context);
                 var write = await outcomes.CreateAsync(
                     request.Name ?? "",
-                    new OutcomeEdit(null, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue),
+                    new OutcomeEdit(null, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue, request.Value),
                     person,
                     TenantLogging.Row(context, TenantActions.OutcomeCreated, null, request.Name, new { status = OutcomeStatus.Active }),
                     ct);
@@ -217,10 +255,10 @@ public static class OutcomeEndpoints
         app.MapPatch("/api/outcomes/{id}", async (
                 string id, EditOutcome request, HttpContext context, IOutcomeStore outcomes, CancellationToken ct) =>
             {
-                var detail = new { request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue };
+                var detail = new { request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue, request.Value };
                 var write = await outcomes.EditAsync(
                     id,
-                    new OutcomeEdit(request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue),
+                    new OutcomeEdit(request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue, request.Value),
                     TenantLogging.Row(context, TenantActions.OutcomeRenamed, id, request.Name, detail),
                     TenantLogging.Row(context, TenantActions.OutcomeChanged, id, null, detail),
                     ct);
@@ -229,9 +267,11 @@ public static class OutcomeEndpoints
             })
             .WithTags("Outcomes")
             .HumansOnly()
-            .WithSummary("Rename or describe an outcome")
+            .WithSummary("Rename, describe or value an outcome")
             .WithDescription(
-                "Absent fields are left alone; an empty target clears it. A rename appends "
+                "Absent fields are left alone; an empty target or `value` clears it. `value` is the "
+                + "outcome's budget, what it may spend, an amount of `outcomes.currency`, 0 or more; anything "
+                + "else is refused (400) with a sentence. A rename appends "
                 + "`outcome.renamed`, any other change `outcome.changed`. A RENAME NEVER REWRITES A LINK: "
                 + "each keeps the name it was made under. 409 for a name another live outcome holds, or "
                 + "for a merged outcome.");
@@ -509,6 +549,34 @@ public static class OutcomeEndpoints
             ? TenantLogging.Row(context, action, null, null, detail)
             : new TriggerAudit(principal.Id, null, action, null, null, JsonSerializer.Serialize(detail));
 
+    /// <summary>What a read prices and counts the dashboard with, read once per request.</summary>
+    private sealed record Dashboard(
+        OutcomeFigures.Pricing Pricing, OutcomeFigures.Book Whole, IReadOnlyList<OutcomeBacklogItem> Items,
+        IReadOnlyDictionary<string, string> Resolution, IReadOnlyDictionary<long, double> Blocked, DateTimeOffset Now)
+    {
+        public object Money => new
+        {
+            currency = Pricing.Currency,
+            agentHourlyRate = Pricing.AgentHourlyRate > 0 ? Pricing.AgentHourlyRate : (int?)null,
+            declaredCountsAs = Pricing.DeclaredCountsAs,
+        };
+
+        public static Dashboard Of(
+            TenantSettings settings, IReadOnlyList<Outcome> all, OutcomeFigures.Book whole,
+            IReadOnlyList<OutcomeBacklogItem> items, DateTimeOffset? from, DateTimeOffset? to)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var pricing = new OutcomeFigures.Pricing(
+                settings.OutcomesCurrency, settings.OutcomesAgentHourlyRate, settings.OutcomesDeclaredCountsAs);
+            return new Dashboard(
+                pricing, whole, items, OutcomeFigures.Resolution(all),
+                OutcomeFigures.BlockedByWorkflow(whole.Rows, now, from, to), now);
+        }
+
+        public OutcomeFigures.Figures Figures(OutcomeFigures.Figures figures, string? outcome) =>
+            OutcomeFigures.Dashboard(figures, Whole, outcome, Items, Resolution, Blocked, Pricing, Now);
+    }
+
     private static IResult Refusal(OutcomeWrite write) =>
         Results.Json(new { error = write.Refusal }, statusCode: write.Status);
 
@@ -523,6 +591,7 @@ public static class OutcomeEndpoints
         outcome.TargetMetric,
         outcome.TargetUnit,
         outcome.TargetValue,
+        outcome.Value,
         outcome.CreatedBy,
         outcome.CreatedByKind,
         outcome.CreatedAt,

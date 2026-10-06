@@ -289,5 +289,15 @@ public static class OutcomeSchema
             CREATE TRIGGER admission_holds_no_delete BEFORE DELETE ON admission_holds
             BEGIN SELECT RAISE(ABORT, 'admission_holds is append-only'); END;
             """),
+
+        // WHAT AN OUTCOME IS WORTH: a non-negative decimal in the instance's currency
+        // (`outcomes.currency`), as text, NULL when nobody has said. A person's, edited like the
+        // name. It takes the place of the target fields on every screen; their columns stay, because
+        // a shipped step is never edited, and nothing writes them any more.
+        new MigrationStep(
+            "outcome-007",
+            """
+            ALTER TABLE outcomes ADD COLUMN value_amount TEXT NULL;
+            """),
     ];
 }

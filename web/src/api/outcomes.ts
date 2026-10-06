@@ -17,7 +17,7 @@ import { json, send } from './client'
  * | list with figures | `GET /api/outcomes?status=&from=&to=` |
  * | one outcome | `GET /api/outcomes/{id}` |
  * | create | `POST /api/outcomes` |
- * | rename, describe, target | `PATCH /api/outcomes/{id}` |
+ * | rename, describe, value | `PATCH /api/outcomes/{id}` |
  * | confirm, retire, reactivate | `POST /api/outcomes/{id}/{verb}` |
  * | merge (and its preview) | `POST /api/outcomes/{id}/merge[?preview=true]` |
  * | reject | `DELETE /api/outcomes/{id}` |
@@ -46,6 +46,52 @@ export interface OutcomeFigures {
   runs: number
   teams: OutcomeTeam[]
   lastWorkedAt: string | null
+  /** Its backlog items by where they stand; `declared` is counted as `money.declaredCountsAs` says. */
+  backlog: { notStarted: number; inProgress: number; achieved: number }
+  /** Time its workflows were blocked on a person, from the ledger. */
+  blockedSeconds: number
+  /** Agent time over agent time plus blocked time, 0..1; null when both are 0, never 0. */
+  efficiency: number | null
+  /** The last eight weeks, oldest first, Monday-start UTC, whatever the period. */
+  weekly: OutcomeWeek[]
+  /** Agent hours times the rate; `amount` is null when no rate is set, never 0. */
+  cost: { amount: number | null; currency: string }
+}
+
+export interface OutcomeWeek {
+  weekStart: string
+  agentSeconds: number
+  billable: number
+  measuredRuns: number
+  unmeasuredRuns: number
+  cost: number | null
+}
+
+/** How the instance prices and counts: what the dashboard is read with. */
+export interface OutcomeMoney {
+  currency: string
+  /** Whole currency units an agent hour; null when no rate is set. */
+  agentHourlyRate: number | null
+  declaredCountsAs: 'achieved' | 'in-progress'
+}
+
+export type OutcomeBucket = 'notStarted' | 'inProgress' | 'achieved'
+
+/** One backlog item an outcome counts, with where it stands. */
+export interface OutcomeBacklogItem {
+  /** The citation, `B003P`, as a person reads it. */
+  id: string
+  /** The number the backlog routes take; the client never parses a citation. */
+  number: number | null
+  title: string
+  state: string
+  archived: boolean
+  bucket: OutcomeBucket
+  team: string | null
+  teamName: string | null
+  workflow: number | null
+  dispatchedAt: string | null
+  landedAt: string | null
 }
 
 export interface Outcome {
@@ -58,6 +104,8 @@ export interface Outcome {
   targetMetric: string | null
   targetUnit: string | null
   targetValue: string | null
+  /** What achieving it is worth, in `money.currency`, as text; null when nobody has said. */
+  value: string | null
   createdBy: string
   createdByKind: string
   createdAt: string
@@ -70,6 +118,7 @@ export interface Outcome {
 
 export interface OutcomeList {
   ledgerStartedAt: string | null
+  money: OutcomeMoney
   outcomes: Outcome[]
   noOutcome: { name: string; figures: OutcomeFigures }
 }
@@ -134,6 +183,8 @@ export interface OutcomeDetail {
   history: OutcomeLinkRow[]
   events: OutcomeEvent[]
   ledgerStartedAt: string | null
+  money: OutcomeMoney
+  backlogItems: OutcomeBacklogItem[]
 }
 
 export interface OutcomeFields {
@@ -142,6 +193,8 @@ export interface OutcomeFields {
   targetMetric?: string
   targetUnit?: string
   targetValue?: string
+  /** An amount of `money.currency`; empty clears it. */
+  value?: string
 }
 
 export interface MergePreview {

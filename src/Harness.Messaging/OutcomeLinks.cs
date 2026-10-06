@@ -155,9 +155,94 @@ public static class OutcomeLinks
         insert.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
         insert.Parameters.AddWithValue("$how", how);
 
-        await using var reader = await insert.ExecuteReaderAsync(ct);
-        await reader.ReadAsync(ct);
-        return Read(reader);
+        OutcomeLink link;
+        await using (var reader = await insert.ExecuteReaderAsync(ct))
+        {
+            await reader.ReadAsync(ct);
+            link = Read(reader);
+        }
+
+        if (outcomeId is not null) await InheritAsync(connection, transaction, link, ct);
+
+        return link;
+    }
+
+    /// <summary>
+    /// A BACKLOG ITEM TAKES THE OUTCOME ITS DISPATCH WORKFLOW IS LINKED TO, only when it has none.
+    /// Called from the one writer, so every way a link is made - a Manager's set or propose, a
+    /// person's choice, a tell, a dispatch - reaches it, in the link's own transaction. It never
+    /// overwrites an item's outcome and never clears one (an unlink does not come here). Each item it
+    /// fills gets a <c>backlog.item-outcome-inherited</c> tenant row naming the link's author.
+    /// </summary>
+    private static async Task InheritAsync(
+        SqliteConnection connection, SqliteTransaction transaction, OutcomeLink link, CancellationToken ct)
+    {
+        var items = new List<(string Id, string Title)>();
+
+        await using (var find = connection.CreateCommand())
+        {
+            find.Transaction = transaction;
+            find.CommandText =
+                """
+                SELECT i.id, i.title FROM backlog_items i
+                WHERE i.outcome_id IS NULL
+                  AND EXISTS (SELECT 1 FROM backlog_dispatches d WHERE d.item = i.id AND d.correlation = $correlation)
+                """;
+            find.Parameters.AddWithValue("$correlation", link.Correlation);
+
+            await using var reader = await find.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) items.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        foreach (var (id, title) in items)
+        {
+            await using (var update = connection.CreateCommand())
+            {
+                update.Transaction = transaction;
+                update.CommandText = "UPDATE backlog_items SET outcome_id = $outcome WHERE id = $id AND outcome_id IS NULL";
+                update.Parameters.AddWithValue("$outcome", link.OutcomeId!);
+                update.Parameters.AddWithValue("$id", id);
+                await update.ExecuteNonQueryAsync(ct);
+            }
+
+            await AppendInheritedRowAsync(
+                connection, transaction, id, title, link.OutcomeId!, link.OutcomeNameAtLink, link.Correlation,
+                link.SetBy, link.SetByKind, link.Id, link.How, ct);
+        }
+    }
+
+    /// <summary>The <c>backlog.item-outcome-inherited</c> tenant row, written in the caller's
+    /// transaction with the tenant log's own columns (as <c>TenantAuditRow</c> writes them). A
+    /// person's row carries their email; an agent's or the platform's, its id.</summary>
+    public static async Task AppendInheritedRowAsync(
+        SqliteConnection connection, SqliteTransaction transaction, string item, string title, string outcomeId,
+        string? outcomeName, long workflow, string by, string byKind, long? linkId, string? how, CancellationToken ct)
+    {
+        await using var audit = connection.CreateCommand();
+        audit.Transaction = transaction;
+        audit.CommandText =
+            """
+            INSERT INTO tenant_events (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
+            VALUES ($at, $actorId, $actorEmail, $action, $subject, $subjectName, $detail)
+            """;
+        var person = byKind == OutcomeActorKind.Person;
+        audit.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        audit.Parameters.AddWithValue("$actorId", person ? DBNull.Value : by);
+        audit.Parameters.AddWithValue("$actorEmail", person ? by : DBNull.Value);
+        audit.Parameters.AddWithValue("$action", TenantActions.BacklogItemOutcomeInherited);
+        audit.Parameters.AddWithValue("$subject", item);
+        audit.Parameters.AddWithValue("$subjectName", title);
+        audit.Parameters.AddWithValue("$detail", JsonSerializer.Serialize(new
+        {
+            outcomeId,
+            outcomeName,
+            workflow,
+            link = linkId,
+            how,
+            by,
+            byKind,
+        }));
+        await audit.ExecuteNonQueryAsync(ct);
     }
 
     /// <summary>The newest link of <paramref name="correlation"/>, or null.</summary>

@@ -35,7 +35,7 @@ public sealed class SqliteOutcomeStore(
     private const string OutcomeColumns =
         """
         id, name, description, status, merged_into, source, target_metric, target_unit, target_value,
-        created_by, created_by_kind, created_at, updated_at, confirmed_by, confirmed_at
+        created_by, created_by_kind, created_at, updated_at, confirmed_by, confirmed_at, value_amount
         """;
 
     private SqliteConnection Open()
@@ -88,6 +88,10 @@ public sealed class SqliteOutcomeStore(
         string name, OutcomeEdit fields, OutcomeActor person, TriggerAudit audit_, CancellationToken ct = default)
     {
         if (NameRefusal(name) is { } bad) return OutcomeWrite.Refused(400, bad);
+        if (!string.IsNullOrWhiteSpace(fields.Value) && OutcomeValue.Canonical(fields.Value) is null)
+        {
+            return OutcomeWrite.Refused(400, OutcomeValue.Refusal);
+        }
 
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -242,6 +246,11 @@ public sealed class SqliteOutcomeStore(
             return OutcomeWrite.Refused(409, Taken(taken));
         }
 
+        if (edit.Value is { } asked && !string.IsNullOrWhiteSpace(asked) && OutcomeValue.Canonical(asked) is null)
+        {
+            return OutcomeWrite.Refused(400, OutcomeValue.Refusal);
+        }
+
         var next = outcome with
         {
             Name = newName,
@@ -249,6 +258,7 @@ public sealed class SqliteOutcomeStore(
             TargetMetric = Target(edit.TargetMetric, outcome.TargetMetric),
             TargetUnit = Target(edit.TargetUnit, outcome.TargetUnit),
             TargetValue = Target(edit.TargetValue, outcome.TargetValue),
+            Value = edit.Value is null ? outcome.Value : string.IsNullOrWhiteSpace(edit.Value) ? null : OutcomeValue.Canonical(edit.Value),
         };
 
         if (next == outcome)
@@ -262,7 +272,8 @@ public sealed class SqliteOutcomeStore(
             update.CommandText =
                 """
                 UPDATE outcomes SET name = $name, name_key = $key, description = $description,
-                    target_metric = $metric, target_unit = $unit, target_value = $value, updated_at = $at
+                    target_metric = $metric, target_unit = $unit, target_value = $value,
+                    value_amount = $amount, updated_at = $at
                 WHERE id = $id
                 """;
             update.Parameters.AddWithValue("$id", id);
@@ -272,6 +283,7 @@ public sealed class SqliteOutcomeStore(
             update.Parameters.AddWithValue("$metric", (object?)next.TargetMetric ?? DBNull.Value);
             update.Parameters.AddWithValue("$unit", (object?)next.TargetUnit ?? DBNull.Value);
             update.Parameters.AddWithValue("$value", (object?)next.TargetValue ?? DBNull.Value);
+            update.Parameters.AddWithValue("$amount", (object?)next.Value ?? DBNull.Value);
             update.Parameters.AddWithValue("$at", Now());
             await update.ExecuteNonQueryAsync(ct);
         }
@@ -511,6 +523,31 @@ public sealed class SqliteOutcomeStore(
         return rows;
     }
 
+    public async Task<IReadOnlyList<OutcomeBacklogItem>> ReadBacklogAsync(CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT i.id, i.title, i.state, i.archived_at IS NOT NULL, i.outcome_id,
+                   d.team_id, d.team_name, d.correlation, d.dispatched_at, d.landed_at
+            FROM backlog_items i
+            LEFT JOIN backlog_dispatches d ON d.id = (SELECT MAX(n.id) FROM backlog_dispatches n WHERE n.item = i.id)
+            ORDER BY i.id
+            """;
+
+        var rows = new List<OutcomeBacklogItem>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new OutcomeBacklogItem(
+                reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3) != 0,
+                Text(reader, 4), Text(reader, 5), Text(reader, 6), Long(reader, 7), At(reader, 8), At(reader, 9)));
+        }
+
+        return rows;
+    }
+
     public async Task<OutcomeLedgerRows> ReadLedgerAsync(
         DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default)
     {
@@ -637,9 +674,9 @@ public sealed class SqliteOutcomeStore(
             """
             INSERT INTO outcomes (id, name, name_key, description, status, merged_into, source,
                 target_metric, target_unit, target_value, created_by, created_by_kind, created_at,
-                updated_at, confirmed_by, confirmed_at)
+                updated_at, confirmed_by, confirmed_at, value_amount)
             VALUES ($id, $name, $key, $description, $status, NULL, 'local', $metric, $unit, $value,
-                $by, $kind, $at, $at, $confirmedBy, $confirmedAt)
+                $by, $kind, $at, $at, $confirmedBy, $confirmedAt, $amount)
             """;
         insert.Parameters.AddWithValue("$id", id);
         insert.Parameters.AddWithValue("$name", clean);
@@ -649,6 +686,8 @@ public sealed class SqliteOutcomeStore(
         insert.Parameters.AddWithValue("$metric", (object?)Target(fields.TargetMetric, null) ?? DBNull.Value);
         insert.Parameters.AddWithValue("$unit", (object?)Target(fields.TargetUnit, null) ?? DBNull.Value);
         insert.Parameters.AddWithValue("$value", (object?)Target(fields.TargetValue, null) ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$amount",
+            (object?)(string.IsNullOrWhiteSpace(fields.Value) ? null : OutcomeValue.Canonical(fields.Value)) ?? DBNull.Value);
         insert.Parameters.AddWithValue("$by", actor.Id);
         insert.Parameters.AddWithValue("$kind", actor.Kind);
         insert.Parameters.AddWithValue("$at", now);
@@ -727,7 +766,7 @@ public sealed class SqliteOutcomeStore(
                 reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
                 Text(reader, 4), reader.GetString(5), Text(reader, 6), Text(reader, 7), Text(reader, 8),
                 reader.GetString(9), reader.GetString(10), MessageRows.ReadStamp(reader.GetString(11)),
-                MessageRows.ReadStamp(reader.GetString(12)), Text(reader, 13), At(reader, 14)));
+                MessageRows.ReadStamp(reader.GetString(12)), Text(reader, 13), At(reader, 14), Text(reader, 15)));
         }
 
         return rows;

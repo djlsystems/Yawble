@@ -86,6 +86,14 @@ public sealed class TenantSettings
     public const string AgentTagsName = "agents.tags";
     public const string AgentCredentialSourceName = "agents.credentialSource";
     public const string OutcomesRequireForCompletionName = "outcomes.requireForCompletion";
+    public const string OutcomesCurrencyName = "outcomes.currency";
+    public const string OutcomesAgentHourlyRateName = "outcomes.agentHourlyRate";
+    public const string OutcomesDeclaredCountsAsName = "outcomes.declaredCountsAs";
+
+    /// <summary>The currencies <c>outcomes.currency</c> may name: ISO 4217 codes, kept lower-case as
+    /// every choice is and read upper-case.</summary>
+    public static readonly string[] OutcomeCurrencies =
+        ["usd", "eur", "gbp", "cad", "aud", "nzd", "chf", "jpy", "cny", "inr", "sek", "nok", "dkk", "pln", "brl", "mxn", "zar", "sgd", "hkd"];
     public const string ConciergeMayMergeName = "concierge.mayMerge";
     public const string LeasesHeavyHoldersName = "leases.heavy.holders";
 
@@ -232,6 +240,22 @@ public sealed class TenantSettings
                 + "A person's close and the platform's own declarations are never refused. Applies to the "
                 + "next declaration.",
                 Choices: ["off", "on"]),
+            new(OutcomesCurrencyName, TenantSettingKind.Choice, "usd", "Outcomes:Currency",
+                "The currency outcomes are valued and priced in, an ISO 4217 code. Only the label "
+                + "changes: no figure is converted. Applies at the next read of the Outcomes dialog.",
+                Choices: OutcomeCurrencies),
+            new(OutcomesAgentHourlyRateName, TenantSettingKind.Integer, "0", "Outcomes:AgentHourlyRate",
+                "What an hour of agent time costs, in whole units of outcomes.currency, for every agent: "
+                + "an outcome's cost is its agent hours times this rate, worked out when it is read, so a "
+                + "change re-prices every outcome's history. Agent time is summed over runs, so parallel "
+                + "runs each count. 0 (the default) prices nothing and the cost reads not set, never 0. "
+                + "Applies at the next read of the Outcomes dialog.",
+                Min: 0, Max: 1_000_000),
+            new(OutcomesDeclaredCountsAsName, TenantSettingKind.Choice, "achieved", "Outcomes:DeclaredCountsAs",
+                "Where an outcome counts a backlog item a Manager declared delivered but no person has "
+                + "marked implemented: `achieved` (the default) or `in-progress`. Applies at the next read "
+                + "of the Outcomes dialog.",
+                Choices: ["achieved", "in-progress"]),
             new(ConciergeMayMergeName, TenantSettingKind.Choice, "off", null,
                 "Lets the Concierge merge a team's finished branch to the default branch through Merge "
                 + "to main and Bring current and merge, as a person's merge does, and it is off unless a "
@@ -511,6 +535,15 @@ public sealed class TenantSettings
 
     /// <summary><c>outcomes.requireForCompletion</c>: whether an agent's declaration needs an outcome.</summary>
     public bool OutcomesRequireForCompletion => Current(OutcomesRequireForCompletionName) == "on";
+
+    /// <summary><c>outcomes.currency</c>: the ISO 4217 code outcomes are valued and priced in.</summary>
+    public string OutcomesCurrency => Current(OutcomesCurrencyName).ToUpperInvariant();
+
+    /// <summary><c>outcomes.agentHourlyRate</c>: whole currency units an agent hour; 0 is not set.</summary>
+    public int OutcomesAgentHourlyRate => (int)Integer(OutcomesAgentHourlyRateName);
+
+    /// <summary><c>outcomes.declaredCountsAs</c>: <c>achieved</c> or <c>in-progress</c>.</summary>
+    public string OutcomesDeclaredCountsAs => Current(OutcomesDeclaredCountsAsName);
 
     /// <summary><c>concierge.mayMerge</c>: whether the Concierge may merge a team branch to the
     /// default branch. Read through a delegate by <see cref="ConciergeMergeGate"/>, never captured.</summary>

@@ -98,6 +98,9 @@ import { solutionNotice, type SolutionNoticeView } from '../lib/solutionNotice';
  */
 const open = defineModel<boolean>({ required: true });
 
+/** An item to open at, by the number the backlog routes take - the Outcomes dialog's way in. */
+const props = defineProps<{ item?: number | null }>();
+
 /** Copied once because `QBtnToggle` declares its `options` mutable; the source of truth is `lib/`. */
 const reviewOptions = [...REVIEW_OPTIONS];
 
@@ -533,9 +536,20 @@ async function load() {
 // `modelValue: true` skips a watcher that fires on a transition and not on a first render that
 // happens to be true - and then an Agent picker comes up empty and reads as "the allowlist
 // filtered everything out".
-watch(open, (isOpen) => {
-  if (isOpen) void load();
-  else selected.value = null;
+watch(open, async (isOpen) => {
+  if (!isOpen) {
+    selected.value = null;
+    return;
+  }
+
+  await load();
+  if (props.item !== null && props.item !== undefined) {
+    try {
+      selected.value = await backlogItem(props.item);
+    } catch (cause) {
+      errorText.value = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
 });
 
 watch(tab, () => {

@@ -300,6 +300,20 @@ catch (Exception exception) when (exception is not OperationCanceledException)
     Console.Error.WriteLine($"The usage ledger's start did not finish and is tried again at the next start: {exception.Message}");
 }
 
+// BACKLOG ITEMS TAKE THEIR DISPATCH WORKFLOW'S OUTCOME, once, for the items dispatched before the
+// link writer did it for them. One transaction; a failure leaves it to the next start.
+try
+{
+    if (await BacklogOutcomeStart.RunAsync(database) is { } inherited)
+    {
+        Console.WriteLine($"Backlog outcomes: {inherited} item(s) took the outcome their dispatch workflow serves.");
+    }
+}
+catch (Exception exception) when (exception is not OperationCanceledException)
+{
+    Console.Error.WriteLine($"The backlog outcome back-fill did not finish and is tried again at the next start: {exception.Message}");
+}
+
 var workflowWaits = new MessageWaitRegistry();
 var store = new SqliteMessageStore(database, workflowWaits);
 

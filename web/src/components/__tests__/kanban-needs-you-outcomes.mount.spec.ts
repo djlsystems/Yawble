@@ -42,6 +42,11 @@ function figures(total: number): OutcomeFigures {
     runs: 0,
     teams: [],
     lastWorkedAt: null,
+    backlog: { notStarted: 0, inProgress: 0, achieved: 0 },
+    blockedSeconds: 0,
+    efficiency: null,
+    weekly: [],
+    cost: { amount: null, currency: 'USD' },
   };
 }
 
@@ -56,6 +61,7 @@ function outcome(id: string, name: string, status: OutcomeStatus, over: Partial<
     targetMetric: null,
     targetUnit: null,
     targetValue: null,
+    value: null,
     createdBy: 'ada@example.com',
     createdByKind: 'person',
     createdAt: '2026-09-01T00:00:00Z',

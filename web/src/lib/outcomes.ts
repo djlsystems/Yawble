@@ -217,9 +217,118 @@ export function mergePreviewText(preview: {
   return `${parts.join(', ')}${unmeasured ? ` (${unmeasured})` : ''} move to ${preview.into.name}.`
 }
 
-/** The filter box: a case-insensitive match on the name and description. */
-export function matchesFilter(outcome: Pick<Outcome, 'name' | 'description'>, text: string): boolean {
-  const needle = text.trim().toLowerCase()
+/**
+ * The filter box: a case-insensitive match on the name and description. A cleared box is null - a
+ * clearable q-input's clear button sends null, not '' - and matches everything, as an empty one does.
+ */
+export function matchesFilter(outcome: Pick<Outcome, 'name' | 'description'>, text: string | null | undefined): boolean {
+  const needle = (text ?? '').trim().toLowerCase()
   if (!needle) return true
   return `${outcome.name}\n${outcome.description}`.toLowerCase().includes(needle)
+}
+
+// ---- The dashboard's wording. Each formats a figure the route answered; none computes one. ----
+
+/** An amount of the instance's currency: `$1,240`, `€20,000`, `$12.50`. Null is "not set", never 0. */
+export function moneyText(amount: number | null, currency: string): string {
+  if (amount === null) return 'not set'
+  const whole = Math.abs(amount) >= 100 || Number.isInteger(amount)
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: whole ? 0 : 2,
+      maximumFractionDigits: whole ? 0 : 2,
+    }).format(amount)
+  } catch {
+    return `${amount.toLocaleString()} ${currency}`
+  }
+}
+
+/** An outcome's budget (the API's `value`) as a number, or null when nobody has set one. */
+export function valueAmount(value: string | null | undefined): number | null {
+  if (value === null || value === undefined || value.trim() === '') return null
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : null
+}
+
+/** What share of the budget the cost is, `6%` - or nothing when either is not known or the budget is 0. */
+export function shareOfValueText(cost: number | null, value: number | null): string {
+  if (cost === null || value === null || value <= 0) return ''
+  const share = (cost / value) * 100
+  return share > 0 && share < 1 ? '<1%' : `${Math.round(share)}%`
+}
+
+/** Agent hours from the route's seconds: `13.8 agent h`, `45 agent min`. */
+export function agentHoursText(seconds: number): string {
+  if (seconds < 3600) return `${Math.round(seconds / 60)} agent min`
+  const hours = seconds / 3600
+  return `${hours < 100 ? hours.toFixed(1) : Math.round(hours).toLocaleString()} agent h`
+}
+
+/** The efficiency figure, `78%`, or `—` when the route has none: no time is no efficiency, never 0%. */
+export function efficiencyText(efficiency: number | null): string {
+  return efficiency === null ? '—' : `${Math.round(efficiency * 100)}%`
+}
+
+/** The tile's one summary line: what the route counted, in words. */
+export function tileSummaryText(figures: OutcomeFigures): string {
+  const parts = [
+    `${figures.workflows.completed} workflow${figures.workflows.completed === 1 ? '' : 's'} completed`,
+    `${figures.workflows.open} active`,
+    `${figures.backlog.notStarted} item${figures.backlog.notStarted === 1 ? '' : 's'} pending`,
+  ]
+  if (figures.efficiency !== null) parts.push(`agents working ${efficiencyText(figures.efficiency)} of the time`)
+  return parts.join(' · ')
+}
+
+export interface BarSegment {
+  key: 'notStarted' | 'inProgress' | 'achieved'
+  label: string
+  count: number
+  /** Its share of the bar, 0..100. Only for drawing: the count is what is read. */
+  share: number
+}
+
+export const BucketLabel: Record<BarSegment['key'], string> = {
+  notStarted: 'Not started',
+  inProgress: 'In progress',
+  achieved: 'Achieved',
+}
+
+/** The backlog bar's three segments, in order, each with the route's count. Empty when there are no items. */
+export function backlogSegments(backlog: OutcomeFigures['backlog']): BarSegment[] {
+  const total = backlog.notStarted + backlog.inProgress + backlog.achieved
+  if (total === 0) return []
+  return (['notStarted', 'inProgress', 'achieved'] as const).map((key) => ({
+    key,
+    label: BucketLabel[key],
+    count: backlog[key],
+    share: (backlog[key] / total) * 100,
+  }))
+}
+
+/** Each week's bar height, 0..100 of the tallest - by cost when priced, else by agent time. */
+export function weekHeights(weekly: OutcomeFigures['weekly']): number[] {
+  const values = weekly.map((w) => w.cost ?? w.agentSeconds)
+  const max = Math.max(0, ...values)
+  return values.map((v) => (max > 0 ? (v / max) * 100 : 0))
+}
+
+/** A week's hover text: `Week of Sep 29: $240 · 2.7 agent h · 3 runs`. */
+export function weekText(week: OutcomeFigures['weekly'][number], currency: string): string {
+  const start = new Date(week.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  const runs = week.measuredRuns + week.unmeasuredRuns
+  const parts: string[] = []
+  if (week.cost !== null) parts.push(moneyText(week.cost, currency))
+  parts.push(agentHoursText(week.agentSeconds), `${runs} run${runs === 1 ? '' : 's'}`)
+  if (week.unmeasuredRuns > 0) parts.push(unmeasuredText(week.unmeasuredRuns))
+  return `Week of ${start}: ${parts.join(' · ')}`
+}
+
+/** The rate line above the tiles: `Agent time at $90/h (USD)`, or that no rate is set. */
+export function rateText(money: { currency: string; agentHourlyRate: number | null }): string {
+  return money.agentHourlyRate === null
+    ? `No rate set for agent time (${money.currency})`
+    : `Agent time at ${moneyText(money.agentHourlyRate, money.currency)}/h (${money.currency})`
 }

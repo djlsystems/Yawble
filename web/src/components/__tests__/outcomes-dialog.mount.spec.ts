@@ -1,11 +1,15 @@
 // @vitest-environment happy-dom
 //
-// MANAGE OUTCOMES. The tabs, each outcome's figures exactly as the route answers them with
-// "+ N unmeasured runs", the "Accounting since" note, the always-shown No outcome row; and the
-// actions: rename, confirm, retire and reactivate send their routes, Merge into… shows the route's
-// preview before it merges, Reject is offered only with no links, and Move sends the link route.
+// OUTCOMES AS A DASHBOARD. The tabs; each outcome as a tile with the route's cost against its value,
+// its eight weeks of spend, its backlog by where it stands and a summary line - never a figure the
+// route did not send, "not set" for a cost with no rate, no efficiency for no time; the "Accounting
+// since" note; the always-shown No outcome assigned tile; the rate editor writing its three settings;
+// and an outcome opened: its money row, its backlog columns, its value edited, and the actions -
+// confirm, retire and reactivate send their routes, Merge into… shows the route's preview before it
+// merges, Reject is offered only with no links, and Move sends the link route.
 //
-// THE MOCK IS OF `api/outcomes`: what the Host does is pinned server-side (OutcomeTests).
+// THE MOCK IS OF `api/outcomes` and the settings save: what the Host does is pinned server-side
+// (OutcomeTests, OutcomeDashboardTests).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
@@ -21,6 +25,13 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock('../../api/outcomes', () => api);
+
+const settingsApi = vi.hoisted(() => ({ saveTenantSettings: vi.fn() }));
+
+vi.mock('../../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/client')>()),
+  saveTenantSettings: settingsApi.saveTenantSettings,
+}));
 
 import OutcomesDialog from '../OutcomesDialog.vue';
 import type { Outcome, OutcomeDetail, OutcomeFigures, OutcomeList } from '../../api/outcomes';
@@ -41,6 +52,11 @@ function figures(over: Partial<OutcomeFigures> = {}): OutcomeFigures {
       { id: 'gone', name: 'Old crew', deleted: true },
     ],
     lastWorkedAt: '2026-09-28T10:00:00Z',
+    backlog: { notStarted: 0, inProgress: 0, achieved: 0 },
+    blockedSeconds: 0,
+    efficiency: null,
+    weekly: [],
+    cost: { amount: null, currency: 'USD' },
     ...over,
   };
 }
@@ -56,6 +72,7 @@ function outcome(id: string, name: string, status: Outcome['status'], over: Part
     targetMetric: null,
     targetUnit: null,
     targetValue: null,
+    value: null,
     createdBy: 'ada@example.com',
     createdByKind: 'person',
     createdAt: '2026-09-01T00:00:00Z',
@@ -81,9 +98,10 @@ const secondTarget = outcome('o-5', 'Second target', 'active');
 function listing(over: Partial<OutcomeList> = {}): OutcomeList {
   return {
     ledgerStartedAt: '2026-08-15T00:00:00Z',
+    money: { currency: 'USD', agentHourlyRate: null, declaredCountsAs: 'achieved' },
     outcomes: [pipeline, proposal, retired, merged],
     noOutcome: {
-      name: 'No outcome',
+      name: 'No outcome assigned',
       figures: figures({
         workflows: { open: 0, completed: 7, closed: 0, total: 7 },
         tokens: { billable: 5000, measuredRuns: 4, unmeasuredRuns: 1 },
@@ -97,6 +115,8 @@ function listing(over: Partial<OutcomeList> = {}): OutcomeList {
 function detailOf(o: Outcome, links = 1): OutcomeDetail {
   return {
     outcome: o,
+    money: { currency: 'USD', agentHourlyRate: null, declaredCountsAs: 'achieved' },
+    backlogItems: [],
     resolvedTo: null,
     mergedFrom: [],
     workflows: links
@@ -146,6 +166,7 @@ function detailOf(o: Outcome, links = 1): OutcomeDetail {
 
 beforeEach(() => {
   for (const mock of Object.values(api)) mock.mockReset();
+  settingsApi.saveTenantSettings.mockReset();
   api.listOutcomes.mockResolvedValue(listing());
   api.getOutcome.mockImplementation(async (id: string) => {
     const found = listing().outcomes.find((o) => o.id === id)!;
@@ -201,48 +222,106 @@ describe('Manage Outcomes: tabs and figures', () => {
 
     await click('[data-outcome-tab="ended"]');
     expect(row('o-3')).toContain('Old goal');
-    expect(row('o-4')).toContain('merged into Current job pipeline');
+    expect(row('o-4')).toContain('into Current job pipeline');
     expect(bodyFind('[data-no-outcome-row]')).toBeNull();
   });
 
-  it('asks the route once for every status, and each table has the eight resizable columns', async () => {
+  it('asks the route once for every status and lays each outcome out as a tile', async () => {
     await open();
 
     expect(api.listOutcomes).toHaveBeenCalledWith({ status: ['proposed', 'active', 'retired', 'merged'], from: null, to: null });
-
-    const headers = [...document.body.querySelectorAll('[data-outcomes-table] thead th')] as HTMLElement[];
-    expect(headers.map((th) => th.textContent?.trim())).toEqual([
-      'Outcome', 'Teams', 'Workflows', 'Agent time', 'Waiting', 'Elapsed', 'Tokens', 'Last worked',
-    ]);
-    expect(headers.every((th) => th.querySelector('.os-col-resizer'))).toBe(true);
+    expect(bodyFind('[data-outcome-tiles]')).not.toBeNull();
+    expect(bodyFind('[data-outcome-row="o-1"]')?.classList.contains('os-tile')).toBe(true);
+    expect(document.body.querySelector('[data-outcomes-dialog] [data-outcome-tiles] table')).toBeNull();
   });
 
-  it('shows each figure as the route answers it, with "+ N unmeasured runs" and a gone team named deleted', async () => {
+  it('shows the route\'s cost against the value, the backlog by where it stands and one summary line', async () => {
+    api.listOutcomes.mockResolvedValue(listing({
+      money: { currency: 'USD', agentHourlyRate: 90, declaredCountsAs: 'achieved' },
+      outcomes: [outcome('o-1', 'Current job pipeline', 'active', {
+        value: '20000',
+        figures: figures({
+          cost: { amount: 1240, currency: 'USD' },
+          backlog: { notStarted: 2, inProgress: 3, achieved: 5 },
+          efficiency: 0.78,
+          blockedSeconds: 600,
+        }),
+      })],
+    }));
     await open();
 
-    const text = row('o-1');
-    expect(text).toContain('Current job pipeline described');
-    expect(text).not.toContain('second line');
-    expect(text).toContain('Alpha, Old crew (deleted)');
-    expect(text).toContain('1 open · 4/6');
-    expect(text).toContain('3h 5m');
-    expect(text).toContain('1m');
-    expect(text).toContain('45m · 2h');
-    expect(text).toContain('1.2M');
-    expect(text).toContain('+ 2 unmeasured runs');
+    const money = bodyFind('[data-outcome-row="o-1"] [data-outcome-tile-money]')?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(money).toContain('$1,240');
+    expect(money).toContain('of $20,000 budget');
+    expect(money).toContain('3.1 agent h');
 
-    expect(bodyFind('[data-outcome-figures-note]')?.textContent).toContain('can make it exceed elapsed');
-    expect(bodyFind('[data-outcome-figures-note]')?.textContent).toContain('never summed');
+    const counts = (key: string) => bodyFind(`[data-outcome-row="o-1"] [data-outcome-bucket-count="${key}"]`)?.textContent?.trim();
+    expect([counts('notStarted'), counts('inProgress'), counts('achieved')]).toEqual(['2 not started', '3 in progress', '5 achieved']);
+
+    expect(bodyFind('[data-outcome-row="o-1"] [data-outcome-summary]')?.textContent)
+      .toBe('4 workflows completed · 1 active · 2 items pending · agents working 78% of the time');
+    expect(bodyFind('[data-outcome-rate]')?.textContent).toContain('Agent time at $90/h (USD)');
+    expect(row('o-1')).not.toContain('awaiting you');
   });
 
-  it('never shows an unmeasured run as 0 tokens', async () => {
+  it('reads a cost with no rate as not set, never $0, and gives no efficiency for no time', async () => {
     await open();
-    await click('[data-outcome-tab="proposed"]');
 
-    const tokens = bodyFind('[data-outcome-row="o-2"] [data-outcome-tokens]')?.textContent ?? '';
-    expect(tokens).toContain('not measured');
-    expect(tokens).toContain('+ 3 unmeasured runs');
-    expect(tokens).not.toMatch(/(^|\s)0(\s|$)/);
+    const money = bodyFind('[data-outcome-row="o-1"] [data-outcome-tile-money]')?.textContent ?? '';
+    expect(money).toContain('not set');
+    expect(money).not.toContain('$0');
+    expect(bodyFind('[data-outcome-row="o-1"] [data-outcome-summary]')?.textContent).not.toContain('agents working');
+    expect(bodyFind('[data-outcome-rate]')?.textContent).toContain('No rate set for agent time (USD)');
+  });
+
+  it('draws eight weeks of spend, each bar with its week in words, and no backlog bar with no items', async () => {
+    const weekly = Array.from({ length: 8 }, (_, i) => ({
+      weekStart: new Date(Date.UTC(2026, 7, 10 + 7 * i)).toISOString(),
+      agentSeconds: i === 7 ? 7200 : 3600,
+      billable: 10,
+      measuredRuns: 1,
+      unmeasuredRuns: 0,
+      cost: null,
+    }));
+    api.listOutcomes.mockResolvedValue(listing({
+      outcomes: [outcome('o-1', 'Current job pipeline', 'active', { figures: figures({ weekly }) })],
+    }));
+    await open();
+
+    const bars = [...document.body.querySelectorAll('[data-outcome-row="o-1"] .outcome-week__bar')] as HTMLElement[];
+    expect(bars).toHaveLength(8);
+    expect(bars.at(-1)?.style.height).toBe('100%');
+    expect(bars[0]?.style.height).toBe('50%');
+    expect(bodyFind('[data-outcome-row="o-1"] [data-outcome-backlog-bar]')).toBeNull();
+    expect(row('o-1')).toContain('No backlog items yet.');
+  });
+
+  it('marks items awaiting a person only when a declared item counts as in progress', async () => {
+    api.listOutcomes.mockResolvedValue(listing({
+      money: { currency: 'USD', agentHourlyRate: null, declaredCountsAs: 'in-progress' },
+      outcomes: [outcome('o-1', 'Current job pipeline', 'active', {
+        figures: figures({ backlog: { notStarted: 0, inProgress: 2, achieved: 1 } }),
+      })],
+    }));
+    await open();
+
+    expect(row('o-1')).toContain('2 awaiting you');
+  });
+
+  it('shows every outcome again when the filter is cleared with its clear button', async () => {
+    const wrapper = await open();
+
+    await type('Filter', 'pipeline');
+    expect(bodyFind('[data-outcome-row="o-1"]')).not.toBeNull();
+    await type('Filter', 'nothing matches this');
+    expect(bodyFind('[data-outcome-row="o-1"]')).toBeNull();
+
+    // THE CLEAR BUTTON SENDS NULL, not an empty string.
+    const filter = wrapper.findAllComponents({ name: 'QInput' }).find((input) => input.props('label') === 'Filter')!;
+    filter.vm.$emit('update:modelValue', null);
+    await settle();
+
+    expect(bodyFind('[data-outcome-row="o-1"]')).not.toBeNull();
   });
 
   it('renders an outcome name as text, never as markup', async () => {
@@ -253,60 +332,46 @@ describe('Manage Outcomes: tabs and figures', () => {
     expect(row('o-2')).toContain('<b>Faster</b>');
   });
 
-  it('closes Active with the No outcome row and its own figures, even with no outcomes', async () => {
+  it('closes Active with the No outcome assigned tile and its own figures, even with no outcomes', async () => {
     api.listOutcomes.mockResolvedValue(listing({ outcomes: [] }));
     await open();
 
     const none = bodyFind('[data-no-outcome-row]')?.textContent ?? '';
-    expect(none).toContain('No outcome');
-    expect(none).toContain('Beta');
-    expect(none).toContain('0 open · 7/7');
-    expect(none).toContain('5.0K');
+    expect(none).toContain('No outcome assigned');
+    expect(none).toContain('7 workflows completed · 0 active');
     expect(none).toContain('+ 1 unmeasured run');
 
-    const rows = [...document.body.querySelectorAll('[data-outcomes-table] tbody tr')];
-    expect(rows.at(-1)?.hasAttribute('data-no-outcome-row')).toBe(true);
+    const tiles = [...document.body.querySelectorAll('[data-outcome-tiles] > .os-tile')];
+    expect(tiles.at(-1)?.hasAttribute('data-no-outcome-row')).toBe(true);
   });
 
-  it('shows three teams then "+27 more" on one line, with all 30 in the tooltip, deleted ones marked', async () => {
-    const teams = Array.from({ length: 30 }, (_, i) => ({
-      id: `t-${i + 1}`,
-      name: `Team ${i + 1}`,
-      deleted: i % 2 === 1,
-    }));
-    api.listOutcomes.mockResolvedValue(
-      listing({ noOutcome: { name: 'No outcome', figures: figures({ teams }) } }),
-    );
-    await open();
+  it('saves the currency, the agent hourly rate and how a declared item counts through the settings', async () => {
+    settingsApi.saveTenantSettings.mockResolvedValue(undefined);
+    const wrapper = await open();
 
-    const cell = bodyFind('[data-no-outcome-row] [data-outcome-teams]') as HTMLElement;
-    expect(cell.textContent?.trim()).toBe('Team 1, Team 2 (deleted), Team 3 +27 more');
-    expect(cell.querySelector('.outcome-teams')).not.toBeNull();
+    await click('[data-outcome-rate-change]');
+    await choose(wrapper, 'Currency', 'EUR');
+    await type('Per agent hour', '90');
+    await choose(wrapper, 'An item a Manager declared delivered counts as', 'In progress');
+    await click('[data-outcome-pricing-save]');
 
-    const tooltip = cell.getAttribute('title')!.split(', ');
-    expect(tooltip).toHaveLength(30);
-    expect(tooltip).toEqual(teams.map((t) => (t.deleted ? `${t.name} (deleted)` : t.name)));
+    expect(settingsApi.saveTenantSettings).toHaveBeenCalledWith({
+      'outcomes.currency': 'eur',
+      'outcomes.agentHourlyRate': 90,
+      'outcomes.declaredCountsAs': 'in-progress',
+    });
+    expect(api.listOutcomes).toHaveBeenCalledTimes(2);
   });
 
-  it('shows three or fewer teams in full, with no "+N more"', async () => {
-    const three = [
-      { id: 'alpha', name: 'Alpha', deleted: false },
-      { id: 'beta', name: 'Beta', deleted: false },
-      { id: 'gone', name: 'Old crew', deleted: true },
-    ];
-    api.listOutcomes.mockResolvedValue(
-      listing({ outcomes: [outcome('o-1', 'Current job pipeline', 'active', { figures: figures({ teams: three }) })] }),
-    );
+  it('refuses a rate that is not a whole number and saves nothing', async () => {
     await open();
 
-    const cell = bodyFind('[data-outcome-row="o-1"] [data-outcome-teams]') as HTMLElement;
-    expect(cell.textContent?.trim()).toBe('Alpha, Beta, Old crew (deleted)');
-    expect(cell.textContent).not.toContain('more');
-    expect(cell.getAttribute('title')).toBe('Alpha, Beta, Old crew (deleted)');
+    await click('[data-outcome-rate-change]');
+    await type('Per agent hour', 'ninety');
+    await click('[data-outcome-pricing-save]');
 
-    const none = bodyFind('[data-no-outcome-row] [data-outcome-teams]') as HTMLElement;
-    expect(none.textContent?.trim()).toBe('Beta');
-    expect(none.textContent).not.toContain('more');
+    expect(bodyFind('[data-outcome-pricing-problem]')?.textContent).toContain('whole number');
+    expect(settingsApi.saveTenantSettings).not.toHaveBeenCalled();
   });
 
   it('says "Accounting since" when the period reaches before the ledger began, and not after it', async () => {
@@ -324,16 +389,92 @@ describe('Manage Outcomes: tabs and figures', () => {
 });
 
 describe('Manage Outcomes: an outcome opened', () => {
-  it('opens at the outcome it was given, with editable details and the target note', async () => {
+  it('opens at the outcome it was given, with its value, its money, its backlog and its workflows', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => {
+      const found = listing().outcomes.find((o) => o.id === id)!;
+      const detail = detailOf({
+        ...found,
+        value: '20000',
+        figures: figures({ cost: { amount: 1240, currency: 'USD' }, efficiency: 0.5, blockedSeconds: 3600 }),
+      });
+      detail.money = { currency: 'USD', agentHourlyRate: 90, declaredCountsAs: 'achieved' };
+      detail.backlogItems = [
+        { id: 'B0041', number: 129, title: 'Retry a failed clone', state: 'ready', archived: false, bucket: 'notStarted', team: null, teamName: null, workflow: null, dispatchedAt: null, landedAt: null },
+        { id: 'B003X', number: 125, title: 'Undo a half-made team', state: 'ready', archived: false, bucket: 'inProgress', team: 'b003x', teamName: 'B003X team', workflow: 9801, dispatchedAt: '2026-10-01T00:00:00Z', landedAt: null },
+        { id: 'B001F', number: 47, title: 'Forgiving repositories', state: 'implemented', archived: true, bucket: 'achieved', team: 'b001f', teamName: 'B001F team', workflow: 8000, dispatchedAt: '2026-09-01T00:00:00Z', landedAt: '2026-09-30T00:00:00Z' },
+      ];
+      return detail;
+    });
     await open({ outcome: 'o-1' });
 
     expect(api.getOutcome).toHaveBeenCalledWith('o-1');
     expect(bodyFind('[data-outcome-detail]')?.getAttribute('data-outcome-id')).toBe('o-1');
     expect(bodyFind('[data-outcome-title]')?.textContent).toBe('Current job pipeline');
-    expect(bodyFind('[data-outcome-target-note]')?.textContent).toContain('nothing measures it yet');
-    expect(bodyFind('[data-outcome-workflow="4100"]')?.textContent).toContain('Alpha');
+
+    expect(bodyFind('[data-outcome-value]')?.textContent).toContain('$20,000');
+    expect(bodyFind('[data-outcome-value]')?.textContent).toContain('Budget');
+    expect(bodyFind('[data-outcome-share]')?.textContent).toContain('Of its budget spent');
+    expect(bodyFind('[data-outcome-cost]')?.textContent).toContain('$1,240');
+    expect(bodyFind('[data-outcome-cost]')?.textContent).toContain('at $90/h');
+    expect(bodyFind('[data-outcome-share]')?.textContent).toContain('6%');
+    expect(bodyFind('[data-outcome-efficiency]')?.textContent).toContain('50%');
+    expect(bodyFind('[data-outcome-efficiency]')?.textContent).toContain('1h waiting on a person');
+
+    const column = (key: string) => bodyFind(`[data-outcome-bucket="${key}"]`)?.textContent ?? '';
+    expect(column('notStarted')).toContain('Not started (1)');
+    expect(column('notStarted')).toContain('Retry a failed clone');
+    expect(column('inProgress')).toContain('B003X team · workflow 9801');
+    expect(column('achieved')).toContain('implemented · landed');
+
+    // THE SETTINGS, WORKFLOWS AND HISTORY ARE BUTTONS THAT OPEN DIALOGS, not sections of the page.
+    expect(bodyFind('[data-outcome-field="value"]')).toBeNull();
+    expect(bodyFind('[data-outcome-workflow="4100"]')).toBeNull();
+    expect(bodyFind('[data-outcome-workflows-open]')?.textContent).toContain('Workflows (1)');
+    expect(bodyFind('[data-outcome-history-open]')?.textContent).toContain('History (5)');
+
+    await click('[data-outcome-settings-open]');
+    expect(bodyFind('[data-outcome-settings] [data-outcome-field="value"]')).not.toBeNull();
+    expect(bodyText()).not.toContain('Target metric');
+
+    await click('[data-outcome-workflows-open]');
+    expect(bodyFind('[data-outcome-workflows] [data-outcome-workflow="4100"]')?.textContent).toContain('Alpha');
     expect(bodyFind('[data-outcome-workflow="4100"]')?.textContent).toContain('+ 1 unmeasured run');
-    expect(bodyFind('[data-outcome-history]')?.textContent).toContain('Workflow 4100 (Alpha) linked');
+
+    await click('[data-outcome-history-open]');
+    expect(bodyFind('[data-outcome-history-dialog] [data-outcome-history]')?.textContent).toContain('Workflow 4100 (Alpha) linked');
+  });
+
+  it('puts the settings button to the right of Retire', async () => {
+    await open({ outcome: 'o-1' });
+
+    const header = [...document.body.querySelectorAll('[data-outcome-action], [data-outcome-settings-open]')];
+    const retire = header.findIndex((b) => b.getAttribute('data-outcome-action') === 'retire');
+    const settings = header.findIndex((b) => b.hasAttribute('data-outcome-settings-open'));
+    expect(retire).toBeGreaterThanOrEqual(0);
+    expect(settings).toBe(retire + 1);
+  });
+
+  it('budgets an outcome from its settings dialog through the edit route, sending only the budget, and closes it', async () => {
+    await open({ outcome: 'o-1' });
+
+    await click('[data-outcome-settings-open]');
+    await type('Budget (USD)', '20000');
+    await click('[data-outcome-save]');
+
+    expect(api.editOutcome).toHaveBeenCalledWith('o-1', { value: '20000' });
+    expect(bodyFind('[data-outcome-settings]')).toBeNull();
+  });
+
+  it('keeps the settings dialog open with the route\'s refusal when a save is refused', async () => {
+    api.editOutcome.mockRejectedValue(new Error("An outcome's budget is an amount of the instance's currency, 0 or more, such as 20000 or 1250.50."));
+    await open({ outcome: 'o-1' });
+
+    await click('[data-outcome-settings-open]');
+    await type('Budget (USD)', 'lots');
+    await click('[data-outcome-save]');
+
+    expect(bodyFind('[data-outcome-settings-problem]')?.textContent).toContain("An outcome's budget is an amount");
+    expect(bodyFind('[data-outcome-settings]')).not.toBeNull();
   });
 
   it('reads a workflow\'s tokens from the route\'s counts: a measured 0 with one unmeasured run is "0 + 1 unmeasured run"', async () => {
@@ -346,6 +487,7 @@ describe('Manage Outcomes: an outcome opened', () => {
       return detail;
     });
     await open({ outcome: 'o-1' });
+    await click('[data-outcome-workflows-open]');
 
     const tokens = (correlation: number) =>
       (bodyFind(`[data-outcome-workflow="${correlation}"] [data-outcome-tokens]`)?.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -363,6 +505,7 @@ describe('Manage Outcomes: an outcome opened', () => {
       return detail;
     });
     await open({ outcome: 'o-1' });
+    await click('[data-outcome-history-open]');
 
     const lines = [...document.body.querySelectorAll('[data-outcome-history] li')].map((li) => li.textContent ?? '');
     expect(lines.find((l) => l.includes('Workflow 4100 (Alpha) set to no outcome'))).toContain('by grace@example.com');
@@ -370,6 +513,7 @@ describe('Manage Outcomes: an outcome opened', () => {
 
   it('lists renames and status changes from the route, each with who and when', async () => {
     await open({ outcome: 'o-1' });
+    await click('[data-outcome-history-open]');
 
     const lines = [...document.body.querySelectorAll('[data-outcome-history] li')].map((li) => li.textContent ?? '');
     const renamed = lines.find((l) => l.includes('Renamed from "Job pipeline" to "Current job pipeline"'));
@@ -386,6 +530,7 @@ describe('Manage Outcomes: an outcome opened', () => {
   it('renames through the edit route, sending only what changed', async () => {
     await open({ outcome: 'o-1' });
 
+    await click('[data-outcome-settings-open]');
     await type('Name', 'Qualified job pipeline');
 
     await click('[data-outcome-save]');
@@ -515,6 +660,7 @@ describe('Manage Outcomes: an outcome opened', () => {
   it('moves a workflow to another outcome through the link route', async () => {
     const wrapper = await open({ outcome: 'o-1' });
 
+    await click('[data-outcome-workflows-open]');
     await click('[data-outcome-move]');
     await choose(wrapper, 'To outcome', 'Faster');
     await click('[data-outcome-move-confirm]');

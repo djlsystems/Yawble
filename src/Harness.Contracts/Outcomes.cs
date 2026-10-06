@@ -12,6 +12,10 @@ namespace Harness.Contracts;
 /// <param name="Id">A GUID, written as <c>Guid.ToString("D")</c>: its hyphens keep it text in a
 /// column of any affinity (<c>workflow_ledger.outcome_id_at_close</c> is INTEGER), where a string of
 /// only digits would be read back as a number.</param>
+/// <param name="Value">The outcome's budget - what it may spend - shown as Budget: a non-negative
+/// decimal in the instance's currency (<c>outcomes.currency</c>), as text; null when no one has set
+/// one. A person's, edited like the name. It replaces the target fields, which are kept and no longer
+/// shown.</param>
 /// <param name="MergedInto">Set on a <c>merged</c> outcome only. Reads follow it to the outcome the
 /// figures moved to; nothing that links to this one is rewritten.</param>
 public sealed record Outcome(
@@ -29,7 +33,8 @@ public sealed record Outcome(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     string? ConfirmedBy,
-    DateTimeOffset? ConfirmedAt)
+    DateTimeOffset? ConfirmedAt,
+    string? Value = null)
 {
     public bool IsLive => OutcomeStatus.IsLive(Status);
 }
@@ -164,10 +169,28 @@ public sealed record OutcomeWrite(
 }
 
 /// <summary>The fields a person edits on an outcome. Null leaves a field as it is; an empty target
-/// clears it.</summary>
+/// or value clears it.</summary>
 public sealed record OutcomeEdit(
     string? Name = null, string? Description = null,
-    string? TargetMetric = null, string? TargetUnit = null, string? TargetValue = null);
+    string? TargetMetric = null, string? TargetUnit = null, string? TargetValue = null,
+    string? Value = null);
+
+/// <summary>An outcome's value as the store keeps it: a non-negative decimal, invariant, no
+/// exponent. The one check, so the route and the store say the same.</summary>
+public static class OutcomeValue
+{
+    public const string Refusal =
+        "An outcome's budget is an amount of the instance's currency, 0 or more, such as 20000 or 1250.50.";
+
+    /// <summary>The canonical text of <paramref name="text"/>, or null when it is not a value.</summary>
+    public static string? Canonical(string text)
+    {
+        var trimmed = text.Trim().Replace(",", "", StringComparison.Ordinal);
+        if (!decimal.TryParse(trimmed, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var amount)) return null;
+        if (amount < 0 || amount > 1_000_000_000_000m) return null;
+        return decimal.Round(amount, 2).ToString("0.##", CultureInfo.InvariantCulture);
+    }
+}
 
 /// <summary>
 /// THE OUTCOMES AND THEIR LINKS (<c>outcome-002</c>), in the log's own database file so a link is
@@ -252,7 +275,26 @@ public interface IOutcomeStore
     /// <summary>What the figures are read from: every workflow's newest link, and the ledger's rows,
     /// narrowed to the window.</summary>
     Task<OutcomeLedgerRows> ReadLedgerAsync(DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default);
+
+    /// <summary>Every backlog item with its outcome and its newest dispatch: what an outcome's
+    /// Not started, In progress and Achieved are counted from.</summary>
+    Task<IReadOnlyList<OutcomeBacklogItem>> ReadBacklogAsync(CancellationToken ct = default);
 }
+
+/// <summary>One backlog item as the outcome figures see it: its own outcome (as stored, not yet
+/// followed through merges), its state, whether it is archived, and its newest dispatch - team,
+/// workflow, when, and when it landed - or none.</summary>
+public sealed record OutcomeBacklogItem(
+    string Id,
+    string Title,
+    string State,
+    bool Archived,
+    string? OutcomeId,
+    string? Team,
+    string? TeamName,
+    long? Correlation,
+    DateTimeOffset? DispatchedAt,
+    DateTimeOffset? LandedAt);
 
 /// <summary>The ledger rows the figures are computed from.</summary>
 public sealed record OutcomeLedgerRows(
