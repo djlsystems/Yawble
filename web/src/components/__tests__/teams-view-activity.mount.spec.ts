@@ -105,10 +105,26 @@ describe('the compact Activity tile', () => {
 });
 
 describe('the Teams list', () => {
-  async function mountView() {
+  async function mountView(latest: string | null = null, roster = members) {
     setActivePinia(createPinia());
     const board = useConsoleStore();
-    board.$patch({ teams: [{ id: 'alpha' as TeamId, name: 'Alpha', paused: false, containers: members }] } as never);
+    board.$patch({ teams: [{ id: 'alpha' as TeamId, name: 'Alpha', paused: false, containers: roster }] } as never);
+    if (latest !== null) {
+      board.$patch({
+        workflows: {
+          alpha: {
+            available: true, openCount: 0, totalCount: 1, earliestStartedAt: null, serverNow: iso(30),
+            workflows: [{
+              available: true, correlation: 1, state: latest, startedAt: iso(0), endedAt: iso(30), serverNow: iso(30),
+              executionSeconds: 0, partial: false, runsCounted: 0, runsUnfinished: 0, blockedBy: null, runsFailed: 0,
+              failedMembers: [], missing: null, members: [], lastActivityAt: iso(30), awaitingFrom: null, subject: null,
+              pausedAt: null, pausedReason: null, pausedLimit: null,
+            }],
+            missing: null,
+          },
+        },
+      } as never);
+    }
     vi.spyOn(board, 'refresh').mockResolvedValue();
     vi.spyOn(board, 'refreshRollupIfShowing').mockImplementation(() => {});
     const setActive = vi.spyOn(board, 'setActiveTeam').mockResolvedValue(undefined as never);
@@ -146,5 +162,34 @@ describe('the Teams list', () => {
     await view.find('td.teams-activity').trigger('click');
 
     expect(setActive).not.toHaveBeenCalled();
+  });
+  it('shows a green check to the right of the chart for a team whose latest workflow was completed', async () => {
+    const { view } = await mountView('Completed');
+
+    const cell = view.find('td.teams-activity');
+    const icon = cell.find('[data-team-status]');
+    expect(icon.exists()).toBe(true);
+    expect(icon.classes()).toContain('team-status-icon--positive');
+    expect(icon.attributes('aria-label')).toBe('completed');
+    expect(icon.text()).toContain('check_circle');
+
+    // To the RIGHT of the chart: the chart first in the cell, the icon after it.
+    const children = cell.find('.teams-activity-cell').element.children;
+    expect(children[0]!.classList.contains('tile-stub')).toBe(true);
+    expect(children[1]!.hasAttribute('data-team-status')).toBe(true);
+  });
+
+  it('shows a running team as running, with no check', async () => {
+    const { view } = await mountView('Completed', [{ ...container('Manager'), state: 'Running' }] as never);
+
+    const icon = view.find('td.teams-activity [data-team-status]');
+    expect(icon.attributes('data-team-status')).toBe('running');
+    expect(icon.text()).toContain('sync');
+  });
+
+  it('shows no icon for a team that has run no workflow', async () => {
+    const { view } = await mountView();
+
+    expect(view.find('td.teams-activity [data-team-status]').exists()).toBe(false);
   });
 });

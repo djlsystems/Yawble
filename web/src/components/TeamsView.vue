@@ -31,6 +31,7 @@ import type { LocalRepo, Team, TeamDeleted, TeamId } from '../api/types';
 import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
 import TeamStatisticsTile from './TeamStatisticsTile.vue';
+import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
 
 const board = useConsoleStore();
@@ -551,12 +552,15 @@ async function setPaused(team: Team | null, paused: boolean) {
                label and the caption. A click on it opens the Activity dialog for this team, not the
                team itself, so the row's own click is stopped here. -->
           <td class="teams-activity" @click.stop @keydown.enter.stop @keydown.space.stop>
-            <TeamStatisticsTile
-              compact
-              :team-id="row.id"
-              :containers="teamFor(row)?.containers ?? []"
-              :workflows="board.workflowsFor(row.id)"
-            />
+            <div class="teams-activity-cell">
+              <TeamStatisticsTile
+                compact
+                :team-id="row.id"
+                :containers="teamFor(row)?.containers ?? []"
+                :workflows="board.workflowsFor(row.id)"
+              />
+              <TeamStatusIcon :status="row.status" :held="row.held" :workflows="board.workflowsFor(row.id)" />
+            </div>
           </td>
 
           <!-- `.stop` because these controls sit inside the whole-row click handler that switches
@@ -812,6 +816,18 @@ async function setPaused(team: Team | null, paused: boolean) {
 </template>
 
 <style scoped>
+/* The Activity cell: the chart, then the team's status icon on its right. */
+.teams-activity-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.teams-activity-cell > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .teams-table {
   background: var(--os-surface);
 }

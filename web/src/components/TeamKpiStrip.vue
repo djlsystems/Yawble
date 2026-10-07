@@ -30,6 +30,8 @@ import { closeWorkflow, nudgeWorkflow, resumeWorkflow, stopWorkflow } from '../a
 import { useConsoleStore } from '../stores/console';
 import { vResizableColumns } from '../lib/resizableColumns';
 import TeamStatisticsTile from './TeamStatisticsTile.vue';
+import TeamStatusIcon from './TeamStatusIcon.vue';
+import type { TeamStatus } from '../lib/teamKpis';
 import TeamTokensChart from './TeamTokensChart.vue';
 
 const props = defineProps<{
@@ -60,6 +62,9 @@ const props = defineProps<{
 
   /** The team ID, needed for repo actions. */
   teamId: string;
+
+  /** The team's roster status, the tab's own answer: the icon beside the Activity chart shows it. */
+  status?: TeamStatus | null;
 
   /**
    * The live finding kinds this team holds, or absent / null / empty if none.
@@ -651,6 +656,13 @@ function showThread(row: WorkflowRow) {
       :containers="containers"
       :workflows="workflows"
     />
+    <TeamStatusIcon
+      v-if="status"
+      class="team-kpi-status"
+      :status="status"
+      :held="heldMembers(containers)"
+      :workflows="workflows"
+    />
 
     <button type="button" class="team-kpi team-kpi--tokens" @click="tokensOpen = true">
       <div class="team-kpi-label">Tokens</div>
@@ -1178,6 +1190,11 @@ function showThread(row: WorkflowRow) {
   flex-wrap: wrap;
   gap: 8px;
   margin: 0 0 16px;
+}
+
+/* The team's status beside its Activity chart: centred on the row, its own width. */
+.team-kpi-status {
+  align-self: center;
 }
 
 .team-kpi {

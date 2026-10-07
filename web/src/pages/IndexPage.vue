@@ -588,6 +588,7 @@ onUnmounted(() => {
         :workflows="board.workflowsFor(activeTeam.id)"
         :clock-offset="board.workflowClockOffset"
         :team-id="activeTeam.id"
+        :status="tabStatus(activeTeam)"
         :findings="board.findingKinds(activeTeam.id)"
         :repo-status="board.repoStatusTeam === activeTeam.id ? board.repoStatus : null"
       />
