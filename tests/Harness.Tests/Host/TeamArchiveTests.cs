@@ -217,8 +217,7 @@ public sealed class TeamArchiveTests : IAsyncLifetime
         // Work reaching it by a road no route guards: queued, never run.
         await Log.AppendAsync(new NewMessage(
             MessageTypes.InstructionFor(Dev), WakeManagerPolicy.InstructionPayload("do it later", "never"), "person"), Ct);
-        await Services.GetRequiredService<ContainerHost>().PumpOnceAsync(Ct);
-        await Task.Delay(300, Ct);
+        await Task.Delay(500, Ct);
         Assert.Equal(0, _agents.RunsFor(Dev));
         Assert.DoesNotContain(Services.GetRequiredService<WipLedger>().View().Waiting, hold => hold.Team == _team);
 
@@ -495,10 +494,15 @@ public sealed class TeamArchiveTests : IAsyncLifetime
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
     }
 
-    /// <summary>Until every member has finished and nothing is queued.</summary>
+    /// <summary>Until Dev's run and the Manager's wake on it have both finished and nothing is queued.</summary>
     private Task QuietAsync() =>
-        UntilAsync(async () => await Services.GetRequiredService<TeamArchive>().NotQuietAsync(_team, Ct) is null
-            && await Log.ReadAfterAsync(0, [MessageTypes.Completed], int.MaxValue, Ct) is { Count: > 0 }, "the team quiet");
+        UntilAsync(async () =>
+        {
+            var completed = await Log.ReadAfterAsync(0, [MessageTypes.Completed], int.MaxValue, Ct);
+            return completed.Any(m => m.Source == Dev.ToString())
+                && completed.Any(m => m.Source == Manager.ToString())
+                && await Services.GetRequiredService<TeamArchive>().NotQuietAsync(_team, Ct) is null;
+        }, "the team quiet");
 
     private async Task<JsonElement> OverviewTeamAsync()
     {
@@ -553,7 +557,6 @@ public sealed class TeamArchiveTests : IAsyncLifetime
         Message? found = null;
         await UntilAsync(async () =>
         {
-            await Services.GetRequiredService<ContainerHost>().PumpOnceAsync(Ct);
             found = (await Log.ReadAfterAsync(0, types, int.MaxValue, Ct)).FirstOrDefault(match);
             return found is not null;
         }, what);
