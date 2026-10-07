@@ -1548,13 +1548,18 @@ export const deleteMember = (team: TeamId, name: MemberId) =>
     { method: 'DELETE' },
   )
 
-export const tell =(team: TeamId, container: MemberId, instruction: string) =>
+/**
+ * A person's instruction to a member. `causation` joins an open workflow instead of starting a new
+ * one: pass the workflow's correlation id, the same number `publishSteering` hands the Concierge.
+ * Omitted, the instruction heads a new workflow.
+ */
+export const tell = (team: TeamId, container: MemberId, instruction: string, causation?: number | null) =>
   json<{ seq: number; correlationId: number }>(
     `/api/teams/${encodeURIComponent(team)}/containers/${encodeURIComponent(container)}/tell`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ instruction }),
+      body: JSON.stringify(causation == null ? { instruction } : { instruction, causation: String(causation) }),
     },
   )
 
