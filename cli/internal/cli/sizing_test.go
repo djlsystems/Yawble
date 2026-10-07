@@ -142,7 +142,7 @@ func TestFirstUpRefusesOverTheMaximumAndUnderTheFloorNamingTheBound(t *testing.T
 	}
 	for _, want := range []string{
 		"refused: 20000 MB, with control's 1536 MB, is more than what this computer has; the most is 10752 MB",
-		"refused: 1000 MB is below the floor of 4096 MB that leaves the Host a usable share; the least is 4096 MB",
+		"refused: 1000 MB is below the floor of 4096 MB that leaves Yawble a usable share; the least is 4096 MB",
 		`refused: "lots" is not a whole number`,
 		"refused: 12 CPUs is more than what this computer has; the most is 10",
 		"refused: the least is 1 CPU",

@@ -359,6 +359,16 @@ func HostChecks(o Observed) []Check {
 // an instance that is not running, or an image without --doctor, cannot be measured and every
 // check is Skip; anything else is the Host's doctor FAILING, said once, then the skips.
 func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
+	return instanceChecks(r, err, now, false)
+}
+
+// InstanceChecksDetails is InstanceChecks for --details and --json: the agents row also says where
+// each sign-in comes from and when the sign-ins were measured.
+func InstanceChecksDetails(r *HostReport, err error, now time.Time) []Check {
+	return instanceChecks(r, err, now, true)
+}
+
+func instanceChecks(r *HostReport, err error, now time.Time, details bool) []Check {
 	names := []string{"data root", "database", "backups", "agents"}
 	// The Host's figures, never estimated here: with no report they are not known.
 	figures := []string{"running limit", "run memory"}
@@ -455,10 +465,12 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 			part = a.Agent + " NOT signed in"
 			verdict = Warn
 		}
-		if source := a.SourceText(); source != "" {
+		// The source is developer detail, except when it is why the row warns.
+		unset := a.Issued() && a.IssuedSet != nil && !*a.IssuedSet
+		if source := a.SourceText(); source != "" && (details || unset) {
 			part += ", source " + source
 		}
-		if a.Issued() && a.IssuedSet != nil && !*a.IssuedSet {
+		if unset {
 			verdict = Warn
 		}
 		// Beside the sign-in: whether the CLI starts the way a member run launches it.
@@ -478,7 +490,7 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 	}
 	summary := strings.Join(parts, " · ")
 	for _, a := range r.Agents {
-		if measured := a.MeasuredText(); measured != "" {
+		if measured := a.MeasuredText(); measured != "" && details {
 			summary += " (sign-ins measured " + measured + ")"
 			break
 		}

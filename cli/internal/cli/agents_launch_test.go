@@ -128,3 +128,45 @@ func TestAgentsDefaultLeavesDeveloperLinesForDetails(t *testing.T) {
 		}
 	}
 }
+
+// With several signed-in agents that did not start, the top line points at their "to fix" lines.
+func TestAgentsTopLineSaysTheirFixLinesForSeveral(t *testing.T) {
+	both := strings.Replace(codexSignedInFailing(), claudeLaunchOk, claudeLaunchFailed, 1)
+	s, dir := agentsDeps(t, both)
+	deps := stubbed(s)
+	deps.ConfigDir = dir
+	_, out, _ := run(t, deps, "agents")
+	top, _, _ := strings.Cut(out, "\n")
+	if top != "No agent can run yet: claude and codex are signed in but did not start; their \"to fix\" lines say what to do." {
+		t.Errorf("top line: %q", top)
+	}
+}
+
+// Doctor's default agents row leaves the source and when the sign-ins were measured to --details.
+func TestDoctorShowsTheAgentsSourceOnlyWithDetails(t *testing.T) {
+	s, dir := agentsDeps(t, codexSignedInFailing())
+	deps := stubbed(s)
+	deps.ConfigDir = dir
+	_, out, _ := run(t, deps, "doctor")
+	row := lineOf(out, "agents")
+	if row == "" || strings.Contains(row, "source") || strings.Contains(row, "sign-ins measured") {
+		t.Errorf("default agents row: %q\n%s", row, out)
+	}
+	if !strings.Contains(row, "codex signed in, launch FAILED, exit 1, see yawble agents") {
+		t.Errorf("default agents row should still name codex's failed launch: %q", row)
+	}
+	_, out, _ = run(t, deps, "doctor", "--details")
+	if row := lineOf(out, "agents"); !strings.Contains(row, "source home") || !strings.Contains(row, "sign-ins measured") {
+		t.Errorf("--details agents row: %q", row)
+	}
+}
+
+// lineOf is the doctor line whose check is name, "" when there is none.
+func lineOf(out, name string) string {
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); len(f) > 1 && f[1] == name {
+			return l
+		}
+	}
+	return ""
+}

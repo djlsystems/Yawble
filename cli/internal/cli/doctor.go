@@ -74,7 +74,11 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 			} else {
 				report, reportErr = doctor.FetchHostReport(cmd.Context(), e, observed.ContainerKnown && observed.Container == engine.StateRunning)
 			}
-			checks = append(checks, doctor.InstanceChecks(report, reportErr, deps.Now())...)
+			if details || asJSON {
+				checks = append(checks, doctor.InstanceChecksDetails(report, reportErr, deps.Now())...)
+			} else {
+				checks = append(checks, doctor.InstanceChecks(report, reportErr, deps.Now())...)
+			}
 			checks = append(checks, doctor.CapacityCheck(capacity, s, report))
 			if observed.EngineErr == nil && observed.ContainerKnown {
 				checks = append(checks, workerChecks(cmd.Context(), e, s, report)...)

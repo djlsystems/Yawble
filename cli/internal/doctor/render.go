@@ -136,18 +136,23 @@ func agentsSummary(agents []Agent, anyRuns bool) string {
 	case anyRuns:
 		var clauses []string
 		if didNotStart != "" {
-			clauses = append(clauses, didNotStart+" (its \"to fix\" line says what to do)")
+			clauses = append(clauses, didNotStart+" ("+fixLines(failed)+")")
 		}
 		if len(idle) > 0 {
 			clauses = append(clauses, andList(idle)+verb(idle, " is", " are")+" not in use (sign one in only if you want it)")
 		}
 		return strings.Join(append([]string{andList(running) + " can run agent work"}, clauses...), "; ") + "."
 	case didNotStart != "":
-		return "No agent can run yet: " + didNotStart + "; its \"to fix\" line says what to do."
+		return "No agent can run yet: " + didNotStart + "; " + fixLines(failed) + "."
 	case measured:
 		return "No agent can run yet: sign one in as its \"to fix\" line says."
 	}
 	return ""
+}
+
+// fixLines points at the "to fix" line of one agent, or the lines of several.
+func fixLines(names []string) string {
+	return verb(names, "its \"to fix\" line says what to do", "their \"to fix\" lines say what to do")
 }
 
 // verb is one or other for one name or several.

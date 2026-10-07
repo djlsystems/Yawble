@@ -85,7 +85,7 @@ func TestProbeRecheckDefaultInsideStatedRangeOnEveryPath(t *testing.T) {
 			if lo < 4096 && !strings.Contains(out2, "the proposal for an engine under 8 GB") {
 				t.Errorf("%s: lowered floor refusal does not say why:\n%s", name, out2)
 			}
-			if lo == 4096 && !strings.Contains(out2, "that leaves the Host a usable share") {
+			if lo == 4096 && !strings.Contains(out2, "that leaves Yawble a usable share") {
 				t.Errorf("%s: 4 GB floor refusal wording changed:\n%s", name, out2)
 			}
 			if !strings.Contains(out2, fmt.Sprintf("saved memory %dm", lo)) {

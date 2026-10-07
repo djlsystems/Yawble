@@ -86,7 +86,7 @@ func sizeFirstUp(deps Deps, c config.Config, m instance.Machine, yes bool, out i
 			case v < floor && floor < memoryFloorMB:
 				return fmt.Sprintf("%d MB is below the floor of %d MB, the proposal for an engine under 8 GB; the least is %d MB", v, floor, floor)
 			case v < floor:
-				return fmt.Sprintf("%d MB is below the floor of %d MB that leaves the Host a usable share; the least is %d MB", v, floor, floor)
+				return fmt.Sprintf("%d MB is below the floor of %d MB that leaves Yawble a usable share; the least is %d MB", v, floor, floor)
 			}
 			return ""
 		})
