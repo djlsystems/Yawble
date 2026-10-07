@@ -24,6 +24,7 @@ vi.mock('quasar', async (importOriginal) => ({
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getInstanceId: async () => 'instance-a',
   backlogItems,
   backlogItem,
   listCatalog,
@@ -74,7 +75,7 @@ afterEach(resetBody);
 
 /** Opens the backlog with this browser remembering `repos`, opens Dispatch on the item, picks "new team". */
 async function openDispatchToNew(repos: string[]) {
-  remember({ managerAgent: 'claude-headless', memberAgents: ['claude-headless'], root: null, repos });
+  remember({ managerAgent: 'claude-headless', memberAgents: ['claude-headless'], root: null, repos }, 'instance-a');
   setActivePinia(createPinia());
 
   const board = useConsoleStore();

@@ -22,6 +22,7 @@ vi.mock('quasar', async (importOriginal) => ({
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getInstanceId: async () => 'instance-a',
   createTeam,
   fileSystemRoots,
   listCatalog,
@@ -64,7 +65,7 @@ afterEach(() => {
 });
 
 async function open() {
-  remember({ managerAgent: 'claude-headless', memberAgents: ['claude-headless'], root: null, repos: [] });
+  remember({ managerAgent: 'claude-headless', memberAgents: ['claude-headless'], root: null, repos: [] }, 'instance-a');
   setActivePinia(createPinia());
   useConsoleStore().$patch({ teams: [], overviewLanded: true });
   useSessionStore().$patch({ user: { id: 'u1', email: 'admin@example.com' } });

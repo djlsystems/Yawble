@@ -35,6 +35,7 @@ vi.mock('quasar', async (importOriginal) => ({
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getInstanceId: async () => 'instance-a',
   backlogItems,
   backlogItem,
   listCatalog,
@@ -924,8 +925,10 @@ describe('BacklogDialog dispatching to a new team', () => {
       managerAgent: 'claude-headless',
       memberAgents: ['claude-headless'],
       root: null,
-      repos: ['https://github.com/example/Widget.git'],
     }));
+    localStorage.setItem('harness.recentRepos.instance.instance-a', JSON.stringify([
+      'https://github.com/example/Widget.git',
+    ]));
   }
 
   /**
@@ -1212,6 +1215,7 @@ describe('BacklogDialog dispatching to a new team', () => {
 
     await openDispatchFor(0);
     localStorage.removeItem('harness.newTeamDefaults');
+    localStorage.removeItem('harness.recentRepos.instance.instance-a');
 
     const board = useConsoleStore();
     vi.spyOn(board, 'refreshForTeamCreated').mockResolvedValue(undefined as never);
@@ -1223,7 +1227,8 @@ describe('BacklogDialog dispatching to a new team', () => {
 
     const stored = JSON.parse(localStorage.getItem('harness.newTeamDefaults') ?? '{}');
 
-    expect(stored.repos).toEqual(['https://github.com/example/Widget.git']);
+    expect(JSON.parse(localStorage.getItem('harness.recentRepos.instance.instance-a') ?? '[]'))
+      .toEqual(['https://github.com/example/Widget.git']);
     expect(stored.managerAgent).toBe('claude-headless');
   });
 
