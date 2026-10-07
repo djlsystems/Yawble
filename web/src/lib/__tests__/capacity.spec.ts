@@ -19,7 +19,7 @@ describe('the gauge colour is the worst of memory in use, memory pressure and CP
     const g = gauge(memoryAt(50), fresh)
 
     expect(g.level).toBe('green')
-    expect(g.reason).toBe('Memory: 6.5 of 12.9 GB in use (50%)')
+    expect(g.reason).toBe("Memory of this worker's container, against its own limit: 6.5 of 12.9 GB in use (50%)")
   })
 
   it('is amber from 75% memory and red from 90%', () => {

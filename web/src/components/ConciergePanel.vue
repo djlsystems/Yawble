@@ -276,6 +276,12 @@ function trackViewport() {
     const height = visual ? visual.height : window.innerHeight;
     const offsetTop = visual ? visual.offsetTop : 0;
 
+    // A WINDOW SHORTER OR NARROWER THAN THE PANEL takes the panel back inside it. The window's own
+    // geometry is the display store's, which nothing else re-measures, so without this a browser
+    // made shorter leaves the panel's bottom - the reply's end and the prompt - off screen. The
+    // box shrinking is what refits the terminal (the observer below).
+    if (isWindowed.value) display.clampToViewport(visual ? visual.width : window.innerWidth, height);
+
     if (height === viewport.value.height && offsetTop === viewport.value.offsetTop) return;
 
     viewport.value = { height, offsetTop };

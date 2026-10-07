@@ -7,11 +7,17 @@ namespace Harness.Host;
 /// ignorant of agents, workspaces and environment.</summary>
 /// <remarks>Asynchronous because launching mints the session's credential, which is a database
 /// write.</remarks>
-/// <param name="publicUrl">The address the person's browser reached this Host on, from the request
-/// that opened the session, or null when there was none. See
-/// <see cref="ConciergeLaunchFactory.ForAsync"/>.</param>
+/// <param name="browser">What the browser that opened the session says about the person, or null
+/// when there was none. See <see cref="ConciergeLaunchFactory.ForAsync"/>.</param>
 public delegate Task<PtySpec> ConciergeLaunch(
-    ConciergeSessionKey key, string team, string? publicUrl, CancellationToken ct);
+    ConciergeSessionKey key, string team, ConciergeBrowser? browser, CancellationToken ct);
+
+/// <summary>What the browser opening a Concierge session says about the person behind it.</summary>
+/// <param name="PublicUrl">The address the browser reached this Host on, for the links the Concierge
+/// hands the person.</param>
+/// <param name="TimeZone">The browser's time zone as it named it (an IANA name, unchecked here), for
+/// the times the Concierge states.</param>
+public sealed record ConciergeBrowser(string? PublicUrl, string? TimeZone);
 
 /// <summary>How that session's credential is ended. Separate from the launch rather than folded
 /// into disposal, because this type does not know what a credential is - only that ending a
@@ -127,10 +133,10 @@ public sealed class ConciergeSessionStore(
     /// guessed default width and then replayed into the real terminal is wrapped for a screen that
     /// never existed, which is what made every first open look broken. An existing session ignores
     /// this - PtyAttachment resizes it instead.</param>
-    /// <param name="publicUrl">The address the attaching browser used. Used only when this call
+    /// <param name="browser">The attaching browser's address and time zone. Used only when this call
     /// SPAWNS the child, for <paramref name="cols"/>'s reason: an environment is fixed at spawn.</param>
     public async Task<ConciergeSession> AttachAsync(
-        ConciergeSessionKey key, string team, int cols, int rows, CancellationToken ct, string? publicUrl = null)
+        ConciergeSessionKey key, string team, int cols, int rows, CancellationToken ct, ConciergeBrowser? browser = null)
     {
         if (_sessions.TryGetValue(key, out var existing)) return existing;
 
@@ -141,7 +147,7 @@ public sealed class ConciergeSessionStore(
             if (_sessions.TryGetValue(key, out existing)) return existing;
 
             var record = new PtyRecord(key.ToString());
-            var spec = await launch(key, team, publicUrl, ct) with { Cols = cols, Rows = rows };
+            var spec = await launch(key, team, browser, ct) with { Cols = cols, Rows = rows };
             var session = await engine.SpawnAsync(spec, ct);
 
             // Subscribed BEFORE the session is handed out, so the record is complete from birth and

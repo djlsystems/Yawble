@@ -77,6 +77,23 @@ public sealed class ConciergeLaunchFactory(
     }
 
     /// <summary>
+    /// The browser's time zone when it is one this machine knows by its IANA name, else null. Only
+    /// the name's own characters pass: it becomes an environment value.
+    /// </summary>
+    public static string? TimeZone(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)
+            || name.Length > 64
+            || name.Contains("..", StringComparison.Ordinal)
+            || !name.All(c => char.IsAsciiLetterOrDigit(c) || c is '/' or '_' or '-' or '+'))
+        {
+            return null;
+        }
+
+        return TimeZoneInfo.TryFindSystemTimeZoneById(name, out var zone) && zone.HasIanaId ? name : null;
+    }
+
+    /// <summary>
     /// Under a tenant-level folder outside every team root. This
     /// is not team-owned state: one Concierge serves one person across teams.
     /// </summary>
@@ -119,12 +136,13 @@ public sealed class ConciergeLaunchFactory(
         IReadOnlyDictionary<string, string> teamEnv,
         string? steeringCausation = null,
         string? publicUrl = null,
+        string? timeZone = null,
         CancellationToken ct = default) =>
         // THE ONE-PROCESS COMPOSITION of the two halves: what control resolves, made into a terminal
         // as a worker makes it. Production resolves here and hands the launch to a worker
         // (WorkerPtyEngine); this composition is kept so the launch's tests read one finished spec.
         ConciergeTerminal.Materialize(
-            await ResolveAsync(team, teamLabel, user, login, agent, teamEnv, steeringCausation, publicUrl, ct), runAs).Spec;
+            await ResolveAsync(team, teamLabel, user, login, agent, teamEnv, steeringCausation, publicUrl, timeZone, ct), runAs).Spec;
 
     /// <summary>
     /// Everything about one person's Concierge launch that control decides: the refusal when agents
@@ -144,6 +162,7 @@ public sealed class ConciergeLaunchFactory(
         IReadOnlyDictionary<string, string> teamEnv,
         string? steeringCausation = null,
         string? publicUrl = null,
+        string? timeZone = null,
         CancellationToken ct = default)
     {
         // FAIL CLOSED, before a credential is minted: see AgentLaunchUser.Refuses.
@@ -245,6 +264,15 @@ public sealed class ConciergeLaunchFactory(
         // opened this session; the internal address when there was none. Members never get it: they
         // hand nothing to a person's browser, and the container path does not set it.
         environment["HARNESS_PUBLIC_URL"] = PublicUrl(publicUrl) ?? baseAddress;
+
+        // THE PERSON'S TIME ZONE, the one their browser shows every time in, so the times the
+        // Concierge states read as the page does. TZ too, so the CLI's own clock reads it. None when
+        // the browser named none this machine knows: the prompt then says to name the zone.
+        if (TimeZone(timeZone) is { } zone)
+        {
+            environment["HARNESS_TIME_ZONE"] = zone;
+            environment["TZ"] = zone;
+        }
 
         if (!string.IsNullOrWhiteSpace(steeringCausation))
         {

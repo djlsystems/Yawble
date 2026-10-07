@@ -480,6 +480,28 @@ describe('windowed and full screen', () => {
 
     expect(initialize).toHaveBeenCalledWith(window.innerWidth, window.innerHeight);
   });
+
+  it('re-fits inside the window when the window gets shorter, so the prompt line stays on screen', async () => {
+    const height = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    Object.defineProperty(window, 'innerHeight', { value: 1036, configurable: true });
+    vi.stubGlobal('visualViewport', undefined);
+
+    try {
+      await openPanel();
+      const display = useTerminalDisplayStore();
+      display.set({ left: 100, top: 100, width: 700, height: 900 });
+
+      Object.defineProperty(window, 'innerHeight', { value: 783, configurable: true });
+      window.dispatchEvent(new Event('resize'));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+      await flushPromises();
+
+      expect(display.top + display.height).toBeLessThanOrEqual(783);
+      expect(parseInt(shell().style.top, 10) + parseInt(shell().style.height, 10)).toBeLessThanOrEqual(783);
+    } finally {
+      if (height) Object.defineProperty(window, 'innerHeight', height);
+    }
+  });
 });
 
 describe('the terminal', () => {

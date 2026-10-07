@@ -1530,7 +1530,7 @@ builder.Services.AddSingleton(sp =>
         // The LABEL, resolved here rather than inside the factory - it has no TeamRegistry of
         // its own, and this delegate already holds one. LabelFor falls back to the identifier for
         // a team nobody has relabelled, so a never-relabelled team's console reads its identifier.
-        async (key, team, publicUrl, ct) =>
+        async (key, team, browser, ct) =>
         {
             // THE CONCIERGE, ASKED WITHOUT NAMING A TEAM. ConciergeFor(team) throws when the
             // registry holds nothing, which is the empty instance GET /api/concierge/ws exists
@@ -1560,7 +1560,8 @@ builder.Services.AddSingleton(sp =>
                 agent,
                 teams.EnvFor(stored ?? ""),
                 SteeringFile.Read(dataRoot, key.User),
-                publicUrl,
+                browser?.PublicUrl,
+                browser?.TimeZone,
                 ct));
             if (staged.Env is { } environment) floors.AddOrUpdate(environment, OutputFloor.Of(catalog.Definition(agent)));
             return staged;
@@ -8129,7 +8130,7 @@ app.UseWebSockets();
 // MUST NOT call SetCurrentTeamAsync. Opening the Concierge must leave the current team as it is.
 // Setting it here would be picking a team on the person's behalf.
 app.MapGet("/api/concierge/ws", async (
-    int? cols, int? rows, HttpContext context,
+    int? cols, int? rows, string? tz, HttpContext context,
     ConciergeSessionStore consoles, WorkerPool workers, CancellationToken ct) =>
 {
     if (PrincipalClaims.From(context.User) is not { } caller) return Results.Unauthorized();
@@ -8181,10 +8182,12 @@ app.MapGet("/api/concierge/ws", async (
         // refused upgrade shows an empty panel and puts the reason in devtools.
         // THE ADDRESS THIS BROWSER REACHED US ON becomes the Concierge's HARNESS_PUBLIC_URL. The
         // scheme is the tunnel's when one forwarded it (UseForwardedHeaders); the host is what the
-        // browser asked for.
+        // browser asked for. THE ZONE THE BROWSER NAMED (`tz`) is the one the Concierge states times
+        // in, so they read as the page does; the launch checks it.
         console = await consoles.AttachAsync(
             key, "", width, height, ct,
-            $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase.Value}");
+            new ConciergeBrowser(
+                $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase.Value}", tz));
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {

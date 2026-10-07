@@ -11,21 +11,21 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// THE CONCIERGE HANDS A PERSON LINKS, SO IT IS TOLD THE ADDRESS THE PERSON USES. `HARNESS_PUBLIC_URL`
-/// is the address of the browser request that opened the session - a VM address, a tunnel - while
-/// `HARNESS_URL` stays the internal one. Members keep the internal address and are never handed
-/// the public one.
+/// ONE CLOCK: THE CONCIERGE STATES TIMES IN THE PERSON'S OWN TIME ZONE, the one the page shows. The
+/// browser names its IANA zone on the socket that opens the session, and the launch carries it as
+/// `HARNESS_TIME_ZONE` and `TZ`; the prompt says to state every time in it, or to name the zone with
+/// the time when there is none.
 /// </summary>
 [Collection(ProcessEnvironmentCollection.Name)]
-public sealed class ConciergePublicUrlTests : IDisposable
+public sealed class ConciergeTimeZoneTests : IDisposable
 {
     private readonly string _dataRoot =
-        Path.Combine(Path.GetTempPath(), $"harness-public-url-{Guid.NewGuid():N}");
+        Path.Combine(Path.GetTempPath(), $"harness-time-zone-{Guid.NewGuid():N}");
 
-    public ConciergePublicUrlTests() => Directory.CreateDirectory(_dataRoot);
+    public ConciergeTimeZoneTests() => Directory.CreateDirectory(_dataRoot);
 
     [Fact]
-    public async Task The_concierge_is_handed_the_browsers_address_and_keeps_the_internal_one()
+    public async Task The_concierge_launch_carries_the_persons_time_zone()
     {
         var ct = TestContext.Current.CancellationToken;
         using var restore = new EnvironmentScope([new("HOME", _dataRoot)]);
@@ -33,61 +33,47 @@ public sealed class ConciergePublicUrlTests : IDisposable
 
         var spec = await factory.ForAsync(
             team: "", teamLabel: "this instance", user: "user-1", login: "person@example.com",
-            agent, teamEnv: new Dictionary<string, string>(),
-            publicUrl: "https://tunnel.example.net", ct: ct);
+            agent, teamEnv: new Dictionary<string, string>(), timeZone: "America/New_York", ct: ct);
 
-        Assert.Equal("https://tunnel.example.net", spec.Env!["HARNESS_PUBLIC_URL"]);
-        Assert.Equal("http://127.0.0.1:5000", spec.Env["HARNESS_URL"]);
-    }
-
-    [Fact]
-    public async Task Without_a_browser_address_the_concierge_is_handed_the_internal_one()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        using var restore = new EnvironmentScope([new("HOME", _dataRoot)]);
-        var (factory, agent) = Factory();
-
-        var spec = await factory.ForAsync(
-            team: "", teamLabel: "this instance", user: "user-1", login: "person@example.com",
-            agent, teamEnv: new Dictionary<string, string>(), publicUrl: "javascript:alert(1)", ct: ct);
-
-        Assert.Equal("http://127.0.0.1:5000", spec.Env!["HARNESS_PUBLIC_URL"]);
+        Assert.Equal("America/New_York", spec.Env!["HARNESS_TIME_ZONE"]);
+        Assert.Equal("America/New_York", spec.Env["TZ"]);
     }
 
     [Theory]
-    [InlineData("http://10.0.0.5:8080", "http://10.0.0.5:8080")]
-    [InlineData("https://tunnel.example.net/", "https://tunnel.example.net")]
-    [InlineData("https://host.example/base/?q=1#x", "https://host.example/base")]
-    [InlineData("ftp://host.example", null)]
-    [InlineData("/relative", null)]
-    [InlineData("", null)]
-    [InlineData(null, null)]
-    public void The_public_address_is_scheme_host_port_and_base_path_only(string? given, string? expected) =>
-        Assert.Equal(expected, ConciergeLaunchFactory.PublicUrl(given));
-
-    [Fact]
-    public async Task A_member_keeps_the_internal_address_and_is_not_handed_the_public_one()
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Mars/Olympus_Mons")]
+    [InlineData("../../etc/passwd")]
+    [InlineData("America/New_York\nHARNESS_KEY=x")]
+    public async Task A_zone_that_is_not_one_is_not_carried(string? given)
     {
-        var catalog = new AgentCatalog(AgentCatalogFile.BuiltIns());
-        var agent = catalog.Definitions.First(d => d.Mode == AgentMode.Headless).Name;
-        var environment = new AgentEnvironment(
-            new MintingPrincipals(), catalog, "http://127.0.0.1:5000",
-            new TeamDocuments(new TeamPaths(_dataRoot)));
+        var ct = TestContext.Current.CancellationToken;
+        using var restore = new EnvironmentScope([new("HOME", _dataRoot)]);
+        var (factory, agent) = Factory();
 
-        var member = await environment.ForContainerAsync(
-            new ContainerId("Alpha", "Worker"), agent, new HashSet<string> { Permits.Progress },
-            new Dictionary<string, string> { ["HARNESS_PUBLIC_URL"] = "https://tunnel.example.net" }, [],
-            TestContext.Current.CancellationToken);
+        var spec = await factory.ForAsync(
+            team: "", teamLabel: "this instance", user: "user-1", login: "person@example.com",
+            agent, teamEnv: new Dictionary<string, string>(), timeZone: given, ct: ct);
 
-        Assert.Equal("http://127.0.0.1:5000", member["HARNESS_URL"]);
-        Assert.False(member.ContainsKey("HARNESS_PUBLIC_URL"));
+        Assert.False(spec.Env!.ContainsKey("HARNESS_TIME_ZONE"));
+        Assert.False(spec.Env.ContainsKey("TZ"));
     }
 
     [Fact]
-    public async Task The_socket_route_hands_the_launch_the_address_the_browser_opened_it_on()
+    public void The_concierge_prompt_says_to_state_times_in_the_persons_zone()
+    {
+        var prompt = BuiltInPrompts.ConciergePromptText.ReplaceLineEndings(" ");
+
+        Assert.Contains("HARNESS_TIME_ZONE", prompt, StringComparison.Ordinal);
+        Assert.Contains("in their own time zone", prompt, StringComparison.Ordinal);
+        Assert.Contains("name the zone with every time", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_socket_route_hands_the_launch_the_zone_the_browser_named()
     {
         var ct = TestContext.Current.CancellationToken;
-        string? handed = null;
+        ConciergeBrowser? handed = null;
         var launched = new TaskCompletionSource();
 
         await using var app = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
@@ -97,7 +83,7 @@ public sealed class ConciergePublicUrlTests : IDisposable
                 new SilentEngine(),
                 (key, team, browser, _) =>
                 {
-                    handed = browser?.PublicUrl;
+                    handed = browser;
                     launched.TrySetResult();
                     return Task.FromResult(new PtySpec("true", _dataRoot));
                 },
@@ -113,12 +99,14 @@ public sealed class ConciergePublicUrlTests : IDisposable
 
         var client = app.Server.CreateWebSocketClient();
         client.ConfigureRequest = request => request.Headers.Cookie = cookie;
-        using var socket = await client.ConnectAsync(new Uri("ws://vm.example:9000/api/concierge/ws"), ct);
+        using var socket = await client.ConnectAsync(
+            new Uri("ws://vm.example:9000/api/concierge/ws?cols=80&rows=24&tz=America%2FNew_York"), ct);
 
         await launched.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
         await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "done", ct);
 
-        Assert.Equal("http://vm.example:9000", handed);
+        Assert.Equal("America/New_York", handed?.TimeZone);
+        Assert.Equal("http://vm.example:9000", handed?.PublicUrl);
     }
 
     private (ConciergeLaunchFactory Factory, string Agent) Factory()

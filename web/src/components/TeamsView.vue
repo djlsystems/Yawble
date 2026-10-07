@@ -26,6 +26,7 @@ import {
   type TeamSort,
 } from '../lib/teamsTable';
 import { ariaSort } from '../lib/tableSort';
+import { localDay } from '../lib/localTime';
 import type { LocalRepo, Team, TeamDeleted, TeamId } from '../api/types';
 import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
@@ -233,7 +234,7 @@ function losesLine(repo: LocalRepo): string {
   const branches = (repo.branches ?? []).length > 0
     ? `on ${repo.branches!.length === 1 ? 'branch' : 'branches'} ${repo.branches!.join(', ')}`
     : 'on no branch';
-  const last = repo.lastCommit?.committedAt ? `, last commit ${repo.lastCommit.committedAt.slice(0, 10)}` : '';
+  const last = repo.lastCommit?.committedAt ? `, last commit ${localDay(repo.lastCommit.committedAt)}` : '';
   return `${commits} ${branches}${last}`;
 }
 
