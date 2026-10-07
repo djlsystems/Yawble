@@ -380,13 +380,7 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
         Assert.Equal("Which database?", blocked.GetProperty("reason").GetString());
         Assert.Equal(root.Seq, blocked.GetProperty("workflow").GetInt64());
 
-        var reset = await bed.Person.PostAsJsonAsync($"/api/teams/{team}/reset", new
-        {
-            members = new[] { "Dev", TeamRegistry.DefaultManagerName },
-            forgetHistory = true,
-            purge = true,
-            clearTranscripts = true,
-        }, Ct);
+        var reset = await bed.ResetMemoryAsync(team);
         Assert.True(reset.IsSuccessStatusCode, await reset.Content.ReadAsStringAsync(Ct));
         Assert.Null(await bed.Log.FindAsync(root.Seq, Ct));
 
@@ -490,13 +484,7 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
         var before = await bed.ActivityAsync(team, T(0), T(100));
         Assert.Contains("held 20-40 w1731", Spans(before, "Dev"));
 
-        var reset = await bed.Person.PostAsJsonAsync($"/api/teams/{team}/reset", new
-        {
-            members = new[] { "Dev", TeamRegistry.DefaultManagerName },
-            forgetHistory = true,
-            purge = true,
-            clearTranscripts = true,
-        }, Ct);
+        var reset = await bed.ResetMemoryAsync(team);
         Assert.True(reset.IsSuccessStatusCode, await reset.Content.ReadAsStringAsync(Ct));
 
         Assert.Equal(Spans(before, "Dev"), Spans(await bed.ActivityAsync(team, T(0), T(100)), "Dev"));
@@ -802,6 +790,33 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
 
         /// <summary>Waits until no member of <paramref name="team"/> has a run going and none has
         /// started one for a moment.</summary>
+        /// <summary>
+        /// A RESET OF DEV AND THE MANAGER THAT DELETES MEMORY, taken once the team is quiet. Quiet as
+        /// <see cref="QuietAsync"/> reads it can come a moment before the Manager is woken to read
+        /// Dev's finished run; a reset then is refused, correctly, with "still working" (409). That
+        /// refusal changes nothing, so it is waited out and asked again, up to 30 s, rather than
+        /// failing a test about something else.
+        /// </summary>
+        public async Task<HttpResponseMessage> ResetMemoryAsync(string team)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+
+            while (true)
+            {
+                await QuietAsync(team);
+                var reset = await Person.PostAsJsonAsync($"/api/teams/{team}/reset", new
+                {
+                    members = new[] { "Dev", TeamRegistry.DefaultManagerName },
+                    forgetHistory = true,
+                    purge = true,
+                    clearTranscripts = true,
+                }, Ct);
+
+                if (reset.StatusCode != HttpStatusCode.Conflict || DateTime.UtcNow > deadline) return reset;
+                await Task.Delay(300, Ct);
+            }
+        }
+
         public async Task QuietAsync(string team)
         {
             var deadline = DateTime.UtcNow.AddSeconds(30);
