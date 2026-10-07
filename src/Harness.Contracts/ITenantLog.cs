@@ -259,6 +259,9 @@ public static class TenantActions
     public const string AgentsResetToSeed = "agents.reset-to-seed";
 
     public const string ScheduleCreated = "schedule.created";
+    /// <summary>A trigger changed. A person's change through the triggers route carries
+    /// <c>changed</c>, each field that differs with its value before and after (an instruction or a
+    /// filter by name only), so turned off and turned on read apart.</summary>
     public const string ScheduleChanged = "schedule.changed";
     public const string ScheduleDeleted = "schedule.deleted";
     public const string ScheduleFired = "schedule.fired";

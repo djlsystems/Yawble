@@ -14,6 +14,7 @@ import { settle } from '../../test/formProbe';
 import { fakeHost, reply, sent, type Call } from '../../test/solutionFixtures';
 import { HtmlLooking, launcherRow } from '../../test/solutionPanelFixtures';
 import type { InstalledSolution } from '../../api/types';
+import { localTime } from '../../lib/localTime';
 
 let calls: Call[] = [];
 
@@ -59,7 +60,7 @@ describe('the solutions launcher', () => {
     expect(first.querySelector('[data-tile-name]')?.textContent).toBe('Job Tracker');
     expect(first.querySelector('[data-tile-version]')?.textContent).toBe('1.1.0');
     expect(first.querySelector('[data-tile-team]')?.textContent).toContain('Job Tracker');
-    expect(first.querySelector('[data-tile-status]')?.textContent).toBe('3 new jobs · last checked 2026-09-30T08:00:00Z');
+    expect(first.querySelector('[data-tile-status]')?.textContent).toBe(`3 new jobs · last checked ${localTime(Date.parse('2026-09-30T08:00:00Z'), { date: true })}`);
     expect(first.querySelector('[data-tile-state="idle"]')?.textContent).toContain('Idle');
 
     const second = tile('news');

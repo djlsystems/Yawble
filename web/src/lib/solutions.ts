@@ -10,8 +10,10 @@ import type {
   SolutionSecret,
   SolutionStep,
   SolutionWakeManager,
+  TeamTrigger,
 } from '../api/types';
 import { productCli } from '../presentation/product';
+import { clockWords, cronWords, rawCron } from './scheduleWords';
 
 /**
  * THE WORDS OF THE SOLUTION INSTALL WIZARD, kept out of the component so each can be read and
@@ -91,8 +93,11 @@ export function triggerSource(trigger: SolutionPlanTrigger): string {
       // schedule already say so.
       const once = trigger.runAtInstall ? 'runs once now, then ' : '';
       if (trigger.everySeconds) return once + everyWords(trigger.everySeconds);
+      // A cron is said in words in the reader's own zone; the raw cron is the caller's Advanced.
+      const words = cronWords(trigger.cron, trigger.timezone);
+      if (words) return once + words;
+      if (trigger.cron) return `${once}${rawCron(trigger.cron, trigger.timezone)}`;
       if (trigger.schedule) return trigger.schedule;
-      if (trigger.cron) return `${once}cron ${trigger.cron} (${trigger.timezone || 'UTC'})`;
       return once + 'on a schedule';
     }
     case 'event':
@@ -292,11 +297,12 @@ export function secretSetWith(key: string): string {
 /** A first run's time as a person reads it: "8:51 PM" today, "Thu 8:00 AM" on another day. */
 export function firstRunTime(at: string, now: Date = new Date()): string {
   const when = new Date(at);
-  // One plain space before AM/PM, whichever space the runtime's locale data puts there.
-  const time = when.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s+/g, ' ');
+  // In the browser's own format, as a schedule's words say it; one plain space before AM/PM,
+  // whichever space the runtime's locale data puts there.
+  const time = clockWords(when.getTime());
   return when.toDateString() === now.toDateString()
     ? time
-    : `${when.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+    : `${when.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
 }
 
 /**
@@ -309,4 +315,63 @@ export function firstRunLine(run: SolutionFirstRun, now: Date = new Date()): str
   if (!run.runAtInstall || run.outcome === 'scheduled') return `${run.trigger}${at}`;
   const why = run.outcome === 'failed' ? 'could not run now' : `did not run now (${run.outcome})`;
   return `${run.trigger} ${why}; it${at}`;
+}
+
+// --- An update's old and new values, side by side ------------------------------------------------
+
+/** One value an update changes: what the team has now and what the package makes it. */
+export interface ValueChange {
+  label: string;
+  was: string;
+  now: string;
+  /** A whole instruction: shown as two blocks side by side rather than on one line. */
+  long: boolean;
+}
+
+/** A trigger as the team has it now, in the plan's shape, so both are said by the same words. */
+export function liveAsPlanTrigger(live: TeamTrigger, member: string): SolutionPlanTrigger {
+  const kind = live.kind === 'event' ? 'event' : live.kind === 'folderChange' ? 'folder' : 'schedule';
+  return {
+    name: live.name,
+    kind,
+    platformKind: live.kind,
+    member,
+    instruction: live.instruction,
+    wakeManager: live.wakeManager ?? 'always',
+    dailyTokenCap: live.dailyTokenCap ?? null,
+    idleOnly: live.idleOnly,
+    schedule: null,
+    cron: live.kind === 'cron' ? live.expression : null,
+    timezone: live.timezone,
+    everySeconds: live.kind === 'every' ? live.intervalSeconds : null,
+    eventType: live.eventType,
+    filter: live.filter,
+    folderPath: live.watchPath ?? null,
+    folderGlob: live.watchGlob ?? null,
+  };
+}
+
+const busyWords = (idleOnly: boolean) => (idleOnly ? 'Skipped while the member is busy' : 'Queued while the member is busy');
+
+/**
+ * What an update changes in one trigger, from what the team has now (`was`, in the plan's shape)
+ * to the package's (`now`): only the values that differ. Whether it runs once at install is the
+ * install's, not a change to the trigger, so the schedule is compared without it.
+ */
+export function triggerChanges(was: SolutionPlanTrigger, now: SolutionPlanTrigger): ValueChange[] {
+  const pairs: [string, string, string, boolean][] = [
+    ['When', triggerSource(was), triggerSource({ ...now, runAtInstall: false }), false],
+    ['Wakes', was.member, now.member, false],
+    ['Manager', wakeWords(was.wakeManager), wakeWords(now.wakeManager), false],
+    ['Daily cap', capWords(was.dailyTokenCap), capWords(now.dailyTokenCap), false],
+    ['Busy', busyWords(was.idleOnly), busyWords(now.idleOnly), false],
+    ['Instruction', was.instruction, now.instruction, true],
+  ];
+  return pairs.filter(([, before, after]) => before !== after).map(([label, before, after, long]) => ({ label, was: before, now: after, long }));
+}
+
+/** What an update changes in an agent member's own instructions, or nothing when they are the same. */
+export function memberChanges(was: string | null | undefined, now: string): ValueChange[] {
+  const before = was ?? '';
+  return before === now ? [] : [{ label: 'Instructions', was: before || '(none)', now: now || '(none)', long: true }];
 }
