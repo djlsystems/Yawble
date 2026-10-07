@@ -86,7 +86,7 @@ describe('Solution wizard - a schedule first run', () => {
 
     const source = (name: string) => bodyFind(`[data-trigger="${name}"]`)!.querySelector('[data-source]')!.textContent;
     expect(source('Scan for postings')).toBe('runs once now, then every hour');
-    expect(source('Morning summary')).toBe('runs once now, then At 08:00, Monday to Friday (Europe/London)');
+    expect(source('Morning summary')).toMatch(/^runs once now, then weekdays at 8:00 AM London time/);
     expect(source('Apply pressed')).toBe('on site.action where siteAction eq tracker/apply');
   });
 
@@ -103,7 +103,8 @@ describe('Solution wizard - a schedule first run', () => {
     const line = (name: string) => bodyFind(`[data-first-run="${name}"]`)!.textContent!.trim();
     expect(line('Scan for postings')).toBe('Scan for postings ran now.');
     expect(bodyFind('[data-first-run="Scan for postings"]')!.getAttribute('data-ran-now')).toBe('true');
-    expect(line('Morning summary')).toBe(`Morning summary first runs at ${firstRunTime(morningAt)}.`);
+    // Kept on London's clock, it also says that clock's time when the suite's zone is another.
+    expect(line('Morning summary')).toMatch(new RegExp(`^Morning summary first runs at ${firstRunTime(morningAt)}( \\(\\d{1,2}:00 [AP]M London time\\))?\\.$`));
     expect(line('Evening summary')).toBe(`Evening summary did not run now (skipped); it first runs at ${firstRunTime(morningAt)}.`);
   });
 });

@@ -4197,7 +4197,7 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
             TenantActions.ScheduleChanged,
             candidate.Id,
             candidate.Name,
-            JsonSerializer.Serialize(new { team = candidate.Team, member = candidate.Container })),
+            JsonSerializer.Serialize(new { team = candidate.Team, member = candidate.Container, changed = TriggerChanges.Of(existing, candidate) })),
         ct);
 
     // The edit can change EITHER the trigger's event type/enabled state OR which container holds

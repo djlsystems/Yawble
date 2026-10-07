@@ -36,8 +36,10 @@ import {
   type PluginFieldValues,
   type PluginSettingsShape,
 } from '../lib/pluginSettings';
-import { missingLine } from '../lib/solutions';
+import { capWords, missingLine } from '../lib/solutions';
+import { localInstants } from '../lib/localTime';
 import {
+  cappedWords,
   hasNewRun,
   instructionFirstLine,
   memberStateLine,
@@ -51,7 +53,7 @@ import {
   triggerFacts,
   whenWords,
 } from '../lib/solutionPanel';
-import { cappedLine, spentTodayLine } from '../lib/triggers';
+import { spentTodayLine } from '../lib/triggers';
 import ConnectionPicker from './ConnectionPicker.vue';
 import { bindSlot } from '../lib/slotBinding';
 import { guidedProviders } from '../lib/connections';
@@ -132,6 +134,7 @@ function reset() {
   notice.value = '';
   settings.value = {};
   caps.value = {};
+  capSaved.value = {};
   transcripts.value = {};
   uninstall.value = { asking: false, plugins: [], removePlugins: false, busy: false, result: null, problem: '' };
 }
@@ -210,6 +213,8 @@ async function reloadConnections() {
 // --- Controls: triggers --------------------------------------------------------------------------
 
 const caps = ref<Record<string, string>>({});
+/** The cap each trigger was last saved at, by trigger id, for its "Saved" line; gone once edited again. */
+const capSaved = ref<Record<string, number | null>>({});
 
 function capText(trigger: SolutionPanelTrigger): string {
   return caps.value[trigger.id] ?? (trigger.dailyTokenCap === null ? '' : String(trigger.dailyTokenCap));
@@ -230,7 +235,14 @@ function saveCap(trigger: SolutionPanelTrigger) {
     await updateSchedule(asTeamId(props.team), trigger.id, { dailyTokenCap: cap });
     const { [trigger.id]: _, ...rest } = caps.value;
     caps.value = rest;
+    capSaved.value = { ...capSaved.value, [trigger.id]: cap };
   });
+}
+
+function editCap(trigger: SolutionPanelTrigger, value: string | number | null) {
+  caps.value = { ...caps.value, [trigger.id]: value === null ? '' : String(value) };
+  const { [trigger.id]: _, ...rest } = capSaved.value;
+  capSaved.value = rest;
 }
 
 function setEnabled(trigger: SolutionPanelTrigger, enabled: boolean) {
@@ -556,7 +568,7 @@ function closeUninstall() {
             >
               <q-icon :name="badge.icon" size="14px" class="q-mr-xs" />{{ badge.text }}
             </q-badge>
-            <span class="os-body" data-panel-status>{{ panel.status }}</span>
+            <span class="os-body" data-panel-status>{{ localInstants(panel.status) }}</span>
           </div>
           <div class="text-caption os-text-muted q-mt-xs">Team {{ panel.teamName }}</div>
           <div v-if="panel.description" class="os-body q-mt-xs" data-panel-description>{{ panel.description }}</div>
@@ -584,7 +596,7 @@ function closeUninstall() {
               :data-blocked="item.name"
             >
               <div class="os-body">{{ missingLine(item) }}</div>
-              <div v-if="item.reason" class="text-caption text-weight-medium" data-blocked-reason>{{ item.reason }}</div>
+              <div v-if="item.reason" class="text-caption text-weight-medium" data-blocked-reason>{{ localInstants(item.reason) }}</div>
               <q-file
                 v-if="item.kind === 'document'"
                 :model-value="null"
@@ -633,7 +645,7 @@ function closeUninstall() {
                 <span class="text-weight-medium solution-panel-tile-name">{{ member.packageName }}</span>
                 <q-badge v-if="member.role === 'manager'" outline color="grey-7" label="Manager" />
               </div>
-              <div class="os-tile-line"><span class="os-text-muted">State </span><span data-member-state>{{ memberStateLine(member) }}</span></div>
+              <div class="os-tile-line"><span class="os-text-muted">State </span><span data-member-state>{{ localInstants(memberStateLine(member)) }}</span></div>
               <div class="os-tile-line">
                 <span class="os-text-muted">Last run </span>
                 <template v-if="member.lastRun">{{ whenWords(member.lastRun.at) }} · {{ member.lastRun.outcome }}</template>
@@ -656,7 +668,7 @@ function closeUninstall() {
               <div class="os-tile-line" data-next-fire>{{ nextFireLine(trigger) }}</div>
               <div class="os-tile-line" data-spend :class="{ 'text-negative': trigger.capReachedToday }">
                 {{ spentTodayLine(trigger) ?? 'spent today not known (no cap)' }}
-                <div v-if="cappedLine(trigger)" class="text-caption" data-capped>{{ cappedLine(trigger) }}</div>
+                <div v-if="cappedWords(trigger)" class="text-caption" data-capped>{{ cappedWords(trigger) }}</div>
               </div>
             </div>
           </div>
@@ -743,7 +755,7 @@ function closeUninstall() {
                   :error-message="capProblem(trigger)"
                   :aria-label="`${trigger.packageName} daily cap`"
                   data-trigger-cap
-                  @update:model-value="(value) => (caps = { ...caps, [trigger.id]: value === null ? '' : String(value) })"
+                  @update:model-value="(value) => editCap(trigger, value)"
                 />
                 <q-btn
                   flat
@@ -755,6 +767,9 @@ function closeUninstall() {
                   data-trigger-cap-save
                   @click="saveCap(trigger)"
                 />
+              </div>
+              <div v-if="trigger.id in capSaved" class="text-caption" data-trigger-cap-saved>
+                Saved: {{ capWords(capSaved[trigger.id] ?? null) }}.
               </div>
               <div class="solution-panel-tile-actions">
                 <q-btn
@@ -896,8 +911,8 @@ function closeUninstall() {
               <q-item-section>
                 <q-item-label>{{ run.packageMember }} · {{ run.outcome }}</q-item-label>
                 <q-item-label caption>{{ whenWords(run.endedAt) }}</q-item-label>
-                <div v-if="run.output" class="run-output mono" data-run-output>{{ run.output }}</div>
-                <div v-if="run.reason" class="run-output text-negative" data-run-reason>{{ run.reason }}</div>
+                <div v-if="run.output" class="run-output mono" data-run-output>{{ localInstants(run.output) }}</div>
+                <div v-if="run.reason" class="run-output text-negative" data-run-reason>{{ localInstants(run.reason) }}</div>
                 <div v-if="transcripts[runKey(run)]" class="run-output mono transcript" data-run-transcript>{{ transcripts[runKey(run)] }}</div>
               </q-item-section>
               <q-item-section v-if="run.transcript" side top>
@@ -1035,7 +1050,7 @@ function closeUninstall() {
 
   <HostPathPicker v-model="pickerOpen" instance-only title="Choose the folder of the newer version" @chose="(folder: string) => (wizard = { open: true, folder })" />
 
-  <SolutionWizard v-model="wizard.open" :folder="wizard.folder" />
+  <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :team="panel?.team ?? team" />
 
   <!-- A TRIGGER'S DETAILS: its whole instruction, newlines kept, and what fires it - all text. -->
   <q-dialog :model-value="detailsTrigger !== null" @update:model-value="(showing: boolean) => { if (!showing) detailsTrigger = null; }">

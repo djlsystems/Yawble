@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { solutionsInstalled } from '../api/client';
 import type { InstalledSolution, SolutionStateKind } from '../api/types';
 import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
+import { localInstants } from '../lib/localTime';
 import FilterText from './FilterText.vue';
 import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
@@ -187,7 +188,7 @@ watch(() => wizard.value.open, (showing, was) => {
                   <span class="solution-badge-text">{{ stateBadge(row.state)?.text }}</span>
                 </q-badge>
               </div>
-              <div v-if="row.status" class="os-tile-line solution-tile-status" data-tile-status>{{ row.status }}</div>
+              <div v-if="row.status" class="os-tile-line solution-tile-status" data-tile-status>{{ localInstants(row.status) }}</div>
 
               <div class="solution-tile-actions">
                 <!-- A REAL LINK, in a new tab: the site is the solution's app. Shown only when the
@@ -280,7 +281,7 @@ watch(() => wizard.value.open, (showing, was) => {
           </template>
           <template v-if="detailsRow.status">
             <dt>Status</dt>
-            <dd data-detail="status">{{ detailsRow.status }}</dd>
+            <dd data-detail="status">{{ localInstants(detailsRow.status) }}</dd>
           </template>
         </dl>
       </q-card-section>

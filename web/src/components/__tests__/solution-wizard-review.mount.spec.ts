@@ -80,7 +80,10 @@ describe('Solution wizard - Review', () => {
     expect(trigger('Scan for postings').querySelector('[data-source]')!.textContent).toBe('every hour');
     expect(trigger('Apply pressed').querySelector('[data-source]')!.textContent).toBe('on site.action where siteAction eq tracker/apply');
     expect(trigger('Resume changed').querySelector('[data-source]')!.textContent).toBe('a file in Resume/ matching *');
-    expect(trigger('Morning summary').querySelector('[data-source]')!.textContent).toBe('At 08:00, Monday to Friday (Europe/London)');
+    // A cron in words on London's clock, then the reader's (whatever zone the suite runs in).
+    expect(trigger('Morning summary').querySelector('[data-source]')!.textContent).toMatch(
+      /^weekdays at 8:00 AM London time(, \d{1,2}:00 [AP]M( the (day before|next day))? yours| \(your time\))$/,
+    );
 
     expect(trigger('Scan for postings').querySelector('[data-wake]')!.textContent).toBe('Never wakes the Manager');
     expect(trigger('Apply pressed').querySelector('[data-wake]')!.textContent).toBe('Wakes the Manager only if the run hands back or fails');

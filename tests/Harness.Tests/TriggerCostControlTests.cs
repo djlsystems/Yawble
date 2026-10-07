@@ -433,6 +433,41 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
         Assert.Equal("never", read.GetProperty("wakeManager").GetString());
     }
 
+    [Fact]
+    public async Task A_trigger_turned_off_turned_on_and_its_cap_set_each_say_what_changed_on_its_tenant_row()
+    {
+        var id = (await ScheduleAsync("Dev", "look", dailyTokenCap: 200_000)).GetProperty("id").GetString()!;
+
+        Assert.Equal(HttpStatusCode.OK, (await _person.PatchAsJsonAsync($"/api/teams/{_team}/triggers/{id}", new { enabled = false }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _person.PatchAsJsonAsync($"/api/teams/{_team}/triggers/{id}", new { enabled = true }, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _person.PatchAsJsonAsync($"/api/teams/{_team}/triggers/{id}", new { dailyTokenCap = 250_000 }, Ct)).StatusCode);
+
+        var rows = (await Services.GetRequiredService<ITenantLog>().ReadAsync(take: 10_000, ct: Ct)).Events
+            .Where(e => e.Action == TenantActions.ScheduleChanged && e.Subject == id)
+            .OrderBy(e => e.Seq)
+            .Select(e => JsonDocument.Parse(e.Detail!).RootElement.GetProperty("changed").EnumerateArray().Single())
+            .ToList();
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(("enabled", true, false), (rows[0].GetProperty("field").GetString(), rows[0].GetProperty("from").GetBoolean(), rows[0].GetProperty("to").GetBoolean()));
+        Assert.Equal(("enabled", false, true), (rows[1].GetProperty("field").GetString(), rows[1].GetProperty("from").GetBoolean(), rows[1].GetProperty("to").GetBoolean()));
+        Assert.Equal(("dailyTokenCap", 200_000L, 250_000L), (rows[2].GetProperty("field").GetString(), rows[2].GetProperty("from").GetInt64(), rows[2].GetProperty("to").GetInt64()));
+    }
+
+    [Fact]
+    public async Task A_changed_instruction_is_named_on_its_tenant_row_without_its_words()
+    {
+        var id = (await ScheduleAsync("Dev", "look")).GetProperty("id").GetString()!;
+
+        Assert.Equal(HttpStatusCode.OK, (await _person.PatchAsJsonAsync($"/api/teams/{_team}/triggers/{id}", new { instruction = "look harder" }, Ct)).StatusCode);
+
+        var row = (await Services.GetRequiredService<ITenantLog>().FindLatestAsync(TenantActions.ScheduleChanged, id, Ct))!;
+        var change = JsonDocument.Parse(row.Detail!).RootElement.GetProperty("changed").EnumerateArray().Single();
+        Assert.Equal("instruction", change.GetProperty("field").GetString());
+        Assert.False(change.TryGetProperty("to", out _));
+        Assert.DoesNotContain("look harder", row.Detail, StringComparison.Ordinal);
+    }
+
     // ---- B: the daily cap -------------------------------------------------------------------
 
     [Fact]

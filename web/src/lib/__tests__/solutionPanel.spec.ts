@@ -243,7 +243,8 @@ describe("a trigger's instruction and Details", () => {
       }),
       now,
     );
-    expect(facts.map((fact) => fact.label)).toEqual(['Fires', 'Timezone', 'On', 'Daily cap', 'Last fired', 'Last outcome', 'Missed']);
+    expect(facts.map((fact) => fact.label)).toEqual(['Fires', 'Cron', 'Timezone', 'On', 'Daily cap', 'Last fired', 'Last outcome', 'Missed']);
+    expect(facts.find((fact) => fact.label === 'Cron')?.value).toBe('cron 0 8 * * * (Europe/London)');
     expect(facts.find((fact) => fact.label === 'On')?.value).toBe('No, it is off');
     expect(facts.find((fact) => fact.label === 'Daily cap')?.value).toBe('no cap');
     expect(facts.find((fact) => fact.label === 'Last outcome')?.value).toBe('handback');

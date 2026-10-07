@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import { readTenantLog } from '../api/client';
 import type { TenantEvent } from '../api/types';
 import { useCursorList } from '../lib/useCursorList';
+import { detailWords, didWords } from '../lib/tenantLogWords';
 import { vResizableColumns } from '../lib/resizableColumns';
 import CursorSentinel from './CursorSentinel.vue';
 
@@ -68,6 +69,19 @@ const wording: Record<string, string> = {
   'key.revoked': 'revoked an API key',
 };
 
+/**
+ * THE DETAIL IN WORDS for the common acts (a trigger turned off or on, a cap set, a setting
+ * changed), the JSON behind the Show JSON toggle. One toggle for the whole table rather than one per
+ * row: the virtual scroll lays rows out at one height, and a row that opened would break it. A row
+ * the words do not know shows its JSON either way.
+ */
+const showJson = ref(false);
+
+function detailText(row: TenantEvent): string | null {
+  if (!row.detail) return null;
+  return showJson.value ? row.detail : (detailWords(row) ?? row.detail);
+}
+
 /** Destructive acts read differently, because they are the ones somebody scans for. */
 function destructive(action: string) {
   return action === 'team.deleted' || action === 'user.deleted' || action === 'key.revoked';
@@ -88,6 +102,7 @@ watch(open, (showing) => {
       <q-card-section class="row items-center q-pb-none">
         <div class="os-dialog-title">Log</div>
         <q-space />
+        <q-toggle v-model="showJson" dense label="Show JSON" class="q-mr-sm" data-show-json />
         <q-btn v-close-popup flat round dense icon="close" />
       </q-card-section>
 
@@ -137,15 +152,15 @@ watch(open, (showing) => {
               <td class="tenant-log-when">{{ when(row.occurredAt) }}</td>
               <td>{{ row.actorEmail }}</td>
               <td :class="destructive(row.action) ? 'text-negative' : ''">
-                {{ wording[row.action] ?? row.action }}
+                {{ didWords(row) ?? wording[row.action] ?? row.action }}
               </td>
               <td>{{ row.subjectName }}</td>
-              <!-- A deletion's detail is JSON and can be long. Truncated in the cell with the whole
+              <!-- A detail the words do not know is JSON and can be long. Truncated in the cell with the whole
                    of it in a tooltip: the counts are why the row is worth keeping, but a column that
                    wraps to six lines makes every other row unreadable. -->
-              <td class="tenant-log-detail">
-                <span v-if="row.detail">{{ row.detail }}</span>
-                <q-tooltip v-if="row.detail" max-width="480px">{{ row.detail }}</q-tooltip>
+              <td class="tenant-log-detail" data-detail>
+                <span v-if="row.detail">{{ detailText(row) }}</span>
+                <q-tooltip v-if="row.detail" max-width="480px">{{ detailText(row) }}</q-tooltip>
               </td>
             </tr>
           </template>
