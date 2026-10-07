@@ -388,3 +388,15 @@ export function timeOf(occurredAt: string): string {
     ? ''
     : at.toLocaleTimeString(undefined, { hour12: false })
 }
+
+/**
+ * The same clock with its local date in front: the opened message, which can be days old, where a
+ * time of day alone cannot say whether it was today.
+ */
+export function dateTimeOf(occurredAt: string): string {
+  const at = new Date(occurredAt)
+
+  return Number.isNaN(at.getTime())
+    ? ''
+    : `${at.toLocaleDateString()} ${at.toLocaleTimeString(undefined, { hour12: false })}`
+}

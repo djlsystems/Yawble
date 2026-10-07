@@ -75,6 +75,28 @@ describe('a member card row opens its message in a dialog', () => {
     expect(position()).toBe('2 of 3');
   });
 
+  it('names the date beside the time, so a message from days ago does not read as today', async () => {
+    mountFeed(feed);
+    await rows()[0]!.trigger('click');
+    await settle();
+
+    const at = new Date('2026-09-29T10:00:00Z');
+    const stamp = bodyFind('[data-feed-card-time]')?.textContent?.trim() ?? '';
+    expect(stamp).toContain(at.toLocaleDateString());
+    expect(stamp).toContain(at.toLocaleTimeString(undefined, { hour12: false }));
+  });
+
+  it('names the date beside the time, so a message from days ago does not read as today', async () => {
+    mountFeed(feed);
+    await rows()[0]!.trigger('click');
+    await settle();
+
+    const at = new Date('2026-09-29T10:00:00Z');
+    const stamp = bodyFind('[data-feed-card-time]')?.textContent?.trim() ?? '';
+    expect(stamp).toContain(at.toLocaleDateString());
+    expect(stamp).toContain(at.toLocaleTimeString(undefined, { hour12: false }));
+  });
+
   it('steps to the newer row with Newer and the older row with Older, and stops at each end', async () => {
     mountFeed(feed);
     await rows()[1]!.trigger('click');

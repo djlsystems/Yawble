@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../../api/types'
-import { detail, label, ownerOf, summarise, timeOf } from '../summarise'
+import { dateTimeOf, detail, label, ownerOf, summarise, timeOf } from '../summarise'
 
 const message = (payload: unknown): Message => ({
   seq: 1,
@@ -217,6 +217,19 @@ describe('ownerOf', () => {
 
     expect(ownerOf(blank)).toBe('u-17')
     expect(ownerOf(broken)).toBe('u-17')
+  })
+})
+
+describe('dateTimeOf', () => {
+  it('puts the local date in front of the time, so a message from days ago reads as such', () => {
+    const at = new Date(2026, 9, 5, 14, 27, 37)
+
+    expect(dateTimeOf(at.toISOString())).toBe(`${at.toLocaleDateString()} ${timeOf(at.toISOString())}`)
+    expect(dateTimeOf(at.toISOString())).toMatch(/14[:.]27[:.]37/)
+  })
+
+  it('returns empty for an unparseable stamp', () => {
+    expect(dateTimeOf('not a date')).toBe('')
   })
 })
 

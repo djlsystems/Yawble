@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { getMessagesBefore } from '../api/client';
 import type { Message } from '../api/types';
-import { detail, label, ownerOf, summarise, timeOf } from '../lib/summarise';
+import { dateTimeOf, detail, label, ownerOf, summarise, timeOf } from '../lib/summarise';
 import { solutionNoticeOf } from '../lib/solutionNotice';
 import { runMarkOf } from '../lib/runMarks';
 import { useCursorList } from '../lib/useCursorList';
@@ -280,7 +280,7 @@ function tone(type: string): string {
         <span class="feed-card-source mono">{{ shown.source }}</span>
         <span class="feed-card-spacer"></span>
         <span class="feed-card-meta mono" :title="workflowNumberTitle(shown.correlationId)" data-workflow-number>#{{ shown.correlationId }}</span>
-        <span class="feed-card-meta mono">{{ timeOf(shown.occurredAt) }}</span>
+        <span class="feed-card-meta mono" data-feed-card-time>{{ dateTimeOf(shown.occurredAt) }}</span>
       </q-card-section>
 
       <!-- Interpolated, exactly like the row it came from. Agent output reaches this, and a
