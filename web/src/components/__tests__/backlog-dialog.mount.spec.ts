@@ -265,8 +265,17 @@ describe('BacklogDialog readiness', () => {
 
     const itemDialog = document.querySelector('[data-backlog-item-dialog]')!;
     expect(itemDialog).not.toBeNull();
-    expect(itemDialog.querySelector('.backlog-detail')?.textContent).toContain('B0001');
+    expect(itemDialog.querySelector('.backlog-detail')).not.toBeNull();
     expect(listCard.querySelector('.backlog-detail')).toBeNull();
+
+    // A title bar, as every dialog has: the item's name on the left, its close as the bar's last
+    // control on the right, and neither inside the scrolling body.
+    const bar = itemDialog.querySelector('[data-backlog-item-bar]')!;
+    expect(bar).not.toBeNull();
+    expect(bar.textContent).toContain('B0001');
+    const barButtons = [...bar.querySelectorAll('button')];
+    expect(barButtons.at(-1)?.getAttribute('aria-label')).toBe('Close this item');
+    expect(itemDialog.querySelector('.backlog-detail [aria-label="Close this item"]')).toBeNull();
 
     const close = [...itemDialog.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close') as HTMLButtonElement;
     close.click();

@@ -406,6 +406,39 @@ public sealed class ConciergeMergeTests : IAsyncDisposable
         AssertRefusal(await concierge.Repo(action: "merge", team: second, repo: Repo, cancellationToken: Ct));
     }
 
+    /// <summary>
+    /// A general "may you merge?" names no team. The `repo` tool's status with no team answers the
+    /// Concierge the setting alone, read at the call, so a change shows on the next read; anyone
+    /// else with no team is still told to name one.
+    /// </summary>
+    [Fact]
+    public async Task The_repo_tools_status_with_no_team_answers_the_Concierge_the_setting_now()
+    {
+        var person = await PersonAsync();
+        var concierge = await ConciergeAsync();
+
+        static bool MayMerge(string reply)
+        {
+            Assert.True(reply.StartsWith("HTTP 200", StringComparison.Ordinal), reply);
+            using var body = JsonDocument.Parse(reply.Split('\n', 2)[1]);
+            return body.RootElement.GetProperty("conciergeMayMerge").GetBoolean();
+        }
+
+        Assert.False(MayMerge(await concierge.Repo(cancellationToken: Ct)));
+
+        await SetAsync(person, "on");
+        Assert.True(MayMerge(await concierge.Repo(cancellationToken: Ct)));
+        Assert.True(MayMerge(await concierge.Repo(action: "status", cancellationToken: Ct)));
+
+        await SetAsync(person, "off");
+        Assert.False(MayMerge(await concierge.Repo(cancellationToken: Ct)));
+
+        // A merge still needs a team, and nobody but the Concierge reads the setting this way.
+        AssertRefusal(await concierge.Repo(action: "merge", repo: Repo, cancellationToken: Ct));
+        var other = new KeyedTools(Tools(concierge.Key, PrincipalKind.ApiKey), concierge.Key);
+        Assert.StartsWith("Refused: name a team", await other.Repo(cancellationToken: Ct), StringComparison.Ordinal);
+    }
+
     // ---- the tool ----
 
     [Fact]
