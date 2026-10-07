@@ -458,6 +458,15 @@ const uninstall = ref<{
 }>({ asking: false, plugins: [], removePlugins: false, busy: false, result: null, problem: '' });
 
 /** ASKS FIRST, listing what goes and what stays. The plugins are offered only when the package has any. */
+/** The package's sites the uninstall takes offline and keeps, by name. */
+const uninstallSites = computed(() => {
+  const current = panel.value;
+  if (!current) return [];
+  const named = (current.sites ?? []).map((site) => site.name);
+  if (named.length > 0) return named;
+  return current.primarySite ? [current.primarySite.name] : [];
+});
+
 async function askUninstall() {
   uninstall.value = { asking: true, plugins: [], removePlugins: false, busy: false, result: null, problem: '' };
   try {
@@ -957,11 +966,19 @@ function closeUninstall() {
             Members: {{ panel.members.filter((member) => member.role !== 'manager').map((member) => member.packageName).join(', ') }}
           </li>
           <li>Its team skills</li>
-          <li v-if="panel.primarySite">Sites: {{ panel.primarySite.name }} and any other the package published</li>
-          <li v-else>Any site the package published</li>
           <li>Its tools folder</li>
         </ul>
+        <div class="q-mt-sm" data-uninstall-sites-kept>
+          It takes offline and keeps
+          <template v-if="uninstallSites.length > 0">the site{{ uninstallSites.length === 1 ? '' : 's' }} {{ uninstallSites.join(', ') }}</template>
+          <template v-else>every site the package published</template>,
+          with <strong>all their data</strong> and versions: nobody can open them while the package is uninstalled, and installing
+          it onto team {{ panel.teamName }} again brings them back as they were.
+        </div>
         <div class="q-mt-sm">It keeps the team, its Manager and <strong>all of its documents</strong>.</div>
+        <div class="q-mt-sm os-text-muted" data-uninstall-team-delete>
+          Deleting the team later removes the kept sites and their data for good.
+        </div>
         <q-checkbox
           v-if="uninstall.plugins.length > 0"
           v-model="uninstall.removePlugins"
@@ -982,7 +999,9 @@ function closeUninstall() {
           <li v-if="uninstall.result.removed.triggers.length">Triggers removed: {{ uninstall.result.removed.triggers.join(', ') }}</li>
           <li v-if="uninstall.result.removed.members.length">Members removed: {{ uninstall.result.removed.members.join(', ') }}</li>
           <li v-if="uninstall.result.removed.skills.length">Skills removed: {{ uninstall.result.removed.skills.join(', ') }}</li>
-          <li v-if="uninstall.result.removed.sites.length">Sites removed: {{ uninstall.result.removed.sites.join(', ') }}</li>
+          <li v-if="uninstall.result.sitesKept?.length" data-sites-kept>
+            Taken offline and kept with their data: {{ uninstall.result.sitesKept.join(', ') }}. Reinstall the package onto this team to bring them back.
+          </li>
           <li v-if="uninstall.result.removed.tools">Tools folder removed</li>
           <li v-if="uninstall.result.plugins.removed.length">Plugins removed: {{ uninstall.result.plugins.removed.join(', ') }}</li>
           <li v-for="kept in uninstall.result.plugins.kept" :key="kept.id" data-plugin-kept>

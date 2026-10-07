@@ -318,7 +318,8 @@ public sealed class TeamDeletion(
             }
         }
 
-        // Which solution package it came from: a same-name successor was installed from none. The
+        // Which solution package it came from, or held and uninstalled: a same-name successor was
+        // installed from none, and cannot reinstall onto what this team kept. The
         // package's plugins stay installed - deleting a team never removes a plugin.
         if (solutions is not null)
         {

@@ -579,5 +579,17 @@ public static class AuthSchema
                 password_protected TEXT NOT NULL
             );
             """),
+
+        // AN UNINSTALLED PACKAGE IS REMEMBERED, NOT FORGOTTEN: uninstalling keeps the team's sites with
+        // their data, and the row stays with `uninstalled_at` set, so a reinstall of the same package
+        // id onto the same team knows the team held it. `answers` is the person's answers at
+        // uninstall (settings and connection slots, JSON), for the reinstall to prefill. Both NULL
+        // while installed, and for every row from before the step. A team deletion removes the row.
+        new MigrationStep(
+            "auth-021",
+            """
+            ALTER TABLE team_solutions ADD COLUMN uninstalled_at TEXT NULL;
+            ALTER TABLE team_solutions ADD COLUMN answers TEXT NULL;
+            """),
     ];
 }

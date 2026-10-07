@@ -427,10 +427,10 @@ public static class TenantActions
     public const string SolutionFailed = "solution.failed";
 
     /// <summary>A person uninstalled the solution a team was installed from. Subject is the team;
-    /// detail names the package id and version, the triggers, members, skills and sites removed,
-    /// whether the tools folder went, the plugins removed and kept (with the teams still using
-    /// them), the documents folder kept, and anything that could not be removed. Written with the
-    /// deletion of the team's <c>team_solutions</c> row.</summary>
+    /// detail names the package id and version, the triggers, members and skills removed, whether
+    /// the tools folder went, the sites taken offline and kept with their data, the plugins removed
+    /// and kept (with the teams still using them), the documents folder kept, and anything that
+    /// could not be removed. Written with the team's <c>team_solutions</c> row marked uninstalled.</summary>
     public const string SolutionUninstalled = "solution.uninstalled";
 
     // ONLY ACTIONS SOMETHING WRITES ARE LISTED HERE. A tenant-log action nobody writes is a row type
