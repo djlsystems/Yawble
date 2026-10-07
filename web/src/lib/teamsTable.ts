@@ -50,10 +50,10 @@ export interface TeamRow {
   workflows: TeamChip | null
 }
 
-// `'workflows'` (the plural projection's chip) is deliberately distinct from `'workflow'` (the
-// Last workflow column's instant) - two different questions, two different sort keys, the same
-// split {@link TeamRow.workflows} draws against `status`.
-export type TeamSort = TableSort<'name' | 'members' | 'status' | 'workflows' | 'workflow'>
+// The sortable columns the Teams list shows. Its Activity column draws each team's lanes and is not
+// a sort: a picture over time has no single value to order by. The Workflows and Last workflow
+// columns it replaced went with their sort keys; a stored sort naming either reads back as the default.
+export type TeamSort = TableSort<'name' | 'members' | 'status'>
 
 /** Name ascending. A person looking for a team looks for its name. */
 export const DefaultTeamSort: TeamSort = { column: 'name', descending: false }
@@ -120,7 +120,7 @@ export function nextSort(current: TeamSort, column: TeamSort['column']): TeamSor
  * and a string here that is NOT a column compiles happily and admits a value the comparator has
  * no arm for.
  */
-const Columns: TeamSort['column'][] = ['name', 'members', 'status', 'workflows', 'workflow']
+const Columns: TeamSort['column'][] = ['name', 'members', 'status']
 
 /**
  * THE RANKING, and it is the chip's own order rather than the alphabet: a column that sorted
@@ -275,35 +275,6 @@ function comparePrimary(a: TeamRow, b: TeamRow, sort: TeamSort): number {
       return (a.members - b.members) * direction
     case 'status':
       return (StatusOrder[a.status] - StatusOrder[b.status]) * direction
-    case 'workflows': {
-      const aRank = chipRank(a.workflows)
-      const bRank = chipRank(b.workflows)
-
-      // NULLS LAST IN BOTH DIRECTIONS, for `workflow`'s own reason below: a team whose plural
-      // payload has not landed (or ranked nothing) is not the quietest team, it is no answer at
-      // all, and flipping the arrow must not float that absence to the top.
-      if (aRank === Number.POSITIVE_INFINITY && bRank === Number.POSITIVE_INFINITY) return 0
-      if (aRank === Number.POSITIVE_INFINITY) return 1
-      if (bRank === Number.POSITIVE_INFINITY) return -1
-
-      // ASCENDING IS LOUDEST FIRST, matching `status` above: rank 0 (or MISCONFIGURED's -1) is the
-      // worst news, and that is what a person sorting this column is looking for.
-      return (aRank - bRank) * direction
-    }
-    case 'workflow': {
-      // NULLS LAST IN BOTH DIRECTIONS. A team that has never run is not the oldest one; it is
-      // absent, and flipping the arrow should not float absence to the top.
-      if (a.startedAt === null && b.startedAt === null) return 0
-      if (a.startedAt === null) return 1
-      if (b.startedAt === null) return -1
-
-      // ASCENDING IS OLDEST FIRST, like every other column, and that is what makes the arrow
-      // honest. It was `b - a`, which sorted newest-first while the header rendered
-      // `arrow_upward` - a control saying the opposite of what it did. Newest-first is one more
-      // click, and inverting the arrow for this column alone would need a second rule explaining
-      // why up means down here.
-      return (a.startedAt - b.startedAt) * direction
-    }
     default:
       return byName(a, b) * direction
   }
