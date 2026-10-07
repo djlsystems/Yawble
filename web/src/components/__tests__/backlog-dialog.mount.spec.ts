@@ -253,6 +253,30 @@ describe('BacklogDialog readiness', () => {
     await flushPromises();
   }
 
+  it('opens the picked item in a dialog of its own over the list, and closing it returns to the list', async () => {
+    await openWith('ready');
+
+    // The list's card holds no item editor any more.
+    const listCard = document.querySelector('.backlog-card')!;
+    expect(listCard.querySelector('.backlog-detail')).toBeNull();
+
+    await openTheItem();
+
+    const itemDialog = document.querySelector('[data-backlog-item-dialog]')!;
+    expect(itemDialog).not.toBeNull();
+    expect(itemDialog.querySelector('.backlog-detail')?.textContent).toContain('B0001');
+    expect(listCard.querySelector('.backlog-detail')).toBeNull();
+
+    const close = [...itemDialog.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close') as HTMLButtonElement;
+    close.click();
+    await flushPromises();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await flushPromises();
+
+    expect(document.querySelector('[data-backlog-item-dialog] .backlog-detail')).toBeNull();
+    expect(document.querySelector('.backlog-card')).not.toBeNull();
+  });
+
   it('leaves Dispatch live on a ready item', async () => {
     await openWith('ready');
 

@@ -1300,8 +1300,18 @@ function down(index: number) {
         />
       </q-card-section>
 
-      <q-separator v-if="selected" />
+      <q-card-actions align="right">
+        <q-btn flat no-caps label="Close" @click="open = false" />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
 
+  <!-- THE ITEM, IN A DIALOG OF ITS OWN over the list rather than a panel under it: a spec is long,
+       and a panel squeezed below the rows left room for neither. Opened by picking a row; closing it
+       returns to the list as it was. The state controls, the outcome, the spec and its Save, and the
+       dispatches are the panel's, unchanged. -->
+  <q-dialog :model-value="selected !== null" @update:model-value="(showing: boolean) => { if (!showing) selected = null; }">
+    <q-card class="backlog-item-card os-dialog-lg" data-backlog-item-dialog>
       <q-card-section v-if="selected" class="backlog-detail">
         <div class="row items-center q-gutter-sm">
           <div class="text-subtitle1">
@@ -1460,7 +1470,7 @@ function down(index: number) {
       </q-card-section>
 
       <q-card-actions align="right">
-        <q-btn flat no-caps label="Close" @click="open = false" />
+        <q-btn flat no-caps label="Close" @click="selected = null" />
       </q-card-actions>
     </q-card>
   </q-dialog>
@@ -1808,14 +1818,17 @@ function down(index: number) {
   overflow-x: auto;
 }
 
-.backlog-detail {
-  flex: 0 0 auto;
-  max-height: 40vh;
-  overflow-y: auto;
+/* The item's own dialog: a column whose body scrolls, so a long spec never pushes Close off screen. */
+.backlog-item-card {
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+}
 
-  /* A hairline where the panel meets the list, because the two scroll independently and without it
-     a body that opens reads as more rows. */
-  border-top: 1px solid var(--os-rule);
+.backlog-detail {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Pushed away from the state controls beside it - see the comment in the template. */
