@@ -1025,16 +1025,18 @@ onBeforeUnmount(() => {
           @change="onPicked"
         />
 
-        <!-- Refresh: paint then detach+attach without DELETE, does not restart the agent. -->
+        <!-- Refresh: paint then detach+attach without DELETE, does not restart the agent. A SCREEN
+             for an icon, not a circular arrow: Reload beside it is the arrow, and two arrows side
+             by side read as the same button. -->
         <q-btn
           flat
           dense
           round
-          icon="refresh"
-          aria-label="Refresh display — does not restart the agent"
+          icon="desktop_windows"
+          aria-label="Redraw the screen — the agent keeps running"
           @click="refresh"
         >
-          <q-tooltip>Refresh display — does not restart the agent</q-tooltip>
+          <q-tooltip>Redraw the screen — the agent keeps running</q-tooltip>
         </q-btn>
 
         <!-- Reset is DESTRUCTIVE and asks first - see confirmReset. It sits left of Settings so
@@ -1049,7 +1051,7 @@ onBeforeUnmount(() => {
           :loading="resetting"
           @click="confirmOpen = true"
         >
-          <q-tooltip>Reload — ends this agent and starts a new one</q-tooltip>
+          <q-tooltip>Reload the Concierge — starts a new agent, which keeps its notes on your teams</q-tooltip>
         </q-btn>
 
         <!-- Maximise toggle: visible whenever not lt.sm (≥600px), even when maximised. Shows as 'fullscreen' when not maximised, 'fullscreen_exit' when maximised. -->
@@ -1100,8 +1102,8 @@ onBeforeUnmount(() => {
           <q-card-section class="os-dialog-title">Reload the Concierge?</q-card-section>
 
           <q-card-section class="q-pt-none">
-            This ends the running agent and starts a new one. Everything it knows — the conversation
-            so far, and anything it was part-way through — is lost, and cannot be recovered.
+            This ends the running agent and starts a new one. The new one keeps its notes on your
+            teams; this conversation, and anything it was part-way through, is lost.
           </q-card-section>
 
           <q-card-actions align="right">

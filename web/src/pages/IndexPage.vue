@@ -500,8 +500,8 @@ onUnmounted(() => {
     <div v-else-if="!hasTeams" class="column items-center q-pa-xl text-center">
       <div class="text-h6 q-mb-sm">No teams yet</div>
       <div class="text-body2 os-text-muted" style="max-width: 32rem">
-        A team is created with its Manager. There is no team without a door into it. Use
-        <strong>New Team</strong> on the ribbon above to make one.
+        A team is a Manager and the members it takes on to do your work; to start one, choose
+        <strong>New Team</strong> on the ribbon above or ask the Concierge.
       </div>
     </div>
 

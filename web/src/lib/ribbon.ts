@@ -223,6 +223,9 @@ export const Ribbon: RibbonSpec = {
  * expect a `projects-` predicate to exist.
  */
 
+/** What a disabled `team-` command says on hover, and on a phone under its row. */
+export const NoTeamHint = 'Pick or create a team first';
+
 /**
  * An action named `team-...` needs an active team id.
  *

@@ -354,3 +354,20 @@ describe('what the page re-reads', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+/**
+ * THE EMPTY CONSOLE SAYS WHAT A TEAM IS AND WHAT TO DO NEXT, in words a first-time person reads
+ * once: New Team, or the Concierge. Not a line about how the platform is built.
+ */
+describe('the console with no team yet', () => {
+  it('says what a team is and names New Team and the Concierge as the next step', async () => {
+    const page = await mountPage([]);
+    const text = page.text().replace(/\s+/g, ' ');
+
+    expect(text).toContain('No teams yet');
+    expect(text).toContain(
+      'A team is a Manager and the members it takes on to do your work; to start one, choose New Team on the ribbon above or ask the Concierge.',
+    );
+    expect(text).not.toContain('door into it');
+  });
+});
