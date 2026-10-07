@@ -21,7 +21,7 @@ public sealed class SqliteTeamSolutionStore(
     private const string Select =
         """
         SELECT team, package_id, name, version, folder, installed_at, installed_by, updated_at,
-               manifest, digests, members, triggers, plugins
+               manifest, digests, members, triggers, plugins, uninstalled_at, answers
           FROM team_solutions
         """;
 
@@ -29,7 +29,7 @@ public sealed class SqliteTeamSolutionStore(
     {
         await using var connection = Open();
         await using var command = connection.CreateCommand();
-        command.CommandText = $"{Select} WHERE team = $team";
+        command.CommandText = $"{Select} WHERE team = $team AND uninstalled_at IS NULL";
         command.Parameters.AddWithValue("$team", team);
 
         return (await ReadAsync(command, ct)).SingleOrDefault();
@@ -39,7 +39,26 @@ public sealed class SqliteTeamSolutionStore(
     {
         await using var connection = Open();
         await using var command = connection.CreateCommand();
-        command.CommandText = $"{Select} ORDER BY team";
+        command.CommandText = $"{Select} WHERE uninstalled_at IS NULL ORDER BY team";
+
+        return await ReadAsync(command, ct);
+    }
+
+    public async Task<TeamSolutionRow?> FindUninstalledAsync(string team, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"{Select} WHERE team = $team AND uninstalled_at IS NOT NULL";
+        command.Parameters.AddWithValue("$team", team);
+
+        return (await ReadAsync(command, ct)).SingleOrDefault();
+    }
+
+    public async Task<IReadOnlyList<TeamSolutionRow>> ListUninstalledAsync(CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"{Select} WHERE uninstalled_at IS NOT NULL ORDER BY team";
 
         return await ReadAsync(command, ct);
     }
@@ -56,15 +75,16 @@ public sealed class SqliteTeamSolutionStore(
                 """
                 INSERT INTO team_solutions
                     (team, package_id, name, version, folder, installed_at, installed_by, updated_at,
-                     manifest, digests, members, triggers, plugins)
+                     manifest, digests, members, triggers, plugins, uninstalled_at, answers)
                 VALUES ($team, $id, $name, $version, $folder, $installedAt, $installedBy, $updatedAt,
-                        $manifest, $digests, $members, $triggers, $plugins)
+                        $manifest, $digests, $members, $triggers, $plugins, $uninstalledAt, $answers)
                 ON CONFLICT(team) DO UPDATE SET
                     package_id = excluded.package_id, name = excluded.name, version = excluded.version,
                     folder = excluded.folder, installed_at = excluded.installed_at,
                     installed_by = excluded.installed_by, updated_at = excluded.updated_at,
                     manifest = excluded.manifest, digests = excluded.digests, members = excluded.members,
-                    triggers = excluded.triggers, plugins = excluded.plugins
+                    triggers = excluded.triggers, plugins = excluded.plugins,
+                    uninstalled_at = excluded.uninstalled_at, answers = excluded.answers
                 """;
             command.Parameters.AddWithValue("$team", row.Team);
             command.Parameters.AddWithValue("$id", row.PackageId);
@@ -79,6 +99,8 @@ public sealed class SqliteTeamSolutionStore(
             command.Parameters.AddWithValue("$members", JsonSerializer.Serialize(row.Members));
             command.Parameters.AddWithValue("$triggers", JsonSerializer.Serialize(row.Triggers));
             command.Parameters.AddWithValue("$plugins", JsonSerializer.Serialize(row.Plugins));
+            command.Parameters.AddWithValue("$uninstalledAt", (object?)row.UninstalledAt?.ToString("O") ?? DBNull.Value);
+            command.Parameters.AddWithValue("$answers", (object?)row.Answers ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(ct);
         }
 
@@ -127,7 +149,11 @@ public sealed class SqliteTeamSolutionStore(
                 Map(reader.GetString(9)),
                 Map(reader.GetString(10)),
                 Map(reader.GetString(11)),
-                Map(reader.GetString(12))));
+                Map(reader.GetString(12)))
+            {
+                UninstalledAt = reader.IsDBNull(13) ? null : DateTimeOffset.Parse(reader.GetString(13), CultureInfo.InvariantCulture),
+                Answers = reader.IsDBNull(14) ? null : reader.GetString(14),
+            });
         }
 
         return rows;

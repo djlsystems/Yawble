@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 //
-// UNINSTALL ASKS FIRST: it names what goes and says the team and its documents stay, offers
+// UNINSTALL ASKS FIRST: it names what goes, says the sites are taken offline and kept with their
+// data so a reinstall brings them back, and says the team and its documents stay; it offers
 // the package's plugins only when it has some, sends nothing until confirmed, sends `removePlugins`
 // as chosen, and then says what it did - plugins kept and who uses them, the documents folder kept,
 // and anything it could not remove.
@@ -36,7 +37,8 @@ const uninstall: Route = (call) =>
         team: 'job-tracker',
         id: 'job-tracker',
         version: '1.1.0',
-        removed: { triggers: ['Scan for postings', 'Apply pressed'], members: ['scout'], skills: ['job-search-playbook'], sites: ['tracker'], tools: true },
+        removed: { triggers: ['Scan for postings', 'Apply pressed'], members: ['scout'], skills: ['job-search-playbook'], tools: true },
+        sitesKept: ['tracker'],
         plugins: { removed: [], kept: [{ id: 'job-board', usedBy: ['other-team'] }] },
         teamName: 'Job Tracker',
         documentsKept: '/data/documents/job-tracker',
@@ -77,10 +79,21 @@ describe('Uninstall', () => {
     expect(bodyText()).toContain('Uninstall Job Tracker?');
     expect(asking.textContent).toContain('Triggers: Scan for postings, Apply pressed');
     expect(asking.textContent).toContain('Members: Scout');
-    expect(asking.textContent).toContain('Sites: tracker');
     expect(asking.textContent).toContain('tools folder');
     expect(asking.textContent).toContain('all of its documents');
     expect(sent(calls, 'POST', '/api/teams/job-tracker/solution/uninstall')).toHaveLength(0);
+  });
+
+  it('says the sites are taken offline and kept with their data, so a reinstall brings them back', async () => {
+    await ask();
+
+    const words = (bodyFind('[data-uninstall-sites-kept]')!.textContent ?? '').replace(/\s+/g, ' ');
+    expect(words).toContain('It takes offline and keeps the site tracker, with all their data and versions');
+    expect(words).toContain('nobody can open them while the package is uninstalled');
+    expect(words).toContain('installing it onto team Job Tracker again brings them back as they were');
+    // Nothing in the removal list says a site goes.
+    expect(bodyFind('[data-uninstall-ask] ul')!.textContent).not.toMatch(/site/i);
+    expect(bodyFind('[data-uninstall-team-delete]')!.textContent).toContain('Deleting the team later removes the kept sites and their data for good.');
   });
 
   it('sends nothing when cancelled', async () => {
@@ -101,6 +114,10 @@ describe('Uninstall', () => {
     expect(result.textContent).toContain('Members removed: scout');
     expect(result.textContent).toContain('except what is named below');
     expect(result.textContent).toContain('Team Job Tracker stays, with its Manager.');
+    expect(bodyFind('[data-sites-kept]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'Taken offline and kept with their data: tracker. Reinstall the package onto this team to bring them back.',
+    );
+    expect(result.textContent).not.toContain('Sites removed');
     expect(bodyFind('[data-plugin-kept]')?.textContent).toContain('Plugin job-board kept: used by other-team');
     expect(bodyFind('[data-documents-kept]')?.textContent).toContain('/data/documents/job-tracker');
     expect(bodyFind('[data-uninstall-failure]')?.textContent).toBe('The site tracker could not be unpublished: it is locked.');

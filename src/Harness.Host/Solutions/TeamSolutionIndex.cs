@@ -6,17 +6,22 @@ namespace Harness.Host.Solutions;
 /// <summary>
 /// <c>team_solutions</c>, held in memory as well: every write goes through to the store and then
 /// the copy, so <see cref="For"/> - read on every team summary - answers with no database round trip.
-/// Loaded once at start. The one registration of both <see cref="ITeamSolutionStore"/> and
+/// An uninstalled row is held apart, so <see cref="For"/>, <see cref="FindAsync"/> and
+/// <see cref="ListAsync"/> answer only installed packages. Loaded once at start. The one registration of both <see cref="ITeamSolutionStore"/> and
 /// <see cref="ITeamSolutions"/> in the Host.
 /// </summary>
 public sealed class TeamSolutionIndex(ITeamSolutionStore store) : ITeamSolutionStore, ITeamSolutions
 {
     private readonly ConcurrentDictionary<string, TeamSolutionRow> _rows = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly ConcurrentDictionary<string, TeamSolutionRow> _uninstalled = new(StringComparer.OrdinalIgnoreCase);
+
     public async Task LoadAsync(CancellationToken ct = default)
     {
         _rows.Clear();
+        _uninstalled.Clear();
         foreach (var row in await store.ListAsync(ct)) _rows[row.Team] = row;
+        foreach (var row in await store.ListUninstalledAsync(ct)) _uninstalled[row.Team] = row;
     }
 
     /// <summary>Which package a team came from, for its summary; null for a team made by hand.</summary>
@@ -31,16 +36,33 @@ public sealed class TeamSolutionIndex(ITeamSolutionStore store) : ITeamSolutionS
     public Task<IReadOnlyList<TeamSolutionRow>> ListAsync(CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<TeamSolutionRow>>([.. _rows.Values.OrderBy(r => r.Team, StringComparer.Ordinal)]);
 
+    public Task<TeamSolutionRow?> FindUninstalledAsync(string team, CancellationToken ct = default) =>
+        Task.FromResult(_uninstalled.GetValueOrDefault(team));
+
+    public Task<IReadOnlyList<TeamSolutionRow>> ListUninstalledAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<TeamSolutionRow>>([.. _uninstalled.Values.OrderBy(r => r.Team, StringComparer.Ordinal)]);
+
     public async Task SaveAsync(TeamSolutionRow row, TriggerAudit audit, CancellationToken ct = default)
     {
         await store.SaveAsync(row, audit, ct);
-        _rows[row.Team] = row;
+
+        if (row.UninstalledAt is null)
+        {
+            _uninstalled.TryRemove(row.Team, out _);
+            _rows[row.Team] = row;
+        }
+        else
+        {
+            _rows.TryRemove(row.Team, out _);
+            _uninstalled[row.Team] = row;
+        }
     }
 
     public async Task<bool> DeleteAsync(string team, TriggerAudit? audit, CancellationToken ct = default)
     {
         var deleted = await store.DeleteAsync(team, audit, ct);
         _rows.TryRemove(team, out _);
+        _uninstalled.TryRemove(team, out _);
         return deleted;
     }
 }

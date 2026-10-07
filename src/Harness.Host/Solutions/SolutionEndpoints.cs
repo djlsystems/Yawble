@@ -74,8 +74,12 @@ public static class SolutionEndpoints
             .WithSummary("What installing a solution package would do")
             .WithDescription(
                 "Writes nothing. Body `{ folder, team? }`. A new team: 200 `{ ok: true, mode: \"install\", "
-                + "teamName, nameRefusal, plan, connections }`, where `nameRefusal` says why that name cannot "
-                + "be used, or null. `team` naming a team installed from an earlier version of the same "
+                + "teamName, nameRefusal, plan, connections, reinstallable }`, where `nameRefusal` says why "
+                + "that name cannot be used, or null, and `reinstallable` lists each team `{ team, teamName, "
+                + "version, uninstalledAt }` that kept an uninstalled install of this package id. `team` "
+                + "naming one of those: the same with `reinstall: { team, teamName, from }` and `previous: "
+                + "{ settings: [{ member, setting, value }], connections: [{ member, slot, connection }] }`, "
+                + "the person's earlier answers that still apply, to prefill. `team` naming a team installed from an earlier version of the same "
                 + "package: 200 `{ ok: true, mode: \"update\", team, teamName, from, to, plan, diff, "
                 + "connections }`, the diff naming the members, triggers, skills, sites, tools and plugins "
                 + "added, changed and removed. A team that cannot be updated from it: 200 `{ ok: false, "
@@ -105,7 +109,10 @@ public static class SolutionEndpoints
                 + "undone in reverse order. 200 `{ ok: false, refusals }` for a package that fails its "
                 + "check; 400 `{ error }` for a refused folder or answer - a connection lacking scopes its "
                 + "slot needs adds `reconnect: { connectionId, scopes }`, the first such binding and exactly "
-                + "the scopes it lacks; 409 for a team name that is taken. A person only.");
+                + "the scopes it lacks; 409 for a team name that is taken. `teamName` naming a team with no "
+                + "package installed that kept an uninstalled install of this same package id installs over "
+                + "it: its kept sites are published again with their data, its members and triggers made "
+                + "again, and the answer carries `reinstalledFrom`, the version it held. A person only.");
 
         app.MapPost("/api/solutions/update", async (
             SolutionUpdateBody request, SolutionInstaller installer, HttpContext context, CancellationToken ct) =>
@@ -168,11 +175,13 @@ public static class SolutionEndpoints
             .WithSummary("Uninstall the solution a team was installed from")
             .WithDescription(
                 "Body `{ removePlugins?: false }`. Removes the team's triggers, members (the Manager stays, "
-                + "with the package's instructions cleared), team skills, sites with their data, and tools "
-                + "folder, and forgets the package (`solution.uninstalled`). KEEPS the team and its "
-                + "documents. With `removePlugins: true`, each of the package's plugins is removed when no "
+                + "with the package's instructions cleared), team skills and tools folder (`solution."
+                + "uninstalled`). Takes the package's sites offline and KEEPS them, with every version and "
+                + "all their data, and keeps the record that the team held the package, with the person's "
+                + "answers, so installing the same package onto this team publishes them again. KEEPS the "
+                + "team and its documents. Deleting the team removes the kept sites and data. With `removePlugins: true`, each of the package's plugins is removed when no "
                 + "other team has a member on it. 200 `{ ok, team, teamName, id, version, removed: { "
-                + "triggers, members, skills, sites, tools }, plugins: { removed, kept: [{ id, usedBy }] }, "
+                + "triggers, members, skills, tools }, sitesKept, plugins: { removed, kept: [{ id, usedBy }] }, "
                 + "documentsKept, failures }`; `ok` is false when something could not be removed, each named "
                 + "in `failures`. Asking first is the caller's: this acts when called. 404 for a team not "
                 + "installed from a package. A person only.");

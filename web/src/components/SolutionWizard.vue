@@ -71,6 +71,9 @@ import { useConsoleStore } from '../stores/console';
  *
  * 1. **Team**: a new team (its name, editable, checked here and by the Host's preview; a local
  *    repository or not), or an update of a team installed from an earlier version of this package.
+ *    A team that kept an uninstalled install of this package is offered for a REINSTALL: the install
+ *    goes over it, its kept sites come back with their data, and the person's earlier answers that
+ *    still apply are prefilled in Your part, each asked again.
  * 2. **Review**: everything the install makes, WHOLE. Every member's instructions and every
  *    trigger's instruction become prompts, so none is shortened; each trigger says what fires it,
  *    whom it wakes, how the Manager is woken and its daily cap. An update marks what is new or
@@ -128,6 +131,7 @@ function reset() {
   teamName.value = '';
   localRepository.value = true;
   updateTeam.value = '';
+  prefilledFor = '';
   preview.value = null;
   previewProblem.value = '';
   values.value = {};
@@ -199,6 +203,42 @@ const nameRefusal = computed(() =>
     ? installPreview.value.nameRefusal
     : null,
 );
+
+/** The kept team the name names, which the install goes over; null for a new team. */
+const reinstall = computed(() =>
+  installPreview.value && installPreview.value.teamName === teamName.value.trim() ? (installPreview.value.reinstall ?? null) : null,
+);
+
+/** Teams that kept an uninstalled install of this package, offered for a reinstall. */
+const reinstallable = computed(() => installPreview.value?.reinstallable ?? []);
+
+function chooseReinstall(name: string) {
+  mode.value = 'install';
+  teamName.value = name;
+  void previewName();
+}
+
+// THE PERSON'S EARLIER ANSWERS start each input they still apply to, once per kept team; each is
+// still asked, and the person may change it.
+let prefilledFor = '';
+
+watch(installPreview, (answer) => {
+  if (!answer?.reinstall || !answer.previous || prefilledFor === answer.reinstall.team) return;
+  prefilledFor = answer.reinstall.team;
+  const asked = new Set((answer.plan.personSettings ?? []).map(settingKey));
+  const nextValues = { ...values.value };
+  for (const entry of answer.previous.settings) {
+    if (asked.has(settingKey(entry))) nextValues[settingKey(entry)] = entry.value;
+  }
+  values.value = nextValues;
+  const nextBindings = { ...bindings.value };
+  for (const entry of answer.previous.connections) nextBindings[slotKey(entry)] = entry.connection;
+  bindings.value = nextBindings;
+});
+
+/** Whether a setting starts from the person's answer to the earlier install. */
+const previousSetting = (setting: SolutionPersonSetting) =>
+  !!reinstall.value && !!installPreview.value?.previous?.settings.some((entry) => settingKey(entry) === settingKey(setting));
 
 const candidates = computed(() =>
   checkPlan.value ? updateCandidates(installed.value, checkPlan.value.package.id, checkPlan.value.package.version) : [],
@@ -583,6 +623,9 @@ const installLine = computed(() => {
   if (updatePreview.value) {
     return `Update ${updatePreview.value.teamName} from ${updatePreview.value.from} to ${updatePreview.value.to}.`;
   }
+  if (reinstall.value) {
+    return `Reinstall ${current.package.name} ${current.package.version} onto the team ${reinstall.value.teamName}, bringing back its kept sites with their data.`;
+  }
   return `Install ${current.package.name} ${current.package.version} as the team ${teamName.value.trim()}.`;
 });
 
@@ -745,14 +788,37 @@ function next() {
                 :error-message="nameProblem ?? nameRefusal ?? ''"
                 data-team-name
               />
-              <q-checkbox
-                v-model="localRepository"
-                dense
-                label="Create a local repository for this team"
-                data-local-repository
-              />
-              <div class="text-caption os-text-muted">
-                The team gets a local repository named after it, as a new team does. Untick for none.
+              <div v-if="reinstall" class="q-mt-sm" data-reinstall-line>
+                Reinstalls onto the team {{ reinstall.teamName }}, which kept {{ plan.package.name }} {{ reinstall.from }} when it was
+                uninstalled: its sites come back with their data, its members and triggers are made again, and your earlier
+                answers are filled in for you to check.
+              </div>
+              <template v-else>
+                <q-checkbox
+                  v-model="localRepository"
+                  dense
+                  label="Create a local repository for this team"
+                  data-local-repository
+                />
+                <div class="text-caption os-text-muted">
+                  The team gets a local repository named after it, as a new team does. Untick for none.
+                </div>
+              </template>
+              <div v-if="reinstallable.length > 0 && !reinstall" class="q-mt-sm" data-reinstall-candidates>
+                <div class="text-caption os-text-muted">
+                  These teams kept an earlier install of this package, its sites offline with their data:
+                </div>
+                <q-btn
+                  v-for="kept in reinstallable"
+                  :key="kept.team"
+                  flat
+                  dense
+                  no-caps
+                  color="primary"
+                  :label="`Reinstall onto ${kept.teamName} (had ${kept.version})`"
+                  :data-reinstall-team="kept.team"
+                  @click="chooseReinstall(kept.teamName)"
+                />
               </div>
             </div>
 
@@ -796,6 +862,9 @@ function next() {
             <div class="q-mb-sm">{{ plan.package.description }}</div>
             <div v-if="updatePreview" class="text-weight-medium q-mb-sm" data-version-line>
               {{ updatePreview.teamName }}: {{ updatePreview.from }} -> {{ updatePreview.to }}
+            </div>
+            <div v-else-if="reinstall" class="q-mb-sm" data-reinstall-team-line>
+              Reinstall onto {{ reinstall.teamName }}, which had {{ reinstall.from }}: its kept sites come back with their data.
             </div>
             <div v-else class="q-mb-sm" data-new-team-line>A new team: {{ teamName.trim() }}</div>
 
@@ -960,6 +1029,7 @@ function next() {
                   {{ setting.description }}
                   <template v-if="settingDefaultWords(setting) !== null"> Default: {{ settingDefaultWords(setting) }}.</template>
                   {{ setting.required ? 'Required.' : 'Optional.' }}
+                  <template v-if="previousSetting(setting)"><span data-previous-setting> Filled in with your answer before.</span></template>
                 </div>
                 </template>
               </div>

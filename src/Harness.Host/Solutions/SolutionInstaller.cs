@@ -89,6 +89,10 @@ public sealed record SolutionDone(
 
     /// <summary>Each schedule's first run: ran now at install, or when it first comes due.</summary>
     public IReadOnlyList<SolutionFirstRun> FirstRuns { get; init; } = [];
+
+    /// <summary>For an install onto a team that kept an uninstalled earlier install of this package,
+    /// the version it held; null for a new team.</summary>
+    public string? ReinstalledFrom { get; init; }
 }
 
 /// <summary>
@@ -335,6 +339,23 @@ public sealed class SolutionInstaller(
         var plan = check.Check.Plan!;
         var available = await ConnectionsAsync(ct);
 
+        if (!string.IsNullOrWhiteSpace(team) && await ReinstallableAsync(team, package.Manifest.Id, ct) is { } kept)
+        {
+            return new(200, new
+            {
+                ok = true,
+                mode = "install",
+                teamName = team.Trim(),
+                nameRefusal = (string?)null,
+                reinstall = new { team = kept.Team, teamName = teams.LabelFor(kept.Team), from = kept.Version },
+                previous = await PreviousAnswersAsync(kept, package, ct),
+                plan,
+                connections = available,
+                secrets = SecretStates(package, (member, field) => package.Manifest.Member(member)?.Secrets.GetValueOrDefault(field), config: null),
+                reinstallable = await ReinstallableTeamsAsync(package.Manifest.Id, ct),
+            });
+        }
+
         if (!string.IsNullOrWhiteSpace(team) && ExistingTeam(team) is { } stored)
         {
             var (row, refusal) = await UpdatableAsync(stored, package, ct);
@@ -367,7 +388,122 @@ public sealed class SolutionInstaller(
             plan,
             connections = available,
             secrets = SecretStates(package, (member, field) => package.Manifest.Member(member)?.Secrets.GetValueOrDefault(field), config: null),
+            reinstallable = await ReinstallableTeamsAsync(package.Manifest.Id, ct),
         });
+    }
+
+    /// <summary>
+    /// THE TEAM <paramref name="name"/> NAMES, WHEN AN INSTALL OF <paramref name="packageId"/> MAY GO
+    /// OVER IT: the team exists, has no package installed, and kept an uninstalled earlier install of
+    /// this same package id. Null for any other team, which the install refuses by name as before.
+    /// </summary>
+    private async Task<TeamSolutionRow?> ReinstallableAsync(string name, string packageId, CancellationToken ct)
+    {
+        if (ExistingTeam(name) is not { } stored || await store.FindAsync(stored, ct) is not null) return null;
+
+        return await store.FindUninstalledAsync(stored, ct) is { } kept && string.Equals(kept.PackageId, packageId, StringComparison.Ordinal)
+            ? kept with { Team = stored }
+            : null;
+    }
+
+    /// <summary>Every team a package of <paramref name="packageId"/> may be reinstalled onto, for the
+    /// wizard to offer.</summary>
+    private async Task<IReadOnlyList<object>> ReinstallableTeamsAsync(string packageId, CancellationToken ct)
+    {
+        var teamsKept = new List<object>();
+
+        foreach (var row in await store.ListUninstalledAsync(ct))
+        {
+            if (!string.Equals(row.PackageId, packageId, StringComparison.Ordinal) || teams.ExistingName(row.Team) is not { } stored) continue;
+            if (await store.FindAsync(stored, ct) is not null) continue;
+
+            teamsKept.Add(new { team = stored, teamName = teams.LabelFor(stored), version = row.Version, uninstalledAt = row.UninstalledAt });
+        }
+
+        return teamsKept;
+    }
+
+    /// <summary>The person's answers as an uninstall keeps them: package member to setting to value,
+    /// and package member to slot to connection id.</summary>
+    private sealed record KeptAnswers(
+        Dictionary<string, Dictionary<string, JsonElement>>? Settings,
+        Dictionary<string, Dictionary<string, string>>? Connections);
+
+    private static readonly JsonSerializerOptions AnswersJson = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// THE PERSON'S ANSWERS AT UNINSTALL, read before its members go: each setting the package asks
+    /// a person for, as the member holds it, and each connection slot it asks for, as bound. Null
+    /// when there is nothing to keep.
+    /// </summary>
+    private async Task<string?> AnswersOfAsync(string team, TeamSolutionRow row, SolutionManifest? manifest, CancellationToken ct)
+    {
+        if (manifest is null || pluginSettings is null) return null;
+
+        var settings = new Dictionary<string, Dictionary<string, JsonElement>>(StringComparer.Ordinal);
+        var connected = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+
+        async Task<PluginMemberSettings?> HeldAsync(string member) =>
+            row.Members.TryGetValue(member, out var id) && MemberExists(team, id)
+                ? await pluginSettings.ForAsync(new ContainerId(team, id), ct)
+                : null;
+
+        foreach (var input in manifest.Inputs.Settings)
+        {
+            if (await HeldAsync(input.Member) is { } held && held.Config.TryGetValue(input.Setting, out var value))
+            {
+                (settings.TryGetValue(input.Member, out var of) ? of : settings[input.Member] = new(StringComparer.Ordinal))[input.Setting] = value;
+            }
+        }
+
+        foreach (var input in manifest.Inputs.Connections)
+        {
+            if (await HeldAsync(input.Member) is { } held && held.Connections.TryGetValue(input.Slot, out var id))
+            {
+                (connected.TryGetValue(input.Member, out var of) ? of : connected[input.Member] = new(StringComparer.Ordinal))[input.Slot] = id;
+            }
+        }
+
+        return settings.Count + connected.Count == 0
+            ? null
+            : JsonSerializer.Serialize(new KeptAnswers(settings, connected), AnswersJson);
+    }
+
+    /// <summary>
+    /// WHAT A REINSTALL PREFILLS: the answers the person gave the earlier install, only where they
+    /// still apply - a setting this package still asks for, with a value its plugin still accepts,
+    /// and a slot it still asks for, bound to a connection that still exists. Every one is asked
+    /// again; these are where the answer starts.
+    /// </summary>
+    private async Task<object> PreviousAnswersAsync(TeamSolutionRow kept, SolutionPackage package, CancellationToken ct)
+    {
+        var settings = new List<object>();
+        var connected = new List<object>();
+        var answers = kept.Answers is { } json ? JsonSerializer.Deserialize<KeptAnswers>(json, AnswersJson) : null;
+        var manifest = package.Manifest;
+        var connectionIds = connectionStore is null
+            ? []
+            : (await connectionStore.ListAsync(ct)).Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var input in manifest.Inputs.Settings)
+        {
+            if (AnswersFor(answers?.Settings, input.Member).TryGetValue(input.Setting, out var value)
+                && package.Plugin(manifest.Member(input.Member)?.PluginId)?.Manifest.Config.GetValueOrDefault(input.Setting) is { } field
+                && field.Refusal(input.Setting, value) is null)
+            {
+                settings.Add(new { member = input.Member, setting = input.Setting, value });
+            }
+        }
+
+        foreach (var input in manifest.Inputs.Connections)
+        {
+            if (AnswersFor(answers?.Connections, input.Member).TryGetValue(input.Slot, out var id) && connectionIds.Contains(id))
+            {
+                connected.Add(new { member = input.Member, slot = input.Slot, connection = id });
+            }
+        }
+
+        return new { settings, connections = connected };
     }
 
     /// <summary>
@@ -621,7 +757,10 @@ public sealed class SolutionInstaller(
         var manifest = package.Manifest;
         var teamName = string.IsNullOrWhiteSpace(request.TeamName) ? manifest.Team.Name : request.TeamName.Trim();
 
-        if (NameRefusal(teamName) is { } nameRefusal) return new(409, new { error = nameRefusal });
+        // A TEAM THAT KEPT AN UNINSTALLED INSTALL OF THIS PACKAGE is installed over; any other
+        // existing team is refused by name, as it always was.
+        var kept = await ReinstallableAsync(teamName, manifest.Id, ct);
+        if (kept is null && NameRefusal(teamName) is { } nameRefusal) return new(409, new { error = nameRefusal });
 
         var answers = request.Answers ?? new SolutionAnswers();
         if (AnswersRefusal(package, answers, update: false) is { } answersRefusal) return new(400, new { error = answersRefusal });
@@ -648,9 +787,16 @@ public sealed class SolutionInstaller(
                 foreach (var plugin in package.Plugins) await InstallPluginAsync(plugin, run, ct);
             });
 
-            // 2. THE TEAM, with its local repository unless asked not to.
+            // 2. THE TEAM, with its local repository unless asked not to - or the team that kept the
+            // earlier install, as it is.
             await run.StepAsync(StepTeam, async () =>
             {
+                if (kept is not null)
+                {
+                    stored = kept.Team;
+                    return;
+                }
+
                 var repos = await repoSetup.PlanNewTeamAsync(null, null, null, person: true, request.LocalRepository, ct);
                 var presets = manifest.Members
                     .Where(m => m.Kind == MemberRef.AgentKind && m.Preset is not null)
@@ -701,6 +847,15 @@ public sealed class SolutionInstaller(
             // 3. THE MEMBERS: the Manager takes the package's name and instructions, the rest are hired.
             await run.StepAsync(StepMembers, async () =>
             {
+                // THE KEPT TEAM'S MANAGER takes the package's name and instructions again; undone to
+                // what it had, since the team does not go with the undo.
+                if (kept is not null && MemberExists(stored!, TeamRegistry.DefaultManagerName))
+                {
+                    var before = await teams.MemberAsync(stored!, TeamRegistry.DefaultManagerName, ct);
+                    run.Made($"member {before.Label} (instructions)", () => teams.UpdateMemberAsync(
+                        stored!, TeamRegistry.DefaultManagerName, before.Label, before.SystemPrompt ?? "", before.Agent, actor.PromptSetter, CancellationToken.None));
+                }
+
                 foreach (var member in manifest.Members)
                 {
                     memberIds[member.Name] = await HireAsync(stored!, member, package, answers, agent, tools, actor, run, ct);
@@ -718,6 +873,9 @@ public sealed class SolutionInstaller(
             {
                 if (package.ToolsFolder is not { } source) return;
 
+                // An uninstall that could not remove the old copy leaves it; the package's is the one.
+                if (kept is not null) await RemoveFolderAsync(tools!);
+
                 CopyReadOnly(source, tools!);
                 run.Made($"tools {tools}", () => RemoveFolderAsync(tools!));
 
@@ -726,9 +884,14 @@ public sealed class SolutionInstaller(
             });
 
             // 6. THE SITES.
+            // A SITE THE TEAM KEPT is published again from the package, its versions and data as kept.
             await run.StepAsync(StepSites, async () =>
             {
-                foreach (var site in package.Sites) await PublishSiteAsync(stored!, site, actor, run, isNew: true, ct);
+                foreach (var site in package.Sites)
+                {
+                    var keptSite = kept is not null && (await sites.FindAsync(stored!, site.Name, null, ct)).Value is not null;
+                    await PublishSiteAsync(stored!, site, actor, run, isNew: !keptSite, ct);
+                }
             });
 
             // 7. THE TRIGGERS, after the document folders a folder trigger watches.
@@ -757,6 +920,7 @@ public sealed class SolutionInstaller(
                 {
                     id = manifest.Id,
                     version = manifest.Version,
+                    reinstalledFrom = kept?.Version,
                     folder = package.Folder,
                     members = memberIds,
                     triggers = triggerIds.Keys,
@@ -766,7 +930,9 @@ public sealed class SolutionInstaller(
                     plugins = row.Plugins,
                 }), ct);
 
-                run.Made($"record {stored}", () => store.DeleteAsync(stored!, null, CancellationToken.None));
+                run.Made($"record {stored}", () => kept is null
+                    ? store.DeleteAsync(stored!, null, CancellationToken.None)
+                    : store.SaveAsync(kept, actor.Row(TenantActions.SolutionFailed, stored, teams.LabelFor(stored!), new { id = kept.PackageId, restored = "uninstalled" }), CancellationToken.None));
             });
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -788,6 +954,7 @@ public sealed class SolutionInstaller(
         {
             Secrets = await InstalledSecretsAsync(stored!, memberIds, package, ct),
             FirstRuns = firstRuns,
+            ReinstalledFrom = kept?.Version,
         });
     }
 
@@ -818,10 +985,13 @@ public sealed class SolutionInstaller(
     /// <summary>
     /// UNINSTALLS the solution <paramref name="team"/> was installed from: removes the triggers, the
     /// members (the team's Manager stays - every team has one - with the package's instructions
-    /// cleared), the team skills, the sites with their data and the tools folder the package made,
-    /// and forgets the <c>team_solutions</c> row with its <c>solution.uninstalled</c> row. The team
-    /// and its DOCUMENTS stay: they are the person's. With <paramref name="removePlugins"/>, each of
-    /// the package's plugins is removed too, but only when no other team has a member on it.
+    /// cleared), the team skills and the tools folder the package made. The SITES are taken offline
+    /// and KEPT with every version and all their data, as an update keeps a site its package drops.
+    /// The <c>team_solutions</c> row is kept as uninstalled, with the person's answers and its
+    /// <c>solution.uninstalled</c> row, so installing the same package onto this team again brings
+    /// the sites back. The team and its DOCUMENTS stay: they are the person's. A team deletion
+    /// removes the kept sites and the row. With <paramref name="removePlugins"/>, each of the
+    /// package's plugins is removed too, but only when no other team has a member on it.
     ///
     /// Asking first is the caller's: this acts when called. Each removal goes through the store a
     /// person's own click uses, with its own tenant row; one that fails is named in <c>failures</c>
@@ -855,7 +1025,7 @@ public sealed class SolutionInstaller(
         var removedTriggers = new List<string>();
         var removedMembers = new List<string>();
         var removedSkills = new List<string>();
-        var removedSites = new List<string>();
+        var sitesKept = new List<string>();
 
         async Task Try(string what, Func<Task> removal)
         {
@@ -867,6 +1037,17 @@ public sealed class SolutionInstaller(
             {
                 failures.Add($"{what}: {exception.Message}");
             }
+        }
+
+        // THE PERSON'S ANSWERS, read while the members still hold them, for a reinstall to prefill.
+        string? answers = null;
+        try
+        {
+            answers = await AnswersOfAsync(stored, row, manifest, ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            failures.Add($"answers: {exception.Message}");
         }
 
         // 1. TRIGGERS FIRST, so nothing fires onto a member about to go.
@@ -919,12 +1100,13 @@ public sealed class SolutionInstaller(
             });
         }
 
-        // 4. SITES, with their data: the solution's app goes with it. Documents are not site data.
+        // 4. SITES ARE TAKEN OFFLINE AND KEPT, every version and all their data, as an update keeps a
+        // site its package drops: the data is the person's, and a reinstall publishes them again.
         foreach (var name in manifest?.Sites ?? [])
         {
             await Try($"site {name}", async () =>
             {
-                if ((await sites.DeleteAsync(stored, name, confirmed: true, actor.Site, ct)).Ok) removedSites.Add(name);
+                if ((await sites.UnpublishAsync(stored, name, actor.Site, ct)).Ok) sitesKept.Add(name);
             });
         }
 
@@ -972,19 +1154,21 @@ public sealed class SolutionInstaller(
             triggers = removedTriggers,
             members = removedMembers,
             skills = removedSkills,
-            sites = removedSites,
             tools = hadTools && !Directory.Exists(tools),
         };
 
-        await store.DeleteAsync(stored, actor.Row(TenantActions.SolutionUninstalled, stored, teams.LabelFor(stored), new
-        {
-            id = row.PackageId,
-            version = row.Version,
-            removed = removedSummary,
-            plugins = new { removed = pluginsRemoved, kept = pluginsKept },
-            documentsKept,
-            failures,
-        }), ct);
+        // KEPT AS UNINSTALLED, not forgotten: the record that this team held the package.
+        await store.SaveAsync(row with { UninstalledAt = DateTimeOffset.UtcNow, Answers = answers },
+            actor.Row(TenantActions.SolutionUninstalled, stored, teams.LabelFor(stored), new
+            {
+                id = row.PackageId,
+                version = row.Version,
+                removed = removedSummary,
+                sitesKept,
+                plugins = new { removed = pluginsRemoved, kept = pluginsKept },
+                documentsKept,
+                failures,
+            }), ct);
 
         return new(200, new
         {
@@ -994,6 +1178,7 @@ public sealed class SolutionInstaller(
             id = row.PackageId,
             version = row.Version,
             removed = removedSummary,
+            sitesKept,
             plugins = new { removed = pluginsRemoved, kept = pluginsKept },
             documentsKept,
             failures,
@@ -1470,6 +1655,7 @@ public sealed class SolutionInstaller(
             run.Made($"site {site.Name} (published)", async () =>
             {
                 if (previous is { } version) await sites.RollbackAsync(team, site.Name, version, actor.Site, CancellationToken.None);
+                else await sites.UnpublishAsync(team, site.Name, actor.Site, CancellationToken.None);
             });
         }
     }
