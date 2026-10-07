@@ -12,6 +12,7 @@ import { asTeamId } from '../api/types';
 import { getTeamActivity } from '../api/client';
 import {
   ActivityStates,
+  type ActivityRange,
   activityCaption,
   activityLanes,
   activitySummary,
@@ -41,7 +42,16 @@ const props = defineProps<{
    * or tap opens the Activity dialog (there is no label to tap on a phone).
    */
   compact?: boolean;
+  /**
+   * THE AXIS TO DRAW ON, when the Teams list shares one across its rows (its relative view): the
+   * lanes are still this team's own, only the stretch of time under them is the list's. Absent, the
+   * axis is the team's own window.
+   */
+  range?: ActivityRange | null;
 }>();
+
+/** The team's own window, or `null` with no chart, so the Teams list can share one axis across rows. */
+const emit = defineEmits<{ 'own-window': [range: ActivityRange | null] }>();
 
 /** A lane is never shorter than this, so its initials stay legible. */
 const LaneHeight = 14;
@@ -157,10 +167,20 @@ const lanes = computed(() => (activity.value ? activityLanes(activity.value, pro
 const from = computed(() => (activity.value?.from ? Date.parse(activity.value.from) : null));
 
 /** A time of day alone is ambiguous once the window crosses midnight: then every time has its date. */
-const withDate = computed(() => from.value !== null && crossesDays(from.value, end.value));
+const withDate = computed(() => from.value !== null && crossesDays(axisFrom.value, axisTo.value));
 
 const hasChart = computed(() =>
   activity.value !== null && activity.value.window !== 'none' && from.value !== null && lanes.value.length > 0);
+
+/** WHERE THE AXIS RUNS: the shared range when the list hands one, else the team's own window. */
+const axisFrom = computed(() => props.range?.from ?? from.value ?? end.value);
+const axisTo = computed(() => Math.max(props.range?.to ?? end.value, axisFrom.value + 1));
+
+watch(
+  () => (hasChart.value && from.value !== null ? `${from.value}|${end.value}` : ''),
+  (key) => emit('own-window', key === '' ? null : { from: from.value!, to: end.value }),
+  { immediate: true },
+);
 
 const caption = computed(() =>
   activity.value
@@ -188,8 +208,8 @@ const pointerAt = ref<number | null>(null);
 
 function notePointerX(event: { offsetX?: number }) {
   const width = tileEl.value?.querySelector('.stats-chart')?.getBoundingClientRect().width ?? 0;
-  const start = from.value ?? end.value;
-  const stop = Math.max(end.value, start + 1);
+  const start = axisFrom.value;
+  const stop = axisTo.value;
 
   pointerAt.value = width > 0 && event.offsetX !== undefined
     ? start + (Math.min(Math.max(event.offsetX, 0), width) / width) * (stop - start)
@@ -216,8 +236,8 @@ function renderSpan(params: CustomSeriesRenderItemParams, api: CustomSeriesRende
 }
 
 const option = computed(() => {
-  const start = from.value ?? end.value;
-  const stop = Math.max(end.value, start + 1);
+  const start = axisFrom.value;
+  const stop = axisTo.value;
   const ink = colours.value.ink;
 
   const data = lanes.value.flatMap((lane, index) =>

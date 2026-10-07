@@ -102,6 +102,31 @@ export function windowEnd(activity: TeamActivity): number {
   return Number.isNaN(now) ? to : Math.min(to, now)
 }
 
+/** A stretch of time an Activity chart's axis runs over, as milliseconds. */
+export interface ActivityRange {
+  from: number
+  to: number
+}
+
+/**
+ * THE TEAMS LIST'S RELATIVE VIEW: one axis for every chart, from the earliest window's start to the
+ * latest window's end, so a stretch in one row stands over the same instant in every other. A team
+ * with no chart (`null`) takes no part; with none, there is no shared axis and each keeps its own.
+ */
+export function sharedWindow(windows: Iterable<ActivityRange | null>): ActivityRange | null {
+  let shared: ActivityRange | null = null
+
+  for (const window of windows) {
+    if (window === null) continue
+
+    shared = shared === null
+      ? { from: window.from, to: window.to }
+      : { from: Math.min(shared.from, window.from), to: Math.max(shared.to, window.to) }
+  }
+
+  return shared
+}
+
 /** The spans as instants, an open one (`to: null`) drawn to `end`; one reaching `end` is open there. */
 export function growSpans(spans: readonly ActivitySpan[], end: number): GrownSpan[] {
   return spans.map((span) => {

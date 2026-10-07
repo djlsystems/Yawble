@@ -18,6 +18,7 @@ import {
   growSpans,
   laneInitials,
   memberInitials,
+  sharedWindow,
   stateShapes,
   type StatePalette,
   tooltipHtml,
@@ -693,5 +694,20 @@ describe('a hold for a slot', () => {
       expect(x + width).toBeLessThanOrEqual(30)
     }
     expect(stateShapes(0, 0, 30, 10, 'blocked', palette).map((shape) => shape.type)).toEqual(['rect', 'polygon'])
+  })
+})
+
+describe('sharedWindow (the Teams list\'s relative view)', () => {
+  it('runs from the earliest start to the latest end of every chart', () => {
+    expect(sharedWindow([{ from: 100, to: 400 }, { from: 50, to: 300 }, { from: 200, to: 900 }])).toEqual({ from: 50, to: 900 })
+  })
+
+  it('leaves out a team with no chart', () => {
+    expect(sharedWindow([null, { from: 100, to: 400 }, null])).toEqual({ from: 100, to: 400 })
+  })
+
+  it('has no shared axis when no team has a chart', () => {
+    expect(sharedWindow([null, null])).toBeNull()
+    expect(sharedWindow([])).toBeNull()
   })
 })

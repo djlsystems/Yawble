@@ -31,6 +31,7 @@ import type { LocalRepo, Team, TeamDeleted, TeamId } from '../api/types';
 import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
 import TeamStatisticsTile from './TeamStatisticsTile.vue';
+import { type ActivityRange, sharedWindow } from '../lib/teamActivity';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
 
@@ -49,6 +50,43 @@ function storedSort(): TeamSort {
 }
 
 const sort = ref<TeamSort>(storedSort());
+
+const RelativeKey = 'harness.teamsActivityRelative';
+
+/**
+ * THE ACTIVITY COLUMN'S RELATIVE VIEW: off, each chart runs over its own team's window; on, every
+ * chart runs over one axis, the earliest start to the latest end of every team with a chart, so a
+ * team waiting for a slot sits under the team holding it. Kept per browser, like the sort.
+ */
+function storedRelative(): boolean {
+  try {
+    return localStorage.getItem(RelativeKey) === '1';
+  } catch {
+    return false;
+  }
+}
+
+const relative = ref(storedRelative());
+
+function setRelative(on: boolean) {
+  relative.value = on;
+  try {
+    localStorage.setItem(RelativeKey, on ? '1' : '0');
+  } catch {
+    // Not kept: the switch still works for this visit.
+  }
+}
+
+/** Each row's own window, as its chart reports it; `null` for a team with no chart. */
+const activityWindows = ref<Record<string, ActivityRange | null>>({});
+
+function noteWindow(teamId: string, range: ActivityRange | null) {
+  activityWindows.value = { ...activityWindows.value, [teamId]: range };
+}
+
+/** The one axis every chart shares while relative is on: over the rows listed, nothing else. */
+const sharedRange = computed(() =>
+  relative.value ? sharedWindow(rows.value.map((row) => activityWindows.value[row.id] ?? null)) : null);
 
 /**
  * THE SAME CLOCK THE TAB STRIP KEEPS, and for the same reason: `UNDECLARED` has a grace period, so a
@@ -510,7 +548,21 @@ async function setPaused(team: Team | null, paused: boolean) {
           </th>
 
           <!-- NOT SORTABLE: lanes over time have no single value to order by. -->
-          <th data-col="activity" class="text-left">Activity</th>
+          <th data-col="activity" class="text-left">
+            <div class="teams-activity-heading">
+              <span>Activity</span>
+              <q-toggle
+                dense
+                size="xs"
+                data-activity-relative
+                label="Relative"
+                :model-value="relative"
+                @update:model-value="setRelative"
+              >
+                <q-tooltip>Every chart on the same time span, so teams can be compared side by side</q-tooltip>
+              </q-toggle>
+            </div>
+          </th>
 
           <!-- No label: the column carries live controls rather than sortable data. -->
           <th class="text-right" />
@@ -558,6 +610,8 @@ async function setPaused(team: Team | null, paused: boolean) {
                 :team-id="row.id"
                 :containers="teamFor(row)?.containers ?? []"
                 :workflows="board.workflowsFor(row.id)"
+                :range="sharedRange"
+                @own-window="(range: ActivityRange | null) => noteWindow(row.id, range)"
               />
               <TeamStatusIcon :status="row.status" :held="row.held" :workflows="board.workflowsFor(row.id)" />
             </div>
@@ -816,6 +870,14 @@ async function setPaused(team: Team | null, paused: boolean) {
 </template>
 
 <style scoped>
+/* The Activity heading: its word, then the Relative switch beside it. */
+.teams-activity-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: inherit;
+}
+
 /* The Activity cell: the chart, then the team's status icon on its right. */
 .teams-activity-cell {
   display: flex;

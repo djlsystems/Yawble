@@ -97,6 +97,25 @@ describe('the compact Activity tile', () => {
     expect(tile.findComponent(TeamStatisticsDialog).props('modelValue')).toBe(true);
   });
 
+  it('reports its own window to the list, and nothing for a team that never ran', async () => {
+    const tile = await mountTile();
+    expect(tile.emitted('own-window')!.at(-1)).toEqual([{ from: Date.parse(iso(0)), to: Date.parse(iso(30)) }]);
+
+    wrapper!.unmount();
+    const none = await mountTile({ ...activity, window: 'none', from: null, to: null, members: [] } as TeamActivity);
+    expect(none.emitted('own-window')!.at(-1)).toEqual([null]);
+  });
+
+  it('draws its axis over the range the list shares, and over its own window without one', async () => {
+    const tile = await mountTile();
+    const axis = () => (tile.findComponent({ name: 'echarts' }).props('option') as { xAxis: { min: number; max: number } }).xAxis;
+
+    expect(axis()).toMatchObject({ min: Date.parse(iso(0)), max: Date.parse(iso(30)) });
+
+    await tile.setProps({ range: { from: Date.parse(iso(-60)), to: Date.parse(iso(90)) } });
+    expect(axis()).toMatchObject({ min: Date.parse(iso(-60)), max: Date.parse(iso(90)) });
+  });
+
   it('shows a dash, not an empty cell, for a team that never ran', async () => {
     const tile = await mountTile({ ...activity, window: 'none', from: null, to: null, members: [] } as TeamActivity);
 
@@ -105,10 +124,15 @@ describe('the compact Activity tile', () => {
 });
 
 describe('the Teams list', () => {
-  async function mountView(latest: string | null = null, roster = members) {
+  async function mountView(latest: string | null = null, roster = members, extraTeams: { id: string; name: string }[] = []) {
     setActivePinia(createPinia());
     const board = useConsoleStore();
-    board.$patch({ teams: [{ id: 'alpha' as TeamId, name: 'Alpha', paused: false, containers: roster }] } as never);
+    board.$patch({
+      teams: [
+        { id: 'alpha' as TeamId, name: 'Alpha', paused: false, containers: roster },
+        ...extraTeams.map((t) => ({ id: t.id as TeamId, name: t.name, paused: false, containers: roster })),
+      ],
+    } as never);
     if (latest !== null) {
       board.$patch({
         workflows: {
@@ -131,7 +155,7 @@ describe('the Teams list', () => {
 
     wrapper = mount(TeamsView, {
       attachTo: document.body,
-      global: { stubs: { TeamStatisticsTile: { template: '<div class="tile-stub" />', props: ['teamId', 'containers', 'workflows', 'compact'] } } },
+      global: { stubs: { TeamStatisticsTile: { template: '<div class="tile-stub" />', props: ['teamId', 'containers', 'workflows', 'compact', 'range'], emits: ['own-window'] } } },
     });
     await flushPromises();
     return { view: wrapper, setActive };
@@ -142,7 +166,7 @@ describe('the Teams list', () => {
 
     // The sorted heading carries its arrow's icon name as text; the words are what is checked.
     const headings = view.findAll('thead th').map((th) => th.text().replace(/arrow_(up|down)ward/, '').replace(/\s+/g, ' ').trim());
-    expect(headings).toEqual(['Team', 'Members', 'Status', 'Activity', '']);
+    expect(headings).toEqual(['Team', 'Members', 'Status', 'ActivityRelative', '']);
     expect(view.find('thead th[data-col="activity"]').exists()).toBe(true);
   });
 
@@ -191,5 +215,49 @@ describe('the Teams list', () => {
     const { view } = await mountView();
 
     expect(view.find('td.teams-activity [data-team-status]').exists()).toBe(false);
+  });
+
+  describe('the Relative switch in the Activity heading', () => {
+    beforeEach(() => localStorage.removeItem('harness.teamsActivityRelative'));
+
+    const tileFor = (view: VueWrapper, id: string) =>
+      view.findAllComponents(TeamStatisticsTile).find((tile) => tile.props('teamId') === id)!;
+
+    it('is off by default, and each chart keeps its own window', async () => {
+      const { view } = await mountView(null, members, [{ id: 'beta', name: 'Beta' }]);
+
+      expect(view.find('[data-activity-relative]').attributes('aria-checked')).toBe('false');
+      tileFor(view, 'alpha').vm.$emit('own-window', { from: 100, to: 400 });
+      tileFor(view, 'beta').vm.$emit('own-window', { from: 200, to: 900 });
+      await flushPromises();
+
+      expect(tileFor(view, 'alpha').props('range')).toBeNull();
+      expect(tileFor(view, 'beta').props('range')).toBeNull();
+    });
+
+    it('on, gives every chart the earliest start to the latest end of the teams with a chart', async () => {
+      const { view } = await mountView(null, members, [{ id: 'beta', name: 'Beta' }, { id: 'gamma', name: 'Gamma' }]);
+
+      tileFor(view, 'alpha').vm.$emit('own-window', { from: 100, to: 400 });
+      tileFor(view, 'beta').vm.$emit('own-window', { from: 200, to: 900 });
+      tileFor(view, 'gamma').vm.$emit('own-window', null);
+      await view.find('[data-activity-relative]').trigger('click');
+      await flushPromises();
+
+      for (const id of ['alpha', 'beta', 'gamma']) expect(tileFor(view, id).props('range')).toEqual({ from: 100, to: 900 });
+    });
+
+    it('is kept in this browser and read back on the next visit', async () => {
+      const first = await mountView();
+      await first.view.find('[data-activity-relative]').trigger('click');
+      expect(localStorage.getItem('harness.teamsActivityRelative')).toBe('1');
+      first.view.unmount();
+
+      const { view } = await mountView();
+      expect(view.find('[data-activity-relative]').attributes('aria-checked')).toBe('true');
+
+      await view.find('[data-activity-relative]').trigger('click');
+      expect(localStorage.getItem('harness.teamsActivityRelative')).toBe('0');
+    });
   });
 });
