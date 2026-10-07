@@ -502,7 +502,7 @@ async function signOut() {
               @click="minimizeConciergeFor(() => (firstRunGuideOpen = true))"
             >
               <q-item-section avatar>
-                <q-icon name="tips_and_updates" />
+                <q-icon name="flag" />
               </q-item-section>
               <q-item-section>Getting started</q-item-section>
             </q-item>
