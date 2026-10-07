@@ -84,6 +84,15 @@ public sealed partial class TeamDocuments
 
         if (name.Length == 0) throw new DocumentPathException("That zip has no name.");
 
+        // THE FOLDER IT MAKES is one plain name: `..zip` would unpack into the folder it was dropped
+        // in and `...zip` into the one above, and the marker's name is never a document's.
+        if (name is "." or ".." || name.Contains(':'))
+        {
+            throw new DocumentPathException($"{refused}{name} is not a folder name.");
+        }
+
+        if (IsMarker(name)) throw new DocumentPathException($"{refused}{name} is reserved for the folder's marker.");
+
         if (archive.Entries.Count > MaximumPackageFiles)
         {
             throw new DocumentPathException($"{refused}it holds more than {MaximumPackageFiles} entries.");

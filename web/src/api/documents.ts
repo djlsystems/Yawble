@@ -160,7 +160,7 @@ export const uploadDocumentFolder = (
     form.append('relativePath', relativePath)
   }
 
-  return sendPackage(docs(folder, '/upload-folder'), form, path, onClash)
+  return sendPackage(docs(folder, '/upload-folder'), form, path, onClash, 'That folder is larger than 100 MB.')
 }
 
 /**
@@ -176,14 +176,20 @@ export const uploadDocumentZip = (
   const form = new FormData()
   form.append('file', zip)
 
-  return sendPackage(docs(folder, '/upload-zip'), form, path, onClash)
+  return sendPackage(docs(folder, '/upload-zip'), form, path, onClash, 'That zip is larger than 25 MB.')
 }
 
+/**
+ * A 413 is the server's body limit refusing the request before the route reads it, so it carries
+ * no sentence of the route's (a proxy in front may send an HTML page instead): it is thrown as
+ * `tooLarge`, the route's own size sentence, never as a bare status.
+ */
 async function sendPackage(
   url: string,
   form: FormData,
   path: string,
   onClash: 'ask' | OnClash,
+  tooLarge: string,
 ): Promise<DocumentsPackageAnswer> {
   form.append('path', path)
   form.append('onClash', onClash)
@@ -197,6 +203,8 @@ async function sendPackage(
   } catch (failure) {
     const clash = clashOf(failure)
     if (clash) return clash
+
+    if ((failure as { status?: number }).status === 413) throw Object.assign(new Error(tooLarge), { status: 413 })
 
     throw failure
   }

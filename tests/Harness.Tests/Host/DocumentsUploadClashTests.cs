@@ -160,4 +160,28 @@ public sealed class DocumentsUploadClashTests(HostFixture host) : IClassFixture<
 
         Assert.False(File.Exists(Docs.At(gone, "new.md")));
     }
+    [Fact]
+    public async Task An_upload_named_the_marker_is_refused_under_every_onClash_and_the_marker_is_kept()
+    {
+        using var client = await host.PersonAsync();
+        Docs.Folder(host.Alpha, "up-marker");
+        var marker = TeamPaths.MarkerIn(Docs.RootFor(host.Alpha));
+        var before = File.ReadAllText(marker);
+        var rows = (await host.Services.GetRequiredService<ITenantLog>().ReadAsync(null, 1000, Ct)).Total;
+
+        foreach (var onClash in new[] { null, "ask", "keep-both", "replace", "skip" })
+        {
+            foreach (var name in new[] { TeamPaths.MarkerFileName, ".HARNESS-TEAM" })
+            {
+                var response = await UploadAsync(client, host.Alpha, "", name, "overwritten", onClash);
+
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                Assert.Equal($"{name} is reserved for the folder's marker.", await response.ErrorAsync());
+            }
+        }
+
+        Assert.Equal(before, File.ReadAllText(marker));
+        Assert.Equal([TeamPaths.MarkerFileName], Directory.GetFiles(Docs.RootFor(host.Alpha)).Select(Path.GetFileName).Where(n => n!.StartsWith(".harness", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(rows, (await host.Services.GetRequiredService<ITenantLog>().ReadAsync(null, 1000, Ct)).Total);
+    }
 }

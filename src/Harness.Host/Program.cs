@@ -6320,7 +6320,8 @@ documents.MapPost("/upload", async (
         "A multipart form with the file in `file` and an optional destination folder in `path`.\n\n"
         + "Only the LEAF of the uploaded filename is kept, so a name carrying directory separators "
         + "cannot place the file anywhere but where `path` says. 400 for a missing file, an empty "
-        + $"one, or one larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB. Audited as "
+        + "one, one named for the documents marker (under every `onClash`), "
+        + $"or one larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB. Audited as "
         + "`document.uploaded`, with the path and size and never the contents.\n\n"
         + "An optional `onClash` says what to do when the name is already taken. Absent, a file of "
         + "that name is replaced, as it always has been. `ask` answers 409 with `clashes` and "
@@ -6430,6 +6431,9 @@ documents.MapPost("/upload-zip", async (
     }
 })
     .HumansOnly()
+    // THE BODY LIMIT IS THE ZIP'S OWN, plus room for the form around it: one over it is refused
+    // before it is read, and one just under it reaches the size check and its sentence.
+    .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(TeamDocuments.MaximumUploadBytes + 1024 * 1024))
     .WithSummary("Upload a .zip and unpack it")
     .WithDescription(
         "A multipart form with the zip in `file` and an optional destination folder in `path`. The "
@@ -6437,10 +6441,12 @@ documents.MapPost("/upload-zip", async (
         + "every entry already sits in a folder of that name it is not doubled, and `__MACOSX/` is "
         + "left out.\n\n"
         + "REFUSED WHOLE, with 400 and nothing written, when any entry is a link (or anything but a "
-        + "plain file or folder), an absolute path, or a path with a `..` in it, and when the zip "
+        + "plain file or folder), an absolute path, or a path with a `..` in it, when the zip's name "
+        + "is not a plain folder name (`..zip`, `...zip`) or is the documents marker's, and when the zip "
         + $"cannot be read, is over {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB, holds more "
         + $"than {TeamDocuments.MaximumPackageFiles} entries, or unpacks to more than "
-        + $"{TeamDocuments.MaximumPackageBytes / (1024 * 1024)} MB.\n\n"
+        + $"{TeamDocuments.MaximumPackageBytes / (1024 * 1024)} MB. A request body more than 1 MB over "
+        + "the zip's limit is refused with 413 before it is read.\n\n"
         + PackageClashDescription
         + Describe.Documents);
 

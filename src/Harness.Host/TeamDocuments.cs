@@ -221,13 +221,7 @@ public sealed partial class TeamDocuments(
     public (string Path, string Name, bool IsFile, bool IsFolder) UploadTarget(string team, string? folder, string fileName)
     {
         var root = RootFor(team);
-        var safeName = Path.GetFileName(fileName.Replace('\\', Path.DirectorySeparatorChar));
-
-        if (string.IsNullOrWhiteSpace(safeName))
-        {
-            throw new DocumentPathException("That file has no name.");
-        }
-
+        var safeName = UploadLeaf(fileName);
         var directory = Resolve(team, folder);
         var target = Resolve(team, Path.Combine(Relative(root, directory), safeName));
 
@@ -238,13 +232,7 @@ public sealed partial class TeamDocuments(
         string team, string? folder, string fileName, Stream content, CancellationToken ct = default)
     {
         var root = EnsureFor(team);
-        var safeName = Path.GetFileName(fileName.Replace('\\', Path.DirectorySeparatorChar));
-
-        if (string.IsNullOrWhiteSpace(safeName))
-        {
-            throw new DocumentPathException("That file has no name.");
-        }
-
+        var safeName = UploadLeaf(fileName);
         var directory = Resolve(team, folder);
         Directory.CreateDirectory(directory);
 
@@ -388,6 +376,21 @@ public sealed partial class TeamDocuments(
     private static bool IsMarker(string path) =>
         string.Equals(
             Path.GetFileName(path), TeamPaths.MarkerFileName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The name an upload is saved under: only the LEAF of what was sent, never empty, and never the
+    /// folder's marker - which Delete refuses too, so an upload cannot overwrite what Delete keeps.
+    /// </summary>
+    private static string UploadLeaf(string fileName)
+    {
+        var leaf = Path.GetFileName(fileName.Replace('\\', Path.DirectorySeparatorChar));
+
+        if (string.IsNullOrWhiteSpace(leaf)) throw new DocumentPathException("That file has no name.");
+
+        if (IsMarker(leaf)) throw new DocumentPathException($"{leaf} is reserved for the folder's marker.");
+
+        return leaf;
+    }
 
     /// <summary>
     /// Every documents folder on disk, in the order a person would read them.

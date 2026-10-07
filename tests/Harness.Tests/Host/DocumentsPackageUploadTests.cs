@@ -381,4 +381,75 @@ public sealed class DocumentsPackageUploadTests(HostFixture host) : IClassFixtur
 
         Assert.False(Directory.Exists(Docs.At(gone, "pkg")));
     }
+    [Fact]
+    public async Task A_folder_or_zip_named_the_marker_is_refused_under_every_onClash_and_the_marker_is_kept()
+    {
+        using var client = await host.PersonAsync();
+        Docs.Folder(host.Alpha, "pk-marker");
+        var marker = TeamPaths.MarkerIn(Docs.RootFor(host.Alpha));
+        var before = File.ReadAllText(marker);
+        var rows = await RowCountAsync();
+
+        foreach (var onClash in new[] { null, "ask", "keep-both", "replace", "skip" })
+        {
+            var folder = await UploadFolderAsync(client, host.Alpha, "", onClash, (".harness-team/a.md", "a"));
+            Assert.Equal(HttpStatusCode.BadRequest, folder.StatusCode);
+            Assert.Equal("The folder was not uploaded: .harness-team/a.md is the documents marker.", await folder.ErrorAsync());
+
+            var zip = await UploadZipAsync(client, host.Alpha, "", ".harness-team.zip", Zip(F("a.md", "a")), onClash);
+            Assert.Equal(HttpStatusCode.BadRequest, zip.StatusCode);
+            Assert.Equal("The zip was not unpacked: .harness-team is reserved for the folder's marker.", await zip.ErrorAsync());
+        }
+
+        Assert.True(File.Exists(marker));
+        Assert.Equal(before, File.ReadAllText(marker));
+        Assert.False(File.Exists(Path.Combine(Docs.RootFor(host.Alpha), ".harness-team (copy)")));
+        Assert.False(Directory.Exists(Path.Combine(Docs.RootFor(host.Alpha), ".harness-team (copy)")));
+        Assert.Equal(rows, await RowCountAsync());
+    }
+
+    [Fact]
+    public async Task A_zip_whose_name_is_not_a_folder_name_is_refused_and_writes_nothing()
+    {
+        using var client = await host.PersonAsync();
+        Docs.Write(host.Alpha, "pk-badname/inner/kept.md", "kept");
+        var rows = await RowCountAsync();
+
+        foreach (var (name, error) in new[]
+        {
+            ("..zip", "The zip was not unpacked: . is not a folder name."),
+            ("...zip", "The zip was not unpacked: .. is not a folder name."),
+            ("a:b.zip", "The zip was not unpacked: a:b is not a folder name."),
+            (" .zip", "That zip has no name."),
+        })
+        {
+            foreach (var onClash in new[] { null, "keep-both", "replace" })
+            {
+                var response = await UploadZipAsync(client, host.Alpha, "pk-badname/inner", name, Zip(F("unpacked.md", "x")), onClash);
+
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                Assert.Equal(error, await response.ErrorAsync());
+            }
+        }
+
+        Assert.Equal(["kept.md"], Directory.GetFileSystemEntries(Docs.At(host.Alpha, "pk-badname/inner")).Select(Path.GetFileName));
+        Assert.Equal(["inner"], Directory.GetFileSystemEntries(Docs.At(host.Alpha, "pk-badname")).Select(Path.GetFileName));
+        Assert.Equal(rows, await RowCountAsync());
+    }
+    /// <summary>The test server applies no body limit, so the limit each route asks Kestrel for is
+    /// read off its endpoint: the zip's is its own 25 MB plus the form, so a zip just over 25 MB gets
+    /// the size sentence rather than Kestrel's default 413 at about 28.6 MB.</summary>
+    [Theory]
+    [InlineData("/api/teams/{team}/documents/upload-zip", TeamDocuments.MaximumUploadBytes + 1024 * 1024)]
+    [InlineData("/api/teams/{team}/documents/upload-folder", TeamDocuments.MaximumPackageBytes + 1024 * 1024)]
+    public void Each_package_route_asks_for_a_body_limit_just_over_its_own_size_check(string route, long limit)
+    {
+        var endpoint = host.Services.GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>().Endpoints
+            .OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>()
+            .Single(e => "/" + e.RoutePattern.RawText?.TrimStart('/') == route);
+
+        var asked = endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Http.Metadata.IRequestSizeLimitMetadata>();
+
+        Assert.Equal(limit, asked?.MaxRequestBodySize);
+    }
 }
