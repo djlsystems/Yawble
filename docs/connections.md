@@ -32,7 +32,18 @@ means typing a new one.
 
 ## Connecting an account: the guided path
 
-Start here. Admin → **Connections** → **Add connection** opens a dialog in three steps:
+Start here. Admin → **Connections** → **Add connection** - and a plugin slot's **Connect** - opens
+one screen of provider tiles, each saying its way in: **Gmail** (app password), **Outlook or
+Microsoft 365** (sign in with a code), **iCloud** (app-specific password), **Yahoo** (app password)
+and **Other** (server settings). A mailbox tile opens the mailbox form with that provider's hints -
+for Gmail, links to 2-Step Verification and App passwords and "paste the 16 characters"; for iCloud,
+account.apple.com, a password shown once and a user name that is often the part before the @; for
+Yahoo, Account security → Generate app password - see
+[A mailbox with an app password](#a-mailbox-with-an-app-password-imap). Gmail through a Google app of
+your own sits behind **Advanced…** (and in Gmail's hints, for an account that cannot make an app
+password). A slot's Connect shows only the kinds the slot takes, a mailbox (`imap`) included.
+
+Google (through Advanced…) and Microsoft (the Outlook tile) then go in three steps:
 
 1. **Service** - Google or Microsoft. The dialog shows what will be asked, in words, each line naming
    the plugin that wants it ("Read, change and send your Gmail - mailer"); the raw scope is behind
@@ -41,7 +52,10 @@ Start here. Admin → **Connections** → **Add connection** opens a dialog in t
    slots (`GET /api/connections/needs?provider=<id>`, or `&plugin=<id>&slot=<name>` for one slot).
 2. **Set up the app** - only when the provider's client is not set up yet: the provider's setup
    guide as a checklist, with links into the provider's console and buttons to copy each value (the
-   redirect URI, the scopes, the APIs). The guide is served with the provider by
+   redirect URI, the scopes, the APIs). It says first that this is a one-time setup and roughly how
+   long it takes (Google about 20 to 30 minutes, Microsoft about 10), that the tick boxes only mark
+   your own progress, and, for Google, that a project you already have is fine: the APIs and scopes
+   it keeps for other things stay as they are. The guide is served with the provider by
    `GET /api/connections/providers` (`guide.steps`), so the dialog and this page say the same thing.
 3. **Sign in** - the provider's consent page, then back to the dialog, where you may name the
    connection.
@@ -59,10 +73,13 @@ Start here. Admin → **Connections** → **Add connection** opens a dialog in t
    **Advanced → Go to <app>**.
 4. **Data access** - add exactly the scopes the dialog lists, each one copyable.
 5. **Client** - type **Web application**, with the redirect URI the dialog shows registered under
-   Authorized redirect URIs. When the address you are using is one Google will refuse (an IP address,
-   http on anything but localhost, a name with no public top-level domain), this step says so first:
-   open the web UI at `http://localhost:<port>` on the machine running the container and register
-   that, or connect with `yawble connect`.
+   Authorized redirect URIs. When the address you are using is one Google will refuse (an IP address
+   other than loopback, http on anything but localhost, a name with no public top-level domain), this
+   step says so first, and the warning is shown again beside **Save client**: open the web UI at
+   `http://localhost:<port>` on the machine running the container and register that, or connect with
+   `yawble connect`. `http://127.0.0.1:<port>` and `http://localhost:<port>` are both accepted -
+   Google exempts loopback from its no-IP-address and https rules - so neither warns; register
+   exactly the one in your browser's address bar, as Google treats them as different URIs.
 6. **Paste the client ID and secret** - the ID must end in `.apps.googleusercontent.com`, checked
    before saving and again by the Host. Saved with `PUT /api/connections/providers/google`.
 

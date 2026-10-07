@@ -119,7 +119,7 @@ describe('Add connection, a mailbox with an app password', () => {
   it('offers Gmail, iCloud, Yahoo and Other as tiles, in the Host order', async () => {
     const wrapper = await openAdd();
 
-    const tiles = [...document.body.querySelectorAll('[data-mailbox-preset]')].map((tile) => tile.textContent?.trim());
+    const tiles = [...document.body.querySelectorAll('[data-mailbox-preset] [data-tile-name]')].map((tile) => tile.textContent?.trim());
     expect(tiles).toEqual(['Gmail', 'iCloud', 'Yahoo', 'Other']);
 
     wrapper.unmount();

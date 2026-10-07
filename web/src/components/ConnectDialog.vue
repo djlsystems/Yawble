@@ -39,6 +39,7 @@ import {
 } from '../lib/connections';
 import { productCli } from '../presentation/product';
 import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/providerReturn';
+import { mailboxHint, OutlookHint, setupTime } from '../lib/mailboxHints';
 import MailboxForm from './MailboxForm.vue';
 
 /**
@@ -69,9 +70,13 @@ import MailboxForm from './MailboxForm.vue';
  * A SIGN-IN WITH A CODE STILL WAITING at the Host is picked back up on open: closing the dialog, or
  * reloading the page, does not lose the code the person may be typing at Microsoft.
  *
- * A MAILBOX WITH AN APP PASSWORD is offered beside them on the service step: tiles Gmail, iCloud,
- * Yahoo and Other, from the Host's presets, open `MailboxForm`, which logs in before it saves and
- * shows the login's one sentence. No app, no sign-in elsewhere. A slot shows them when it takes `imap`.
+ * THE SERVICE STEP IS PROVIDER TILES: Gmail, Outlook or Microsoft 365, iCloud, Yahoo and Other, each
+ * saying its way in. Gmail, iCloud, Yahoo and Other are a MAILBOX WITH AN APP PASSWORD, from the Host's
+ * presets: they open `MailboxForm`, with that provider's hints, which logs in before it saves and
+ * shows the login's one sentence. No app, no sign-in elsewhere. Outlook is Microsoft's sign-in with a
+ * code. Gmail through a Google app of one's own sits behind ADVANCED…; where no mailbox is on offer -
+ * a slot that does not take `imap`, or an older Host with no presets - the Google tile is that app.
+ * A slot shows the tiles of the kinds it takes, `imap` included.
  *
  * THE CLIENT SECRET IS WRITE-ONLY here as in Advanced: typed, sent once, never shown or kept. The
  * provider's device code never reaches the browser: only the code the person types does.
@@ -181,7 +186,8 @@ async function begin(seq: number) {
     return;
   }
 
-  const only = props.need && services.value.length === 1 ? services.value[0]! : null;
+  // A slot that also takes a mailbox has its tiles to choose from.
+  const only = props.need && services.value.length === 1 && !props.need.providers.includes('imap') ? services.value[0]! : null;
   if (!only) return;
   await choose(only.id);
   if (seq === opening && open.value && needs.value && step.value === 'service') await next();
@@ -215,6 +221,44 @@ async function readPresets(seq: number) {
   } catch {
     // No presets, no tiles: the OAuth services are offered as before.
   }
+}
+
+interface Tile {
+  id: string;
+  name: string;
+  wayIn: string;
+  /** The mailbox preset it opens, or the service it signs in to. */
+  preset?: string;
+  service?: string;
+}
+
+const offers = (id: string) => services.value.some((service) => service.id === id);
+
+/** The provider tiles, in the plan's order: Gmail, Outlook, then the Host's other presets. */
+const tiles = computed<Tile[]>(() => {
+  const list: Tile[] = [];
+  const gmail = mailboxTiles.value.find((preset) => preset.id === 'gmail');
+  if (gmail) list.push({ id: 'gmail', name: gmail.name, wayIn: mailboxHint('gmail').wayIn, preset: 'gmail' });
+  else if (offers('google')) list.push({ id: 'google', name: 'Google', wayIn: 'A Google app of your own', service: 'google' });
+  if (offers('microsoft')) list.push({ id: 'outlook', name: 'Outlook or Microsoft 365', wayIn: OutlookHint.wayIn, service: 'microsoft' });
+  for (const preset of mailboxTiles.value) {
+    if (preset.id !== 'gmail') list.push({ id: preset.id, name: preset.name, wayIn: mailboxHint(preset.id).wayIn, preset: preset.id });
+  }
+  return list;
+});
+
+/** Gmail through a Google app of one's own, when the Gmail tile is the app password. */
+const advanced = computed(() => offers('google') && tiles.value.some((tile) => tile.preset === 'gmail'));
+
+function chooseTile(tile: Tile) {
+  if (tile.preset) chooseMailbox(tile.preset);
+  else if (tile.service) void choose(tile.service);
+}
+
+/** From Gmail's hints, for who cannot make an app password. */
+function chooseAdvanced() {
+  step.value = 'service';
+  void choose('google');
 }
 
 function chooseMailbox(id: string) {
@@ -317,6 +361,7 @@ const clientBusy = ref(false);
 
 const steps = computed<ConnectionGuideStep[]>(() => guide.value?.steps ?? []);
 const redirectWarning = computed(() => redirectUriWarning(currentOrigin(), productCli));
+const setupTakes = computed(() => (provider.value ? setupTime[provider.value.kind] ?? null : null));
 
 /** Microsoft's client is public and signs in with a code: no secret, no redirect URI. */
 const isMicrosoft = computed(() => provider.value?.kind === 'microsoft');
@@ -625,33 +670,46 @@ const stepLabels = computed(() => [
 
       <!-- 1. SERVICE -->
       <q-card-section v-if="step === 'service'" data-connect-step="service" class="q-gutter-y-md">
-        <template v-if="mailboxTiles.length > 0">
-          <div>A mailbox, with an app password:</div>
-          <div class="row q-gutter-sm" data-mailbox-tiles>
-            <q-btn
-              v-for="tile in mailboxTiles"
-              :key="tile.id"
-              outline
-              no-caps
-              :label="tile.name"
-              :data-mailbox-preset="tile.id"
-              @click="chooseMailbox(tile.id)"
-            />
-          </div>
-          <div v-if="services.length > 0">Or an account, through an app of your own:</div>
-        </template>
-        <div v-else>Which account do you want to connect?</div>
-        <div class="row q-gutter-sm">
+        <div>Which account do you want to connect?</div>
+        <div class="connect-tiles" data-provider-tiles>
           <q-btn
-            v-for="service in services"
-            :key="service.id"
+            v-for="tile in tiles"
+            :key="tile.id"
             no-caps
-            :outline="providerId !== service.id"
-            :color="providerId === service.id ? 'primary' : undefined"
-            :label="service.name"
-            :data-connect-service="service.id"
-            @click="choose(service.id)"
+            align="left"
+            class="connect-tile"
+            :outline="!(tile.service && providerId === tile.service)"
+            :color="tile.service && providerId === tile.service ? 'primary' : undefined"
+            :data-provider-tile="tile.id"
+            :data-mailbox-preset="tile.preset"
+            :data-connect-service="tile.service"
+            @click="chooseTile(tile)"
+          >
+            <div class="column items-start">
+              <div class="text-weight-medium" data-tile-name>{{ tile.name }}</div>
+              <div class="text-caption" data-tile-way>{{ tile.wayIn }}</div>
+            </div>
+          </q-btn>
+        </div>
+        <div v-if="advanced">
+          <q-btn
+            flat
+            dense
+            no-caps
+            size="sm"
+            label="Advanced…"
+            data-connect-service="google"
+            data-connect-advanced
+            @click="choose('google')"
           />
+        </div>
+
+        <ul v-if="providerId === 'microsoft'" class="connect-hints text-caption" data-tile-hints="outlook">
+          <li v-for="(item, index) in OutlookHint.steps" :key="index">{{ item.text }}</li>
+        </ul>
+        <div v-else-if="providerId === 'google'" class="text-caption" data-tile-hints="google">
+          Gmail and the other Google services, signed in through a Google app you set up once in the Google
+          Cloud console.
         </div>
 
         <template v-if="provider">
@@ -705,7 +763,14 @@ const stepLabels = computed(() => [
 
       <!-- A MAILBOX WITH AN APP PASSWORD -->
       <q-card-section v-else-if="step === 'mailbox'" data-connect-step="mailbox">
-        <MailboxForm ref="mailboxForm" :presets="presets" :preset="mailboxPreset" @saved="mailboxConnected" />
+        <MailboxForm
+          ref="mailboxForm"
+          :presets="presets"
+          :preset="mailboxPreset"
+          :advanced="advanced"
+          @saved="mailboxConnected"
+          @advanced="chooseAdvanced"
+        />
       </q-card-section>
 
       <!-- 2. SET UP THE APP -->
@@ -714,6 +779,16 @@ const stepLabels = computed(() => [
           {{ provider.name }} needs an app of your own to sign in through. Work down the list in another
           tab; tick each step as you finish it.
         </div>
+        <ul class="connect-hints text-caption" data-setup-intro>
+          <li data-setup-once>
+            This is a one-time setup{{ setupTakes ? `, ${setupTakes}` : '' }}. Once the client is saved, every
+            later {{ provider.name }} account just signs in.
+          </li>
+          <li data-setup-marks>The tick boxes only mark your own progress: nothing checks them.</li>
+          <li v-if="!isMicrosoft" data-setup-project>
+            A project you already have is fine: the APIs and scopes it keeps for other things stay as they are.
+          </li>
+        </ul>
 
         <ol class="connect-guide">
           <li v-for="item in steps" :key="item.id" class="connect-guide-step" :data-guide-step="item.id">
@@ -814,6 +889,9 @@ const stepLabels = computed(() => [
                   autocomplete="new-password"
                   spellcheck="false"
                 />
+                <div v-if="!isMicrosoft && redirectWarning" class="text-caption text-warning" data-save-warning>
+                  Before you save: {{ redirectWarning }}
+                </div>
                 <div class="row justify-end">
                   <q-btn
                     color="primary"
@@ -990,6 +1068,21 @@ const stepLabels = computed(() => [
 .connect-steps-now {
   color: inherit;
   font-weight: 600;
+}
+
+.connect-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.connect-tile {
+  min-height: 56px;
+}
+
+.connect-hints {
+  margin: 0;
+  padding-left: 20px;
 }
 
 .connect-scope {
