@@ -220,11 +220,11 @@ export function usedByLabels(connection: Pick<Connection, 'usedBy'>): string[] {
  * none of it.
  */
 /**
- * The providers of a slot Add connection signs in to: Google and Microsoft. A custom provider's
- * account is connected in Admin → Connections.
+ * The providers of a slot Add connection connects: Google, Microsoft and a mailbox (`imap`). A custom
+ * provider's account is connected in Admin → Connections.
  */
 export function guidedProviders(spec: Pick<ConnectionSlot, 'providers'>): string[] {
-  return spec.providers.filter((id) => id === 'google' || id === 'microsoft');
+  return spec.providers.filter((id) => id === 'google' || id === 'microsoft' || id === 'imap');
 }
 
 export type CallbackOutcome =
@@ -317,6 +317,31 @@ export function takeGuidedConnect(storage: Storage = sessionStorage): string | n
   const provider = storage.getItem(GuidedKey);
   storage.removeItem(GuidedKey);
   return provider;
+}
+
+/**
+ * THE RECONNECT'S WAY BACK: the same note for a Reconnect begun in Admin → Connections, so a refusal
+ * coming back says the reconnect failed - not that a new account was not connected. Taken once.
+ */
+const ReconnectKey = 'connections.reconnect';
+
+export function rememberReconnect(id: string, storage: Storage = sessionStorage): void {
+  storage.setItem(ReconnectKey, id);
+}
+
+export function takeReconnect(storage: Storage = sessionStorage): string | null {
+  const id = storage.getItem(ReconnectKey);
+  storage.removeItem(ReconnectKey);
+  return id;
+}
+
+/**
+ * What a connection lets a plugin do, in words and once each: the Host's `permissions`, where
+ * `email` and `userinfo.email` are one line. A Host older than that answers only the scopes, shown
+ * as themselves, once each.
+ */
+export function permissionsOf(connection: Pick<Connection, 'scopes' | 'permissions'>): string[] {
+  return [...new Set(connection.permissions ?? connection.scopes)];
 }
 
 const Guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

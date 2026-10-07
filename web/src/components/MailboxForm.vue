@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { addMailbox } from '../api/client';
 import type { Connection, MailboxPreset, MailSecurity, MailServer } from '../api/types';
+import { mailboxHint } from '../lib/mailboxHints';
 
 /**
  * A MAILBOX WITH AN APP PASSWORD, over IMAP and SMTP: the form inside Add connection.
@@ -11,6 +12,10 @@ import type { Connection, MailboxPreset, MailSecurity, MailServer } from '../api
  * the Host, which logs in to IMAP and authenticates to SMTP before it saves anything, and answers one
  * sentence: connected, or what to fix. A refused login saves nothing, so Save can be tried again.
  *
+ * THE CHOSEN TILE'S HINTS sit above the fields: where to make the app password, with links, and for
+ * Gmail who cannot make one - pointed to Advanced, Gmail through a Google app of one's own, when the
+ * dialog can offer it (`advanced`).
+ *
  * THE APP PASSWORD IS WRITE-ONLY: typed, sent once, cleared once saved, never filled from anything.
  * A saved mailbox says only that its password is set.
  */
@@ -18,8 +23,12 @@ const props = defineProps<{
   presets: MailboxPreset[];
   /** The tile chosen when the form opens. */
   preset: string;
+  /** Whether Gmail's own Google app is on offer, for who cannot make an app password. */
+  advanced?: boolean;
 }>();
 const emit = defineEmits<{
+  /** Gmail through a Google app of one's own, instead. */
+  advanced: [];
   /** Saved, after a successful login: the connection and the login's sentence. */
   saved: [connection: Connection, sentence: string];
 }>();
@@ -35,6 +44,8 @@ const imapSecurity = ref<MailSecurity>('TLS');
 const smtpHost = ref('');
 const smtpPort = ref('');
 const smtpSecurity = ref<MailSecurity>('TLS');
+
+const hint = computed(() => mailboxHint(presetId.value));
 
 const securities: MailSecurity[] = ['TLS', 'STARTTLS'];
 
@@ -100,7 +111,10 @@ async function save() {
   }
 }
 
-defineExpose({ save, ready, busy, connected });
+/** Whether the person has typed anything not yet saved: the dialog then holds on to it. */
+const typed = computed(() => !connected.value && [name, account, username, password].some((field) => field.value !== ''));
+
+defineExpose({ save, ready, busy, connected, typed });
 </script>
 
 <template>
@@ -120,6 +134,19 @@ defineExpose({ save, ready, busy, connected });
     </div>
 
     <template v-if="!connected">
+      <div class="mailbox-hints text-caption" data-mailbox-hints>
+        <ol>
+          <li v-for="(item, index) in hint.steps" :key="index" data-mailbox-hint>
+            {{ item.text }}
+            <a v-if="item.link" :href="item.link.href" target="_blank" rel="noopener noreferrer" data-mailbox-hint-link>{{ item.link.label }}</a>
+          </li>
+        </ol>
+        <div v-if="hint.cannot && advanced" data-mailbox-cannot>
+          {{ hint.cannot }}
+          <q-btn flat dense no-caps size="sm" label="Advanced…" data-mailbox-advanced @click="emit('advanced')" />
+        </div>
+      </div>
+
       <q-input v-model="account" outlined dense label="Email address" type="email" autocomplete="off" spellcheck="false" />
       <q-input
         v-model="username"
@@ -188,6 +215,11 @@ defineExpose({ save, ready, busy, connected });
 </template>
 
 <style scoped>
+.mailbox-hints ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
 .mailbox-server {
   display: flex;
   gap: 8px;

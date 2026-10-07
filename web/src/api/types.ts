@@ -3129,6 +3129,11 @@ export interface Connection {
   kind?: 'oauth' | 'imap'
   account: string
   scopes: string[]
+  /**
+   * The scopes in words, once each (`email` and `userinfo.email` are one), an unknown scope as
+   * itself. Absent from a Host older than it.
+   */
+  permissions?: string[]
   connectedAt: string
   /** For a mailbox: its last successful login. */
   refreshedAt: string | null

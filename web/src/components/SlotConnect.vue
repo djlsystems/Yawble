@@ -9,8 +9,8 @@ import ConnectDialog from './ConnectDialog.vue';
  * slot - its providers (a choice of them when it takes more than one) and the scopes of that one
  * slot. `connected` names the connection the sign-in made; binding it is the opener's.
  *
- * Shown only for a slot that takes Google or Microsoft: those are the services Add connection signs
- * in to. A custom provider's account is still connected in Admin → Connections. The dialog stays
+ * Shown only for a slot that takes Google, Microsoft or a mailbox: those are what Add connection
+ * connects. A custom provider's account is still connected in Admin → Connections. The dialog stays
  * mounted while the button is not `offered`, so binding the new connection - which ends the offer -
  * does not close it under the person.
  */
@@ -37,7 +37,9 @@ const emit = defineEmits<{
 }>();
 
 const connectable = computed(() => guidedProviders(props.spec));
-const label = computed(() => `Connect ${connectable.value.map((id) => providerName(id, props.providers)).join(' or ')}`);
+const label = computed(
+  () => `Connect ${connectable.value.map((id) => (id === 'imap' ? 'a mailbox' : providerName(id, props.providers))).join(' or ')}`,
+);
 const need = computed(() => ({
   plugin: props.plugin,
   slot: props.slotName,

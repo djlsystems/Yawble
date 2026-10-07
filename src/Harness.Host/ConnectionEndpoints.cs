@@ -139,7 +139,7 @@ public static class ConnectionEndpoints
             .WithSummary("The connected accounts")
             .WithDescription(
                 "Each connection: `id`, `name`, `provider`, `providerKind`, `account`, `scopes`, "
-                + "`connectedAt`, `refreshedAt`, `status` (`ok` or `needs-reconnect`, with the provider's "
+                + "`permissions` (the scopes in words, once each), `connectedAt`, `refreshedAt`, `status` (`ok` or `needs-reconnect`, with the provider's "
                 + "`statusReason`) and `usedBy` (`team`, `member`, `label`, `slot`). Never a token.");
 
         app.MapGet("/api/connections/imap/presets", () => Results.Ok(MailPresets.All.Select(p => p.View())))
@@ -474,6 +474,7 @@ public static class ConnectionEndpoints
         providerKind = ConnectionProviders.KindOf(connection.Provider),
         account = connection.Account,
         scopes = connection.Scopes,
+        permissions = ConnectionNeeds.Permissions(connection.Scopes),
         connectedAt = connection.ConnectedAt,
         refreshedAt = connection.RefreshedAt,
         status = connection.Status,

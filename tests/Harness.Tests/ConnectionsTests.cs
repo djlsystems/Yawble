@@ -116,6 +116,25 @@ public sealed class ConnectionsTests : IAsyncLifetime
     // ---- web flow, end to end ---------------------------------------------------------------------
 
     [Fact]
+    public async Task A_connection_answers_its_permissions_in_words_once_each_and_an_unknown_scope_as_itself()
+    {
+        const string UserinfoEmail = "https://www.googleapis.com/auth/userinfo.email";
+        const string Unknown = "https://www.googleapis.com/auth/not-a-real-scope";
+        await ConnectAsync(["openid", "email", UserinfoEmail, MailScope, Unknown]);
+
+        var listed = Assert.Single((await GetAsync("/api/connections")).EnumerateArray());
+
+        // The scopes stay as granted; `permissions` is what a person reads, each once.
+        Assert.Contains(UserinfoEmail, listed.GetProperty("scopes").EnumerateArray().Select(s => s.GetString()));
+        var permissions = listed.GetProperty("permissions").EnumerateArray().Select(s => s.GetString()).ToList();
+        Assert.Single(permissions, p => p == "See your email address");
+        Assert.Contains("Confirm who you are", permissions);
+        Assert.Contains("Read, change, send and permanently delete all your Gmail", permissions);
+        Assert.Contains(Unknown, permissions);
+        Assert.Equal(permissions.Distinct().Count(), permissions.Count);
+    }
+
+    [Fact]
     public async Task A_google_account_connected_through_the_web_flow_gives_a_bound_plugin_run_its_access_token()
     {
         var start = await StartAsync([MailScope]);
