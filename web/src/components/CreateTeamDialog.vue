@@ -13,7 +13,7 @@ import {
   type UnresolvedAgent,
 } from '../api/types';
 import { normalizeAllowlist } from '../lib/memberAllowlist';
-import { budgetFieldIsLegal, budgetFieldRefusal, budgetFieldValue } from '../lib/teamBudget';
+import { budgetFieldIsLegal, budgetFieldRefusal, budgetFieldValue, budgetInWords } from '../lib/teamBudget';
 import { applyDefaults, readRemembered, remember } from '../lib/newTeamDefaults';
 import { useConsoleStore } from '../stores/console';
 import { teamFolderLine } from '../lib/teamRoot';
@@ -253,6 +253,25 @@ const additionalInstructions = ref('');
  */
 const budgetTokens = ref<number | string | null>(null);
 
+/** The budget as words under the box: "no limit", or "100 million tokens" rather than nine digits.
+ *  An empty box runs on the instance's figure, so that is the figure put into words. */
+const budgetWords = computed(() => {
+  const chosen = budgetFieldValue(budgetTokens.value);
+  return chosen === null
+    ? `${budgetInWords(board.workflowSpendLimit)}, the instance's own figure`
+    : budgetInWords(chosen);
+});
+
+/**
+ * ADVANCED..., COLLAPSED ON EVERY OPEN: where the files go, which machines have an agent, how the
+ * allowlist picks among agents, and the budget. Each has a working default, so a first-time person
+ * makes a team without meeting any of them. A budget the field refuses keeps the section open: a
+ * disabled Create with its reason folded away would say nothing.
+ */
+const advancedOpen = ref(false);
+const advancedPanel = ref<HTMLElement | null>(null);
+const showAdvanced = computed(() => advancedOpen.value || !budgetFieldIsLegal(budgetTokens.value));
+
 const getAgentStatus = (agentName: string | null) => {
   if (!agentName || !installations.value) return null;
   return installStatus(installationFor(installations.value, agentName));
@@ -328,11 +347,13 @@ const codePanel = ref<HTMLElement | null>(null);
 
 function showFailingTab(component: { $el?: Element }) {
   tab.value = component.$el && codePanel.value?.contains(component.$el) ? 'code' : 'general';
+  if (component.$el && advancedPanel.value?.contains(component.$el)) advancedOpen.value = true;
 }
 
 watch(open, (showing) => {
   if (showing) {
     tab.value = 'general';
+    advancedOpen.value = false;
     carriesOn.value = '';
     void loadDefaults();
   }
@@ -611,7 +632,7 @@ async function submit() {
       <q-card-section>
         <div class="os-dialog-title">New team</div>
         <div class="text-caption os-text-muted">
-          A team is created with its Manager. There is no team without a door into it.
+          Every team starts with a Manager: an agent that plans the work and hires members to do it.
         </div>
       </q-card-section>
 
@@ -640,65 +661,18 @@ async function submit() {
                 @update:model-value="serverError = ''"
               />
 
-              <!-- Where this team's files go. NO q-col-gutter here: that class gives every child
-                   `padding-top: 8px` and a `q-btn`'s own padding rule beats it on source order at equal
-                   specificity, so the input takes the 8px and the button rides above it. `row items-center
-                   no-wrap` plus a plain `q-ml-sm` margin on the button, matching ProfileDialog's key row,
-                   does not lose that fight. -->
-              <div>
-                <div class="row items-center no-wrap">
-                  <q-input
-                    v-model="root"
-                    class="col"
-                    outlined
-                    dense
-                    hide-bottom-space
-                    label="Place team in"
-                    :placeholder="instanceRootPath ?? ''"
-                  />
-                  <q-btn
-                    class="col-auto q-ml-sm"
-                    outlined
-                    dense
-                    no-caps
-                    label="Browse…"
-                    @click="pickerOpen = true"
-                  />
-                </div>
-                <!-- THE FAILURE IS RENDERED, not swallowed. Without this line a failed
-                     `GET /api/fs/roots` leaves the placeholder blank and `folderLine` blank, and the
-                     person is in front of an empty box with nothing at all saying why. Only while the box is empty: once somebody has typed
-                     or browsed a path there IS a preview, and the instance root is no longer what they
-                     are getting. -->
-                <div
-                  v-if="instanceRootError && !root.trim()"
-                  class="os-body text-negative q-mt-xs"
-                >
-                  Could not read this host's folders, so there is nothing to preview:
-                  {{ instanceRootError }} Leaving this blank still puts the team in the default place.
-                </div>
-                <div v-else class="text-caption os-text-muted q-mt-xs">
-                  {{ folderLine }}
-                </div>
-              </div>
-
               <!-- Which CLI the Manager runs. What it is told is the built-in Manager prompt.
 
                    The Concierge has no picker here — it belongs to the instance, not to a team, and
-                   lives on Admin → Concierge. -->
+                   lives on Admin → Concierge.
+
+                   ONLY A PROBLEM IS SAID HERE. Which machines have the agent is under Advanced...;
+                   one that lacks it is something a first-time person has to know before Create. -->
               <div>
                 <q-select v-model="agent" :options="agents" outlined dense label="Manager agent" />
-                <div v-if="agent && getAgentStatus(agent)" class="q-mt-xs">
-                  <q-icon
-                    :name="getAgentStatus(agent)!.icon"
-                    size="14px"
-                    class="q-mr-xs"
-                    aria-hidden="true"
-                    :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn' }"
-                  />
-                  <span :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn', 'os-text-muted': getAgentStatus(agent)!.tone !== 'warn' }">
-                    {{ getAgentStatus(agent)!.text }}
-                  </span>
+                <div v-if="agent && getAgentStatus(agent)?.tone === 'warn'" class="q-mt-xs" data-manager-agent-warning>
+                  <q-icon :name="getAgentStatus(agent)!.icon" size="14px" class="q-mr-xs text-warning" aria-hidden="true" />
+                  <span class="text-warning">{{ getAgentStatus(agent)!.text }}</span>
                 </div>
               </div>
 
@@ -712,7 +686,8 @@ async function submit() {
                    General, deliberately - a person who has met one has met the other. It is every member's
                    list, not only a Manager's hire: the member settings and Add member dialogs offer only
                    these, so the heading says so. Not preselected: a team created on whatever sorted first
-                   is a team hiring on a CLI nobody chose. -->
+                   is a team hiring on a CLI nobody chose. Visible because Create needs one; what
+                   "headless" and "tag" mean is under Advanced.... -->
               <div class="text-subtitle2 q-mt-sm" data-member-agents-heading>Agents this team's members may use</div>
               <div class="text-caption os-text-muted">
                 Applies when you hire a member or change its agent, and when a Manager hires one. The first is used when nobody chooses.
@@ -726,8 +701,7 @@ async function submit() {
                     class="col"
                     outlined
                     dense
-                    label="Allowlist: add Agent"
-                    hint="Headless presets only."
+                    label="Add an agent"
                   />
                   <q-btn
                     class="col-auto q-ml-sm"
@@ -740,17 +714,9 @@ async function submit() {
                   />
                 </div>
 
-                <div v-if="memberAgentToAdd && getAgentStatus(memberAgentToAdd)" class="q-mt-xs">
-                  <q-icon
-                    :name="getAgentStatus(memberAgentToAdd)!.icon"
-                    size="14px"
-                    class="q-mr-xs"
-                    aria-hidden="true"
-                    :class="{ 'text-warning': getAgentStatus(memberAgentToAdd)!.tone === 'warn' }"
-                  />
-                  <span :class="{ 'text-warning': getAgentStatus(memberAgentToAdd)!.tone === 'warn', 'os-text-muted': getAgentStatus(memberAgentToAdd)!.tone !== 'warn' }">
-                    {{ getAgentStatus(memberAgentToAdd)!.text }}
-                  </span>
+                <div v-if="memberAgentToAdd && getAgentStatus(memberAgentToAdd)?.tone === 'warn'" class="q-mt-xs">
+                  <q-icon :name="getAgentStatus(memberAgentToAdd)!.icon" size="14px" class="q-mr-xs text-warning" aria-hidden="true" />
+                  <span class="text-warning">{{ getAgentStatus(memberAgentToAdd)!.text }}</span>
                 </div>
 
                 <q-list v-if="memberAgents.length > 0" bordered separator class="q-mt-sm">
@@ -758,7 +724,7 @@ async function submit() {
                     <q-item-section>
                       <q-item-label class="mono">{{ entry }}</q-item-label>
                       <q-item-label caption>
-                        {{ index === 0 ? 'Default when no tag is requested' : `Priority ${index + 1}` }}
+                        {{ index === 0 ? 'Used when nobody chooses' : `Choice ${index + 1}` }}
                       </q-item-label>
                     </q-item-section>
                     <q-item-section side>
@@ -818,26 +784,111 @@ async function submit() {
                 />
               </section>
 
-              <!-- THE PER-WORKFLOW BUDGET. Last on the dialog and prefilled, which is the shape the
-                   argument needs: nobody has to answer it to make a team, and anybody who wants to can.
+              <!-- ADVANCED..., see `advancedOpen`. A link rather than an expansion item, so it reads as
+                   optional. `v-show` and not `v-if`: the budget field stays registered with the form
+                   while folded, so its rule still runs on Create. -->
+              <div>
+                <a
+                  href="#"
+                  class="text-primary"
+                  role="button"
+                  :aria-expanded="showAdvanced ? 'true' : 'false'"
+                  data-advanced-link
+                  @click.prevent="advancedOpen = !showAdvanced"
+                >{{ showAdvanced ? 'Fewer settings' : 'Advanced...' }}</a>
+              </div>
 
-                   THE HINT SAYS WHAT THE NUMBER BOUNDS, because the obvious misreading is that it is a
-                   total for the team. It is not: a team on this figure with three workflows open has
-                   three budgets of it, one each, and nothing is shared between them.
+              <div v-show="showAdvanced" ref="advancedPanel" class="q-gutter-md" data-advanced-settings>
+                <!-- Where this team's files go. NO q-col-gutter here: that class gives every child
+                     `padding-top: 8px` and a `q-btn`'s own padding rule beats it on source order at equal
+                     specificity, so the input takes the 8px and the button rides above it. `row items-center
+                     no-wrap` plus a plain `q-ml-sm` margin on the button, matching ProfileDialog's key row,
+                     does not lose that fight. -->
+                <div>
+                  <div class="row items-center no-wrap">
+                    <q-input
+                      v-model="root"
+                      class="col"
+                      outlined
+                      dense
+                      hide-bottom-space
+                      label="Place team in"
+                      :placeholder="instanceRootPath ?? ''"
+                    />
+                    <q-btn
+                      class="col-auto q-ml-sm"
+                      outlined
+                      dense
+                      no-caps
+                      label="Browse…"
+                      @click="pickerOpen = true"
+                    />
+                  </div>
+                  <!-- THE FAILURE IS RENDERED, not swallowed. Without this line a failed
+                       `GET /api/fs/roots` leaves the placeholder blank and `folderLine` blank, and the
+                       person is in front of an empty box with nothing at all saying why. Only while the box is empty: once somebody has typed
+                       or browsed a path there IS a preview, and the instance root is no longer what they
+                       are getting. -->
+                  <div
+                    v-if="instanceRootError && !root.trim()"
+                    class="os-body text-negative q-mt-xs"
+                  >
+                    Could not read this host's folders, so there is nothing to preview:
+                    {{ instanceRootError }} Leaving this blank still puts the team in the default place.
+                  </div>
+                  <div v-else class="text-caption os-text-muted q-mt-xs">
+                    {{ folderLine }}
+                  </div>
+                </div>
 
-                   AND IT SAYS WHAT EMPTY AND 0 MEAN, because they are different answers and neither is
-                   guessable. -->
-              <q-input
-                v-model.number="budgetTokens"
-                type="number"
-                outlined
-                dense
-                min="0"
-                step="1"
-                :rules="budgetRules"
-                label="Budget for one workflow (tokens)"
-                hint="What ONE workflow on this team may spend before it pauses — not a total across the team. Empty follows the instance figure; 0 is unlimited."
-              />
+                <!-- Where the chosen agents are installed, in full: "Installed on worker-1" names a
+                     machine, which only matters to whoever runs more than one. -->
+                <div v-if="agent && getAgentStatus(agent)" data-manager-agent-status>
+                  <q-icon
+                    :name="getAgentStatus(agent)!.icon"
+                    size="14px"
+                    class="q-mr-xs"
+                    aria-hidden="true"
+                    :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn' }"
+                  />
+                  <span :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn', 'os-text-muted': getAgentStatus(agent)!.tone !== 'warn' }">
+                    Manager agent: {{ getAgentStatus(agent)!.text }}
+                  </span>
+                </div>
+
+                <div class="text-caption os-text-muted" data-allowlist-terms>
+                  Only headless presets are offered: agents that work on their own, woken by messages,
+                  rather than a terminal somebody types into. When a Manager hires for a tag, such as
+                  developer or tester, members are spread across the agents carrying that tag and the
+                  earlier one in the list wins a tie; with no tag, the first is used.
+                </div>
+
+                <!-- THE PER-WORKFLOW BUDGET, prefilled, which is the shape the argument needs: nobody
+                     has to answer it to make a team, and anybody who wants to can.
+
+                     THE HINT SAYS WHAT THE NUMBER BOUNDS, because the obvious misreading is that it is a
+                     total for the team. It is not: a team on this figure with three workflows open has
+                     three budgets of it, one each, and nothing is shared between them.
+
+                     AND IT SAYS WHAT EMPTY AND 0 MEAN, because they are different answers and neither is
+                     guessable. The figure is said again in words beneath it. -->
+                <div>
+                  <q-input
+                    v-model.number="budgetTokens"
+                    type="number"
+                    outlined
+                    dense
+                    min="0"
+                    step="1"
+                    :rules="budgetRules"
+                    label="Budget for one workflow (tokens)"
+                    hint="What one piece of work on this team may spend before it pauses — not a total for the team. Leave it empty to use the instance's figure; 0 means no limit."
+                  />
+                  <div class="text-caption os-text-muted q-mt-lg" data-budget-words>
+                    Budget for one workflow: {{ budgetWords }}
+                  </div>
+                </div>
+              </div>
             </div>
           </q-tab-panel>
 
@@ -869,7 +920,8 @@ async function submit() {
 
                 <ForkItForMe @forked="addFork" />
 
-                <LocalRepoPicker :attached="repos" @attach="attachLocal" />
+                <!-- Attach only: the one way to make a local repository here is the box below. -->
+                <LocalRepoPicker :attached="repos" :offer-create="false" @attach="attachLocal" />
 
                 <div v-if="repoSuggestions.length > 0" class="q-mt-sm">
                   <div class="text-caption os-text-muted">Recent repositories:</div>
@@ -967,6 +1019,10 @@ async function submit() {
                   label="Create a local repository for this team"
                   data-local-repository-checkbox
                 />
+                <div v-if="offerLocalRepository" class="text-caption os-text-muted q-mt-xs" data-local-repository-hint>
+                  With no repository listed, the team gets a git repository of its own, named after it
+                  and kept on this instance only. Untick it for a team with no code.
+                </div>
               </div>
             </div>
           </q-tab-panel>
