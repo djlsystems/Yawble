@@ -179,7 +179,9 @@ it. On each one:
 - **Reconnect** - the same account again. A short dialog first says what it will ask for: what the
   connection already has and, when an installed plugin's slot needs more of that provider, that it
   adds those. The provider's answer comes back to Admin → Connections, saying it worked or what
-  failed. It clears `needs reconnect`.
+  failed. A Microsoft connection was made with a code (its app is a public client with no redirect
+  URI) and reconnects with one: the dialog shows the code and the link to enter it at, and closes by
+  itself on the same message. It clears `needs reconnect`.
 - **Rename** - the name members and the CLI show.
 - **Disconnect** - refused while any member uses it, naming them; unbind those first. It revokes the
   grant at the provider where the provider supports that, and deletes the tokens.

@@ -365,7 +365,9 @@ async function submit() {
 </script>
 
 <template>
-  <q-dialog v-model="open">
+  <!-- Stays open on a route change: the Console changes its address under open dialogs, and a
+       slot's Add connection inside this one would close with it, losing what was typed. -->
+  <q-dialog v-model="open" no-route-dismiss>
     <q-card class="member-settings-card os-dialog-md">
       <q-form ref="form" @submit="submit" @keydown="onEnter">
       <q-card-section>

@@ -3,7 +3,8 @@
 // ADD CONNECTION STAYS OPEN WHILE A PERSON TYPES. Two things closed it under them, with what they
 // had typed: a press on the backdrop (on a Mac, a palm or a tap on the trackpad mid-word), and a
 // route change - Quasar closes every dialog when the route changes, and the Console changes its
-// address under open dialogs. Once anything is typed only Close closes it, and no route change does.
+// address under open dialogs. Once anything is typed only Close closes it; no route change closes it,
+// typed or not.
 //
 // THE MOCK IS OF `api/client`. No request leaves the test; the router is an in-memory one.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -98,6 +99,25 @@ describe('Add connection, while a person types', () => {
     expect(bodyFind('[data-connections-dialog]')).not.toBeNull();
     expect(field('Email address').value).toBe('me@gmail.com');
     expect(field('App password').value).toBe('abcd efgh');
+
+    wrapper.unmount();
+  });
+
+  it('stays open on a route change before anything is typed', async () => {
+    const wrapper = await mountDialog(ConnectionsDialog, {}, { global: { plugins: [router] } });
+    await settle();
+    button('Add connection').click();
+    await settle();
+    bodyFind('[data-mailbox-preset="gmail"]')!.click();
+    await settle();
+    expect(bodyFind('[data-guided-connect]')).not.toBeNull();
+
+    await router.replace({ path: '/console', query: { team: 'another' } });
+    await settle();
+
+    // Nothing typed, so not persistent: only its own no-route-dismiss keeps it, at the tile chosen.
+    expect(bodyFind('[data-guided-connect]')).not.toBeNull();
+    expect(field('Email address').value).toBe('');
 
     wrapper.unmount();
   });

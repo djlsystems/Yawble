@@ -22,6 +22,7 @@ const {
   startDeviceConnection,
   getConnectionFlow,
   listOpenConnectionFlows,
+  listMailboxPresets,
   renameConnection,
   saveConnectionProvider,
   goTo,
@@ -34,6 +35,7 @@ const {
   startDeviceConnection: vi.fn(),
   getConnectionFlow: vi.fn(),
   listOpenConnectionFlows: vi.fn(),
+  listMailboxPresets: vi.fn(),
   renameConnection: vi.fn(),
   saveConnectionProvider: vi.fn(),
   goTo: vi.fn(),
@@ -49,6 +51,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   startDeviceConnection,
   getConnectionFlow,
   listOpenConnectionFlows,
+  listMailboxPresets,
   renameConnection,
   saveConnectionProvider,
 }));
@@ -140,6 +143,7 @@ beforeEach(() => {
     startDeviceConnection,
     getConnectionFlow,
     listOpenConnectionFlows,
+    listMailboxPresets,
     renameConnection,
     saveConnectionProvider,
     goTo,
@@ -155,6 +159,7 @@ beforeEach(() => {
   startDeviceConnection.mockResolvedValue(started());
   getConnectionFlow.mockResolvedValue({ state: 'waiting', sentence: 'Waiting for you to sign in.' });
   listOpenConnectionFlows.mockResolvedValue([]);
+  listMailboxPresets.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -471,4 +476,85 @@ describe("Microsoft's sign-in step", () => {
 
     wrapper.unmount();
   });
+});
+
+describe('Reconnect of a Microsoft connection', () => {
+  // Made with a code: its app is a public client with no redirect URI, so the browser sign-in
+  // would stop at Microsoft. Reconnect signs in with a code too, in the Reconnect dialog.
+  const outlook = hostConnection({
+    id: 'conn-outlook',
+    provider: 'microsoft',
+    name: 'Outlook',
+    account: 'someone@contoso.test',
+    scopes: ['offline_access'],
+    status: 'needs-reconnect',
+    statusReason: 'invalid_grant: Token has been expired or revoked.',
+  });
+
+  const reconnectButton = () =>
+    [...bodyFind('[data-connection="conn-outlook"]')!.querySelectorAll('button')].find(
+      (candidate) => candidate.getAttribute('aria-label') === 'Reconnect Outlook',
+    ) ?? null;
+
+  async function startReconnect() {
+    listConnections.mockResolvedValue([outlook]);
+    const wrapper = await mountConnections();
+    await click(reconnectButton());
+    pinClock();
+    return wrapper;
+  }
+
+  it('says it shows a code, not that the browser comes back here', async () => {
+    const wrapper = await startReconnect();
+
+    const asks = bodyFind('[data-reconnect-asks]')!.textContent!;
+    expect(asks).toContain('code');
+    expect(asks).toContain('someone@contoso.test');
+    expect(bodyFind('[data-reconnect-dialog]')!.textContent).not.toContain('You come back here');
+
+    wrapper.unmount();
+  });
+
+  it('signs in with a code for that connection, shows the code, and once done says it worked', async () => {
+    const wrapper = await startReconnect();
+    await click(bodyFind('[data-reconnect-continue]'));
+
+    expect(startDeviceConnection).toHaveBeenCalledWith({ reconnectId: 'conn-outlook', scopes: [mailSend], flow: 'device' });
+    expect(startConnection).not.toHaveBeenCalled();
+    expect(goTo).not.toHaveBeenCalled();
+    expect(bodyFind('[data-reconnect-dialog] [data-device-code]')!.textContent).toBe(fakeCode);
+    expect(bodyFind('[data-reconnect-dialog] a[data-device-link]')!.getAttribute('href')).toBe(verificationUri);
+
+    const reconnected = { ...outlook, status: 'ok' as const, statusReason: null };
+    listConnections.mockResolvedValue([reconnected]);
+    getConnectionFlow.mockResolvedValue({ state: 'done', sentence: 'Reconnected Outlook.', connection: reconnected });
+    await advance(3000);
+
+    expect(getConnectionFlow).toHaveBeenCalledWith('flow-1');
+    expect(bodyFind('[data-reconnect-dialog]')).toBeNull();
+    expect(bodyFind('[data-connections-dialog]')).not.toBeNull();
+    expect(bodyFind('[data-connections-notice]')!.textContent).toContain('Reconnected Outlook (someone@contoso.test).');
+
+    wrapper.unmount();
+  });
+
+  for (const ending of [
+    { state: 'refused' as const, sentence: 'Microsoft refused the sign-in: access_denied.' },
+    { state: 'expired' as const, sentence: 'The code expired before anyone signed in.' },
+  ]) {
+    it(`says which connection was not reconnected and why when the code is ${ending.state}`, async () => {
+      const wrapper = await startReconnect();
+      await click(bodyFind('[data-reconnect-continue]'));
+
+      getConnectionFlow.mockResolvedValue(ending);
+      await advance(3000);
+
+      expect(bodyFind('[data-reconnect-dialog]')).toBeNull();
+      const notice = bodyFind('[data-connections-notice]')!;
+      expect(notice.textContent).toContain(`Outlook was not reconnected: ${ending.sentence}`);
+      expect(notice.className).toContain('text-negative');
+
+      wrapper.unmount();
+    });
+  }
 });

@@ -1,23 +1,33 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   ActionRefused,
   deleteConnectionProvider,
   disconnectConnection,
+  getConnectionFlow,
   getConnectionNeeds,
   listConnectionProviders,
   listConnections,
   renameConnection,
   saveConnectionProvider,
   startConnection,
+  startDeviceConnection,
   updateMailboxPassword,
 } from '../api/client';
-import type { Connection, ConnectionNeeds, ConnectionProvider, ConnectionProviderSave, ConnectionUse } from '../api/types';
+import type {
+  Connection,
+  ConnectionDeviceStart,
+  ConnectionNeeds,
+  ConnectionProvider,
+  ConnectionProviderSave,
+  ConnectionUse,
+} from '../api/types';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { productCli } from '../presentation/product';
 import ConnectDialog from './ConnectDialog.vue';
 import DialogTabs from './DialogTabs.vue';
 import {
+  countdown,
   mailServerLabel,
   parseScopes,
   permissionsOf,
@@ -45,7 +55,9 @@ import {
  * RECONNECT first says, in a short dialog, what it will ask the provider for - the scopes already
  * granted and, when an installed plugin's slot needs more of that provider, that it adds those - and
  * only then leaves for the provider. The Host's callback comes back here, to this dialog, with a
- * message saying it worked or what failed.
+ * message saying it worked or what failed. A MICROSOFT connection was made with a code - its app is a
+ * public client with no redirect URI, so the browser sign-in would stop at Microsoft - and reconnects
+ * with a code too: the Reconnect dialog shows it, reads the flow, and closes on the same message.
  *
  * THE DIALOG STAYS OPEN ON A ROUTE CHANGE (`no-route-dismiss`). Quasar closes a dialog whenever the
  * route changes; the Console takes the provider's answer off the address just after opening this
@@ -106,7 +118,11 @@ watch(advanced, (showing) => {
 });
 
 watch(open, async (showing) => {
-  if (!showing) return;
+  if (!showing) {
+    stopCode();
+    return;
+  }
+  codeNotice.value = null;
   reconnectedFrom.value = props.notice ? takeReconnect() : null;
   if (!(await load())) return;
 
@@ -140,7 +156,13 @@ const redirectWarning = computed(() => redirectUriWarning(currentOrigin(), produ
 
 const nameOf = (id: string) => providerName(id, providers.value);
 
+/** How a Reconnect with a code ended, said here as the provider's answer would be. */
+const codeNotice = ref<{ refused: boolean; text: string } | null>(null);
+
+const noticeRefused = computed(() => (codeNotice.value ? codeNotice.value.refused : props.notice?.outcome === 'refused'));
+
 const noticeText = computed(() => {
+  if (codeNotice.value) return codeNotice.value.text;
   const notice = props.notice;
   if (!notice) return '';
   if (notice.outcome === 'refused') {
@@ -231,7 +253,12 @@ const reconnectAdds = computed(() => {
 const reconnectAddWords = computed(() => [...new Set(reconnectAdds.value.map((line) => line.words ?? line.scope))]);
 const reconnectAddPlugins = computed(() => [...new Set(reconnectAdds.value.flatMap((line) => line.plugins))]);
 
+/** Microsoft's connections are made with a code, and reconnect with one: no redirect to come back by. */
+const reconnectWithCode = computed(() => reconnecting.value?.providerKind === 'microsoft');
+
 async function reconnect(connection: Connection) {
+  stopCode();
+  reconnectCode.value = null;
   reconnecting.value = connection;
   reconnectNeeds.value = null;
   reconnectProblem.value = '';
@@ -250,10 +277,89 @@ async function continueReconnect() {
   if (!connection || leaving.value || reconnectReading.value) return;
 
   // The Host asks for the old granted scopes and these together; none added is the same account again.
+  const scopes = reconnectAdds.value.map((line) => line.scope);
+  if (reconnectWithCode.value) {
+    await startCode(connection, scopes);
+    return;
+  }
   rememberReconnect(connection.id);
-  await sendToProvider({ reconnectId: connection.id, scopes: reconnectAdds.value.map((line) => line.scope) }, reconnectProblem);
+  await sendToProvider({ reconnectId: connection.id, scopes }, reconnectProblem);
   // Not sent: no answer will come back for it.
   if (reconnectProblem.value !== '') takeReconnect();
+}
+
+// --- Reconnect with a code ------------------------------------------------------------------------
+
+/** How often the flow is read while it waits. The Host does the waiting at the provider. */
+const codeReadEvery = 3000;
+
+const reconnectCode = ref<ConnectionDeviceStart | null>(null);
+const codeNow = ref(Date.now());
+const codeLeft = computed(() => (reconnectCode.value ? countdown(reconnectCode.value.expiresAt, codeNow.value) : ''));
+let codeTimer: ReturnType<typeof setTimeout> | null = null;
+let codeClock: ReturnType<typeof setInterval> | null = null;
+
+/** Stops reading; a code still shown is left to expire at the Host. */
+function stopCode() {
+  if (codeTimer !== null) clearTimeout(codeTimer);
+  if (codeClock !== null) clearInterval(codeClock);
+  codeTimer = null;
+  codeClock = null;
+}
+
+onBeforeUnmount(stopCode);
+
+watch(reconnecting, (connection) => {
+  if (connection === null) {
+    stopCode();
+    reconnectCode.value = null;
+  }
+});
+
+async function startCode(connection: Connection, scopes: string[]) {
+  leaving.value = true;
+  reconnectProblem.value = '';
+  try {
+    reconnectCode.value = await startDeviceConnection({ reconnectId: connection.id, scopes, flow: 'device' });
+    codeNow.value = Date.now();
+    codeClock = setInterval(() => (codeNow.value = Date.now()), 1000);
+    codeTimer = setTimeout(() => void readCode(connection), codeReadEvery);
+  } catch (cause) {
+    reconnectProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    leaving.value = false;
+  }
+}
+
+async function readCode(connection: Connection) {
+  const code = reconnectCode.value;
+  codeTimer = null;
+  if (!code || reconnecting.value !== connection) return;
+
+  let read;
+  try {
+    read = await getConnectionFlow(code.flowId);
+  } catch (cause) {
+    // A read that failed is not an ending: say so and read again.
+    reconnectProblem.value = cause instanceof Error ? cause.message : String(cause);
+    if (reconnectCode.value === code) codeTimer = setTimeout(() => void readCode(connection), codeReadEvery);
+    return;
+  }
+  // Cancelled while the read was out: this answer is for a code no longer shown.
+  if (reconnectCode.value !== code || reconnecting.value !== connection) return;
+
+  reconnectProblem.value = '';
+  if (read.state === 'waiting') {
+    codeTimer = setTimeout(() => void readCode(connection), codeReadEvery);
+    return;
+  }
+
+  const made = read.connection ?? connection;
+  codeNotice.value = read.state === 'done'
+    ? { refused: false, text: `Reconnected ${made.name} (${made.account}).` }
+    : { refused: true, text: `${connection.name} was not reconnected: ${read.sentence}` };
+  reconnecting.value = null;
+  await load();
 }
 
 // --- Update password, for a mailbox -------------------------------------------------------------
@@ -480,7 +586,7 @@ async function removeProvider(provider: ConnectionProvider) {
         <q-banner
           v-if="noticeText"
           dense
-          :class="notice?.outcome === 'refused' ? 'os-bg-tint-error text-negative q-mb-md' : 'os-bg-tint-ok text-positive q-mb-md'"
+          :class="noticeRefused ? 'os-bg-tint-error text-negative q-mb-md' : 'os-bg-tint-ok text-positive q-mb-md'"
           data-connections-notice
         >
           {{ noticeText }}
@@ -752,8 +858,14 @@ async function removeProvider(provider: ConnectionProvider) {
       </q-card-section>
       <q-card-section class="q-pt-none q-gutter-y-sm">
         <div data-reconnect-asks>
-          This sends you to {{ nameOf(reconnecting.provider) }} to agree again as
-          <span class="mono">{{ reconnecting.account }}</span>.
+          <template v-if="reconnectWithCode">
+            This shows a code to enter at {{ nameOf(reconnecting.provider) }}, signing in again as
+            <span class="mono">{{ reconnecting.account }}</span>.
+          </template>
+          <template v-else>
+            This sends you to {{ nameOf(reconnecting.provider) }} to agree again as
+            <span class="mono">{{ reconnecting.account }}</span>.
+          </template>
           <template v-if="permissionsOf(reconnecting).length > 0">It asks for what it already has:</template>
           <template v-else>It asks for nothing beyond signing in.</template>
         </div>
@@ -769,7 +881,18 @@ async function removeProvider(provider: ConnectionProvider) {
             <li v-for="words in reconnectAddWords" :key="words">{{ words }}</li>
           </ul>
         </template>
-        <div class="os-text-muted">You come back here when it is done.</div>
+        <template v-if="reconnectCode">
+          <div data-reconnect-code>
+            Open <a :href="reconnectCode.verificationUri" target="_blank" rel="noopener noreferrer" data-device-link>{{ reconnectCode.verificationUri }}</a>
+            and enter
+            <span class="mono text-weight-bold" data-device-code>{{ reconnectCode.userCode }}</span>
+          </div>
+          <div class="text-caption os-text-muted">
+            The code expires in {{ codeLeft }}. This closes by itself once you have signed in.
+          </div>
+        </template>
+        <div v-else-if="reconnectWithCode" class="os-text-muted">This closes by itself once you have signed in.</div>
+        <div v-else class="os-text-muted">You come back here when it is done.</div>
         <q-banner v-if="reconnectProblem" dense class="os-bg-tint-error text-negative" data-reconnect-problem>
           {{ reconnectProblem }}
         </q-banner>
@@ -777,9 +900,10 @@ async function removeProvider(provider: ConnectionProvider) {
       <q-card-actions align="right">
         <q-btn flat no-caps label="Cancel" v-close-popup />
         <q-btn
+          v-if="!reconnectCode"
           color="primary"
           no-caps
-          :label="`Continue to ${nameOf(reconnecting.provider)}`"
+          :label="reconnectWithCode ? 'Show the code' : `Continue to ${nameOf(reconnecting.provider)}`"
           :loading="leaving"
           :disable="reconnectReading"
           data-reconnect-continue
