@@ -50,9 +50,45 @@ public sealed class TriggerCreation(
     public static string OutcomeRefusal(string asked) =>
         $"No active or proposed outcome '{asked}'. Name one by its id or its exact name.";
 
-    public async Task<TriggerCreated> CreateAsync(
+    public Task<TriggerCreated> CreateAsync(
         string stored, NewTrigger request, string createdBy, string? createdByEmail, Func<TriggerRow, TriggerAudit> audit,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        MakeAsync(stored, request, createdBy, createdByEmail, audit, keeping: null, ct);
+
+    /// <summary>
+    /// Rewrites <paramref name="keeping"/> as <paramref name="request"/> describes, with every check
+    /// <see cref="CreateAsync"/> makes, under the SAME id: what a solution update does to a trigger
+    /// its new version keeps. Its last fire, outcome and capped skips are kept with the id.
+    /// </summary>
+    public Task<TriggerCreated> ReplaceAsync(
+        TriggerRow keeping, NewTrigger request, string createdBy, string? createdByEmail, Func<TriggerRow, TriggerAudit> audit,
+        CancellationToken ct = default) =>
+        MakeAsync(keeping.Team, request, createdBy, createdByEmail, audit, keeping, ct);
+
+    public Task<TriggerRow?> FindAsync(string id, CancellationToken ct = default) => schedules.FindAsync(id, ct);
+
+    /// <summary>
+    /// Puts <paramref name="row"/> back as it was, with its tenant row, and recomputes what wakes its
+    /// member and the member it was moved to - what undoing <see cref="ReplaceAsync"/> needs.
+    /// </summary>
+    public async Task RestoreAsync(TriggerRow row, TriggerAudit audit, CancellationToken ct = default)
+    {
+        var current = await schedules.FindAsync(row.Id, ct);
+
+        await schedules.SaveAsync(row, audit, ct);
+        await effective.RecomputeAsync(new ContainerId(row.Team, row.Container), ct);
+
+        if (current is not null && !string.Equals(current.Container, row.Container, StringComparison.OrdinalIgnoreCase))
+        {
+            await effective.RecomputeAsync(new ContainerId(row.Team, current.Container), ct);
+        }
+
+        wake.Signal();
+    }
+
+    private async Task<TriggerCreated> MakeAsync(
+        string stored, NewTrigger request, string createdBy, string? createdByEmail, Func<TriggerRow, TriggerAudit> audit,
+        TriggerRow? keeping, CancellationToken ct)
     {
         var name = (request.Name ?? "").Trim();
         var instruction = (request.Instruction ?? "").Trim();
@@ -109,7 +145,7 @@ public sealed class TriggerCreation(
             if (await folders.RefusalForAsync(
                     stored, request.WatchRoot, request.WatchPath, request.WatchGlob,
                     request.PollSeconds, request.QuietSeconds, request.MinIntervalSeconds,
-                    counting: true, ct) is { } folderRefusal)
+                    counting: keeping is null || !FolderWatch.IsFolderKind(keeping.Kind), ct) is { } folderRefusal)
             {
                 return Refused(folderRefusal);
             }
@@ -170,7 +206,7 @@ public sealed class TriggerCreation(
         var timezone = string.IsNullOrWhiteSpace(request.Timezone) ? null : request.Timezone.Trim();
 
         var row = new TriggerRow(
-            Guid.NewGuid().ToString("N"),
+            keeping?.Id ?? Guid.NewGuid().ToString("N"),
             stored,
             container,
             name,
@@ -190,11 +226,11 @@ public sealed class TriggerCreation(
             // A SUPPLIED VALUE STILL WINS: it means "fire first at this time, then follow the shape".
             // Absent means "start from now", which is what a person ticking Enabled means.
             request.NextDueAt ?? FirstOccurrence(kind, expression, timezone, request.IntervalSeconds, request.FireAt, DateTimeOffset.UtcNow),
-            null,
-            null,
-            null,
-            0,
-            DateTimeOffset.UtcNow,
+            keeping?.LastFiredAt,
+            keeping?.LastOutcome,
+            keeping?.LastSeq,
+            keeping?.MissedCount ?? 0,
+            keeping?.CreatedAt ?? DateTimeOffset.UtcNow,
             createdBy,
             EventType: eventType,
             Filter: request.Filter)
@@ -218,6 +254,12 @@ public sealed class TriggerCreation(
         // A NEW event trigger changes what wakes its container, so the effective set is recomputed
         // right after the row lands - a no-op for a clock-driven trigger, which contributes nothing.
         await effective.RecomputeAsync(new ContainerId(stored, container), ct);
+
+        // A kept trigger moved to another member leaves its old member one subscription fewer.
+        if (keeping is not null && !string.Equals(keeping.Container, container, StringComparison.OrdinalIgnoreCase))
+        {
+            await effective.RecomputeAsync(new ContainerId(stored, keeping.Container), ct);
+        }
 
         // The runner is asleep until whatever WAS due next. Signalled AFTER the write, so waking
         // early cannot read a row that is not there.

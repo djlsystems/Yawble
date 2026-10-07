@@ -57,3 +57,22 @@ export function localDay(iso: string | null | undefined): string {
 
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
 }
+
+/** An ISO-8601 instant inside text: a date, `T`, a time to the minute or finer, and its zone. */
+const IsoInstant = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})(?![\w:])/g
+
+/**
+ * Text with every ISO-8601 instant in it read in the browser's zone and format, so a line a package
+ * or a log fills ("last checked 2026-10-07T14:41:07Z") says "last checked 10/7/2026, 3:41:07 PM" on
+ * a London browser. The rest of the text is left exactly as it was.
+ */
+export function localInstants(text: string): string
+export function localInstants(text: string | null | undefined): string | null | undefined
+export function localInstants(text: string | null | undefined): string | null | undefined {
+  if (!text) return text
+
+  return text.replace(IsoInstant, (iso) => {
+    const at = Date.parse(iso)
+    return Number.isNaN(at) ? iso : localTime(at, { date: true })
+  })
+}

@@ -13,6 +13,7 @@ import { settle } from '../../test/formProbe';
 import { fakeHost, reply, sent, type Call, type Route } from '../../test/solutionFixtures';
 import { HtmlLooking, openSection, panelRead, panelRoutes, panelTrigger } from '../../test/solutionPanelFixtures';
 import type { SolutionPanel as PanelShape } from '../../api/types';
+import { localTime } from '../../lib/localTime';
 
 // The re-read after Run now waits a few milliseconds here instead of seconds, and gives up sooner.
 vi.mock('../../lib/solutionPanel', async (actual) => ({
@@ -116,7 +117,7 @@ describe('the control panel: Controls', () => {
     expect(bodyFind('[data-panel-status]')?.textContent).not.toContain('5 new jobs');
 
     await click('[data-control-trigger="trg_scan"] [data-run-now]');
-    await vi.waitFor(() => expect(bodyFind('[data-panel-status]')?.textContent).toBe('5 new jobs · last checked 2026-09-30T10:00:00Z'));
+    await vi.waitFor(() => expect(bodyFind('[data-panel-status]')?.textContent).toBe(`5 new jobs · last checked ${localTime(Date.parse('2026-09-30T10:00:00Z'), { date: true })}`));
 
     await new Promise((resolve) => setTimeout(resolve, 60));
     await settle();
@@ -178,6 +179,39 @@ describe('the control panel: Controls', () => {
 
     const patch = sent(calls, 'PATCH', '/api/teams/job-tracker/triggers/trg_scan');
     expect(patch.map((call) => call.body)).toEqual([{ dailyTokenCap: 50000 }, { dailyTokenCap: null }]);
+  });
+
+  it("says a trigger's daily cap saved, like every other Save on the panel, until it is edited again", async () => {
+    await controls();
+    expect(bodyFind('[data-trigger-cap-saved]')).toBeNull();
+
+    const input = capBox();
+    input.value = '250,000';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    await click('[data-control-trigger="trg_scan"] [data-trigger-cap-save]');
+
+    expect(bodyFind('[data-control-trigger="trg_scan"] [data-trigger-cap-saved]')?.textContent?.trim()).toBe('Saved: 250,000 tokens a day.');
+
+    const again = capBox();
+    again.value = '300,000';
+    again.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(bodyFind('[data-trigger-cap-saved]')).toBeNull();
+  });
+
+  it('says nothing saved when the cap is refused', async () => {
+    serve([(call) => (call.method === 'PATCH' ? reply(400, { error: 'The cap was refused.' }) : undefined)]);
+    await controls();
+
+    const input = capBox();
+    input.value = '250,000';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    await click('[data-control-trigger="trg_scan"] [data-trigger-cap-save]');
+
+    expect(bodyFind('[data-trigger-cap-saved]')).toBeNull();
+    expect(bodyFind('[data-control-problem]')?.textContent).toContain('The cap was refused.');
   });
 
   it('refuses a cap that is not a whole number before sending it', async () => {

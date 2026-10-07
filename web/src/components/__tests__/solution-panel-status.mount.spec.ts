@@ -15,6 +15,8 @@ import { settle } from '../../test/formProbe';
 import { fakeHost, reply, sent, type Call, type Route } from '../../test/solutionFixtures';
 import { HtmlLooking, panelRead, panelRoutes, panelTrigger } from '../../test/solutionPanelFixtures';
 import type { SolutionPanel as PanelShape } from '../../api/types';
+import { localTime } from '../../lib/localTime';
+import { whenWords } from '../../lib/solutionPanel';
 
 let calls: Call[] = [];
 let read: PanelShape;
@@ -47,7 +49,7 @@ describe('the control panel: Status', () => {
     expect(sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length).toBeGreaterThan(0);
     expect(bodyFind('[data-panel-title]')?.textContent).toContain('Job Tracker');
     expect(bodyFind('[data-panel-state="blocked"]')?.textContent).toContain('Blocked: Upload a file to Resume/');
-    expect(bodyFind('[data-panel-status]')?.textContent).toBe('3 new jobs · last checked 2026-09-30T08:00:00Z');
+    expect(bodyFind('[data-panel-status]')?.textContent).toBe(`3 new jobs · last checked ${localTime(Date.parse('2026-09-30T08:00:00Z'), { date: true })}`);
     expect(bodyFind('[data-section="status"]')).not.toBeNull();
   });
 
@@ -89,7 +91,8 @@ describe('the control panel: Status', () => {
     const spend = bodyFind('[data-trigger="trg_scan"] [data-spend]')!;
     expect(spend.textContent).toContain('nothing measured + 2 runs not measured / cap 200,000 tokens');
     expect(spend.textContent).toContain('cap reached');
-    expect(spend.querySelector('[data-capped]')?.textContent).toContain('Capped until 2026-10-01 00:00 UTC');
+    // When it resumes, on the reader's own clock (the panel's one clock), not the trigger's.
+    expect(spend.querySelector('[data-capped]')?.textContent).toContain(`Capped until ${whenWords('2026-10-01T00:00:00Z')}`);
   });
 
   it('says what each blocked item needs, in the Host\'s words', async () => {

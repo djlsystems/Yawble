@@ -743,6 +743,16 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<FolderRemoval>());
 });
 
+// WHAT A SOLUTION TEAM WAITS FOR, asked before every trigger's fire. The installer is late-bound:
+// it fires run-at-install through TriggerSweep, which asks this.
+builder.Services.AddSingleton(sp => new SolutionWait(
+    sp.GetRequiredService<ITeamSolutionStore>(),
+    () => sp.GetRequiredService<SolutionInstaller>(),
+    sp.GetRequiredService<ContainerHost>(),
+    sp.GetRequiredService<IMessageLog>(),
+    sp.GetRequiredService<ITriggerStore>(),
+    sp.GetRequiredService<TenantLogging>()));
+
 // THE SOLUTIONS LAUNCHER AND A SOLUTION'S CONTROL PANEL: reads only; every control is an existing route.
 builder.Services.AddSingleton(sp => new SolutionPanels(
     sp.GetRequiredService<ITeamSolutionStore>(),
@@ -1093,10 +1103,13 @@ builder.Services.AddSingleton(sp => new ContainerHost(
     // live so a repository added to a team after its members were created is named on the next wake.
     worktrees: (member, key) => sp.GetRequiredService<TeamRegistry>().WorktreesFor(member, key),
 
-    // AN EVENT OR FOLDER TRIGGER'S DAILY TOKEN CAP, asked by the pump before it fires one. Late-
+    // AN EVENT OR FOLDER TRIGGER HELD, asked by the pump before it fires one: its solution team
+    // waits for a missing required input (SolutionWait), or its daily token cap is reached. Late-
     // bound for the reason above: TriggerCost's tenant log is registered below this line.
-    triggerCapped: (trigger, member, cause, ct) => sp.GetRequiredService<TriggerCost>()
-        .SkipIfCappedAsync(trigger, member, DateTimeOffset.UtcNow, nextDueAt: null, cause.Seq, ct),
+    triggerHeld: async (trigger, member, cause, ct) =>
+        await sp.GetRequiredService<SolutionWait>().SkipIfWaitingAsync(trigger, member, DateTimeOffset.UtcNow, cause.Seq, ct)
+        || await sp.GetRequiredService<TriggerCost>()
+            .SkipIfCappedAsync(trigger, member, DateTimeOffset.UtcNow, nextDueAt: null, cause.Seq, ct),
 
     // Whether a member's card shows the eye: its preset has a live view this Host can read.
     // Asked per snapshot, so a catalog edit or a repoint shows on the next one.
@@ -4184,7 +4197,7 @@ app.MapPatch("/api/teams/{team}/triggers/{id}", async (
             TenantActions.ScheduleChanged,
             candidate.Id,
             candidate.Name,
-            JsonSerializer.Serialize(new { team = candidate.Team, member = candidate.Container })),
+            JsonSerializer.Serialize(new { team = candidate.Team, member = candidate.Container, changed = TriggerChanges.Of(existing, candidate) })),
         ct);
 
     // The edit can change EITHER the trigger's event type/enabled state OR which container holds
@@ -6234,7 +6247,7 @@ documents.MapPost("/folders", (
 documents.MapPost("/upload", async (
     [Description(Describe.Team)] string team,
     HttpRequest request, TeamRegistry teams, TeamDocuments docs, FolderWatch folders,
-    TenantLogging audit, HttpContext context, CancellationToken ct) =>
+    TenantLogging audit, SolutionWait waiting, HttpContext context, CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
@@ -6314,6 +6327,9 @@ documents.MapPost("/upload", async (
             context, TenantActions.DocumentUploaded, stored, saved.Path,
             new { team = stored, path = saved.Path, size = saved.Size, onClash },
             ct);
+
+        // A MISSING REQUIRED INPUT PROVIDED ends the team's wait now, and its members' marks with it.
+        await waiting.WaitingForAsync(stored, ct);
 
         return Results.Ok(saved);
     });
@@ -8825,6 +8841,9 @@ static async Task<IResult> UploadPackageAsync(
         context, TenantActions.DocumentUploaded, stored, saved.Path,
         new { team = stored, path = saved.Path, size = saved.Size, files = saved.Files.Count, kind, onClash },
         ct);
+
+    // A MISSING REQUIRED INPUT PROVIDED ends the team's wait now, as a single file's upload does.
+    await context.RequestServices.GetRequiredService<SolutionWait>().WaitingForAsync(stored, ct);
 
     return Results.Ok(saved);
 }

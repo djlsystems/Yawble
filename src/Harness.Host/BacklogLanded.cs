@@ -831,12 +831,27 @@ public static class BacklogLandedState
         GitRunner.GitStatus status,
         CancellationToken ct)
     {
-        if (status.TeamSha is not null) return $"refs/heads/team/{stored}";
+        var local = $"refs/heads/team/{stored}";
+        var origin = $"refs/remotes/origin/team/{stored}";
+        var originResolves = await ResolvesAsync(git, clonePath, origin, ct);
 
-        if (await ResolvesAsync(git, clonePath, $"refs/remotes/origin/team/{stored}", ct))
+        // A LOCAL TEAM BRANCH BEHIND ORIGIN'S IS NOT THE WORK. Members push origin's team branch
+        // from their own worktrees, so the clone's local one can stay where an earlier item left
+        // it; read there, a later item's merged work looks like nothing of its own. Origin's is
+        // taken only when the local one is strictly behind it, never when they have parted.
+        if (status.TeamSha is not null)
         {
-            return $"refs/remotes/origin/team/{stored}";
+            if (originResolves
+                && (await git.RunGitAsync(clonePath, ["merge-base", "--is-ancestor", local, origin], ct)).ExitCode == 0
+                && (await git.RunGitAsync(clonePath, ["merge-base", "--is-ancestor", origin, local], ct)).ExitCode != 0)
+            {
+                return origin;
+            }
+
+            return local;
         }
+
+        if (originResolves) return origin;
 
         return status.MainAhead is > 0 ? localBranch : null;
     }

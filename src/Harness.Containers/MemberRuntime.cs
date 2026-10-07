@@ -522,6 +522,24 @@ public sealed class MemberRuntime : IAsyncDisposable
     }
 
     /// <summary>
+    /// Clears the blocked and failed marks - the failure's class and promised resume with it - when
+    /// what they reported has been put right OUTSIDE a run: a solution team's missing required input
+    /// was provided (<c>SolutionWait</c>). The next wake clears them anyway; this is for a member
+    /// nothing wakes, whose card would otherwise keep saying it cannot reach what is now there.
+    /// Pushed only when a mark moves, like the marks themselves.
+    /// </summary>
+    public void ClearTroubleMarks()
+    {
+        if (_blocked is null && _failed is null) return;
+
+        _blocked = null;
+        _failed = null;
+        _failureClass = null;
+        _resumeAt = null;
+        Publish();
+    }
+
+    /// <summary>
     /// Records that the platform intends to resume this member's workflow BY ITSELF at
     /// <paramref name="at"/>, and pushes it. Null withdraws the promise.
     ///

@@ -19,6 +19,7 @@ import { panelPath } from '../lib/solutionPanel';
 import { useDisplayStore } from '../stores/display';
 import { useKanbanStore } from '../stores/kanban';
 import { useCapacityStore } from '../stores/capacity';
+import { useConsoleHistory } from '../composables/useConsoleHistory';
 import type { Team, TeamId } from '../api/types';
 import {
   StalledBadgeGrace,
@@ -47,6 +48,9 @@ const display = useDisplayStore();
  * "back to the team" a single click and what the default team filter is taken from.
  */
 const kanban = useKanbanStore();
+
+// Back and Forward move between the Teams table, a team's board and the Kanban.
+useConsoleHistory();
 const capacity = useCapacityStore();
 const { hasTeams, error, signedOut, activeTeam, openTeams, connected, connectionEstablished } =
   storeToRefs(board);

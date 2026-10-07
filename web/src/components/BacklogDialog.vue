@@ -1327,12 +1327,26 @@ function down(index: number) {
        dispatches are the panel's, unchanged. -->
   <q-dialog :model-value="selected !== null" @update:model-value="(showing: boolean) => { if (!showing) selected = null; }">
     <q-card class="backlog-item-card os-dialog-lg" data-backlog-item-dialog>
+      <!-- THE TITLE BAR: the item's name on the left and its close on the right, where every
+           dialog's close is. It stays put while the spec below it scrolls. -->
+      <q-card-section v-if="selected" class="backlog-item-bar row items-center no-wrap" data-backlog-item-bar>
+        <div class="backlog-item-title" :title="`${itemLabel(selected.item.id)}: ${selected.item.title}`">
+          {{ itemLabel(selected.item.id) }}: {{ selected.item.title }}
+        </div>
+        <q-space />
+        <q-btn
+          flat dense round
+          icon="close"
+          aria-label="Close this item"
+          class="backlog-detail-close"
+          @click="selected = null"
+        >
+          <q-tooltip>Close this item</q-tooltip>
+        </q-btn>
+      </q-card-section>
+
       <q-card-section v-if="selected" class="backlog-detail">
         <div class="row items-center q-gutter-sm">
-          <div class="text-subtitle1">
-            {{ itemLabel(selected.item.id) }}: {{ selected.item.title }}
-          </div>
-          <q-space />
           <!-- WHERE THE OPEN ITEM'S WORK IS, BESIDE THE CLAIM ABOUT IT. The two facts sit next to
                each other because neither one answers the other's question: the state is what a
                person or a Manager SAID, this is what the repository SHOWS. Same rendering as the
@@ -1348,10 +1362,6 @@ function down(index: number) {
             {{ selectedLanding.text }}
           </span>
 
-          <!-- CLOSE IS THE LAST CONTROL IN THIS ROW RATHER THAN THE FIRST, and it is further down
-               past the state controls: a close beside "Mark implemented" is a misclick that
-               changes an item's state. The landing chip above is a FACT and sits nearest the
-               title; everything after it acts. -->
           <!-- THE REVIEW TOGGLE. `pending` means nobody has reviewed this and `ready`
                means somebody has.
 
@@ -1393,16 +1403,6 @@ function down(index: number) {
             :disable="busy"
             @click="setState(selected.item, BacklogStates.Pending)"
           />
-          <q-btn
-            flat dense round
-            icon="close"
-            size="sm"
-            aria-label="Close this item"
-            class="backlog-detail-close"
-            @click="selected = null"
-          >
-            <q-tooltip>Close this item</q-tooltip>
-          </q-btn>
         </div>
 
         <div class="text-caption os-text-muted">{{ reviewCaption(selected.item) }}</div>
@@ -1846,9 +1846,31 @@ function down(index: number) {
   overflow-y: auto;
 }
 
-/* Pushed away from the state controls beside it - see the comment in the template. */
+/* The item's title bar: on the chrome tone with a rule under it, so it reads as the window's bar
+   and not as the first line of the spec. A long title takes two lines, then ends in an ellipsis
+   (the whole title is its tooltip). */
+.backlog-item-bar {
+  flex: 0 0 auto;
+  gap: 8px;
+  background: var(--os-chrome);
+  border-bottom: 1px solid var(--os-rule);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.backlog-item-title {
+  min-width: 0;
+  font-size: 1.125rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .backlog-detail-close {
-  margin-left: 4px;
+  flex: 0 0 auto;
 }
 
 .backlog-filter {

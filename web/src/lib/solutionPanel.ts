@@ -9,6 +9,7 @@ import type {
 import { filterWords, matchesWords } from './filterWords';
 import { capWords } from './solutions';
 import { triggerSentence } from './triggers';
+import { clockWords, cronWords, rawCron } from './scheduleWords';
 
 /**
  * THE WORDS OF THE SOLUTIONS LAUNCHER AND CONTROL PANEL, kept out of the components so each can be
@@ -78,14 +79,30 @@ export function memberStateLine(member: Pick<SolutionPanelMember, 'state' | 'blo
   return [state, ...notes].join(' · ');
 }
 
-/** "8:51 PM" today, "Thu 8:00 AM" on another day; the input itself when it is not a date. */
+/**
+ * "8:51 PM" today, "Thu, Oct 8 8:00 AM" on another day, in the browser's own zone and format; the
+ * input itself when it is not a date.
+ */
 export function whenWords(at: string, now = new Date()): string {
   const when = new Date(at);
   if (Number.isNaN(when.getTime())) return at;
-  const time = when.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s+/g, ' ');
+  const time = clockWords(when.getTime());
   if (when.toDateString() === now.toDateString()) return time;
-  const day = when.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const day = when.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   return `${day} ${time}`;
+}
+
+/**
+ * What the daily cap is holding, on the panel's clock: a schedule asleep until the next day says
+ * when it resumes in the reader's own zone; otherwise how many fires the cap skipped today. Null
+ * when the cap is holding nothing.
+ */
+export function cappedWords(
+  trigger: Pick<SolutionPanelTrigger, 'cappedUntil' | 'skippedToday'>,
+  now = new Date(),
+): string | null {
+  if (trigger.cappedUntil && !Number.isNaN(Date.parse(trigger.cappedUntil))) return `Capped until ${whenWords(trigger.cappedUntil, now)}`;
+  return trigger.skippedToday ? `skipped today: ${trigger.skippedToday}` : null;
 }
 
 /** "2.0 KB", "512 B". */
@@ -183,7 +200,11 @@ export interface TriggerFact {
  * many fires it missed.
  */
 export function triggerFacts(trigger: SolutionPanelTrigger, now = new Date()): TriggerFact[] {
-  const facts: TriggerFact[] = [{ label: 'Fires', value: triggerSentence(trigger) }];
+  // A cron in words in the reader's own zone; the raw cron is its own fact, for whoever wants it.
+  const cron = trigger.kind === 'cron' && trigger.expression ? trigger.expression : null;
+  const fires = (cron && cronWords(cron, trigger.timezone, now)) || triggerSentence(trigger);
+  const facts: TriggerFact[] = [{ label: 'Fires', value: fires }];
+  if (cron) facts.push({ label: 'Cron', value: rawCron(cron, trigger.timezone) });
   if (trigger.filter) facts.push({ label: 'Filter', value: trigger.filter });
   if (trigger.timezone) facts.push({ label: 'Timezone', value: trigger.timezone });
   facts.push({ label: 'On', value: trigger.enabled ? 'Yes' : 'No, it is off' });

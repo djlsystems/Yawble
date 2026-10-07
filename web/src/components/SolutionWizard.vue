@@ -5,10 +5,12 @@ import SlotReconnect from './SlotReconnect.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   checkSolution,
+  getMember,
   installSolution,
   listConnectionProviders,
   listConnections,
   previewSolution,
+  solutionPanel,
   solutionsInstalled,
   teamSolution,
   updateSolution,
@@ -16,6 +18,7 @@ import {
 import { uploadDocument } from '../api/documents';
 import {
   asDocumentsFolderKey,
+  asMemberId,
   asTeamId,
   type Connection,
   type ConnectionProvider,
@@ -30,6 +33,7 @@ import {
   type SolutionMissing,
   type SolutionPersonSetting,
   type SolutionPlan,
+  type SolutionPlanTrigger,
   type SolutionPreview,
   type SolutionRefusal,
   type SolutionSecret,
@@ -45,6 +49,8 @@ import {
   failureSentence,
   isBlank,
   keptValueWords,
+  liveAsPlanTrigger,
+  memberChanges,
   missingLine,
   refusalLine,
   removedItems,
@@ -59,10 +65,13 @@ import {
   settingStartValue,
   settingsBody,
   slotKey,
+  triggerChanges,
   triggerSource,
   updateCandidates,
   wakeWords,
+  type ValueChange,
 } from '../lib/solutions';
+import { clockWords, rawCron, sameZone, browserZone, zoneWords } from '../lib/scheduleWords';
 import { boundsHint, boundsProblem } from '../lib/numberBounds';
 import { useConsoleStore } from '../stores/console';
 
@@ -71,13 +80,15 @@ import { useConsoleStore } from '../stores/console';
  *
  * 1. **Team**: a new team (its name, editable, checked here and by the Host's preview; a local
  *    repository or not), or an update of a team installed from an earlier version of this package.
+ *    Opened from a team's own panel, that team's update is chosen to start with.
  *    A team that kept an uninstalled install of this package is offered for a REINSTALL: the install
  *    goes over it, its kept sites come back with their data, and the person's earlier answers that
  *    still apply are prefilled in Your part, each asked again.
  * 2. **Review**: everything the install makes, WHOLE. Every member's instructions and every
- *    trigger's instruction become prompts, so none is shortened; each trigger says what fires it,
- *    whom it wakes, how the Manager is woken and its daily cap. An update marks what is new or
- *    changed and lists what goes.
+ *    trigger's instruction become prompts, so none is shortened; each trigger says what fires it
+ *    (a schedule in words, in the reader's own zone, the raw cron under Advanced), whom it wakes,
+ *    how the Manager is woken and its daily cap. An update marks what is new or changed, shows each
+ *    changed value as it was beside what it becomes, and lists what goes.
  * 3. **Your part**: what only a person provides - person-only settings, connections, documents -
  *    and the secrets the package binds, by key name: set on the Host, not set (its source fails
  *    until it is, and how to set it), or not needed for a source left off. Never a value.
@@ -95,6 +106,11 @@ const props = defineProps<{
   from?: 'link';
   /** A check the opener already made (Install from a folder), so it is not asked twice. */
   check?: SolutionCheck | null;
+  /**
+   * The team the wizard was opened for (a solution's own panel, Update from a folder): its update
+   * is chosen at the start when the package can update it. Left out, nothing is chosen for you.
+   */
+  team?: string;
 }>();
 
 const emit = defineEmits<{ opened: [team: string] }>();
@@ -132,6 +148,7 @@ function reset() {
   localRepository.value = true;
   updateTeam.value = '';
   prefilledFor = '';
+  teamNow.value = null;
   preview.value = null;
   previewProblem.value = '';
   values.value = {};
@@ -174,7 +191,11 @@ async function start() {
     installed.value = [];
   }
 
-  await previewName();
+  // OPENED FOR A TEAM, its update is chosen when this package can update it; otherwise the wizard
+  // starts as it does anywhere else.
+  const forTeam = props.team ? candidates.value.find((candidate) => candidate.installed.team === props.team) : undefined;
+  if (forTeam?.selectable) await chooseUpdateTeam(forTeam.installed.team);
+  else await previewName();
 }
 
 watch(open, (showing) => {
@@ -340,6 +361,58 @@ const removed = computed(() => (diff.value ? removedItems(diff.value) : []));
 
 function mark(section: keyof SolutionDiff, name: string) {
   return diffMark(diff.value?.[section] as SolutionDiffSection | undefined, name);
+}
+
+// WHAT AN UPDATE CHANGES, OLD AND NEW SIDE BY SIDE: the team's triggers and agent members as they
+// are now, read from its panel (and each changed agent member's own instructions), so a changed
+// item shows what it was beside what it becomes. Without them only the new values are shown.
+interface TeamNow {
+  team: string;
+  triggers: Record<string, SolutionPlanTrigger>;
+  instructions: Record<string, string | null>;
+}
+
+const teamNow = ref<TeamNow | null>(null);
+
+watch(updatePreview, async (answer) => {
+  if (!answer || teamNow.value?.team === answer.team) return;
+  const team = answer.team;
+  try {
+    const panel = await solutionPanel(team);
+    const packageName = (member: string) => panel.members.find((entry) => entry.member === member)?.packageName ?? member;
+    const changedMembers = answer.diff.members.changed;
+    const instructions: Record<string, string | null> = {};
+    await Promise.all(
+      panel.members
+        .filter((member) => member.kind === 'agent' && changedMembers.includes(member.packageName))
+        .map(async (member) => {
+          try {
+            instructions[member.packageName] = (await getMember(asTeamId(team), asMemberId(member.member))).systemPrompt ?? null;
+          } catch {
+            // This member's old instructions are not shown; the rest are.
+          }
+        }),
+    );
+    if (updatePreview.value?.team !== team) return;
+    teamNow.value = {
+      team,
+      triggers: Object.fromEntries(panel.triggers.map((trigger) => [trigger.packageName, liveAsPlanTrigger(trigger, packageName(trigger.container))])),
+      instructions,
+    };
+  } catch {
+    // The review still shows what the update makes; only the old values are missing.
+  }
+});
+
+function triggerWas(trigger: SolutionPlanTrigger): ValueChange[] {
+  const was = mark('triggers', trigger.name) === 'changed' ? teamNow.value?.triggers[trigger.name] : undefined;
+  return was ? triggerChanges(was, trigger) : [];
+}
+
+function memberWas(member: SolutionPlan['members'][number]): ValueChange[] {
+  const now = teamNow.value;
+  if (!now || mark('members', member.name) !== 'changed' || !(member.name in now.instructions)) return [];
+  return memberChanges(now.instructions[member.name], member.instructions);
 }
 
 const openSkills = ref<Record<string, boolean>>({});
@@ -599,8 +672,16 @@ const unsetSecrets = computed(() => {
 });
 /** Each schedule's first run, as the result names it: ran now, or when it first runs. */
 const firstRuns = computed(() =>
-  (succeeded.value?.firstRuns ?? []).map((run) => ({ trigger: run.trigger, ranNow: run.ranNow, line: firstRunLine(run) })),
+  (succeeded.value?.firstRuns ?? []).map((run) => ({ trigger: run.trigger, ranNow: run.ranNow, line: firstRunLine(run) + theirClock(run) })),
 );
+
+/** A first run kept in another zone also says that zone's clock, as Review's words do. */
+function theirClock(run: { trigger: string; ranNow: boolean; at?: string | null }): string {
+  const zone = plan.value?.triggers.find((trigger) => trigger.name === run.trigger)?.timezone;
+  if (run.ranNow || !run.at || !zone || sameZone(zone, browserZone())) return '';
+  const at = Date.parse(run.at);
+  return Number.isNaN(at) ? '' : ` (${clockWords(at, zone)} ${zoneWords(zone)})`;
+}
 const failedStep = computed(() => (result.value && !result.value.ok && 'step' in result.value ? result.value : null));
 const failedCheck = computed(() => (result.value && !result.value.ok && 'refusals' in result.value ? result.value : null));
 
@@ -882,6 +963,14 @@ function next() {
                   <q-badge v-if="mark('members', member.name)" outline color="primary" :label="mark('members', member.name)!" data-mark />
                 </div>
                 <pre v-if="member.instructions" class="solution-text" data-instructions>{{ member.instructions }}</pre>
+                <div v-if="memberWas(member).length > 0" class="solution-changes" data-changes>
+                  <div class="solution-changes-title">What changes</div>
+                  <div v-for="change in memberWas(member)" :key="change.label" class="solution-change" :data-change="change.label">
+                    <div class="solution-change-label">{{ change.label }}</div>
+                    <div class="solution-change-side" data-was><div class="solution-change-head">Was</div><pre class="solution-text">{{ change.was }}</pre></div>
+                    <div class="solution-change-side" data-now><div class="solution-change-head">Now</div><pre class="solution-text">{{ change.now }}</pre></div>
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -895,13 +984,36 @@ function next() {
                   <q-badge v-if="mark('triggers', trigger.name)" outline color="primary" :label="mark('triggers', trigger.name)!" data-mark />
                 </div>
                 <dl class="solution-facts">
-                  <dt>When</dt><dd data-source>{{ triggerSource(trigger) }}</dd>
+                  <dt>When</dt>
+                  <dd>
+                    <span data-source>{{ triggerSource(trigger) }}</span>
+                    <!-- The raw schedule, for whoever wants it, under Advanced. -->
+                    <details v-if="trigger.cron" class="solution-advanced" data-cron>
+                      <summary>Advanced</summary>
+                      <span class="mono">{{ rawCron(trigger.cron, trigger.timezone) }}</span>
+                    </details>
+                  </dd>
                   <dt>Wakes</dt><dd data-target>{{ trigger.member }}</dd>
                   <dt>Manager</dt><dd data-wake>{{ wakeWords(trigger.wakeManager) }}</dd>
                   <dt>Daily cap</dt><dd data-cap>{{ capWords(trigger.dailyTokenCap) }}</dd>
                   <dt>Busy</dt><dd>{{ trigger.idleOnly ? 'Skipped while the member is busy' : 'Queued while the member is busy' }}</dd>
                 </dl>
                 <pre class="solution-text" data-instruction>{{ trigger.instruction }}</pre>
+                <!-- A CHANGED TRIGGER: each value the update changes, what it was beside what it becomes. -->
+                <div v-if="triggerWas(trigger).length > 0" class="solution-changes" data-changes>
+                  <div class="solution-changes-title">What changes</div>
+                  <div v-for="change in triggerWas(trigger)" :key="change.label" class="solution-change" :data-change="change.label">
+                    <div class="solution-change-label">{{ change.label }}</div>
+                    <template v-if="change.long">
+                      <div class="solution-change-side" data-was><div class="solution-change-head">Was</div><pre class="solution-text">{{ change.was }}</pre></div>
+                      <div class="solution-change-side" data-now><div class="solution-change-head">Now</div><pre class="solution-text">{{ change.now }}</pre></div>
+                    </template>
+                    <template v-else>
+                      <div class="solution-change-side" data-was><div class="solution-change-head">Was</div>{{ change.was }}</div>
+                      <div class="solution-change-side" data-now><div class="solution-change-head">Now</div>{{ change.now }}</div>
+                    </template>
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -1270,6 +1382,39 @@ function next() {
 
 .solution-facts dd {
   margin: 0;
+}
+
+.solution-advanced summary {
+  cursor: pointer;
+  color: var(--os-ink-muted);
+  font-size: 0.85em;
+}
+
+/* An update's old and new values: a label, then Was and Now side by side. */
+.solution-changes {
+  margin-top: 6px;
+}
+
+.solution-changes-title {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+.solution-change {
+  display: grid;
+  grid-template-columns: max-content 1fr 1fr;
+  column-gap: 12px;
+  align-items: start;
+  margin-top: 4px;
+}
+
+.solution-change-label,
+.solution-change-head {
+  color: var(--os-ink-muted);
+}
+
+.solution-change-side {
+  min-width: 0;
 }
 
 </style>
