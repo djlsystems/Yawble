@@ -262,6 +262,41 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         Assert.Equal(own, (await CurrentDispatchAsync(second)).LandedSha);
     }
 
+    /// <summary>
+    /// A MEMBER PUSHES TO ORIGIN'S TEAM BRANCH FROM ITS OWN WORKTREE, so the clone's local
+    /// <c>team/{id}</c> can stay where an earlier item left it. Read off that stale local branch,
+    /// the second item's merged work looked like nothing of its own and read unknown.
+    /// </summary>
+    [Fact]
+    public async Task A_second_items_work_pushed_past_a_stale_local_team_branch_reads_landed_once_merged()
+    {
+        var person = await PersonAsync();
+        var team = await TeamAsync("Theta");
+        var first = await DispatchAsync(team);
+        PushWork(team, "theta one", alsoTo: "trunk");
+        var clone = Clone(team);
+        Git(clone, "fetch", "origin");
+        Git(clone, "branch", $"team/{team}", $"origin/team/{team}");
+        Assert.Equal(BacklogLandedStates.Landed, (await ReadAsync(person, first)).GetProperty("state").GetString());
+
+        var second = await DispatchAsync(team);
+
+        // The second item's work, committed and pushed somewhere else, then merged; the clone's own
+        // team branch is never moved.
+        var work = Path.Combine(_root, $"work2-{team}");
+        Git(_root, "clone", "-b", $"team/{team}", _origin, work);
+        File.WriteAllText(Path.Combine(work, "theta2.txt"), "theta two\n");
+        Commit(work, "theta two");
+        var own = Run(work, "rev-parse", "HEAD").Stdout.Trim();
+        Git(work, "push", "origin", $"HEAD:refs/heads/team/{team}");
+        Git(work, "push", "origin", "HEAD:refs/heads/trunk");
+        Git(clone, "fetch", "origin");
+
+        Assert.NotEqual(own, Run(clone, "rev-parse", $"refs/heads/team/{team}").Stdout.Trim());
+        Assert.Equal(BacklogLandedStates.Landed, (await ReadAsync(person, second)).GetProperty("state").GetString());
+        Assert.Equal(own, (await CurrentDispatchAsync(second)).LandedSha);
+    }
+
     [Fact]
     public async Task Merge_to_main_stores_landed_only_on_dispatches_whose_work_is_in_the_merge()
     {
