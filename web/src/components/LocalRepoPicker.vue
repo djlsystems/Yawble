@@ -10,10 +10,14 @@ import { firstProblem, localRepoName, repoFolderName } from '../lib/rules';
  * way what joins the team's list is `local:<name>`, a reference and never a path. Both routes are a
  * person's; what a local repository is lives on Admin → Repositories.
  */
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   /** The team's list as it stands, so a repository already in it reads as attached. */
   attached: readonly string[];
-}>();
+
+  /** Whether to offer "Create a local repository" at all. New Team has its own way to make one -
+   *  named after the team, when it is created - and two ways to do one thing read as two things. */
+  offerCreate?: boolean;
+}>(), { offerCreate: true });
 
 const emit = defineEmits<{ attach: [reference: string] }>();
 
@@ -68,6 +72,7 @@ onMounted(load);
 
 <template>
   <div class="q-mt-sm" data-local-repo-picker>
+    <template v-if="props.offerCreate">
     <div class="row items-center no-wrap">
       <q-input
         v-model="name"
@@ -97,6 +102,7 @@ onMounted(load);
       A git repository kept on this instance only, with no hosting service. It starts on
       <span class="mono">main</span> with one empty commit.
     </div>
+    </template>
 
     <div v-if="loadProblem" class="os-body text-negative q-mt-xs">
       Could not list the local repositories: {{ loadProblem }}

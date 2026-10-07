@@ -12,6 +12,7 @@ import {
   BudgetFieldRefusal,
   BudgetFieldFractionRefusal,
   spendAgainstBudget,
+  budgetInWords,
 } from '../teamBudget'
 
 describe('isUnlimited', () => {
@@ -365,5 +366,30 @@ describe('spendAgainstBudget', () => {
   it('is null when neither figure was measured', () => {
     expect(spendAgainstBudget(null, null)).toBeNull()
     expect(spendAgainstBudget(undefined, undefined)).toBeNull()
+  })
+})
+
+describe('budgetInWords', () => {
+  it('says no limit for null and 0', () => {
+    expect(budgetInWords(null)).toBe('no limit')
+    expect(budgetInWords(0)).toBe('no limit')
+  })
+
+  it('says a round figure in millions or billions, without the digits', () => {
+    expect(budgetInWords(100_000_000)).toBe('100 million tokens')
+    expect(budgetInWords(1_500_000)).toBe('1.5 million tokens')
+    expect(budgetInWords(2_000_000_000)).toBe('2 billion tokens')
+    expect(budgetInWords(50_000)).toBe('50 thousand tokens')
+  })
+
+  it('says about for a figure it rounded', () => {
+    expect(budgetInWords(2_345_678)).toBe('about 2.3 million tokens')
+    expect(budgetInWords(2_300_000)).toBe('2.3 million tokens')
+    expect(budgetInWords(999_960)).toBe('about 1 million tokens')
+  })
+
+  it('says a small figure as it is', () => {
+    expect(budgetInWords(1)).toBe('1 token')
+    expect(budgetInWords(750)).toBe('750 tokens')
   })
 })
