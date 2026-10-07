@@ -66,39 +66,44 @@ async function submit() {
 
 <template>
   <div class="tell-manager q-mb-sm" data-tell-manager>
-    <q-input
-      v-model="words"
-      type="textarea"
-      autogrow
-      outlined
-      dense
-      label="Tell the Manager what you want done (or ask the Concierge)"
-      data-tell-manager-input
-      @update:model-value="sent = false"
-    />
-    <div class="row items-center q-gutter-sm q-mt-xs">
-      <q-select
-        v-model="workflow"
-        :options="options"
-        emit-value
-        map-options
-        dense
+    <!-- ONE LINE: the words, then which work they are for and the button, beside them. On a narrow
+         screen the two controls wrap under the words. -->
+    <div class="tell-manager-line" data-tell-manager-line>
+      <q-input
+        v-model="words"
+        type="textarea"
+        autogrow
         outlined
-        options-dense
-        label="For"
-        class="tell-manager-workflow"
-        data-tell-manager-workflow
+        dense
+        label="Tell the Manager what you want done (or ask the Concierge)"
+        class="tell-manager-words"
+        data-tell-manager-input
+        @update:model-value="sent = false"
       />
-      <q-btn
-        unelevated
-        no-caps
-        color="primary"
-        label="Tell the Manager"
-        :loading="sending"
-        :disable="!words.trim()"
-        data-tell-manager-send
-        @click="submit"
-      />
+      <div class="tell-manager-controls">
+        <q-select
+          v-model="workflow"
+          :options="options"
+          emit-value
+          map-options
+          dense
+          outlined
+          options-dense
+          label="For"
+          class="tell-manager-workflow"
+          data-tell-manager-workflow
+        />
+        <q-btn
+          unelevated
+          no-caps
+          color="primary"
+          label="Tell the Manager"
+          :loading="sending"
+          :disable="!words.trim()"
+          data-tell-manager-send
+          @click="submit"
+        />
+      </div>
     </div>
     <div v-if="sent" class="text-caption text-positive q-mt-xs" data-tell-manager-sent>Sent. The Manager has it.</div>
     <div v-if="problem" class="text-negative q-mt-xs" data-tell-manager-error>{{ problem }}</div>
@@ -107,7 +112,27 @@ async function submit() {
 
 <style scoped>
 .tell-manager {
-  max-width: 48rem;
+  max-width: 72rem;
+}
+
+/* The controls stand at the top of the words, so a box that grows with its text keeps them in place. */
+.tell-manager-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.tell-manager-words {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.tell-manager-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
 }
 
 .tell-manager-workflow {

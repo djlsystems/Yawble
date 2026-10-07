@@ -90,6 +90,15 @@ describe('Tell the Manager box', () => {
     expect(box.find('[data-tell-manager-next]').exists()).toBe(false);
   });
 
+  it('puts the For select and the button on the same line as the words, to their right', async () => {
+    const box = await mountBox();
+
+    const line = box.find('[data-tell-manager-line]');
+    const order = [...line.element.querySelectorAll('[data-tell-manager-input], [data-tell-manager-workflow], [data-tell-manager-send]')]
+      .map((el) => ['data-tell-manager-input', 'data-tell-manager-workflow', 'data-tell-manager-send'].find((name) => el.hasAttribute(name)));
+    expect(order).toEqual(['data-tell-manager-input', 'data-tell-manager-workflow', 'data-tell-manager-send']);
+  });
+
   it('sends the words to the Manager through the person\'s tell route, starting new work by default', async () => {
     const box = await mountBox([timing()]);
 
