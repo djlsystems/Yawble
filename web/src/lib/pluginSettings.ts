@@ -1,6 +1,14 @@
-import type { ConnectionSlot, PluginConfigField, PluginHire, PluginSecretField, PluginSettingValue } from '../api/types';
+import type {
+  ConnectionSlot,
+  PluginConfigField,
+  PluginHire,
+  PluginSecretField,
+  PluginSettingValue,
+  SecretKeyState,
+} from '../api/types';
 import { bindingsBody } from './connections';
 import { boundsHint, boundsProblem } from './numberBounds';
+import { secretSetWith } from './solutions';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, AS A FORM: what each manifest field starts as, whether it is still at
@@ -85,6 +93,17 @@ export function initialSecrets(
   stored: Record<string, string> = {},
 ): Record<string, string> {
   return Object.fromEntries(Object.keys(shape.secrets).map((name) => [name, stored[name] ?? '']));
+}
+
+/**
+ * What the Host says of a secret's key, in the solution wizard's words: set, not set with the exact
+ * commands that set it, or why no plugin may be bound to it.
+ */
+export function secretKeySentence(state: SecretKeyState, required: boolean): string {
+  if (state.refusal) return state.refusal;
+  if (state.set) return 'Set on this Host.';
+  const meaning = required ? 'the hire is refused until it is' : 'the plugin runs without it until it is';
+  return `Not set on this Host: ${meaning}. Set it with: ${secretSetWith(state.key)}.`;
 }
 
 /** A number box's text as the number it names, or null when it names none. */

@@ -541,4 +541,48 @@ public sealed class PluginInstallRouteTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, manager.StatusCode);
         Assert.Contains("not a plugin", await manager.Content.ReadAsStringAsync(Ct));
     }
+
+    [Fact]
+    public async Task A_person_reads_whether_a_key_is_set_by_its_name_and_never_its_value()
+    {
+        using var person = await PersonAsync();
+
+        var set = await person.GetAsync($"/api/secrets/{TokenKey}", Ct);
+        Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+        var text = await set.Content.ReadAsStringAsync(Ct);
+        Assert.DoesNotContain(TokenValue, text);
+        var body = JsonDocument.Parse(text).RootElement;
+        Assert.Equal(TokenKey, body.GetProperty("key").GetString());
+        Assert.True(body.GetProperty("set").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("refusal").ValueKind);
+        Assert.Contains($"secret set {TokenKey}", body.GetProperty("setWith").GetString());
+
+        var unset = await person.GetFromJsonAsync<JsonElement>("/api/secrets/PLUGIN_SETTINGS_ROUTE_NEVER_SET", Ct);
+        Assert.False(unset.GetProperty("set").GetBoolean());
+        Assert.Contains("secret set PLUGIN_SETTINGS_ROUTE_NEVER_SET", unset.GetProperty("setWith").GetString());
+    }
+
+    [Fact]
+    public async Task A_key_no_plugin_may_be_pointed_at_answers_its_refusal_and_not_set()
+    {
+        using var person = await PersonAsync();
+
+        var platform = await person.GetFromJsonAsync<JsonElement>("/api/secrets/HARNESS_URL", Ct);
+        Assert.False(platform.GetProperty("set").GetBoolean());
+        Assert.Contains("platform's own", platform.GetProperty("refusal").GetString());
+
+        var lower = await person.GetFromJsonAsync<JsonElement>("/api/secrets/token", Ct);
+        Assert.False(lower.GetProperty("set").GetBoolean());
+        Assert.Contains("not a secret key", lower.GetProperty("refusal").GetString());
+    }
+
+    [Fact]
+    public async Task A_manager_is_refused_reading_whether_a_key_is_set()
+    {
+        using var manager = await ManagerAsync();
+
+        var response = await manager.GetAsync($"/api/secrets/{TokenKey}", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.DoesNotContain(TokenValue, await response.Content.ReadAsStringAsync(Ct));
+    }
 }
