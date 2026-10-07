@@ -228,7 +228,12 @@ const overflowGroups = computed(() => {
                 <q-item-section v-if="entry.item.icon" avatar>
                   <q-icon :name="entry.item.icon" />
                 </q-item-section>
-                <q-item-section>{{ entry.item.label }}</q-item-section>
+                <q-item-section>
+                  <q-item-label>{{ entry.item.label }}</q-item-label>
+                  <!-- A disabled row in a menu fires no tooltip either, so its reason is a caption,
+                       as in the phone menu. -->
+                  <q-item-label v-if="needsTeam(entry.item)" caption>{{ tooltipFor(entry.item) }}</q-item-label>
+                </q-item-section>
                 <q-item-section v-if="badgeFor(entry.item)" side>
                   <q-badge
                     color="warning"

@@ -4,7 +4,7 @@ import { useConsoleStore } from '../stores/console';
 import { useSessionStore } from '../stores/session';
 import { AgentsAction } from './agentInstall';
 import { refreshAgentInstallations, useAgentInstallations } from './useAgentInstallations';
-import { Ribbon, needsActiveWorkTeam, type RibbonItem, type RibbonTab } from './ribbon';
+import { NoTeamHint, Ribbon, needsActiveWorkTeam, type RibbonItem, type RibbonTab } from './ribbon';
 
 /**
  * Shared ribbon state for the desktop strip and the mobile drawer.
@@ -67,11 +67,11 @@ export function useRibbon() {
     return needsActiveWorkTeam(item.action, activeWorkTeamId.value);
   }
 
-  /** The item's own description. There is no disabled-reason override: the only reason an
-   *  item is ever disabled is a missing active team, and the strip already says that in the
-   *  block heading above it. */
+  /** The item's own description, or why it is disabled. The only reason an item is ever
+   *  disabled is a missing active team, and a greyed button that does not say so reads as broken:
+   *  the heading above it says "No team", which names the state but not the way out. */
   function tooltipFor(item: RibbonItem) {
-    return item.tooltip;
+    return needsTeam(item) ? NoTeamHint : item.tooltip;
   }
 
   /**

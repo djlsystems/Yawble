@@ -37,6 +37,7 @@ import { useSessionStore } from '../../stores/session';
 import { remember } from '../../lib/newTeamDefaults';
 import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { TeamInstructionsLabel } from '../../lib/additionalInstructions';
+import { refreshAgentInstallations } from '../../lib/useAgentInstallations';
 
 beforeEach(() => {
   localStorage.clear();
@@ -63,8 +64,9 @@ afterEach(() => {
   resetBody();
 });
 
-/** `remembered` seeds the choices a returning person already made, so only the name is open. */
-async function open(remembered = true) {
+/** `remembered` seeds the choices a returning person already made, so only the name is open.
+ *  `workflowSpendLimit` is the instance's own budget figure, which the budget box opens holding. */
+async function open(remembered = true, workflowSpendLimit: number | null = null) {
   if (remembered) {
     remember({
       managerAgent: 'claude-headless',
@@ -75,7 +77,7 @@ async function open(remembered = true) {
   }
 
   setActivePinia(createPinia());
-  useConsoleStore().$patch({ teams: [], overviewLanded: true });
+  useConsoleStore().$patch({ teams: [], overviewLanded: true, workflowSpendLimit });
   useSessionStore().$patch({ user: { id: 'u1', email: 'admin@example.com' } });
 
   return mountDialog(CreateTeamDialog, {}, { pinia: false });
@@ -264,11 +266,10 @@ describe('CreateTeamDialog validation', () => {
     });
   });
 
-  // A local repository joins the list as `local:<name>` - picked from the instance's, or created
-  // beside the URL field - is sent as it is, and offers no upstream: contributor mode does not apply.
-  it('attaches an existing local repository and a newly created one, and sends both as local:<name>', async () => {
+  // A local repository joins the list as `local:<name>` - picked from the instance's beside the URL
+  // field - is sent as it is, and offers no upstream: contributor mode does not apply.
+  it('attaches an existing local repository and sends it as local:<name>', async () => {
     listLocalRepos.mockResolvedValue([localRepo('widget')]);
-    createLocalRepo.mockResolvedValue(localRepo('gadget'));
 
     const wrapper = await open();
     await field(wrapper, 'Team name').setValue('Beta');
@@ -278,31 +279,27 @@ describe('CreateTeamDialog validation', () => {
     chip('Attach local:widget').click();
     await validated();
     expect(chip('local:widget is attached').classList.contains('disabled')).toBe(true);
-
-    await field(wrapper, 'Create a local repository').setValue('gadget');
-    await validated();
-    button('Create').click();
-    await validated();
-
-    expect(createLocalRepo).toHaveBeenCalledWith('gadget');
     expect(() => field(wrapper, 'Upstream URL for local:widget')).toThrow();
 
     button('Create team').click();
     await validated();
 
     expect(createTeam).toHaveBeenCalledTimes(1);
-    expect(createTeam.mock.calls[0]![4]).toEqual(['local:widget', 'local:gadget']);
+    expect(createTeam.mock.calls[0]![4]).toEqual(['local:widget']);
   });
 
-  it('refuses an illegal local repository name on the field and creates nothing', async () => {
+  // ONE WAY TO MAKE A LOCAL REPOSITORY: the box, which says what it does. A named Create beside it
+  // was a second way to do the same thing, and made one even if the team was then cancelled.
+  it('offers one way to make a local repository: the ticked box, which says what it makes', async () => {
     const wrapper = await open();
     await showTab('Code');
-    await field(wrapper, 'Create a local repository').setValue('../escape');
-    await validated();
 
-    expect(bodyText()).toContain("'../escape' is not a local repository name. Use 1 to 100 letters, digits, '.', '_' or '-'");
-    expect(bodyText()).toContain("with no '..'");
-    expect(button('Create').hasAttribute('disabled')).toBe(true);
+    expect(() => field(wrapper, 'Create a local repository')).toThrow();
+    expect([...document.body.querySelectorAll('button')].some((candidate) => candidate.textContent?.trim() === 'Create')).toBe(false);
+    expect(document.body.querySelectorAll('[data-local-repository-checkbox]')).toHaveLength(1);
+    expect(document.body.querySelector('[data-local-repository-hint]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'With no repository listed, the team gets a git repository of its own, named after it and kept on this instance only. Untick it for a team with no code.',
+    );
     expect(createLocalRepo).not.toHaveBeenCalled();
   });
 
@@ -398,5 +395,159 @@ describe('CreateTeamDialog prompts', () => {
     expect(args.slice(0, 3)).toEqual(['Beta', 'claude-headless', ['claude-headless']]);
 
     wrapper.unmount();
+  });
+});
+
+/** The text a person sees, with the folded part left out: `v-show` keeps it in the DOM. */
+function visibleText(): string {
+  const copy = document.body.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll<HTMLElement>('[style*="display: none"]').forEach((hidden) => hidden.remove());
+  return (copy.textContent ?? '').replace(/\s+/g, ' ');
+}
+
+function advancedLink(): HTMLElement {
+  const found = document.body.querySelector<HTMLElement>('[data-advanced-link]');
+  if (!found) throw new Error('no Advanced... link in the rendered dialog');
+  return found;
+}
+
+function advancedSettings(): HTMLElement {
+  const found = document.body.querySelector<HTMLElement>('[data-advanced-settings]');
+  if (!found) throw new Error('no advanced settings in the rendered dialog');
+  return found;
+}
+
+function budgetWords(): string {
+  return document.body.querySelector('[data-budget-words]')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+/** A first-time person meets plain words; the folder, the machines, the agent terms and the budget
+ *  wait behind Advanced.... */
+describe('CreateTeamDialog for a first-time person', () => {
+  afterEach(async () => {
+    listCatalog.mockResolvedValue({ agents: [] });
+    await refreshAgentInstallations();
+  });
+
+  it('says what a team starts with in plain words', async () => {
+    await open();
+
+    expect(visibleText()).toContain('Every team starts with a Manager: an agent that plans the work and hires members to do it.');
+    expect(bodyText()).not.toContain('door into it');
+  });
+
+  it('labels the agent allowlist in plain words, with no preset or tag terms on show', async () => {
+    const wrapper = await open();
+
+    const select = wrapper.findAllComponents({ name: 'QSelect' }).map((candidate) => String(candidate.props('label')));
+    expect(select).toContain('Add an agent');
+    expect(select).not.toContain('Allowlist: add Agent');
+
+    const shown = visibleText();
+    expect(shown).toContain('Used when nobody chooses');
+    expect(shown).not.toContain('Default when no tag is requested');
+    expect(shown).not.toContain('Headless presets only');
+    expect(shown).not.toMatch(/headless preset|\btag\b/i);
+  });
+
+  it('folds the folder, the machines, the agent terms and the budget behind Advanced..., hidden until it is clicked', async () => {
+    listCatalog.mockResolvedValue({
+      agents: [{ name: 'claude-headless', mode: 'Headless' }],
+      installations: [{
+        agent: 'claude-headless',
+        command: 'claude',
+        state: null,
+        resolvedPath: '/usr/bin/claude',
+        referenced: true,
+        message: 'claude is installed on worker-1.',
+        measuredOn: [{ worker: 'worker-1', installed: true, at: '2026-10-07T00:00:00Z' }],
+      }],
+    });
+    await refreshAgentInstallations();
+
+    fileSystemRoots.mockResolvedValue({ roots: [{ path: '/data', isInstance: true }] });
+
+    const wrapper = await open(true, 100_000_000);
+    await field(wrapper, 'Team name').setValue('QuickNotes');
+    await validated();
+
+    expect(advancedLink().textContent?.trim()).toBe('Advanced...');
+    expect(advancedLink().getAttribute('aria-expanded')).toBe('false');
+    expect(advancedSettings().style.display).toBe('none');
+
+    const folded = visibleText();
+    expect(folded).not.toContain('Place team in');
+    expect(folded).not.toContain('New team folder will be /data/teams/QuickNotes');
+    expect(folded).not.toContain('Installed on worker-1');
+    expect(folded).not.toContain('Budget for one workflow');
+    expect(folded).not.toContain('100000000');
+
+    advancedLink().click();
+    await validated();
+
+    expect(advancedLink().getAttribute('aria-expanded')).toBe('true');
+    expect(advancedSettings().style.display).toBe('');
+    const shown = visibleText();
+    expect(shown).toContain('Place team in');
+    expect(shown).toContain('New team folder will be /data/teams/QuickNotes');
+    expect(shown).toContain('Manager agent: Installed on worker-1');
+    expect(shown).toContain('Only headless presets are offered');
+    expect(advancedSettings().contains(field(wrapper, 'Budget for one workflow (tokens)').element)).toBe(true);
+  });
+
+  it('folds Advanced... again on every open', async () => {
+    const wrapper = await open();
+    advancedLink().click();
+    await validated();
+    expect(advancedSettings().style.display).toBe('');
+
+    await wrapper.setProps({ modelValue: false });
+    await wrapper.setProps({ modelValue: true });
+    await validated();
+
+    expect(advancedSettings().style.display).toBe('none');
+  });
+
+  it('says the budget in words: rounded to millions, and no limit for 0', async () => {
+    const wrapper = await open(true, 100_000_000);
+    advancedLink().click();
+    await validated();
+
+    expect(budgetWords()).toBe('Budget for one workflow: 100 million tokens');
+
+    await field(wrapper, 'Budget for one workflow (tokens)').setValue(0);
+    await validated();
+    expect(budgetWords()).toBe('Budget for one workflow: no limit');
+
+    await field(wrapper, 'Budget for one workflow (tokens)').setValue(2_345_678);
+    await validated();
+    expect(budgetWords()).toBe('Budget for one workflow: about 2.3 million tokens');
+
+    await field(wrapper, 'Budget for one workflow (tokens)').setValue('');
+    await validated();
+    expect(budgetWords()).toBe("Budget for one workflow: 100 million tokens, the instance's own figure");
+  });
+
+  it('says no limit for an instance with no budget', async () => {
+    const wrapper = await open(true, null);
+    advancedLink().click();
+    await validated();
+
+    expect(budgetWords()).toBe("Budget for one workflow: no limit, the instance's own figure");
+    wrapper.unmount();
+  });
+
+  it('keeps Advanced... open while the budget there is refused', async () => {
+    const wrapper = await open(true, 100_000_000);
+    advancedLink().click();
+    await validated();
+    await field(wrapper, 'Budget for one workflow (tokens)').setValue(1.5);
+    await validated();
+
+    advancedLink().click();
+    await validated();
+
+    expect(advancedSettings().style.display).toBe('');
+    expect(button('Create team').hasAttribute('disabled')).toBe(true);
   });
 });

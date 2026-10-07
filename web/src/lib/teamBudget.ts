@@ -279,3 +279,37 @@ export function budgetBar(
     near: fraction >= BudgetWarningFraction,
   }
 }
+
+/**
+ * A token budget as a person reads it: "no limit", or a figure rounded to millions or billions
+ * ("100 million tokens") rather than nine digits nobody counts. A rounded figure says "about", so
+ * the words never claim a precision the box does not hold. Takes the RESOLVED figure, where `null`
+ * and 0 both mean no bound - see {@link isUnlimited}.
+ */
+export function budgetInWords(limitTokens: number | null | undefined): string {
+  if (isUnlimited(limitTokens)) return 'no limit'
+
+  const limit = limitTokens as number
+  const scales: readonly [number, string][] = [
+    [1_000_000_000, 'billion'],
+    [1_000_000, 'million'],
+    [1_000, 'thousand'],
+  ]
+
+  for (const [at, [size, word]] of scales.entries()) {
+    if (limit < size) continue
+    const tenths = Math.round((limit / size) * 10)
+    // 999,960 rounds to 1,000 thousand: say it with the scale above instead.
+    const larger = scales[at - 1]
+    if (tenths >= 10_000 && larger) return inScale(limit, larger)
+    return inScale(limit, [size, word])
+  }
+
+  return limit === 1 ? '1 token' : `${limit} tokens`
+}
+
+function inScale(limit: number, [size, word]: readonly [number, string]): string {
+  const tenths = Math.round((limit / size) * 10)
+  const about = (tenths * size) / 10 === limit ? '' : 'about '
+  return `${about}${(tenths / 10).toLocaleString('en')} ${word} tokens`
+}

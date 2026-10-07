@@ -571,7 +571,7 @@ describe('Refresh and Reload', () => {
     await openPanel();
     const first = sockets[0]!;
 
-    await click('Refresh display — does not restart the agent');
+    await click('Redraw the screen — the agent keeps running');
 
     expect(endConcierge).not.toHaveBeenCalled();
     expect(first.dispose).toHaveBeenCalled();
@@ -584,7 +584,7 @@ describe('Refresh and Reload', () => {
     const first = sockets[0]!;
     fake.nextSize = { cols: 100, rows: 30 };
 
-    await click('Refresh display — does not restart the agent');
+    await click('Redraw the screen — the agent keeps running');
 
     expect(first.sendResize).toHaveBeenCalledWith(100, 30);
   });
@@ -609,6 +609,36 @@ describe('Refresh and Reload', () => {
       expect.objectContaining({ cols: expect.any(Number), rows: expect.any(Number) }),
       expect.anything(),
     );
+  });
+});
+
+/**
+ * RELOAD SAYS WHAT IT KEEPS. The new agent still has its notes on the person's teams, so a warning
+ * that everything is lost for good is false, and it scares a person off the one way to unstick it.
+ */
+describe('what Reload and Refresh say', () => {
+  it('Reload\'s confirmation names what is kept and what is lost, and claims nothing is gone for good', async () => {
+    await openPanel();
+
+    await click('Reload the Concierge');
+    const text = document.body.querySelector('.reset-confirm-card')?.textContent?.replace(/\s+/g, ' ') ?? '';
+
+    expect(text).toContain('The new one keeps its notes on your teams');
+    expect(text).toContain('this conversation, and anything it was part-way through, is lost');
+    expect(text).not.toContain('cannot be recovered');
+    expect(text).not.toContain('Everything it knows');
+  });
+
+  it('draws Refresh and Reload with different icons and different words', async () => {
+    const panel = await openPanel();
+    const buttons = panel.findAllComponents({ name: 'QBtn' });
+    const refresh = buttons.find((b) => b.attributes('aria-label') === 'Redraw the screen — the agent keeps running');
+    const reload = buttons.find((b) => b.attributes('aria-label') === 'Reload the Concierge');
+
+    expect(refresh, 'no Redraw button').toBeDefined();
+    expect(reload, 'no Reload button').toBeDefined();
+    expect(refresh!.props('icon')).toBe('desktop_windows');
+    expect(reload!.props('icon')).toBe('restart_alt');
   });
 });
 
