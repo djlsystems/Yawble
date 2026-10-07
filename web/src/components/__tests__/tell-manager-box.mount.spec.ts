@@ -81,13 +81,13 @@ function sent() {
 }
 
 describe('Tell the Manager box', () => {
-  it('has a place to type and says in plain words what happens next', async () => {
+  it('has a place to type whose hint names the Concierge as the other way in, and no line under it', async () => {
     const box = await mountBox();
 
     expect(box.find('textarea[data-tell-manager-input]').exists()).toBe(true);
     expect(box.find('[data-tell-manager-send]').text()).toBe('Tell the Manager');
-    expect(box.find('[data-tell-manager-next]').text()).toBe(
-      'The Manager plans the work and hands it to the team. The board shows it as it moves.');
+    expect(box.text()).toContain('Tell the Manager what you want done (or ask the Concierge)');
+    expect(box.find('[data-tell-manager-next]').exists()).toBe(false);
   });
 
   it('sends the words to the Manager through the person\'s tell route, starting new work by default', async () => {

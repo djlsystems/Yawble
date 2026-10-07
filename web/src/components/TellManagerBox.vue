@@ -72,7 +72,7 @@ async function submit() {
       autogrow
       outlined
       dense
-      label="Tell the Manager what you want done"
+      label="Tell the Manager what you want done (or ask the Concierge)"
       data-tell-manager-input
       @update:model-value="sent = false"
     />
@@ -99,9 +99,6 @@ async function submit() {
         data-tell-manager-send
         @click="submit"
       />
-      <span class="text-caption os-text-muted" data-tell-manager-next>
-        The Manager plans the work and hands it to the team. The board shows it as it moves.
-      </span>
     </div>
     <div v-if="sent" class="text-caption text-positive q-mt-xs" data-tell-manager-sent>Sent. The Manager has it.</div>
     <div v-if="problem" class="text-negative q-mt-xs" data-tell-manager-error>{{ problem }}</div>

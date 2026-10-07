@@ -245,11 +245,10 @@ describe('a team\'s marks', () => {
     expect(box.props('team')).toBe('alpha');
   });
 
-  it('no longer says the page cannot take work, and still names the Concierge as another way', async () => {
+  it('says nothing under the box: its own hint names the Concierge', async () => {
     const page = await mountPage([team('alpha')]);
 
-    expect(page.find('[data-team-work-hint]').text()).toBe(
-      'You can also ask the Concierge (bottom right).');
+    expect(page.find('[data-team-work-hint]').exists()).toBe(false);
   });
 
   it('does not mark a running team paused', async () => {

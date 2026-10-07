@@ -570,11 +570,8 @@ onUnmounted(() => {
       </div>
 
       <!-- HOW WORK REACHES A TEAM, where people look for it: a person who opened a team to give it
-           work found no input. The box tells the Manager; the Concierge stays another way in. -->
+           work found no input. The box tells the Manager; its hint names the Concierge as another way in. -->
       <TellManagerBox :team="activeTeam.id" :workflows="board.workflowsFor(activeTeam.id)?.workflows ?? []" />
-      <div class="text-caption os-text-muted q-mb-sm" data-team-work-hint>
-        You can also ask the Concierge (bottom right).
-      </div>
 
       <!-- A team installed from a solution package that still waits for its person. -->
       <SolutionBlockedBanner :team="activeTeam.id" />
