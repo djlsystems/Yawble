@@ -53,15 +53,17 @@ A worker's size comes from what the engine has, asked of the engine itself: `doc
 When yawble's config holds neither `memory` nor `cpus`, the first `up` at a terminal shows one short screen and asks for each, Enter accepting the proposal:
 
 ```
-How much of the engine should Yawble's worker get? (asked once)
-  the engine has   12288 MB memory, 10 CPUs (docker info)
+How much of this computer should Yawble's worker get? (asked once)
+  available        12288 MB memory and 10 CPUs: Docker Desktop's share of this computer, not all of it
+                   To give Docker Desktop more: Docker Desktop's Settings > Resources
   control takes    1536 MB memory, 2 CPUs (fixed), so a worker may have up to 10752 MB
-  proposed         6144 MB memory, 8 CPUs (half the engine's memory up to 12 GB; its CPUs up to 8)
-  running limit    3 at once, derived from the Host's rule: the smaller of CPUs - 1 and memory / wip.memoryPerRunMb (the Host's default, 2048 MB). Not asked; yawble config set maxRunning overrides it
+  proposed         6144 MB memory, 8 CPUs (half the memory available, up to 12 GB; the CPUs, up to 8)
+Up to 3 agent runs can work at once, because each run is given 2048 MB of memory and the worker has 6144 MB.
 Press Enter to accept a value, or type another.
 Memory in MB (4096 to 10752) [6144]:
 CPUs (1 to 10) [8]:
-saved memory 6144m and cpus 8 in yawble's config; the Host's rule derives a running limit of 3 from them (yawble config set memory <size> and yawble config set cpus <n> change them, then yawble up)
+saved memory 6144m and cpus 8 in yawble's config (yawble config set memory <size> and yawble config set cpus <n> change them, then yawble up)
+Up to 3 agent runs can work at once, because each run is given 2048 MB of memory and the worker has 6144 MB.
 ```
 
 Memory takes megabytes (`8192`) or a size (`8g`). A value above what the engine has beside control is refused with the maximum named, and so is memory below the 4 GB floor (the Host's own share beside one run) and fewer than 1 CPU. An engine under 8 GB proposes less than 4 GB, and then the floor is that proposal, so the default in brackets is always inside the range the prompt states; then it asks again. A refusal for being above the engine's figure also says how to give that engine more:
@@ -70,7 +72,7 @@ Memory takes megabytes (`8192`) or a size (`8g`). A value above what the engine 
 - Docker Desktop: `To give Docker Desktop more: Docker Desktop's Settings > Resources`
 - Linux, no VM (Docker or Podman): `On Linux there is no VM: this computer's own RAM and CPUs are the limit, and there is nothing to enlarge`
 
-(Docker in some other VM, such as Colima, is told to change it in the tool that runs that VM.) `yawble doctor`'s `capacity` warning and a later `up`'s warning give the same hint when a saved value is more than the engine has. The running limit on this screen is the only figure yawble derives itself, and it says so: it is the Host's default rule with the Host's default `wip.memoryPerRunMb`. It is not asked; `yawble config set maxRunning` overrides it, and `yawble doctor` reports the limit the Host actually applies.
+(Docker in some other VM, such as Colima, is told to change it in the tool that runs that VM.) `yawble doctor`'s `capacity` warning and a later `up`'s warning give the same hint when a saved value is more than the engine has. The figures are named as whose share of this computer they are (the Podman machine's, Docker Desktop's, or on Linux all of it), with where to give it more on the line below. How many agent runs can work at once is the only figure yawble derives itself: the Host's own rule at its default allowance of 2048 MB a run, said in one sentence with its reason, and the started line repeats that number. It is not asked; `yawble config set maxRunning` overrides it, and `yawble doctor --details` reports the limit the Host actually applies.
 
 With `--yes`, or without a terminal, `up` takes the proposal without asking and prints what it chose and how to change it. Either way the answer is saved, so later `up`s do not ask; `yawble config set memory <size>` and `yawble config set cpus <n>`, then `yawble up`, change it. A saved value above what the engine now has (a smaller Docker Desktop VM, say) is warned about on every `up`, with the largest value that fits and how to give the engine more. `yawble restore` does not ask; it uses what is saved, or the proposal.
 
@@ -198,7 +200,7 @@ By default it leaves out only what the instance reinstalls at its next start: th
 
 `yawble restore <file>` puts a backup into the instance on this computer and engine, whichever made it: Podman to Docker, or one computer to another. It restores into an empty volume without asking. If the volume already holds data, it refuses unless `--replace` is given. `--replace` asks you to type the word `replace` (or use `--replace --yes` from a script), and first writes a backup of the current volume beside the file, naming it. A backup from a newer Yawble is refused with both versions named: run `yawble update` first. After restoring, it starts the instance as `up` does and waits for it to answer. It ends by listing the providers whose keys the backed-up instance used, never their values.
 
-yawble's own settings are not in a backup. On a new computer, choose the engine and port again and set those keys again with `yawble secret set`. `yawble doctor` shows the newest backup written on this computer and its age, as an `info` line that never fails. More in [docs/ops/backups-logs-and-versions.md](../docs/ops/backups-logs-and-versions.md).
+yawble's own settings are not in a backup. On a new computer, choose the engine and port again and set those keys again with `yawble secret set`. `yawble doctor`'s one `backups` line tells the Host's daily copies in the data volume, which are lost if the volume is lost, from the newest backup written on this computer and its age; with no backup on this computer it warns and names `yawble backup`. More in [docs/ops/backups-logs-and-versions.md](../docs/ops/backups-logs-and-versions.md).
 
 ## Secrets: GitHub and API keys
 
@@ -253,9 +255,10 @@ You are responsible for your provider's terms when one credential is used by man
 
 Conventions: `--json` on `status`, `doctor`, `agents`, `config get` and `version`; exit 0 on success, 1 when the thing failed, 2 when the invocation was wrong; `YAWBLE_*` environment variables override the config file; no prompts when stdin is not a terminal; no colour, except the Yawble mark that `yawble`, `yawble version` and `yawble up` draw in orange for a terminal (`NO_COLOR` turns the colour off; a pipe or `--json` gets no mark at all).
 
-`doctor` prints one line per check. The verdict words are `ok`, `warn`, `FAIL`, `skip` and `info`; `skip` means the check could not be measured (a stopped instance has no health to check) and is not a failure, and `info` (the newest backup) only informs. Exit 1 when anything FAILs. The in-container half runs the Host's own `--doctor` switch through `podman exec` (or `docker exec`), so those checks are computed by the platform and only rendered here. `--fix` starts a stopped Podman machine (with Podman as the engine), creates a missing data volume and starts a stopped container; it never removes anything. After starting a machine it checks again and stops there, so a second `--fix` may be needed for the container.
+`doctor` prints one line per check. By default it lists whether the instance runs, whether an agent can work in it and whether it is backed up, and every check that warns or fails, then counts the rest; `--details` lists every check and, under them, what each agent's tools would load. The verdict words are `ok`, `warn`, `FAIL`, `skip` and `info`; `skip` means the check could not be measured (a stopped instance has no health to check) and is not a failure, and `info` (a figure such as `capacity`) only informs. With one agent signed in and launching, `agents` is ok and the others are listed as not in use; it warns when no agent can run, or a signed-in one fails to start. Exit 1 when anything FAILs. The in-container half runs the Host's own `--doctor` switch through `podman exec` (or `docker exec`), so those checks are computed by the platform and only rendered here. `--fix` starts a stopped Podman machine (with Podman as the engine), creates a missing data volume and starts a stopped container; it never removes anything. After starting a machine it checks again and stops there, so a second `--fix` may be needed for the container.
 
 ```
+$ yawble doctor --details
 ok    machine        podman-machine-default, 10 CPUs, 15688 MB
 ok    rootless       the machine is rootless
 ok    machine memory 15688 MB, above the container limit of 8192 MB
@@ -271,13 +274,12 @@ warn  path           C:\src\yawble is not on PATH
 skip  release        newer yawble releases are not checked in this build
 ok    data root      /data, 915 GB free, writable
 ok    database       schema accepted (9 steps)
-warn  backups        no daily backup yet (the Host writes one a day into /data/backups)
-warn  agents         claude signed in, launch ok · codex NOT signed in, launch ok · copilot not measured, launch not checked · grok signed in, launch FAILED, exit 134 · agy not installed
+ok    backups        1 daily copy in the data volume (newest 2026-09-28 03:00 UTC), lost if the volume is lost; newest copy on this computer: C:\Users\me\yawble-backup-20260927-181200.tar.gz, 17 hours old
+warn  agents         claude signed in, launch ok · codex not in use (not signed in) · copilot not measured · grok signed in, launch FAILED, exit 134 · agy not in use (not installed)
                      fix: yawble agents
 info  capacity       engine has 15688 MB, 10 CPUs (podman machine); the container got 8192 MB, 8 CPUs (the Host's cgroup reading)
 ok    running limit  4, from the memory bound (the Host's answer: ...)
 info  run memory     rlimit, 1792 MB per run: runs.memoryLimitMb is set
-info  backup         newest C:\Users\me\yawble-backup-20260927-181200.tar.gz, 17 hours old
 ```
 
 `capacity` puts what the engine has (asked of it, as `up` does) beside what the container got, as the Host inside reads its cgroup; it warns when yawble's config asks for more than the engine has. The running limit and run memory are the Host's own answers; when the Host cannot be asked they read "not known", never an estimate. The first four rows appear only with Podman on macOS and Windows, where it runs in a machine; on Linux, and with Docker, the list starts at `engine`.
@@ -285,7 +287,7 @@ info  backup         newest C:\Users\me\yawble-backup-20260927-181200.tar.gz, 17
 ## Where things live
 
 - Settings: `~/.config/yawble/config.toml` on Linux, `~/Library/Application Support/yawble` on macOS, `%APPDATA%\yawble` on Windows. `yawble config` reads and writes it.
-- Provider keys the instance should receive: a file named `env` beside the config, one `NAME=value` per line, passed to the container at `up`.
+- Provider keys the instance should receive: a file named `env` beside the config, one `NAME=value` per line, passed to the container at `up`; `yawble secret set <KEY>` writes it.
 - Everything else is state the container engine holds: pod `yawble` (a network of that name with Docker), volume `yawble-data` mounted at `/data`, container `yawble`.
 
 ## Releasing

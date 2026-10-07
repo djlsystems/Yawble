@@ -169,7 +169,7 @@ func TestProbeDoctorAtTheEnginesFigureIsInfoAndOverItGivesTheEngineHint(t *testi
 		deps.GOOS, deps.LookPath = c.goos, lookPath("docker")
 		deps.ConfigDir = t.TempDir()
 		writeConfig(t, deps.ConfigDir, c.saved)
-		_, out, _ := run(t, deps, "doctor")
+		_, out, _ := run(t, deps, "doctor", "--details")
 		var rows []string
 		for _, l := range strings.Split(out, "\n") {
 			if strings.Contains(l, "capacity") {

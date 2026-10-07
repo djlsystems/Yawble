@@ -13,14 +13,14 @@ import (
 
 // The Host's own --doctor report, written by DoctorReportCliContractTests from a real launch check
 // (a fake CLI aborting under a 64 MB data limit, leaking a credential on stderr) and the wip
-// figures the Host recorded under cgroup, rlimit and not enforced, decodes here into the launch
+// figures the Host recorded under cgroup, rlimit and no per-run cap, decodes here into the launch
 // result, the Host's figures and its running Concierge sessions, with nothing derived and nothing
 // unredacted.
 func TestTheHostsOwnDoctorReportDecodes(t *testing.T) {
 	for _, c := range []struct{ file, runMemory string }{
 		{"host-doctor-cgroup.json", "cgroup, 1792 MB per run: "},
 		{"host-doctor-rlimit.json", "rlimit, 2048 MB per run: "},
-		{"host-doctor-none.json", "not enforced: "},
+		{"host-doctor-none.json", "no per-run memory cap: "},
 	} {
 		raw, err := os.ReadFile(filepath.Join("testdata", c.file))
 		if err != nil {

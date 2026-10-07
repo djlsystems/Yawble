@@ -8,24 +8,53 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/backup"
 )
 
-// Info is a line that informs and never fails: the newest backup, which a person may keep
-// anywhere or nowhere.
+// Info is a line that informs and never fails: a figure a person may want, with nothing to do.
 const Info Verdict = "info"
 
-// BackupCheck names the newest backup `yawble backup` (or a restore's safety copy) wrote on this
-// computer and its age. None, or one since moved, is said, never failed.
-func BackupCheck(configDir string, now time.Time) Check {
-	c := Check{Name: "backup", Verdict: Info}
+// BackupCheck folds the newest copy `yawble backup` (or a restore's safety copy) wrote on this
+// computer into the "backups" row, beside the Host's daily copies in the data volume, so "am I
+// backed up?" has one answer. The daily copies are lost with the volume, so without a copy here
+// the row warns and names `yawble backup`; a copy here is named with its age, and one since
+// moved is said. The separate row this was is gone: two rows disagreed.
+func BackupCheck(checks []Check, configDir string, now time.Time) []Check {
+	row, at := Check{Name: "backups", Verdict: Skip, Detail: "daily copies in the data volume: not known"}, -1
+	for i, c := range checks {
+		if c.Name == "backups" {
+			row, at = c, i
+			if c.Verdict == Skip {
+				row.Detail = "daily copies in the data volume: not known (" + c.Detail + ")"
+			}
+			break
+		}
+	}
+	const fix = "yawble backup (writes a copy on this computer, outside the data volume)"
 	rec, ok := backup.Last(configDir)
 	switch {
 	case !ok:
-		c.Detail = "no backup has been written on this computer (yawble backup)"
+		row.Detail += "; no copy on this computer yet"
+		row.Verdict, row.Fix = Warn, fix
 	case !exists(rec.Path):
-		c.Detail = fmt.Sprintf("the newest backup written here, %s, %s, is no longer at that path", rec.Path, age(now.Sub(rec.At)))
+		row.Detail += fmt.Sprintf("; the newest copy written on this computer, %s, %s, is no longer there", rec.Path, age(now.Sub(rec.At)))
+		row.Verdict, row.Fix = Warn, fix
 	default:
-		c.Detail = fmt.Sprintf("newest %s, %s", rec.Path, age(now.Sub(rec.At)))
+		row.Detail += fmt.Sprintf("; newest copy on this computer: %s, %s", rec.Path, age(now.Sub(rec.At)))
+		if row.Verdict == Skip {
+			row.Verdict = OK
+		}
 	}
-	return c
+	if at < 0 {
+		return append(checks, row)
+	}
+	checks[at] = row
+	return checks
+}
+
+// dailyCopies counts the Host's daily copies in words.
+func dailyCopies(n int) string {
+	if n == 1 {
+		return "1 daily copy"
+	}
+	return fmt.Sprintf("%d daily copies", n)
 }
 
 func exists(path string) bool {

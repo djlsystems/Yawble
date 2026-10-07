@@ -88,7 +88,8 @@ func runMemoryRow(r *HostReport) Check {
 			text += ", figure not known"
 		}
 	case "none":
-		text = "not enforced"
+		// How this engine is, not something gone wrong: the Host's sentence would only repeat it.
+		return Check{name, Info, "no per-run memory cap: this engine offers none, so runs share the worker's memory (a fact of the engine, not a fault)", ""}
 	default:
 		text = fmt.Sprintf("not known (the Host said %q)", m.Mechanism)
 	}

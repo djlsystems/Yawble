@@ -149,7 +149,7 @@ func TestProbeRecheckASmallEnginesSavedProposalIsNotWarnedByLaterUpOrDoctor(t *t
 		dd.GOOS, dd.LookPath = "darwin", lookPath("docker")
 		dd.ConfigDir = t.TempDir()
 		writeConfig(t, dd.ConfigDir, saved)
-		_, dout, _ := run(t, dd, "doctor")
+		_, dout, _ := run(t, dd, "doctor", "--details")
 		var row string
 		for _, l := range strings.Split(dout, "\n") {
 			if strings.Contains(l, "capacity") {

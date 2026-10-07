@@ -78,7 +78,7 @@ func withWorkerKey(deps Deps, s instance.Settings, out io.Writer) (instance.Sett
 		return s, fmt.Errorf("making the worker key in %s: %w", config.WorkerKeyFile(deps.ConfigDir), err)
 	}
 	if made {
-		fmt.Fprintf(out, "made the key control and the workers share (%s, readable by you alone)\n", config.WorkerKeyFile(deps.ConfigDir))
+		fmt.Fprintf(out, "made the key Yawble's containers use to trust each other (%s, readable by you alone)\n", config.WorkerKeyFile(deps.ConfigDir))
 	}
 	s.KeyFile, s.KeyHash = config.WorkerKeyFile(deps.ConfigDir), hash
 	return s, nil
@@ -452,8 +452,9 @@ func upReady(cmd *cobra.Command, deps Deps, yes, size bool) (engine.Engine, inst
 	}
 	// The first up chooses the container's size; later ups keep what was saved and warn about a
 	// saved value the engine cannot give.
+	runsShown := 0
 	if size {
-		if c, err = sizeFirstUp(deps, c, m, yes, cmd.OutOrStdout()); err != nil {
+		if c, runsShown, err = sizeFirstUp(deps, c, m, yes, cmd.OutOrStdout()); err != nil {
 			return nil, instance.Settings{}, err
 		}
 	}
@@ -473,6 +474,7 @@ func upReady(cmd *cobra.Command, deps Deps, yes, size bool) (engine.Engine, inst
 	if err := checkBound(m, s, cmd.ErrOrStderr()); err != nil {
 		return nil, instance.Settings{}, err
 	}
+	s.RunsShown = runsShown
 	return engineOf(deps, c), s, nil
 }
 

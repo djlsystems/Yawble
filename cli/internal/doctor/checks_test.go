@@ -615,7 +615,8 @@ func TestTheAgentVersionsRowSaysWhichVersionAndWhenItWasUpdated(t *testing.T) {
 	}
 	for _, want := range []string{
 		"claude 2.1.280, updated 2026-09-29 20:46 UTC",
-		"copilot GitHub Copilot CLI 1.0.88., unchanged since 2026-09-25 15:22 UTC",
+		// The CLI's own full stop after its version is not carried into the sentence.
+		"copilot GitHub Copilot CLI 1.0.88, unchanged since 2026-09-25 15:22 UTC",
 	} {
 		if !strings.Contains(row.Detail, want) {
 			t.Errorf("agent versions should say %q: %+v", want, row)
@@ -676,7 +677,7 @@ func TestRunMemorySaysTheHostsMechanism(t *testing.T) {
 	}{
 		{doctor.RunMemory{Mechanism: "cgroup", PerRunMb: intp(2048), Detail: "per-run cgroup"}, "cgroup, 2048 MB per run: per-run cgroup"},
 		{doctor.RunMemory{Mechanism: "rlimit", PerRunMb: intp(1792), Detail: "set"}, "rlimit, 1792 MB per run: set"},
-		{doctor.RunMemory{Mechanism: "none", Detail: "nothing set"}, "not enforced: nothing set"},
+		{doctor.RunMemory{Mechanism: "none", Detail: "nothing set"}, "no per-run memory cap: this engine offers none, so runs share the worker's memory (a fact of the engine, not a fault)"},
 		{doctor.RunMemory{Mechanism: "quota"}, `not known (the Host said "quota")`},
 	} {
 		m := c.m

@@ -27,3 +27,19 @@ func MoreForEngine(kind EngineKind) string {
 	}
 	return ""
 }
+
+// EngineShare says whose memory and CPUs the engine's figures are: on macOS and Windows a VM's
+// share of this computer, not the computer's own total, and on Linux the computer itself.
+func EngineShare(kind EngineKind) string {
+	switch kind {
+	case KindPodmanMachine:
+		return "the Podman machine's share of this computer, not all of it"
+	case KindDockerDesktop:
+		return "Docker Desktop's share of this computer, not all of it"
+	case KindDockerVM:
+		return "Docker's VM's share of this computer, not all of it"
+	case KindLinux:
+		return "all of this computer"
+	}
+	return "what the engine has"
+}

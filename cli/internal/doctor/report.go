@@ -113,6 +113,49 @@ func (a Agent) MeasuredText() string {
 	return at + " on worker " + *a.MeasuredOn
 }
 
+// CanRun is whether a member run of this agent can start now, as the Host measured it: installed,
+// signed in, its launch checked ok, and not waiting for an issued credential.
+func (a Agent) CanRun() bool {
+	return a.Updating == nil && a.IsInstalled() && a.Authenticated != nil && *a.Authenticated &&
+		a.Launch != nil && a.Launch.Result == "ok" && !(a.Issued() && a.IssuedSet != nil && !*a.IssuedSet)
+}
+
+// AnyCanRun is whether at least one agent can run: then the others are not in use, not faults.
+func AnyCanRun(agents []Agent) bool {
+	for _, a := range agents {
+		if a.CanRun() {
+			return true
+		}
+	}
+	return false
+}
+
+// NotInUse is an agent nobody has set up: measured and not updating, and not installed, not
+// signed in, or waiting for an issued credential. One that is signed in is never "not in use": its
+// launch is shown beside its sign-in, and a failed one is a fault whoever else can run.
+func (a Agent) NotInUse() bool {
+	switch {
+	case a.Updating != nil || a.Installed == nil:
+		return false
+	case !*a.Installed:
+		return true
+	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
+		return true
+	}
+	return a.Authenticated != nil && !*a.Authenticated
+}
+
+// whyNotInUse is the reason an agent is not in use, in a few words.
+func (a Agent) whyNotInUse() string {
+	switch {
+	case a.NotInstalled():
+		return "not installed"
+	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
+		return "no credential set"
+	}
+	return "not signed in"
+}
+
 // Issued says whether the agent signs in through its command's issued credential.
 func (a Agent) Issued() bool { return a.CredentialSource != nil && *a.CredentialSource == "issued" }
 
@@ -166,7 +209,8 @@ func (a Agent) LaunchText() string {
 // UpdatedText says which version is installed and when it last changed, in one phrase, or "" when
 // the report carried no version.
 func (a Agent) UpdatedText() string {
-	if a.Version == nil || *a.Version == "" {
+	version := a.VersionText()
+	if version == "" {
 		return ""
 	}
 	day := func(stamp string) string {
@@ -177,12 +221,21 @@ func (a Agent) UpdatedText() string {
 	}
 	switch {
 	case a.UpdatedAt != nil && *a.UpdatedAt != "":
-		return *a.Version + ", updated " + day(*a.UpdatedAt)
+		return version + ", updated " + day(*a.UpdatedAt)
 	case a.VersionsSince != nil && *a.VersionsSince != "":
-		return *a.Version + ", unchanged since " + day(*a.VersionsSince)
+		return version + ", unchanged since " + day(*a.VersionsSince)
 	default:
-		return *a.Version
+		return version
 	}
+}
+
+// VersionText is the version the CLI printed, without the full stop some print after it
+// ("GitHub Copilot CLI 1.0.92."), which would otherwise land mid-sentence. "" when there is none.
+func (a Agent) VersionText() string {
+	if a.Version == nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(*a.Version), ".")
 }
 
 // IsModelAgent is an entry that signs in to a model provider: no kind or kind "agent", and not

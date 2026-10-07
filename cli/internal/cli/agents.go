@@ -17,8 +17,10 @@ func newAgentsCommand(deps Deps) *cobra.Command {
 		Use:   "agents",
 		Short: "Each agent CLI inside the instance: installed, signed in, and how to sign in if not",
 		Long: "Reads the instance's own report of its agent CLIs (the Host's --doctor). Sign-in happens " +
-			"in the board: open a Concierge on the agent and log in there. A provider key in the env file " +
-			"beside yawble's config is the other way; `yawble up` hands it to the container.\n\n" +
+			"in the board: open a Concierge on the agent and log in there. A provider key is the other way: " +
+			"`yawble secret set <KEY>` (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...), then `yawble up` hands it to the container.\n" +
+			"With one agent able to run, the others are listed as not in use, with how to use them; only " +
+			"when no agent can run is there something to fix.\n\n" +
 			"Each agent also shows its source: home signs in through the shared home, issued uses the one " +
 			"credential stored for its command (`yawble agents credential set`), chosen per preset with " +
 			"`yawble agents source`.",

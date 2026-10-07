@@ -409,22 +409,26 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 
 	switch {
 	case r.Backups.DailyCount == 0 || r.Backups.NewestDailyAt == nil:
-		checks = append(checks, Check{"backups", Warn, "no daily backup yet (the Host writes one a day into " + r.Backups.Directory + ")", ""})
+		checks = append(checks, Check{"backups", Warn, "no daily copy in the data volume yet (the Host writes one a day into " + r.Backups.Directory + ")", ""})
 	default:
 		newest, parseErr := time.Parse(time.RFC3339, *r.Backups.NewestDailyAt)
 		age := now.Sub(newest)
 		switch {
 		case parseErr != nil:
-			checks = append(checks, Check{"backups", Skip, "the newest backup's time could not be read: " + *r.Backups.NewestDailyAt, ""})
+			checks = append(checks, Check{"backups", Skip, "the newest daily copy's time could not be read: " + *r.Backups.NewestDailyAt, ""})
 		case age > 48*time.Hour:
-			checks = append(checks, Check{"backups", Warn, fmt.Sprintf("newest daily backup is %d days old (%d kept)", int(age.Hours()/24), r.Backups.DailyCount), "yawble logs, and check the Host is running daily"})
+			checks = append(checks, Check{"backups", Warn, fmt.Sprintf("the newest daily copy in the data volume is %d days old (%d kept), and copies there are lost if the volume is lost", int(age.Hours()/24), r.Backups.DailyCount), "yawble logs, and check the Host is running daily"})
 		default:
-			checks = append(checks, Check{"backups", OK, fmt.Sprintf("%d daily, newest %s", r.Backups.DailyCount, newest.UTC().Format("2006-01-02 15:04 UTC")), ""})
+			checks = append(checks, Check{"backups", OK, fmt.Sprintf("%s in the data volume (newest %s), lost if the volume is lost", dailyCopies(r.Backups.DailyCount), newest.UTC().Format("2006-01-02 15:04 UTC")), ""})
 		}
 	}
 
 	var parts []string
 	verdict := OK
+	// With one agent able to run, an agent nobody signed in is not in use, not a fault: a
+	// Claude-only install is not warned about the others. Only an agent that is signed in and
+	// cannot start still warns, and with none able to run every gap is a warning, as it was.
+	anyRuns := AnyCanRun(r.Agents)
 	for _, a := range r.Agents {
 		var part string
 		switch {
@@ -435,6 +439,9 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 		case a.Installed == nil:
 			// Not measured: no worker answered the Host's probe. Never "not installed", never a failure.
 			parts = append(parts, a.Agent+" not measured")
+			continue
+		case anyRuns && a.NotInUse():
+			parts = append(parts, a.Agent+" not in use ("+a.whyNotInUse()+")")
 			continue
 		case !*a.Installed:
 			parts = append(parts, a.Agent+" not installed")
@@ -505,7 +512,7 @@ func SignInHint(a Agent) string {
 	case a.Installed == nil:
 		return ""
 	case !*a.Installed:
-		return "not installed in the instance; the image's first start installs it, or install it by hand inside the container"
+		return "not installed in the instance; a worker installs it when it starts: yawble down, then yawble up"
 	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
 		return "its source is issued and no credential is set: yawble agents credential set " + a.Agent +
 			" (or yawble agents source " + a.Agent + " home)"
@@ -514,11 +521,11 @@ func SignInHint(a Agent) string {
 	case a.Issued():
 		return "its source is issued: replace its credential with yawble agents credential set " + a.Agent
 	}
-	hint := "open a Concierge on " + a.Agent + " in the board and sign in there"
+	concierge := "open a Concierge on " + a.Agent + " in the board and sign in there"
 	if a.CredentialVariable != nil && *a.CredentialVariable != "" {
-		hint += ", or put " + *a.CredentialVariable + "=... in the env file beside yawble's config and run `yawble up`"
+		return "yawble secret set " + *a.CredentialVariable + ", then yawble up; or " + concierge
 	}
-	return hint
+	return concierge
 }
 
 // GitHubObserved is what GitHub said about the GH_TOKEN set with `yawble secret`: not set, its

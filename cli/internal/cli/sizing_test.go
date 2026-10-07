@@ -93,10 +93,10 @@ func TestFirstUpShowsTheEngineAndTheProposalAndEnterAcceptsAndSaves(t *testing.T
 	}
 	perRun := strconv.Itoa(instance.HostDefaultMemoryPerRunMb)
 	for _, want := range []string{
-		"the engine has   12288 MB memory, 10 CPUs (docker info)",
+		"available        12288 MB memory and 10 CPUs: Docker Desktop's share of this computer, not all of it",
 		"proposed         6144 MB memory, 8 CPUs",
-		// min(8 - 1, 6144 / 2048) = 3, labelled as the Host's rule with its default allowance.
-		"running limit    3 at once, derived from the Host's rule: the smaller of CPUs - 1 and memory / wip.memoryPerRunMb (the Host's default, " + perRun + " MB). Not asked",
+		// min(8 - 1, 6144 / 2048) = 3, said with the Host's default allowance as its reason.
+		"Up to 3 agent runs can work at once, because each run is given " + perRun + " MB of memory and the worker has 6144 MB.",
 		"Memory in MB (4096 to 10752) [6144]: ",
 		"CPUs (1 to 10) [8]: ",
 		"saved memory 6144m and cpus 8 in yawble's config",
@@ -127,7 +127,7 @@ func TestFirstUpAcceptsAValidChangeAndSavesIt(t *testing.T) {
 	if !strings.Contains(calls(s), "--memory 8192m --cpus 4") {
 		t.Errorf("the run did not use the answers:\n%s", calls(s))
 	}
-	if !strings.Contains(out, "derives a running limit of 3 from them") {
+	if !strings.Contains(out, "Up to 3 agent runs can work at once") {
 		t.Errorf("out %s", out)
 	}
 }
@@ -180,7 +180,7 @@ func TestUnattendedFirstUpTakesTheDefaultsWithoutAsking(t *testing.T) {
 		if strings.Contains(out, "How much of the engine") || strings.Contains(out, "Memory in MB") {
 			t.Errorf("%s: asked:\n%s", name, out)
 		}
-		if !strings.Contains(out, "memory 6144m and cpus 8 for the container: half of the 12288 MB and the 10 CPUs the engine has (docker info)") ||
+		if !strings.Contains(out, "memory 6144m and cpus 8 for the container: half of the 12288 MB and the 10 CPUs available (Docker Desktop's share of this computer, not all of it)") ||
 			!strings.Contains(out, "yawble config set memory <size> and yawble config set cpus <n> change them") {
 			t.Errorf("%s: did not say what it chose and how to change it:\n%s", name, out)
 		}
@@ -264,7 +264,7 @@ func TestDoctorShowsTheEnginesCapacityBesideTheContainers(t *testing.T) {
 		deps.GOOS, deps.LookPath = "darwin", lookPath("docker")
 		deps.ConfigDir = t.TempDir()
 		writeConfig(t, deps.ConfigDir, c.saved)
-		_, out, errOut := run(t, deps, "doctor")
+		_, out, errOut := run(t, deps, "doctor", "--details")
 		var row string
 		for _, line := range strings.Split(out, "\n") {
 			if strings.Contains(line, "capacity") {
