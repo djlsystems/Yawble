@@ -6,6 +6,7 @@ import type {
   KanbanLane,
   KanbanStatus,
 } from '../api/kanban'
+import type { Outcome } from '../api/outcomes'
 
 /**
  * Everything the board decides that is NOT a fetch and NOT a template.
@@ -401,6 +402,76 @@ export function swimlaneTeams(
   }
 
   return teamFilter ? rows.filter((team) => team.id === teamFilter) : rows
+}
+
+/**
+ * THE TEAMS A PROPOSED OUTCOME BELONGS TO: each team whose workflows it serves (`figures.teams`,
+ * read from the links) and the team of the Manager who proposed it (`createdBy` is `team/member`
+ * for a member). Lower-cased, as the board's team filter is compared. An outcome nobody on a team
+ * proposed and no workflow serves belongs to no team.
+ */
+export function outcomeTeams(outcome: Pick<Outcome, 'createdBy' | 'createdByKind' | 'figures'>): string[] {
+  const teams = new Set((outcome.figures?.teams ?? []).map((team) => team.id.toLowerCase()))
+  const slash = outcome.createdBy.indexOf('/')
+
+  if (outcome.createdByKind === 'member' && slash > 0) teams.add(outcome.createdBy.slice(0, slash).toLowerCase())
+
+  return [...teams]
+}
+
+/**
+ * THE PROPOSED OUTCOMES NEEDS YOU DRAWS, under the same filters as the cards beside them. The read
+ * that fetches them is instance-wide, so without this a board narrowed to one team still listed
+ * every team's proposals in its Needs You lane.
+ *
+ * Every filter given must hold, any of its values keeps an outcome, ignoring case - the server's
+ * rule for cards (`KanbanProjector`):
+ * - team: one of the outcome's teams (`outcomeTeams`) is picked;
+ * - member: a picked member proposed it;
+ * - status: never - a status names what a CARD is doing, and an outcome is not a card;
+ * - outcome: its id is picked (`none` keeps nothing: a proposal is an outcome);
+ * - the search box: its name, id or proposer contains the text, as a card's fields do.
+ *
+ * Pass the filters IN EFFECT (`effectiveFilters`): Swimlanes drops the team, and so does this.
+ */
+export function proposedMatchingFilters(
+  outcomes: readonly Outcome[],
+  filters: KanbanFilters,
+  text = '',
+): Outcome[] {
+  const teams = filterValues(filters.team).map((team) => team.toLowerCase())
+  const members = filterValues(filters.member).map((member) => member.toLowerCase())
+  const statuses = filterValues(filters.status)
+  const picked = filterValues(filters.outcome)
+  const needle = text.trim().toLowerCase()
+
+  return outcomes.filter((outcome) => {
+    if (teams.length > 0 && !outcomeTeams(outcome).some((team) => teams.includes(team))) return false
+    if (members.length > 0 && !members.includes(proposingMember(outcome))) return false
+    if (statuses.length > 0) return false
+    if (picked.length > 0 && !picked.includes(outcome.id)) return false
+    if (needle !== '' && ![outcome.name, outcome.id, outcome.createdBy].join('\n').toLowerCase().includes(needle)) return false
+
+    return true
+  })
+}
+
+/** The member who proposed an outcome, lower-cased, or '' when a person or the Concierge did. */
+function proposingMember(outcome: Pick<Outcome, 'createdBy' | 'createdByKind'>): string {
+  const slash = outcome.createdBy.indexOf('/')
+
+  return outcome.createdByKind === 'member' && slash > 0 ? outcome.createdBy.slice(slash + 1).toLowerCase() : ''
+}
+
+/**
+ * THE BOARD HEADER'S COUNT: every entry on screen, said as what it is - `2 cards`, or
+ * `1 card, 1 proposed outcome` when Needs You lists any. A proposed outcome is drawn in a lane like
+ * a card, so a header counting only cards read one short of the board under it.
+ */
+export function boardCountText(cards: number, proposed: number): string {
+  const cardText = `${cards} card${cards === 1 ? '' : 's'}`
+
+  return proposed > 0 ? `${cardText}, ${proposed} proposed outcome${proposed === 1 ? '' : 's'}` : cardText
 }
 
 /** An advisory lane is over its limit. A lane with no limit never is. */

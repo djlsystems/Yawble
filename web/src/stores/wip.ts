@@ -86,12 +86,15 @@ export function wipLine(running: number, waiting: number): string {
 }
 
 /**
- * The In Progress header: `3 / 4 running`, or `3 running` with no limit.
+ * The ledger's line under the In Progress header: `3 / 4 agents running, all teams`, or
+ * `3 agents running, all teams` with no limit. IT SAYS WHAT IT COUNTS because it is not the lane's
+ * figure: the ledger holds every team's runs, a Manager's with no card among them, whatever the
+ * board is filtered to - the lane's own count is its cards.
  */
-export function inProgressHeader(running: number, max: number | null): string {
-  if (max === null || max === 0) return `${running} running`
+export function runningAcrossTeams(running: number, max: number | null): string {
+  if (max === null || max === 0) return `${running} agents running, all teams`
 
-  return `${running} / ${max} running`
+  return `${running} / ${max} agents running, all teams`
 }
 
 if (import.meta.hot) {
