@@ -364,7 +364,10 @@ function onTileClick() {
         autoresize
         @zr:mousemove="notePointerX"
       />
+      <!-- THE TEAM'S STATUS ICON, when the page gives one: inside the pane, right of the lanes. -->
+      <div v-if="$slots.status" class="stats-status"><slot name="status" /></div>
     </div>
+    <div v-else-if="$slots.status" class="stats-status"><slot name="status" /></div>
 
     <div v-if="!compact" class="stats-caption">{{ caption }}</div>
     <div v-else-if="!hasChart" class="os-text-muted" data-activity-none>—</div>
@@ -414,6 +417,11 @@ function onTileClick() {
 
 .stats-initials {
   flex: none;
+}
+
+.stats-status {
+  flex: none;
+  align-self: center;
 }
 
 .stats-lane-initials {

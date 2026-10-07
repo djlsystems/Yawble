@@ -57,13 +57,14 @@ function mountStrip(status: TeamStatus | null, latest = 'Completed') {
 afterEach(() => resetBody());
 
 describe('the status icon on a team\'s strip', () => {
-  it('is a green check right after the Activity tile when the latest workflow was completed', () => {
+  it('is a green check inside the Activity tile, beside its lanes, when the latest workflow was completed', () => {
     const strip = mountStrip('idle');
 
     const icon = strip.find('[data-team-status]');
     expect(icon.attributes('aria-label')).toBe('completed');
     expect(icon.classes()).toContain('team-status-icon--positive');
-    expect(icon.element.previousElementSibling).toBe(strip.findComponent(TeamStatisticsTile).element);
+    expect(strip.findComponent(TeamStatisticsTile).element.contains(icon.element)).toBe(true);
+    expect(icon.element.closest('.stats-status')).not.toBeNull();
   });
 
   it('is a grey check when a person closed the latest workflow', () => {

@@ -655,14 +655,11 @@ function showThread(row: WorkflowRow) {
       :team-id="teamId"
       :containers="containers"
       :workflows="workflows"
-    />
-    <TeamStatusIcon
-      v-if="status"
-      class="team-kpi-status"
-      :status="status"
-      :held="heldMembers(containers)"
-      :workflows="workflows"
-    />
+    >
+      <template v-if="status" #status>
+        <TeamStatusIcon :status="status" :held="heldMembers(containers)" :workflows="workflows" />
+      </template>
+    </TeamStatisticsTile>
 
     <button type="button" class="team-kpi team-kpi--tokens" @click="tokensOpen = true">
       <div class="team-kpi-label">Tokens</div>
@@ -1193,10 +1190,6 @@ function showThread(row: WorkflowRow) {
 }
 
 /* The team's status beside its Activity chart: centred on the row, its own width. */
-.team-kpi-status {
-  align-self: center;
-}
-
 .team-kpi {
   /* EQUAL THIRDS, which needs a ZERO basis rather than matching bases: with a content-sized basis
      each tile grows from a different starting width, so three tiles that grow at the same rate
