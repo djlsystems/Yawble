@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from 'vue';
 import FileBrowser from './FileBrowser.vue';
-import { hostFileBrowser, type HostBrowser } from '../lib/fileSystemSource';
+import { hostFileBrowser, packageFolderBrowser, type HostBrowser } from '../lib/fileSystemSource';
 
 /**
  * A picker over the HOST's own filesystem, bounded to the allowlist `GET /api/fs/roots` answers.
@@ -49,10 +49,14 @@ import { hostFileBrowser, type HostBrowser } from '../lib/fileSystemSource';
 /**
  * `instanceOnly` offers the instance's own data root and no other root - for a caller whose Host
  * route refuses a path anywhere else, so a person is never led to a folder that cannot be used.
+ *
+ * `packages` is the install picker: it opens in the teams' Documents and goes no higher, hides
+ * dot-entries, and does not offer Documents itself as a choice (`packageFolderBrowser`).
  */
-const props = withDefaults(defineProps<{ mode?: 'folder'; instanceOnly?: boolean; title?: string }>(), {
+const props = withDefaults(defineProps<{ mode?: 'folder'; instanceOnly?: boolean; packages?: boolean; title?: string }>(), {
   mode: 'folder',
   instanceOnly: false,
+  packages: false,
   title: 'Choose a folder',
 });
 
@@ -90,7 +94,14 @@ const atRoots = computed(() => here.value === '');
  */
 function goToRoots() {
   here.value = null;
-  browser.value = hostFileBrowser({ instanceOnly: props.instanceOnly });
+  browser.value = props.packages ? packageFolderBrowser() : hostFileBrowser({ instanceOnly: props.instanceOnly });
+}
+
+/** Whether the open folder may be chosen. In `packages` mode its top, Documents, may not: it holds
+ *  every team's folder and is nobody's package, so Choose waits for a folder below it. */
+function choosable(path: string | null): path is string {
+  if (!path) return false;
+  return !(props.packages && path === activeRoot.value?.path);
 }
 
 /**
@@ -103,7 +114,7 @@ function goToRoots() {
  * is for the state where there is nothing to choose at all - the roots level, where `path` is `''`.
  */
 function choose(path: string | null) {
-  if (!path) return;
+  if (!choosable(path)) return;
 
   emit('chose', path);
   open.value = false;
@@ -123,14 +134,14 @@ watch(open, (showing) => {
         <div>
           <div class="os-dialog-title">{{ title }}</div>
           <div class="text-caption os-text-muted">
-            {{ activeRoot ? activeRoot.name : instanceOnly ? 'A folder inside this instance' : 'A folder on the Host itself' }}
+            {{ packages ? "A package folder in your teams' Documents" : activeRoot ? activeRoot.name : instanceOnly ? 'A folder inside this instance' : 'A folder on the Host itself' }}
           </div>
         </div>
         <q-space />
         <!-- The way back out of a root. `parentWithin` stops AT the root on purpose, so there is
              no `..` row that would climb out of one - this is the affordance that does it. -->
         <q-btn
-          v-if="activeRoot"
+          v-if="activeRoot && !packages"
           flat
           dense
           no-caps
@@ -146,7 +157,10 @@ watch(open, (showing) => {
         <template #empty>
           <!-- Empty roots: reachable when an operator configured roots and every one of them was
                dropped. A blank panel here would read as a broken feature. -->
-          <template v-if="atRoots">
+          <template v-if="atRoots && packages">
+            This instance has no Documents folder to pick from. Type the folder's path instead.
+          </template>
+          <template v-else-if="atRoots">
             No host access configured. An operator adds one under
             <span class="mono">FileBrowser:Roots</span> in
             <span class="mono">appsettings.json</span>.
@@ -160,7 +174,7 @@ watch(open, (showing) => {
             color="primary"
             no-caps
             label="Choose this folder"
-            :disable="busy || !path"
+            :disable="busy || !choosable(path)"
             @click="choose(path)"
           />
         </template>
