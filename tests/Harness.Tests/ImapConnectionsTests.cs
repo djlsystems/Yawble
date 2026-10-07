@@ -62,7 +62,7 @@ public sealed class ImapConnectionsTests : IAsyncLifetime
         // (so the no-leak scan does not find the plugin's own copy) and ALSO prints it: a plugin
         // echoing its password must have it redacted from everything the Host stores.
         PluginInstall.Write(_dataRoot, "mailer",
-            script: $"env >> '{Environment}'; printf '%s\\n' \"$0 $*\" >> '{Environment}'; req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; printf '%s\\n' \"$req\"; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"read\"}}'",
+            script: $"env >> '{Environment}'; printf '%s\\n' \"$0 $*\" >> '{Environment}'; req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; printf '%s\\n' \"$req\"; pw=$(printf '%s' \"$req\" | sed -n 's/.*\"password\":\"\\([^\"]*\\)\".*/\\1/p'); printf 'the mailbox key is %s\\n' \"$pw\"; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"read\"}}'",
             manifest: PluginInstall.Manifest("mailer", edit: m => m["connections"] = JsonNode.Parse(
                 """{"mail":{"description":"The mailbox.","providers":["imap"],"required":true}}""")));
 
@@ -270,9 +270,11 @@ public sealed class ImapConnectionsTests : IAsyncLifetime
         // ON STDIN ONLY: never in the child's environment or its argv.
         Assert.DoesNotContain(AppPassword, File.ReadAllText(Environment));
 
-        // The plugin printed it; redaction kept it out of the row.
+        // The plugin printed it; redaction kept it out of the row. The bare value, printed outside
+        // any "password" key, is caught only because the password is in the run's redaction set.
         Assert.DoesNotContain(AppPassword, row.Payload);
         Assert.Contains("[redacted]", row.Payload, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"the mailbox key is {DiagnosticRedaction.Placeholder}", row.Payload);
     }
 
     [Fact]
