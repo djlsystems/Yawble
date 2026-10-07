@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
-import { createTeam, fileSystemRoots, listCatalog, repoCheckRefusal } from '../api/client';
+import { createTeam, fileSystemRoots, getInstanceId, listCatalog, repoCheckRefusal } from '../api/client';
 import { carriesOnMessage, creatingLine, waitWasCutOff } from '../lib/slowCreate';
 import {
   agentsForMode,
@@ -14,7 +14,7 @@ import {
 } from '../api/types';
 import { normalizeAllowlist } from '../lib/memberAllowlist';
 import { budgetFieldIsLegal, budgetFieldRefusal, budgetFieldValue, budgetInWords } from '../lib/teamBudget';
-import { applyDefaults, readRemembered, remember } from '../lib/newTeamDefaults';
+import { applyDefaults, readRemembered, remember, type RecentReposScope } from '../lib/newTeamDefaults';
 import { useConsoleStore } from '../stores/console';
 import { teamFolderLine } from '../lib/teamRoot';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -97,6 +97,10 @@ function setUpstream(index: number, url: string | number | null) {
   upstreams.value = next;
 }
 const repoSuggestions = ref<string[]>([]);
+/** Whose the suggestions are: this instance's, or (when it could not say who it is) this browser's. */
+const repoSuggestionsScope = ref<RecentReposScope>('instance');
+/** What the instance answered when this dialog opened; the recent repositories are kept under it. */
+const instanceId = ref<string | null>(null);
 
 /**
  * "Create a local repository for this team": with no repository listed, the Host makes one named
@@ -284,7 +288,13 @@ async function loadDefaults() {
   instanceRootError.value = null;
   serverError.value = '';
 
-  const [catalogResult, rootsResult] = await Promise.allSettled([listCatalog(), fileSystemRoots()]);
+  const [catalogResult, rootsResult, instanceResult] = await Promise.allSettled([
+    listCatalog(),
+    fileSystemRoots(),
+    getInstanceId(),
+  ]);
+
+  instanceId.value = instanceResult.status === 'fulfilled' ? instanceResult.value : null;
 
   if (catalogResult.status === 'fulfilled') {
     catalog = catalogResult.value;
@@ -303,7 +313,7 @@ async function loadDefaults() {
   agents.value = agentsForMode(catalog.agents, 'Headless').map((entry) => entry.name);
 
   const defaults = applyDefaults(
-    readRemembered(),
+    readRemembered(instanceId.value),
     catalog,
     roots,
     board.teams.map((team) => team.id),
@@ -316,6 +326,7 @@ async function loadDefaults() {
   additionalInstructions.value = '';
   root.value = defaults.root ?? '';
   repoSuggestions.value = defaults.repoSuggestions;
+  repoSuggestionsScope.value = defaults.repoSuggestionsScope;
   repos.value = defaults.repos;
   upstreams.value = [];
   repoInput.value = '';
@@ -566,7 +577,7 @@ async function submit() {
       root: root.value.trim() === '' ? null : root.value.trim(),
       // Not a URL that was dropped for a local repository: it does not exist, so it is no suggestion.
       repos: repos.value.filter((url) => repoChoices.value[url.trim()] !== 'use-local'),
-    });
+    }, instanceId.value);
 
     // Handle unresolvedAgents if present
     if (created.unresolvedAgents?.length) {
@@ -924,7 +935,9 @@ async function submit() {
                 <LocalRepoPicker :attached="repos" :offer-create="false" @attach="attachLocal" />
 
                 <div v-if="repoSuggestions.length > 0" class="q-mt-sm">
-                  <div class="text-caption os-text-muted">Recent repositories:</div>
+                  <div class="text-caption os-text-muted">
+                    {{ repoSuggestionsScope === 'instance' ? 'Recent repositories:' : 'Repositories used before in this browser:' }}
+                  </div>
                   <div class="row q-gutter-xs q-mt-xs">
                     <q-chip
                       v-for="repo in repoSuggestions"

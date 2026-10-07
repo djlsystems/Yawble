@@ -41,6 +41,7 @@ vi.mock('quasar', async (importOriginal) => ({
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getInstanceId: async () => 'instance-a',
   createTeam,
   fileSystemRoots,
   listCatalog,
@@ -154,7 +155,7 @@ describe('CreateTeamDialog: the per-workflow budget', () => {
       memberAgents: ['claude-headless'],
       root: null,
       repos: [],
-    });
+    }, 'instance-a');
 
     setActivePinia(createPinia());
 

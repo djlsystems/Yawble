@@ -8,6 +8,7 @@ import { runMarkOf } from '../lib/runMarks';
 import { useCursorList } from '../lib/useCursorList';
 import { useConsoleStore } from '../stores/console';
 import CursorSentinel from './CursorSentinel.vue';
+import { WORKFLOW_NUMBER_HINT, workflowNumberTitle } from '../lib/workflowNumber';
 
 /**
  * `team`, `name` and `sinceSeq` name whose feed this is, and turn on "load older". Without
@@ -195,6 +196,7 @@ function tone(type: string): string {
             {{ board.highlightedWorkflow === message.correlationId
               ? 'Stop following this workflow'
               : 'Follow this workflow across every card' }}
+            <div class="q-mt-xs" data-workflow-number-hint>{{ WORKFLOW_NUMBER_HINT }}</div>
           </q-tooltip>
         </q-btn>
       </q-item-section>
@@ -277,7 +279,7 @@ function tone(type: string): string {
         <q-badge :color="toneOf(shown)" :label="label(shown.type)" />
         <span class="feed-card-source mono">{{ shown.source }}</span>
         <span class="feed-card-spacer"></span>
-        <span class="feed-card-meta mono">#{{ shown.correlationId }}</span>
+        <span class="feed-card-meta mono" :title="workflowNumberTitle(shown.correlationId)" data-workflow-number>#{{ shown.correlationId }}</span>
         <span class="feed-card-meta mono">{{ timeOf(shown.occurredAt) }}</span>
       </q-card-section>
 

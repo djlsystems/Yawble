@@ -25,6 +25,7 @@ vi.mock('quasar', async (importOriginal) => ({
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getInstanceId: async () => 'instance-a',
   ...client,
 }));
 
@@ -77,7 +78,7 @@ const cutOff = () => new TypeError('Failed to fetch');
 const refusal = (message: string, status: number) => Object.assign(new Error(message), { status });
 
 async function openNewTeam() {
-  remember({ managerAgent: 'claude-headless', memberAgents: ['claude-headless'], root: null, repos: [] });
+  remember({ managerAgent: 'claude-headless', memberAgents: ['claude-headless'], root: null, repos: [] }, 'instance-a');
   setActivePinia(createPinia());
   useConsoleStore().$patch({ teams: [], overviewLanded: true });
   useSessionStore().$patch({ user: { id: 'u1', email: 'admin@example.com' } });
@@ -90,7 +91,7 @@ async function openNewTeam() {
 }
 
 async function openDispatchToNew() {
-  remember({ managerAgent: 'claude-headless', memberAgents: ['claude-headless'], root: null, repos: [] });
+  remember({ managerAgent: 'claude-headless', memberAgents: ['claude-headless'], root: null, repos: [] }, 'instance-a');
   setActivePinia(createPinia());
   const board = useConsoleStore();
   board.teams = [{ id: 'alpha', name: 'Alpha' }] as never;

@@ -53,6 +53,7 @@ describe('applyDefaults', () => {
       root: null,
       repos: [],
       repoSuggestions: [],
+      repoSuggestionsScope: 'instance',
     })
   })
 
@@ -142,23 +143,104 @@ describe('applyDefaults', () => {
       },
     })
 
-    expect(readRemembered()).toBeNull()
+    expect(readRemembered('instance-a')).toBeNull()
     expect(() =>
       remember({
         managerAgent: 'Manager-A',
         memberAgents: ['Builder-A'],
         root: null,
         repos: ['https://github.com/os/repo-a.git'],
-      }),
+      }, 'instance-a'),
     ).not.toThrow()
 
-    expect(applyDefaults(readRemembered(), catalog(), roots(['C:\\teams']), [])).toEqual({
+    expect(applyDefaults(readRemembered('instance-a'), catalog(), roots(['C:\\teams']), [])).toEqual({
       name: 'Team-1',
       managerAgent: null,
       memberAgents: null,
       root: null,
       repos: [],
       repoSuggestions: [],
+      repoSuggestionsScope: 'instance',
     })
+  })
+})
+
+describe('recent repositories are kept per instance', () => {
+  const values = (repos: string[]) => ({
+    managerAgent: 'Manager-A',
+    memberAgents: ['Builder-A'],
+    root: null,
+    repos,
+  })
+
+  beforeEach(() => {
+    const items = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => items.get(key) ?? null,
+      setItem: (key: string, value: string) => void items.set(key, String(value)),
+      removeItem: (key: string) => void items.delete(key),
+    })
+  })
+
+  it('does not offer repositories saved under another instance at the same address', () => {
+    remember(values(['https://github.com/os/old-install.git']), 'instance-a')
+
+    const defaults = applyDefaults(readRemembered('instance-b'), catalog(), roots(['C:\\teams']), [])
+
+    expect(defaults.repoSuggestions).toEqual([])
+    expect(defaults.repoSuggestionsScope).toBe('instance')
+  })
+
+  it('offers repositories saved under the same instance', () => {
+    remember(values(['https://github.com/os/repo-a.git']), 'instance-a')
+    remember(values(['https://github.com/os/repo-b.git']), 'instance-a')
+
+    const defaults = applyDefaults(readRemembered('instance-a'), catalog(), roots(['C:\\teams']), [])
+
+    expect(defaults.repoSuggestions).toEqual([
+      'https://github.com/os/repo-b.git',
+      'https://github.com/os/repo-a.git',
+    ])
+    expect(defaults.repoSuggestionsScope).toBe('instance')
+  })
+
+  it('does not offer repositories saved before the list was kept per instance', () => {
+    localStorage.setItem('harness.newTeamDefaults', JSON.stringify({
+      managerAgent: 'Manager-A',
+      memberAgents: ['Builder-A'],
+      root: null,
+      repos: ['https://github.com/os/unkeyed.git'],
+    }))
+
+    expect(applyDefaults(readRemembered('instance-a'), catalog(), roots(['C:\\teams']), []).repoSuggestions)
+      .toEqual([])
+    expect(applyDefaults(readRemembered(null), catalog(), roots(['C:\\teams']), []).repoSuggestions)
+      .toEqual([])
+
+    // The agent choices beside it are still remembered: only the repositories were address-wide.
+    expect(readRemembered('instance-a')?.managerAgent).toBe('Manager-A')
+  })
+
+  it('drops the unkeyed repositories on the next save', () => {
+    localStorage.setItem('harness.newTeamDefaults', JSON.stringify({
+      managerAgent: 'Manager-A',
+      memberAgents: ['Builder-A'],
+      root: null,
+      repos: ['https://github.com/os/unkeyed.git'],
+    }))
+
+    remember(values(['https://github.com/os/repo-a.git']), 'instance-a')
+
+    expect(localStorage.getItem('harness.newTeamDefaults')).not.toContain('unkeyed')
+    expect(readRemembered('instance-a')?.repos).toEqual(['https://github.com/os/repo-a.git'])
+  })
+
+  it('falls back to the repositories used in this browser, labelled so, when the instance cannot be told', () => {
+    remember(values(['https://github.com/os/repo-a.git']), 'instance-a')
+
+    const defaults = applyDefaults(readRemembered(null), catalog(), roots(['C:\\teams']), [])
+
+    expect(defaults.repoSuggestions).toEqual(['https://github.com/os/repo-a.git'])
+    expect(defaults.repoSuggestionsScope).toBe('browser')
   })
 })

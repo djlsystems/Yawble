@@ -28,6 +28,7 @@ vi.mock('quasar', async (importOriginal) => ({
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getInstanceId: async () => 'instance-a',
   backlogItems,
   backlogItem,
   createBacklogItem,
@@ -83,8 +84,8 @@ function remember(repos: string[]) {
     managerAgent: 'claude-headless',
     memberAgents: ['claude-headless'],
     root: null,
-    repos,
   }));
+  localStorage.setItem('harness.recentRepos.instance.instance-a', JSON.stringify(repos));
 }
 
 async function open() {

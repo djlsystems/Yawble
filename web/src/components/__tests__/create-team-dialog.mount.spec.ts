@@ -7,8 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, type VueWrapper } from '@vue/test-utils';
 
-const { createTeam, fileSystemRoots, listCatalog, listLocalRepos, createLocalRepo } = vi.hoisted(() => ({
+const { createTeam, fileSystemRoots, getInstanceId, listCatalog, listLocalRepos, createLocalRepo } = vi.hoisted(() => ({
   createTeam: vi.fn(),
+  getInstanceId: vi.fn(),
   fileSystemRoots: vi.fn(),
   listCatalog: vi.fn(),
   listLocalRepos: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('quasar', async (importOriginal) => ({
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getInstanceId,
   createTeam,
   fileSystemRoots,
   listCatalog,
@@ -48,6 +50,8 @@ beforeEach(() => {
 
   createTeam.mockReset();
   createTeam.mockResolvedValue({ id: 'beta', name: 'Beta' });
+  getInstanceId.mockReset();
+  getInstanceId.mockResolvedValue('instance-a');
   fileSystemRoots.mockReset();
   fileSystemRoots.mockResolvedValue({ roots: [] });
   listCatalog.mockReset();
@@ -73,7 +77,7 @@ async function open(remembered = true, workflowSpendLimit: number | null = null)
       memberAgents: ['claude-headless'],
       root: null,
       repos: [],
-    });
+    }, 'instance-a');
   }
 
   setActivePinia(createPinia());
@@ -345,6 +349,50 @@ describe('CreateTeamDialog validation', () => {
 });
 
 /** What a team is told is the built-in role prompt; a person may only append to it. */
+describe('CreateTeamDialog recent repositories', () => {
+  function rememberRepo(instanceId: string) {
+    remember({
+      managerAgent: 'claude-headless',
+      memberAgents: ['claude-headless'],
+      root: null,
+      repos: ['https://github.com/os/used-before.git'],
+    }, instanceId);
+  }
+
+  it('offers none from an earlier install at the same address', async () => {
+    rememberRepo('old-install');
+    getInstanceId.mockResolvedValue('new-install');
+
+    await open(false);
+    await showTab('Code');
+
+    expect(bodyText()).not.toContain('Recent repositories');
+    expect(bodyText()).not.toContain('used-before');
+  });
+
+  it('offers the ones used on this instance', async () => {
+    rememberRepo('instance-a');
+
+    await open(false);
+    await showTab('Code');
+
+    expect(bodyText()).toContain('Recent repositories:');
+    expect(bodyText()).toContain('https://github.com/os/used-before.git');
+  });
+
+  it('says the list is this browser\'s when the instance cannot say who it is', async () => {
+    rememberRepo('instance-a');
+    getInstanceId.mockResolvedValue(null);
+
+    await open(false);
+    await showTab('Code');
+
+    expect(bodyText()).not.toContain('Recent repositories');
+    expect(bodyText()).toContain('Repositories used before in this browser:');
+    expect(bodyText()).toContain('https://github.com/os/used-before.git');
+  });
+});
+
 describe('CreateTeamDialog prompts', () => {
   it('offers no Manager or Member prompt picker', async () => {
     const wrapper = await open();
