@@ -296,6 +296,36 @@ export function writeTeamSort(sort: TeamSort): string {
   return JSON.stringify(sort)
 }
 
+/** Which teams the Teams list shows: the active ones, the archived ones, or both. */
+export interface TeamsShown {
+  active: boolean
+  archived: boolean
+}
+
+/** Active ticked, archived not: a finished team put away stays out of the way until asked for. */
+export const DefaultTeamsShown: TeamsShown = { active: true, archived: false }
+
+/** Read defensively, as the sort is: anything but a stored pair of booleans is the default. */
+export function readTeamsShown(raw: string | null): TeamsShown {
+  if (!raw) return DefaultTeamsShown
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<TeamsShown> | null
+    if (parsed && typeof parsed.active === 'boolean' && typeof parsed.archived === 'boolean') {
+      return { active: parsed.active, archived: parsed.archived }
+    }
+  } catch {
+    // Not JSON: the default.
+  }
+
+  return DefaultTeamsShown
+}
+
+/** Whether a team is listed under what is ticked. */
+export function teamShown(team: { archived?: boolean }, shown: TeamsShown): boolean {
+  return team.archived === true ? shown.archived : shown.active
+}
+
 /**
  * The name the Clone dialog opens with.
  *

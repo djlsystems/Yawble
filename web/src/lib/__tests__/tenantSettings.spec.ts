@@ -56,6 +56,7 @@ describe('the Admission field', () => {
     expect(names).toEqual([
       'causation.depthLimit',
       'concierge.idleTimeout',
+      'concierge.mayArchive',
       'concierge.mayMerge',
       'kanban.wipLimits',
       'quiet.window',

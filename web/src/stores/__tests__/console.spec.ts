@@ -1534,4 +1534,49 @@ describe('board store', () => {
       expect(board.liveTeamIds).toEqual(['Alpha']);
     });
   });
+
+  /**
+   * AN ARCHIVED TEAM IS KEPT AND OUT OF THE WAY: still in `teams`, so the Teams list, Delete and
+   * Clone find it, and never offered by the chooser or given a tab.
+   */
+  describe('archived teams', () => {
+    const alpha = asTeamId('Alpha');
+    const beta = asTeamId('Beta');
+
+    it('are left out of the choosable teams and still held in teams', () => {
+      const board = useConsoleStore();
+      board.teams = [team(alpha), team(beta, { archived: true })];
+
+      expect(board.choosableTeams.map((entry) => entry.id)).toEqual([alpha]);
+      expect(board.teams.map((entry) => entry.id)).toEqual([alpha, beta]);
+    });
+
+    it('lose their tab when the overview marks them archived', () => {
+      const board = useConsoleStore();
+      board.overviewLanded = true;
+      board.teams = [team(alpha), team(beta, { archived: true })];
+      board.openTeamTabs = [alpha, beta];
+      board.activeTeamId = alpha;
+      board.view = 'board';
+
+      board.reconcileActiveTeam();
+
+      expect(board.openTeamTabs).toEqual([alpha]);
+      expect(board.openTeams.map((entry) => entry.id)).toEqual([alpha]);
+    });
+
+    it('get no tab back even while one is the active team', () => {
+      const board = useConsoleStore();
+      board.overviewLanded = true;
+      board.teams = [team(alpha), team(beta, { archived: true })];
+      board.openTeamTabs = [alpha];
+      board.activeTeamId = beta;
+      board.view = 'board';
+
+      board.reconcileActiveTeam();
+
+      expect(board.openTeamTabs).toEqual([alpha]);
+      expect(board.activeTeamId).toBe(alpha);
+    });
+  });
 });

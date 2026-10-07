@@ -439,6 +439,11 @@ const teams = computed(() =>
 
 const createOptions = computed(() => teamOptions(teams.value));
 
+/** Where an item may be dispatched: the active teams. An archived team does no work, so is never offered. */
+const dispatchOptions = computed(() =>
+  board.choosableTeams.map((team) => ({ label: team.name, value: team.id as string })),
+);
+
 /**
  * THE FILTER IS BUILT FROM THE ITEMS, NEVER FROM `createOptions`.
  *
@@ -1559,7 +1564,7 @@ function down(index: number) {
           <q-select
             v-if="!dispatchToNew"
             v-model="dispatchTeam"
-            :options="teams.map((t) => ({ label: t.name, value: t.id }))"
+            :options="dispatchOptions"
             dense
             outlined
             emit-value

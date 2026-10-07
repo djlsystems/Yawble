@@ -344,6 +344,11 @@ body {
   color: #00838f;
 }
 
+/* Put away, not failing: the theme's muted ink in light and dark alike. */
+.console-tab-status--archived {
+  color: var(--os-ink-muted);
+}
+
 .console-tab-status--running {
   color: #43a047;
 }
