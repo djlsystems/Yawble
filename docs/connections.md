@@ -171,12 +171,15 @@ right now - `<the address in your browser>/api/connections/callback`. The provid
 - reached through a tunnel (`https://…`), register the tunnel's address, or use the CLI flow below,
   which never needs the Host's own address at the provider.
 
-Each connection lists its provider, account, granted scopes, when it was connected and last
-refreshed, its status (`ok`, or `needs reconnect` with the provider's reason) and the members that use
+Each connection lists its provider, account, what its granted scopes allow - in words, once each
+(`email` and `userinfo.email` are one line; the API answers them as `permissions`) - when it was
+connected and last refreshed, its status (`ok`, or `needs reconnect` with the provider's reason) and the members that use
 it. On each one:
 
-- **Reconnect** - the same account again, with the new scopes added to the old. It clears
-  `needs reconnect`.
+- **Reconnect** - the same account again. A short dialog first says what it will ask for: what the
+  connection already has and, when an installed plugin's slot needs more of that provider, that it
+  adds those. The provider's answer comes back to Admin → Connections, saying it worked or what
+  failed. It clears `needs reconnect`.
 - **Rename** - the name members and the CLI show.
 - **Disconnect** - refused while any member uses it, naming them; unbind those first. It revokes the
   grant at the provider where the provider supports that, and deletes the tokens.

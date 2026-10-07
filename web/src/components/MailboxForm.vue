@@ -111,7 +111,10 @@ async function save() {
   }
 }
 
-defineExpose({ save, ready, busy, connected });
+/** Whether the person has typed anything not yet saved: the dialog then holds on to it. */
+const typed = computed(() => !connected.value && [name, account, username, password].some((field) => field.value !== ''));
+
+defineExpose({ save, ready, busy, connected, typed });
 </script>
 
 <template>

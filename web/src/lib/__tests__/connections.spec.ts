@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  permissionsOf,
   bindingsBody,
   callbackOutcome,
   connectionsForSlot,
@@ -112,5 +113,17 @@ describe('connections', () => {
     expect(providerReturnAddress({ pathname: '/console', search: '?connection=connected&id=c1' })).toBe('/#/console?connection=connected&id=c1')
     expect(providerReturnAddress({ pathname: '/', search: '' })).toBeNull()
     expect(providerReturnAddress({ pathname: '/', search: '?tab=x' })).toBeNull()
+  })
+})
+
+describe('permissionsOf', () => {
+  it("is the Host's words, once each", () => {
+    expect(permissionsOf({ scopes: ['email', 'https://www.googleapis.com/auth/userinfo.email'], permissions: ['See your email address'] })).toEqual([
+      'See your email address',
+    ])
+  })
+
+  it('from a Host without words, is the scopes as themselves, once each', () => {
+    expect(permissionsOf({ scopes: ['openid', 'email', 'openid'] })).toEqual(['openid', 'email'])
   })
 })

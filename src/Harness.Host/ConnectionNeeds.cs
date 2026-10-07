@@ -132,6 +132,12 @@ public static class ConnectionNeeds
         return GraphWords.GetValueOrDefault(bare);
     }
 
+    /// <summary>What <paramref name="scopes"/> let a plugin do, as a person reads it: each scope's words,
+    /// once each in first-granted order - <c>email</c> and <c>userinfo.email</c> are one line - and a
+    /// scope this table has no words for as itself.</summary>
+    public static IReadOnlyList<string> Permissions(IEnumerable<string> scopes) =>
+        [.. scopes.Select(scope => WordsFor(scope) ?? scope).Distinct(StringComparer.Ordinal)];
+
     /// <summary>The APIs <paramref name="scopes"/> need turned on at <paramref name="provider"/>, once
     /// each in first-needed order. Only Google has such a map; any other provider needs none.</summary>
     public static IReadOnlyList<ApiNeed> Apis(string provider, IEnumerable<string> scopes)

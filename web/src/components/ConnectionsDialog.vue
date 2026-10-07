@@ -4,6 +4,7 @@ import {
   ActionRefused,
   deleteConnectionProvider,
   disconnectConnection,
+  getConnectionNeeds,
   listConnectionProviders,
   listConnections,
   renameConnection,
@@ -11,7 +12,7 @@ import {
   startConnection,
   updateMailboxPassword,
 } from '../api/client';
-import type { Connection, ConnectionProvider, ConnectionProviderSave, ConnectionUse } from '../api/types';
+import type { Connection, ConnectionNeeds, ConnectionProvider, ConnectionProviderSave, ConnectionUse } from '../api/types';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { productCli } from '../presentation/product';
 import ConnectDialog from './ConnectDialog.vue';
@@ -19,12 +20,15 @@ import DialogTabs from './DialogTabs.vue';
 import {
   mailServerLabel,
   parseScopes,
+  permissionsOf,
   providerHelp,
   providerName,
   redirectUriFor,
   redirectUriWarning,
+  rememberReconnect,
   statusLabel,
   takeGuidedConnect,
+  takeReconnect,
   usedByLabels,
   when,
   type CallbackOutcome,
@@ -36,7 +40,16 @@ import {
  * Each connection shows its provider, account, granted scopes, when it was connected and last
  * refreshed, its status (`ok`, or `needs reconnect` with the provider's reason) and the members
  * using it, with Reconnect, Rename and Disconnect. Disconnect is refused by the Host while a member
- * uses it; the refusal names them.
+ * uses it; the refusal names them. The granted scopes show as the Host words them, once each.
+ *
+ * RECONNECT first says, in a short dialog, what it will ask the provider for - the scopes already
+ * granted and, when an installed plugin's slot needs more of that provider, that it adds those - and
+ * only then leaves for the provider. The Host's callback comes back here, to this dialog, with a
+ * message saying it worked or what failed.
+ *
+ * THE DIALOG STAYS OPEN ON A ROUTE CHANGE (`no-route-dismiss`). Quasar closes a dialog whenever the
+ * route changes; the Console takes the provider's answer off the address just after opening this
+ * dialog with it, which closed it under the person and left them on the Kanban.
  *
  * ADD CONNECTION, at the top, is the guided way: `ConnectDialog` walks a person through the service,
  * setting its app up and signing in, with the scopes the plugins ask for. Everything below it as it
@@ -55,6 +68,9 @@ import {
  * input starts empty whatever is stored. An empty input on save keeps the stored secret.
  */
 const props = defineProps<{ notice?: CallbackOutcome | null }>();
+
+/** The connection a Reconnect from here left for, once the provider's answer is back. */
+const reconnectedFrom = ref<string | null>(null);
 const open = defineModel<boolean>({ required: true });
 
 const connections = ref<Connection[]>([]);
@@ -91,6 +107,7 @@ watch(advanced, (showing) => {
 
 watch(open, async (showing) => {
   if (!showing) return;
+  reconnectedFrom.value = props.notice ? takeReconnect() : null;
   if (!(await load())) return;
 
   // Back from a sign-in that Add connection began: it opens again at its last step.
@@ -126,7 +143,11 @@ const nameOf = (id: string) => providerName(id, providers.value);
 const noticeText = computed(() => {
   const notice = props.notice;
   if (!notice) return '';
-  if (notice.outcome === 'refused') return `The account was not connected: ${notice.reason}`;
+  if (notice.outcome === 'refused') {
+    const from = connections.value.find((candidate) => candidate.id === reconnectedFrom.value);
+    if (reconnectedFrom.value !== null) return `${from ? from.name : 'The connection'} was not reconnected: ${notice.reason}`;
+    return `The account was not connected: ${notice.reason}`;
+  }
 
   const connection = notice.id ? connections.value.find((candidate) => candidate.id === notice.id) : undefined;
   const which = connection ? ` ${connection.name} (${connection.account})` : '';
@@ -192,20 +213,47 @@ function connect() {
 
 // --- Reconnect ------------------------------------------------------------------------------------
 
-const rowProblem = ref<Record<string, string>>({});
+const reconnecting = ref<Connection | null>(null);
+/** What installed plugins' slots ask of its provider; null until read, or when the read failed. */
+const reconnectNeeds = ref<ConnectionNeeds | null>(null);
+const reconnectReading = ref(false);
+const reconnectProblem = ref('');
 
-function reconnect(connection: Connection) {
-  const problem = {
-    get value() {
-      return rowProblem.value[connection.id] ?? '';
-    },
-    set value(text: string) {
-      rowProblem.value = { ...rowProblem.value, [connection.id]: text };
-    },
-  };
+/** What the slots ask that this connection was not granted: Reconnect adds those. */
+const reconnectAdds = computed(() => {
+  const connection = reconnecting.value;
+  if (!connection || !reconnectNeeds.value) return [];
+  const granted = new Set(connection.scopes);
+  return reconnectNeeds.value.scopes.filter((line) => !granted.has(line.scope));
+});
+
+/** The added scopes in words, once each; one the Host has no words for reads as itself. */
+const reconnectAddWords = computed(() => [...new Set(reconnectAdds.value.map((line) => line.words ?? line.scope))]);
+const reconnectAddPlugins = computed(() => [...new Set(reconnectAdds.value.flatMap((line) => line.plugins))]);
+
+async function reconnect(connection: Connection) {
+  reconnecting.value = connection;
+  reconnectNeeds.value = null;
+  reconnectProblem.value = '';
+  reconnectReading.value = true;
+  try {
+    reconnectNeeds.value = await getConnectionNeeds(connection.provider);
+  } catch {
+    // Nothing known to add: Reconnect still asks again for what was granted.
+  } finally {
+    reconnectReading.value = false;
+  }
+}
+
+async function continueReconnect() {
+  const connection = reconnecting.value;
+  if (!connection || leaving.value || reconnectReading.value) return;
 
   // The Host asks for the old granted scopes and these together; none added is the same account again.
-  void sendToProvider({ reconnectId: connection.id, scopes: [] }, problem);
+  rememberReconnect(connection.id);
+  await sendToProvider({ reconnectId: connection.id, scopes: reconnectAdds.value.map((line) => line.scope) }, reconnectProblem);
+  // Not sent: no answer will come back for it.
+  if (reconnectProblem.value !== '') takeReconnect();
 }
 
 // --- Update password, for a mailbox -------------------------------------------------------------
@@ -397,7 +445,7 @@ async function removeProvider(provider: ConnectionProvider) {
 </script>
 
 <template>
-  <q-dialog v-model="open">
+  <q-dialog v-model="open" no-route-dismiss>
     <q-card class="connections-card os-dialog-xl" data-connections-dialog>
       <q-card-section class="row items-center q-pb-none">
         <div class="os-dialog-title">Connections</div>
@@ -509,10 +557,12 @@ async function removeProvider(provider: ConnectionProvider) {
                   <dd data-connection-password>{{ connection.passwordSet ? 'set' : 'not set' }}</dd>
                 </template>
                 <template v-else>
-                  <dt>Scopes</dt>
+                  <dt>Allows</dt>
                   <dd data-connection-scopes>
-                    <template v-if="connection.scopes.length === 0">None</template>
-                    <div v-for="scope in connection.scopes" :key="scope" class="mono conn-scope">{{ scope }}</div>
+                    <template v-if="permissionsOf(connection).length === 0">Nothing beyond signing in</template>
+                    <div v-for="permission in permissionsOf(connection)" :key="permission" class="conn-scope" data-connection-permission>
+                      {{ permission }}
+                    </div>
                   </dd>
                 </template>
                 <dt>Connected</dt>
@@ -525,9 +575,6 @@ async function removeProvider(provider: ConnectionProvider) {
                   <div v-for="label in usedByLabels(connection)" :key="label">{{ label }}</div>
                 </dd>
               </dl>
-              <div v-if="rowProblem[connection.id]" class="conn-tile-line text-negative" data-row-problem>
-                {{ rowProblem[connection.id] }}
-              </div>
 
               <div class="conn-tile-actions">
                 <span v-if="isMailbox(connection)" class="row-btn-wrap">
@@ -692,6 +739,51 @@ async function removeProvider(provider: ConnectionProvider) {
           :loading="passwordBusy"
           :disable="newPassword === '' || passwordBusy"
           @click="updatePassword"
+        />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
+
+  <!-- RECONNECT: what it will ask for, before leaving for the provider. -->
+  <q-dialog :model-value="reconnecting !== null" @update:model-value="(value: boolean) => { if (!value) reconnecting = null; }">
+    <q-card v-if="reconnecting" class="os-dialog-sm" data-reconnect-dialog>
+      <q-card-section>
+        <div class="os-dialog-title">Reconnect {{ reconnecting.name }}</div>
+      </q-card-section>
+      <q-card-section class="q-pt-none q-gutter-y-sm">
+        <div data-reconnect-asks>
+          This sends you to {{ nameOf(reconnecting.provider) }} to agree again as
+          <span class="mono">{{ reconnecting.account }}</span>.
+          <template v-if="permissionsOf(reconnecting).length > 0">It asks for what it already has:</template>
+          <template v-else>It asks for nothing beyond signing in.</template>
+        </div>
+        <ul v-if="permissionsOf(reconnecting).length > 0" class="q-my-none" data-reconnect-kept>
+          <li v-for="permission in permissionsOf(reconnecting)" :key="permission">{{ permission }}</li>
+        </ul>
+        <div v-if="reconnectReading" class="os-text-muted">Reading what the installed plugins need…</div>
+        <template v-else-if="reconnectAddWords.length > 0">
+          <div data-reconnect-adds-intro>
+            It also adds what {{ reconnectAddPlugins.join(', ') }} {{ reconnectAddPlugins.length === 1 ? 'needs' : 'need' }}:
+          </div>
+          <ul class="q-my-none" data-reconnect-adds>
+            <li v-for="words in reconnectAddWords" :key="words">{{ words }}</li>
+          </ul>
+        </template>
+        <div class="os-text-muted">You come back here when it is done.</div>
+        <q-banner v-if="reconnectProblem" dense class="os-bg-tint-error text-negative" data-reconnect-problem>
+          {{ reconnectProblem }}
+        </q-banner>
+      </q-card-section>
+      <q-card-actions align="right">
+        <q-btn flat no-caps label="Cancel" v-close-popup />
+        <q-btn
+          color="primary"
+          no-caps
+          :label="`Continue to ${nameOf(reconnecting.provider)}`"
+          :loading="leaving"
+          :disable="reconnectReading"
+          data-reconnect-continue
+          @click="continueReconnect"
         />
       </q-card-actions>
     </q-card>

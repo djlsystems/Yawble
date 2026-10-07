@@ -19,6 +19,7 @@ const {
   disconnectConnection,
   saveConnectionProvider,
   deleteConnectionProvider,
+  getConnectionNeeds,
   goTo,
 } = vi.hoisted(() => ({
   listConnections: vi.fn(),
@@ -28,6 +29,7 @@ const {
   disconnectConnection: vi.fn(),
   saveConnectionProvider: vi.fn(),
   deleteConnectionProvider: vi.fn(),
+  getConnectionNeeds: vi.fn(),
   goTo: vi.fn(),
 }));
 
@@ -40,6 +42,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   disconnectConnection,
   saveConnectionProvider,
   deleteConnectionProvider,
+  getConnectionNeeds,
 }));
 
 // The address the page is on: a test sets another to see what a LAN address is told.
@@ -61,7 +64,8 @@ const workMail = hostConnection({
   name: 'Work mail',
   provider: 'google',
   account: 'person@example.com',
-  scopes: ['openid', 'email', 'https://mail.google.com/'],
+  scopes: ['openid', 'email', 'https://www.googleapis.com/auth/userinfo.email', 'https://mail.google.com/'],
+  permissions: ['Confirm who you are', 'See your email address', 'Read, change, send and permanently delete all your Gmail'],
   connectedAt: '2026-09-28T10:00:00Z',
   refreshedAt: '2026-09-28T11:00:00Z',
   usedBy: [{ team: 'mail-team', member: 'Inbox', label: 'Inbox', slot: 'mail' }],
@@ -97,12 +101,15 @@ beforeEach(() => {
     disconnectConnection,
     saveConnectionProvider,
     deleteConnectionProvider,
+    getConnectionNeeds,
     goTo,
   ]) {
     mock.mockReset();
   }
   listConnections.mockResolvedValue([workMail, outlook]);
   listConnectionProviders.mockResolvedValue([google, microsoft]);
+  getConnectionNeeds.mockResolvedValue({ provider: 'google', needs: [], scopes: [], apis: [] });
+  sessionStorage.clear();
   startConnection.mockResolvedValue({
     authorizationUrl,
     state: 'abc',
@@ -158,7 +165,10 @@ describe('ConnectionsDialog, the list', () => {
     expect(work.querySelector('[data-connection-name]')!.textContent).toBe('Work mail');
     expect(work.querySelector('[data-connection-provider]')!.textContent).toBe('Google');
     expect(work.querySelector('[data-connection-account]')!.textContent).toBe('person@example.com');
-    expect(work.querySelector('[data-connection-scopes]')!.textContent).toContain('https://mail.google.com/');
+    // In words, once each: `email` and `userinfo.email` are one line.
+    const permissions = [...work.querySelectorAll('[data-connection-permission]')].map((line) => line.textContent?.trim());
+    expect(permissions).toEqual(['Confirm who you are', 'See your email address', 'Read, change, send and permanently delete all your Gmail']);
+    expect(work.querySelector('[data-connection-scopes]')!.textContent).not.toContain('https://');
     expect(work.querySelector('[data-connection-connected]')!.textContent).toBe(new Date('2026-09-28T10:00:00Z').toLocaleString());
     expect(work.querySelector('[data-connection-refreshed]')!.textContent).toBe(new Date('2026-09-28T11:00:00Z').toLocaleString());
     expect(work.querySelector('[data-connection-status]')!.textContent).toBe('ok');
@@ -320,14 +330,80 @@ describe('ConnectionsDialog, connecting an account', () => {
 });
 
 describe('ConnectionsDialog, on a connection', () => {
-  it('Reconnect asks the Host for that connection and sends the browser to the provider', async () => {
+  it('Reconnect first says what it will ask for, then asks the Host for that connection and sends the browser to the provider', async () => {
     const wrapper = await mountConnections();
 
-    buttonIn(row('conn-outlook'), 'Reconnect').click();
+    buttonIn(row('conn-work'), 'Reconnect').click();
     await settle();
 
-    expect(startConnection).toHaveBeenCalledWith({ reconnectId: 'conn-outlook', scopes: [] });
+    // Nothing has left yet: the dialog says what it will ask for, in words.
+    expect(startConnection).not.toHaveBeenCalled();
+    expect(getConnectionNeeds).toHaveBeenCalledWith('google');
+    expect(bodyFind('[data-reconnect-asks]')!.textContent).toContain('person@example.com');
+    const kept = [...bodyFind('[data-reconnect-kept]')!.querySelectorAll('li')].map((line) => line.textContent?.trim());
+    expect(kept).toEqual(['Confirm who you are', 'See your email address', 'Read, change, send and permanently delete all your Gmail']);
+    expect(bodyFind('[data-reconnect-adds]')).toBeNull();
+
+    (bodyFind('[data-reconnect-continue]') as HTMLElement).click();
+    await settle();
+
+    expect(startConnection).toHaveBeenCalledWith({ reconnectId: 'conn-work', scopes: [] });
     expect(goTo).toHaveBeenCalledWith(authorizationUrl);
+
+    wrapper.unmount();
+  });
+
+  it("Reconnect says it adds the scopes an installed plugin's slot needs, and asks for them", async () => {
+    const calendar = 'https://www.googleapis.com/auth/calendar.events';
+    getConnectionNeeds.mockResolvedValue({
+      provider: 'google',
+      needs: [{ plugin: 'diary', slot: 'calendar', description: null, scopes: ['https://mail.google.com/', calendar] }],
+      scopes: [
+        { scope: 'https://mail.google.com/', words: 'Read, change, send and permanently delete all your Gmail', plugins: ['diary'] },
+        { scope: calendar, words: 'See and change events on your Google calendars', plugins: ['diary'] },
+      ],
+      apis: [],
+    });
+    const wrapper = await mountConnections();
+
+    buttonIn(row('conn-work'), 'Reconnect').click();
+    await settle();
+
+    expect(bodyFind('[data-reconnect-adds-intro]')!.textContent).toContain('diary needs');
+    const adds = [...bodyFind('[data-reconnect-adds]')!.querySelectorAll('li')].map((line) => line.textContent?.trim());
+    expect(adds).toEqual(['See and change events on your Google calendars']);
+
+    (bodyFind('[data-reconnect-continue]') as HTMLElement).click();
+    await settle();
+
+    expect(startConnection).toHaveBeenCalledWith({ reconnectId: 'conn-work', scopes: [calendar] });
+
+    wrapper.unmount();
+  });
+
+  it('back from a Reconnect, says it worked, naming the connection', async () => {
+    const wrapper = await mountConnections({ notice: { outcome: 'reconnected', id: 'conn-work' } });
+
+    expect(bodyFind('[data-connections-notice]')!.textContent).toContain('Reconnected Work mail (person@example.com).');
+
+    wrapper.unmount();
+  });
+
+  it('back from a Reconnect that failed, says which connection was not reconnected and why', async () => {
+    const first = await mountConnections();
+    buttonIn(row('conn-work'), 'Reconnect').click();
+    await settle();
+    (bodyFind('[data-reconnect-continue]') as HTMLElement).click();
+    await settle();
+    first.unmount();
+    resetBody();
+
+    // The provider's answer brings the Console back with the Connections dialog open on it.
+    const wrapper = await mountConnections({ notice: { outcome: 'refused', reason: 'The sign-in was cancelled at the provider.' } });
+
+    expect(bodyFind('[data-connections-notice]')!.textContent).toContain(
+      'Work mail was not reconnected: The sign-in was cancelled at the provider.',
+    );
 
     wrapper.unmount();
   });

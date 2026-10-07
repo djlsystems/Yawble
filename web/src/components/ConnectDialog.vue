@@ -78,6 +78,12 @@ import MailboxForm from './MailboxForm.vue';
  * a slot that does not take `imap`, or an older Host with no presets - the Google tile is that app.
  * A slot shows the tiles of the kinds it takes, `imap` included.
  *
+ * WHAT IS TYPED IS NOT LOST TO A STRAY CLICK OR A ROUTE CHANGE. Once anything is typed the dialog is
+ * persistent: a click on the backdrop - a palm on a trackpad, mid-word - no longer closes it, and
+ * only Close does. Nor does a route change close it (`no-route-dismiss`): the Console changes its
+ * address under an open dialog, taking the provider's answer off it, and Quasar's default closes
+ * every dialog when it does.
+ *
  * THE CLIENT SECRET IS WRITE-ONLY here as in Advanced: typed, sent once, never shown or kept. The
  * provider's device code never reaches the browser: only the code the person types does.
  */
@@ -637,6 +643,13 @@ async function finish() {
   open.value = false;
 }
 
+/** Anything typed here or in the mailbox form that is not yet saved. */
+const typed = computed(
+  () =>
+    (mailboxForm.value?.typed ?? false)
+    || [projectId, clientId, clientSecret, tenantId, resultName].some((field) => field.value.trim() !== ''),
+);
+
 const stepLabels = computed(() => [
   { id: 'service', label: 'Service' },
   {
@@ -648,7 +661,7 @@ const stepLabels = computed(() => [
 </script>
 
 <template>
-  <q-dialog v-model="open">
+  <q-dialog v-model="open" :persistent="typed" no-route-dismiss>
     <q-card class="os-dialog-md" data-guided-connect>
       <q-card-section class="row items-center q-pb-none">
         <div class="os-dialog-title">Add connection</div>
