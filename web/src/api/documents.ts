@@ -6,6 +6,8 @@ import type {
   DocumentsChangeResult,
   DocumentsFolder,
   DocumentsFolderKey,
+  DocumentsPackageAnswer,
+  DocumentsPackageSaved,
   DocumentsRenameItem,
   DocumentsTransfer,
   DocumentsUploadAnswer,
@@ -28,6 +30,8 @@ export type { DocumentEntry } from './types'
  * | read a file | `GET /api/teams/{folder}/documents/content` |
  * | create a folder | `POST /api/teams/{folder}/documents/folders` |
  * | upload | `POST /api/teams/{folder}/documents/upload` |
+ * | upload a folder | `POST /api/teams/{folder}/documents/upload-folder` |
+ * | upload a .zip | `POST /api/teams/{folder}/documents/upload-zip` |
  * | delete | `DELETE /api/teams/{folder}/documents` |
  * | rename | `POST /api/teams/{folder}/documents/rename` |
  * | move | `POST /api/teams/{folder}/documents/move` |
@@ -125,6 +129,71 @@ export async function uploadDocument(
     if ('skipped' in answer && answer.skipped) return { kind: 'skipped', path: answer.path }
 
     return { kind: 'saved', entry: answer as DocumentEntry }
+  } catch (failure) {
+    const clash = clashOf(failure)
+    if (clash) return clash
+
+    throw failure
+  }
+}
+
+/** One file of a folder upload, with its path inside the folder, top folder first
+ *  (`File.webkitRelativePath`). */
+export interface FolderUploadFile {
+  file: File
+  relativePath: string
+}
+
+/**
+ * A whole folder into `path`, its subfolders kept: one `file` and one `relativePath` per file, in
+ * the same order. The clash is about the top folder, with the single upload's `onClash` choices.
+ */
+export const uploadDocumentFolder = (
+  folder: DocumentsFolderKey,
+  files: FolderUploadFile[],
+  path: string,
+  onClash: 'ask' | OnClash,
+) => {
+  const form = new FormData()
+  for (const { file, relativePath } of files) {
+    form.append('file', file)
+    form.append('relativePath', relativePath)
+  }
+
+  return sendPackage(docs(folder, '/upload-folder'), form, path, onClash)
+}
+
+/**
+ * A .zip into `path`, unpacked into a folder named after it. A zip holding a link, an absolute
+ * path or a `..` is refused whole and nothing is written; that refusal is thrown with its sentence.
+ */
+export const uploadDocumentZip = (
+  folder: DocumentsFolderKey,
+  zip: File,
+  path: string,
+  onClash: 'ask' | OnClash,
+) => {
+  const form = new FormData()
+  form.append('file', zip)
+
+  return sendPackage(docs(folder, '/upload-zip'), form, path, onClash)
+}
+
+async function sendPackage(
+  url: string,
+  form: FormData,
+  path: string,
+  onClash: 'ask' | OnClash,
+): Promise<DocumentsPackageAnswer> {
+  form.append('path', path)
+  form.append('onClash', onClash)
+
+  try {
+    const answer = await json<DocumentsPackageSaved | { skipped: true; path: string }>(url, { method: 'POST', body: form })
+
+    if ('skipped' in answer && answer.skipped) return { kind: 'skipped', path: answer.path }
+
+    return { kind: 'saved', saved: answer as DocumentsPackageSaved }
   } catch (failure) {
     const clash = clashOf(failure)
     if (clash) return clash

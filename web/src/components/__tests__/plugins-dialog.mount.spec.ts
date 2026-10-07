@@ -56,6 +56,12 @@ vi.mock('../../api/client', async (importOriginal) => ({
   checkSolution,
 }));
 
+// The install dialog's Upload a package lists the Documents folders on open; none here.
+vi.mock('../../api/documents', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listDocumentsRoot: vi.fn(async () => ({ folders: [], root: '/data/documents' })),
+}));
+
 import PluginsDialog from '../PluginsDialog.vue';
 import { ActionRefused } from '../../api/client';
 import { useConsoleStore } from '../../stores/console';

@@ -355,6 +355,8 @@ export type DocumentsAction =
   | 'newFolder'
   | 'newFolderInside'
   | 'upload'
+  | 'uploadFolder'
+  | 'uploadZip'
   | 'refresh';
 
 /** What the menu and toolbar know about where the person is and what they picked. */
@@ -445,6 +447,8 @@ export function availability(action: DocumentsAction, context: MenuContext): Ava
     }
     case 'newFolder':
     case 'upload':
+    case 'uploadFolder':
+    case 'uploadZip':
       return writeRefusal ? refuse(writeRefusal) : { ok: true };
     case 'newFolderInside':
       return writeRefusal ? refuse(writeRefusal) : { ok: true };
@@ -477,6 +481,8 @@ const Labels: Record<DocumentsAction, { label: string; icon: string; shortcut?: 
   newFolder: { label: 'New folder', icon: 'create_new_folder', shortcut: 'Ctrl+Shift+N' },
   newFolderInside: { label: 'New folder inside', icon: 'create_new_folder' },
   upload: { label: 'Upload', icon: 'upload' },
+  uploadFolder: { label: 'Upload a folder', icon: 'drive_folder_upload' },
+  uploadZip: { label: 'Upload a .zip', icon: 'folder_zip' },
   refresh: { label: 'Refresh', icon: 'refresh', shortcut: 'F5' },
 };
 

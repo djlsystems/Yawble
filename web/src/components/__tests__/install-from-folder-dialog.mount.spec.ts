@@ -13,7 +13,13 @@
 // the picker at the roots (start), dropping the entry filter (hidden), choosing Documents itself
 // (Choose), and either screen going back to its own dialog (shared).
 //
-// THE MOCK IS OF `api/client`: what the dialog does with what the routes answer.
+// UPLOAD A PACKAGE (.zip) sits in the upload place: the zip goes to the Documents zip route, into
+// the active team's folder unless the person picks another, and the folder it made fills Folder.
+// SEEN TO FAIL: with the slot's old sentence back in place of the action, every case in that
+// describe fails (no button); with the dialog not taking the uploaded folder, the Folder cases fail.
+//
+// THE MOCK IS OF `api/client`: what the dialog does with what the routes answer. The Documents
+// routes the upload uses are answered at `fetch` by the fake Documents host.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
@@ -42,6 +48,10 @@ import PluginsDialog from '../PluginsDialog.vue';
 import type { DirectoryListing, HostEntry } from '../../api/types';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, field, isDisabled, settle } from '../../test/formProbe';
+import { documentsServer } from '../../test/documentsServer';
+import { useConsoleStore } from '../../stores/console';
+import { asTeamId } from '../../api/types';
+import UploadPackageAction from '../UploadPackageAction.vue';
 
 const DataRootFolders = ['agent-credentials', 'agent-home', 'backups', 'bin', 'connections', 'go'];
 
@@ -66,8 +76,12 @@ const listing = (path: string): DirectoryListing => ({
   total: (tree[path] ?? []).length,
 });
 
+let server: ReturnType<typeof documentsServer>;
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // Every open of the dialog lists the Documents folders the upload can go to.
+  server = documentsServer();
   fileSystemRoots.mockResolvedValue({
     roots: [
       { name: 'Instance data', path: '/data', isInstance: true, allowCreate: false, allowUpdate: false, allowDelete: false },
@@ -83,7 +97,10 @@ beforeEach(() => {
   }));
 });
 
-afterEach(resetBody);
+afterEach(() => {
+  vi.unstubAllGlobals();
+  resetBody();
+});
 
 /** A row is opened by clicking its name, where the shared browser hangs the handler. */
 function rowNamed(name: string): HTMLElement | undefined {
@@ -194,6 +211,112 @@ describe('Solutions and Plugins share the one install dialog', () => {
     expect(dialog.props('modelValue')).toBe(true);
     expect(bodyFind('[data-install-dialog] .q-checkbox')?.textContent).toContain('Replace');
     expect(bodyFind('[data-upload-package]')).not.toBeNull();
+
+    wrapper.unmount();
+  });
+});
+
+describe('Upload a package (.zip)', () => {
+
+  async function openWithActiveTeam(team: string) {
+    setActivePinia(createPinia());
+    useConsoleStore().activeTeamId = asTeamId(team);
+    const wrapper = await mountDialog(InstallFromFolderDialog, {}, { pinia: false });
+    await settle();
+    return wrapper;
+  }
+
+  async function chooseZip(name: string) {
+    const input = bodyFind('[data-upload-package-input]') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { value: [new File(['PK'], name)], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    await settle();
+    await settle();
+  }
+
+  it('says where the zip lands: the active team\'s Documents', async () => {
+    const wrapper = await openWithActiveTeam('beta');
+
+    expect(bodyFind('[data-upload-package-button]')?.textContent).toContain('Upload a package (.zip)');
+    expect(bodyFind('[data-upload-package-action]')?.textContent).toContain('top of Documents › Beta');
+
+    wrapper.unmount();
+  });
+
+  it('uploads into the active team\'s folder and fills Folder with the unpacked folder', async () => {
+    const wrapper = await openWithActiveTeam('alpha');
+    await chooseZip('job-tracker.zip');
+
+    expect(server.callsTo('upload-zip').map((call) => [call.folder, call.body])).toEqual([
+      ['alpha', { file: 'job-tracker.zip', path: '', onClash: 'ask' }],
+    ]);
+    expect(field('Folder').value).toBe('/data/documents/alpha/job-tracker');
+    expect(bodyFind('[data-upload-package-landed]')?.textContent).toContain('Unpacked into Documents › Alpha › job-tracker');
+    expect(isDisabled('Install')).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('uploads into the team the person picked', async () => {
+    const wrapper = await openWithActiveTeam('alpha');
+    wrapper.findComponent(UploadPackageAction).findComponent({ name: 'QSelect' }).vm.$emit('update:modelValue', 'beta');
+    await settle();
+    await chooseZip('job-tracker.zip');
+
+    expect(server.callsTo('upload-zip').map((call) => call.folder)).toEqual(['beta']);
+    expect(field('Folder').value).toBe('/data/documents/beta/job-tracker');
+
+    wrapper.unmount();
+  });
+
+  it('a keep-both clash fills Folder with the copy it made', async () => {
+    const wrapper = await openWithActiveTeam('alpha');
+    server.reply('upload-zip', 409, {
+      error: 'job-tracker is already in alpha. Choose Keep both, Replace or Skip.',
+      clashes: [{ from: 'job-tracker', to: 'job-tracker', isFolder: true }],
+    });
+    server.reply('upload-zip', 200, {
+      path: 'job-tracker (copy)', name: 'job-tracker (copy)', isFolder: true, files: ['job-tracker (copy)/solution.json'], size: 2,
+    });
+    await chooseZip('job-tracker.zip');
+
+    (bodyFind('.documents-clash [data-clash="keep-both"]') as HTMLElement).click();
+    await settle();
+    await settle();
+
+    expect(server.callsTo('upload-zip').map((call) => (call.body as { onClash: string }).onClash)).toEqual(['ask', 'keep-both']);
+    expect(field('Folder').value).toBe('/data/documents/alpha/job-tracker (copy)');
+
+    wrapper.unmount();
+  });
+
+  it('shows an unsafe zip\'s refusal and leaves Folder empty', async () => {
+    const wrapper = await openWithActiveTeam('alpha');
+    server.reply('upload-zip', 400, { error: 'The zip was not unpacked: ../outside.md leaves the folder.' });
+    await chooseZip('evil.zip');
+
+    expect(bodyFind('[data-upload-package-error]')?.textContent).toContain('The zip was not unpacked: ../outside.md leaves the folder.');
+    expect(field('Folder').value).toBe('');
+
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['Solutions', () => mountDialog(SolutionsLauncher, {}, { pinia: false }), '[data-install-from-folder]'],
+    ['Plugins', () => mountDialog(PluginsDialog, {}, { pinia: false }), null],
+  ] as const)('works from %s', async (_screen, mountScreen, opener) => {
+    setActivePinia(createPinia());
+    useConsoleStore().activeTeamId = asTeamId('alpha');
+    const wrapper = await mountScreen();
+    await settle();
+    if (opener) bodyFind(opener)!.click();
+    else button('Install from a folder…').click();
+    await settle();
+    await settle();
+
+    await chooseZip('job-tracker.zip');
+
+    expect(field('Folder').value).toBe('/data/documents/alpha/job-tracker');
 
     wrapper.unmount();
   });
