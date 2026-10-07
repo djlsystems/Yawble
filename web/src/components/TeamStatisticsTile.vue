@@ -206,6 +206,19 @@ function besidePointer(point: number[], _params: unknown, _dom: unknown, _rect: 
  */
 const pointerAt = ref<number | null>(null);
 
+const chartRef = ref<InstanceType<typeof VChart> | null>(null);
+
+/**
+ * THE POINTER LEFT THE LANES: hide this chart's hover box and its hover line now. ECharts hides
+ * them on its own `globalout`, which a quick move across the Teams list's many small charts loses,
+ * and the box lives on the page body, outside the tile, so nothing else would ever take it away.
+ */
+function leaveChart() {
+  pointerAt.value = null;
+  chartRef.value?.dispatchAction({ type: 'hideTip' });
+  chartRef.value?.dispatchAction({ type: 'updateAxisPointer', currTrigger: 'leave' });
+}
+
 function notePointerX(event: { offsetX?: number }) {
   const width = tileEl.value?.querySelector('.stats-chart')?.getBoundingClientRect().width ?? 0;
   const start = axisFrom.value;
@@ -334,7 +347,7 @@ function onTileClick() {
   >
     <button v-if="!compact" type="button" class="team-kpi-label stats-label" @click.stop="openActivity">Activity</button>
 
-    <div v-if="hasChart" class="stats-body">
+    <div v-if="hasChart" class="stats-body" @pointerleave="leaveChart" @mouseleave="leaveChart">
       <div class="stats-initials" aria-hidden="true">
         <div
           v-for="lane in lanes"
@@ -344,6 +357,7 @@ function onTileClick() {
         >{{ lane.initials }}</div>
       </div>
       <v-chart
+        ref="chartRef"
         class="stats-chart"
         :style="{ height: chartHeight }"
         :option="option"

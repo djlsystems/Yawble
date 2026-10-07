@@ -116,6 +116,17 @@ describe('the compact Activity tile', () => {
     expect(axis()).toMatchObject({ min: Date.parse(iso(-60)), max: Date.parse(iso(90)) });
   });
 
+  it('hides its hover box and hover line as soon as the pointer leaves the lanes', async () => {
+    const tile = await mountTile();
+    const chart = tile.findComponent({ name: 'echarts' });
+    const dispatch = vi.spyOn((chart.vm as unknown as { $: { exposed: { dispatchAction: (action: unknown) => void } } }).$.exposed, 'dispatchAction');
+
+    await tile.find('.stats-body').trigger('pointerleave');
+
+    expect(dispatch).toHaveBeenCalledWith({ type: 'hideTip' });
+    expect(dispatch).toHaveBeenCalledWith({ type: 'updateAxisPointer', currTrigger: 'leave' });
+  });
+
   it('shows a dash, not an empty cell, for a team that never ran', async () => {
     const tile = await mountTile({ ...activity, window: 'none', from: null, to: null, members: [] } as TeamActivity);
 
