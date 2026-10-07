@@ -3571,6 +3571,12 @@ export type SolutionPreview =
       connections: SolutionConnectionOption[]
       /** The package's secrets and whether the Host has each set (a Host before it answers without). */
       secrets?: SolutionSecret[]
+      /** Each team that kept an uninstalled install of this package id, which it can be reinstalled onto. */
+      reinstallable?: SolutionReinstallable[]
+      /** Set when the name is such a team: the install goes over it, bringing its kept sites back. */
+      reinstall?: { team: string; teamName: string; from: string }
+      /** With `reinstall`: the person's earlier answers that still apply, to prefill. */
+      previous?: SolutionPrevious
     }
   | {
       ok: true
@@ -3588,6 +3594,20 @@ export type SolutionPreview =
       secrets?: SolutionSecret[]
     }
   | { ok: false; error?: string; refusals?: SolutionRefusal[] }
+
+/** A team that kept an uninstalled install of a package: its sites, offline, with their data. */
+export interface SolutionReinstallable {
+  team: string
+  teamName: string
+  version: string
+  uninstalledAt: string | null
+}
+
+/** The answers a person gave an earlier install of the package, where they still apply. */
+export interface SolutionPrevious {
+  settings: { member: string; setting: string; value: unknown }[]
+  connections: { member: string; slot: string; connection: string }[]
+}
 
 /**
  * What an update keeps of the person's part: each kept member's person-only settings (null when
@@ -3669,6 +3689,8 @@ export type SolutionInstallResult =
       unset?: string[]
       /** Each schedule's first run: ran now at install, or when it first comes due. */
       firstRuns?: SolutionFirstRun[]
+      /** For a reinstall onto a team that kept an earlier install, the version it held. */
+      reinstalledFrom?: string | null
     }
   | { ok: false; step: string; stepNumber: number; reason: string; steps: SolutionStep[] }
   | { ok: false; refusals: SolutionRefusal[] }
@@ -3853,7 +3875,9 @@ export interface SolutionUninstallResult {
   team: string
   id: string
   version: string
-  removed: { triggers: string[]; members: string[]; skills: string[]; sites: string[]; tools: boolean }
+  removed: { triggers: string[]; members: string[]; skills: string[]; tools: boolean }
+  /** The package's sites, taken offline and kept with every version and their data. */
+  sitesKept: string[]
   plugins: { removed: string[]; kept: { id: string; usedBy: string[] }[] }
   teamName?: string
   /** The team's documents folder, kept. */

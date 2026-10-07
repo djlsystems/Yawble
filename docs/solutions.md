@@ -450,9 +450,16 @@ none:
 
 **Uninstall** (`POST /api/teams/{team}/solution/uninstall`, `{ removePlugins? }`, a person only)
 asks first - the asking is the panel's - and then removes the team's triggers, its members (the
-Manager stays, as every team has one, with the package's instructions cleared), its team skills,
-its sites with their data and its tools folder, and forgets the package with a
-`solution.uninstalled` row. **It keeps the team and its documents.** With `removePlugins: true` it
+Manager stays, as every team has one, with the package's instructions cleared), its team skills
+and its tools folder, with a `solution.uninstalled` row. **It takes the package's sites offline and
+keeps them, with every version and all their data**, as an update keeps a site its package drops,
+and keeps the record that the team held the package, with the person's answers. **It keeps the team
+and its documents.** Installing the same package id onto that team again - the wizard offers it, and
+`POST /api/solutions/install` takes it as `teamName` - installs over it: the kept sites are published
+again with their data, the members and triggers are made again, and the person's earlier answers
+that still apply are filled in and asked again (`previous` in the preview). A team that never had the
+package is refused by name, as any taken name is. Deleting the team removes the kept sites, their
+data and the record. With `removePlugins: true` it
 removes each of the package's plugins that no other team has a member on, and names the ones it
 kept and the teams using them. Something that cannot be removed is named in `failures` and the rest
 still goes. Deleting the team itself is still the team delete.
@@ -824,5 +831,6 @@ skill `interview-prep` and ships `job-board` 0.2.0. The tests make it the same w
   like HTML, the refused forms, the default line).
 - The launcher and the panel: `SolutionPanelTests` (the tile's filled status line, state and Open; the
   panel's status, controls and results with measured spend only; a cap changed through its existing
-  route showing at once; Uninstall removing what the package made and keeping the documents; a
+  route showing at once; Uninstall removing what the package made and keeping the documents and the sites offline with
+  their data; a reinstall onto the kept team bringing them back; a
   plugin another team uses kept; a person's only).

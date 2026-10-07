@@ -35,13 +35,13 @@ public sealed class FreshVolumeTests : IDisposable
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
     /// settings; `auth-008` is a plugin member's configuration and secret bindings; `auth-009` is who
     /// last set a member's own instructions, and when; `auth-010` is a trigger's wake choice and daily
-    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `outcome-001` is the usage ledger (`usage_ledger`, `workflow_ledger`); `outcome-002` is the outcomes and their append-only workflow links; `outcome-003` is a delivery's attribution and each nudge, recorded at delivery (`delivery_ledger`, `nudge_ledger`); `outcome-004` makes a link's outcome nullable, for a person's unlink; `outcome-005` indexes `usage_ledger` by team and end time, for the team activity read; `outcome-006` is every admission hold (`admission_holds`), append-only but for its one close; `outcome-007` is an outcome's value; `auth-017` is the outcome a trigger's fires serve; `backlog-002` is a dispatch's recorded tips, where it started and its stored landed; `backlog-003` is the outcome a backlog item serves; `backlog-004` is a dispatch's start that could not be recorded, retried while its branch is unchanged; `auth-018` is the email of the person who last configured a trigger; `auth-019` is the credential issued to each agent CLI; `auth-020` is a mailbox connection's servers, username and encrypted app password.
+    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `outcome-001` is the usage ledger (`usage_ledger`, `workflow_ledger`); `outcome-002` is the outcomes and their append-only workflow links; `outcome-003` is a delivery's attribution and each nudge, recorded at delivery (`delivery_ledger`, `nudge_ledger`); `outcome-004` makes a link's outcome nullable, for a person's unlink; `outcome-005` indexes `usage_ledger` by team and end time, for the team activity read; `outcome-006` is every admission hold (`admission_holds`), append-only but for its one close; `outcome-007` is an outcome's value; `auth-017` is the outcome a trigger's fires serve; `backlog-002` is a dispatch's recorded tips, where it started and its stored landed; `backlog-003` is the outcome a backlog item serves; `backlog-004` is a dispatch's start that could not be recorded, retried while its branch is unchanged; `auth-018` is the email of the person who last configured a trigger; `auth-019` is the credential issued to each agent CLI; `auth-020` is a mailbox connection's servers, username and encrypted app password; `auth-021` keeps an uninstalled package's `team_solutions` row, marked uninstalled, with the person's answers.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "messages-002", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007"],
+            ["messages-001", "messages-002", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -53,7 +53,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "messages-001", "messages-002", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "skill-001", "skill-002", "skill-003", "skill-004"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "messages-001", "messages-002", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "skill-001", "skill-002", "skill-003", "skill-004"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -211,6 +211,40 @@ public sealed class FreshVolumeTests : IDisposable
 
         Assert.True(await store.DeleteAsync("JobTracker", null, Ct));
         Assert.Empty(await store.ListAsync(Ct));
+    }
+
+    /// <summary>
+    /// `auth-021`: an uninstalled package's row stays, marked uninstalled with the person's answers.
+    /// It is not the team's installed package, it reads back whole as the uninstalled record, a save
+    /// as installed takes it back, and a delete removes it.
+    /// </summary>
+    [Fact]
+    public async Task An_uninstalled_team_solutions_row_is_kept_apart_from_the_installed_ones_and_goes_with_a_delete()
+    {
+        await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct: Ct);
+        var store = new SqliteTeamSolutionStore(Database);
+        var at = new DateTimeOffset(2026, 10, 7, 10, 0, 0, TimeSpan.Zero);
+        var row = new TeamSolutionRow(
+            "JobTracker", "job-tracker", "Job Tracker", "1.0.0", "/data/documents/Alpha/job-tracker", at, "person@example.test", null,
+            "{\"format\":1}", new Dictionary<string, string>(), new Dictionary<string, string>(), new Dictionary<string, string>(),
+            new Dictionary<string, string>());
+        var audit = new TriggerAudit(null, null, TenantActions.SolutionUninstalled, "JobTracker", null, null);
+
+        await store.SaveAsync(row with { UninstalledAt = at, Answers = "{\"settings\":{}}" }, audit, Ct);
+
+        Assert.Null(await store.FindAsync("JobTracker", Ct));
+        Assert.Empty(await store.ListAsync(Ct));
+        var kept = (await store.FindUninstalledAsync("jobtracker", Ct))!;
+        Assert.Equal(("job-tracker", (DateTimeOffset?)at, "{\"settings\":{}}"), (kept.PackageId, kept.UninstalledAt, kept.Answers));
+        Assert.Single(await store.ListUninstalledAsync(Ct));
+
+        await store.SaveAsync(row, audit with { Action = TenantActions.SolutionInstalled }, Ct);
+        Assert.NotNull(await store.FindAsync("JobTracker", Ct));
+        Assert.Null(await store.FindUninstalledAsync("JobTracker", Ct));
+
+        await store.SaveAsync(row with { UninstalledAt = at }, audit, Ct);
+        Assert.True(await store.DeleteAsync("JobTracker", null, Ct));
+        Assert.Null(await store.FindUninstalledAsync("JobTracker", Ct));
     }
 
     /// <summary>

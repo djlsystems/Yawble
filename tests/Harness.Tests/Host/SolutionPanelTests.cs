@@ -16,8 +16,9 @@ namespace Harness.Tests.Host;
 /// <summary>
 /// The Solutions launcher and a solution's control panel on the real Host, with the Job Tracker
 /// sample installed: the tile's filled status line and state, the panel's status, controls and
-/// results, a control that is an existing route taking effect at once, and Uninstall removing what
-/// the package made while keeping the team's documents.
+/// results, a control that is an existing route taking effect at once, Uninstall removing what the
+/// package made while keeping the team's documents and its sites offline with their data, and a
+/// reinstall onto that team bringing them back.
 /// </summary>
 public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFixture>
 {
@@ -230,7 +231,7 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
     }
 
     [Fact]
-    public async Task Uninstall_removes_what_the_package_made_and_keeps_the_team_and_its_documents()
+    public async Task Uninstall_removes_what_the_package_made_and_keeps_the_team_its_documents_and_its_sites_offline_with_their_data()
     {
         var team = await InstallAsync(PackageWithPlugin("jb-uninstall"), "Uninstall");
         var documents = Get<TeamDocuments>().EnsureFor(team);
@@ -238,6 +239,9 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         File.WriteAllText(Path.Combine(documents, "Drafts", "acme.md"), "a letter");
         var tools = SolutionInstaller.ToolsFolderOf(Get<TeamPaths>(), team);
         Assert.True(Directory.Exists(tools));
+        await PostingsAsync(team, "a", "b");
+        var versions = (await Get<ISiteStore>().VersionsAsync(team, "tracker", Ct)).Select(v => v.Version).ToList();
+        Assert.NotEmpty(versions);
         using var person = await host.PersonAsync();
 
         var body = await JsonAsync(await person.PostAsJsonAsync($"/api/teams/{team}/solution/uninstall", new { removePlugins = true }, Ct));
@@ -246,32 +250,165 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         Assert.Equal(5, body.GetProperty("removed").GetProperty("triggers").GetArrayLength());
         Assert.Equal(["Scout", "Writer"], body.GetProperty("removed").GetProperty("members").EnumerateArray().Select(m => m.GetString()).Order());
         Assert.Equal(["jb-uninstall"], body.GetProperty("plugins").GetProperty("removed").EnumerateArray().Select(p => p.GetString()));
+        Assert.Equal(["tracker"], body.GetProperty("sitesKept").EnumerateArray().Select(s => s.GetString()));
 
         // Gone: triggers, members (the Manager stays, without the package's instructions), skills,
-        // sites, tools, the plugin no other team used, and the record.
+        // tools and the plugin no other team used. The package is no longer installed.
         Assert.Empty(await Get<ITriggerStore>().ListForTeamAsync(team, Ct));
         Assert.Equal(["Manager"], Get<TeamRegistry>().ContainerIdsOf(team).Select(c => c.Name));
         Assert.Empty(await Get<ISkillStore>().ListTeamAsync(team, Ct));
-        Assert.Null(await Get<ISiteStore>().FindAsync(team, "tracker", Ct));
         Assert.False(Directory.Exists(tools));
         Assert.Null(Get<PluginCatalog>().For("jb-uninstall"));
         Assert.Null(await Get<ITeamSolutionStore>().FindAsync(team, Ct));
         Assert.DoesNotContain("coordinate the job search", (await Get<TeamRegistry>().MemberAsync(team, "Manager", Ct)).SystemPrompt ?? "");
 
-        // KEPT: the team and its documents, named.
+        // KEPT, OFFLINE: the site with every version and all its data, no longer served.
+        var site = await Get<ISiteStore>().FindAsync(team, "tracker", Ct);
+        Assert.NotNull(site);
+        Assert.Null(site!.LiveVersion);
+        Assert.Equal(versions, (await Get<ISiteStore>().VersionsAsync(team, "tracker", Ct)).Select(v => v.Version));
+        Assert.Equal(["a", "b"], await PostingIdsAsync(team));
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.SiteUnpublished, $"{team}/tracker", Ct));
+        Assert.NotEqual(HttpStatusCode.OK, (await person.GetAsync($"/sites/{Uri.EscapeDataString(team)}/tracker/", Ct)).StatusCode);
+
+        // KEPT: the team and its documents, named, and the record that it held the package.
         Assert.NotNull(Get<TeamRegistry>().ExistingName(team));
         Assert.True(File.Exists(Path.Combine(documents, "Drafts", "acme.md")));
         Assert.Equal(documents, body.GetProperty("documentsKept").GetString());
+        var kept = await Get<ITeamSolutionStore>().FindUninstalledAsync(team, Ct);
+        Assert.Equal(("job-tracker", "1.0.0"), (kept?.PackageId, kept?.Version));
 
         // Its row, and the solution is no longer one.
         var row = await Get<ITenantLog>().FindLatestAsync(TenantActions.SolutionUninstalled, team, Ct);
         Assert.NotNull(row);
         Assert.Contains("jb-uninstall", row!.Detail);
         Assert.Equal(HttpStatusCode.NotFound, (await person.GetAsync($"/api/teams/{team}/solution/panel", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await person.GetAsync($"/api/teams/{team}/solution", Ct)).StatusCode);
         Assert.DoesNotContain((await JsonAsync(await person.GetAsync("/api/solutions/installed", Ct))).EnumerateArray(),
             t => t.GetProperty("team").GetString() == team);
         Assert.Equal(HttpStatusCode.NotFound, (await person.PostAsJsonAsync($"/api/teams/{team}/solution/uninstall", new { }, Ct)).StatusCode);
     }
+
+    [Fact]
+    public async Task Reinstalling_onto_the_team_that_kept_it_publishes_its_sites_again_with_their_data_and_makes_its_members_and_triggers_again()
+    {
+        var folder = PackageWithPlugin("jb-reinstall");
+        var label = $"Again {Guid.NewGuid().ToString("N")[..6]}";
+        var sources = JsonSerializer.SerializeToElement(new[] { "sample" });
+        var installed = await Get<SolutionInstaller>().InstallAsync(
+            new SolutionInstallRequest(folder, label, Answers: new SolutionAnswers(
+                Settings: new Dictionary<string, Dictionary<string, JsonElement>> { ["Scout"] = new() { ["sources"] = sources } })),
+            Person, Ct);
+        var team = Assert.IsType<SolutionDone>(installed.Body).Team;
+        await PostingsAsync(team, "a", "b");
+        using var person = await host.PersonAsync();
+        await JsonAsync(await person.PostAsJsonAsync($"/api/teams/{team}/solution/uninstall", new { }, Ct));
+        var before = await PostingIdsAsync(team);
+
+        // THE WIZARD OFFERS THE KEPT TEAM, and naming it previews a reinstall with the answers before.
+        var fresh = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/preview", new { folder }, Ct));
+        Assert.Contains(fresh.GetProperty("reinstallable").EnumerateArray(), t => t.GetProperty("team").GetString() == team);
+
+        var preview = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/preview", new { folder, team = label }, Ct));
+        Assert.Equal("install", preview.GetProperty("mode").GetString());
+        Assert.Equal(JsonValueKind.Null, preview.GetProperty("nameRefusal").ValueKind);
+        Assert.Equal(team, preview.GetProperty("reinstall").GetProperty("team").GetString());
+        Assert.Equal("1.0.0", preview.GetProperty("reinstall").GetProperty("from").GetString());
+        var previous = Assert.Single(preview.GetProperty("previous").GetProperty("settings").EnumerateArray());
+        Assert.Equal(("Scout", "sources", "[\"sample\"]"),
+            (previous.GetProperty("member").GetString(), previous.GetProperty("setting").GetString(), previous.GetProperty("value").GetRawText()));
+
+        var body = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/install", new
+        {
+            folder,
+            teamName = label,
+            settings = new Dictionary<string, Dictionary<string, JsonElement>> { ["Scout"] = new() { ["sources"] = sources } },
+        }, Ct));
+
+        Assert.True(body.GetProperty("ok").GetBoolean(), body.ToString());
+        Assert.Equal(team, body.GetProperty("team").GetString());
+        Assert.Equal("1.0.0", body.GetProperty("reinstalledFrom").GetString());
+
+        // THE SITE IS LIVE AGAIN, ITS DATA AS IT WAS (the Scout's first run may add postings of its own).
+        var site = await Get<ISiteStore>().FindAsync(team, "tracker", Ct);
+        Assert.NotNull(site!.LiveVersion);
+        Assert.Contains("a", before);
+        Assert.Contains("b", before);
+        Assert.Superset(before.ToHashSet(), (await PostingIdsAsync(team)).ToHashSet());
+        Assert.Equal(HttpStatusCode.OK, (await person.GetAsync($"/sites/{Uri.EscapeDataString(team)}/tracker/", Ct)).StatusCode);
+
+        // MEMBERS AND TRIGGERS MADE AGAIN, the person's answer with them; the package installed.
+        Assert.Equal(["Manager", "Scout", "Writer"], Get<TeamRegistry>().ContainerIdsOf(team).Select(c => c.Name).Order());
+        Assert.Contains("coordinate the job search", (await Get<TeamRegistry>().MemberAsync(team, "Manager", Ct)).SystemPrompt ?? "");
+        Assert.Equal(5, (await Get<ITriggerStore>().ListForTeamAsync(team, Ct)).Count);
+        Assert.Equal("[\"sample\"]", (await Get<IPluginMemberSettingsStore>().ForAsync(new ContainerId(team, "Scout"), Ct)).Config["sources"].GetRawText());
+        Assert.Equal("1.0.0", (await Get<ITeamSolutionStore>().FindAsync(team, Ct))?.Version);
+        Assert.Null(await Get<ITeamSolutionStore>().FindUninstalledAsync(team, Ct));
+        Assert.Equal(HttpStatusCode.OK, (await person.GetAsync($"/api/teams/{team}/solution/panel", Ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task An_existing_team_that_never_had_the_package_is_refused_by_name_as_before()
+    {
+        // A team made by hand.
+        var alpha = Get<TeamRegistry>().LabelFor(host.Alpha);
+        var byHand = await Get<SolutionInstaller>().InstallAsync(new SolutionInstallRequest(Package(), alpha), Person, Ct);
+        Assert.Equal(409, byHand.Status);
+        Assert.Contains("already exists", JsonSerializer.Serialize(byHand.Body));
+
+        // A team that kept an uninstalled install of ANOTHER package id.
+        var other = PackageWithPlugin("jb-other");
+        SolutionSamples.Edit(other, m => m["id"] = "other-pack");
+        var label = $"Other {Guid.NewGuid().ToString("N")[..6]}";
+        var otherTeam = Assert.IsType<SolutionDone>((await Get<SolutionInstaller>().InstallAsync(new SolutionInstallRequest(other, label), Person, Ct)).Body).Team;
+        await Get<SolutionInstaller>().UninstallAsync(otherTeam, false, Person, null, Ct);
+
+        var refused = await Get<SolutionInstaller>().InstallAsync(new SolutionInstallRequest(Package(), label), Person, Ct);
+        Assert.Equal(409, refused.Status);
+        Assert.Contains("already exists", JsonSerializer.Serialize(refused.Body));
+        Assert.Null(await Get<ITeamSolutionStore>().FindAsync(otherTeam, Ct));
+
+        using var person = await host.PersonAsync();
+        var preview = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/preview", new { folder = Package(), team = label }, Ct));
+        Assert.False(preview.GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Deleting_a_team_removes_the_sites_and_data_its_uninstall_kept_and_the_record()
+    {
+        var label = $"Deleted {Guid.NewGuid().ToString("N")[..6]}";
+        var team = Assert.IsType<SolutionDone>((await Get<SolutionInstaller>().InstallAsync(
+            new SolutionInstallRequest(PackageWithPlugin("jb-deleted"), label), Person, Ct)).Body).Team;
+        await PostingsAsync(team, "a");
+        await Get<SolutionInstaller>().UninstallAsync(team, false, Person, null, Ct);
+        Assert.NotNull(await Get<ISiteStore>().FindAsync(team, "tracker", Ct));
+
+        Assert.NotNull(await Get<TeamDeletion>().DeleteAsync(team, ct: Ct));
+
+        Assert.Null(await Get<ISiteStore>().FindAsync(team, "tracker", Ct));
+        Assert.Empty(await Get<ISiteStore>().VersionsAsync(team, "tracker", Ct));
+        Assert.Empty(await Get<ISiteStore>().CollectionsAsync(team, "tracker", Ct));
+        Assert.Null(await Get<ITeamSolutionStore>().FindUninstalledAsync(team, Ct));
+
+        // A NEW TEAM OF THE SAME NAME HELD NOTHING: its install is a new team's, nothing reinstalled.
+        var again = Assert.IsType<SolutionDone>((await Get<SolutionInstaller>().InstallAsync(
+            new SolutionInstallRequest(PackageWithPlugin("jb-deleted"), label), Person, Ct)).Body);
+        var answered = JsonSerializer.SerializeToElement(again, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.False(answered.TryGetProperty("reinstalledFrom", out var from) && from.ValueKind == JsonValueKind.String);
+        Assert.Empty(await PostingIdsAsync(again.Team));
+    }
+
+    private async Task PostingsAsync(string team, params string[] ids)
+    {
+        foreach (var id in ids)
+        {
+            var put = await Get<SiteService>().PutDocumentAsync(team, "tracker", "jobs", id, "{\"status\":\"new\"}", SiteActor.Person("person-id", "person@example.test"), Ct);
+            Assert.True(put.Ok, put.Refusal);
+        }
+    }
+
+    private async Task<IReadOnlyList<string>> PostingIdsAsync(string team) =>
+        [.. ((await Get<SiteService>().ListDocumentsAsync(team, "tracker", "jobs", null, Ct)).Value ?? []).Select(d => d.Id).Order(StringComparer.Ordinal)];
 
     [Fact]
     public async Task Uninstall_keeps_a_plugin_another_team_still_uses_and_every_plugin_unless_asked()
