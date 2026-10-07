@@ -603,6 +603,117 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
+    /// The Concierge asks a person nothing its own tools can read: the Agents a team may run are the
+    /// `hiring` tool's answer, and a team about to be created starts on the default Agent rather than
+    /// on a question about a screen. When it must send the person to a screen, it names it as the
+    /// ribbon in web/ shows it - Agents in the Admin group, or under the ... menu when it overflows.
+    /// </summary>
+    [Fact]
+    public void The_concierge_never_asks_the_person_what_its_own_tools_can_read_and_names_screens_as_the_person_sees_them()
+    {
+        var concierge = Flat(BuiltInSkills.Find("concierge")!.Body);
+        foreach (var line in new[]
+        {
+            "Never ask a person something you can read with your own tools.",
+            "The Agents a team may run are the `hiring` tool's answer (`hiring  team: <id>`), never the person's.",
+            "When you must send the person to a screen, name it as they see it: Agents is in the Admin group of the ribbon, or under the ... menu at the ribbon's end when the window is too narrow to show it.",
+        })
+        {
+            Assert.Contains(Flat(line), concierge, StringComparison.Ordinal);
+        }
+
+        var newTeam = Flat(BuiltInSkills.Find("new-team")!.Body);
+        Assert.Contains(
+            Flat("Never ask the person which Agents are ready. The team is created in step 3 on the default Agent, unless the person named one; then read what it may run with `hiring  team: <id>`."),
+            newTeam, StringComparison.Ordinal);
+        Assert.DoesNotContain("ask the person what the Agents screen shows", newTeam, StringComparison.Ordinal);
+
+        // The words are the ribbon's own: Agents under Admin, and the overflow's More commands button.
+        var ribbon = File.ReadAllText(Path.Combine(SolutionSamples.RepoRoot(), "web", "src", "lib", "ribbon.ts"));
+        Assert.Contains("label: 'Admin'", ribbon, StringComparison.Ordinal);
+        Assert.Contains("action: 'admin-agents', label: 'Agents'", ribbon, StringComparison.Ordinal);
+        var bar = File.ReadAllText(Path.Combine(SolutionSamples.RepoRoot(), "web", "src", "components", "RibbonBar.vue"));
+        Assert.Contains("icon=\"more_horiz\"", bar, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// "I'll check with you before it starts" followed by the step in the same turn is a broken
+    /// promise. The skill says to stop and ask before such a step, or not to make the promise.
+    /// </summary>
+    [Fact]
+    public void The_concierge_keeps_a_promise_to_check_with_the_person_or_does_not_make_it()
+    {
+        var concierge = Flat(BuiltInSkills.Find("concierge")!.Body);
+        foreach (var line in new[]
+        {
+            "When you tell the person you will check with them before a step, stop before that step, ask, and take it only once they answer - never in the same turn as the promise.",
+            "If you mean to go straight on, say that instead: keep such a promise, or do not make it.",
+        })
+        {
+            Assert.Contains(Flat(line), concierge, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// A team's document is found in the Documents dialog, said in words; a path inside the
+    /// container opens nothing for the person. Repository steps are named by the Git dialog's own
+    /// button words, taken from web/'s `ACTION_LABELS`, and a document is never sent there.
+    /// </summary>
+    [Fact]
+    public void The_concierge_points_to_a_teams_output_in_the_documents_dialog_and_names_git_steps_by_their_buttons()
+    {
+        var concierge = Flat(BuiltInSkills.Find("concierge")!.Body);
+        foreach (var line in new[]
+        {
+            "A document a team wrote is in the Documents dialog: Documents on the ribbon, then the team's folder, then the file by its name.",
+            "Say it in those words, never as a path inside the container (`/data/...`): the person cannot open one.",
+            "A document is not in a repository, so never send the person to the Git dialog for one.",
+            "Repository work is in the team's Git dialog (Git, under Active Team on the ribbon). Name each step by its button's words: Fetch origin, Bring current, Push, Merge to main (it names the default branch), Bring current and merge, Open pull request, Clean up worktrees.",
+        })
+        {
+            Assert.Contains(Flat(line), concierge, StringComparison.Ordinal);
+        }
+
+        var labels = File.ReadAllText(Path.Combine(SolutionSamples.RepoRoot(), "web", "src", "lib", "repoLadder.ts"));
+        foreach (var button in new[] { "Fetch origin", "Bring current", "Push", "Merge to main", "Bring current and merge", "Open pull request", "Clean up worktrees" })
+        {
+            Assert.Contains($": '{button}',", labels, StringComparison.Ordinal);
+        }
+
+        var ribbon = File.ReadAllText(Path.Combine(SolutionSamples.RepoRoot(), "web", "src", "lib", "ribbon.ts"));
+        Assert.Contains("label: 'Documents'", ribbon, StringComparison.Ordinal);
+        Assert.Contains("action: 'team-git', label: 'Git'", ribbon, StringComparison.Ordinal);
+        Assert.Contains("label: 'Active Team'", ribbon, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The sections on asking, keeping its word and where output is stand on their own, just before
+    /// "The rest of the job", so the dispatch section keeps every one of its bullets under it.
+    /// </summary>
+    [Fact]
+    public void The_concierge_keeps_its_dispatch_bullets_together_and_its_asking_sections_before_the_rest_of_the_job()
+    {
+        var concierge = Flat(BuiltInSkills.Find("concierge")!.Body);
+        var headings = new[]
+        {
+            "## Dispatch, then wait - never poll in a loop",
+            "## Ask the person only what they alone can answer",
+            "## Keep your word",
+            "## Where a team's output is",
+            "## The rest of the job",
+        };
+        var at = headings.Select(h => concierge.IndexOf(h, StringComparison.Ordinal)).ToArray();
+        Assert.All(at, i => Assert.True(i >= 0));
+        Assert.Equal(at.Order().ToArray(), at);
+
+        var dispatch = concierge[at[0]..at[1]];
+        Assert.Contains("- If you wait, say so in the instruction and ask for `workflow_complete`.", dispatch, StringComparison.Ordinal);
+        Assert.Contains("- If the workflow ended in `agentContainer.needsDecision`, the step is not done:", dispatch, StringComparison.Ordinal);
+        Assert.DoesNotContain("## ", concierge[(at[3] + 3)..at[4]], StringComparison.Ordinal);
+        Assert.DoesNotContain("- If you wait", concierge[at[1]..at[4]], StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A finished team's branch is what `landed` is read from until it is proven, so the skill reads
     /// `landed` before asking the person to delete the team. And when the person merged the work
     /// outside the platform and `landed` reads `unknown`, their word marks the item implemented, and
