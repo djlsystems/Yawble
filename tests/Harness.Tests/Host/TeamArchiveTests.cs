@@ -160,7 +160,8 @@ public sealed class TeamArchiveTests : IAsyncLifetime
     public async Task Open_workflows_do_not_block_and_the_archive_check_lists_them()
     {
         await TellAsync("Dev", "write the report", subject: "Write the report");
-        var root = Assert.Single(await Log.ReadAfterAsync(0, [MessageTypes.InstructionFor(Dev)], int.MaxValue, Ct));
+        // The Host may already have offered Dev the idle workflow under the same thread; the root is the tell.
+        var root = Assert.Single(await InstructionsForDevAsync(), m => !IdleWorkflowOffer.IsOffer(m));
         await QuietAsync();
 
         var check = await _person.GetFromJsonAsync<JsonElement>($"/api/teams/{_team}/archive-check", Ct);
@@ -494,13 +495,17 @@ public sealed class TeamArchiveTests : IAsyncLifetime
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
     }
 
-    /// <summary>Until Dev's run and the Manager's wake on it have both finished and nothing is queued.</summary>
+    /// <summary>
+    /// Until Dev's run and the Manager's wake on it have both finished and nothing is queued or
+    /// appended-not-delivered: the idle offer's second Dev run wakes the Manager again.
+    /// </summary>
     private Task QuietAsync() =>
         UntilAsync(async () =>
         {
             var completed = await Log.ReadAfterAsync(0, [MessageTypes.Completed], int.MaxValue, Ct);
             return completed.Any(m => m.Source == Dev.ToString())
                 && completed.Any(m => m.Source == Manager.ToString())
+                && await TeamQuiet.IsQuietAsync(Services, _team, Ct)
                 && await Services.GetRequiredService<TeamArchive>().NotQuietAsync(_team, Ct) is null;
         }, "the team quiet");
 
