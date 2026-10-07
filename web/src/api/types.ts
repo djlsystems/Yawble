@@ -1042,6 +1042,18 @@ export interface Team {
    */
   paused?: boolean
 
+  /**
+   * Put away: kept whole, doing no work, out of the tabs, the team chooser and the Kanban, and still
+   * a source to clone from. Absent reads as active.
+   */
+  archived?: boolean
+
+  /** When it was archived (UTC), or null while active. */
+  archivedAt?: string | null
+
+  /** Who archived it: a person's email, or the Concierge on a person's behalf. Null while active. */
+  archivedBy?: string | null
+
   /** Agents that could not be resolved when this team was created or updated: present on the
    *  write response if a chosen Agent did not resolve at the time. This is a WARNING - the write SUCCEEDED. */
   unresolvedAgents?: UnresolvedAgent[]
@@ -3997,4 +4009,14 @@ export interface CapacityView {
   intervalSeconds: number
   latest: CapacitySample | null
   history: CapacitySample[]
+}
+
+/** What `GET /api/teams/{team}/archive-check` answers before the Archive confirmation. */
+export interface ArchiveCheck {
+  /** Nothing running and nothing queued, in any member: archiving would be allowed now. */
+  quiet: boolean
+  /** The sentence naming what is still going, member by member. Null when quiet. */
+  reason: string | null
+  /** The team's open workflows. They do not block archiving; the confirmation lists them. */
+  openWorkflows: { workflow: number; title: string }[]
 }

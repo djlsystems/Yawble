@@ -72,6 +72,11 @@ function storedView(): KanbanView {
  * the one thing the design brief forbids outright.
  */
 
+/** The archived teams' ids, lower-cased as the board's team filter is compared. */
+function archivedTeamIds(): Set<string> {
+  return new Set(useConsoleStore().teams.filter((team) => team.archived === true).map((team) => team.id.toLowerCase()))
+}
+
 export const useKanbanStore = defineStore('kanban', {
   state: () => ({
     /** What the board is narrowed to. Empty means the whole tenant. */
@@ -172,7 +177,13 @@ export const useKanbanStore = defineStore('kanban', {
     rendered(state): Pick<KanbanBoard, 'lanes' | 'cards'> | null {
       if (!state.board) return null
 
-      return { lanes: state.board.lanes, cards: cardsMatchingText(state.board.cards, state.text) }
+      // AN ARCHIVED TEAM'S CARDS NEVER SHOW, in Board or Swimlanes: "all teams" means the active ones.
+      const archived = archivedTeamIds()
+      const cards = archived.size === 0
+        ? state.board.cards
+        : state.board.cards.filter((card) => !archived.has(card.team.toLowerCase()))
+
+      return { lanes: state.board.lanes, cards: cardsMatchingText(cards, state.text) }
     },
 
     /** The template's lanes, plus a home for any card naming a lane the template does not have. */
@@ -202,7 +213,7 @@ export const useKanbanStore = defineStore('kanban', {
      * only a card names still gets its row.
      */
     swimlanes(): SwimlaneTeam[] {
-      const teams = useConsoleStore().teams.map((team) => ({ id: team.id as string, name: team.name }))
+      const teams = useConsoleStore().choosableTeams.map((team) => ({ id: team.id as string, name: team.name }))
 
       return swimlaneTeams(teams, this.rendered?.cards ?? [])
     },
@@ -215,14 +226,16 @@ export const useKanbanStore = defineStore('kanban', {
      */
     memberOptions(state): string[] {
       const pairs = new Set(state.seenMembers)
-      for (const team of useConsoleStore().teams) {
+      for (const team of useConsoleStore().choosableTeams) {
         for (const container of team.containers ?? []) pairs.add(`${team.id}/${container.id}`)
       }
 
       const teams = new Set(filterValues(effectiveFilters(state.filters, state.view).team).map((t) => t.toLowerCase()))
       const names = new Set(filterValues(state.filters.member))
+      const archived = archivedTeamIds()
       for (const pair of pairs) {
         const slash = pair.indexOf('/')
+        if (archived.has(pair.slice(0, slash).toLowerCase())) continue
         if (teams.size === 0 || teams.has(pair.slice(0, slash).toLowerCase())) names.add(pair.slice(slash + 1))
       }
 
@@ -230,7 +243,10 @@ export const useKanbanStore = defineStore('kanban', {
     },
 
     teamOptions(state): string[] {
-      return state.board ? teamsOf(state.board) : []
+      if (!state.board) return []
+
+      const archived = archivedTeamIds()
+      return teamsOf(state.board).filter((team) => !archived.has(team.toLowerCase()))
     },
 
     /**

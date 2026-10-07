@@ -361,10 +361,14 @@ export const useConsoleStore = defineStore('console', {
 
   getters: {
     hasTeams: (state) => state.teams.length > 0,
-    choosableTeams: (state): Team[] => state.teams,
-    openTeams(state): Team[] {
-      return state.openTeamTabs
-        .map((id) => state.teams.find((team) => team.id === id) ?? null)
+    /**
+     * The ACTIVE teams: what the tabs, the ribbon's chooser, the Kanban and backlog dispatch offer.
+     * An archived team stays in `teams`, so the Teams list, Delete and Clone still find it.
+     */
+    choosableTeams: (state): Team[] => state.teams.filter((team) => team.archived !== true),
+    openTeams(): Team[] {
+      return this.openTeamTabs
+        .map((id) => this.choosableTeams.find((team) => team.id === id) ?? null)
         .filter((team): team is Team => team !== null);
     },
     /**
@@ -566,7 +570,7 @@ export const useConsoleStore = defineStore('console', {
     setActiveTeam(id: TeamId | '') {
       const changed = this.activeTeamId !== id;
       this.activeTeamId = id;
-      const picked = this.teams.find((team) => team.id === id);
+      const picked = this.choosableTeams.find((team) => team.id === id);
       if (id && picked && !this.openTeamTabs.includes(id)) {
         this.openTeamTabs.push(id);
       }
@@ -854,7 +858,8 @@ export const useConsoleStore = defineStore('console', {
         choosable.has(id) && all.indexOf(id) === index,
       );
 
-      const active = this.teams.find((team) => team.id === this.activeTeamId) ?? null;
+      // An archived team never gets a tab back, even while it is the active one.
+      const active = this.choosableTeams.find((team) => team.id === this.activeTeamId) ?? null;
       if (active !== null && !this.openTeamTabs.includes(active.id)) {
         this.openTeamTabs.push(active.id);
       }
@@ -867,7 +872,7 @@ export const useConsoleStore = defineStore('console', {
           this.openTeamTabs = [this.choosableTeams[0]!.id];
         }
 
-        const activeExists = this.teams.some((team) => team.id === this.activeTeamId);
+        const activeExists = this.choosableTeams.some((team) => team.id === this.activeTeamId);
         const activeIsOpenTeam = active !== null && this.openTeamTabs.includes(active.id);
 
         if (!activeExists || !activeIsOpenTeam) {
