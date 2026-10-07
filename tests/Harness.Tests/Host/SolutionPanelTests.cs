@@ -450,7 +450,9 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
     [Fact]
     public async Task Nothing_on_the_panel_is_estimated_its_spend_is_the_triggers_own_measured_view()
     {
-        var team = await InstallAsync(Package(), "Measured");
+        // No Resume to wait for, or the team would skip the run at install this reads.
+        var team = await InstallAsync(
+            Package(folder => SolutionSamples.Edit(folder, m => m["inputs"]!["documents"]![0]!["required"] = false)), "Measured");
         using var person = await host.PersonAsync();
 
         // THE INSTALL'S RUN FINISHED FIRST: "Scan for postings" runs Scout at install, and its

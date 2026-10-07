@@ -46,8 +46,13 @@ public sealed class SolutionFirstRunTests(HostFixture host) : IClassFixture<Host
     public async Task RunAtInstall_fires_once_at_install_through_the_schedules_own_fire_and_next_on_its_interval()
     {
         // Not idle-only here, so the interval's fire below cannot be skipped while the first run is
-        // still in hand: the point is when it comes due, not whether Scout is idle.
-        var folder = Package(m => m["triggers"]![0]!["idleOnly"] = false);
+        // still in hand: the point is when it comes due, not whether Scout is idle. No Resume to wait
+        // for, or the team would skip every fire until one arrives.
+        var folder = Package(m =>
+        {
+            m["triggers"]![0]!["idleOnly"] = false;
+            m["inputs"]!["documents"]![0]!["required"] = false;
+        });
 
         var done = Done(await Get<SolutionInstaller>().InstallAsync(new(folder, Unique("First run")), Person, Ct));
         var team = done.Team;
@@ -110,5 +115,23 @@ public sealed class SolutionFirstRunTests(HostFixture host) : IClassFixture<Host
         var scan = Assert.Single(done.FirstRuns, r => r.Trigger == "Scan for postings");
         Assert.Equal((false, false, SolutionFirstRun.Scheduled), (scan.RunAtInstall, scan.RanNow, scan.Outcome));
         Assert.Equal(row.NextDueAt, scan.At);
+    }
+
+    [Fact]
+    public async Task A_run_at_install_of_a_team_waiting_for_its_resume_is_skipped_saying_what_it_waits_for()
+    {
+        var folder = Package(m => m["triggers"]![0]!["idleOnly"] = false);
+
+        var done = Done(await Get<SolutionInstaller>().InstallAsync(new(folder, Unique("Waiting")), Person, Ct));
+        var id = (await Get<ITeamSolutionStore>().FindAsync(done.Team, Ct))!.Triggers["Scan for postings"];
+
+        Assert.Empty(await FiresAsync(done.Team, id));
+        var scan = Assert.Single(done.FirstRuns, r => r.Trigger == "Scan for postings");
+        Assert.Equal((true, false, "skipped"), (scan.RunAtInstall, scan.RanNow, scan.Outcome));
+
+        var skipped = Assert.Single(
+            await Get<IMessageLog>().ReadAfterAsync(0, [MessageTypes.ScheduleSkipped], int.MaxValue, Ct), m => m.Source == $"schedule:{id}");
+        Assert.Equal("waiting for a file in Resume/", JsonDocument.Parse(skipped.Payload).RootElement.GetProperty("reason").GetString());
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.ScheduleSkipped, id, Ct));
     }
 }

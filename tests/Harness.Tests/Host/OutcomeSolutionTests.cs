@@ -30,6 +30,9 @@ public sealed class OutcomeSolutionTests(HostFixture host) : IClassFixture<HostF
             m["triggers"]![0]!["outcome"] = outcome;
             m["triggers"]![0]!["runAtInstall"] = true;
             m["triggers"]![0]!["idleOnly"] = false;
+
+            // No Resume to wait for, or the team would skip its first run until one arrives.
+            m["inputs"]!["documents"]![0]!["required"] = false;
         });
 
         return folder;
