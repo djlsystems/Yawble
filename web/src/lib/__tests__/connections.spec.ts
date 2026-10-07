@@ -9,6 +9,7 @@ import {
   scopeRefusal,
   redirectUriFor,
   redirectUriWarning,
+  slotHint,
   slotSummary,
 } from '../connections'
 import { hostConnection, hostProvider, hostSlot } from '../../test/pluginFixtures'
@@ -59,6 +60,17 @@ describe('connections', () => {
     expect(slotSummary(hostSlot({ providers: ['google'], summary: 'needs a Google connection' }))).toBe('needs a Google connection')
     expect(slotSummary(hostSlot({ providers: ['google', 'microsoft', 'custom'], summary: '' }), providers)).toBe(
       'needs a Google, Microsoft or custom connection',
+    )
+  })
+
+  it("words a slot's hint as one sentence: its description with the summary, or the summary alone", () => {
+    const google = { providers: ['google'], summary: 'needs a Google connection' }
+    expect(slotHint(hostSlot({ ...google, description: 'The Google account to report on.', required: true }))).toBe(
+      'The Google account to report on (needs a Google connection).',
+    )
+    expect(slotHint(hostSlot({ ...google, required: true }))).toBe('This slot needs a Google connection.')
+    expect(slotHint(hostSlot({ ...google, description: 'The drive to read' }))).toBe(
+      'The drive to read (needs a Google connection). Optional.',
     )
   })
 

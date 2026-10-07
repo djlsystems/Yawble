@@ -3484,6 +3484,15 @@ export interface SolutionSecret {
   setWith: string
 }
 
+/** `GET /api/secrets/{key}`: whether the Host has a key set, by name. `refusal` names a key no
+ *  plugin may be bound to, which is never `set`. */
+export interface SecretKeyState {
+  key: string
+  set: boolean
+  refusal: string | null
+  setWith: string
+}
+
 /** `POST /api/solutions/preview`: what installing or updating would do. Writes nothing. */
 export type SolutionPreview =
   | {

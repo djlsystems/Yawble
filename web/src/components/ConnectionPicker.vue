@@ -13,9 +13,8 @@ import {
   missingScopes,
   providerName,
   scopeRefusal,
-  slotSummary,
+  slotHint,
   statusLabel,
-  unboundRefusal,
 } from '../lib/connections';
 
 /**
@@ -23,9 +22,8 @@ import {
  * lists the connections of the providers the slot allows and stores the chosen connection's ID;
  * no token is anywhere near it.
  *
- * It says, before the save, what the Host would say: a required slot left unbound (the sentence the
- * member's runs will be blocked with - the Host still hires and saves, so the account can be
- * connected later), and a connection that lacks a scope the slot needs (refused at the save) -
+ * It says, before the save, what the Host would say of a connection that lacks a scope the slot
+ * needs (refused at the save) -
  * with Reconnect, which asks the Host for that connection's consent page with the missing scopes
  * added and sends the browser there. The Host is still the check: it refuses the save in the same
  * words.
@@ -82,9 +80,15 @@ const chosen = computed(() => props.connections.find((connection) => connection.
 
 const missing = computed(() => (chosen.value ? missingScopes(props.spec, chosen.value) : []));
 
-/** The sentence the Host would refuse the binding with, or block the member's runs with. */
+/**
+ * The sentence the Host would refuse the binding with. A required slot left unbound is no refusal
+ * here: the picker and Connect are right above, and the Host still hires and saves, so it says only
+ * what is left to do.
+ */
+const unbound = computed(() => bound.value === '' && props.spec.required);
+
 const refusal = computed(() => {
-  if (bound.value === '') return props.spec.required ? unboundRefusal(props.slotName) : '';
+  if (bound.value === '') return '';
   if (!chosen.value) return props.connections.length > 0 ? goneRefusal(props.slotName) : '';
   if (missing.value.length > 0) return scopeRefusal(props.slotName, chosen.value, missing.value);
   return '';
@@ -187,7 +191,7 @@ async function connected(connection: Connection) {
       dense
       clearable
       :label="label ?? `Connection for ${slotName}`"
-      :hint="hint ?? `${spec.description ? spec.description + ' ' : ''}${slotSummary(spec, providers)}${spec.required ? '' : ' Optional.'}`"
+      :hint="hint ?? slotHint(spec, providers)"
       @update:model-value="(value: string | null) => (bound = value ?? '')"
     >
       <template #no-option>
@@ -201,6 +205,10 @@ async function connected(connection: Connection) {
 
     <div v-if="choices.length === 0 && !offerConnect" class="text-caption os-text-muted q-mt-xs" data-no-connections>
       No connection of that kind yet. A person connects one in Admin → Connections.
+    </div>
+
+    <div v-if="unbound" class="text-caption os-text-muted q-mt-xs" data-slot-unbound>
+      Required: the member's runs are blocked until a connection is chosen here.
     </div>
 
     <div v-if="refusal" class="text-caption text-negative q-mt-xs row items-center q-gutter-x-sm" data-binding-refusal>

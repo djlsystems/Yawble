@@ -59,6 +59,7 @@ import type {
   PluginInstallResult,
   PluginRemoveResult,
   PluginMemberSettings,
+  SecretKeyState,
   ContainerSnapshot,
   MemberDeleted,
   MemberDetail,
@@ -1401,6 +1402,12 @@ export const removePlugin = (id: string, version?: string | null) =>
     `/api/plugins/${encodeURIComponent(id)}${version ? `?version=${encodeURIComponent(version)}` : ''}`,
     { method: 'DELETE' },
   )
+
+/**
+ * Whether one secret KEY is set on this Host, by its name - never its value: what a solution's
+ * preview says of each key it binds, for the key a person types at a hire. A person's.
+ */
+export const getSecretKey = (key: string) => json<SecretKeyState>(`/api/secrets/${encodeURIComponent(key)}`)
 
 const pluginSettingsPath = (team: string, member: string) =>
   `/api/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(member)}/plugin-settings`

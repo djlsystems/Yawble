@@ -145,11 +145,6 @@ export function named(connection: Pick<Connection, 'name' | 'account'>): string 
   return connection.name === connection.account ? `'${connection.name}'` : `'${connection.name}' (${connection.account})`;
 }
 
-/** The Host's sentence for a required slot left unbound: the member's runs are blocked with it. */
-export function unboundRefusal(slotName: string): string {
-  return `This member has no connection bound for the plugin's required slot \`${slotName}\`. A person binds one in the member's settings.`;
-}
-
 /** The sentence for a binding naming a connection that no longer exists. */
 export function goneRefusal(slotName: string): string {
   return `The connection bound for slot \`${slotName}\` no longer exists. A person binds another in the member's settings.`;
@@ -166,6 +161,18 @@ export function slotSummary(slot: ConnectionSlot, providers: ConnectionProvider[
   const list = names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
 
   return `needs a ${list} connection`;
+}
+
+/**
+ * A slot's picker hint as ONE sentence: "The Google account to report on (needs a Google
+ * connection).", or "This slot needs a Google connection." with no description - never the
+ * description and the summary run together.
+ */
+export function slotHint(slot: ConnectionSlot, providers: ConnectionProvider[] = []): string {
+  const summary = slotSummary(slot, providers).trim().replace(/\.$/, '');
+  const description = (slot.description ?? '').trim().replace(/[.\s]+$/, '');
+  const sentence = description === '' ? `This slot ${summary}.` : `${description} (${summary}).`;
+  return slot.required ? sentence : `${sentence} Optional.`;
 }
 
 /** The bindings to send: each slot with a connection chosen. An unbound slot is left out. */

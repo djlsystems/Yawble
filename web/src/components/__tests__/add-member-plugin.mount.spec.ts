@@ -5,10 +5,11 @@
 // the hire goes through the same `addMember` call with the config and the secret's LOGICAL KEY.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listCatalog, listPlugins, addMember } = vi.hoisted(() => ({
+const { listCatalog, listPlugins, addMember, getSecretKey } = vi.hoisted(() => ({
   listCatalog: vi.fn(),
   listPlugins: vi.fn(),
   addMember: vi.fn(),
+  getSecretKey: vi.fn(),
 }));
 
 vi.mock('../../api/client', async (importOriginal) => ({
@@ -16,6 +17,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   listCatalog,
   listPlugins,
   addMember,
+  getSecretKey,
 }));
 
 import AddMemberDialog from '../AddMemberDialog.vue';
@@ -57,6 +59,8 @@ beforeEach(() => {
   listPlugins.mockResolvedValue(plugins);
   addMember.mockReset();
   addMember.mockResolvedValue({ name: 'Echo' });
+  getSecretKey.mockReset();
+  getSecretKey.mockImplementation(async (key: string) => ({ key, set: true, refusal: null, setWith: '' }));
 });
 
 afterEach(resetBody);
