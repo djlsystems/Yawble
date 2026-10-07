@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
-// MOUNTED. The board's two layouts, the In Progress header read off the WIP
-// ledger (`3 / 4 running`), an advisory lane turning amber over its limit, and the waiting mark on
+// MOUNTED. The board's two layouts, the In Progress header counting its cards with the WIP
+// ledger's line beside it (`3 / 4 agents running, all teams`), an advisory lane turning amber over its limit, and the waiting mark on
 // a card whose member is held. The ledger is the WIP store's one copy; nothing here fetches it.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
@@ -116,8 +116,9 @@ describe('lane headers', () => {
 });
 
 /**
- * An In Progress lane reading `4 / 2 running` is not exempt from the amber rule: an
- * over-limit In Progress lane turns amber the same as any other lane - over the figure its header shows, the ledger's running count and limit.
+ * An In Progress lane whose ledger line reads `4 / 2 agents running, all teams` is not exempt from
+ * the amber rule: it turns amber the same as any other lane over its limit - over the ledger figure
+ * its header shows, while its count stays the cards in it.
  */
 describe('an over-limit In Progress lane', () => {
   const overLedger = () => {
@@ -140,7 +141,8 @@ describe('an over-limit In Progress lane', () => {
     await flushPromises();
 
     const head = wrapper.find('[data-lane-id="in-progress"] .k-lane-head');
-    expect(head.find('.k-lane-count').text()).toBe('4 / 2 running');
+    expect(head.find('.k-lane-count').text()).toBe('1');
+    expect(head.find('[data-lane-wip]').text()).toBe('4 / 2 agents running, all teams');
     expect(head.classes()).toContain('k-lane-head--over');
   });
 
@@ -150,7 +152,8 @@ describe('an over-limit In Progress lane', () => {
     await flushPromises();
 
     const head = wrapper.find('.k-swimlanes [data-lane-id="in-progress"]');
-    expect(head.find('.k-lane-count').text()).toBe('4 / 2 running');
+    expect(head.find('.k-lane-count').text()).toBe('1');
+    expect(head.find('[data-lane-wip]').text()).toBe('4 / 2 agents running, all teams');
     expect(head.classes()).toContain('k-lane-head--over');
   });
 
@@ -158,7 +161,7 @@ describe('an over-limit In Progress lane', () => {
     const { wrapper } = await mountBoard([card({ id: 'a' })], [team('alpha')]);
 
     const head = wrapper.find('[data-lane-id="in-progress"] .k-lane-head');
-    expect(head.find('.k-lane-count').text()).toBe('3 / 4 running');
+    expect(head.find('[data-lane-wip]').text()).toBe('3 / 4 agents running, all teams');
     expect(head.classes()).not.toContain('k-lane-head--over');
   });
 
@@ -169,11 +172,11 @@ describe('an over-limit In Progress lane', () => {
     await flushPromises();
 
     const head = wrapper.find('[data-lane-id="in-progress"] .k-lane-head');
-    expect(head.find('.k-lane-count').text()).toBe('3 running');
+    expect(head.find('[data-lane-wip]').text()).toBe('3 agents running, all teams');
     expect(head.classes()).not.toContain('k-lane-head--over');
   });
 
-  it('before the ledger answers, reads its running cards against the lane limit, not its card count', async () => {
+  it('before the ledger answers, counts its cards, shows no ledger line, and is amber over its running cards against the lane limit', async () => {
     const running = ['a', 'b', 'c', 'd', 'e'].map((id) => card({ id }));
     const { wrapper, kanban } = await mountBoard(running, [team('alpha')]);
     const wip = useWipStore();
@@ -181,13 +184,14 @@ describe('an over-limit In Progress lane', () => {
     await flushPromises();
 
     const head = wrapper.find('[data-lane-id="in-progress"] .k-lane-head');
-    expect(head.find('.k-lane-count').text()).toBe('5 / 4 running');
+    expect(head.find('.k-lane-count').text()).toBe('5');
+    expect(head.find('[data-lane-wip]').exists()).toBe(false);
     expect(head.classes()).toContain('k-lane-head--over');
 
-    // Five cards in the lane, but only four running: under the limit the header shows.
+    // Five cards in the lane, but only four running: not over the limit.
     kanban.board!.cards[4]!.status = 'queued';
     await flushPromises();
-    expect(head.find('.k-lane-count').text()).toBe('4 / 4 running');
+    expect(head.find('.k-lane-count').text()).toBe('5');
     expect(head.classes()).not.toContain('k-lane-head--over');
   });
 });
@@ -240,7 +244,8 @@ describe('swimlanes', () => {
     expect(cells[5]!.find('[data-card-id="b"]').exists()).toBe(true);
     expect(grid.attributes('style')).toContain('grid-template-columns: 10rem repeat(3, var(--k-lane-width))');
     expect(grid.findAll('.k-swim-sticky-top')).toHaveLength(4);
-    expect(grid.find('[data-lane-id="in-progress"] .k-lane-count').text()).toBe('3 / 4 running');
+    expect(grid.find('[data-lane-id="in-progress"] .k-lane-count').text()).toBe('1');
+    expect(grid.find('[data-lane-id="in-progress"] [data-lane-wip]').text()).toBe('3 / 4 agents running, all teams');
   });
 
   it('keeps a row for a team only a card names', async () => {

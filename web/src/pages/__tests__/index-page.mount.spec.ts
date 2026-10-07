@@ -290,6 +290,37 @@ describe('what the page re-reads', () => {
     expect(order).toEqual(['loadIfShowing', 'refreshRollupIfShowing', 'connectHub']);
   });
 
+  /**
+   * The Teams table lists every team, so it hears every team's pushes - a team with no tab
+   * included. Joining only the open tabs left such a row reading the last overview (IDLE, one
+   * member) beside a WIP ledger line saying two of its members were running.
+   */
+  it('joins every team\'s live updates on the Teams table, tab or no tab', async () => {
+    const joined: string[] = [];
+    connectHub.mockImplementationOnce((handlers: HubHandlers) => {
+      hub.handlers = handlers;
+      return Promise.resolve({ stop: vi.fn() } as never);
+    });
+
+    setActivePinia(createPinia());
+    const boardStore = useConsoleStore();
+    boardStore.$patch({ teams: [team('alpha'), team('beta')] as never, activeTeamId: '' as never, openTeamTabs: [] });
+    boardStore.view = 'teams';
+    vi.spyOn(boardStore, 'refresh').mockResolvedValue();
+    vi.spyOn(boardStore, 'refreshRollupIfShowing').mockImplementation(() => {});
+    vi.spyOn(boardStore, 'switchHubTeam').mockImplementation(async (_connection, id) => {
+      joined.push(id);
+      return true;
+    });
+    vi.spyOn(useKanbanStore(), 'loadIfShowing').mockImplementation(() => {});
+    useSessionStore().$patch({ user: { email: 'person@example.com' } as never, checked: true });
+
+    wrapper = mount(IndexPage, { global: { stubs } });
+    await flushPromises();
+
+    expect(joined.sort()).toEqual(['alpha', 'beta']);
+  });
+
   /** Container activity IS kanban activity, and the Teams table's only refresh once it is open. */
   it('refreshes the board and the rollup on container activity', async () => {
     await mountPage([team('alpha')]);
