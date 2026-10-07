@@ -141,10 +141,10 @@ func TestFirstUpRefusesOverTheMaximumAndUnderTheFloorNamingTheBound(t *testing.T
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
 	for _, want := range []string{
-		"refused: 20000 MB is more than the engine has beside control's 1536 MB; the most is 10752 MB",
+		"refused: 20000 MB, with control's 1536 MB, is more than what this computer has; the most is 10752 MB",
 		"refused: 1000 MB is below the floor of 4096 MB that leaves the Host a usable share; the least is 4096 MB",
 		`refused: "lots" is not a whole number`,
-		"refused: 12 CPUs is more than the engine has; the most is 10",
+		"refused: 12 CPUs is more than what this computer has; the most is 10",
 		"refused: the least is 1 CPU",
 	} {
 		if !strings.Contains(out, want) {
@@ -207,9 +207,9 @@ func TestLaterUpsDoNotAskAndWarnAboutASavedValueOverTheEngine(t *testing.T) {
 	}{
 		{"memory = \"8g\"\ncpus = 4\n", nil},
 		{"memory = \"16g\"\ncpus = 12\n", []string{
-			"warning: memory 16g in yawble's config is more than the engine has (12288 MB, docker info)",
+			"warning: memory 16g in yawble's config is more than Docker Desktop's share of this computer (12288 MB)",
 			"yawble config set memory 12288m or less",
-			"warning: cpus 12 in yawble's config is more than the engine has (10, docker info)",
+			"warning: cpus 12 in yawble's config is more than Docker Desktop's share of this computer (10 CPUs)",
 		}},
 	} {
 		_, deps := dockerUp("darwin")

@@ -36,8 +36,10 @@ func Short(checks []Check) ([]Check, int) {
 
 // RenderAgents prints, first, whether any agent can run, then one block per agent from the
 // Host's report with what to do. With one agent able to run, the others are not in use: their
-// sign-in is "no", not a fault, and their hint is how to use them, not a fix.
-func RenderAgents(w io.Writer, agents []Agent) {
+// sign-in is "no", not a fault, and their hint is how to use them, not a fix. The source, when
+// the sign-in was measured and the launch's and probe's own words are developer detail, printed
+// only with details.
+func RenderAgents(w io.Writer, agents []Agent, details bool) {
 	anyRuns := AnyCanRun(agents)
 	if line := agentsSummary(agents, anyRuns); line != "" {
 		fmt.Fprintln(w, line)
@@ -75,15 +77,15 @@ func RenderAgents(w io.Writer, agents []Agent) {
 		default:
 			fmt.Fprintln(w, "  signed in   NO")
 		}
-		if source := a.SourceText(); source != "" {
+		if source := a.SourceText(); source != "" && details {
 			fmt.Fprintf(w, "  source      %s\n", source)
 		}
-		if measured := a.MeasuredText(); measured != "" {
+		if measured := a.MeasuredText(); measured != "" && details {
 			fmt.Fprintf(w, "  measured    %s\n", measured)
 		}
 		if a.IsInstalled() {
 			fmt.Fprintf(w, "  launch      %s\n", a.LaunchText())
-			if l := a.Launch; l != nil {
+			if l := a.Launch; l != nil && details {
 				if l.Detail != nil && *l.Detail != "" {
 					fmt.Fprintf(w, "  launch why  %s\n", *l.Detail)
 				}
@@ -94,7 +96,7 @@ func RenderAgents(w io.Writer, agents []Agent) {
 				}
 			}
 		}
-		if a.Detail != "" {
+		if a.Detail != "" && details {
 			fmt.Fprintf(w, "  detail      %s\n", a.Detail)
 		}
 		if hint := SignInHint(a); hint != "" {
@@ -107,15 +109,18 @@ func RenderAgents(w io.Writer, agents []Agent) {
 	}
 }
 
-// agentsSummary is the one line above the blocks: which agents can run and that the rest are not
-// in use, or that none can run yet. "" when nothing was measured, which is not a fault either.
+// agentsSummary is the one line above the blocks: which agents can run, which are signed in but
+// did not start, and that the rest are not in use; or that none can run yet, and why. "" when
+// nothing was measured, which is not a fault either.
 func agentsSummary(agents []Agent, anyRuns bool) string {
-	var running, idle []string
+	var running, failed, idle []string
 	measured := false
 	for _, a := range agents {
 		switch {
 		case a.CanRun():
 			running = append(running, a.Agent)
+		case a.Authenticated != nil && *a.Authenticated && a.LaunchFailed():
+			failed = append(failed, a.Agent)
 		case anyRuns && a.NotInUse():
 			idle = append(idle, a.Agent)
 		}
@@ -123,19 +128,34 @@ func agentsSummary(agents []Agent, anyRuns bool) string {
 			measured = true
 		}
 	}
+	didNotStart := ""
+	if len(failed) > 0 {
+		didNotStart = andList(failed) + verb(failed, " is", " are") + " signed in but did not start"
+	}
 	switch {
-	case anyRuns && len(idle) == 0:
-		return andList(running) + " can run agent work."
 	case anyRuns:
-		verb := " are"
-		if len(idle) == 1 {
-			verb = " is"
+		var clauses []string
+		if didNotStart != "" {
+			clauses = append(clauses, didNotStart+" (its \"to fix\" line says what to do)")
 		}
-		return andList(running) + " can run agent work; " + andList(idle) + verb + " not in use (sign one in only if you want it)."
+		if len(idle) > 0 {
+			clauses = append(clauses, andList(idle)+verb(idle, " is", " are")+" not in use (sign one in only if you want it)")
+		}
+		return strings.Join(append([]string{andList(running) + " can run agent work"}, clauses...), "; ") + "."
+	case didNotStart != "":
+		return "No agent can run yet: " + didNotStart + "; its \"to fix\" line says what to do."
 	case measured:
 		return "No agent can run yet: sign one in as its \"to fix\" line says."
 	}
 	return ""
+}
+
+// verb is one or other for one name or several.
+func verb(names []string, one, several string) string {
+	if len(names) == 1 {
+		return one
+	}
+	return several
 }
 
 // andList joins names the way a sentence does: "a", "a and b", "a, b and c".

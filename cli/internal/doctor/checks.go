@@ -426,8 +426,9 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 	var parts []string
 	verdict := OK
 	// With one agent able to run, an agent nobody signed in is not in use, not a fault: a
-	// Claude-only install is not warned about the others. Only an agent that is signed in and
-	// cannot start still warns, and with none able to run every gap is a warning, as it was.
+	// Claude-only install is not warned about the others, and one that is signed in but did not
+	// start is named, pointing at `yawble agents`, without a warning. With none able to run every
+	// gap is a warning, as it was.
 	anyRuns := AnyCanRun(r.Agents)
 	for _, a := range r.Agents {
 		var part string
@@ -462,8 +463,12 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 		}
 		// Beside the sign-in: whether the CLI starts the way a member run launches it.
 		part += ", launch " + a.LaunchText()
-		if a.Launch != nil && a.Launch.Result == "failed" {
-			verdict = Warn
+		if a.LaunchFailed() {
+			if anyRuns {
+				part += ", see yawble agents"
+			} else {
+				verdict = Warn
+			}
 		}
 		parts = append(parts, part)
 	}
@@ -516,6 +521,8 @@ func SignInHint(a Agent) string {
 	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
 		return "its source is issued and no credential is set: yawble agents credential set " + a.Agent +
 			" (or yawble agents source " + a.Agent + " home)"
+	case a.Authenticated != nil && *a.Authenticated && a.LaunchFailed():
+		return "it is signed in but did not start: yawble agents --details shows why; yawble down, then yawble up starts it again"
 	case a.Authenticated != nil && *a.Authenticated:
 		return ""
 	case a.Issued():

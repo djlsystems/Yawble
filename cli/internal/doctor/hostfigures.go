@@ -60,7 +60,7 @@ func runLimitRow(r *HostReport) Check {
 		}
 		if l.Limit == 0 || l.Limit > allowed {
 			return Check{name, Warn, detail + fmt.Sprintf("; the Host's own bounds allow %d", allowed),
-				"yawble config set maxRunning 0 (the Host's default), then yawble up; or lower the tenant setting wip.maxRunning"}
+				"yawble config set maxRunning 0, then yawble up, to use the Host's own limit; or lower \"Agents running at once\" in the board's settings"}
 		}
 	}
 	return Check{name, OK, detail, ""}

@@ -65,8 +65,8 @@ func sizeFirstUp(deps Deps, c config.Config, m instance.Machine, yes bool, out i
 			return c, 0, err
 		}
 		runs, sentence := instance.RunsSentence(memoryMB, cpus, c.WorkerCount(), c.MaxRunning)
-		fmt.Fprintf(out, "memory %dm and cpus %d for the container: half of the %d MB and the %d CPUs available (%s), at most 12 GB and 8 CPUs; saved in yawble's config (%s)\n%s\n",
-			memoryMB, cpus, m.MemoryMB(), m.CPUs, instance.EngineShare(m.Kind), changeHint, sentence)
+		fmt.Fprintf(out, "memory %dm and cpus %d for the container: half of the %d MB and the %d CPUs available (%s), at most 12 GB and 8 CPUs; saved in yawble's config (%s)\n%s\n%s\n",
+			memoryMB, cpus, m.MemoryMB(), m.CPUs, instance.EngineShare(m.Kind), changeHint, capitalize(instance.MoreForEngine(m.Kind)), sentence)
 		c.Memory, c.CPUs = fmt.Sprintf("%dm", memoryMB), cpus
 		return c, runs, nil
 	}
@@ -75,13 +75,14 @@ func sizeFirstUp(deps Deps, c config.Config, m instance.Machine, yes bool, out i
 	most := workerMemoryMax(m)
 	fmt.Fprint(out, firstUpScreen(m, memoryMB, cpus, c.WorkerCount(), c.MaxRunning))
 	more := capitalize(instance.MoreForEngine(m.Kind))
+	share := instance.ShareOf(m.Kind)
 	memoryMB = askNumber(deps, out, fmt.Sprintf("Memory in MB (%d to %d) [%d]: ", floor, most, memoryMB), memoryMB,
 		parseMemoryMB, func(v int) string {
 			switch {
 			case v > most && most < m.MemoryMB():
-				return fmt.Sprintf("%d MB is more than the engine has beside control's %d MB; the most is %d MB. %s", v, instance.ControlMemoryMB(), most, more)
+				return fmt.Sprintf("%d MB, with control's %d MB, is more than %s; the most is %d MB. %s", v, instance.ControlMemoryMB(), share, most, more)
 			case v > most:
-				return fmt.Sprintf("%d MB is more than the engine has; the most is %d MB. %s", v, most, more)
+				return fmt.Sprintf("%d MB is more than %s; the most is %d MB. %s", v, share, most, more)
 			case v < floor && floor < memoryFloorMB:
 				return fmt.Sprintf("%d MB is below the floor of %d MB, the proposal for an engine under 8 GB; the least is %d MB", v, floor, floor)
 			case v < floor:
@@ -93,7 +94,7 @@ func sizeFirstUp(deps Deps, c config.Config, m instance.Machine, yes bool, out i
 		parseCount, func(v int) string {
 			switch {
 			case v > m.CPUs:
-				return fmt.Sprintf("%d CPUs is more than the engine has; the most is %d. %s", v, m.CPUs, more)
+				return fmt.Sprintf("%d CPUs is more than %s; the most is %d. %s", v, share, m.CPUs, more)
 			case v < leastCPUs:
 				return fmt.Sprintf("the least is %d CPU", leastCPUs)
 			}
@@ -209,10 +210,10 @@ func overEngine(c config.Config, m instance.Machine) []string {
 	}
 	var warnings []string
 	if mb := instance.MemoryMB(c.Memory); mb > m.MemoryMB() {
-		warnings = append(warnings, fmt.Sprintf("memory %s in yawble's config is more than the engine has (%d MB, %s); the container cannot get it: yawble config set memory %dm or less, then yawble up; or %s", c.Memory, m.MemoryMB(), m.Source, m.MemoryMB(), instance.MoreForEngine(m.Kind)))
+		warnings = append(warnings, fmt.Sprintf("memory %s in yawble's config is more than %s (%d MB); the container cannot get it: yawble config set memory %dm or less, then yawble up; or %s", c.Memory, instance.ShareOf(m.Kind), m.MemoryMB(), m.MemoryMB(), instance.MoreForEngine(m.Kind)))
 	}
 	if c.CPUs > m.CPUs {
-		warnings = append(warnings, fmt.Sprintf("cpus %d in yawble's config is more than the engine has (%d, %s); the container cannot get them: yawble config set cpus %d or less, then yawble up; or %s", c.CPUs, m.CPUs, m.Source, m.CPUs, instance.MoreForEngine(m.Kind)))
+		warnings = append(warnings, fmt.Sprintf("cpus %d in yawble's config is more than %s (%d CPUs); the container cannot get them: yawble config set cpus %d or less, then yawble up; or %s", c.CPUs, instance.ShareOf(m.Kind), m.CPUs, m.CPUs, instance.MoreForEngine(m.Kind)))
 	}
 	return warnings
 }

@@ -627,7 +627,7 @@ func TestTheAgentVersionsRowSaysWhichVersionAndWhenItWasUpdated(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	doctor.RenderAgents(&out, r.Agents)
+	doctor.RenderAgents(&out, r.Agents, true)
 	if !strings.Contains(out.String(), "installed   yes, 2.1.280, updated 2026-09-29 20:46 UTC") {
 		t.Errorf("yawble agents should say when it was updated:\n%s", out.String())
 	}
@@ -729,7 +729,7 @@ func TestANullInstalledIsNotMeasuredAndFailsNoCheck(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	doctor.RenderAgents(&out, r.Agents)
+	doctor.RenderAgents(&out, r.Agents, true)
 	text := out.String()
 	if !strings.Contains(text, "installed   not measured") || !strings.Contains(text, "signed in   not measured") ||
 		!strings.Contains(text, "no worker is connected") || strings.Contains(text, "installed   no\n") || strings.Contains(text, "  measured    ") {
@@ -750,7 +750,7 @@ func TestTheDoctorSaysWhenAndOnWhichWorkerItMeasured(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	doctor.RenderAgents(&out, r.Agents[:1])
+	doctor.RenderAgents(&out, r.Agents[:1], true)
 	if !strings.Contains(out.String(), "  measured    2026-10-02 12:00 UTC on worker w1\n") {
 		t.Errorf("render:\n%s", out.String())
 	}
@@ -780,8 +780,23 @@ func TestAgentsRowSaysUpdatingNotNotInstalled(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	doctor.RenderAgents(&out, r.Agents)
+	doctor.RenderAgents(&out, r.Agents, true)
 	if text := out.String(); !strings.Contains(text, "installed   updating") || strings.Contains(text, "installed   no\n") {
 		t.Errorf("render:\n%s", text)
+	}
+}
+
+// A running limit set above the Host's bounds is in the default list, so its fix is a command
+// and plain words: no setting key a person cannot type anywhere.
+func TestTheRunningLimitFixNamesTheCommandAndNoSettingKey(t *testing.T) {
+	r := sampleReport()
+	r.Wip = &doctor.HostWip{Limit: &doctor.WipLimit{Limit: 8, Bound: "setting", CPUBound: 7, MemoryBound: intp(4), Reason: "a tenant setting"}}
+	c := find(t, doctor.InstanceChecks(r, nil, now), "running limit")
+	if c.Verdict != doctor.Warn || !strings.Contains(c.Fix, "yawble config set maxRunning 0, then yawble up") ||
+		!strings.Contains(c.Fix, "\"Agents running at once\" in the board's settings") {
+		t.Errorf("the fix should name the command and the board's own words: %+v", c)
+	}
+	if strings.Contains(c.Fix, "wip.") || strings.Contains(c.Fix, "tenant setting") {
+		t.Errorf("the fix names a setting key: %q", c.Fix)
 	}
 }

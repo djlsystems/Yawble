@@ -37,7 +37,7 @@ func TestProbeOddAnswersAreRefusedOrReadAsSizes(t *testing.T) {
 }
 
 func TestProbeUnitsAtThePrompt(t *testing.T) {
-	for in, want := range map[string]string{"8G\n\n": "saved memory 8192m", "8192m\n\n": "saved memory 8192m", "10g\n\n": "saved memory 10240m", "13g\n\n": "refused: 13312 MB is more than the engine has"} {
+	for in, want := range map[string]string{"8G\n\n": "saved memory 8192m", "8192m\n\n": "saved memory 8192m", "10g\n\n": "saved memory 10240m", "13g\n\n": "refused: 13312 MB, with control's 1536 MB, is more than Docker Desktop's share of this computer"} {
 		out := refusalsOf(t, dockerEngine("12884901888|10|Docker Desktop\n"), "darwin", "docker", in)
 		if !strings.Contains(out, want) {
 			t.Errorf("%q: out lacks %q:\n%s", in, want, out)

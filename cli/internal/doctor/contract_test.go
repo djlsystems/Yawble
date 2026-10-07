@@ -96,7 +96,7 @@ func TestTheHostsOwnDoctorReportDecodes(t *testing.T) {
 		}
 
 		var out bytes.Buffer
-		doctor.RenderAgents(&out, r.Agents)
+		doctor.RenderAgents(&out, r.Agents, true)
 		if !strings.Contains(out.String(), "  launch      FAILED, exit 134") || !strings.Contains(out.String(), "[redacted]") {
 			t.Errorf("%s: agents output lacks the failed launch:\n%s", c.file, out.String())
 		}

@@ -120,6 +120,9 @@ func (a Agent) CanRun() bool {
 		a.Launch != nil && a.Launch.Result == "ok" && !(a.Issued() && a.IssuedSet != nil && !*a.IssuedSet)
 }
 
+// LaunchFailed is whether the Host started the CLI the way a member run does and it failed.
+func (a Agent) LaunchFailed() bool { return a.Launch != nil && a.Launch.Result == "failed" }
+
 // AnyCanRun is whether at least one agent can run: then the others are not in use, not faults.
 func AnyCanRun(agents []Agent) bool {
 	for _, a := range agents {
