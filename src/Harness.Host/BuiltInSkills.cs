@@ -840,6 +840,11 @@ public static class BuiltInSkills
               is short. A spec implementation or a suite run is not short: hand over the workflow
               number and name `workflow_show` with correlationId <n> as the way to read the thread
               later.
+            - If you wait, say so in the instruction and ask for `workflow_complete`. Wait once,
+              then read how it ended with `workflow_show`. There is no wait tool, and no
+              sleep-status-repeat loop.
+            - If the workflow ended in `agentContainer.needsDecision`, the step is not done: put the
+              question to the person and dispatch that same step again with the answer.
 
             ## Ask the person only what they alone can answer
 
@@ -868,11 +873,6 @@ public static class BuiltInSkills
             each step by its button's words: Fetch origin, Bring current, Push, Merge to main (it
             names the default branch), Bring current and merge, Open pull request, Clean up
             worktrees.
-            - If you wait, say so in the instruction and ask for `workflow_complete`. Wait once,
-              then read how it ended with `workflow_show`. There is no wait tool, and no
-              sleep-status-repeat loop.
-            - If the workflow ended in `agentContainer.needsDecision`, the step is not done: put the
-              question to the person and dispatch that same step again with the answer.
 
             ## The rest of the job
 

@@ -687,6 +687,33 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
+    /// The sections on asking, keeping its word and where output is stand on their own, just before
+    /// "The rest of the job", so the dispatch section keeps every one of its bullets under it.
+    /// </summary>
+    [Fact]
+    public void The_concierge_keeps_its_dispatch_bullets_together_and_its_asking_sections_before_the_rest_of_the_job()
+    {
+        var concierge = Flat(BuiltInSkills.Find("concierge")!.Body);
+        var headings = new[]
+        {
+            "## Dispatch, then wait - never poll in a loop",
+            "## Ask the person only what they alone can answer",
+            "## Keep your word",
+            "## Where a team's output is",
+            "## The rest of the job",
+        };
+        var at = headings.Select(h => concierge.IndexOf(h, StringComparison.Ordinal)).ToArray();
+        Assert.All(at, i => Assert.True(i >= 0));
+        Assert.Equal(at.Order().ToArray(), at);
+
+        var dispatch = concierge[at[0]..at[1]];
+        Assert.Contains("- If you wait, say so in the instruction and ask for `workflow_complete`.", dispatch, StringComparison.Ordinal);
+        Assert.Contains("- If the workflow ended in `agentContainer.needsDecision`, the step is not done:", dispatch, StringComparison.Ordinal);
+        Assert.DoesNotContain("## ", concierge[(at[3] + 3)..at[4]], StringComparison.Ordinal);
+        Assert.DoesNotContain("- If you wait", concierge[at[1]..at[4]], StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A finished team's branch is what `landed` is read from until it is proven, so the skill reads
     /// `landed` before asking the person to delete the team. And when the person merged the work
     /// outside the platform and `landed` reads `unknown`, their word marks the item implemented, and
