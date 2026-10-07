@@ -460,6 +460,10 @@ const drag = useDocumentsDrag({
       aimClash({ folder, path });
       return transfer.uploadInto(folder, path, files);
     },
+    uploadPackage: (folder, path, upload) => {
+      aimClash({ folder, path });
+      return transfer.uploadPackage(folder, path, upload);
+    },
   },
   folders,
   isMac,
@@ -740,6 +744,36 @@ async function onUploadChosen(event: Event) {
   await transfer.uploadInto(location.value.folder, location.value.path, files);
 }
 
+// A whole folder (the browser's folder pick, subfolders kept) and a .zip (unpacked into a folder of
+// its name): one request each, the same clash question as Upload.
+const folderInput = ref<HTMLInputElement | null>(null);
+const zipInput = ref<HTMLInputElement | null>(null);
+
+async function onFolderChosen(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+  input.value = '';
+
+  if (files.length === 0 || location.value.folder === null) return;
+
+  aimClash(here.value);
+  await transfer.uploadPackage(location.value.folder, location.value.path, {
+    kind: 'folder',
+    files: files.map((file) => ({ file, relativePath: file.webkitRelativePath || file.name })),
+  });
+}
+
+async function onZipChosen(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+
+  if (!file || location.value.folder === null) return;
+
+  aimClash(here.value);
+  await transfer.uploadPackage(location.value.folder, location.value.path, { kind: 'zip', file });
+}
+
 /** Every action, from the toolbar, the menu and the keyboard alike. */
 function act(action: DocumentsAction, target?: DropTarget) {
   const one = selectedItems.value[0];
@@ -792,6 +826,12 @@ function act(action: DocumentsAction, target?: DropTarget) {
       break;
     case 'upload':
       chooseUpload();
+      break;
+    case 'uploadFolder':
+      folderInput.value?.click();
+      break;
+    case 'uploadZip':
+      zipInput.value?.click();
       break;
     case 'refresh':
       void refresh();
@@ -1029,6 +1069,8 @@ const viewComponent = computed(() =>
 const toolbar: { action: DocumentsAction; icon: string; label: string }[] = [
   { action: 'newFolder', icon: 'create_new_folder', label: 'New folder' },
   { action: 'upload', icon: 'upload', label: 'Upload' },
+  { action: 'uploadFolder', icon: 'drive_folder_upload', label: 'Upload a folder' },
+  { action: 'uploadZip', icon: 'folder_zip', label: 'Upload a .zip' },
   { action: 'cut', icon: 'content_cut', label: 'Cut' },
   { action: 'copy', icon: 'content_copy', label: 'Copy' },
   { action: 'paste', icon: 'content_paste', label: 'Paste' },
@@ -1154,6 +1196,8 @@ onBeforeUnmount(() => drag.end());
           @update:model-value="setView"
         />
         <input ref="uploadInput" type="file" multiple class="hidden" data-upload-input @change="onUploadChosen" />
+        <input ref="folderInput" type="file" webkitdirectory class="hidden" data-upload-folder-input @change="onFolderChosen" />
+        <input ref="zipInput" type="file" accept=".zip,application/zip" class="hidden" data-upload-zip-input @change="onZipChosen" />
       </div>
 
       <!-- SAID WHERE IT BITES: a gone team's folder, or a superseded one - two facts, two sentences. -->

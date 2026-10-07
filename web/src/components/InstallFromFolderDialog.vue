@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import HostPathPicker from './HostPathPicker.vue';
+import UploadPackageAction from './UploadPackageAction.vue';
 
 /**
  * INSTALL FROM A FOLDER: the one dialog Solutions and Admin > Plugins both open. A folder inside
@@ -15,8 +16,9 @@ import HostPathPicker from './HostPathPicker.vue';
  * `offerReplace` shows Replace, for a screen whose Host route takes it (a plugin version already
  * installed); a screen without one is not shown a box that would do nothing.
  *
- * THE UPLOAD PLACE (`data-upload-package`, slot `upload`) is where uploading a package (.zip) from
- * this computer goes. Until then it says how a package gets into Documents.
+ * THE UPLOAD PLACE (`data-upload-package`, slot `upload`) holds Upload a package (.zip): the zip
+ * goes into a team's Documents, is unpacked there, and the folder it made fills Folder - so both
+ * screens get it, and Install is the next press.
  */
 const props = withDefaults(defineProps<{
   title?: string;
@@ -77,11 +79,10 @@ function install() {
           </template>
         </q-input>
 
-        <!-- THE UPLOAD PLACE: uploading a package (.zip) from this computer belongs here. -->
+        <!-- THE UPLOAD PLACE: a package (.zip) from this computer, unpacked into Documents. -->
         <div class="text-caption os-text-muted" data-upload-package>
           <slot name="upload">
-            Not in this instance yet? Upload the package folder, or its .zip, into Documents first;
-            Browse opens there.
+            <UploadPackageAction @uploaded="folder = $event" />
           </slot>
         </div>
 
