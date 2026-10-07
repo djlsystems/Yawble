@@ -21,7 +21,7 @@ import {
   windowBucket,
   windowEnd,
 } from '../lib/teamActivity';
-import { crossesDays, localStretch } from '../lib/localTime';
+import { localTime } from '../lib/localTime';
 
 /**
  * TREE-SHAKEN: the custom series the lanes are drawn with, the grid and its time axis, the legend
@@ -134,12 +134,11 @@ const periodFrom = computed(() => (activity.value?.from ? Date.parse(activity.va
 /** The axis's labels are as fine as the window needs: a time of day, or a date. */
 const bucket = computed(() => windowBucket(periodFrom.value ?? periodTo.value, periodTo.value));
 
-/** A time of day alone is ambiguous once the window crosses midnight: then every time has its date. */
-const withDate = computed(() => periodFrom.value !== null && crossesDays(periodFrom.value, periodTo.value));
-
-/** The subtitle: the stretch the lanes cover, "11:38:02 AM – 3:41:17 PM". */
+/** The subtitle: the stretch the lanes cover, each end with its date, "10/5/2026, 11:38:02 AM – 10/7/2026, 3:41:17 PM". */
 const subtitle = computed(() =>
-  periodFrom.value === null ? 'Member time by state.' : localStretch(periodFrom.value, periodTo.value));
+  periodFrom.value === null
+    ? 'Member time by state.'
+    : `${localTime(periodFrom.value, { date: true })} – ${localTime(periodTo.value, { date: true })}`);
 
 /** Every member with a lane - a member since removed too, marked so, in this dialog only. */
 const lanes = computed(() =>
@@ -278,7 +277,8 @@ const option = computed(() => {
         const first = (Array.isArray(params) ? params[0] : params) as { axisValue?: number | string } | undefined;
         const hovered = pointerAt.value ?? Number(first?.axisValue ?? end);
 
-        return tooltipHtml(lanes.value, hovered, withDate.value);
+        // WITH ITS DATE, always: a time of day alone cannot say whether it was today.
+        return tooltipHtml(lanes.value, hovered, true);
       },
     },
     series: [

@@ -21,7 +21,6 @@ import {
   tooltipHtml,
   windowEnd,
 } from '../lib/teamActivity';
-import { crossesDays } from '../lib/localTime';
 import TeamStatisticsDialog from './TeamStatisticsDialog.vue';
 
 /**
@@ -166,8 +165,6 @@ const lanes = computed(() => (activity.value ? activityLanes(activity.value, pro
 
 const from = computed(() => (activity.value?.from ? Date.parse(activity.value.from) : null));
 
-/** A time of day alone is ambiguous once the window crosses midnight: then every time has its date. */
-const withDate = computed(() => from.value !== null && crossesDays(axisFrom.value, axisTo.value));
 
 const hasChart = computed(() =>
   activity.value !== null && activity.value.window !== 'none' && from.value !== null && lanes.value.length > 0);
@@ -286,7 +283,8 @@ const option = computed(() => {
         const first = (Array.isArray(params) ? params[0] : params) as { axisValue?: number | string } | undefined;
         const hovered = pointerAt.value ?? Number(first?.axisValue ?? end.value);
 
-        return tooltipHtml(lanes.value, hovered, withDate.value);
+        // WITH ITS DATE, always: a time of day alone cannot say whether it was today.
+        return tooltipHtml(lanes.value, hovered, true);
       },
     },
     series: [

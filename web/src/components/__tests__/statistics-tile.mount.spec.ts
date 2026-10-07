@@ -285,7 +285,7 @@ describe('the Activity tile', () => {
     const box = document.createElement('div');
     box.innerHTML = option.tooltip.formatter([{ axisValue: at(14, 2) }]);
 
-    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(new Date(at(14, 16)).toLocaleTimeString());
+    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(new Date(at(14, 16)).toLocaleString());
   });
 
   it('reads the time under the pointer as the browser\'s locale reads it', async () => {
@@ -296,7 +296,7 @@ describe('the Activity tile', () => {
     const box = document.createElement('div');
     box.innerHTML = option.tooltip.formatter([{ axisValue: at(14, 10, 7) }]);
 
-    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(new Date(at(14, 10, 7)).toLocaleTimeString());
+    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(new Date(at(14, 10, 7)).toLocaleString());
   });
 });
 
