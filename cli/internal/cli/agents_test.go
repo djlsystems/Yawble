@@ -106,7 +106,7 @@ func TestAgentsShowsEachLaunchBesideTheSignIn(t *testing.T) {
 	).Replace(agentsStdout)
 	s := runningScript()
 	s.On(doctorExec, engine.Result{Stdout: launches})
-	code, out, errOut := run(t, stubbed(s), "agents")
+	code, out, errOut := run(t, stubbed(s), "agents", "--details")
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
@@ -134,12 +134,13 @@ func TestAgentsShowsEachLaunchBesideTheSignIn(t *testing.T) {
 	}
 }
 
-// The doctor's agents row carries the launch beside the sign-in, and a failed launch warns.
+// The doctor's agents row carries the launch beside the sign-in. Beside claude, which runs, a
+// failed launch is named with where to look, not warned about: an agent can run.
 func TestDoctorShowsEachLaunchBesideTheSignIn(t *testing.T) {
 	signedIn := strings.Replace(doctorStdout, `"authenticated":false,"detail":"exit 1"`, `"authenticated":true,"detail":"ok"`, 1)
 	for _, c := range []struct{ codex, want, verdict string }{
 		{`"launch":{"result":"ok","exitCode":0,"stderrTail":null,"detail":null}`, "codex signed in, launch ok", "ok"},
-		{`"launch":{"result":"failed","exitCode":134,"stderrTail":"Aborted","detail":null}`, "codex signed in, launch FAILED, exit 134", "warn"},
+		{`"launch":{"result":"failed","exitCode":134,"stderrTail":"Aborted","detail":null}`, "codex signed in, launch FAILED, exit 134, see yawble agents", "ok"},
 		{`"launch":{"result":"not checked","exitCode":null,"stderrTail":null,"detail":"no free invocation"}`, "codex signed in, launch not checked", "ok"},
 		{`"launch":null`, "codex signed in, launch not known", "ok"},
 	} {
@@ -152,8 +153,8 @@ func TestDoctorShowsEachLaunchBesideTheSignIn(t *testing.T) {
 		if v != c.verdict || detail != "claude signed in, launch ok · "+c.want {
 			t.Errorf("agents row %s %q, want %s %q", v, detail, c.verdict, c.want)
 		}
-		if v == "warn" && fix != "yawble agents" {
-			t.Errorf("a failed launch should point at yawble agents, got %q", fix)
+		if fix != "" {
+			t.Errorf("with claude able to run there is nothing to fix, got %q", fix)
 		}
 	}
 }
@@ -175,7 +176,7 @@ func sourced() string {
 func TestAgentsShowsEachSourceAndTheIssuedHint(t *testing.T) {
 	s := runningScript()
 	s.On(doctorExec, engine.Result{Stdout: sourced()})
-	code, out, errOut := run(t, stubbed(s), "agents")
+	code, out, errOut := run(t, stubbed(s), "agents", "--details")
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}

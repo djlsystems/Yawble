@@ -7,7 +7,7 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/engine"
 )
 
-// A first-up value above what the engine has is refused with how to give that kind of engine
+// A first-up value above the engine's share of this computer is refused with how to give that kind of engine
 // more, and asked again. The wording is pinned here per engine kind.
 
 const (
@@ -34,8 +34,8 @@ func TestFirstUpRefusalOnAPodmanMachineSaysHowToGiveTheMachineMore(t *testing.T)
 	s.On("podman machine inspect", engine.Result{Stdout: "podman-machine-default|running|false|8192|4\n"})
 	out := refusalsOf(t, s, "darwin", "podman", "9000\n\n6\n\n")
 	for _, want := range []string{
-		"refused: 9000 MB is more than the engine has beside control's 1536 MB; the most is 6656 MB. " + podmanMachineMore + "\n",
-		"refused: 6 CPUs is more than the engine has; the most is 4. " + podmanMachineMore + "\n",
+		"refused: 9000 MB, with control's 1536 MB, is more than the Podman machine's share of this computer; the most is 6656 MB. " + podmanMachineMore + "\n",
+		"refused: 6 CPUs is more than the Podman machine's share of this computer; the most is 4. " + podmanMachineMore + "\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("out lacks %q:\n%s", want, out)
@@ -54,8 +54,8 @@ func TestFirstUpRefusalOnDockerDesktopPointsAtItsResourcesSettings(t *testing.T)
 		s.On("docker image inspect", engine.Result{})
 		out := refusalsOf(t, s, goos, "docker", "20000\n\n12\n\n")
 		for _, want := range []string{
-			"refused: 20000 MB is more than the engine has beside control's 1536 MB; the most is 10752 MB. " + dockerDesktopMore + "\n",
-			"refused: 12 CPUs is more than the engine has; the most is 10. " + dockerDesktopMore + "\n",
+			"refused: 20000 MB, with control's 1536 MB, is more than Docker Desktop's share of this computer; the most is 10752 MB. " + dockerDesktopMore + "\n",
+			"refused: 12 CPUs is more than Docker Desktop's share of this computer; the most is 10. " + dockerDesktopMore + "\n",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s: out lacks %q:\n%s", goos, want, out)
@@ -71,8 +71,8 @@ func TestFirstUpRefusalOnLinuxSaysThereIsNothingToEnlarge(t *testing.T) {
 	s.On("docker image inspect", engine.Result{})
 	out := refusalsOf(t, s, "linux", "docker", "20000\n\n12\n\n")
 	for _, want := range []string{
-		"refused: 20000 MB is more than the engine has beside control's 1536 MB; the most is 10752 MB. " + linuxMore + "\n",
-		"refused: 12 CPUs is more than the engine has; the most is 10. " + linuxMore + "\n",
+		"refused: 20000 MB, with control's 1536 MB, is more than what this computer has; the most is 10752 MB. " + linuxMore + "\n",
+		"refused: 12 CPUs is more than what this computer has; the most is 10. " + linuxMore + "\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("out lacks %q:\n%s", want, out)
@@ -108,7 +108,7 @@ func TestALaterUpWarnsAboutAnOverLargeSavedValueWithTheSameHint(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
-	want := "warning: cpus 6 in yawble's config is more than the engine has (4, podman machine); the container cannot get them: yawble config set cpus 4 or less, then yawble up; or to give the Podman machine more: podman machine stop, then podman machine set --memory <MB> --cpus <n>, then podman machine start"
+	want := "warning: cpus 6 in yawble's config is more than the Podman machine's share of this computer (4 CPUs); the container cannot get them: yawble config set cpus 4 or less, then yawble up; or to give the Podman machine more: podman machine stop, then podman machine set --memory <MB> --cpus <n>, then podman machine start"
 	if !strings.Contains(errOut, want) {
 		t.Errorf("stderr lacks %q:\n%s", want, errOut)
 	}

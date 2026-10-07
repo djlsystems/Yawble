@@ -354,7 +354,7 @@ func TestTheFirstUpSizeScreenOffersEngineMemoryLessControl(t *testing.T) {
 	for _, want := range []string{
 		"control takes    1536 MB memory, 2 CPUs (fixed), so a worker may have up to 10752 MB",
 		"Memory in MB (4096 to 10752) [6144]: ",
-		"refused: 10753 MB is more than the engine has beside control's 1536 MB; the most is 10752 MB",
+		"refused: 10753 MB, with control's 1536 MB, is more than Docker Desktop's share of this computer; the most is 10752 MB",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("out lacks %q:\n%s", want, out)

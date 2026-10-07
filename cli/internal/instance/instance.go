@@ -730,11 +730,15 @@ func instanceContainers(ctx context.Context, e engine.Engine) ([]string, error) 
 	return names, nil
 }
 
-// RunLimitText is the running limit as `up` states it: the configured number, or the Host's
-// default, which only the Host names (`yawble doctor` reads it). Nothing is estimated here.
+// RunLimitText is the running limit as `up` states it: the configured number, the number the
+// first up's size screen just said, or else a pointer to `yawble doctor`, which reads the Host's.
+// Nothing is estimated here.
 func RunLimitText(s Settings) string {
-	if s.MaxRunning > 0 {
+	switch {
+	case s.MaxRunning > 0:
 		return fmt.Sprint(s.MaxRunning)
+	case s.RunsShown > 0:
+		return fmt.Sprint(s.RunsShown)
 	}
-	return "the Host's default (yawble doctor names it)"
+	return "set from the worker's size (yawble doctor shows the number)"
 }

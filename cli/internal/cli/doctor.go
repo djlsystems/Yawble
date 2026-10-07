@@ -22,7 +22,7 @@ import (
 var errChecksFailed = errors.New("one or more checks failed")
 
 func newDoctorCommand(deps Deps) *cobra.Command {
-	var asJSON, fix bool
+	var asJSON, fix, details bool
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check the engine, the instance and what runs inside it; say how to fix what is wrong",
@@ -31,8 +31,11 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 			"--fix repairs only what is safe and idempotent: it creates a missing data volume and starts " +
 			"a stopped container, then waits for it to answer, then starts stopped workers. It never removes anything.\n" +
 			"Each worker has a row: control's record of it (connected, version, runs) and the Host's " +
-			"measured figures beside the engine's own stats.",
-		Example: "  yawble doctor\n  yawble doctor --fix\n  yawble doctor --json",
+			"measured figures beside the engine's own stats.\n" +
+			"The list shows whether the instance runs, whether an agent can work in it, whether it is " +
+			"backed up, and anything that warns or fails. --details shows every check, the figures behind " +
+			"them and what each agent's tools would load; --json carries every check either way.",
+		Example: "  yawble doctor\n  yawble doctor --details\n  yawble doctor --fix\n  yawble doctor --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			e, s, _, capacity, err := prepareMeasured(deps)
@@ -71,13 +74,17 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 			} else {
 				report, reportErr = doctor.FetchHostReport(cmd.Context(), e, observed.ContainerKnown && observed.Container == engine.StateRunning)
 			}
-			checks = append(checks, doctor.InstanceChecks(report, reportErr, deps.Now())...)
+			if details || asJSON {
+				checks = append(checks, doctor.InstanceChecksDetails(report, reportErr, deps.Now())...)
+			} else {
+				checks = append(checks, doctor.InstanceChecks(report, reportErr, deps.Now())...)
+			}
 			checks = append(checks, doctor.CapacityCheck(capacity, s, report))
 			if observed.EngineErr == nil && observed.ContainerKnown {
 				checks = append(checks, workerChecks(cmd.Context(), e, s, report)...)
 			}
 			checks = append(checks, doctor.AgentToolsCheck(report, reportErr))
-			checks = append(checks, doctor.BackupCheck(deps.ConfigDir, deps.Now()))
+			checks = doctor.BackupCheck(checks, deps.ConfigDir, deps.Now())
 			if other := otherEngine(deps, e.Name()); other != nil {
 				if v := volumeOn(cmd.Context(), other); v != "" {
 					checks = append(checks, doctor.OtherVolumeCheck(e.Name(), other.Name(), v))
@@ -93,10 +100,16 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 				if err := enc.Encode(map[string]any{"checks": checks, "fixed": fixed, "instance": report}); err != nil {
 					return err
 				}
-			} else {
+			} else if details {
 				doctor.Render(out, checks)
 				if report != nil {
 					doctor.RenderAgentTools(out, report.AgentTools)
+				}
+			} else {
+				shown, hidden := doctor.Short(checks)
+				doctor.Render(out, shown)
+				if hidden > 0 {
+					fmt.Fprintf(out, "\n%d more checks are ok, information or not needed now; yawble doctor --details shows them all, with what each agent's tools would load.\n", hidden)
 				}
 			}
 			if doctor.AnyFailed(checks) {
@@ -106,6 +119,7 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	cmd.Flags().BoolVar(&details, "details", false, "show every check, the figures behind them and each agent's tools")
 	cmd.Flags().BoolVar(&fix, "fix", false, "create a missing volume and start a stopped container, then check again")
 	return cmd
 }

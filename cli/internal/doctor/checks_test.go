@@ -615,7 +615,8 @@ func TestTheAgentVersionsRowSaysWhichVersionAndWhenItWasUpdated(t *testing.T) {
 	}
 	for _, want := range []string{
 		"claude 2.1.280, updated 2026-09-29 20:46 UTC",
-		"copilot GitHub Copilot CLI 1.0.88., unchanged since 2026-09-25 15:22 UTC",
+		// The CLI's own full stop after its version is not carried into the sentence.
+		"copilot GitHub Copilot CLI 1.0.88, unchanged since 2026-09-25 15:22 UTC",
 	} {
 		if !strings.Contains(row.Detail, want) {
 			t.Errorf("agent versions should say %q: %+v", want, row)
@@ -626,7 +627,7 @@ func TestTheAgentVersionsRowSaysWhichVersionAndWhenItWasUpdated(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	doctor.RenderAgents(&out, r.Agents)
+	doctor.RenderAgents(&out, r.Agents, true)
 	if !strings.Contains(out.String(), "installed   yes, 2.1.280, updated 2026-09-29 20:46 UTC") {
 		t.Errorf("yawble agents should say when it was updated:\n%s", out.String())
 	}
@@ -654,7 +655,7 @@ func TestTheRunningLimitIsTheHostsAnswerAndWarnsAboveItsOwnBounds(t *testing.T) 
 		t.Errorf("default: %+v", c)
 	}
 	r.Wip.Limit = &doctor.WipLimit{Limit: 8, Bound: "configuration", CPUBound: 7, MemoryBound: intp(4), Reason: "Wip:MaxRunning is 8"}
-	if c := find(t, doctor.InstanceChecks(r, nil, now), "running limit"); c.Verdict != doctor.Warn || !strings.Contains(c.Detail, "the Host's own bounds allow 4") || !strings.Contains(c.Fix, "maxRunning 0") {
+	if c := find(t, doctor.InstanceChecks(r, nil, now), "running limit"); c.Verdict != doctor.Warn || !strings.Contains(c.Detail, "this computer allows 4") || !strings.Contains(c.Fix, "maxRunning 0") {
 		t.Errorf("configured above: %+v", c)
 	}
 	r.Wip.Limit = &doctor.WipLimit{Limit: 3, Bound: "setting", CPUBound: 7, Reason: "a tenant setting"}
@@ -676,7 +677,7 @@ func TestRunMemorySaysTheHostsMechanism(t *testing.T) {
 	}{
 		{doctor.RunMemory{Mechanism: "cgroup", PerRunMb: intp(2048), Detail: "per-run cgroup"}, "cgroup, 2048 MB per run: per-run cgroup"},
 		{doctor.RunMemory{Mechanism: "rlimit", PerRunMb: intp(1792), Detail: "set"}, "rlimit, 1792 MB per run: set"},
-		{doctor.RunMemory{Mechanism: "none", Detail: "nothing set"}, "not enforced: nothing set"},
+		{doctor.RunMemory{Mechanism: "none", Detail: "nothing set"}, "no per-run memory cap: this engine offers none, so runs share the worker's memory (a fact of the engine, not a fault)"},
 		{doctor.RunMemory{Mechanism: "quota"}, `not known (the Host said "quota")`},
 	} {
 		m := c.m
@@ -728,7 +729,7 @@ func TestANullInstalledIsNotMeasuredAndFailsNoCheck(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	doctor.RenderAgents(&out, r.Agents)
+	doctor.RenderAgents(&out, r.Agents, true)
 	text := out.String()
 	if !strings.Contains(text, "installed   not measured") || !strings.Contains(text, "signed in   not measured") ||
 		!strings.Contains(text, "no worker is connected") || strings.Contains(text, "installed   no\n") || strings.Contains(text, "  measured    ") {
@@ -743,13 +744,13 @@ func TestTheDoctorSaysWhenAndOnWhichWorkerItMeasured(t *testing.T) {
 		r.Agents[i].MeasuredAt, r.Agents[i].MeasuredOn = strp("2026-10-02T12:00:00+00:00"), strp("w1")
 	}
 
-	row := find(t, doctor.InstanceChecks(r, nil, now), "agents")
+	row := find(t, doctor.InstanceChecksDetails(r, nil, now), "agents")
 	if !strings.Contains(row.Detail, "(sign-ins measured 2026-10-02 12:00 UTC on worker w1)") {
 		t.Errorf("agents row: %+v", row)
 	}
 
 	var out bytes.Buffer
-	doctor.RenderAgents(&out, r.Agents[:1])
+	doctor.RenderAgents(&out, r.Agents[:1], true)
 	if !strings.Contains(out.String(), "  measured    2026-10-02 12:00 UTC on worker w1\n") {
 		t.Errorf("render:\n%s", out.String())
 	}
@@ -779,8 +780,59 @@ func TestAgentsRowSaysUpdatingNotNotInstalled(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	doctor.RenderAgents(&out, r.Agents)
+	doctor.RenderAgents(&out, r.Agents, true)
 	if text := out.String(); !strings.Contains(text, "installed   updating") || strings.Contains(text, "installed   no\n") {
 		t.Errorf("render:\n%s", text)
+	}
+}
+
+// A running limit set above the Host's bounds is in the default list, so its fix is a command
+// and plain words: no setting key a person cannot type anywhere.
+func TestTheRunningLimitFixNamesTheCommandAndNoSettingKey(t *testing.T) {
+	r := sampleReport()
+	r.Wip = &doctor.HostWip{Limit: &doctor.WipLimit{Limit: 8, Bound: "setting", CPUBound: 7, MemoryBound: intp(4), Reason: "a tenant setting"}}
+	c := find(t, doctor.InstanceChecks(r, nil, now), "running limit")
+	if c.Verdict != doctor.Warn || !strings.Contains(c.Fix, "yawble config set maxRunning 0, then yawble up") ||
+		!strings.Contains(c.Fix, "\"Agents running at once\" in the board's settings") {
+		t.Errorf("the fix should name the command and the board's own words: %+v", c)
+	}
+	if strings.Contains(c.Fix, "wip.") || strings.Contains(c.Fix, "tenant setting") {
+		t.Errorf("the fix names a setting key: %q", c.Fix)
+	}
+	if c.Detail != "8, set in the board's settings; this computer allows 4" {
+		t.Errorf("the detail should say it plainly: %q", c.Detail)
+	}
+	if !strings.Contains(c.Fix, "to use the limit Yawble works out for this computer") {
+		t.Errorf("the fix should say what maxRunning 0 does in plain words: %q", c.Fix)
+	}
+	r.Wip.Limit = &doctor.WipLimit{Limit: 8, Bound: "configuration", CPUBound: 7, MemoryBound: intp(4), Reason: "Wip:MaxRunning is 8"}
+	configured := find(t, doctor.InstanceChecks(r, nil, now), "running limit")
+	if configured.Detail != "8, set with yawble config set maxRunning; this computer allows 4" {
+		t.Errorf("a limit set on this computer should say where: %q", configured.Detail)
+	}
+	for _, row := range []doctor.Check{c, configured} {
+		for _, jargon := range []string{"Host", "setting bound", "configuration bound", "tenant setting", "Wip:"} {
+			if strings.Contains(row.Detail, jargon) || strings.Contains(row.Fix, jargon) {
+				t.Errorf("the running-limit row says %q, which a person cannot act on: %+v", jargon, row)
+			}
+		}
+	}
+}
+
+// Doctor's default agents row says what each agent can do and leaves where its sign-in comes from
+// and when it was measured to --details, as `yawble agents` does.
+func TestDoctorDefaultAgentsRowLeavesSourceAndMeasuredForDetails(t *testing.T) {
+	r := sampleReport()
+	for i := range r.Agents {
+		r.Agents[i].MeasuredAt, r.Agents[i].MeasuredOn = strp("2026-10-02T12:00:00+00:00"), strp("w1")
+		r.Agents[i].CredentialSource = strp("home")
+	}
+	row := find(t, doctor.InstanceChecks(r, nil, now), "agents")
+	if strings.Contains(row.Detail, "source") || strings.Contains(row.Detail, "sign-ins measured") {
+		t.Errorf("the default agents row has developer detail: %q", row.Detail)
+	}
+	full := find(t, doctor.InstanceChecksDetails(r, nil, now), "agents")
+	if !strings.Contains(full.Detail, ", source home") || !strings.Contains(full.Detail, "(sign-ins measured 2026-10-02 12:00 UTC on worker w1)") {
+		t.Errorf("--details should keep the source and when it was measured: %q", full.Detail)
 	}
 }
