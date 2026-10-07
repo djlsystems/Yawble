@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useKanbanStore } from '../stores/kanban';
 import { KanbanStatusLabel, bodyToRender, colourFor, trailRows } from '../lib/kanban';
+import { workflowNumberTitle } from '../lib/workflowNumber';
 import { KanbanStatuses, type KanbanCardAttributes, type KanbanStatus } from '../api/kanban';
 
 /**
@@ -184,7 +185,7 @@ function when(value: string | null | undefined): string {
           <div class="col">
             <div class="text-subtitle1">{{ card.title }}</div>
             <div class="text-caption os-text-muted">
-              {{ card.team }} / {{ card.member }} · workflow #{{ card.workflowSeq }}
+              {{ card.team }} / {{ card.member }} · <span :title="workflowNumberTitle(card.workflowSeq)" data-workflow-number>workflow #{{ card.workflowSeq }}</span>
             </div>
           </div>
           <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
