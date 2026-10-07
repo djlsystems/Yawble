@@ -210,6 +210,17 @@ describe('the Concierge panel, mounted in the real shell', () => {
 describe('the Concierge bubble is a toggle', () => {
   const dock = () => document.body.querySelector('.concierge-fab-dock') as HTMLElement | null;
 
+  it('is named Concierge on the button while it is closed, not only in its tooltip', async () => {
+    const wrapper = await mountShellWithActiveTeam();
+
+    expect(wrapper.find('.concierge-fab').text()).toContain('Concierge');
+
+    await clickTheConciergeFab(wrapper);
+    expect(wrapper.find('.concierge-fab').text()).not.toContain('Concierge');
+
+    wrapper.unmount();
+  });
+
   it('opens the panel on the first press and minimizes it on the second', async () => {
     const wrapper = await mountShellWithActiveTeam();
     const panel = wrapper.findComponent(ConciergePanel);

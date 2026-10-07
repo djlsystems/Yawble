@@ -208,7 +208,11 @@ public sealed record TeamRepoStatus(
     Prerequisite Gh,
     
     [property: Description("Repository statuses")]
-    IReadOnlyList<RepoStatus> Repos);
+    IReadOnlyList<RepoStatus> Repos,
+
+    [property: Description("Whether a person has turned on concierge.mayMerge, so the Concierge may merge a "
+        + "team branch with the repo tool's merge. Read when this status is read.")]
+    bool ConciergeMayMerge = false);
 
 /// <summary>
 /// Result of an action: the repo name, its new status, a human message, and whether the action

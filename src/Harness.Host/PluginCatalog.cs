@@ -135,6 +135,19 @@ public sealed class PluginCatalog(string root, Func<string, bool>? runtimeFound 
     /// unless a test said otherwise.</summary>
     public bool RuntimeFound(string runtime) => (runtimeFound ?? OnPath)(runtime);
 
+    /// <summary>The runtime check this catalog was given; <see cref="OnWorkers"/> in control.</summary>
+    public Func<string, bool> RuntimeCheck => runtimeFound ?? OnPath;
+
+    /// <summary>
+    /// THE RUNTIME CHECK IN CONTROL: a plugin runs on a worker, never in control, and control's own
+    /// image carries no runtime at all - so control's PATH is the wrong machine to ask, and asking it
+    /// refused every python3 plugin on a split instance. Nothing in control measures a worker's
+    /// runtimes, so not measured is not refused: a runtime the manifest names is one this Host
+    /// knows (an unknown one is refused when the manifest is read), the worker image carries every
+    /// one of them, and a worker without it fails the run at launch saying the program was not found.
+    /// </summary>
+    public static bool OnWorkers(string runtime) => true;
+
     private static bool OnPath(string runtime) => PathSearch.Find(runtime) is not null;
 
     public static PluginScan Scan(string root, Func<string, bool>? runtimeFound = null)

@@ -171,7 +171,28 @@ public sealed class PluginMemberRunnerTests : IDisposable
 
         Assert.Equal(MessageTypes.Failed, row.Type);
         Assert.Equal("the bucket does not exist", member.Snapshot().Failed);
+
+        // THE ROW SAYS IT TOO, not only the live card: the board after a reload, the trail and an
+        // agent reading the log all take a failure's words from the row.
+        Assert.Equal("the bucket does not exist", Output(row));
+        Assert.Equal("the bucket does not exist", new ContainerMarks(null, null, row).FailureReason);
     }
+
+    [Fact]
+    public async Task A_failure_reason_the_output_already_says_is_not_repeated_and_one_it_does_not_leads_it()
+    {
+        var (bed, _, row) = await RunAsync("""cat >/dev/null; echo 'tried the bucket'; echo '{"t":"result","ok":false,"output":"the bucket does not exist","error":"the bucket does not exist"}'""");
+        await using var _ = bed;
+        Assert.Equal(1, CountOf(Output(row), "the bucket does not exist"));
+
+        var (other, _, failed) = await RunAsync("""cat >/dev/null; echo 'tried the bucket'; echo '{"t":"result","ok":false,"error":"no access"}'""");
+        await using var __ = other;
+        Assert.StartsWith("no access\n", Output(failed), StringComparison.Ordinal);
+        Assert.Contains("tried the bucket", Output(failed), StringComparison.Ordinal);
+    }
+
+    private static int CountOf(string text, string words) =>
+        (text.Length - text.Replace(words, "", StringComparison.Ordinal).Length) / words.Length;
 
     [Fact]
     public async Task A_non_zero_exit_fails_even_after_an_ok_result()

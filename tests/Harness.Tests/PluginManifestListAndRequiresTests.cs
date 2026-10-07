@@ -123,6 +123,19 @@ public sealed class PluginManifestListAndRequiresTests : IDisposable
     }
 
     [Fact]
+    public void In_control_a_plugin_needing_a_runtime_loads_and_the_operators_solution_check_does_not_ask_controls_path()
+    {
+        PluginInstall.Write(_dataRoot, "needs-python", manifest: PluginInstall.Manifest("needs-python", edit: m =>
+            m["requires"] = new JsonArray("dotnet", "python3")));
+
+        var scan = PluginCatalog.Scan(PluginInstall.PluginsRoot(_dataRoot), PluginCatalog.OnWorkers);
+
+        Assert.Empty(scan.Refused);
+        Assert.Equal("needs-python", Assert.Single(scan.Plugins).Manifest.Id);
+        Assert.True(Harness.Host.Solutions.SolutionPlatform.ForDataRoot(_dataRoot, control: true).RuntimeFound("python3"));
+    }
+
+    [Fact]
     public void The_catalog_refuses_an_unknown_runtime_naming_it()
     {
         PluginInstall.Write(_dataRoot, "needs-ruby", manifest: PluginInstall.Manifest("needs-ruby", edit: m =>

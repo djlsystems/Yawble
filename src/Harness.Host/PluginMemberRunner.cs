@@ -312,6 +312,15 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             _ => null,
         };
 
+        // THE REASON LEADS THE OUTPUT when the output does not already say it. The terminal row
+        // carries the output and the launch error, never this sentence, and the board, the trail
+        // and every agent read a failure from that row: a plugin that failed with only a result
+        // record (`ok:false` and its `error`) otherwise left a red card saying nothing about why.
+        if (reason is not null && !text.Contains(reason, StringComparison.Ordinal))
+        {
+            text = text.Length == 0 ? reason : reason + "\n" + text;
+        }
+
         return new MemberResult(
             reason is null,
             ended.ExitCode,

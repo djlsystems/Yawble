@@ -178,6 +178,7 @@ public static partial class RepoEndpoints
         GitRunner gitRunner,
         TeamPaths paths,
         ContainerHost host,
+        TenantSettings settings,
         CancellationToken ct)
     {
         if (teams.ExistingName(team) is not { } stored)
@@ -290,7 +291,9 @@ public static partial class RepoEndpoints
                 teams.ContributorFor(stored, repoName)), stored, ct));
         }
 
-        var response = new TeamRepoStatus(Git: gitPrereq, Gh: ghPrereq, Repos: repoStatuses);
+        // WHETHER THE CONCIERGE MAY MERGE, read now: the `repo` tool relays this status, and without it
+        // a Concierge could learn the setting only by trying a merge.
+        var response = new TeamRepoStatus(Git: gitPrereq, Gh: ghPrereq, Repos: repoStatuses, ConciergeMayMerge: settings.ConciergeMayMerge);
         return Results.Json(response);
     }
 

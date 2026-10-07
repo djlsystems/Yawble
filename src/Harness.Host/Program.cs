@@ -574,7 +574,9 @@ var unmeasuredHeadlessPresets = Program.UnmeasuredHeadlessPresets(loadedCatalog)
 // THE INSTALLED PLUGINS, read from `<dataRoot>/plugins` - data, not code: nothing is compiled in and
 // nothing is registered by DI per plugin, so `POST /api/plugins/rescan` registers a new one with no
 // restart. A refused manifest is named here, once, with the field that is wrong.
-var pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"));
+// In control a plugin's runtime is the workers' to have, never looked up on control's own PATH
+// (PluginCatalog.OnWorkers).
+var pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"), control ? PluginCatalog.OnWorkers : null);
 PluginEndpoints.Report(pluginCatalog.Rescan(), Console.Out);
 builder.Services.AddSingleton(pluginCatalog);
 

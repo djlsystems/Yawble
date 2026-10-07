@@ -237,6 +237,13 @@ describe('a team\'s marks', () => {
     expect(page.find('[data-manage-solution]').exists()).toBe(false);
   });
 
+  it('says on the team where its work comes from: the Concierge', async () => {
+    const page = await mountPage([team('alpha')]);
+
+    expect(page.find('[data-team-work-hint]').text()).toBe(
+      'To give this team work, open the Concierge (bottom right) and tell it what you want done.');
+  });
+
   it('does not mark a running team paused', async () => {
     const page = await mountPage([team('alpha')]);
 

@@ -549,9 +549,14 @@ async function signOut() {
       <!-- The brand orange rather than Quasar's primary blue: this is the door into the
            product's own surface, and the stock primary reads as a control borrowed from
            somewhere else. Same value as the landing page and the sign-in button. -->
+      <!-- NAMED ON THE BUTTON while it is closed, not only on hover: an unlabelled round button was
+           not found by a new person looking for "the Concierge" the README and the CLI name. A
+           phone keeps the round button, where a label would cover the board. -->
       <q-btn
         fab
         icon="terminal"
+        :label="conciergeOpen || $q.screen.lt.sm ? undefined : 'Concierge'"
+        no-caps
         class="concierge-fab"
         :aria-label="conciergeOpen ? 'Minimize the Concierge' : 'Open the Concierge'"
         :aria-expanded="conciergeOpen"

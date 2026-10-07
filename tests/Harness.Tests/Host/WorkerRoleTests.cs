@@ -78,6 +78,29 @@ public sealed class WorkerRoleTests
     }
 
     [Fact]
+    public async Task In_control_a_plugins_runtime_is_the_workers_and_never_looked_up_on_controls_own_path()
+    {
+        // Control's image carries no runtime; a python3 plugin was refused on a split instance for it.
+        var controlRoot = Directory.CreateTempSubdirectory("harness-control-runtime-").FullName;
+        var allRoot = Directory.CreateTempSubdirectory("harness-all-runtime-").FullName;
+        try
+        {
+            await using (var control = Host(controlRoot, "control"))
+            {
+                Assert.Equal<Func<string, bool>>(PluginCatalog.OnWorkers, control.Services.GetRequiredService<PluginCatalog>().RuntimeCheck);
+            }
+
+            await using var all = Host(allRoot, "all");
+            Assert.NotEqual<Func<string, bool>>(PluginCatalog.OnWorkers, all.Services.GetRequiredService<PluginCatalog>().RuntimeCheck);
+        }
+        finally
+        {
+            Clean(controlRoot);
+            Clean(allRoot);
+        }
+    }
+
+    [Fact]
     public async Task The_launch_check_in_control_goes_to_a_connected_worker()
     {
         var catalog = new AgentCatalog(

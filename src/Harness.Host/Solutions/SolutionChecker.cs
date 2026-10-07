@@ -34,12 +34,15 @@ public sealed record SolutionPlatform(
     /// <summary>
     /// An instance's, read from its data root with nothing running and nothing written: the built-in
     /// presets plus <c>agents.json</c>, the platform's events plus those of every plugin installed
-    /// under <c>plugins/</c>, and this machine's PATH. What the operator's check uses.
+    /// under <c>plugins/</c>, and this machine's PATH - or, in <paramref name="control"/>, no PATH at
+    /// all, since plugins run on workers (<see cref="PluginCatalog.OnWorkers"/>). What the operator's
+    /// check uses.
     /// </summary>
-    public static SolutionPlatform ForDataRoot(string dataRoot)
+    public static SolutionPlatform ForDataRoot(string dataRoot, bool control = false)
     {
         var presets = AgentCatalogFile.BuiltIns().Concat(AgentCatalogFile.LoadCustom(dataRoot, TextWriter.Null)).ToList();
-        var installed = PluginCatalog.Scan(Path.Combine(dataRoot, "plugins"));
+        Func<string, bool> runtimeFound = control ? PluginCatalog.OnWorkers : runtime => PathSearch.Find(runtime) is not null;
+        var installed = PluginCatalog.Scan(Path.Combine(dataRoot, "plugins"), runtimeFound);
         var events = installed.Plugins
             .SelectMany(p => p.Manifest.Publishes.Select(e => e.Definition(p.Manifest.Id)))
             .GroupBy(e => e.Type, StringComparer.Ordinal)
@@ -48,7 +51,7 @@ public sealed record SolutionPlatform(
         return new(
             name => PresetOf(presets, name),
             type => EventCatalog.For(type) ?? events.GetValueOrDefault(type),
-            runtime => PathSearch.Find(runtime) is not null,
+            runtimeFound,
             BuiltInSkills.IsBuiltIn);
     }
 

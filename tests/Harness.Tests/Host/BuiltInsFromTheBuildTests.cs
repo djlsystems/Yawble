@@ -533,6 +533,17 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     /// The old blanket "never merges" is gone from both skills.
     /// </summary>
     [Fact]
+    public void The_concierge_reads_whether_it_may_merge_from_the_repo_tools_status_and_never_tries_a_merge_to_find_out()
+    {
+        var concierge = Flat(BuiltInSkills.Find("concierge")!.Body);
+        Assert.Contains("Whether it is on now is in the `repo` tool's status, as `conciergeMayMerge`", concierge, StringComparison.Ordinal);
+        Assert.Contains("never guess, and never try a merge to find out.", concierge, StringComparison.Ordinal);
+
+        var backlog = Flat(BuiltInSkills.Find("running-the-backlog")!.Body);
+        Assert.Contains("The `repo` tool's status says whether it is on now (`conciergeMayMerge`)", backlog, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_backlog_running_skill_merges_through_the_repo_tool_only_when_the_person_turned_it_on()
     {
         var body = Flat(BuiltInSkills.Find("running-the-backlog")!.Body);

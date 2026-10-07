@@ -104,6 +104,39 @@ public sealed class ConciergeMayMergeSettingTests(HostFixture host) : IClassFixt
     }
 
     /// <summary>
+    /// THE CONCIERGE CAN READ IT. The `repo` tool relays a team's repo status with the caller's own key,
+    /// so the status says whether the setting is on now; without it a Concierge could learn the
+    /// setting only by trying a merge.
+    /// </summary>
+    [Fact]
+    public async Task A_teams_repo_status_says_whether_the_setting_is_on_now_to_a_person_and_a_machine_principal()
+    {
+        using var person = await host.PersonAsync();
+        using var machine = host.Container(host.AlphaContainerKey);
+        async Task<bool> MayMerge(HttpClient client)
+        {
+            using var status = JsonDocument.Parse(await client.GetStringAsync($"/api/teams/{host.Alpha}/repo-status", Ct));
+            return status.RootElement.GetProperty("conciergeMayMerge").GetBoolean();
+        }
+
+        try
+        {
+            (await person.PutAsJsonAsync("/api/tenant/settings", new Dictionary<string, object> { [Name] = "off" }, Ct)).EnsureSuccessStatusCode();
+            Assert.False(await MayMerge(person));
+            Assert.False(await MayMerge(machine));
+
+            (await person.PutAsJsonAsync("/api/tenant/settings", new Dictionary<string, object> { [Name] = "on" }, Ct)).EnsureSuccessStatusCode();
+            Assert.True(await MayMerge(person));
+            Assert.True(await MayMerge(machine));
+        }
+        finally
+        {
+            using var reset = new StringContent($$"""{"{{Name}}": null}""", System.Text.Encoding.UTF8, "application/json");
+            await person.PutAsync("/api/tenant/settings", reset, Ct);
+        }
+    }
+
+    /// <summary>
     /// The Settings dialog sends this setting as the word <c>on</c> or <c>off</c> (its <c>ToggleWords</c>);
     /// these are the only two the server lists and takes, and a boolean is refused naming the setting.
     /// </summary>

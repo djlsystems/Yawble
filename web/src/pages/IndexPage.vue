@@ -564,6 +564,12 @@ onUnmounted(() => {
         </q-btn>
       </div>
 
+      <!-- HOW WORK REACHES A TEAM, said where people look for it: there is no box on a Manager's
+           card, and a person who opened a team to give it work found nothing that said where. -->
+      <div class="text-caption os-text-muted q-mb-sm" data-team-work-hint>
+        To give this team work, open the Concierge (bottom right) and tell it what you want done.
+      </div>
+
       <!-- A team installed from a solution package that still waits for its person. -->
       <SolutionBlockedBanner :team="activeTeam.id" />
 

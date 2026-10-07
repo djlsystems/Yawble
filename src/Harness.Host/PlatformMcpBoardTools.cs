@@ -255,6 +255,8 @@ public sealed partial class PlatformMcpTools
     [McpServerTool(Name = "repo"), Description(
         "Repository and worktree status for one team: paths, and whether work is pushed or merged. "
         + "action is status (the default) or merge. "
+        + "status answers conciergeMayMerge, whether a person has turned on concierge.mayMerge now: read it "
+        + "before saying whether you may merge, never guess and never try a merge to find out. "
         + "merge is the Concierge's, and only when a person has turned on the setting concierge.mayMerge: "
         + "it runs the platform's Merge to main for one repository (bringCurrent true: Bring current and "
         + "merge), which lands the team branch by fast-forward or a merge commit, never forced, refuses a "

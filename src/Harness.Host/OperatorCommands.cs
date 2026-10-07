@@ -388,7 +388,9 @@ public static class OperatorCommands
             return false;
         }
 
-        var check = new SolutionChecker(SolutionPlatform.ForDataRoot(dataRoot)).Check(folder);
+        // Run with `podman exec` in the control container, whose role says plugins run on workers.
+        var control = Harness.Contracts.HostRoles.Resolve([], Environment.GetEnvironmentVariable(Harness.Contracts.HostRoles.Variable)).Role == Harness.Contracts.HostRole.Control;
+        var check = new SolutionChecker(SolutionPlatform.ForDataRoot(dataRoot, control)).Check(folder);
 
         output.WriteLine(System.Text.Json.JsonSerializer.Serialize(
             SolutionEndpoints.Body(check), System.Text.Json.JsonSerializerOptions.Web));
