@@ -15,6 +15,7 @@ import {
   dispatchBacklogItem,
   dispatchBacklogItemToNewTeam,
   fileSystemRoots,
+  getInstanceId,
   listCatalog,
   moveBacklogItem,
   recordBacklogItemStart,
@@ -279,6 +280,8 @@ const rootOptions = ref<string[]>([]);
  * seen.
  */
 const repoSuggestions = ref<string[]>([]);
+/** What the instance answered when the settings were read; the recent repositories are kept under it. */
+const instanceId = ref<string | null>(null);
 
 /** The team a dispatch to an EXISTING team is aimed at - the record, not just the id. */
 const existingTeam = computed(() =>
@@ -852,12 +855,18 @@ async function loadNewTeamSettings() {
   newTeamSettings.value = null;
   newTeamSource.value = { agent: null };
 
-  const [catalog, roots] = await Promise.allSettled([listCatalog(), fileSystemRoots()]);
+  const [catalog, roots, instance] = await Promise.allSettled([
+    listCatalog(),
+    fileSystemRoots(),
+    getInstanceId(),
+  ]);
 
   if (catalog.status !== 'fulfilled') return;
 
+  instanceId.value = instance.status === 'fulfilled' ? instance.value : null;
+
   const defaults = applyDefaults(
-    readRemembered(),
+    readRemembered(instanceId.value),
     catalog.value,
     roots.status === 'fulfilled' ? roots.value.roots : [],
     teams.value.map((team) => team.id),
@@ -889,7 +898,11 @@ async function loadNewTeamSettings() {
     // This dialog has a repo field, behind Team settings, prefilled from the same suggestions. So
     // the remembered value is the starting point like every other field on this dialog, and it is
     // visible and editable before anything is created rather than silently absent.
-    repos: [...defaults.repoSuggestions],
+    //
+    // Only THIS INSTANCE'S list. When the instance could not say who it is, the suggestions are
+    // whatever this browser used anywhere, and putting one on a team would be a guess: they stay
+    // offered in the dropdown, nothing is prefilled.
+    repos: defaults.repoSuggestionsScope === 'instance' ? [...defaults.repoSuggestions] : [],
   };
 }
 
@@ -944,7 +957,7 @@ async function dispatchIntoNewTeam() {
       root: newTeamSettings.value.root,
       // Not a URL that was dropped for a local repository: it does not exist, so it is no suggestion.
       repos: newTeamSettings.value.repos.filter((url) => newTeamRepoChoices.value[url.trim()] !== 'use-local'),
-    });
+    }, instanceId.value);
 
     clearNewTeamRefusal();
     closeDispatch();

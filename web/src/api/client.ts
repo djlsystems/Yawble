@@ -974,6 +974,21 @@ export const getWip = () => json<WipView>('/api/wip')
  */
 export const getCapacity = () => json<CapacityView>('/api/capacity')
 
+/**
+ * THE INSTANCE'S OWN ID, a GUID written once at its first start, or null when it cannot be told.
+ * `GET /api/ledger/export` is where the platform answers it; `before=0` asks for a page with no
+ * rows, so only the id comes back. Browser storage that must not outlive an uninstall at the same
+ * address is keyed by it.
+ */
+export async function getInstanceId(): Promise<string | null> {
+  try {
+    const answer = await json<{ instanceId?: unknown }>('/api/ledger/export?before=0&take=1')
+    return typeof answer.instanceId === 'string' && answer.instanceId !== '' ? answer.instanceId : null
+  } catch {
+    return null
+  }
+}
+
 /** Every instance-wide setting, with where each value came from, and the file-browser roots. */
 export const getTenantSettings = async (): Promise<TenantSettings> =>
   normaliseTenantSettings(await json<unknown>('/api/tenant/settings'))
