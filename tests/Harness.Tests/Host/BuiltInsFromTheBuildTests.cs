@@ -543,6 +543,23 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.Contains("The `repo` tool's status says whether it is on now (`conciergeMayMerge`)", backlog, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A general "may you merge?" names no team: both skills send the Concierge to `repo` with no
+    /// team, which answers the setting alone, and have it answer with a plain yes or no rather than
+    /// asking for a team.
+    /// </summary>
+    [Fact]
+    public void The_concierge_answers_a_general_may_you_merge_question_from_the_repo_tool_with_no_team_with_a_plain_yes_or_no()
+    {
+        var concierge = Flat(BuiltInSkills.Find("concierge")!.Body);
+        Assert.Contains("`repo` with no team answers the setting alone, and `repo team: <id>` carries it with that team's status.", concierge, StringComparison.Ordinal);
+        Assert.Contains("Answer a general question - may you merge? - with a plain yes or no from that read; never ask for a team to answer it.", concierge, StringComparison.Ordinal);
+
+        var backlog = Flat(BuiltInSkills.Find("running-the-backlog")!.Body);
+        Assert.Contains("`repo` with no team answers it alone, with no team named.", backlog, StringComparison.Ordinal);
+        Assert.Contains("Answer a general question - may you merge? - with a plain yes or no from that read; never ask for a team to answer it.", backlog, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void The_backlog_running_skill_merges_through_the_repo_tool_only_when_the_person_turned_it_on()
     {

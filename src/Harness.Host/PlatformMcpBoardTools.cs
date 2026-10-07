@@ -257,6 +257,7 @@ public sealed partial class PlatformMcpTools
         + "action is status (the default) or merge. "
         + "status answers conciergeMayMerge, whether a person has turned on concierge.mayMerge now: read it "
         + "before saying whether you may merge, never guess and never try a merge to find out. "
+        + "For the Concierge, status with no team answers that setting alone. "
         + "merge is the Concierge's, and only when a person has turned on the setting concierge.mayMerge: "
         + "it runs the platform's Merge to main for one repository (bringCurrent true: Bring current and "
         + "merge), which lands the team branch by fast-forward or a merge commit, never forced, refuses a "
@@ -264,7 +265,7 @@ public sealed partial class PlatformMcpTools
         + "and a member. This is harness repo. It does not fetch, rebase, push, or delete a branch. "
         + "Those are a person's buttons. Do not request /api yourself, and do not guess a path.")]
     public async Task<string> Repo(
-        [Description("Team id. Required for a Concierge. Omit for a member of a team.")] string? team = null,
+        [Description("Team id. Required for a Concierge, except status with no team, which answers whether it may merge now. Omit for a member of a team.")] string? team = null,
         [Description("Ask origin again. Omit to read the status already recorded.")] bool? refresh = null,
         [Description("status (the default) or merge.")] string? action = null,
         [Description("The repository's name, for merge, as the status names it.")] string? repo = null,
@@ -279,6 +280,11 @@ public sealed partial class PlatformMcpTools
         }
 
         var resolved = await TeamAsync(team, cancellationToken);
+        if (resolved is null && verb == "status" && IsConciergeCaller())
+        {
+            return await MayMergeAsync(cancellationToken);
+        }
+
         if (resolved is null)
         {
             return verb == "merge"
@@ -313,6 +319,30 @@ public sealed partial class PlatformMcpTools
         if (reply.StartsWith("HTTP 2", StringComparison.Ordinal)) return reply;
         return MergeRefusal(reply.StartsWith("Refused: ", StringComparison.Ordinal) ? reply["Refused: ".Length..] : Explain(reply));
     }
+
+    /// <summary>
+    /// Whether the Concierge may merge now, with no team named: the tenant setting, read through the
+    /// settings route with the caller's own key at every call, so turning it off shows at once.
+    /// </summary>
+    private async Task<string> MayMergeAsync(CancellationToken ct)
+    {
+        var reply = await SendAsync(HttpMethod.Get, "/api/tenant/settings", null, ct);
+        var split = reply.Split(Environment.NewLine, 2);
+        if (!reply.StartsWith("HTTP 2", StringComparison.Ordinal) || split.Length < 2) return Explain(reply);
+
+        using var document = JsonDocument.Parse(split[1]);
+        var value = document.RootElement.GetProperty("settings").EnumerateArray()
+            .Where(setting => setting.GetProperty("name").GetString() == TenantSettings.ConciergeMayMergeName)
+            .Select(setting => setting.GetProperty("value").GetString())
+            .SingleOrDefault();
+
+        return split[0] + Environment.NewLine
+            + JsonSerializer.Serialize(new { conciergeMayMerge = value == "on" });
+    }
+
+    private bool IsConciergeCaller() =>
+        http.HttpContext is not null
+        && PrincipalClaims.From(http.HttpContext.User) is { Kind: PrincipalKind.TenantConcierge or PrincipalKind.Concierge };
 
     /// <summary>
     /// A merge refusal: it starts <c>Refused:</c>, names the tool and the setting, and carries no URL
