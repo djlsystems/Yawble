@@ -41,3 +41,19 @@ export function localStretch(from: number, to: number, timeZone?: string): strin
 
   return `${localTime(from, options)} – ${localTime(to, options)}`
 }
+
+/**
+ * An instant's calendar day as `2026-10-06`, in the browser's zone. Never the wire string's first ten
+ * characters: those are the UTC day, which late in an American evening is already tomorrow. Empty
+ * for nothing, or for what is not a time.
+ */
+export function localDay(iso: string | null | undefined): string {
+  if (!iso) return ''
+
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+
+  const pad = (value: number) => String(value).padStart(2, '0')
+
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
+}

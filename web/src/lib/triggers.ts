@@ -416,14 +416,15 @@ function formatClock(hours: string, minutes: string, seconds: string): string {
     : `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}`
 }
 
-function formatInstantUtc(instant: Date): string {
-  const year = instant.getUTCFullYear().toString().padStart(4, '0')
-  const month = (instant.getUTCMonth() + 1).toString().padStart(2, '0')
-  const day = instant.getUTCDate().toString().padStart(2, '0')
-  const hours = instant.getUTCHours().toString().padStart(2, '0')
-  const minutes = instant.getUTCMinutes().toString().padStart(2, '0')
+/** An instant on the browser's own clock, as the editor's local date-time field takes it. */
+function formatInstantLocal(instant: Date): string {
+  const year = instant.getFullYear().toString().padStart(4, '0')
+  const month = (instant.getMonth() + 1).toString().padStart(2, '0')
+  const day = instant.getDate().toString().padStart(2, '0')
+  const hours = instant.getHours().toString().padStart(2, '0')
+  const minutes = instant.getMinutes().toString().padStart(2, '0')
 
-  return `${year}-${month}-${day} ${hours}:${minutes} UTC`
+  return `${year}-${month}-${day} ${hours}:${minutes}`
 }
 
 function splitCron(expression: string): string[] {
@@ -548,7 +549,7 @@ export function triggerSentence(trigger: TriggerShape, definition?: EventDefinit
     if (!trigger.fireAt) return 'once'
     const instant = new Date(trigger.fireAt)
     if (Number.isNaN(instant.getTime())) return 'once'
-    return `once, at ${formatInstantUtc(instant)}`
+    return `once, at ${formatInstantLocal(instant)}`
   }
 
   if (!trigger.expression?.trim()) return 'custom cron'

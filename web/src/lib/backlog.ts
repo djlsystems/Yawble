@@ -1,6 +1,7 @@
 import type { BacklogItemView } from '../api/client'
 import type { BacklogInFlight, BacklogLanded, BacklogStranded } from '../api/types'
 import { MAXIMUM_BACKLOG_TITLE_LENGTH } from './rules'
+import { localTime } from './localTime'
 
 /**
  * The sortable columns on the backlog table.
@@ -314,7 +315,10 @@ export function landedMark(landed: BacklogLanded | null | undefined): LandedMark
 
   // The server's own sentence goes on the end rather than replacing the headline: it says WHICH
   // branch and WHICH remote, which is the detail, and the headline is what the reading MEANS.
-  const detail = (landed.detail ?? '').trim()
+  // WHEN comes as data and is read on the person's own clock: the server's sentence names no time.
+  const detail = [(landed.detail ?? '').trim(), when('Proven', landed.landedAt), when('Read', landed.readAt)]
+    .filter((part) => part !== '')
+    .join(' ')
 
   return {
     state,
@@ -322,6 +326,13 @@ export function landedMark(landed: BacklogLanded | null | undefined): LandedMark
     icon: reading.icon,
     title: detail === '' ? reading.long : `${reading.long} ${detail}`,
   }
+}
+
+/** "Proven 10/6/2026, 7:34:00 PM." in the browser's zone, or nothing for no time. */
+function when(label: string, iso: string | null | undefined): string {
+  const ms = iso ? Date.parse(iso) : NaN
+
+  return Number.isNaN(ms) ? '' : `${label} ${localTime(ms, { date: true })}.`
 }
 
 /**

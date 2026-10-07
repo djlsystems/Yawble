@@ -62,7 +62,9 @@ public static class BacklogLandedStates
 /// <param name="Detail">
 /// ONE SENTENCE A PERSON CAN READ WITHOUT KNOWING ANY OF THIS. It is the whole value of
 /// <c>unknown</c>: four items can read <c>unknown</c> for four different reasons, and a screen that
-/// showed only the word would send the reader to the terminal every time.
+/// showed only the word would send the reader to the terminal every time. It names no time:
+/// <see cref="ReadAt"/> and <see cref="LandedAt"/> carry them, and the screen reads them on the
+/// person's own clock.
 /// </param>
 /// <param name="ReadAt">
 /// In contributor mode the answer is GitHub's, about the recorded pull request, and this is
@@ -267,7 +269,9 @@ public static class BacklogLandedState
             at, System.Globalization.CultureInfo.InvariantCulture,
             System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : null;
 
-        var stamp = when?.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture) ?? at;
+        // WHEN is data, on LandedAt, and the screen reads it on the person's own clock; the sentence
+        // names it only when the stored text is not a time at all.
+        var proven = when is null ? $"when it was proven at {at}" : "when it was proven";
         var what = dispatch.LandedSha is { } sha && dispatch.LandedBranch is { } branch && !sha.Contains(' ')
             ? $"{Short(sha)} was on origin/{branch}"
             : $"the work was on the default branch ({dispatch.LandedSha} on {dispatch.LandedBranch})";
@@ -275,7 +279,7 @@ public static class BacklogLandedState
         return new BacklogLanded(
             BacklogLandedStates.Landed,
             dispatch.TeamId,
-            $"{what} when it was proven at {stamp}. Proven landed is kept after the branch or the team is gone.",
+            $"{what} {proven}. Proven landed is kept after the branch or the team is gone.",
             LandedAt: when);
     }
 
@@ -874,14 +878,14 @@ public static class BacklogLandedState
         }
 
         var pull = reading.PullRequest;
-        var when = pull.ReadAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture);
+        // When GitHub answered rides as ReadAt, for the screen to read on the person's own clock.
         if (reading.UnknownReason is { } why)
         {
             return new BacklogLanded(
                 BacklogLandedStates.Unknown,
                 stored,
                 $"GitHub could not say what pull request #{pull.Number} ({pull.Url}) is now: {why} "
-                + $"The last answer, read {when}, was {pull.State}.",
+                + $"The last answer was {pull.State}.",
                 pull.ReadAt);
         }
 
@@ -893,7 +897,7 @@ public static class BacklogLandedState
             _ => $"pull request #{pull.Number} ({pull.Url}) is in a state this platform does not know: {pull.State}.",
         };
 
-        return new BacklogLanded(reading.Landing, stored, $"{sentence} Read {when}.", pull.ReadAt);
+        return new BacklogLanded(reading.Landing, stored, sentence, pull.ReadAt);
     }
 
     private static async Task<bool> ResolvesAsync(

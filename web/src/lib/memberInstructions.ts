@@ -1,3 +1,5 @@
+import { localDay } from './localTime'
+
 /**
  * A member's OWN INSTRUCTIONS: `systemPrompt` on the member row, added to its prompt after the
  * built-in role prompt and before the team instructions. A Manager writes them once, when it hires;
@@ -35,8 +37,7 @@ export interface InstructionsProvenance {
  * the Manager. A person's line says "Set by" for a hire and an edit alike: the row does not tell
  * the two apart, and "Edited" would be wrong for a person's own hire.
  *
- * The date is the UTC calendar day of `systemPromptSetAt`, so the line reads the same wherever it
- * is opened.
+ * The date is the calendar day of `systemPromptSetAt` in the browser's zone, the person's own day.
  */
 export function instructionsWrittenBy(provenance: InstructionsProvenance | null | undefined): string | null {
   if (!provenance) return null
@@ -54,10 +55,5 @@ export function instructionsWrittenBy(provenance: InstructionsProvenance | null 
 }
 
 function calendarDay(iso: string | null | undefined): string | null {
-  if (!iso) return null
-
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return null
-
-  return at.toISOString().slice(0, 10)
+  return localDay(iso) || null
 }

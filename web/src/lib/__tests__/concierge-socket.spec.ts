@@ -44,6 +44,20 @@ describe('connectConcierge', () => {
     expect(url.searchParams.get('rows')).toBe('40');
   });
 
+  it("names the browser's time zone on the connect, so the Concierge states times in the person's zone", () => {
+    const zone = process.env.TZ;
+    process.env.TZ = 'America/New_York';
+
+    try {
+      connectConcierge({ cols: 120, rows: 40 }, handlers);
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+
+    expect(FakeSocket.opened[0]!.url.searchParams.get('tz')).toBe('America/New_York');
+  });
+
   it('sends a keystroke as binary and a resize as control JSON', () => {
     const socket = connectConcierge({ cols: 80, rows: 24 }, handlers);
     socket.sendInput('a');

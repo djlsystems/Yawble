@@ -80,6 +80,7 @@ import {
   type BacklogSort,
 } from '../lib/backlog';
 import { vResizableColumns } from '../lib/resizableColumns';
+import { localDay } from '../lib/localTime';
 import { solutionNotice, type SolutionNoticeView } from '../lib/solutionNotice';
 import { workflowNumberTitle } from '../lib/workflowNumber';
 
@@ -1242,10 +1243,10 @@ function down(index: number) {
                   {{ whyDispatchDisabled(row) }}
                 </span>
               </td>
-              <td class="backlog-when">{{ row.createdAt.slice(0, 10) }}</td>
-              <td class="backlog-when">{{ row.updatedAt.slice(0, 10) }}</td>
+              <td class="backlog-when">{{ localDay(row.createdAt) }}</td>
+              <td class="backlog-when">{{ localDay(row.updatedAt) }}</td>
               <td v-if="tab === 'archived'" class="backlog-when">
-                {{ (row.archivedAt ?? '').slice(0, 10) }}
+                {{ localDay(row.archivedAt) }}
               </td>
               <td class="text-right" @click.stop>
                 <template v-if="tab === 'backlog'">
@@ -1449,7 +1450,7 @@ function down(index: number) {
 
         <div v-if="selected.implementedBy" class="q-mt-md text-caption os-text-muted backlog-implemented-by">
           Marked implemented by {{ selected.implementedBy.by }}<span v-if="selected.implementedBy.viaConcierge">
-          (through the Concierge)</span>, {{ selected.implementedBy.at.slice(0, 10) }}
+          (through the Concierge)</span>, {{ localDay(selected.implementedBy.at) }}
         </div>
 
         <div v-if="selected.dispatches.length > 0" class="q-mt-md">

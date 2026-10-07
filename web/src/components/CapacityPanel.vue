@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import type { CapacitySample, RunFigures } from '../api/types';
 import {
+  MemoryWhose,
   NotMeasured,
   ageWords,
   bytesWords,
@@ -84,7 +85,7 @@ function onWorker(run: RunFigures): string {
       </div>
 
       <section class="q-mb-sm" data-test="capacity-memory">
-        <div class="text-subtitle2">Memory</div>
+        <div class="text-subtitle2">{{ MemoryWhose }}</div>
         <div class="row items-center no-wrap q-gutter-x-sm">
           <div class="col text-body2">{{ memoryWords(sample) }}</div>
           <svg

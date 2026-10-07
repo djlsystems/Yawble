@@ -51,6 +51,11 @@ export function connectConcierge(
   url.searchParams.set('cols', String(size.cols));
   url.searchParams.set('rows', String(size.rows));
 
+  // THE PERSON'S TIME ZONE, an IANA name, for the reason the geometry rides here: the Concierge's
+  // environment is fixed at spawn. It states every time in this zone, the one the page shows.
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (timeZone) url.searchParams.set('tz', timeZone);
+
   const socket = new WebSocket(url);
   socket.binaryType = 'arraybuffer';
 

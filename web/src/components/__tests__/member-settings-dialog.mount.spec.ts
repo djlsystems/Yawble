@@ -317,18 +317,27 @@ describe('MemberSettingsDialog, the member\'s own instructions', () => {
     wrapper.unmount();
   });
 
-  it('names the person who last set them, and the day', async () => {
-    getMember.mockResolvedValue(detail({
-      systemPrompt: 'You review pull requests.',
-      systemPromptSetBy: 'admin@example.com',
-      systemPromptSetByKind: 'person',
-      systemPromptSetAt: '2026-09-27T23:30:00Z',
-    }));
-    const wrapper = await mountSettings();
+  // The person's own day: 02:30 UTC on the 28th is still the 27th in New York.
+  it('names the person who last set them, and the day in their own time zone', async () => {
+    const zone = process.env.TZ;
+    process.env.TZ = 'America/New_York';
 
-    expect(writtenBy()).toBe('Set by admin@example.com, 2026-09-27');
+    try {
+      getMember.mockResolvedValue(detail({
+        systemPrompt: 'You review pull requests.',
+        systemPromptSetBy: 'admin@example.com',
+        systemPromptSetByKind: 'person',
+        systemPromptSetAt: '2026-09-28T02:30:00Z',
+      }));
+      const wrapper = await mountSettings();
 
-    wrapper.unmount();
+      expect(writtenBy()).toBe('Set by admin@example.com, 2026-09-27');
+
+      wrapper.unmount();
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
   });
 
   it('says nothing about who wrote them when nobody is recorded', async () => {

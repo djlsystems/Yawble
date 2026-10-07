@@ -64,6 +64,13 @@ function percent(value: number): string {
   return `${Math.round(value)}%`
 }
 
+/**
+ * WHOSE MEMORY the figure is: this worker's container against the container's own limit. The
+ * engine's total (the size screen, doctor) is another, larger figure; unnamed, the two read as a
+ * disagreement.
+ */
+export const MemoryWhose = "Memory of this worker's container, against its own limit"
+
 /** "11.2 of 12.9 GB in use (87%)", "11.2 GB in use, no limit", or "not measured". */
 export function memoryWords(sample: CapacitySample): string {
   const { inUseBytes, limitBytes, unlimited, percentOfLimit } = sample.memory
@@ -153,7 +160,7 @@ export function gauge(sample: CapacitySample | null, age: { ageSeconds: number |
   const candidates: Candidate[] = []
   const memory = sample.memory.percentOfLimit
   if (memory !== null) {
-    candidates.push({ rank: rankOf(memory), reason: `Memory: ${memoryWords(sample)}` })
+    candidates.push({ rank: rankOf(memory), reason: `${MemoryWhose}: ${memoryWords(sample)}` })
   }
 
   for (const [pressure, resource] of [

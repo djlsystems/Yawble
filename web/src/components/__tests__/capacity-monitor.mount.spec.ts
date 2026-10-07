@@ -87,7 +87,9 @@ describe('the app-bar gauge', () => {
 
     const red = await mountGauge(memoryAt(95));
     expect(level(red)).toBe('red');
-    expect(label(red)).toBe('Activity monitor: Memory: 12.3 of 12.9 GB in use (95%)');
+    expect(label(red)).toBe(
+      "Activity monitor: Memory of this worker's container, against its own limit: 12.3 of 12.9 GB in use (95%)",
+    );
   });
 
   it('turns red on memory pressure with memory low, and its tooltip says pressure set it', async () => {
@@ -158,6 +160,16 @@ describe('the dropdown', () => {
     expect(section(wrapper, 'cpu')).toContain('1.0 of 4 CPUs in use (25%)');
     expect(section(wrapper, 'pids')).toContain('312 of 4096 processes');
     expect(wrapper.findAll('svg.capacity-spark')).toHaveLength(2);
+  });
+
+  // The engine's total (the size screen, doctor) is another figure: this one is the container's
+  // own memory against the container's own limit, and says so rather than reading as a disagreement.
+  it("names the memory figure as this worker's container against its own limit", async () => {
+    const wrapper = await mountPanel(memoryAt(87));
+
+    expect(wrapper.get('[data-test="capacity-memory"] .text-subtitle2').text()).toBe(
+      "Memory of this worker's container, against its own limit",
+    );
   });
 
   it('shows runs running and waiting against the limit, the reserved slot, and each waiter\'s reason', async () => {
