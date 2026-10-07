@@ -13,6 +13,8 @@ credential ever leaves the Host.
   member should act on belongs here. See [architecture.md](architecture.md#the-shared-agent-home).
 - **For plugin authors:** declare a slot in the manifest and read the token on stdin; see
   [plugins.md](plugins.md#connections-oauth-accounts).
+- **A mailbox with an app password** (kind `imap`) is a connection too, with no OAuth at all: see
+  [A mailbox with an app password](#a-mailbox-with-an-app-password-imap).
 
 ## Providers
 
@@ -282,6 +284,67 @@ redirect app with a client secret, unchanged.
 
 Microsoft rotates the refresh token on use; the Host stores each new one before it hands out the
 access token, and serialises the refreshes of one connection so two members sharing it never race.
+
+## A mailbox with an app password (IMAP)
+
+The simplest way to connect a mailbox. Gmail, iCloud and Yahoo each issue an **app password**: a
+password for one program, made in a minute in the account's security settings, that you can revoke at
+any time without changing your own. No OAuth client, Google review or client secret is involved.
+Microsoft (Outlook, Microsoft 365) has switched password access off; connect it as above.
+
+**Make the app password first**, at the provider:
+
+- **Gmail** - it needs 2-Step Verification on the Google account; then Google Account → Security →
+  App passwords (https://support.google.com/accounts/answer/185833).
+- **iCloud** - it needs two-factor authentication on the Apple Account; then account.apple.com →
+  Sign-In and Security → App-Specific Passwords (https://support.apple.com/en-us/102654).
+- **Yahoo** - Account security → Generate app password (https://help.yahoo.com/kb/SLN15241.html).
+
+**Then add it:** Admin → **Connections** → **Add connection**, choose the mailbox's provider - Gmail,
+iCloud, Yahoo or Other - and fill in:
+
+| Field | What goes in |
+|---|---|
+| Email address | The mailbox's address: the connection's account. |
+| Username | What the mail server signs in with: usually the address (the default). iCloud's IMAP takes the part before the @; with a username that has no @, the Host signs in to SMTP with the full address, as Apple's settings say. |
+| App password | The app password you just made. Write-only: the connection afterwards shows only that a password is set. |
+| IMAP server, port, security | Filled in from the provider's published settings and editable; empty for Other. Security is `TLS` (encrypted from the first byte) or `STARTTLS`. |
+| SMTP server, port, security | The same, for sending. |
+| Name (optional) | What the connection is called in Connections and a slot's picker; the address when left empty. |
+
+| Preset | IMAP | SMTP | Published at |
+|---|---|---|---|
+| Gmail | imap.gmail.com:993 TLS | smtp.gmail.com:465 TLS | https://developers.google.com/workspace/gmail/imap/imap-smtp |
+| iCloud | imap.mail.me.com:993 TLS | smtp.mail.me.com:587 STARTTLS | https://support.apple.com/en-us/102525 |
+| Yahoo | imap.mail.yahoo.com:993 TLS | smtp.mail.yahoo.com:465 TLS | https://help.yahoo.com/kb/SLN4075.html |
+| Other | typed | typed | your provider's help |
+
+**The login test.** When you save, the Host logs in to the IMAP server and authenticates to the SMTP
+server with exactly these settings, over a socket from the Host (no program is started), and answers
+in one sentence: "Connected: 1,240 messages in Inbox", or what to fix - "The server refused the
+password. For Gmail, make an app password: it needs 2-Step Verification.", "Could not reach
+imap.example.com on port 993." A mailbox whose first login is refused, or whose server cannot be
+reached, **is not saved**. Save shows the sentence under the form; fix what it names and Save again.
+
+**What the password is used for, and where it is.** Only to sign in to that mailbox's IMAP and SMTP
+servers: by the Host, for the login test and before a run, and by a plugin member a person bound to
+it, which receives it on stdin for that run (see
+[plugins.md](plugins.md#connections-oauth-accounts)). It is stored only as Data Protection ciphertext
+under `<dataRoot>/keys`, like a refresh token; no route, tenant row, log, diagnostic, report or file
+carries it, and everything the plugin writes has it redacted. A connection answers `passwordSet`,
+never the password. Disconnecting deletes it.
+
+**Before a run** the Host trusts the mailbox's last good login for 10 minutes; after that it logs in
+again first. A login the server **refuses** later - the app password was revoked, the account's
+password changed - marks the connection `needs reconnect` with that sentence, and every run of a member
+bound to it is blocked with a sentence naming the connection and Admin → Connections. **Update
+password** there logs in with the new one and, only when that works, stores it and clears the mark. A
+server that cannot be reached blocks only that run.
+
+The routes (people only): `GET /api/connections/imap/presets`, `POST /api/connections/imap`,
+`PUT /api/connections/{id}/password`; rename and disconnect are the routes every connection uses.
+Each write - add, update password, rename, disconnect, a member's binding - lands with its
+`tenant_events` row in the same transaction, or does not happen. Pinned by `ImapConnectionsTests`.
 
 ## When a connection needs reconnecting
 

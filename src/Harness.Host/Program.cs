@@ -625,9 +625,12 @@ builder.Services.AddSingleton(sp => new ReleaseCheck(
 builder.Services.AddHostedService<ReleaseCheckLoop>();
 builder.Services.AddSingleton<IOAuthEndpoints>(sp => new HttpOAuthEndpoints(
     sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(HttpOAuthEndpoints))));
+// A MAILBOX's login test: IMAP and SMTP over a socket in the Host, no process. Tests replace it with
+// one pointed at a fake server in the test process.
+builder.Services.AddSingleton<IMailLogin>(new SocketMailLogin());
 builder.Services.AddSingleton(sp => new Connections(
     sp.GetRequiredService<ConnectionStore>(), sp.GetRequiredService<IOAuthEndpoints>(), sp.GetRequiredService<TimeProvider>(),
-    sp.GetRequiredService<IUserStore>()));
+    sp.GetRequiredService<IUserStore>(), mail: sp.GetRequiredService<IMailLogin>()));
 builder.Services.AddSingleton(sp => new ConnectRequests(
     sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
     sp.GetRequiredService<TeamRegistry>()));

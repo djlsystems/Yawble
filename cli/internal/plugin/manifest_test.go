@@ -112,6 +112,9 @@ func TestConnectionSlots(t *testing.T) {
 		`,"connections":{"mail":{"providers":["google"],"scopes":{"google":[" "]}}}`:       "`connections.mail.scopes.google` must be a list of scope strings",
 		`,"connections":{"mail":{"providers":["custom-` + strings.Repeat("a", 34) + `"]}}`: "which is not a provider",
 		`,"connections":{"mail":{"providers":["custom-` + strings.Repeat("a", 33) + `"]}}`: "",
+		`,"connections":{"mail":{"providers":["imap"],"required":true}}`:                   "",
+		`,"connections":{"mail":{"providers":["google","imap"],"scopes":["read"]}}`:        "",
+		`,"connections":{"mail":{"providers":["imap"],"scopes":{"imap":["INBOX"]}}}`:       "scopes do not apply to an imap connection",
 	} {
 		_, _, err := Parse(manifest(extra))
 		got := ""

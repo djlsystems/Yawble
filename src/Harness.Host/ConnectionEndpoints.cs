@@ -142,6 +142,70 @@ public static class ConnectionEndpoints
                 + "`connectedAt`, `refreshedAt`, `status` (`ok` or `needs-reconnect`, with the provider's "
                 + "`statusReason`) and `usedBy` (`team`, `member`, `label`, `slot`). Never a token.");
 
+        app.MapGet("/api/connections/imap/presets", () => Results.Ok(MailPresets.All.Select(p => p.View())))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("The mail providers a mailbox connection can start from")
+            .WithDescription(
+                "Gmail, iCloud, Yahoo and Other, in that order: each `{ id, name, imap, smtp }`, a server "
+                + "`{ host, port, security: TLS|STARTTLS }` as the provider publishes it, or null for Other, "
+                + "whose fields are typed. The servers are a starting point: a mailbox may change any of them.");
+
+        app.MapPost("/api/connections/imap", async (
+            AddMailbox request, Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
+        {
+            MailboxAnswer answer;
+
+            try
+            {
+                answer = await connections.AddMailboxAsync(Actor(context), request, ct);
+            }
+            catch (SqliteException exception)
+            {
+                return Unrecorded("The mailbox was not saved", exception);
+            }
+
+            return MailboxResult(answer, teams);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Add a mailbox connection (IMAP and SMTP, with an app password)")
+            .WithDescription(
+                "Body `{ preset?, name?, account, username?, password, imap: { host, port, security }, smtp: "
+                + "{ host, port, security } }`; `security` is TLS or STARTTLS, `username` defaults to the "
+                + "account, `name` to the account. The Host logs in to IMAP and authenticates to SMTP with them "
+                + "first. 200 `{ sentence, connection }` (\"Connected: 1,240 messages in Inbox\"); a refused or "
+                + "unreachable login saves nothing and answers 422 with its sentence in `error`; a field that "
+                + "is wrong answers 400 naming it. The password is stored encrypted with the instance's Data "
+                + "Protection keys and never answered: the connection says `passwordSet`. Saved with a "
+                + "`connections.connected` tenant row in the same transaction.");
+
+        app.MapPut("/api/connections/{id}/password", async (
+            [Description("The mailbox connection's id.")] string id,
+            MailboxPassword request, Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
+        {
+            MailboxAnswer answer;
+
+            try
+            {
+                answer = await connections.UpdateMailboxPasswordAsync(Actor(context), id, request.Password, ct);
+            }
+            catch (SqliteException exception)
+            {
+                return Unrecorded("The password was not updated", exception);
+            }
+
+            return MailboxResult(answer, teams);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Update a mailbox's app password")
+            .WithDescription(
+                "Body `{ password }`. The Host logs in with the mailbox's servers and the new password first; "
+                + "only then is it stored, `needs-reconnect` cleared and a `connections.password-updated` "
+                + "tenant row written, in one transaction. 200 `{ sentence, connection }`; a refused login "
+                + "changes nothing and answers 422 with its sentence in `error`. 400 for an OAuth connection.");
+
         app.MapPost("/api/connections/start", async (
             StartConnection request, Connections connections, HttpContext context, CancellationToken ct) =>
         {
@@ -315,6 +379,10 @@ public static class ConnectionEndpoints
                 + "the result is a `connections.revoked` tenant row, and a failed revoke never blocks. 204.");
     }
 
+    private static IResult MailboxResult(MailboxAnswer answer, TeamRegistry teams) => answer.Connection is { } connection
+        ? Results.Ok(new { sentence = answer.Sentence, connection = View(connection, [], teams) })
+        : Results.Json(new { error = answer.Error }, statusCode: answer.Status);
+
     /// <summary>What a flow nobody may read answers: the same for a missing flow and another person's.</summary>
     public const string MissingFlow = "There is no such sign-in, or it was not started by you. Start again.";
 
@@ -411,7 +479,20 @@ public static class ConnectionEndpoints
         status = connection.Status,
         statusReason = connection.StatusReason,
         usedBy = UsedBy(uses, teams),
+        kind = KindOf(connection),
+        username = connection.Mailbox?.Username,
+        imap = Server(connection.Mailbox?.Imap),
+        smtp = Server(connection.Mailbox?.Smtp),
+        preset = connection.Mailbox?.Preset,
+        passwordSet = connection.Mailbox?.PasswordSet,
     };
+
+    /// <summary><c>imap</c> for a mailbox, <c>oauth</c> for an account signed in at a provider.</summary>
+    public static string KindOf(ConnectionRecord connection) => connection.Mailbox is null ? "oauth" : MailboxSettings.Kind;
+
+    /// <summary>A mailbox's server as every answer shows it, or null.</summary>
+    public static object? Server(MailServer? server) =>
+        server is null ? null : new { host = server.Host, port = server.Port, security = server.Security };
 
     private static object[] UsedBy(IEnumerable<ConnectionUse> uses, TeamRegistry teams)
     {

@@ -125,7 +125,7 @@ public static class ConnectionProviders
 
     public static bool IsKnownId(string id) => IsBuiltIn(id) || IsCustomId(id);
 
-    public static string KindOf(string id) => IsBuiltIn(id) ? id : Custom;
+    public static string KindOf(string id) => IsBuiltIn(id) || id == MailboxSettings.Kind ? id : Custom;
 
     /// <summary>A person-facing name for a provider id or manifest provider word.</summary>
     public static string Display(string id) => id switch
@@ -133,6 +133,7 @@ public static class ConnectionProviders
         Google => "Google",
         Microsoft => "Microsoft",
         Custom => "custom",
+        MailboxSettings.Kind => "mailbox (IMAP)",
         _ => id,
     };
 
@@ -205,7 +206,8 @@ public static class ConnectionProviders
 
     /// <summary>
     /// Whether a manifest's provider word <paramref name="allowed"/> admits a connection of provider
-    /// <paramref name="providerId"/>: the same id, or <c>custom</c> for every custom provider.
+    /// <paramref name="providerId"/>: the same id (<c>imap</c> for a mailbox), or <c>custom</c> for
+    /// every custom provider.
     /// </summary>
     public static bool Admits(string allowed, string providerId) =>
         allowed == providerId || (allowed == Custom && IsCustomId(providerId));

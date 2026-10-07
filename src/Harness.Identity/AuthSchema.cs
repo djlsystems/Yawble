@@ -556,5 +556,28 @@ public static class AuthSchema
                 set_at          TEXT NOT NULL
             );
             """),
+
+        // A MAILBOX CONNECTION: an account at a mail server reached with an app password over IMAP
+        // and SMTP. Its `connections` row has provider `imap`, no scopes and no tokens; this row
+        // holds the servers, the username, the preset it was made from (NULL for none) and the app
+        // password as Data Protection ciphertext under the instance's `<dataRoot>/keys`. No column
+        // holds the password or any part of it. Removed with its connection, in the same
+        // transaction.
+        new MigrationStep(
+            "auth-020",
+            """
+            CREATE TABLE imap_connections (
+                id                 TEXT PRIMARY KEY,
+                username           TEXT NOT NULL,
+                imap_host          TEXT NOT NULL,
+                imap_port          INTEGER NOT NULL,
+                imap_security      TEXT NOT NULL,
+                smtp_host          TEXT NOT NULL,
+                smtp_port          INTEGER NOT NULL,
+                smtp_security      TEXT NOT NULL,
+                preset             TEXT NULL,
+                password_protected TEXT NOT NULL
+            );
+            """),
     ];
 }

@@ -289,6 +289,8 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
         id = c.Id, name = c.Name, provider = c.Provider, account = c.Account, scopes = c.Scopes,
         connectedAt = c.ConnectedAt, refreshedAt = c.RefreshedAt, status = c.Status, statusReason = c.StatusReason,
         usedBy = uses.Select(u => new { team = u.Team, member = u.Member, label = u.Member, slot = u.Slot }),
+        kind = ConnectionEndpoints.KindOf(c), username = c.Mailbox?.Username, imap = ConnectionEndpoints.Server(c.Mailbox?.Imap),
+        smtp = ConnectionEndpoints.Server(c.Mailbox?.Smtp), preset = c.Mailbox?.Preset, passwordSet = c.Mailbox?.PasswordSet,
     };
 
     /// <summary>A .tmp then a rename, so the CLI never reads half a report; the Host's alone (0600).</summary>
