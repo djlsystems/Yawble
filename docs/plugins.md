@@ -704,7 +704,11 @@ for an `enum`, chips for a `list`), each with its description, default, whether 
 inputs; and a read-only view of the JSON that will be stored. It saves only the fields that differ from
 their default. Each connection slot is a picker listing the connections of the providers the slot
 allows; a connection lacking a scope the slot asks for is refused with a sentence that offers
-Reconnect.
+Reconnect. A required slot left unbound says, in grey, that the member's runs are blocked until a
+connection is chosen there; it is not a refusal, because the picker and Connect are right beside it.
+At hire, Add member also says under each secret's key whether the Host has that key set and, when
+not, the commands that set it, from `GET /api/secrets/{key}` (`{ key, set, refusal, setWith }`, a
+person's; asked by name, the value is never read into an answer).
 
 - `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the stored
   `config`, `secrets` as logical keys (never a value), the manifest's `fields` and `secretFields`,

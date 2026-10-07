@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { addMember, listCatalog, listPlugins } from '../api/client';
+import { addMember, getSecretKey, listCatalog, listPlugins } from '../api/client';
 import { agentsForMode, type Agent, type InstalledPlugin } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -165,10 +165,26 @@ async function loadAgents() {
   agent.value = agents.value[0] ?? null;
 }
 
+/**
+ * Whether the chosen Agent's command is installed. None for a plugin: it is offered only because it
+ * is installed, and its install is not the Agent check. An Agent the Host has said nothing about
+ * says so, rather than a bare "Not checked".
+ */
 const getAgentStatus = (agentName: string | null) => {
-  if (!agentName || !installations.value) return null;
-  return installStatus(installationFor(installations.value, agentName));
+  if (!agentName || !installations.value || plugin.value) return null;
+  const status = installStatus(installationFor(installations.value, agentName));
+  return status.text === 'Not checked'
+    ? { ...status, text: "Not checked: this Host has not said whether this Agent's command is installed." }
+    : status;
 };
+
+/** The picker's hint: the Agents are the team's allowlist, and the plugins whatever is installed. */
+const agentHint = computed(() => {
+  if (!props.memberAgents) return 'What this member runs. Nothing is assumed — pick one.';
+  return plugins.value.length > 0
+    ? "Agents come from this team's allowlist; plugins from those installed on this Host."
+    : "Choose from this team's allowlist.";
+});
 
 watch(open, (showing) => {
   if (!showing) return;
@@ -304,14 +320,10 @@ async function submit() {
           :rules="agentRules"
           :error="agentProblem !== null ? true : undefined"
           :error-message="agentProblem ?? ''"
-          :hint="
-            memberAgents
-              ? 'Choose from this team\'s allowlist.'
-              : 'What this member runs. Nothing is assumed — pick one.'
-          "
+          :hint="agentHint"
         />
 
-        <div v-if="agent && getAgentStatus(agent)">
+        <div v-if="agent && getAgentStatus(agent)" data-agent-status>
           <q-icon
             :name="getAgentStatus(agent)!.icon"
             size="14px"
@@ -319,7 +331,7 @@ async function submit() {
             aria-hidden="true"
             :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn' }"
           />
-          <span :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn', 'os-text-muted': getAgentStatus(agent)!.tone !== 'warn' }">
+          <span :class="{ 'text-warning': getAgentStatus(agent)!.tone === 'warn', 'os-text-muted': getAgentStatus(agent)!.tone !== 'warn' }" data-agent-status-text>
             {{ getAgentStatus(agent)!.text }}
           </span>
         </div>
@@ -336,6 +348,7 @@ async function submit() {
             v-model:connections="pluginConnections"
             :shape="plugin"
             :plugin="plugin.id"
+            :check-key="getSecretKey"
           />
         </div>
 

@@ -233,6 +233,32 @@ public static class PluginEndpoints
                 + "`member.plugin-settings-changed` tenant row in the same transaction, and read by the "
                 + "member's next run. Answers as GET does.");
 
+        // WHETHER A KEY IS SET, by its name only - what a solution's preview says of each secret it
+        // binds (`set`, `setWith`), for the key a person types at a hire. The value never leaves the
+        // store; a key a plugin may never be pointed at answers its refusal and no `set`.
+        app.MapGet("/api/secrets/{key}", (
+            [Description("The logical key, as in ACME_STORAGE_KEY.")] string key,
+            ISecretStore secrets) =>
+        {
+            var refusal = EnvironmentSecretStore.Refusal(key);
+            return Results.Ok(new
+            {
+                key,
+                set = refusal is null && secrets.TryGet(key) is not null,
+                refusal,
+                setWith = Solutions.SolutionSecret.SetWithFor(key),
+            });
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Whether a secret key is set on this Host")
+            .WithDescription(
+                "`{ key, set, refusal, setWith }` for one logical key: `set` is whether the Host has a value "
+                + "for it, asked by name - the value is never read into an answer. `refusal` is the sentence a "
+                + "binding of it is refused with (not a key's form, the platform's own, a model provider's "
+                + "credential), with `set` false; null otherwise. `setWith` is how an operator sets it, as a "
+                + "solution's preview says it.");
+
         app.MapPost("/api/plugins/rescan", async (
             PluginCatalog plugins, TeamRegistry teams, TenantLogging audit, HttpContext context, CancellationToken ct) =>
         {
