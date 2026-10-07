@@ -10,6 +10,7 @@ import ActivityFeed from './ActivityFeed.vue';
 import LiveViewDialog from './LiveViewDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import TriggersDialog from './TriggersDialog.vue';
+import { workflowNumberTitle } from '../lib/workflowNumber';
 
 const props = defineProps<{
   snapshot: ContainerSnapshot;
@@ -441,7 +442,12 @@ async function stop() {
 
       <!-- The thread a human follows. M3 makes this the point of the screen, so it
            is surfaced from the start rather than added when it matters. -->
-      <div v-if="snapshot.currentCorrelation !== null" class="text-caption text-primary q-mt-xs">
+      <div
+        v-if="snapshot.currentCorrelation !== null"
+        class="text-caption text-primary q-mt-xs"
+        :title="workflowNumberTitle(snapshot.currentCorrelation)"
+        data-workflow-number
+      >
         workflow #{{ snapshot.currentCorrelation }}
       </div>
     </q-card-section>

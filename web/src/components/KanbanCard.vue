@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import type { KanbanCard } from '../api/kanban';
 import { itemLabel } from '../lib/backlog';
 import { KanbanStatusLabel, colourFor } from '../lib/kanban';
+import { workflowNumberTitle } from '../lib/workflowNumber';
 
 /**
  * One card on the board.
@@ -99,7 +100,7 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
       <!-- The workflow seq, because it is the number that GROUPS cards - the one a person quotes
            back at a manager and the one `--workflow` filters on. A card without it could
            not be found among its siblings. -->
-      <span class="k-card-workflow" :title="`Workflow #${card.workflowSeq}`">#{{ card.workflowSeq }}</span>
+      <span class="k-card-workflow" :title="workflowNumberTitle(card.workflowSeq)">#{{ card.workflowSeq }}</span>
 
       <!-- THE CARD MENU. A span for the reason the tag is one; the click stops here so it does not
            open the panel as well. -->

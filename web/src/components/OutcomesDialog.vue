@@ -54,6 +54,7 @@ import {
 import { itemLabel } from '../lib/backlog';
 import { vResizableColumns } from '../lib/resizableColumns';
 import BacklogDialog from './BacklogDialog.vue';
+import { WORKFLOW_NUMBER_HINT, workflowNumberTitle } from '../lib/workflowNumber';
 import DialogTabs from './DialogTabs.vue';
 
 /**
@@ -900,7 +901,7 @@ const history = computed<HistoryLine[]>(() => {
           <thead>
             <tr>
               <th class="text-left">Team</th>
-              <th class="text-left">Workflow</th>
+              <th class="text-left" :title="WORKFLOW_NUMBER_HINT">Workflow</th>
               <th class="text-left">State</th>
               <th class="text-left">Started</th>
               <th class="text-right">Elapsed</th>
@@ -913,7 +914,7 @@ const history = computed<HistoryLine[]>(() => {
           <tbody>
             <tr v-for="line in detail.workflows" :key="line.correlation" :data-outcome-workflow="line.correlation">
               <td class="text-left">{{ line.team ? (line.team.deleted ? `${line.team.name} (deleted)` : line.team.name) : '—' }}</td>
-              <td class="text-left mono">{{ line.correlation }}</td>
+              <td class="text-left mono" :title="workflowNumberTitle(line.correlation)" data-workflow-number>{{ line.correlation }}</td>
               <td class="text-left">{{ line.state }}</td>
               <td class="text-left">{{ when(line.startedAt) }}</td>
               <td class="text-right">{{ line.elapsedSeconds === null ? '—' : duration(line.elapsedSeconds) }}</td>

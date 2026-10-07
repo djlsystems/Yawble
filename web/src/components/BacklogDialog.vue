@@ -80,6 +80,7 @@ import {
 } from '../lib/backlog';
 import { vResizableColumns } from '../lib/resizableColumns';
 import { solutionNotice, type SolutionNoticeView } from '../lib/solutionNotice';
+import { workflowNumberTitle } from '../lib/workflowNumber';
 
 /**
  * The tenant backlog.
@@ -1442,7 +1443,7 @@ function down(index: number) {
           <div class="text-caption os-text-muted">Dispatched</div>
           <div v-for="(d, i) in selected.dispatches" :key="d.id" class="backlog-dispatch">
             <span :class="d.teamGone ? 'text-negative' : ''">{{ d.teamName }}</span>
-            <span class="os-text-muted"> · workflow #{{ d.correlation }}</span>
+            <span class="os-text-muted"> · <span :title="workflowNumberTitle(d.correlation)" data-workflow-number>workflow #{{ d.correlation }}</span></span>
             <span class="os-text-muted"> · {{ selected.stats[i]?.outcome ?? 'unknown' }}</span>
             <span class="os-text-muted">
               ·

@@ -5,6 +5,7 @@ import type { MemberId, MemberRun, TeamId } from '../api/types';
 import { liveLineTime, parseLiveLine, type LiveLine } from '../lib/liveLines';
 import { runDuration, runItemsText, runItemText, runOutcomeLabel, runStartedText, runStartedTitle } from '../lib/memberRuns';
 import { QuietMark, WorkflowDeclaredMark } from '../lib/runMarks';
+import { workflowNumberTitle } from '../lib/workflowNumber';
 
 /**
  * WATCHING ONE MEMBER. Two parts: at the top, the run in progress, streaming as it
@@ -310,7 +311,7 @@ onBeforeUnmount(end);
           <div class="text-subtitle2">Earlier runs</div>
           <div v-if="selected" class="q-ml-sm text-caption os-text-muted ellipsis earlier-run-heading">
             {{ runStartedText(selected.startedAt) }}<template v-if="selected.workflow !== null">
-              · workflow #{{ selected.workflow }}</template> · {{ runDuration(selected.durationMs) }} ·
+              · <span :title="workflowNumberTitle(selected.workflow)" data-workflow-number>workflow #{{ selected.workflow }}</span></template> · {{ runDuration(selected.durationMs) }} ·
             {{ runOutcomeLabel(selected.outcome) }}
           </div>
         </div>
@@ -379,7 +380,7 @@ onBeforeUnmount(end);
                   deferred from run {{ run.deferredFromRun }}
                 </q-item-label>
               </q-item-section>
-              <q-item-section side class="earlier-run-workflow">
+              <q-item-section side class="earlier-run-workflow" :title="run.workflow !== null ? workflowNumberTitle(run.workflow) : undefined">
                 {{ run.workflow !== null ? `workflow #${run.workflow}` : 'no workflow' }}
               </q-item-section>
               <q-item-section side class="earlier-run-duration">{{ runDuration(run.durationMs) }}</q-item-section>
