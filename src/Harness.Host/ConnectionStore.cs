@@ -17,7 +17,8 @@ public sealed record ConnectionRecord(
     DateTimeOffset ConnectedAt,
     DateTimeOffset? RefreshedAt,
     string Status,
-    string? StatusReason)
+    string? StatusReason,
+    MailboxSettings? Mailbox = null)
 {
     public const string Ok = "ok";
 
@@ -48,8 +49,9 @@ public sealed record ConnectionFlow(
 public sealed record ConnectionUse(string Team, string Member, string Slot);
 
 /// <summary>
-/// <c>oauth_providers</c>, <c>connections</c>, <c>connection_flows</c> (schema step auth-014). EVERY
-/// credential column - the client secret, the refresh and access tokens, the PKCE verifier - is
+/// <c>oauth_providers</c>, <c>connections</c>, <c>connection_flows</c> (schema step auth-014) and
+/// <c>imap_connections</c> (auth-020). EVERY credential column - the client secret, the refresh and
+/// access tokens, the PKCE verifier, a mailbox's app password - is
 /// Data Protection ciphertext under the instance's <c>&lt;dataRoot&gt;/keys</c>. Every write a person
 /// makes lands with its <c>tenant_events</c> row in the same transaction, or not at all.
 /// </summary>
@@ -182,14 +184,18 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
 
     // ---- connections ----------------------------------------------------------------------------
 
-    private const string ConnectionColumns =
-        "id, name, provider, account, scopes, connected_at, refreshed_at, status, status_reason";
+    /// <summary>A connection and, for a mailbox, its servers - never its password, only whether one is set.</summary>
+    private const string ConnectionSelect =
+        "SELECT c.id, c.name, c.provider, c.account, c.scopes, c.connected_at, c.refreshed_at, c.status, c.status_reason, "
+        + "m.username, m.imap_host, m.imap_port, m.imap_security, m.smtp_host, m.smtp_port, m.smtp_security, m.preset, "
+        + "m.password_protected IS NOT NULL "
+        + "FROM connections c LEFT JOIN imap_connections m ON m.id = c.id";
 
     public async Task<IReadOnlyList<ConnectionRecord>> ListAsync(CancellationToken ct = default)
     {
         await using var connection = Open();
         await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {ConnectionColumns} FROM connections ORDER BY name COLLATE NOCASE, id";
+        command.CommandText = $"{ConnectionSelect} ORDER BY c.name COLLATE NOCASE, c.id";
 
         var list = new List<ConnectionRecord>();
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -207,7 +213,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = $"SELECT {ConnectionColumns} FROM connections WHERE id = $id";
+        command.CommandText = $"{ConnectionSelect} WHERE c.id = $id";
         command.Parameters.AddWithValue("$id", id);
         await using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadConnection(reader) : null;
@@ -216,7 +222,12 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
     private static ConnectionRecord ReadConnection(SqliteDataReader reader) => new(
         reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), List(reader.GetString(4)),
         Time(reader.GetString(5)), NullableText(reader, 6) is { } refreshed ? Time(refreshed) : null,
-        reader.GetString(7), NullableText(reader, 8));
+        reader.GetString(7), NullableText(reader, 8),
+        reader.IsDBNull(9) ? null : new MailboxSettings(
+            reader.GetString(9),
+            new MailServer(reader.GetString(10), reader.GetInt32(11), reader.GetString(12)),
+            new MailServer(reader.GetString(13), reader.GetInt32(14), reader.GetString(15)),
+            NullableText(reader, 16), reader.GetBoolean(17)));
 
     /// <summary>The tokens, decrypted, for the Host's own refresh and run. Never answered by a route.</summary>
     public async Task<ConnectionTokens?> TokensAsync(string id, CancellationToken ct = default)
@@ -382,6 +393,14 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             if (await command.ExecuteNonQueryAsync(ct) == 0) return (false, []);
         }
 
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM imap_connections WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
         await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
         await transaction.CommitAsync(ct);
         return (true, []);
@@ -432,6 +451,113 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         }
 
         return list;
+    }
+
+    // ---- mailboxes ------------------------------------------------------------------------------
+
+    /// <summary>A new mailbox connection: its <c>connections</c> row, its servers and its app password
+    /// as ciphertext, and the tenant row, in one transaction or not at all.</summary>
+    public async Task InsertMailboxAsync(
+        ConnectionRecord record, MailboxSettings settings, string password, string? connectedBy, TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                INSERT INTO connections (id, name, provider, account, scopes, connected_at, refreshed_at, status, status_reason, connected_by)
+                VALUES ($id, $name, $provider, $account, '[]', $at, $verified, 'ok', NULL, $by)
+                """;
+            command.Parameters.AddWithValue("$id", record.Id);
+            command.Parameters.AddWithValue("$name", record.Name);
+            command.Parameters.AddWithValue("$provider", MailboxSettings.Kind);
+            command.Parameters.AddWithValue("$account", record.Account);
+            command.Parameters.AddWithValue("$at", record.ConnectedAt.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$verified", (record.RefreshedAt ?? record.ConnectedAt).ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$by", (object?)connectedBy ?? DBNull.Value);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                INSERT INTO imap_connections (id, username, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, preset, password_protected)
+                VALUES ($id, $username, $imapHost, $imapPort, $imapSecurity, $smtpHost, $smtpPort, $smtpSecurity, $preset, $password)
+                """;
+            command.Parameters.AddWithValue("$id", record.Id);
+            command.Parameters.AddWithValue("$username", settings.Username);
+            command.Parameters.AddWithValue("$imapHost", settings.Imap.Host);
+            command.Parameters.AddWithValue("$imapPort", settings.Imap.Port);
+            command.Parameters.AddWithValue("$imapSecurity", settings.Imap.Security);
+            command.Parameters.AddWithValue("$smtpHost", settings.Smtp.Host);
+            command.Parameters.AddWithValue("$smtpPort", settings.Smtp.Port);
+            command.Parameters.AddWithValue("$smtpSecurity", settings.Smtp.Security);
+            command.Parameters.AddWithValue("$preset", (object?)settings.Preset ?? DBNull.Value);
+            command.Parameters.AddWithValue("$password", _protector.Protect(password));
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    /// <summary>The app password, decrypted, for the Host's own login and a plugin run. Never
+    /// answered by a route.</summary>
+    public async Task<string?> MailboxPasswordAsync(string id, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT password_protected FROM imap_connections WHERE id = $id";
+        command.Parameters.AddWithValue("$id", id);
+        return Unprotect(await command.ExecuteScalarAsync(ct) as string);
+    }
+
+    /// <summary>Update password: the new one as ciphertext, the status back to <c>ok</c> and the
+    /// login's time, with the tenant row in the same transaction. False when there is no such mailbox.</summary>
+    public async Task<bool> UpdateMailboxPasswordAsync(
+        string id, string password, DateTimeOffset verifiedAt, TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE imap_connections SET password_protected = $password WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$password", _protector.Protect(password));
+            if (await command.ExecuteNonQueryAsync(ct) == 0) return false;
+        }
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE connections SET status = 'ok', status_reason = NULL, refreshed_at = $at WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$at", verifiedAt.ToString("O", CultureInfo.InvariantCulture));
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
+    /// <summary>A run's login succeeded: when, so the next run within <see cref="Connections.MailboxRecheck"/>
+    /// does not log in again. Not a person's act, so no tenant row.</summary>
+    public async Task StoreMailboxVerifiedAsync(string id, DateTimeOffset at, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE connections SET refreshed_at = $at WHERE id = $id AND status = 'ok'";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$at", at.ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(ct);
     }
 
     // ---- flows ----------------------------------------------------------------------------------

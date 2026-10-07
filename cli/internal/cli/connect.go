@@ -103,7 +103,7 @@ func newConnectListCommand(deps Deps) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:     "list",
-		Short:   "Each connection on the instance: name, provider, account, status, scopes and who uses it",
+		Short:   "Each connection on the instance: name, provider, account, status, scopes (a mailbox's servers) and who uses it",
 		Example: "  yawble connect list\n  yawble connect list --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -126,9 +126,9 @@ func newConnectListCommand(deps Deps) *cobra.Command {
 				return nil
 			}
 			w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tPROVIDER\tACCOUNT\tSTATUS\tSCOPES\tUSED BY")
+			fmt.Fprintln(w, "NAME\tPROVIDER\tACCOUNT\tSTATUS\tSCOPES OR SERVERS\tUSED BY")
 			for _, c := range list {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, c.Provider, c.Account, c.statusText(), orDash(strings.Join(c.Scopes, " ")), orDash(c.usedByText()))
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, c.Provider, c.Account, c.statusText(), c.detail(), orDash(c.usedByText()))
 			}
 			return w.Flush()
 		},
@@ -165,6 +165,10 @@ func newConnectRemoveCommand(deps Deps) *cobra.Command {
 			}
 			if !r.ok() {
 				return r.refusal("the Host did not disconnect " + target.Name)
+			}
+			if target.mailbox() {
+				fmt.Fprintf(out, "disconnected %s (%s, a mailbox); its app password is deleted\n", target.Name, target.Account)
+				return nil
 			}
 			fmt.Fprintf(out, "disconnected %s (%s at %s); its tokens are deleted\n", target.Name, target.Account, target.Provider)
 			return nil
@@ -469,6 +473,30 @@ type connection struct {
 	Status       string    `json:"status"`
 	StatusReason *string   `json:"statusReason"`
 	UsedBy       []connUse `json:"usedBy"`
+
+	// A mailbox (kind imap): its servers in place of scopes. The Host never answers its password,
+	// only whether one is set.
+	Kind        string      `json:"kind,omitempty"`
+	Username    string      `json:"username,omitempty"`
+	Imap        *mailServer `json:"imap,omitempty"`
+	Smtp        *mailServer `json:"smtp,omitempty"`
+	PasswordSet *bool       `json:"passwordSet,omitempty"`
+}
+
+type mailServer struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Security string `json:"security"`
+}
+
+func (c connection) mailbox() bool { return c.Kind == "imap" }
+
+// detail is what the list shows beside the status: a mailbox's servers, an account's scopes.
+func (c connection) detail() string {
+	if c.mailbox() && c.Imap != nil && c.Smtp != nil {
+		return fmt.Sprintf("%s:%d %s, %s:%d %s", c.Imap.Host, c.Imap.Port, c.Imap.Security, c.Smtp.Host, c.Smtp.Port, c.Smtp.Security)
+	}
+	return orDash(strings.Join(c.Scopes, " "))
 }
 
 type connUse struct {
@@ -481,6 +509,12 @@ type connUse struct {
 func (c connection) statusText() string {
 	if c.Status == "ok" {
 		return "ok"
+	}
+	if c.mailbox() {
+		if c.StatusReason != nil && *c.StatusReason != "" {
+			return "needs a new app password (" + *c.StatusReason + ")"
+		}
+		return "needs a new app password"
 	}
 	if c.StatusReason != nil && *c.StatusReason != "" {
 		return "needs reconnect (" + *c.StatusReason + ")"

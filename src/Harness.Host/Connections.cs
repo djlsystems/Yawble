@@ -3,12 +3,33 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Harness.Contracts;
+using Microsoft.AspNetCore.Http;
 
 namespace Harness.Host;
 
-/// <summary>What a run is handed for one slot: the fresh access token and what it is for.</summary>
+/// <summary>What a run is handed for one slot: the fresh access token and what it is for, or for a
+/// mailbox its servers and app password.</summary>
 public sealed record ConnectionGrant(
-    string ConnectionId, string Provider, string Account, string AccessToken, DateTimeOffset? ExpiresAt, IReadOnlyList<string> Scopes);
+    string ConnectionId, string Provider, string Account, string AccessToken, DateTimeOffset? ExpiresAt, IReadOnlyList<string> Scopes,
+    MailboxGrant? Mailbox = null)
+{
+    /// <summary>The value the run's redaction set takes: the access token, or the app password.</summary>
+    public string Secret => Mailbox?.Password ?? AccessToken;
+}
+
+/// <summary>A mailbox as a run is handed it. Its printed form leaves the password out.</summary>
+public sealed record MailboxGrant(string Username, string Password, MailServer Imap, MailServer Smtp)
+{
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"Username = {Username}, Imap = {Imap}, Smtp = {Smtp}");
+        return true;
+    }
+}
+
+/// <summary>A mailbox write's answer: the HTTP status, the login's sentence or the refusal, and the
+/// connection when it was saved.</summary>
+public sealed record MailboxAnswer(int Status, string? Sentence, string? Error, ConnectionRecord? Connection);
 
 /// <summary>A binding refused, with what the web offers: Reconnect with these scopes.</summary>
 public sealed record BindingRefusal(string Error, string? ReconnectId = null, IReadOnlyList<string>? ReconnectScopes = null)
@@ -66,8 +87,11 @@ public sealed record ConnectionActor(string Id, string? Email)
 /// </summary>
 public sealed class Connections(
     ConnectionStore store, IOAuthEndpoints endpoints, TimeProvider clock, IUserStore? users = null,
-    Func<TimeSpan, CancellationToken, Task>? delay = null) : IDisposable
+    Func<TimeSpan, CancellationToken, Task>? delay = null, IMailLogin? mail = null) : IDisposable
 {
+    /// <summary>How long a mailbox's last good login is trusted before a run logs in again.</summary>
+    public static readonly TimeSpan MailboxRecheck = TimeSpan.FromMinutes(10);
+
     public static readonly TimeSpan FlowLifetime = TimeSpan.FromMinutes(10);
 
     public static readonly TimeSpan RefreshEarly = TimeSpan.FromMinutes(5);
@@ -287,6 +311,11 @@ public sealed class Connections(
         {
             reconnecting = await store.GetAsync(request.ReconnectId.Trim(), ct);
             if (reconnecting is null) return (null, null, null, $"There is no connection '{request.ReconnectId}' to reconnect.");
+
+            if (reconnecting.Mailbox is not null)
+            {
+                return (null, null, null, $"Connection {reconnecting.Named} is a mailbox; update its password instead of reconnecting it.");
+            }
 
             if (!string.IsNullOrWhiteSpace(request.Provider) && request.Provider.Trim() != reconnecting.Provider)
             {
@@ -662,6 +691,8 @@ public sealed class Connections(
 
             if (connection.Status == ConnectionRecord.NeedsReconnect) return (null, NeedsReconnect(connection, connection.StatusReason));
 
+            if (connection.Mailbox is { } mailbox) return await MailboxGrantAsync(connection, mailbox, ct);
+
             var tokens = await store.TokensAsync(connectionId, ct) ?? new ConnectionTokens(null, null, null);
             var now = clock.GetUtcNow();
 
@@ -725,9 +756,187 @@ public sealed class Connections(
         return NeedsReconnect(connection, reason);
     }
 
-    public static string NeedsReconnect(ConnectionRecord connection, string? reason) =>
-        $"Connection {connection.Named} needs to be reconnected: the provider refused to refresh it ({reason ?? "no reason given"}). "
-        + $"Reconnect it from {Where}.";
+    public static string NeedsReconnect(ConnectionRecord connection, string? reason) => connection.Mailbox is not null
+        ? $"Connection {connection.Named} needs a new app password: {reason ?? "the server refused the password."} Update its password in {Where}."
+        : $"Connection {connection.Named} needs to be reconnected: the provider refused to refresh it ({reason ?? "no reason given"}). "
+            + $"Reconnect it from {Where}.";
+
+    // ---- mailboxes (kind imap) --------------------------------------------------------------------
+
+    /// <summary>
+    /// A mailbox for a run: its app password and servers. Its last good login is trusted for
+    /// <see cref="MailboxRecheck"/>; after that the Host logs in again first, the way an access token
+    /// is refreshed. A refused login marks it <c>needs-reconnect</c> with the login's sentence; a
+    /// server not reached blocks only this run.
+    /// </summary>
+    private async Task<(ConnectionGrant? Grant, string? Refusal)> MailboxGrantAsync(
+        ConnectionRecord connection, MailboxSettings mailbox, CancellationToken ct)
+    {
+        if (await store.MailboxPasswordAsync(connection.Id, ct) is not { } password)
+        {
+            return (null, $"The app password of connection {connection.Named} could not be read on this Host. Update its password in {Where}.");
+        }
+
+        var now = clock.GetUtcNow();
+
+        if (connection.RefreshedAt is not { } verified || now - verified >= MailboxRecheck)
+        {
+            if (mail is null) return (null, $"This Host cannot log in to mailboxes, so connection {connection.Named} could not be checked.");
+
+            var login = await mail.LoginAsync(connection.Account, mailbox, password, ct);
+
+            if (login.Outcome == MailLoginOutcome.Refused) return (null, await MarkAsync(connection, login.Sentence, ct));
+
+            if (!login.Ok)
+            {
+                // TRANSIENT: the server was not reached. The password is not the problem.
+                return (null, $"Connection {connection.Named} could not be checked just now: {login.Sentence} The next run tries again.");
+            }
+
+            await store.StoreMailboxVerifiedAsync(connection.Id, now, ct);
+        }
+
+        return (new ConnectionGrant(
+            connection.Id, connection.Provider, connection.Account, "", null, [],
+            new MailboxGrant(mailbox.Username, password, mailbox.Imap, mailbox.Smtp)), null);
+    }
+
+    /// <summary>
+    /// Adds a mailbox: the fields checked, then an IMAP login and an SMTP authentication with them.
+    /// Saved - with its tenant row, in one transaction - only when both succeed; a refused or failed
+    /// login saves nothing and answers its sentence (422).
+    /// </summary>
+    public async Task<MailboxAnswer> AddMailboxAsync(ConnectionActor actor, AddMailbox request, CancellationToken ct = default)
+    {
+        if (MailboxRefusal(request) is { } refusal) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, refusal, null);
+        if (mail is null) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, "This Host cannot log in to mailboxes.", null);
+
+        var account = request.Account!.Trim();
+        var settings = new MailboxSettings(
+            string.IsNullOrWhiteSpace(request.Username) ? account : request.Username.Trim(),
+            Server(request.Imap!), Server(request.Smtp!),
+            string.IsNullOrWhiteSpace(request.Preset) ? null : request.Preset.Trim(), true);
+
+        var login = await mail.LoginAsync(account, settings, request.Password!, ct);
+        if (!login.Ok) return new MailboxAnswer(StatusCodes.Status422UnprocessableEntity, null, login.Sentence, null);
+
+        var now = clock.GetUtcNow();
+        var record = new ConnectionRecord(
+            "conn-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
+            string.IsNullOrWhiteSpace(request.Name) ? account : request.Name.Trim(), MailboxSettings.Kind, account, [], now, now,
+            ConnectionRecord.Ok, null);
+
+        await store.InsertMailboxAsync(record, settings, request.Password!, actor.Id, actor.Row(
+            TenantActions.ConnectionConnected, record.Id, record.Name,
+            new
+            {
+                connection = record.Id, provider = MailboxSettings.Kind, account, username = settings.Username, preset = settings.Preset,
+                imap = $"{settings.Imap.Host}:{settings.Imap.Port} {settings.Imap.Security}",
+                smtp = $"{settings.Smtp.Host}:{settings.Smtp.Port} {settings.Smtp.Security}",
+            }), ct);
+
+        return new MailboxAnswer(StatusCodes.Status200OK, login.Sentence, null, await store.GetAsync(record.Id, ct));
+    }
+
+    /// <summary>
+    /// Update password: a login with the mailbox's servers and the new password, and only when it
+    /// succeeds the new password stored, <c>needs-reconnect</c> cleared and the tenant row written, in
+    /// one transaction. A refused login changes nothing and answers its sentence (422).
+    /// </summary>
+    public async Task<MailboxAnswer> UpdateMailboxPasswordAsync(
+        ConnectionActor actor, string id, string? password, CancellationToken ct = default)
+    {
+        if (await store.GetAsync(id, ct) is not { } connection)
+        {
+            return new MailboxAnswer(StatusCodes.Status404NotFound, null, $"There is no connection '{id}'.", null);
+        }
+
+        if (connection.Mailbox is not { } mailbox)
+        {
+            return new MailboxAnswer(StatusCodes.Status400BadRequest, null,
+                $"Connection {connection.Named} signs in with {ConnectionProviders.Display(connection.Provider)}, not a password. Reconnect it instead.", null);
+        }
+
+        if (PasswordRefusal(password) is { } refusal) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, refusal, null);
+        if (mail is null) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, "This Host cannot log in to mailboxes.", null);
+
+        var gate = Gate(id);
+        await gate.WaitAsync(ct);
+
+        try
+        {
+            var login = await mail.LoginAsync(connection.Account, mailbox, password!, ct);
+            if (!login.Ok) return new MailboxAnswer(StatusCodes.Status422UnprocessableEntity, null, login.Sentence, null);
+
+            var updated = await store.UpdateMailboxPasswordAsync(id, password!, clock.GetUtcNow(), actor.Row(
+                TenantActions.ConnectionPasswordUpdated, id, connection.Name,
+                new { connection = id, provider = MailboxSettings.Kind, account = connection.Account, wasNeedingReconnect = connection.Status == ConnectionRecord.NeedsReconnect }), ct);
+
+            return updated
+                ? new MailboxAnswer(StatusCodes.Status200OK, login.Sentence, null, await store.GetAsync(id, ct))
+                : new MailboxAnswer(StatusCodes.Status404NotFound, null, $"There is no connection '{id}'.", null);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private static MailServer Server(MailServerRequest request) =>
+        new(request.Host!.Trim().ToLowerInvariant(), request.Port!.Value, request.Security!.Trim().ToUpperInvariant());
+
+    /// <summary>Why a mailbox cannot be added as asked, naming the field, or null.</summary>
+    private static string? MailboxRefusal(AddMailbox request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.Preset) && !MailPresets.IsKnown(request.Preset.Trim()))
+        {
+            return $"`preset` is one of {string.Join(", ", MailPresets.All.Select(p => p.Id))}, or left out.";
+        }
+
+        var account = request.Account?.Trim() ?? "";
+        if (account.Length is 0 or > 254 || !account.Contains('@') || !Printable(account, space: false))
+        {
+            return "`account` is required: the mailbox's email address, such as person@example.com.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Username) && (request.Username.Trim().Length > 254 || !Printable(request.Username.Trim(), space: false)))
+        {
+            return "`username` is the name the mail server signs in with, at most 254 characters with no spaces.";
+        }
+
+        if (request.Name is { } name && name.Trim().Length > MaximumNameLength) return $"`name` is longer than {MaximumNameLength} characters.";
+
+        if (PasswordRefusal(request.Password) is { } password) return password;
+
+        return ServerRefusal("imap", "IMAP", request.Imap) ?? ServerRefusal("smtp", "SMTP", request.Smtp);
+    }
+
+    private static string? ServerRefusal(string field, string what, MailServerRequest? server)
+    {
+        var host = server?.Host?.Trim() ?? "";
+        if (host.Length is 0 or > 253 || Uri.CheckHostName(host) == UriHostNameType.Unknown)
+        {
+            return $"`{field}.host` is required: the {what} server's name, such as {field}.example.com.";
+        }
+
+        if (server!.Port is not (>= 1 and <= 65535)) return $"`{field}.port` is the {what} server's port, 1 to 65535.";
+
+        if (server.Security?.Trim().ToUpperInvariant() is not (MailServer.Tls or MailServer.StartTls))
+        {
+            return $"`{field}.security` is {MailServer.Tls} or {MailServer.StartTls}.";
+        }
+
+        return null;
+    }
+
+    /// <summary>An app password: 4 to 256 printable ASCII characters (spaces allowed, as Gmail shows
+    /// one), so it can be sent in a login and kept out of everything a plugin writes.</summary>
+    private static string? PasswordRefusal(string? password) =>
+        password is null || password.Length < PluginMemberRunner.MinimumSecretLength || password.Length > 256 || !Printable(password, space: true)
+            ? $"`password` is the app password: {PluginMemberRunner.MinimumSecretLength} to 256 characters, letters, digits, spaces and punctuation."
+            : null;
+
+    private static bool Printable(string text, bool space) => text.All(c => c is > ' ' and <= '~' || (space && c == ' '));
 
     // ---- bindings -------------------------------------------------------------------------------
 
@@ -918,6 +1127,26 @@ public sealed record ProviderChange(
 public sealed record StartConnection(
     string? Provider, IReadOnlyList<string>? Scopes = null, string? Name = null, string? ReconnectId = null, string? RedirectUri = null,
     string? Flow = null);
+
+/// <summary>Body of <c>POST /api/connections/imap</c>. Its printed form leaves the password out.</summary>
+public sealed record AddMailbox(
+    string? Preset, string? Name, string? Account, string? Username, string? Password, MailServerRequest? Imap, MailServerRequest? Smtp)
+{
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"Preset = {Preset}, Name = {Name}, Account = {Account}, Username = {Username}, Imap = {Imap}, Smtp = {Smtp}");
+        return true;
+    }
+}
+
+/// <summary>One server of <see cref="AddMailbox"/>.</summary>
+public sealed record MailServerRequest(string? Host, int? Port, string? Security);
+
+/// <summary>Body of <c>PUT /api/connections/{id}/password</c>. Its printed form leaves the password out.</summary>
+public sealed record MailboxPassword(string? Password)
+{
+    private bool PrintMembers(StringBuilder builder) => false;
+}
 
 /// <summary>Body of <c>POST /api/connections/complete</c>.</summary>
 public sealed record CompleteConnection(string? State, string? Code);

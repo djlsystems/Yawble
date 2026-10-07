@@ -184,8 +184,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         var (grants, connectionRefusal) = await GrantConnectionsAsync(manifest, bound, ct);
         if (connectionRefusal is not null) return MemberResult.NotRun(connectionRefusal);
 
-        // THE REDACTION SET: every bound secret AND every access token this run is handed.
-        IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.Select(g => g.AccessToken)];
+        // THE REDACTION SET: every bound secret AND every access token and app password this run is handed.
+        IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.Select(g => g.Secret)];
 
         var siteFiles = await SiteFilesAsync(invocation.Member, ct);
         var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles);
@@ -397,15 +397,27 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             ["workingDirectory"] = invocation.WorkingDirectory,
             ["worktrees"] = worktrees,
 
-            // EACH BOUND SLOT'S FRESH ACCESS TOKEN - never the refresh token, never the client secret.
-            ["connections"] = new JsonObject((grants ?? new Dictionary<string, ConnectionGrant>()).Select(g => KeyValuePair.Create(g.Key, (JsonNode?)new JsonObject
-            {
-                ["provider"] = g.Value.Provider,
-                ["account"] = g.Value.Account,
-                ["accessToken"] = g.Value.AccessToken,
-                ["expiresAt"] = g.Value.ExpiresAt?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
-                ["scopes"] = new JsonArray([.. g.Value.Scopes.Select(scope => (JsonNode?)JsonValue.Create(scope))]),
-            }))),
+            // EACH BOUND SLOT'S FRESH ACCESS TOKEN - never the refresh token, never the client secret -
+            // or a mailbox's servers and app password.
+            ["connections"] = new JsonObject((grants ?? new Dictionary<string, ConnectionGrant>()).Select(g => KeyValuePair.Create(g.Key, (JsonNode?)(
+                g.Value.Mailbox is { } mailbox
+                    ? new JsonObject
+                    {
+                        ["kind"] = MailboxSettings.Kind,
+                        ["account"] = g.Value.Account,
+                        ["username"] = mailbox.Username,
+                        ["password"] = mailbox.Password,
+                        ["imap"] = new JsonObject { ["host"] = mailbox.Imap.Host, ["port"] = mailbox.Imap.Port, ["security"] = mailbox.Imap.Security },
+                        ["smtp"] = new JsonObject { ["host"] = mailbox.Smtp.Host, ["port"] = mailbox.Smtp.Port, ["security"] = mailbox.Smtp.Security },
+                    }
+                    : new JsonObject
+                    {
+                        ["provider"] = g.Value.Provider,
+                        ["account"] = g.Value.Account,
+                        ["accessToken"] = g.Value.AccessToken,
+                        ["expiresAt"] = g.Value.ExpiresAt?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+                        ["scopes"] = new JsonArray([.. g.Value.Scopes.Select(scope => (JsonNode?)JsonValue.Create(scope))]),
+                    })))),
 
             // EACH OF THE MEMBER'S OWN TEAM'S SITES' FILES FOLDER (see SiteFilesAsync); [] for none.
             // Cloned: the request is built twice when reads are measured, and a node has one parent.
@@ -723,8 +735,9 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
     /// <summary>
     /// Each connection slot's fresh access token, fetched NOW (and refreshed when it is within 5
-    /// minutes of expiry), or the sentence the run is blocked with: a required slot unbound, a
-    /// connection gone, needing reconnect, or lacking a scope the slot asks for.
+    /// minutes of expiry), or a mailbox's app password (logged in again when its last good login is
+    /// older than <see cref="Connections.MailboxRecheck"/>), or the sentence the run is blocked with: a
+    /// required slot unbound, a connection gone, needing reconnect, or lacking a scope the slot asks for.
     /// </summary>
     private async Task<(IReadOnlyDictionary<string, ConnectionGrant> Grants, string? Refusal)> GrantConnectionsAsync(
         PluginManifest manifest, PluginMemberSettings bound, CancellationToken ct)

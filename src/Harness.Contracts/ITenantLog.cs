@@ -196,6 +196,10 @@ public static class TenantActions
     /// <summary>The provider refused a refresh; the connection needs a person to reconnect it.</summary>
     public const string ConnectionNeedsReconnect = "connections.needs-reconnect";
 
+    /// <summary>A person gave a mailbox connection a new app password after a successful login,
+    /// clearing <c>needs-reconnect</c>. Never the password.</summary>
+    public const string ConnectionPasswordUpdated = "connections.password-updated";
+
     /// <summary>A credential was issued for an agent CLI (a command, used by every preset launching
     /// it whose source is `issued`) where none was set. Detail: the command, the kind and the
     /// variable - never the value or any part of it.</summary>

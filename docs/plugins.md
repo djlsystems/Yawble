@@ -406,8 +406,8 @@ token, refreshes and rotates, and hands the plugin a fresh access token on each 
 |---|---|
 | slot name | The key the plugin reads in the request's `connections`. Same form as a config field's name. |
 | `description` | One line, shown beside the slot's picker. |
-| `providers` | Which providers' connections may be bound: `google`, `microsoft`, `custom`. At least one. An unknown provider refuses the plugin, with the reason on the Plugins screen. |
-| `scopes` | Provider → the scopes the slot needs. A connection lacking one of them is refused at binding, with a sentence that offers Reconnect. |
+| `providers` | Which providers' connections may be bound: `google`, `microsoft`, `custom`, or `imap` for a mailbox signed in with an app password (see [connections.md](connections.md#a-mailbox-with-an-app-password-imap)). At least one. An unknown provider refuses the plugin, with the reason on the Plugins screen. |
+| `scopes` | Provider → the scopes the slot needs. A connection lacking one of them is refused at binding, with a sentence that offers Reconnect. Scopes do not apply to `imap`: a list is every OAuth provider's, and an `imap` entry refuses the plugin. |
 | `required` | Default false. An unbound required slot blocks the member's runs with a sentence naming the slot, as a missing required secret does. |
 
 - **Without `connections`** a manifest behaves exactly as before.
@@ -509,7 +509,12 @@ name. The install checks the same before it writes.
   before the run when it would expire within 5 minutes, so a run always starts with at least that
   long. It is `{}` when the manifest declares no slot or the member has none bound; a plugin that ignores it
   is unaffected. The refresh
-  token and the client secret never reach a plugin.
+  token and the client secret never reach a plugin. A slot bound to a **mailbox** (`imap`) holds
+  instead `{ "kind": "imap", "account", "username", "password", "imap": { "host", "port", "security" },
+  "smtp": { "host", "port", "security" } }`, `security` being `TLS` or `STARTTLS`. The app password is
+  on stdin only, never in the environment or argv, and is redacted from everything the plugin writes,
+  as an access token is. SMTP signs in with `username`, or with `account` when `username` has no @
+  (iCloud).
 - **`siteFiles`** names the files folder of every site of the member's OWN team, by name, as an
   absolute path; `[]` when the team has none. A file the plugin makes for a site's page goes under
   that folder, and the plugin stores the path RELATIVE to it in a document with `site.put`; the page

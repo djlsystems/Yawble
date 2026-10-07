@@ -37,8 +37,9 @@ var (
 	configName  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 	eventSuffix = regexp.MustCompile(`^[a-z][a-z0-9.-]{0,63}$`)
 	// connectionProvider is a provider a connection slot may name: a built-in, any custom
-	// provider, or one custom provider by id (at most 40 characters in all, as the Host).
-	connectionProvider = regexp.MustCompile(`^(google|microsoft|custom|custom-[a-z0-9][a-z0-9-]{0,32})$`)
+	// provider, one custom provider by id (at most 40 characters in all, as the Host), or imap for a
+	// mailbox signed in with an app password.
+	connectionProvider = regexp.MustCompile(`^(google|microsoft|custom|custom-[a-z0-9][a-z0-9-]{0,32}|imap)$`)
 	// slug is SiteRules.IsSlug: lower-case letters, digits and single hyphens, starting and ending
 	// with a letter or digit, at most 63 characters (the length is checked beside it).
 	slug = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -357,13 +358,13 @@ func connectionSlot(name string, value any) string {
 	}
 	list, ok := slot["providers"].([]any)
 	if !ok || len(list) == 0 || !stringArray(slot["providers"]) {
-		return fmt.Sprintf("`connections.%s.providers` must be a non-empty list of providers (google, microsoft, custom or custom-<id>).", name)
+		return fmt.Sprintf("`connections.%s.providers` must be a non-empty list of providers (google, microsoft, custom, custom-<id> or imap).", name)
 	}
 	var providers []string
 	for _, item := range list {
 		p := item.(string)
 		if !connectionProvider.MatchString(p) {
-			return fmt.Sprintf("`connections.%s.providers` names '%s', which is not a provider (google, microsoft, custom or custom-<id>).", name, p)
+			return fmt.Sprintf("`connections.%s.providers` names '%s', which is not a provider (google, microsoft, custom, custom-<id> or imap).", name, p)
 		}
 		providers = append(providers, p)
 	}
@@ -375,6 +376,9 @@ func connectionSlot(name string, value any) string {
 			}
 		case map[string]any:
 			for _, key := range orderedKeys(v) {
+				if key == "imap" {
+					return fmt.Sprintf("`connections.%s.scopes` has an entry for 'imap', but scopes do not apply to an imap connection: a mailbox signs in with its app password.", name)
+				}
 				if !containsString(providers, key) {
 					return fmt.Sprintf("`connections.%s.scopes` has scopes for '%s', which the slot's providers do not name.", name, key)
 				}
