@@ -51,7 +51,7 @@ function team(id: string, over: Record<string, unknown> = {}) {
 }
 
 /** Children are stubbed: this page is about WHICH of them is on screen and in what order. */
-const stubs = { TeamsView: true, KanbanBoard: true, TeamKpiStrip: true, ContainerCard: true };
+const stubs = { TeamsView: true, KanbanBoard: true, TeamKpiStrip: true, ContainerCard: true, TellManagerBox: true };
 
 let wrapper: VueWrapper | undefined;
 let board: ReturnType<typeof useConsoleStore>;
@@ -237,11 +237,19 @@ describe('a team\'s marks', () => {
     expect(page.find('[data-manage-solution]').exists()).toBe(false);
   });
 
-  it('says on the team where its work comes from: the Concierge', async () => {
+  it('gives the team work on the team page itself, through a Tell the Manager box', async () => {
+    const page = await mountPage([team('alpha')]);
+
+    const box = page.findComponent({ name: 'TellManagerBox' });
+    expect(box.exists()).toBe(true);
+    expect(box.props('team')).toBe('alpha');
+  });
+
+  it('no longer says the page cannot take work, and still names the Concierge as another way', async () => {
     const page = await mountPage([team('alpha')]);
 
     expect(page.find('[data-team-work-hint]').text()).toBe(
-      'To give this team work, open the Concierge (bottom right) and tell it what you want done.');
+      'You can also ask the Concierge (bottom right).');
   });
 
   it('does not mark a running team paused', async () => {
