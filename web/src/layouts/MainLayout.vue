@@ -38,6 +38,7 @@ import VersionTag from '../components/VersionTag.vue';
 import UpdateNotice from '../components/UpdateNotice.vue';
 import CapacityMonitor from '../components/CapacityMonitor.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
+import FirstRunGuide from '../components/FirstRunGuide.vue';
 import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
 import { announceProviderReturn, leaveForProvider } from '../lib/providerReturn';
 import { goTo } from '../lib/browserNavigation';
@@ -195,6 +196,15 @@ const diagnosticsOpen = ref(false);
 const keysOpen = ref(false);
 const tenantSettingsOpen = ref(false);
 const conciergeOpen = ref(false);
+
+/** The first-run guide. It opens itself until dismissed or an agent signs in, and the account menu
+ *  opens it again. */
+const firstRunGuideOpen = ref(false);
+
+/** The guide's own button opens the Concierge; it never toggles one already open shut. */
+function openConciergeFromGuide() {
+  conciergeOpen.value = true;
+}
 const conciergeLaunchTeam = ref<TeamId | null>(null);
 const conciergeLaunchTeamName = ref<string | undefined>(undefined);
 const conciergeActiveTeam = computed(() => board.activeWorkTeam ?? null);
@@ -484,6 +494,19 @@ async function signOut() {
               </q-item-section>
             </q-item>
 
+            <!-- The first-run guide, again: its own text says this is where it lives once dismissed. -->
+            <q-item
+              v-close-popup
+              clickable
+              data-test="account-first-run-guide"
+              @click="minimizeConciergeFor(() => (firstRunGuideOpen = true))"
+            >
+              <q-item-section avatar>
+                <q-icon name="flag" />
+              </q-item-section>
+              <q-item-section>Getting started</q-item-section>
+            </q-item>
+
             <q-item v-close-popup clickable @click="minimizeConciergeFor(() => (profileOpen = true))">
               <q-item-section avatar>
                 <q-icon name="manage_accounts" />
@@ -577,6 +600,14 @@ async function signOut() {
         </q-tooltip>
       </q-btn>
     </q-page-sticky>
+
+    <FirstRunGuide
+      v-if="session.user"
+      v-model:open="firstRunGuideOpen"
+      :concierge-open="conciergeOpen"
+      @open-concierge="openConciergeFromGuide"
+      @new-team="onRibbonAction('admin-new-team')"
+    />
 
     <ConciergePanel
       v-model="conciergeOpen"
