@@ -95,6 +95,7 @@ public sealed class TenantSettings
     public static readonly string[] OutcomeCurrencies =
         ["usd", "eur", "gbp", "cad", "aud", "nzd", "chf", "jpy", "cny", "inr", "sek", "nok", "dkk", "pln", "brl", "mxn", "zar", "sgd", "hkd"];
     public const string ConciergeMayMergeName = "concierge.mayMerge";
+    public const string ConciergeMayArchiveName = "concierge.mayArchive";
     public const string LeasesHeavyHoldersName = "leases.heavy.holders";
     public const string UpdatesCheckName = "updates.check";
 
@@ -261,6 +262,10 @@ public sealed class TenantSettings
                 "Lets the Concierge merge a team's finished branch to the default branch through Merge "
                 + "to main and Bring current and merge, as a person's merge does, and it is off unless a "
                 + "person turns it on.",
+                Choices: ["off", "on"]),
+            new(ConciergeMayArchiveName, TenantSettingKind.Choice, "off", null,
+                "Lets the Concierge archive and unarchive a quiet team when you ask it to in the terminal, "
+                + "as Archive and Unarchive on the Teams screen do, and it is off unless a person turns it on.",
                 Choices: ["off", "on"]),
             new(LeasesHeavyHoldersName, TenantSettingKind.Integer, "1", "Leases:Heavy:Holders",
                 "How many runs may hold the `heavy` lease at once, across all teams. An agent takes it "
@@ -554,6 +559,10 @@ public sealed class TenantSettings
     /// <summary><c>concierge.mayMerge</c>: whether the Concierge may merge a team branch to the
     /// default branch. Read through a delegate by <see cref="ConciergeMergeGate"/>, never captured.</summary>
     public bool ConciergeMayMerge => Current(ConciergeMayMergeName) == "on";
+
+    /// <summary><c>concierge.mayArchive</c>: whether the Concierge may archive and unarchive a team.
+    /// Read through a delegate by <see cref="ConciergeArchiveGate"/>, never captured.</summary>
+    public bool ConciergeMayArchive => Current(ConciergeMayArchiveName) == "on";
 
     /// <summary><c>updates.check</c>: whether the release check reads the release list. Read through
     /// a delegate by <see cref="ReleaseCheck"/>, never captured.</summary>

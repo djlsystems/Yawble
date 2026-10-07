@@ -360,6 +360,10 @@ builder.Services.AddSingleton(sp => new OutcomeGate(
 // Concierge session already running.
 builder.Services.AddSingleton(sp => new ConciergeMergeGate(
     () => sp.GetRequiredService<TenantSettings>().ConciergeMayMerge));
+
+// THE CONCIERGE'S ARCHIVE, read through a delegate for the same reason.
+builder.Services.AddSingleton(sp => new ConciergeArchiveGate(
+    () => sp.GetRequiredService<TenantSettings>().ConciergeMayArchive));
 builder.Services.AddSingleton(new LedgerIdentity(ledgerStart?.InstanceId, ledgerStart?.LedgerStartedAt));
 builder.Services.AddSingleton(new KanbanStore(store));
 
@@ -1103,11 +1107,13 @@ builder.Services.AddSingleton(sp => new ContainerHost(
     // live so a repository added to a team after its members were created is named on the next wake.
     worktrees: (member, key) => sp.GetRequiredService<TeamRegistry>().WorktreesFor(member, key),
 
-    // AN EVENT OR FOLDER TRIGGER HELD, asked by the pump before it fires one: its solution team
-    // waits for a missing required input (SolutionWait), or its daily token cap is reached. Late-
-    // bound for the reason above: TriggerCost's tenant log is registered below this line.
+    // AN EVENT OR FOLDER TRIGGER HELD, asked by the pump before it fires one: its team is archived
+    // (TeamArchive), its solution team waits for a missing required input (SolutionWait), or its
+    // daily token cap is reached. Late-bound for the reason above: TriggerCost's tenant log is
+    // registered below this line.
     triggerHeld: async (trigger, member, cause, ct) =>
-        await sp.GetRequiredService<SolutionWait>().SkipIfWaitingAsync(trigger, member, DateTimeOffset.UtcNow, cause.Seq, ct)
+        await sp.GetRequiredService<TeamArchive>().SkipIfArchivedAsync(trigger, member, DateTimeOffset.UtcNow, cause.Seq, ct)
+        || await sp.GetRequiredService<SolutionWait>().SkipIfWaitingAsync(trigger, member, DateTimeOffset.UtcNow, cause.Seq, ct)
         || await sp.GetRequiredService<TriggerCost>()
             .SkipIfCappedAsync(trigger, member, DateTimeOffset.UtcNow, nextDueAt: null, cause.Seq, ct),
 
@@ -1138,6 +1144,11 @@ builder.Services.AddSingleton(sp => new ContainerHost(
     // the reason above. See ForeignToolsCheck.
     onTerminal: async (terminal, ct) =>
         await sp.GetRequiredService<ForeignToolsCheck>().CheckAsync(terminal, ct),
+
+    // AN ARCHIVED TEAM, asked by the pump for a paused team: its trigger-only events are skipped
+    // (TeamArchive, through triggerHeld above) rather than left to fire at Resume. Late-bound for the
+    // reason above.
+    archived: team => sp.GetRequiredService<TeamRegistry>().IsArchived(team),
 
     onRunEnding: async (member, causation, succeeded, ct) =>
     {
@@ -1763,6 +1774,9 @@ builder.Services.AddSingleton(sp => new FolderWatch(
         : FolderWatch.DefaultMaximumWatches,
     sp.GetRequiredService<ILogger<FolderWatch>>()));
 builder.Services.AddSingleton<TriggerCost>();
+
+// WHAT AN ARCHIVED TEAM IS REFUSED AND SKIPS, and whether a team is quiet enough to archive or delete.
+builder.Services.AddSingleton<TeamArchive>();
 builder.Services.AddSingleton<TriggerSweep>();
 
 // THE ONE PATH A TRIGGER IS MADE BY: the Triggers dialog's route and a solution install.
@@ -2793,6 +2807,18 @@ static async Task<IReadOnlyList<object>> ReadActiveFindingsAsync(
         .ToArray();
 }
 
+// An archive or unarchive's tenant row: the caller's id, and the person's email - for the
+// Concierge, the person it acts for.
+static TriggerAudit ArchiveRow(
+    HttpContext context, string? actorEmail, string action, string team, string label, object detail) =>
+    new(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+        actorEmail,
+        action,
+        team,
+        label,
+        JsonSerializer.Serialize(detail, JsonSerializerOptions.Web));
+
 static string PauseNoticeFor(string teamLabel) =>
     $"Team '{teamLabel}' is paused. This instruction was queued and will run when the team resumes.";
 
@@ -2844,6 +2870,9 @@ app.MapGet("/api/overview", async (
     .WithDescription(
         "The Console's starting point: every team the caller reaches, each with its Agent Containers and "
         + "their current state, plus the default manager name.\n\n"
+        + "Archived teams are listed too, each with `archived: true`, `archivedAt` and `archivedBy` "
+        + "(false and null for an active team): a screen leaves them out of its lists of teams to "
+        + "work with.\n\n"
         + "A team carries TWO names and they are not interchangeable. `name` is what a person "
         + "chose and what you should render; `id` is the identifier that keys the documents "
         + "folder and half of every container's identity, and it is what every other "
@@ -3461,8 +3490,9 @@ app.MapPost("/api/teams/{team}/clone", async (
 //
 // People only: a console child agent has no business renaming the team it was handed. It carries
 // {team} in its template, so TeamGate covers it as well.
-// Deleting a team, and everything that names it. PEOPLE ONLY: this ends running processes and
-// removes files, and no agent credential is consent to destroy a team.
+// Deleting a team, and everything that names it. PEOPLE ONLY: this removes files, and no agent
+// credential is consent to destroy a team. Refused unless the team is quiet (TeamArchive), so it
+// never ends running work.
 //
 // The ORDER the work happens in is TeamDeletion's, and its doc comment is where the reasoning lives.
 // This route's job is authority, the 404, and reporting what actually went.
@@ -3477,7 +3507,7 @@ app.MapDelete("/api/teams/{team}", async (
         + "the person ticked. Only a local repository the team uses; a URL is refused with 400.")]
     string[]? deleteLocalRepository,
     TeamDeletion deletion, LocalRepoDeletion localRepoDeletion, TenantLogging audit, ITenantLog tenantLog,
-    TeamRegistry teams, TeamListPush listPush,
+    TeamRegistry teams, TeamListPush listPush, TeamArchive archive,
     HttpContext context,
     CancellationToken ct) =>
 {
@@ -3513,6 +3543,14 @@ app.MapDelete("/api/teams/{team}", async (
         }
 
         if (!ticked.Contains(own, StringComparer.Ordinal)) ticked.Add(own);
+    }
+
+    // QUIET FIRST, for an active and an archived team alike: a delete never stops running work. A
+    // member with a run going or an instruction accepted and not started refuses it with the same
+    // sentence an archive is refused with, before anything is written or removed.
+    if (teams.ExistingName(team) is { } quietCheck && await archive.NotQuietAsync(quietCheck, ct) is { } busy)
+    {
+        return Results.Conflict(new { error = busy });
     }
 
     TeamDeleted? removed;
@@ -3629,7 +3667,11 @@ app.MapDelete("/api/teams/{team}", async (
     .HumansOnly()
     .WithSummary("Delete a team and everything that names it")
     .WithDescription(
-        "Ends every Concierge session and every Agent Container on the team, removes their "
+        "**REFUSED UNLESS THE TEAM IS QUIET**, active or archived alike: 409 with a sentence naming "
+        + "each member that has a run going or an instruction accepted and not started (the same "
+        + "sentence `GET /api/teams/{team}/archive-check` reads). A delete never stops running work; "
+        + "open workflows do not block.\n\n"
+        + "Removes every Agent Container on the team, their "
         + "cursors, subscriptions, outstanding deliveries and credentials, deletes the team row - "
         + "which cascades to its members - and removes its ROOT: one "
         + "directory holding its skills, repos, member workspaces, transcripts and Concierge "
@@ -3869,6 +3911,125 @@ app.MapPost("/api/teams/{team}/resume", async (
         "Lets this team start receiving new work again. Queued work remains queued while paused and "
         + "delivers in order after resume. Idempotent: resuming an already-running team still "
         + "answers 204.");
+
+// ARCHIVING A TEAM: kept, hidden, doing no work. A person always; the person's Concierge only with
+// the Archive permit AND `concierge.mayArchive` on (ConciergeArchiveGate), marked on both routes as
+// the merge routes are. Refused unless the team is quiet; open workflows do not block. The flag and
+// its tenant row land in one transaction, or nothing changes. See TeamArchive.
+app.MapGet("/api/teams/{team}/archive-check", async (
+    [Description(Describe.Team)] string team,
+    TeamRegistry teams, TeamArchive archive, CancellationToken ct) =>
+    teams.ExistingName(team) is { } stored
+        ? Results.Ok(await archive.CheckAsync(stored, ct))
+        : Results.NotFound(new { error = $"No team '{team}'." }))
+    .WithTags("Teams")
+    .RequirePermit(Permits.Read)
+    .WithSummary("Whether this team is quiet enough to archive or delete, and its open workflows")
+    .WithDescription(
+        "`quiet` is true when no member has a run going and none has an instruction accepted and not "
+        + "started. Otherwise `reason` is the sentence an archive or a delete is refused with, member "
+        + "by member. `openWorkflows` lists each open workflow (`workflow`, `title`): they do not "
+        + "block, and the archive confirmation shows them. Reads only. 404 for an unknown team.");
+
+app.MapPost("/api/teams/{team}/archive", async (
+    [Description(Describe.Team)] string team,
+    TeamRegistry teams, TeamArchive archive, ConciergeArchiveGate gate, IUserStore users,
+    HttpContext context, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored)
+    {
+        return Results.NotFound(new { error = $"No team '{team}'." });
+    }
+
+    var caller = await gate.CheckAsync(context, users, ct);
+    if (caller.Refusal is { } refusal) return refusal;
+
+    var label = teams.LabelFor(stored);
+    if (teams.IsArchived(stored)) return Results.Conflict(new { error = TeamArchive.AlreadyArchived(label) });
+    if (await archive.NotQuietAsync(stored, ct) is { } busy) return Results.Conflict(new { error = busy });
+
+    var archivedBy = caller.ViaConcierge
+        ? $"the Concierge for {caller.ActorEmail ?? "a person"}"
+        : caller.ActorEmail ?? "a person";
+    var now = DateTimeOffset.UtcNow;
+
+    try
+    {
+        await teams.SetArchivedAsync(stored, archivedBy, now, id => ArchiveRow(context, caller.ActorEmail, TenantActions.TeamArchived, id, label, new
+        {
+            archived = true,
+            archivedBy,
+            paused = true,
+            viaConcierge = caller.ViaConcierge,
+        }), ct);
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        return Results.Json(
+            new { error = $"'{label}' was not archived: its tenant log row could not be written ({exception.Message}). Nothing was changed." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    return Results.Ok(new { team = stored, archived = true, archivedAt = now, archivedBy, paused = true });
+})
+    .WithTags("Teams")
+    .HumansOrConcierge(Permits.Archive)
+    .WithSummary("Archive this team")
+    .WithDescription(
+        "Keeps the team and every row, member, document, repository, site and workflow it has, and "
+        + "puts it away: it is paused, every trigger of it skips its fire with the reason \"team "
+        + "archived\", and a tell, a backlog dispatch, a planned card or a site action for it is refused "
+        + "until it is unarchived. Its sites stay readable, and it can still be cloned and deleted.\n\n"
+        + "409 with a sentence naming each member still at work when the team is not quiet (a run "
+        + "going, or an instruction accepted and not started); open workflows do not block. 409 for a "
+        + "team already archived. The flag and its `team.archived` tenant row land together, or "
+        + "nothing changes (500 with a sentence).\n\n"
+        + "A person's action, which the person's Concierge may also take only while a person has "
+        + "turned on `concierge.mayArchive`.");
+
+app.MapPost("/api/teams/{team}/unarchive", async (
+    [Description(Describe.Team)] string team,
+    TeamRegistry teams, ConciergeArchiveGate gate, IUserStore users,
+    HttpContext context, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored)
+    {
+        return Results.NotFound(new { error = $"No team '{team}'." });
+    }
+
+    var caller = await gate.CheckAsync(context, users, ct);
+    if (caller.Refusal is { } refusal) return refusal;
+
+    var label = teams.LabelFor(stored);
+    if (!teams.IsArchived(stored)) return Results.Conflict(new { error = TeamArchive.NotArchived(label) });
+
+    try
+    {
+        await teams.SetArchivedAsync(stored, archivedBy: null, DateTimeOffset.UtcNow, id => ArchiveRow(context, caller.ActorEmail, TenantActions.TeamUnarchived, id, label, new
+        {
+            archived = false,
+            paused = true,
+            viaConcierge = caller.ViaConcierge,
+        }), ct);
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        return Results.Json(
+            new { error = $"'{label}' was not unarchived: its tenant log row could not be written ({exception.Message}). Nothing was changed." },
+            statusCode: StatusCodes.Status500InternalServerError);
+    }
+
+    return Results.Ok(new { team = stored, archived = false, paused = true });
+})
+    .WithTags("Teams")
+    .HumansOrConcierge(Permits.Archive)
+    .WithSummary("Unarchive this team")
+    .WithDescription(
+        "Clears the archived flag and LEAVES THE TEAM PAUSED: nothing restarts until a person presses "
+        + "Resume, which then runs its queued work. 409 for a team that is not archived. The change "
+        + "and its `team.unarchived` tenant row land together, or nothing changes.\n\n"
+        + "A person's action, which the person's Concierge may also take only while a person has "
+        + "turned on `concierge.mayArchive`.");
 
 app.MapGet("/api/teams/{team}/triggers", async (
     [Description(Describe.Team)] string team,
@@ -5837,7 +5998,8 @@ app.MapGet("/api/teams/rollup", async (
     // ONE READ OF THE LEDGER FOR EVERY ROW, so two teams' counts are from the same instant.
     var slots = wip.View();
 
-    foreach (var team in teams.All().Where(t => effective.Contains(t.Id)))
+    // ACTIVE TEAMS ONLY: an archived team does no work, so it has no row to roll up.
+    foreach (var team in teams.All().Where(t => !t.Archived && effective.Contains(t.Id)))
     {
         // THE SAME FLOOR THE PER-TEAM ROUTES COMPUTE, and it must be the same: without it a team
         // deleted and recreated under the same names would otherwise report its PREDECESSOR'S
@@ -5880,7 +6042,7 @@ app.MapGet("/api/teams/rollup", async (
     .RequirePermit(Permits.Read)
     .WithSummary("Every reachable team's current or last workflow")
     .WithDescription(
-        "One row per team the caller reaches, each carrying BOTH projections: `workflow`, the same "
+        "One row per ACTIVE team the caller reaches (an archived team has none), each carrying BOTH projections: `workflow`, the same "
         + "one `GET /api/teams/{team}/workflow` answers for that team, and `openWorkflows`, the "
         + "same one `GET /api/teams/{team}/workflows` answers - every workflow that team has run "
         + "since its floor, open and closed alike, not only the newest. Both are computed from the "
@@ -6686,6 +6848,9 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
     // The STORED spelling, so the id built here is the one the container was registered under
     // however the caller capitalised the team.
     if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+
+    // AN ARCHIVED TEAM DOES NO WORK: nothing is appended, and the sentence names Unarchive.
+    if (teams.IsArchived(stored)) return Results.Conflict(new { error = TeamArchive.Refusal(teams.LabelFor(stored)) });
 
     // Checked BEFORE the id is constructed: ContainerId's constructor THROWS on an illegal name, and
     // an unhandled ArgumentException from a route segment is a 500 where a 404 is correct.

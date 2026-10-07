@@ -37,8 +37,9 @@ public static class KanbanEndpoints
             .WithTags("Kanban")
             .WithSummary("Get the board across every team the caller reaches")
             .WithDescription(
-                "The board as a per-TENANT view: one payload carrying the cards of every team in "
-                + "the caller's effective set.\n\n"
+                "The board as a per-TENANT view: one payload carrying the cards of every ACTIVE team "
+                + "in the caller's effective set. An archived team's cards are never on it, even when "
+                + "`team` names it.\n\n"
                 + "`team` NARROWS this to one team and never widens it. A team the caller does not "
                 + "reach contributes no cards and is not refused - the filter bounds what they may "
                 + "already see, and a refusal would say which teams exist.\n\n"
@@ -325,7 +326,10 @@ public static class KanbanEndpoints
         {
             var effective = await access.EffectiveTeamsAsync(principal, ct);
 
+            // ACTIVE TEAMS ONLY: an archived team's cards never show, and "every team" means every
+            // active team. Naming an archived team in `team` narrows to nothing.
             var scope = teams.All()
+                .Where(t => !t.Archived)
                 .Select(t => t.Id)
                 .Where(effective.Contains)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);

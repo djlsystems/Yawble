@@ -299,9 +299,32 @@ public sealed class LandedStartRetryTests : IAsyncDisposable
         Assert.Equal(BacklogLandedStates.Landed, (await LandedAsync(person, item)).GetProperty("state").GetString());
         Assert.NotNull((await CurrentDispatchAsync(item)).LandedAt);
 
+        // A delete is refused while a member runs, so the team is brought to quiet as a person would.
+        await QuietAsync(person, team);
         Assert.Equal(HttpStatusCode.OK, (await person.DeleteAsync($"/api/teams/{team}", Ct)).StatusCode);
 
         Assert.Equal(BacklogLandedStates.Landed, (await LandedAsync(person, item)).GetProperty("state").GetString());
+    }
+
+    /// <summary>Pauses the team and stops every run in flight (this suite's runs never end on their
+    /// own), until nothing runs and nothing is queued.</summary>
+    private async Task QuietAsync(HttpClient person, string team)
+    {
+        Assert.Equal(HttpStatusCode.NoContent, (await person.PostAsync($"/api/teams/{team}/pause", null, Ct)).StatusCode);
+
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (true)
+        {
+            foreach (var member in _factory.Services.GetRequiredService<TeamRegistry>().ContainerIdsOf(team))
+            {
+                await person.PostAsync($"/api/teams/{team}/containers/{member.Name}/stop", null, Ct);
+            }
+
+            var check = await person.GetFromJsonAsync<JsonElement>($"/api/teams/{team}/archive-check", Ct);
+            if (check.GetProperty("quiet").GetBoolean()) return;
+            Assert.True(DateTime.UtcNow < deadline, check.GetProperty("reason").GetString());
+            await Task.Delay(100, Ct);
+        }
     }
 
     private async Task<JsonElement> ItemAsync(HttpClient person, long item)

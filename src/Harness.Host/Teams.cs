@@ -150,7 +150,18 @@ public sealed record TeamSummary(
     /// <see cref="ITeamSolutions"/>). The delete dialog reads it to say the package's plugins stay
     /// installed. Safe to ride the hub: a package's name, version and plugin ids are the team's own.
     /// </summary>
-    TeamSolution? Solution = null);
+    TeamSolution? Solution = null,
+
+    /// <summary>Whether this team is archived: kept, paused, doing no work, and left out of the
+    /// Kanban and every list of teams to work with. Safe to ride the hub: it is the team's own state.</summary>
+    bool Archived = false,
+
+    /// <summary>When it was archived, in UTC; null for an active team.</summary>
+    DateTimeOffset? ArchivedAt = null,
+
+    /// <summary>Who archived it - a person's email, or the Concierge on a person's behalf; null for
+    /// an active team.</summary>
+    string? ArchivedBy = null);
 
 /// <summary>One repository's default branch as a screen sees it. See <see cref="RepoDefaultBranch"/>.</summary>
 public sealed record TeamRepoDefaultBranch(string Repo, string? Branch, string? FromRemote, string? SetByPerson);
@@ -609,6 +620,39 @@ public sealed class TeamRegistry(
     public bool IsPaused(string team) =>
         ExistingName(team) is { } stored && host.IsPaused(stored);
 
+    /// <summary>Whether <paramref name="team"/> is archived. False for an unknown team.</summary>
+    public bool IsArchived(string team) =>
+        ExistingName(team) is { } stored && _archived.ContainsKey(stored);
+
+    /// <summary>
+    /// Archives (<paramref name="archivedBy"/> set) or unarchives (null) this team. ARCHIVING ALSO
+    /// PAUSES IT, in the same row write, so the pump passes it over and it takes no slot exactly as a
+    /// paused team does; UNARCHIVING LEAVES IT PAUSED, so nothing restarts until a person resumes it.
+    /// The row and its tenant row land in one transaction first; memory and the host follow only once
+    /// both have, so a row that cannot be written changes nothing.
+    /// </summary>
+    public async Task SetArchivedAsync(
+        string team, string? archivedBy, DateTimeOffset now, Func<string, TriggerAudit> audit, CancellationToken ct = default)
+    {
+        var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
+        var archiving = archivedBy is not null;
+
+        await teams.SetArchivedAsync(stored, archiving ? now : null, archivedBy, audit(stored), ct);
+
+        if (archiving)
+        {
+            _archived[stored] = (now, archivedBy);
+            await host.SetPausedAsync(stored, paused: true);
+        }
+        else
+        {
+            _archived.Remove(stored);
+        }
+
+        host.RepublishTeam(stored);
+        TeamChanged?.Invoke(SummaryFor(stored, withRoot: false));
+    }
+
     public async Task SetPausedAsync(
         string team, bool paused, CancellationToken ct = default, Func<string, TriggerAudit>? audit = null)
     {
@@ -895,6 +939,13 @@ public sealed class TeamRegistry(
     /// </summary>
     private readonly Dictionary<string, long> _budgets = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Which teams are ARCHIVED, and when and by whom: a write-through cache of `archived_at` and
+    /// `archived_by`, filled by RestoreAsync and kept in step by <see cref="SetArchivedAsync"/>. Absent
+    /// is an active team.
+    /// </summary>
+    private readonly Dictionary<string, (DateTimeOffset At, string? By)> _archived = new(StringComparer.OrdinalIgnoreCase);
+
     // A WRITE-THROUGH CACHE of the `teams` table's name column, not the record of truth. Filled
     // once by RestoreAsync at startup and kept in step by every writer below.
     //
@@ -1040,6 +1091,7 @@ public sealed class TeamRegistry(
                 // come back through a restart as one; testing `is > 0` here would silently return
                 // a team that chose unlimited to the instance figure.
                 if (team.BudgetTokens is { } chosenBudget) _budgets[team.Id] = chosenBudget;
+                if (team.ArchivedAt is { } archivedAt) _archived[team.Id] = (archivedAt, team.ArchivedBy);
 
                 await host.SetPausedAsync(team.Id, team.Paused);
 
@@ -1394,6 +1446,7 @@ public sealed class TeamRegistry(
         // `EffectiveWorkflowBudgetFor` goes on answering 5,000,000 against a row that is NULL -
         // until a restart quietly makes it the instance figure instead.
         _budgets.Remove(stored);
+        _archived.Remove(stored);
 
         // Same rule, and this one names a PATH: a successor of this identifier that retires nothing
         // must not be told it displaced the folder its predecessor's create displaced.
@@ -1509,7 +1562,10 @@ public sealed class TeamRegistry(
             EffectiveWorkflowBudgetFor(team),
             DefaultBranchesFor(team).Select(b => new TeamRepoDefaultBranch(b.Repo, b.Branch, b.FromRemote, b.SetByPerson)).ToList(),
             ContributorsFor(team).Select(c => new TeamRepoContributor(c.Repo, c.UpstreamUrl, c.ForkOwner, c.DcoSignOff, c.ClaSignedNote)).ToList(),
-            solutions?.For(team));
+            solutions?.For(team),
+            _archived.ContainsKey(team),
+            _archived.TryGetValue(team, out var archived) ? archived.At : null,
+            _archived.TryGetValue(team, out var by) ? by.By : null);
 
     /// <summary>
     /// What this team is CALLED - its label, or its identifier when it has never been relabelled.

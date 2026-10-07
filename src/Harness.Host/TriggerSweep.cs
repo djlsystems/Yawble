@@ -21,7 +21,8 @@ public sealed class TriggerSweep(
     FolderWatch folders,
     ILogger<TriggerSweep> logger,
     TriggerCost? cost = null,
-    SolutionWait? waiting = null)
+    SolutionWait? waiting = null,
+    TeamArchive? archive = null)
 {
     public async Task FireDueAsync(DateTimeOffset now, CancellationToken ct = default)
     {
@@ -290,10 +291,11 @@ public sealed class TriggerSweep(
             ct);
 
     /// <summary>Why a fire of <paramref name="row"/> is skipped before its cap is asked: the team
-    /// is paused, the team waits for a missing required input ("waiting for …", see
+    /// is archived (asked first: an archived team is paused too, and this says why), the team is paused, the team waits for a missing required input ("waiting for …", see
     /// <see cref="SolutionWait"/>), or an idle-only trigger's member is busy. Null when none.</summary>
     private async Task<string?> SkipReasonAsync(TriggerRow row, MemberRuntime container, CancellationToken ct)
     {
+        if (archive?.IsArchived(container.Id.Team) == true) return MessageTypes.ScheduleSkippedArchivedReason;
         if (host.IsPaused(container.Id.Team)) return MessageTypes.ScheduleSkippedPausedReason;
         if (waiting is not null && await waiting.WaitingForAsync(container.Id.Team, ct) is { } input) return input;
         if (row.IdleOnly && await IsBusyAsync(container, ct)) return MessageTypes.ScheduleSkippedBusyReason;

@@ -719,6 +719,12 @@ public static class BacklogEndpoints
                 });
             }
 
+            // AN ARCHIVED TEAM DOES NO WORK, so nothing is dispatched to it.
+            if (teams.IsArchived(stored))
+            {
+                return Results.Conflict(new { error = TeamArchive.Refusal(teams.LabelFor(stored)) });
+            }
+
             if (RefuseUnlessReady(id, item) is { } notReady) return notReady;
 
             if (host.Find(new ContainerId(stored, TeamRegistry.DefaultManagerName)) is null)
@@ -1092,6 +1098,12 @@ public static class BacklogEndpoints
             if (teams.ExistingName(team) is not { } stored)
             {
                 return Results.NotFound(new { error = $"No team '{team}'." });
+            }
+
+            // AN ARCHIVED TEAM DOES NO WORK, so no card is planned for it.
+            if (teams.IsArchived(stored))
+            {
+                return Results.Conflict(new { error = TeamArchive.Refusal(teams.LabelFor(stored)) });
             }
 
             if (string.IsNullOrWhiteSpace(request.Title))

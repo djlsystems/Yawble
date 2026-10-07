@@ -407,6 +407,14 @@ public static class MessageTypes
 
     /// <summary>
     /// The skip reason published in <see cref="ScheduleSkipped"/> rows, and written on the
+    /// `tenant_events` row, for every trigger of an ARCHIVED team - a schedule, an event, a folder
+    /// change and a person's Run now alike. Asked before the paused reason, since an archived team is
+    /// paused too and this says why.
+    /// </summary>
+    public const string ScheduleSkippedArchivedReason = "team archived";
+
+    /// <summary>
+    /// The skip reason published in <see cref="ScheduleSkipped"/> rows, and written on the
     /// `tenant_events` row, for a trigger whose runs have spent its daily token cap - once a day.
     /// An event or folder trigger's reason is exactly this; a schedule's adds "; resumes at
     /// &lt;time&gt;", the first occurrence of the next day it sleeps until.

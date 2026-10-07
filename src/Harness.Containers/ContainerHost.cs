@@ -181,6 +181,14 @@ public sealed class ContainerHost : IAsyncDisposable
     /// </summary>
     private readonly Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? _triggerHeld;
 
+    /// <summary>
+    /// Whether a team is ARCHIVED. An archived team is paused too, so the pump delivers it nothing;
+    /// this lets <see cref="SkipArchivedTriggersAsync"/> pass over the events only its triggers
+    /// would fire on, each skip recorded by <see cref="_triggerHeld"/>, so they are skipped now and
+    /// never fired at a later Resume. Null (a fixture) archives nothing.
+    /// </summary>
+    private readonly Func<string, bool>? _archived;
+
     public ContainerHost(
         IMessageLog log,
         ICursors cursors,
@@ -197,8 +205,10 @@ public sealed class ContainerHost : IAsyncDisposable
         Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? worktrees = null,
         Func<string, bool>? watchable = null,
         Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? triggerHeld = null,
-        Func<Message, CancellationToken, Task>? onTerminal = null)
+        Func<Message, CancellationToken, Task>? onTerminal = null,
+        Func<string, bool>? archived = null)
     {
+        _archived = archived;
         _onTerminal = onTerminal;
         _triggerHeld = triggerHeld;
         _watchable = watchable;
@@ -728,7 +738,11 @@ public sealed class ContainerHost : IAsyncDisposable
 
         foreach (var container in _containers.Values)
         {
-            if (IsPaused(container.Id.Team)) continue;
+            if (IsPaused(container.Id.Team))
+            {
+                if (_archived?.Invoke(container.Id.Team) == true) await SkipArchivedTriggersAsync(container, ct);
+                continue;
+            }
 
             var types = await _subscriptions.ForAsync(container.Id, ct);
             if (types.Count == 0) continue;
@@ -945,6 +959,42 @@ public sealed class ContainerHost : IAsyncDisposable
         }
 
         return delivered;
+    }
+
+    /// <summary>
+    /// AN ARCHIVED TEAM'S TRIGGERS SKIP, THEY DO NOT WAIT. The team is paused, so nothing is offered;
+    /// but an event or folder change only a trigger names is resolved now, where the archived check
+    /// in <see cref="_triggerHeld"/> records its skip, and the cursor moves past it - so it is never
+    /// fired at a later Resume. A message of the container's BASE set is real work: the pass stops
+    /// there and leaves it, and everything after it, for Resume. A message the pump would never
+    /// deliver (its own, or another team's) is passed over as the pump passes it.
+    /// </summary>
+    private async Task SkipArchivedTriggersAsync(MemberRuntime container, CancellationToken ct)
+    {
+        var types = await _subscriptions.ForAsync(container.Id, ct);
+        if (types.Count == 0) return;
+
+        var position = await _cursors.PositionAsync(container.Id, ct);
+        var advanceTo = position;
+
+        foreach (var message in await _log.ReadAfterAsync(position, types, BatchSize, ct))
+        {
+            var ours = !string.Equals(message.Source, container.Id.ToString(), StringComparison.OrdinalIgnoreCase)
+                && string.Equals(MessageTeam.Of(message), container.Id.Team, StringComparison.OrdinalIgnoreCase);
+
+            if (ours)
+            {
+                if (container.HasBaseSubscription(message.Type)) break;
+
+                // Every governing trigger is held while the team is archived, so this appends nothing.
+                // Should it ever resolve to a delivery (unarchived meanwhile), stop and leave it.
+                if ((await ResolveDeliveryAsync(container, message, ct)).Message is not null) break;
+            }
+
+            advanceTo = message.Seq;
+        }
+
+        if (advanceTo > position) await _cursors.AdvanceAsync(container.Id, advanceTo, ct);
     }
 
     public bool IsPaused(string team) => _pausedTeams.ContainsKey(team);

@@ -76,7 +76,15 @@ public sealed record PersistedTeam(
     ///
     /// Optional and last for the reason <see cref="Paused"/> above it is.
     /// </summary>
-    long? BudgetTokens = null);
+    long? BudgetTokens = null,
+
+    /// <summary>When this team was archived, in UTC; null for an active team. An archived team keeps
+    /// every row and does no work. Optional and last for the reason <see cref="Paused"/> is.</summary>
+    DateTimeOffset? ArchivedAt = null,
+
+    /// <summary>Who archived it: the person's email, or the Concierge on a person's behalf. Null for
+    /// an active team.</summary>
+    string? ArchivedBy = null);
 
 /// <summary>
 /// Tenant-wide Concierge launch settings. The one store of them: a team has no Concierge
@@ -228,6 +236,15 @@ public interface ITeamStore
     /// <remarks>With <paramref name="audit"/>, that row is appended to `tenant_events` in the same
     /// transaction: both land or neither does.</remarks>
     Task SetPausedAsync(string team, bool paused, TriggerAudit? audit = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Archives (<paramref name="archivedAt"/> set) or unarchives (null) this team. Archiving also
+    /// pauses it, in the same statement; unarchiving clears the flag and leaves it paused. The
+    /// <paramref name="audit"/> row is appended to `tenant_events` in the same transaction: both land
+    /// or neither does. REQUIRED, for the reason <see cref="SetEnvAsync"/> gives.
+    /// </summary>
+    Task SetArchivedAsync(
+        string team, DateTimeOffset? archivedAt, string? archivedBy, TriggerAudit audit, CancellationToken ct = default);
 
     /// <summary>
     /// Sets what this team may spend on ONE workflow. See <see cref="PersistedTeam.BudgetTokens"/>

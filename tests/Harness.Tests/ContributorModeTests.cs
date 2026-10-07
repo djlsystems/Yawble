@@ -355,7 +355,7 @@ public sealed class ContributorModeTests : IAsyncDisposable
             .Order(StringComparer.Ordinal);
         Assert.Equal(
             ["backlog", "blocked", "handback", "hiring", "kanban", "lease", "member", "needs_decision", "outcome", "progress", "repo",
-             "site", "skills_get", "skills_search", "status", "team_create", "team_current", "team_list", "tell", "wip",
+             "site", "skills_get", "skills_search", "status", "team_archive", "team_create", "team_current", "team_list", "tell", "wip",
              "workflow_complete", "workflow_show"],
             tools);
 

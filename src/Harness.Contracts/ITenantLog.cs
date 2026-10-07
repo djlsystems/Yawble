@@ -56,6 +56,14 @@ public static class TenantActions
     public const string TeamPaused = "team.paused";
     public const string TeamResumed = "team.resumed";
 
+    /// <summary>A team was archived: kept, paused and doing no work. Written in the same transaction
+    /// as the flag; when it cannot be written the team is not archived.</summary>
+    public const string TeamArchived = "team.archived";
+
+    /// <summary>A team was unarchived: the flag cleared, the team left paused. Written in the same
+    /// transaction as the change.</summary>
+    public const string TeamUnarchived = "team.unarchived";
+
     /// <summary>A person changed what this team may spend on ONE workflow.</summary>
     public const string TeamBudgetChanged = "team.budgetChanged";
 
