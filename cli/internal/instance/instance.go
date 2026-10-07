@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/engine"
+	"github.com/djlsystems/yawble/cli/internal/release"
 )
 
 // Status is what `yawble status` reports. Image and URL are what RUNS, read from the container
@@ -281,7 +282,9 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 // capabilities it keeps. No Wip__MaxRunning unless one was configured: the Host's default then
 // applies and GET /api/wip names its bound.
 func controlSpec(s Settings) engine.RunSpec {
-	env := map[string]string{"HARNESS_ROLE": RoleControl}
+	// HARNESS_RELEASE_REPOSITORY tells the Host where its releases are published, so the version in
+	// the web's top bar can say when a newer one is out. The Host carries no repository name of its own.
+	env := map[string]string{"HARNESS_ROLE": RoleControl, "HARNESS_RELEASE_REPOSITORY": release.Repository}
 	if s.MaxRunning > 0 {
 		env["Wip__MaxRunning"] = fmt.Sprint(s.MaxRunning)
 	}

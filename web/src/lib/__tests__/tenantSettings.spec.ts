@@ -63,6 +63,7 @@ describe('the Admission field', () => {
       'runs.memoryLimitMb',
       'system.packages',
       'theme.default',
+      'updates.check',
       'wip.maxRunning',
       'wip.memoryPerRunMb',
       'workflow.spendLimit',

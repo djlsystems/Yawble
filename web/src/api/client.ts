@@ -1,5 +1,6 @@
 import { diagnosticsQuery } from '../lib/diagnostics'
 import type { BuildInfo } from '../lib/buildInfo'
+import type { UpdateStatus } from '../lib/releaseUpdates'
 import { normaliseTenantSettings, rejectedField } from '../lib/tenantSettings'
 
 /** Points the Concierge at the workflow the person is looking at. Advisory: a failure here
@@ -1048,6 +1049,12 @@ export const readCliVersions = (take = 20) =>
 
 /** Which build the Host is. Anonymous. */
 export const readVersion = () => json<BuildInfo>('/api/version')
+
+/** Whether a newer release is out, what changed, and whether that is known. Human-only. */
+export const readUpdateStatus = () => json<UpdateStatus>('/api/version/updates')
+
+/** Reads the release list now; answers as {@link readUpdateStatus}. Human-only. */
+export const checkForUpdates = () => json<UpdateStatus>('/api/version/updates/check', { method: 'POST' })
 
 /**
  * Deletes a team and everything that names it. Human-only.

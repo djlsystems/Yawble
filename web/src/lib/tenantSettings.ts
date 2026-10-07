@@ -36,6 +36,7 @@ export const SystemPackages = 'system.packages'
 export const AgentTags = 'agents.tags'
 export const AgentCredentialSources = 'agents.credentialSource'
 export const ConciergeMayMerge = 'concierge.mayMerge'
+export const UpdatesCheck = 'updates.check'
 
 /** This sentence is put in front of a person, word for word: what the setting allows, and that it is off unless turned on. */
 export const ConciergeMayMergeSentence =
@@ -144,6 +145,13 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     kind: 'theme',
     label: 'Default theme',
     hint: 'What a browser shows before its person picks a theme. Read on the next load.',
+  },
+  {
+    name: UpdatesCheck,
+    tab: 'system',
+    kind: 'toggle',
+    label: 'Check for updates',
+    hint: 'Reads the list of published releases about twice a day, so the version in the top bar can say when a newer release is out, what changed and how to update. Nothing is updated by itself.',
   },
   {
     name: SystemPackages,

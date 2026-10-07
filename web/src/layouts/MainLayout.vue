@@ -35,6 +35,7 @@ import OutcomesDialog from '../components/OutcomesDialog.vue';
 import ConciergePanel from '../components/ConciergePanel.vue';
 import StatusStrip from '../components/StatusStrip.vue';
 import VersionTag from '../components/VersionTag.vue';
+import UpdateNotice from '../components/UpdateNotice.vue';
 import CapacityMonitor from '../components/CapacityMonitor.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
@@ -403,6 +404,8 @@ async function signOut() {
           </router-link>
           <!-- Which build this is, beside the mark. It gives way first on a narrow bar. -->
           <VersionTag class="header-version" />
+          <!-- "Update available" when the release check found a newer release; nothing otherwise. -->
+          <UpdateNotice />
         </q-toolbar-title>
 
         <!--

@@ -69,7 +69,7 @@ func TestUpOnAFreshPodmanMachineMakesThePodControlAndOneWorker(t *testing.T) {
 		inspect,
 		"podman image exists " + img,
 		"podman pull " + img,
-		"podman run -d --name yawble --pod yawble --restart unless-stopped --memory 1536m --cpus 2 --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add FSETID --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --cap-add KILL -e HARNESS_ROLE=control -e Wip__MaxRunning=8 --label yawble.instance=yawble --label yawble.role=control --label yawble.settings=" + label(st) + " --env-file /c/yawble/env --env-file /c/yawble/worker.env -v yawble-data:/data " + img,
+		"podman run -d --name yawble --pod yawble --restart unless-stopped --memory 1536m --cpus 2 --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add FSETID --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --cap-add KILL -e HARNESS_RELEASE_REPOSITORY=djlsystems/Yawble -e HARNESS_ROLE=control -e Wip__MaxRunning=8 --label yawble.instance=yawble --label yawble.role=control --label yawble.settings=" + label(st) + " --env-file /c/yawble/env --env-file /c/yawble/worker.env -v yawble-data:/data " + img,
 		// While waiting: the log from this start on, for the progress lines (the time varies).
 		"podman logs --follow --since <start> yawble",
 		inspect + "-worker-1",

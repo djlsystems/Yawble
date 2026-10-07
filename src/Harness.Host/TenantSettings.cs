@@ -96,6 +96,7 @@ public sealed class TenantSettings
         ["usd", "eur", "gbp", "cad", "aud", "nzd", "chf", "jpy", "cny", "inr", "sek", "nok", "dkk", "pln", "brl", "mxn", "zar", "sgd", "hkd"];
     public const string ConciergeMayMergeName = "concierge.mayMerge";
     public const string LeasesHeavyHoldersName = "leases.heavy.holders";
+    public const string UpdatesCheckName = "updates.check";
 
     private readonly SqliteTenantSettingsStore _store;
     private readonly IConfiguration _configuration;
@@ -267,6 +268,11 @@ public sealed class TenantSettings
                 + "build, an image build - and the rest wait their turn in order. Applies at the next "
                 + "acquire or release.",
                 Min: 1, Max: 1000),
+            new(UpdatesCheckName, TenantSettingKind.Choice, "on", "Updates:Check",
+                "Whether the instance reads the published release list about every 12 hours, so the "
+                + "version in the top bar can say when a newer release is out, what changed and how to "
+                + "update. It reads the list only; nothing is updated. Applies at the next read.",
+                Choices: ["off", "on"]),
         ];
 
         _definitions = Definitions.ToDictionary(d => d.Name, StringComparer.Ordinal);
@@ -548,6 +554,10 @@ public sealed class TenantSettings
     /// <summary><c>concierge.mayMerge</c>: whether the Concierge may merge a team branch to the
     /// default branch. Read through a delegate by <see cref="ConciergeMergeGate"/>, never captured.</summary>
     public bool ConciergeMayMerge => Current(ConciergeMayMergeName) == "on";
+
+    /// <summary><c>updates.check</c>: whether the release check reads the release list. Read through
+    /// a delegate by <see cref="ReleaseCheck"/>, never captured.</summary>
+    public bool UpdatesCheck => Current(UpdatesCheckName) == "on";
 
     /// <summary><c>system.packages</c>: what the entrypoint installs at the next start.</summary>
     public IReadOnlyList<string> SystemPackages =>

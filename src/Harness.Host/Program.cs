@@ -607,6 +607,20 @@ builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlitePluginMember
 // through IOAuthEndpoints, which the tests replace.
 builder.Services.AddSingleton(sp => new ConnectionStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
 builder.Services.AddHttpClient(nameof(HttpOAuthEndpoints), client => client.Timeout = TimeSpan.FromSeconds(30));
+
+// THE RELEASE CHECK: whether a newer release is out, for the version chip. It reads the release
+// list of the repository the operator CLI names (Updates:Repository, or HARNESS_RELEASE_REPOSITORY);
+// with none it reads nothing and says so. It never updates anything (see ReleaseCheck).
+builder.Services.AddHttpClient(nameof(GitHubReleaseFeed), client => client.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddSingleton<IReleaseFeed>(sp => new GitHubReleaseFeed(
+    sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(GitHubReleaseFeed)),
+    builder.Configuration[ReleaseCheck.RepositorySetting] ?? builder.Configuration[ReleaseCheck.RepositoryVariable]));
+builder.Services.AddSingleton(sp => new ReleaseCheck(
+    sp.GetRequiredService<IReleaseFeed>(),
+    () => sp.GetRequiredService<TenantSettings>().UpdatesCheck,
+    () => DateTimeOffset.UtcNow,
+    sp.GetRequiredService<ILogger<ReleaseCheck>>()));
+builder.Services.AddHostedService<ReleaseCheckLoop>();
 builder.Services.AddSingleton<IOAuthEndpoints>(sp => new HttpOAuthEndpoints(
     sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(HttpOAuthEndpoints))));
 builder.Services.AddSingleton(sp => new Connections(
@@ -2430,6 +2444,7 @@ TeamTokenRuns.Map(app);
 OutcomeEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
+ReleaseCheckEndpoints.Map(app);
 // A worker's one connection. In control a worker joins the pool here; a Host that runs its runs
 // itself (all) welcomes none, and a worker that connects to it is told so, in a sentence, and stops.
 var workerConnections = new WorkerConnections(
