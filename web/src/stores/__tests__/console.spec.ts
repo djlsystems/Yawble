@@ -1506,4 +1506,32 @@ describe('board store', () => {
       expect(board.repoStatusTeam).toBe('');
     });
   });
+
+  /**
+   * THE TEAMS TABLE IS LIVE FOR EVERY ROW IT SHOWS, not only for the teams that happen to have a
+   * tab. Its Members and Status cells are the pushed snapshots and its Workflows and Last workflow
+   * cells are re-read on each push, while the `2 running` beside them is the polled WIP ledger - so
+   * a row whose team's group was never joined froze at whatever the last overview said while its
+   * ledger line kept moving: IDLE beside "2 running", Members 1 when the team had two.
+   */
+  describe('which teams are live', () => {
+    it('is every team while the Teams table is showing, tab or no tab', () => {
+      const board = useConsoleStore();
+      board.teams = [team(asTeamId('Alpha')), team(asTeamId('Beta'))];
+      board.openTeamTabs = [];
+
+      board.showTeamsView();
+
+      expect(board.liveTeamIds).toEqual(['Alpha', 'Beta']);
+    });
+
+    it('is the open tabs on a team board, so a closed tab stops pushing', () => {
+      const board = useConsoleStore();
+      board.teams = [team(asTeamId('Alpha')), team(asTeamId('Beta'))];
+      board.openTeamTabs = [asTeamId('Alpha')];
+      board.view = 'board';
+
+      expect(board.liveTeamIds).toEqual(['Alpha']);
+    });
+  });
 });

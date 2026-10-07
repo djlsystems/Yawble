@@ -315,6 +315,7 @@ public static class KanbanProjector
             && !string.Equals(target.Member, member, StringComparison.OrdinalIgnoreCase);
 
         var state = CardForInstruction(msg, cardStates, team, member ?? "unknown");
+        state.InstructedSinceDone = true;
 
         var (subject, body) = ExtractTitleAndBody(msg);
 
@@ -352,6 +353,20 @@ public static class KanbanProjector
     {
         if (CardFor(msg, cardStates) is not { } state) return;
 
+        // A DONE CARD LEAVES DONE FOR NEW WORK AND NOTHING ELSE. A run exiting puts its card in
+        // Done, and the same member is routinely woken again in the same workflow with nothing new
+        // to do for this card - a Manager woken by its member's hand-back, a failure, a trigger.
+        // Moving the card on that wake sent it back to In Progress and its exit sent it to Done
+        // again: a card crossing the board twice with nobody touching it. New work is a run an
+        // instruction started, or an instruction for this card after it reached Done (it may share
+        // a batch woken by something else). A person's move is `HandleKanbanCardEvent`'s.
+        if (state.LaneId == KanbanLanes.Done && !state.InstructedSinceDone && !StartedByInstruction(msg))
+        {
+            Record(state, msg, "");
+            state.UpdatedAt = msg.OccurredAt.DateTime;
+            return;
+        }
+
         state.Status = "running";
         state.LaneId = KanbanLanes.ForStatus("running");
         state.Color = KanbanLanes.ColourForStatus("running");
@@ -361,6 +376,14 @@ public static class KanbanProjector
         Record(state, msg, "");
         state.UpdatedAt = msg.OccurredAt.DateTime;
     }
+
+    /// <summary>
+    /// Whether an instruction woke this run, read off the `trigger` the runtime writes on the row.
+    /// A row without one predates the field, and is read as it always was: as work starting.
+    /// </summary>
+    private static bool StartedByInstruction(Message msg) =>
+        StringField(msg, PayloadFields.Trigger) is not { Length: > 0 } trigger
+        || trigger.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal);
 
     private static void HandleContainerProgress(
         Message msg,
@@ -1037,7 +1060,24 @@ public static class KanbanProjector
         /// </summary>
         public required string Body { get; set; }
         public required string Status { get; set; }
-        public required string LaneId { get; set; }
+        /// <summary>Entering Done clears <see cref="InstructedSinceDone"/>: the work told so far is
+        /// the work that finished.</summary>
+        public required string LaneId
+        {
+            get => _laneId;
+            set
+            {
+                if (value == KanbanLanes.Done && _laneId != KanbanLanes.Done) InstructedSinceDone = false;
+                _laneId = value;
+            }
+        }
+
+        private string _laneId = "";
+
+        /// <summary>Whether an instruction for this card arrived after it last reached Done - the
+        /// one thing besides an instruction-started run that takes it out. See
+        /// <c>HandleContainerStarted</c>.</summary>
+        public bool InstructedSinceDone { get; set; }
         public required string Color { get; set; }
         public required List<ProgressItem> Progress { get; set; }
 

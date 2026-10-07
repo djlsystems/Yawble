@@ -367,7 +367,18 @@ export const useConsoleStore = defineStore('console', {
         .map((id) => state.teams.find((team) => team.id === id) ?? null)
         .filter((team): team is Team => team !== null);
     },
-    liveTeamIds(): string[] {
+    /**
+     * The teams whose SignalR groups this browser joins, which is the teams whose pushes it hears.
+     *
+     * EVERY TEAM WHILE THE TEAMS TABLE IS SHOWING, because the table shows every team: its Members
+     * and Status cells are the pushed snapshots, and its Workflows and Last workflow cells are
+     * re-read on each push (`refreshRollupIfShowing`). Open tabs alone left a team without a tab
+     * frozen at the last overview while the polled WIP ledger beside it moved on - IDLE next to
+     * `2 running`. On a board, the open tabs: a closed tab stops pushing.
+     */
+    liveTeamIds(state): string[] {
+      if (state.view === 'teams') return state.teams.map((team) => team.id);
+
       return this.openTeams.map((team) => team.id);
     },
     /**
