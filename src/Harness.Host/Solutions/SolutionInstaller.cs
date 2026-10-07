@@ -1160,11 +1160,21 @@ public sealed class SolutionInstaller(
                     var added = diff.Triggers.Added.Contains(trigger.Name);
                     if (!added && !diff.Triggers.Changed.Contains(trigger.Name)) continue;
 
-                    // A CHANGED TRIGGER IS MADE NEW, and the old one removed with the removals.
-                    if (!added && triggerIds.TryGetValue(trigger.Name, out var oldId))
+                    // A CHANGED TRIGGER KEEPS ITS IDENTITY: its row is rewritten in place, under the
+                    // same id, rather than deleted and made new. Its spend today is what the ledger
+                    // charged to `schedule:<id>` and `trigger:<id>`, so the same id is the same spend
+                    // and the same daily cap with no second key to keep in step - the cap cannot be
+                    // spent twice in a day by an update. Keying the spend reads on a lineage of
+                    // replaced ids instead would need a stored link every spend read follows, and
+                    // the trigger's last fire, outcome and capped skips would still start again. The
+                    // undo puts the old row back. Only a trigger of the SAME NAME is kept: one the
+                    // package drops is deleted and one it adds is new, so the two are never merged.
+                    if (!added
+                        && triggerIds.TryGetValue(trigger.Name, out var keptId)
+                        && await triggers.FindAsync(keptId, ct) is { } kept)
                     {
-                        removals.Add(() => triggers.DeleteAsync(oldId,
-                            actor.Row(TenantActions.ScheduleDeleted, oldId, trigger.Name, new { team = stored, solution = manifest.Id, replaced = true }), CancellationToken.None));
+                        await ReplaceTriggerAsync(kept, trigger, memberIds, tools, actor, run, ct);
+                        continue;
                     }
 
                     triggerIds[trigger.Name] = (await CreateTriggerAsync(stored, trigger, memberIds, tools, actor, run, ct)).Id;
@@ -1527,9 +1537,43 @@ public sealed class SolutionInstaller(
         string team, SolutionTrigger trigger, IReadOnlyDictionary<string, string> memberIds, string? tools,
         SolutionActor actor, Run run, CancellationToken ct)
     {
+        var request = await TriggerRequestAsync(trigger, memberIds, tools, actor, run, ct);
+
+        var created = await triggers.CreateAsync(team, request, actor.Label, actor.Email,
+            row => actor.Row(TenantActions.ScheduleCreated, row.Id, row.Name, new { team = row.Team, member = row.Container, solution = true }), ct);
+
+        if (created.Row is not { } made) throw new SolutionStepException($"The trigger '{trigger.Name}' was refused: {created.Refusal}");
+
+        run.Made($"trigger {trigger.Name}", () => triggers.DeleteAsync(made.Id,
+            actor.Row(TenantActions.ScheduleDeleted, made.Id, made.Name, new { team, reason = "install undone" }), CancellationToken.None));
+
+        return made;
+    }
+
+    /// <summary>An update's changed trigger, rewritten under its own id; undone by putting the old
+    /// row back.</summary>
+    private async Task ReplaceTriggerAsync(
+        TriggerRow kept, SolutionTrigger trigger, IReadOnlyDictionary<string, string> memberIds, string? tools,
+        SolutionActor actor, Run run, CancellationToken ct)
+    {
+        var request = await TriggerRequestAsync(trigger, memberIds, tools, actor, run, ct);
+
+        var replaced = await triggers.ReplaceAsync(kept, request, actor.Label, actor.Email,
+            row => actor.Row(TenantActions.ScheduleChanged, row.Id, row.Name, new { team = row.Team, member = row.Container, solution = true }), ct);
+
+        if (replaced.Row is null) throw new SolutionStepException($"The trigger '{trigger.Name}' was refused: {replaced.Refusal}");
+
+        run.Made($"trigger {trigger.Name} (changed)", () => triggers.RestoreAsync(kept,
+            actor.Row(TenantActions.ScheduleChanged, kept.Id, kept.Name, new { team = kept.Team, reason = "update undone" }), CancellationToken.None));
+    }
+
+    private async Task<NewTrigger> TriggerRequestAsync(
+        SolutionTrigger trigger, IReadOnlyDictionary<string, string> memberIds, string? tools,
+        SolutionActor actor, Run run, CancellationToken ct)
+    {
         var outcomeId = trigger.Outcome is { } named ? await OutcomeForAsync(named, actor, run, ct) : null;
 
-        var request = new NewTrigger(
+        return new NewTrigger(
             trigger.Name,
             memberIds.GetValueOrDefault(trigger.Member) ?? trigger.Member,
             ResolveSolution(trigger.Instruction, tools),
@@ -1552,16 +1596,6 @@ public sealed class SolutionInstaller(
             WakeManager: trigger.WakeManager,
             DailyTokenCap: trigger.DailyTokenCap,
             OutcomeId: outcomeId);
-
-        var created = await triggers.CreateAsync(team, request, actor.Label, actor.Email,
-            row => actor.Row(TenantActions.ScheduleCreated, row.Id, row.Name, new { team = row.Team, member = row.Container, solution = true }), ct);
-
-        if (created.Row is not { } made) throw new SolutionStepException($"The trigger '{trigger.Name}' was refused: {created.Refusal}");
-
-        run.Made($"trigger {trigger.Name}", () => triggers.DeleteAsync(made.Id,
-            actor.Row(TenantActions.ScheduleDeleted, made.Id, made.Name, new { team, reason = "install undone" }), CancellationToken.None));
-
-        return made;
     }
 
     /// <summary>
