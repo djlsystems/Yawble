@@ -174,11 +174,12 @@ public sealed class ContainerHost : IAsyncDisposable
     /// means to exercise delivery MUST supply one.
     /// </param>
     /// <summary>
-    /// Whether an event or folder trigger's DAILY TOKEN CAP stops this fire, the skip recorded by
-    /// the callee when it does. Null (a fixture) is never capped. Asked in
-    /// <see cref="ResolveDeliveryAsync"/> after the trigger's filter matched, before it appends.
+    /// Whether an event or folder trigger's fire is held - its team waits for a missing required
+    /// input, or its DAILY TOKEN CAP is reached - the skip recorded by the callee when it is. Null
+    /// (a fixture) holds nothing. Asked in <see cref="ResolveDeliveryAsync"/> after the trigger's
+    /// filter matched, before it appends.
     /// </summary>
-    private readonly Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? _triggerCapped;
+    private readonly Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? _triggerHeld;
 
     public ContainerHost(
         IMessageLog log,
@@ -195,11 +196,11 @@ public sealed class ContainerHost : IAsyncDisposable
         Func<long>? workflowSpendLimitNow = null,
         Func<ContainerId, string, IReadOnlyList<RepoWorktree>>? worktrees = null,
         Func<string, bool>? watchable = null,
-        Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? triggerCapped = null,
+        Func<TriggerRow, ContainerId, Message, CancellationToken, Task<bool>>? triggerHeld = null,
         Func<Message, CancellationToken, Task>? onTerminal = null)
     {
         _onTerminal = onTerminal;
-        _triggerCapped = triggerCapped;
+        _triggerHeld = triggerHeld;
         _watchable = watchable;
         _workflowSpendLimitNow = workflowSpendLimitNow;
         _worktrees = worktrees;
@@ -1214,11 +1215,10 @@ public sealed class ContainerHost : IAsyncDisposable
             // it. `EventFieldsOf` is what keeps a payload field's own value from being rescanned for
             // tokens: it is looked up once by PromptTokens' MatchEvaluator and the result is written
             // straight into the replacement, which .NET's Regex.Replace never revisits.
-            // THE DAILY CAP, the same rule the sweep applies to a schedule: an event storm is the
-            // same bill. A capped trigger fires nothing; another governing trigger still may.
-            if (trigger.DailyTokenCap is not null
-                && _triggerCapped is not null
-                && await _triggerCapped(trigger, container.Id, message, ct))
+            // A TEAM WAITING FOR A MISSING INPUT, AND THE DAILY CAP, the same rules the sweep applies
+            // to a schedule: an event storm is the same bill. A held trigger fires nothing; another
+            // governing trigger still may.
+            if (_triggerHeld is not null && await _triggerHeld(trigger, container.Id, message, ct))
             {
                 continue;
             }

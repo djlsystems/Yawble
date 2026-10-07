@@ -131,10 +131,15 @@ public static class SolutionEndpoints
                 + "version or a newer one. A person only.");
 
         app.MapGet("/api/teams/{team}/solution", async (
-            [Description(Describe.Team)] string team, SolutionInstaller installer, CancellationToken ct) =>
-            await installer.DescribeAsync(team, ct) is { } described
+            [Description(Describe.Team)] string team, SolutionInstaller installer, SolutionWait waiting, TeamRegistry teams, CancellationToken ct) =>
+        {
+            // Read through the wait as well, so a wait this read finds over ends its marks.
+            if (teams.ExistingName(team) is { } stored) await waiting.WaitingForAsync(stored, ct);
+
+            return await installer.DescribeAsync(team, ct) is { } described
                 ? Results.Ok(described)
-                : Results.NotFound(new { error = $"'{team}' was not installed from a solution package." }))
+                : Results.NotFound(new { error = $"'{team}' was not installed from a solution package." });
+        })
             .WithTags(Area)
             .RequirePermit(Permits.Read)
             .WithSummary("The solution package a team came from, and what it still waits for")

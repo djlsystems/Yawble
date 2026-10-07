@@ -3,6 +3,7 @@ using System.Text.Json;
 using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host.Auth;
+using Harness.Host.Solutions;
 
 namespace Harness.Host;
 
@@ -19,10 +20,24 @@ public sealed class TriggerSweep(
     TenantLogging tenant,
     FolderWatch folders,
     ILogger<TriggerSweep> logger,
-    TriggerCost? cost = null)
+    TriggerCost? cost = null,
+    SolutionWait? waiting = null)
 {
     public async Task FireDueAsync(DateTimeOffset now, CancellationToken ct = default)
     {
+        // THE HEARTBEAT THAT ENDS A WAIT provided with no hook of its own, so its marks clear.
+        if (waiting is not null)
+        {
+            try
+            {
+                await waiting.ObserveAllAsync(ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                logger.LogWarning(exception, "Reading the solution teams' missing inputs failed.");
+            }
+        }
+
         foreach (var row in await schedules.DueAsync(now, ct))
         {
             try
@@ -122,6 +137,7 @@ public sealed class TriggerSweep(
                 {
                     team = found.Team,
                     container = found.Name,
+                    reason,
                     dueAt = due.ToString("O", CultureInfo.InvariantCulture),
                     nextDueAt = next?.ToString("O", CultureInfo.InvariantCulture),
                 },
@@ -164,8 +180,8 @@ public sealed class TriggerSweep(
     /// FIRES ONE CLOCK TRIGGER NOW, outside its schedule: the one single-fire entry point, for a
     /// person's Run now and a solution's run-at-install. It is the fire the sweep makes - source
     /// `schedule:&lt;id&gt;`, the trigger's instruction with its wakeManager and the sweep's
-    /// `schedule.fired` row, skipped with its `schedule.skipped` row for a paused team or a busy
-    /// idle-only member, and skipped as the sweep's capped fire is when the daily cap is reached - but
+    /// `schedule.fired` row, skipped with its `schedule.skipped` row for a paused team, a team
+    /// waiting for a missing required input or a busy idle-only member, and skipped as the sweep's capped fire is when the daily cap is reached - but
     /// it is nobody's due time, so nothing is counted as missed.
     ///
     /// THE CLOCK: by default the stored `next_due_at` is left alone (a capped one sleeps, as the cap
@@ -274,10 +290,12 @@ public sealed class TriggerSweep(
             ct);
 
     /// <summary>Why a fire of <paramref name="row"/> is skipped before its cap is asked: the team
-    /// is paused, or an idle-only trigger's member is busy. Null when neither.</summary>
+    /// is paused, the team waits for a missing required input ("waiting for …", see
+    /// <see cref="SolutionWait"/>), or an idle-only trigger's member is busy. Null when none.</summary>
     private async Task<string?> SkipReasonAsync(TriggerRow row, MemberRuntime container, CancellationToken ct)
     {
         if (host.IsPaused(container.Id.Team)) return MessageTypes.ScheduleSkippedPausedReason;
+        if (waiting is not null && await waiting.WaitingForAsync(container.Id.Team, ct) is { } input) return input;
         if (row.IdleOnly && await IsBusyAsync(container, ct)) return MessageTypes.ScheduleSkippedBusyReason;
         return null;
     }
@@ -364,8 +382,8 @@ public sealed class TriggerSweep(
     }
 }
 
-/// <summary>What one <see cref="TriggerSweep.RunNowAsync"/> did: `fired`, `skipped` (paused team or
-/// busy idle-only member, <c>Reason</c> says which), `capped` or `member-missing`, and the seq of the
+/// <summary>What one <see cref="TriggerSweep.RunNowAsync"/> did: `fired`, `skipped` (paused team, a
+/// team waiting for a missing input or a busy idle-only member, <c>Reason</c> says which), `capped` or `member-missing`, and the seq of the
 /// instruction or `schedule.skipped` row it appended (null when capped: that row is the cap's), and
 /// the trigger as the fire left it.</summary>
 public sealed record TriggerRunNow(string Outcome, long? Seq, string? Reason, TriggerRow Trigger);
