@@ -9,6 +9,7 @@ import {
   renameConnection,
   saveConnectionProvider,
   startConnection,
+  updateMailboxPassword,
 } from '../api/client';
 import type { Connection, ConnectionProvider, ConnectionProviderSave, ConnectionUse } from '../api/types';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
@@ -16,6 +17,7 @@ import { productCli } from '../presentation/product';
 import ConnectDialog from './ConnectDialog.vue';
 import DialogTabs from './DialogTabs.vue';
 import {
+  mailServerLabel,
   parseScopes,
   providerHelp,
   providerName,
@@ -44,6 +46,10 @@ import {
  * browser to the provider's consent page. The provider returns to the Host's callback, which answers
  * a redirect back to the Console; `notice` is what it came back with. The dialog shows the exact
  * redirect URI to register for the address in use, and one line of help per built-in provider.
+ *
+ * A MAILBOX (kind `imap`) shows its servers and "set" for its app password instead of scopes, and
+ * UPDATE PASSWORD instead of Reconnect: the Host logs in with the new password and only then stores
+ * it, clearing needs-reconnect. The login's sentence shows on the tile; a refusal shows in the dialog.
  *
  * THE CLIENT SECRET IS WRITE-ONLY. No route answers it: the dialog says "set" or "not set", and its
  * input starts empty whatever is stored. An empty input on save keeps the stored secret.
@@ -200,6 +206,45 @@ function reconnect(connection: Connection) {
 
   // The Host asks for the old granted scopes and these together; none added is the same account again.
   void sendToProvider({ reconnectId: connection.id, scopes: [] }, problem);
+}
+
+// --- Update password, for a mailbox -------------------------------------------------------------
+
+const isMailbox = (connection: Connection) => connection.kind === 'imap' || connection.providerKind === 'imap';
+
+/** The login's sentence after a password update, on the mailbox's tile. */
+const rowNotice = ref<Record<string, string>>({});
+
+const passwordFor = ref<Connection | null>(null);
+/** WRITE-ONLY: starts empty every time and is cleared once sent. */
+const newPassword = ref('');
+const passwordProblem = ref('');
+const passwordBusy = ref(false);
+
+function startPasswordUpdate(connection: Connection) {
+  passwordFor.value = connection;
+  newPassword.value = '';
+  passwordProblem.value = '';
+}
+
+async function updatePassword() {
+  const connection = passwordFor.value;
+  if (!connection || newPassword.value === '' || passwordBusy.value) return;
+
+  passwordBusy.value = true;
+  passwordProblem.value = '';
+  try {
+    const answer = await updateMailboxPassword(connection.id, newPassword.value);
+    newPassword.value = '';
+    passwordFor.value = null;
+    rowNotice.value = { ...rowNotice.value, [connection.id]: answer.sentence };
+    await load();
+  } catch (cause) {
+    // The login's sentence: refused or unreachable. Nothing changed at the Host.
+    passwordProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    passwordBusy.value = false;
+  }
 }
 
 // --- Rename ---------------------------------------------------------------------------------------
@@ -361,9 +406,10 @@ async function removeProvider(provider: ConnectionProvider) {
       </q-card-section>
 
       <q-card-section class="os-body os-text-muted q-pt-xs">
-        Accounts at OAuth services that plugin members act on. The Host keeps each account's refresh
-        token and hands a plugin only a fresh access token on each run. A person binds a connection
-        to a member in the member's settings.
+        Accounts that plugin members act on. For an account at an OAuth service the Host keeps its
+        refresh token and hands a plugin only a fresh access token on each run; for a mailbox it keeps
+        the app password encrypted and hands it to a bound plugin's run alone. A person binds a
+        connection to a member in the member's settings.
       </q-card-section>
 
       <q-card-section class="row items-center q-gutter-x-sm q-py-sm">
@@ -439,18 +485,39 @@ async function removeProvider(provider: ConnectionProvider) {
               </div>
 
               <div v-if="connection.status !== 'ok'" class="conn-tile-line text-negative" data-connection-reason>
-                {{ connection.statusReason ?? 'The provider gave no reason.' }} Reconnect it to clear this.
+                <template v-if="isMailbox(connection)">
+                  {{ connection.statusReason ?? 'The server refused the login.' }} Update its password to clear this.
+                </template>
+                <template v-else>
+                  {{ connection.statusReason ?? 'The provider gave no reason.' }} Reconnect it to clear this.
+                </template>
+              </div>
+              <div v-else-if="rowNotice[connection.id]" class="conn-tile-line text-positive" data-row-notice>
+                {{ rowNotice[connection.id] }}
               </div>
 
               <dl class="conn-facts q-mt-xs">
-                <dt>Scopes</dt>
-                <dd data-connection-scopes>
-                  <template v-if="connection.scopes.length === 0">None</template>
-                  <div v-for="scope in connection.scopes" :key="scope" class="mono conn-scope">{{ scope }}</div>
-                </dd>
+                <template v-if="isMailbox(connection)">
+                  <dt>Servers</dt>
+                  <dd data-connection-servers>
+                    <div class="mono">IMAP {{ mailServerLabel(connection.imap) }}</div>
+                    <div class="mono">SMTP {{ mailServerLabel(connection.smtp) }}</div>
+                  </dd>
+                  <dt>Username</dt>
+                  <dd class="mono" data-connection-username>{{ connection.username ?? connection.account }}</dd>
+                  <dt>App password</dt>
+                  <dd data-connection-password>{{ connection.passwordSet ? 'set' : 'not set' }}</dd>
+                </template>
+                <template v-else>
+                  <dt>Scopes</dt>
+                  <dd data-connection-scopes>
+                    <template v-if="connection.scopes.length === 0">None</template>
+                    <div v-for="scope in connection.scopes" :key="scope" class="mono conn-scope">{{ scope }}</div>
+                  </dd>
+                </template>
                 <dt>Connected</dt>
                 <dd data-connection-connected>{{ when(connection.connectedAt) }}</dd>
-                <dt>Last refreshed</dt>
+                <dt>{{ isMailbox(connection) ? 'Last login' : 'Last refreshed' }}</dt>
                 <dd data-connection-refreshed>{{ when(connection.refreshedAt) }}</dd>
                 <dt>Used by</dt>
                 <dd data-connection-used-by>
@@ -463,7 +530,18 @@ async function removeProvider(provider: ConnectionProvider) {
               </div>
 
               <div class="conn-tile-actions">
-                <span class="row-btn-wrap">
+                <span v-if="isMailbox(connection)" class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    icon="key"
+                    :aria-label="`Update password ${connection.name}`"
+                    @click="startPasswordUpdate(connection)"
+                  />
+                  <q-tooltip>Update password: a new app password, tried before it is kept</q-tooltip>
+                </span>
+                <span v-else class="row-btn-wrap">
                   <q-btn
                     dense
                     flat
@@ -577,6 +655,47 @@ async function removeProvider(provider: ConnectionProvider) {
     :returned="guidedReturned"
     @changed="load"
   />
+
+  <!-- UPDATE PASSWORD, for a mailbox. The password is write-only: the field starts empty every time. -->
+  <q-dialog :model-value="passwordFor !== null" @update:model-value="(showing) => { if (!showing) passwordFor = null; }">
+    <q-card v-if="passwordFor" class="os-dialog-sm" data-password-dialog>
+      <q-card-section>
+        <div class="os-dialog-title">Update password</div>
+        <div class="text-caption os-text-muted">
+          A new app password for {{ passwordFor.name }} ({{ passwordFor.account }}). The Host logs in
+          with it first and keeps it only if that works.
+        </div>
+      </q-card-section>
+
+      <q-card-section class="q-gutter-md">
+        <q-input
+          v-model="newPassword"
+          outlined
+          dense
+          autofocus
+          type="password"
+          label="New app password"
+          hint="Stored encrypted and never shown again."
+          autocomplete="new-password"
+          spellcheck="false"
+          @keydown.enter.prevent="updatePassword"
+        />
+        <div v-if="passwordProblem" class="text-negative" data-password-problem>{{ passwordProblem }}</div>
+      </q-card-section>
+
+      <q-card-actions align="right">
+        <q-btn flat no-caps label="Cancel" @click="passwordFor = null" />
+        <q-btn
+          color="primary"
+          no-caps
+          label="Update password"
+          :loading="passwordBusy"
+          :disable="newPassword === '' || passwordBusy"
+          @click="updatePassword"
+        />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
 
   <!-- CONNECT AN ACCOUNT -->
   <q-dialog v-model="connectOpen">

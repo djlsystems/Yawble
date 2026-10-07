@@ -5,6 +5,7 @@ import {
   getConnectionNeeds,
   listConnectionProviders,
   listConnections,
+  listMailboxPresets,
   listOpenConnectionFlows,
   renameConnection,
   saveConnectionProvider,
@@ -21,6 +22,7 @@ import type {
   ConnectionOpenFlow,
   ConnectionProvider,
   ConnectionProviderSave,
+  MailboxPreset,
   MicrosoftAudience,
 } from '../api/types';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
@@ -37,6 +39,7 @@ import {
 } from '../lib/connections';
 import { productCli } from '../presentation/product';
 import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/providerReturn';
+import MailboxForm from './MailboxForm.vue';
 
 /**
  * ADD CONNECTION: connecting an account for a person who has never registered an OAuth app.
@@ -66,6 +69,10 @@ import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/prov
  * A SIGN-IN WITH A CODE STILL WAITING at the Host is picked back up on open: closing the dialog, or
  * reloading the page, does not lose the code the person may be typing at Microsoft.
  *
+ * A MAILBOX WITH AN APP PASSWORD is offered beside them on the service step: tiles Gmail, iCloud,
+ * Yahoo and Other, from the Host's presets, open `MailboxForm`, which logs in before it saves and
+ * shows the login's one sentence. No app, no sign-in elsewhere. A slot shows them when it takes `imap`.
+ *
  * THE CLIENT SECRET IS WRITE-ONLY here as in Advanced: typed, sent once, never shown or kept. The
  * provider's device code never reaches the browser: only the code the person types does.
  */
@@ -94,7 +101,7 @@ const emit = defineEmits<{
   connected: [connection: Connection];
 }>();
 
-type Step = 'service' | 'setup' | 'signin' | 'result';
+type Step = 'service' | 'setup' | 'signin' | 'result' | 'mailbox';
 
 const step = ref<Step>('service');
 const providerId = ref<string | null>(null);
@@ -133,6 +140,8 @@ watch(open, (showing) => {
   }
 
   step.value = 'service';
+  mailboxPreset.value = '';
+  mailboxSaved.value = false;
   providerId.value = null;
   needs.value = null;
   unticked.value = new Set();
@@ -151,6 +160,7 @@ watch(open, (showing) => {
 
 /** A waiting sign-in with a code is picked back up; else a slot taking one provider skips the service step. */
 async function begin(seq: number) {
+  void readPresets(seq);
   let flows: ConnectionOpenFlow[] = [];
   try {
     flows = await listOpenConnectionFlows();
@@ -186,6 +196,39 @@ const builtIn = [
 
 /** The services offered: a slot's own, when started from one. */
 const services = computed(() => (props.need ? builtIn.filter((service) => props.need!.providers.includes(service.id)) : builtIn));
+
+// --- A mailbox with an app password ---------------------------------------------------------------
+
+/** The Host's mailbox presets; empty until read, and when the read fails (an older Host). */
+const presets = ref<MailboxPreset[]>([]);
+const mailboxPreset = ref('');
+const mailboxSaved = ref(false);
+const mailboxForm = ref<InstanceType<typeof MailboxForm> | null>(null);
+
+/** Offered unless the slot this was started from does not take a mailbox. */
+const mailboxTiles = computed(() => (!props.need || props.need.providers.includes('imap') ? presets.value : []));
+
+async function readPresets(seq: number) {
+  try {
+    const read = await listMailboxPresets();
+    if (seq === opening) presets.value = read;
+  } catch {
+    // No presets, no tiles: the OAuth services are offered as before.
+  }
+}
+
+function chooseMailbox(id: string) {
+  mailboxPreset.value = id;
+  mailboxSaved.value = false;
+  problem.value = '';
+  step.value = 'mailbox';
+}
+
+function mailboxConnected(connection: Connection) {
+  mailboxSaved.value = true;
+  emit('changed');
+  emit('connected', connection);
+}
 
 async function choose(id: string) {
   providerId.value = id;
@@ -568,7 +611,7 @@ const stepLabels = computed(() => [
         <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
       </q-card-section>
 
-      <q-card-section v-if="step !== 'result'" class="q-py-xs">
+      <q-card-section v-if="step !== 'result' && step !== 'mailbox'" class="q-py-xs">
         <ol class="connect-steps text-caption">
           <li
             v-for="(item, index) in stepLabels"
@@ -582,7 +625,22 @@ const stepLabels = computed(() => [
 
       <!-- 1. SERVICE -->
       <q-card-section v-if="step === 'service'" data-connect-step="service" class="q-gutter-y-md">
-        <div>Which account do you want to connect?</div>
+        <template v-if="mailboxTiles.length > 0">
+          <div>A mailbox, with an app password:</div>
+          <div class="row q-gutter-sm" data-mailbox-tiles>
+            <q-btn
+              v-for="tile in mailboxTiles"
+              :key="tile.id"
+              outline
+              no-caps
+              :label="tile.name"
+              :data-mailbox-preset="tile.id"
+              @click="chooseMailbox(tile.id)"
+            />
+          </div>
+          <div v-if="services.length > 0">Or an account, through an app of your own:</div>
+        </template>
+        <div v-else>Which account do you want to connect?</div>
         <div class="row q-gutter-sm">
           <q-btn
             v-for="service in services"
@@ -643,6 +701,11 @@ const stepLabels = computed(() => [
             </template>
           </template>
         </template>
+      </q-card-section>
+
+      <!-- A MAILBOX WITH AN APP PASSWORD -->
+      <q-card-section v-else-if="step === 'mailbox'" data-connect-step="mailbox">
+        <MailboxForm ref="mailboxForm" :presets="presets" :preset="mailboxPreset" @saved="mailboxConnected" />
       </q-card-section>
 
       <!-- 2. SET UP THE APP -->
@@ -870,6 +933,20 @@ const stepLabels = computed(() => [
         </template>
         <template v-else-if="step === 'setup'">
           <q-btn flat no-caps label="Back" @click="step = 'service'" />
+        </template>
+        <template v-else-if="step === 'mailbox'">
+          <q-btn v-if="mailboxSaved" v-close-popup color="primary" no-caps label="Finish" />
+          <template v-else>
+            <q-btn flat no-caps label="Back" @click="step = 'service'" />
+            <q-btn
+              color="primary"
+              no-caps
+              label="Save"
+              :loading="mailboxForm?.busy ?? false"
+              :disable="!(mailboxForm?.ready ?? false) || (mailboxForm?.busy ?? false)"
+              @click="mailboxForm?.save()"
+            />
+          </template>
         </template>
         <template v-else-if="step === 'signin' && provider">
           <q-btn flat no-caps label="Back" @click="back" />

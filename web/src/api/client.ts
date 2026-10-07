@@ -55,6 +55,9 @@ import type {
   ConnectionDeviceStartRequest,
   ConnectionFlow,
   ConnectionOpenFlow,
+  MailboxAddRequest,
+  MailboxPreset,
+  MailboxSaved,
   PluginList,
   PluginInstallResult,
   PluginRemoveResult,
@@ -1459,6 +1462,29 @@ export const getConnectionNeeds = (provider: string, slot?: { plugin: string; sl
 
 /** Every connected account, with its status and the members that use it. */
 export const listConnections = () => json<Connection[]>('/api/connections')
+
+/** Gmail, iCloud, Yahoo and Other, with each one's IMAP and SMTP servers. Other's are null. */
+export const listMailboxPresets = () => json<MailboxPreset[]>('/api/connections/imap/presets')
+
+/**
+ * Adds a mailbox with an app password. The Host logs in to IMAP and SMTP first and saves only when
+ * both succeed: 200 with the login's sentence, else a refusal whose message is the sentence saying
+ * what to fix (422), or which field is wrong (400). Nothing is saved on a refusal.
+ */
+export const addMailbox = (body: MailboxAddRequest) =>
+  json<MailboxSaved>('/api/connections/imap', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+/** Logs in with a mailbox's new app password and, only if it works, stores it and clears needs-reconnect. */
+export const updateMailboxPassword = (id: string, password: string) =>
+  json<MailboxSaved>(`/api/connections/${encodeURIComponent(id)}/password`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password }),
+  })
 
 /**
  * Starts a web flow: the answer's `authorizationUrl` is where the browser goes. The provider comes

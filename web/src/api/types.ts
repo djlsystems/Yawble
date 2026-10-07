@@ -3106,14 +3106,64 @@ export interface Connection {
   id: string
   name: string
   provider: string
-  providerKind: ConnectionProviderKind
+  /** `imap` for a mailbox with an app password; its `provider` is `imap` too. */
+  providerKind: ConnectionProviderKind | 'imap'
+  /** Absent from a Host older than mailbox connections, which held OAuth accounts only. */
+  kind?: 'oauth' | 'imap'
   account: string
   scopes: string[]
   connectedAt: string
+  /** For a mailbox: its last successful login. */
   refreshedAt: string | null
   status: 'ok' | 'needs-reconnect'
+  /** For a mailbox that needs reconnecting: the login's own sentence. */
   statusReason: string | null
   usedBy: ConnectionUse[]
+  /** A mailbox's login name; null for an OAuth account. */
+  username?: string | null
+  imap?: MailServer | null
+  smtp?: MailServer | null
+  /** The preset it was added with (`gmail`, `icloud`, `yahoo`, `other`), or null. */
+  preset?: string | null
+  /** A mailbox says only whether its app password is set. No route ever answers the password. */
+  passwordSet?: boolean | null
+}
+
+/** One mail server of a mailbox connection: where it is and how the connection is secured. */
+export interface MailServer {
+  host: string
+  port: number
+  security: MailSecurity
+}
+
+export type MailSecurity = 'TLS' | 'STARTTLS'
+
+/**
+ * One of `GET /api/connections/imap/presets`: Gmail, iCloud, Yahoo, then Other, whose servers are
+ * null - every field typed.
+ */
+export interface MailboxPreset {
+  id: string
+  name: string
+  imap: MailServer | null
+  smtp: MailServer | null
+}
+
+/** `POST /api/connections/imap`. The password is sent once and never comes back. */
+export interface MailboxAddRequest {
+  preset?: string | null
+  name?: string | null
+  account: string
+  username?: string | null
+  password: string
+  imap: MailServer
+  smtp: MailServer
+}
+
+/** What a mailbox save or password update answers: the login test's one sentence, and the connection. */
+export interface MailboxSaved {
+  sentence: string
+  connection: Connection
 }
 
 /** `POST /api/connections/start`. */

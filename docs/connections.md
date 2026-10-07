@@ -305,11 +305,12 @@ iCloud, Yahoo or Other - and fill in:
 
 | Field | What goes in |
 |---|---|
-| Account | The mailbox's email address. |
+| Email address | The mailbox's address: the connection's account. |
 | Username | What the mail server signs in with: usually the address (the default). iCloud's IMAP takes the part before the @; with a username that has no @, the Host signs in to SMTP with the full address, as Apple's settings say. |
 | App password | The app password you just made. Write-only: the connection afterwards shows only that a password is set. |
 | IMAP server, port, security | Filled in from the provider's published settings and editable; empty for Other. Security is `TLS` (encrypted from the first byte) or `STARTTLS`. |
 | SMTP server, port, security | The same, for sending. |
+| Name (optional) | What the connection is called in Connections and a slot's picker; the address when left empty. |
 
 | Preset | IMAP | SMTP | Published at |
 |---|---|---|---|
@@ -323,7 +324,7 @@ server with exactly these settings, over a socket from the Host (no program is s
 in one sentence: "Connected: 1,240 messages in Inbox", or what to fix - "The server refused the
 password. For Gmail, make an app password: it needs 2-Step Verification.", "Could not reach
 imap.example.com on port 993." A mailbox whose first login is refused, or whose server cannot be
-reached, **is not saved**.
+reached, **is not saved**. Save shows the sentence under the form; fix what it names and Save again.
 
 **What the password is used for, and where it is.** Only to sign in to that mailbox's IMAP and SMTP
 servers: by the Host, for the login test and before a run, and by a plugin member a person bound to

@@ -1,4 +1,4 @@
-import type { Connection, ConnectionProvider, ConnectionSlot } from '../api/types';
+import type { Connection, ConnectionProvider, ConnectionSlot, MailServer } from '../api/types';
 
 /**
  * CONNECTIONS, READ FOR A PERSON: the redirect URI to register, which connections a plugin's slot
@@ -91,6 +91,7 @@ export function providerName(id: string, providers: ConnectionProvider[]): strin
   if (known) return known.name;
   if (id === 'google') return 'Google';
   if (id === 'microsoft') return 'Microsoft';
+  if (id === 'imap') return 'Mailbox (IMAP)';
   return id;
 }
 
@@ -194,6 +195,11 @@ export function parseScopes(text: string): string[] {
 /** "ok", or "needs reconnect" - in words, never in colour alone. */
 export function statusLabel(connection: Pick<Connection, 'status'>): string {
   return connection.status === 'ok' ? 'ok' : 'needs reconnect';
+}
+
+/** A mailbox's server, as "imap.gmail.com:993 TLS". */
+export function mailServerLabel(server: MailServer | null | undefined): string {
+  return server ? `${server.host}:${server.port} ${server.security}` : 'not set';
 }
 
 /** "alpha / Inbox (mail)" for each member using it. */
