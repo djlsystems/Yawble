@@ -78,6 +78,7 @@ import type {
   Team,
   TeamCloned,
   TeamCreated,
+  ArchiveCheck,
   TeamDeleted,
   RemovalRetried,
   UnfinishedRemoval,
@@ -805,6 +806,18 @@ export const pauseTeam = (team: TeamId) =>
 export const resumeTeam = (team: TeamId) =>
   send(`/api/teams/${encodeURIComponent(team)}/resume`, { method: 'POST' })
 
+/** Whether this team is quiet enough to archive now, and its open workflows. */
+export const archiveCheck = (team: TeamId) =>
+  json<ArchiveCheck>(`/api/teams/${encodeURIComponent(team)}/archive-check`)
+
+/** Archives this team. A 409 carries the sentence naming what is still going. */
+export const archiveTeam = (team: TeamId) =>
+  send(`/api/teams/${encodeURIComponent(team)}/archive`, { method: 'POST' })
+
+/** Brings an archived team back, paused: nothing restarts until someone resumes it. */
+export const unarchiveTeam = (team: TeamId) =>
+  send(`/api/teams/${encodeURIComponent(team)}/unarchive`, { method: 'POST' })
+
 /** What `GET /api/backlog/{id}` answers: the item, its dispatches, and what each one did. */
 export interface BacklogItemDetail {
   item: BacklogItemView
@@ -1113,7 +1126,8 @@ export const deleteTeam = async (team: TeamId, confirmation?: string, deleteLoca
       )
     }
 
-    throw new Error(detail || `${response.status} ${response.statusText}`)
+    // The status rides along, as `send` does it: a 409 here names what is still going.
+    throw Object.assign(new Error(detail || `${response.status} ${response.statusText}`), { status: response.status })
   }
 
   return (await response.json()) as TeamDeleted

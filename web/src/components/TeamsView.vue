@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useQuasar } from 'quasar';
 import {
+  archiveCheck,
+  archiveTeam,
   cloneTeam,
   deleteTeam,
   listLocalRepos,
@@ -9,7 +11,9 @@ import {
   pauseTeam,
   resumeTeam,
   TeamDeletionConfirmationRequired,
+  unarchiveTeam,
 } from '../api/client';
+import { refusalStatus } from '../lib/forms';
 import { useConsoleStore } from '../stores/console';
 import { useWipStore, wipLine } from '../stores/wip';
 import { StalledBadgeGrace } from '../lib/teamKpis';
@@ -19,15 +23,18 @@ import {
   nextSort,
   proposeCloneName,
   readTeamSort,
+  readTeamsShown,
   teamRowFrom,
+  teamShown,
   teamStatusText,
   writeTeamSort,
   type TeamRow,
   type TeamSort,
+  type TeamsShown,
 } from '../lib/teamsTable';
 import { ariaSort } from '../lib/tableSort';
 import { localDay } from '../lib/localTime';
-import type { LocalRepo, Team, TeamDeleted, TeamId } from '../api/types';
+import type { ArchiveCheck, LocalRepo, Team, TeamDeleted, TeamId } from '../api/types';
 import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
 import TeamStatisticsTile from './TeamStatisticsTile.vue';
@@ -88,6 +95,29 @@ function noteWindow(teamId: string, range: ActivityRange | null) {
 const sharedRange = computed(() =>
   relative.value ? sharedWindow(rows.value.map((row) => activityWindows.value[row.id] ?? null)) : null);
 
+const ShownKey = 'harness.teamsShown';
+
+/** Show active and Show archived, remembered per browser. Wrapped for the same reason the sort is. */
+function storedShown(): TeamsShown {
+  try {
+    return readTeamsShown(localStorage.getItem(ShownKey));
+  } catch {
+    return readTeamsShown(null);
+  }
+}
+
+const shown = ref<TeamsShown>(storedShown());
+
+function setShown(which: keyof TeamsShown, value: boolean) {
+  shown.value = { ...shown.value, [which]: value };
+
+  try {
+    localStorage.setItem(ShownKey, JSON.stringify(shown.value));
+  } catch {
+    // Still applies for this session.
+  }
+}
+
 /**
  * THE SAME CLOCK THE TAB STRIP KEEPS, and for the same reason: `UNDECLARED` has a grace period, so a
  * team's status is a function of TIME as well as of state - and a team that has stopped publishes
@@ -147,6 +177,7 @@ function sortBy(column: TeamSort['column']) {
 
 const rows = computed<TeamRow[]>(() =>
   board.teams
+    .filter((team) => teamShown(team, shown.value))
     .map((team) => teamRowFrom(team, board.workflowFor(team.id), board.workflowsFor(team.id), now.value))
     .sort((a, b) => compareTeams(a, b, sort.value)),
 );
@@ -157,6 +188,9 @@ const rows = computed<TeamRow[]>(() =>
  * table is still what is on screen.
  */
 function open(id: TeamId) {
+  // An archived team has no board to open: it has no tab until it is unarchived.
+  if (board.teams.find((team) => team.id === id)?.archived === true) return;
+
   board.showBoard();
   board.setActiveTeam(id);
 }
@@ -172,6 +206,8 @@ const doomed = ref<Team | null>(null);
 const typed = ref('');
 const deleteLosses = ref<string[]>([]);
 const deletionConfirmation = ref<string | null>(null);
+/** The server's sentence when it refused the deletion because the team is not quiet. */
+const deleteRefusal = ref('');
 const busy = ref(false);
 
 /**
@@ -298,6 +334,7 @@ function ask(team: Team | null) {
   typed.value = '';
   deleteLosses.value = [];
   deletionConfirmation.value = null;
+  deleteRefusal.value = '';
   deleteLocalRepos.value = [];
   if (team) void loadLocalRepos();
 }
@@ -371,6 +408,12 @@ async function remove() {
       deleteLosses.value = cause.losses;
       deletionConfirmation.value = cause.confirmation;
       typed.value = '';
+      return;
+    }
+
+    // Not quiet: said in the dialog, where the person asked, naming what is still going.
+    if (refusalStatus(cause) === 409 && cause instanceof Error) {
+      deleteRefusal.value = cause.message;
       return;
     }
 
@@ -469,6 +512,77 @@ async function clone() {
   }
 }
 
+/**
+ * ARCHIVING: kept whole, doing no work, out of the way, and still a template to clone. The dialog
+ * reads `archive-check` for the open workflows it lists; a refusal is the server's sentence.
+ */
+const archiving = ref<Team | null>(null);
+const archiveFacts = ref<ArchiveCheck | null>(null);
+const archiveRefusal = ref('');
+const archiveBusy = ref(false);
+const unarchiveBusy = ref<TeamId | ''>('');
+
+async function askArchive(team: Team | null) {
+  archiving.value = team;
+  archiveFacts.value = null;
+  archiveRefusal.value = '';
+  if (!team) return;
+
+  try {
+    const facts = await archiveCheck(team.id);
+    if (archiving.value?.id !== team.id) return;
+    archiveFacts.value = facts;
+    if (!facts.quiet && facts.reason) archiveRefusal.value = facts.reason;
+  } catch (cause) {
+    if (archiving.value?.id === team.id) archiveRefusal.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+async function archive() {
+  if (!archiving.value || archiveBusy.value) return;
+
+  const team = archiving.value;
+  archiveBusy.value = true;
+  archiveRefusal.value = '';
+
+  try {
+    await archiveTeam(team.id);
+    void askArchive(null);
+    await board.refresh();
+    board.refreshRollupIfShowing();
+    $q.notify({
+      type: 'positive',
+      timeout: 5000,
+      message: `${team.name} is archived. Tick Show archived to find it.`,
+    });
+  } catch (cause) {
+    archiveRefusal.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    archiveBusy.value = false;
+  }
+}
+
+async function unarchive(team: Team | null) {
+  if (!team || unarchiveBusy.value) return;
+
+  unarchiveBusy.value = team.id;
+
+  try {
+    await unarchiveTeam(team.id);
+    await board.refresh();
+    board.refreshRollupIfShowing();
+    $q.notify({
+      type: 'positive',
+      timeout: 5000,
+      message: `${team.name} is back, paused. Nothing runs until someone resumes it.`,
+    });
+  } catch (cause) {
+    $q.notify({ type: 'negative', message: cause instanceof Error ? cause.message : String(cause) });
+  } finally {
+    unarchiveBusy.value = '';
+  }
+}
+
 async function setPaused(team: Team | null, paused: boolean) {
   if (!team || pauseBusy.value) return;
 
@@ -509,6 +623,29 @@ async function setPaused(team: Team | null, paused: boolean) {
         A team is a Manager and the members it takes on to do your work; to start one, choose
         <strong>New Team</strong> on the ribbon above or ask the Concierge.
       </div>
+    </div>
+
+    <template v-else>
+    <!-- WHICH TEAMS ARE LISTED, remembered per browser. Archived ones are out of the way until asked for. -->
+    <div class="row q-gutter-md q-mb-sm teams-shown">
+      <q-checkbox
+        dense
+        label="Show active"
+        :model-value="shown.active"
+        data-teams-shown="active"
+        @update:model-value="(value: boolean) => setShown('active', value)"
+      />
+      <q-checkbox
+        dense
+        label="Show archived"
+        :model-value="shown.archived"
+        data-teams-shown="archived"
+        @update:model-value="(value: boolean) => setShown('archived', value)"
+      />
+    </div>
+
+    <div v-if="!shown.active && !shown.archived" class="q-pa-lg text-center os-text-muted" data-teams-shown-none>
+      Tick Show active or Show archived
     </div>
 
     <q-markup-table v-else v-resizable-columns="'teams'" flat bordered class="teams-table">
@@ -575,6 +712,7 @@ async function setPaused(team: Team | null, paused: boolean) {
         <tr
           v-for="row in rows"
           :key="row.id"
+          :data-team="row.id"
           class="teams-row"
           tabindex="0"
           @click="open(row.id)"
@@ -588,7 +726,10 @@ async function setPaused(team: Team | null, paused: boolean) {
             <div v-if="row.memberBreakdown" class="text-caption os-text-muted">{{ row.memberBreakdown }}</div>
           </td>
 
-          <td>
+          <td v-if="teamFor(row)?.archived" data-col-status>
+            <span class="console-tab-status console-tab-status--archived">ARCHIVED</span>
+          </td>
+          <td v-else data-col-status>
             <span class="console-tab-status" :class="`console-tab-status--${row.status}`">
               <span
                 v-if="row.status === 'running'"
@@ -619,8 +760,23 @@ async function setPaused(team: Team | null, paused: boolean) {
 
           <!-- `.stop` because these controls sit inside the whole-row click handler that switches
                teams - without it, acting on a team would also activate it on the way through. -->
-          <td class="text-right">
+          <td class="text-right" data-col-actions>
+            <!-- AN ARCHIVED TEAM is brought back with Unarchive, and comes back paused: no Pause or Resume here. -->
             <q-btn
+              v-if="teamFor(row)?.archived"
+              flat
+              dense
+              no-caps
+              icon="unarchive"
+              label="Unarchive"
+              :loading="unarchiveBusy === row.id"
+              :disable="busy || cloneBusy"
+              @click.stop="unarchive(teamFor(row))"
+            >
+              <q-tooltip>Bring this team back, paused</q-tooltip>
+            </q-btn>
+            <q-btn
+              v-else
               flat
               dense
               no-caps
@@ -650,6 +806,18 @@ async function setPaused(team: Team | null, paused: boolean) {
               <q-tooltip>Clone this team's repos, env and roster into a new one</q-tooltip>
             </q-btn>
             <q-btn
+              v-if="!teamFor(row)?.archived"
+              flat
+              dense
+              round
+              icon="archive"
+              aria-label="Archive this team"
+              :disable="busy || cloneBusy || archiveBusy"
+              @click.stop="askArchive(teamFor(row))"
+            >
+              <q-tooltip>Put this team away: kept whole, doing no work, still a template to clone</q-tooltip>
+            </q-btn>
+            <q-btn
               flat
               dense
               round
@@ -665,6 +833,7 @@ async function setPaused(team: Team | null, paused: boolean) {
         </tr>
       </tbody>
     </q-markup-table>
+    </template>
 
     <UnfinishedRemovals ref="removalsList" />
 
@@ -742,6 +911,8 @@ async function setPaused(team: Team | null, paused: boolean) {
                same question of a team with nothing to lose as of one holding unpushed commits, and
                teach people to type past it. This one only exists
                when the server has already refused and named what would go. -->
+          <!-- NOT QUIET: the server's sentence naming what is still going, member by member. -->
+          <p v-if="deleteRefusal" class="text-negative" data-delete-refusal>{{ deleteRefusal }}</p>
           <template v-if="deletionConfirmation">
             <p class="text-negative q-mb-sm">
               This team's repos still hold commits that are on no remote. Deleting it now would also
@@ -803,6 +974,43 @@ async function setPaused(team: Team | null, paused: boolean) {
             label="Retry removal"
             :loading="retrying"
             @click="retryUnfinished"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- ARCHIVE: what it does, the open workflows it leaves open, and the refusal as the server's sentence. -->
+    <q-dialog :model-value="archiving !== null" no-backdrop-dismiss @update:model-value="askArchive(null)">
+      <q-card class="teams-archive-card os-dialog-sm">
+        <q-card-section class="os-dialog-title">Archive {{ archiving?.name }}?</q-card-section>
+
+        <q-card-section class="q-pt-none">
+          <p>
+            Archiving keeps everything the team has - its members, settings, documents, repositories,
+            sites and history - and puts it away: it does no work, takes no instructions, and leaves
+            the tabs and the Kanban. It can still be cloned and deleted.
+          </p>
+          <p>Unarchive brings the team back paused: nothing runs until someone resumes it.</p>
+          <template v-if="archiveFacts && archiveFacts.openWorkflows.length > 0">
+            <p class="q-mb-xs">These workflows are still open and stay open:</p>
+            <ul class="q-pl-md" data-archive-open-workflows>
+              <li v-for="open in archiveFacts.openWorkflows" :key="open.workflow">
+                #{{ open.workflow }} {{ open.title }}
+              </li>
+            </ul>
+          </template>
+          <p v-if="archiveRefusal" class="text-negative" data-archive-refusal>{{ archiveRefusal }}</p>
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" :disable="archiveBusy" @click="askArchive(null)" />
+          <q-btn
+            color="primary"
+            unelevated
+            label="Archive team"
+            :loading="archiveBusy"
+            :disable="archiveBusy"
+            @click="archive"
           />
         </q-card-actions>
       </q-card>

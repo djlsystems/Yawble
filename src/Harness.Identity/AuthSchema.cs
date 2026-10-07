@@ -591,5 +591,15 @@ public static class AuthSchema
             ALTER TABLE team_solutions ADD COLUMN uninstalled_at TEXT NULL;
             ALTER TABLE team_solutions ADD COLUMN answers TEXT NULL;
             """),
+
+        // AN ARCHIVED TEAM IS A FLAG ON THE TEAM, NEVER A SECOND KIND OF TEAM: every row it has stays.
+        // `archived_at` is when a person (or the Concierge on a person's behalf) archived it, in UTC;
+        // NULL is an active team, which every team from before the step is. `archived_by` names who.
+        new MigrationStep(
+            "auth-022",
+            """
+            ALTER TABLE teams ADD COLUMN archived_at TEXT NULL;
+            ALTER TABLE teams ADD COLUMN archived_by TEXT NULL;
+            """),
     ];
 }

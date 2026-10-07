@@ -110,6 +110,17 @@ public static class Permits
     /// </summary>
     public const string Merge = "Merge";
 
+    /// <summary>
+    /// Archiving and unarchiving a team, for the CONCIERGE: its own verb, folded into nothing else,
+    /// exactly as <see cref="Merge"/> is. Held by <c>ConciergeLaunchFactory.ConciergePermits</c> alone
+    /// and taken from every other principal at authentication however its key was made; the routes
+    /// also ask the tenant setting <c>concierge.mayArchive</c>, off unless a person turns it on.
+    /// Deleting a team stays a person's, and no permit reaches it.
+    ///
+    /// NOT IN <see cref="All"/>, which is what a member key or an API key can be minted with.
+    /// </summary>
+    public const string Archive = "Archive";
+
     public static IReadOnlySet<string> All { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         Read, Tell, CreateContainer, CreateTeam, Progress,

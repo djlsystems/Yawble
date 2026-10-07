@@ -36,11 +36,16 @@ export const SystemPackages = 'system.packages'
 export const AgentTags = 'agents.tags'
 export const AgentCredentialSources = 'agents.credentialSource'
 export const ConciergeMayMerge = 'concierge.mayMerge'
+export const ConciergeMayArchive = 'concierge.mayArchive'
 export const UpdatesCheck = 'updates.check'
 
 /** This sentence is put in front of a person, word for word: what the setting allows, and that it is off unless turned on. */
 export const ConciergeMayMergeSentence =
   'Lets the Concierge merge a team’s finished branch through the platform’s Merge to main, as the step of a backlog run you asked for or on your own request, recorded as done for you; it is off unless a person turns it on.'
+
+/** This sentence is put in front of a person, word for word: what the setting allows, and that it is off unless turned on. */
+export const ConciergeMayArchiveSentence =
+  'Lets the Concierge archive and unarchive a quiet team when you ask it to in the terminal; it is off unless a person turns it on.'
 
 /** This sentence is put in front of a person, word for word. */
 export const SystemPackagesRestartSentence = 'Adding one costs a restart, not an image rebuild.'
@@ -108,6 +113,13 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     kind: 'toggle',
     label: 'Let the Concierge merge finished work',
     hint: ConciergeMayMergeSentence,
+  },
+  {
+    name: ConciergeMayArchive,
+    tab: 'concierge',
+    kind: 'toggle',
+    label: 'Let the Concierge archive teams',
+    hint: ConciergeMayArchiveSentence,
   },
   {
     name: 'quiet.window',
@@ -314,6 +326,8 @@ function settingFrom(entry: Record<string, unknown>, name: string): TenantSettin
 /** A setting's value as the text in its box. Objects are not edited through this; a list is its items. */
 export function draftOf(value: unknown): string {
   if (value === null || value === undefined) return ''
+  // An on-or-off setting listed as a JSON boolean reads as its word, as a toggle's draft is held.
+  if (typeof value === 'boolean') return value ? 'on' : 'off'
   if (Array.isArray(value)) return value.map(String).join(' ')
   if (typeof value === 'object') return JSON.stringify(value)
 

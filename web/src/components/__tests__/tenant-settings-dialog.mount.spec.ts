@@ -82,6 +82,7 @@ function settings() {
       setting('concierge.idleTimeout', '08:00:00'),
       // As the server lists it: the word, never a boolean, with its built-in default.
       setting('concierge.mayMerge', 'off', { default: 'off', defaultSource: 'builtIn' }),
+      setting('concierge.mayArchive', 'off', { default: 'off', defaultSource: 'builtIn' }),
       setting('quiet.window', '00:30:00'),
       setting('resume.maxAutomatic', 3),
       setting('causation.depthLimit', 25),
@@ -521,6 +522,49 @@ describe('Concierge', () => {
     expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'concierge.mayMerge': 'on' });
   });
 
+  /**
+   * Whether the Concierge may archive is a person's choice too: a toggle on the Concierge tab with
+   * its one sentence, never the key, sent as the word the server reads.
+   */
+  it('shows whether the Concierge may archive, off, with its one sentence and never the key', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'concierge');
+
+    const toggle = wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === 'Let the Concierge archive teams');
+    expect(toggle).toBeDefined();
+    expect(toggle!.props('modelValue')).toBe(false);
+    expect(bodyText()).toContain(
+      'Lets the Concierge archive and unarchive a quiet team when you ask it to in the terminal; it is off unless a person turns it on.',
+    );
+    expect(bodyText()).not.toContain('concierge.mayArchive');
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it('sends the word on when a person turns the Concierge archive setting on', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'concierge');
+
+    wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === 'Let the Concierge archive teams')!.vm.$emit('update:modelValue', true);
+    await flushPromises();
+    saveButton().click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'concierge.mayArchive': 'on' });
+  });
+
+  it('reads the Concierge archive setting on when the server lists it as a boolean', async () => {
+    const withOn = settings();
+    Object.assign(withOn.settings.find((entry) => entry.name === 'concierge.mayArchive')!, { value: true, source: 'row' });
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(withOn));
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'concierge');
+
+    const toggle = wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === 'Let the Concierge archive teams')!;
+    expect(toggle.props('modelValue')).toBe(true);
+    expect(bodyText()).not.toContain('On or off.');
+    expect(saveButton().disabled).toBe(true);
+  });
+
   /** The Concierge tab also holds this browser's terminal display. */
   it('holds this browser\'s terminal display, saved as it changes and never by Save', async () => {
     const wrapper = await openDialog();
@@ -679,7 +723,7 @@ describe('every tab', () => {
 
     expect([...seen.keys()].sort()).toEqual(
       [
-        'causation.depthLimit', 'concierge.idleTimeout', 'concierge.mayMerge', 'quiet.window', 'resume.maxAutomatic', 'runs.memoryLimitMb',
+        'causation.depthLimit', 'concierge.idleTimeout', 'concierge.mayArchive', 'concierge.mayMerge', 'quiet.window', 'resume.maxAutomatic', 'runs.memoryLimitMb',
         'theme.default', 'wip.maxRunning', 'wip.memoryPerRunMb', 'workflow.spendLimit',
       ],
     );

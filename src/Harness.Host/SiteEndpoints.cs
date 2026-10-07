@@ -284,10 +284,17 @@ public static class SiteEndpoints
 
     private static async Task<IResult> PostAction(
         string team, string site, string capability, string action, HttpContext context,
-        SiteService sites, SiteCapability capabilities, CancellationToken ct)
+        SiteService sites, SiteCapability capabilities, TeamRegistry teams, CancellationToken ct)
     {
         var granted = await ApiGrantAsync(team, site, capability, context, sites, capabilities, ct);
         if (granted.Refusal is { } refusal) return Refuse(refusal, granted.Status);
+
+        // AN ARCHIVED TEAM'S SITES STAY LIVE AND READABLE, but an action is work, and an archived
+        // team does none: refused with the sentence that names Unarchive, and nothing is appended.
+        if (teams.IsArchived(granted.Site!.Team))
+        {
+            return Refuse(TeamArchive.Refusal(teams.LabelFor(granted.Site.Team)), StatusCodes.Status409Conflict);
+        }
 
         var body = await ReadBodyAsync(context.Request, SiteRules.MaxActionPayloadBytes, ct);
 

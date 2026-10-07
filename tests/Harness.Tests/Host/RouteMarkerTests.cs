@@ -34,20 +34,21 @@ public sealed class RouteMarkerTests(HostFixture host) : IClassFixture<HostFixtu
     }
 
     [Fact]
-    public void Only_the_two_merge_routes_open_a_door_to_the_Concierge_and_only_for_Merge()
+    public void Only_the_merge_and_archive_routes_open_a_door_to_the_Concierge_each_for_its_own_permit()
     {
         var doors = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .Where(e => e.Metadata.GetMetadata<HumansOrConciergeMarker>() is not null)
-            .ToList();
+            .ToDictionary(Describe, e => e.Metadata.GetMetadata<HumansOrConciergeMarker>()!.Permit);
 
         Assert.Equal(
-            [
-                "POST /api/teams/{team}/repos/{repo}/bring-current-and-merge",
-                "POST /api/teams/{team}/repos/{repo}/merge-to-main",
-            ],
-            doors.Select(Describe).Order(StringComparer.Ordinal));
-        Assert.All(doors, e => Assert.Equal(
-            Harness.Contracts.Permits.Merge, e.Metadata.GetMetadata<HumansOrConciergeMarker>()!.Permit));
+            new Dictionary<string, string>
+            {
+                ["POST /api/teams/{team}/archive"] = Harness.Contracts.Permits.Archive,
+                ["POST /api/teams/{team}/repos/{repo}/bring-current-and-merge"] = Harness.Contracts.Permits.Merge,
+                ["POST /api/teams/{team}/repos/{repo}/merge-to-main"] = Harness.Contracts.Permits.Merge,
+                ["POST /api/teams/{team}/unarchive"] = Harness.Contracts.Permits.Archive,
+            },
+            doors);
     }
 
     private static string Describe(Endpoint endpoint)

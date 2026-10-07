@@ -27,7 +27,14 @@ public sealed class ConciergeLaunchFactory(
             Permits.Outcomes,
             // ITS ALONE, and only useful while a person has turned on concierge.mayMerge.
             Permits.Merge,
+
+            // ITS ALONE too, and only useful while a person has turned on concierge.mayArchive.
+            Permits.Archive,
         };
+
+    /// <summary>The permits only the Concierge may hold: <see cref="Strip"/> takes them from anyone else.</summary>
+    public static IReadOnlySet<string> ConciergeOnlyPermits { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { Permits.Merge, Permits.Archive };
 
     /// <summary>
     /// Whether <paramref name="principal"/> is one person's tenant Concierge: its kind, and the id
@@ -38,16 +45,17 @@ public sealed class ConciergeLaunchFactory(
         && string.Equals(principal.Id, PrincipalId(owner), StringComparison.Ordinal);
 
     /// <summary>
-    /// <paramref name="principal"/> without <see cref="Permits.Merge"/> unless it is the Concierge.
-    /// Applied where a key becomes a principal, so a key minted with it by any other road - a
-    /// member's permits, a plugin's, a person's API key, a hand-edited row - holds nothing.
+    /// <paramref name="principal"/> without <see cref="Permits.Merge"/> or <see cref="Permits.Archive"/>
+    /// unless it is the Concierge. Applied where a key becomes a principal, so a key minted with
+    /// either by any other road - a member's permits, a plugin's, a person's API key, a hand-edited
+    /// row - holds nothing.
     /// </summary>
     public static Principal Strip(Principal principal) =>
-        !principal.May(Permits.Merge) || IsConcierge(principal)
+        !principal.Permits.Any(ConciergeOnlyPermits.Contains) || IsConcierge(principal)
             ? principal
             : principal with
             {
-                Permits = new HashSet<string>(principal.Permits.Where(p => p != Permits.Merge), StringComparer.Ordinal),
+                Permits = new HashSet<string>(principal.Permits.Where(p => !ConciergeOnlyPermits.Contains(p)), StringComparer.Ordinal),
             };
 
     /// <summary>

@@ -235,6 +235,24 @@ public sealed class SqliteTeamStore : ITeamStore
             audit,
             ct);
 
+    /// <summary>Narrow: the two archive columns and, when archiving, <c>paused</c>. See
+    /// <see cref="ITeamStore.SetArchivedAsync"/>.</summary>
+    public Task SetArchivedAsync(
+        string team, DateTimeOffset? archivedAt, string? archivedBy, TriggerAudit audit, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText = archivedAt is null
+                    ? "UPDATE teams SET archived_at = NULL, archived_by = NULL WHERE id = $id COLLATE NOCASE"
+                    : "UPDATE teams SET archived_at = $at, archived_by = $by, paused = 1 WHERE id = $id COLLATE NOCASE";
+                command.Parameters.AddWithValue("$id", team);
+                command.Parameters.AddWithValue(
+                    "$at", archivedAt is { } at ? at.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) : DBNull.Value);
+                command.Parameters.AddWithValue("$by", (object?)archivedBy ?? DBNull.Value);
+            },
+            audit,
+            ct);
+
     /// <summary>Narrow, single column. See <see cref="ITeamStore.SetBudgetAsync"/>.</summary>
     public Task SetBudgetAsync(string team, long? budgetTokens, TriggerAudit? audit = null, CancellationToken ct = default) =>
         WriteAsync(command => BindBudget(command, team, budgetTokens), audit, ct);
@@ -368,7 +386,7 @@ public sealed class SqliteTeamStore : ITeamStore
 
         command.CommandText =
             "SELECT id, name, member_agent, member_agents, additional_instructions, root, repos, env, paused, "
-            + "budget_tokens "
+            + "budget_tokens, archived_at, archived_by "
             + "FROM teams";
 
         var teams = new List<PersistedTeam>();
@@ -400,7 +418,13 @@ public sealed class SqliteTeamStore : ITeamStore
                 // SaveTeamAsync, so a column missing from this SELECT is a setting that works all
                 // session and is gone at the next restart. NULL IS NOT 0: null means the team has
                 // chosen nothing, 0 means it chose unlimited.
-                reader.IsDBNull(9) ? null : reader.GetInt64(9)));
+                reader.IsDBNull(9) ? null : reader.GetInt64(9),
+
+                // Written by the narrow archive setter only, so read here or lost at a restart.
+                reader.IsDBNull(10)
+                    ? null
+                    : DateTimeOffset.Parse(reader.GetString(10), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                reader.IsDBNull(11) ? null : reader.GetString(11)));
         }
 
         return teams;
