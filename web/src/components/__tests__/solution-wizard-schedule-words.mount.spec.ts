@@ -13,7 +13,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import SolutionWizard from '../SolutionWizard.vue';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, settle } from '../../test/formProbe';
-import { Folder, fakeHost, hostPlan, installedRow, reply, steps, updatePreview, wizardRoutes, type Call, type Route } from '../../test/solutionFixtures';
+import { Folder, UpdateDiff, fakeHost, hostPlan, installedRow, reply, steps, updatePreview, wizardRoutes, type Call, type Route } from '../../test/solutionFixtures';
 import { panelRead, panelTrigger } from '../../test/solutionPanelFixtures';
 
 let calls: Call[] = [];
@@ -124,7 +124,7 @@ describe('Solution wizard - a schedule in words', () => {
       [
         (call) =>
           call.url === '/api/solutions/preview' && (call.body as { team?: string }).team === 'job-tracker'
-            ? reply(200, { ...updatePreview('job-tracker', plan()), diff: { ...updatePreview().diff, triggers: { added: [], changed: ['Morning summary'], removed: [] } } })
+            ? reply(200, { ...updatePreview('job-tracker', plan()), diff: { ...UpdateDiff, triggers: { added: [], changed: ['Morning summary'], removed: [] } } })
             : undefined,
         (call) =>
           call.url === '/api/teams/job-tracker/solution/panel'
