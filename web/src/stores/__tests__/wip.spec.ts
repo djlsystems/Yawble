@@ -8,7 +8,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getWip,
 }));
 
-import { WipPollMs, inProgressHeader, useWipStore, wipLine } from '../wip';
+import { WipPollMs, runningAcrossTeams, useWipStore, wipLine } from '../wip';
 
 const view = {
   max: 4,
@@ -78,9 +78,9 @@ describe('the words', () => {
     expect(wipLine(0, 0)).toBe('');
   });
 
-  it('reads the In Progress header against the limit, and without one at 0', () => {
-    expect(inProgressHeader(3, 4)).toBe('3 / 4 running');
-    expect(inProgressHeader(3, 0)).toBe('3 running');
-    expect(inProgressHeader(3, null)).toBe('3 running');
+  it('reads the ledger line against the limit, without one at 0, and says it is every team', () => {
+    expect(runningAcrossTeams(3, 4)).toBe('3 / 4 agents running, all teams');
+    expect(runningAcrossTeams(3, 0)).toBe('3 agents running, all teams');
+    expect(runningAcrossTeams(3, null)).toBe('3 agents running, all teams');
   });
 });

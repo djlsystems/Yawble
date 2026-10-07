@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { KanbanBoard, KanbanCard, KanbanTrailEntry } from '../../api/kanban';
+import type { Outcome } from '../../api/outcomes';
 import {
+  boardCountText,
+  outcomeTeams,
+  proposedMatchingFilters,
   cardShowsWaiting,
   laneOverLimit,
   swimlaneTeams,
@@ -528,3 +532,64 @@ describe('the filters in effect for a layout', () => {
     expect(sameFilters({ team: 'alpha' }, { team: 'beta' })).toBe(false)
   })
 })
+
+describe('the proposed outcomes Needs You draws', () => {
+  const proposal = (id: string, createdBy: string, teams: string[] = [], createdByKind = 'member') =>
+    ({
+      id,
+      name: `Outcome ${id}`,
+      status: 'proposed',
+      createdBy,
+      createdByKind,
+      figures: { teams: teams.map((team) => ({ id: team, name: team, deleted: false })) },
+    }) as unknown as Outcome;
+
+  const outcomes = [
+    proposal('mine', 'quick-notes/Manager', ['quick-notes']),
+    proposal('theirs', 'other-team/Manager'),
+    proposal('linked', 'other-team/Manager', ['Quick-Notes']),
+    proposal('concierge', 'concierge', [], 'concierge'),
+  ];
+  const ids = (list: Outcome[]) => list.map((outcome) => outcome.id);
+
+  it('belongs to the proposer\'s team and to every team whose workflows it serves', () => {
+    expect(outcomeTeams(outcomes[2]!).sort()).toEqual(['other-team', 'quick-notes']);
+    expect(outcomeTeams(outcomes[3]!)).toEqual([]);
+  });
+
+  it('keeps every one with no filter', () => {
+    expect(ids(proposedMatchingFilters(outcomes, {}))).toEqual(['mine', 'theirs', 'linked', 'concierge']);
+  });
+
+  it('keeps those of any picked team, ignoring case', () => {
+    expect(ids(proposedMatchingFilters(outcomes, { team: 'QUICK-NOTES' }))).toEqual(['mine', 'linked']);
+    expect(ids(proposedMatchingFilters(outcomes, { team: 'quick-notes,other-team' }))).toEqual(['mine', 'theirs', 'linked']);
+  });
+
+  it('keeps those a picked member proposed', () => {
+    expect(ids(proposedMatchingFilters(outcomes, { member: 'manager' }))).toEqual(['mine', 'theirs', 'linked']);
+    expect(ids(proposedMatchingFilters(outcomes, { member: 'Dev1' }))).toEqual([]);
+  });
+
+  it('keeps none under a status filter: a status is a card\'s', () => {
+    expect(proposedMatchingFilters(outcomes, { status: 'blocked' })).toEqual([]);
+  });
+
+  it('keeps the picked outcomes, and none for No outcome', () => {
+    expect(ids(proposedMatchingFilters(outcomes, { outcome: 'theirs' }))).toEqual(['theirs']);
+    expect(proposedMatchingFilters(outcomes, { outcome: 'none' })).toEqual([]);
+  });
+
+  it('is narrowed by the search box as the cards are', () => {
+    expect(ids(proposedMatchingFilters(outcomes, {}, ' outcome MINE '))).toEqual(['mine']);
+  });
+});
+
+describe('the board header\'s count', () => {
+  it('names the cards, and the proposed outcomes when there are any', () => {
+    expect(boardCountText(1, 0)).toBe('1 card');
+    expect(boardCountText(0, 0)).toBe('0 cards');
+    expect(boardCountText(1, 1)).toBe('1 card, 1 proposed outcome');
+    expect(boardCountText(3, 2)).toBe('3 cards, 2 proposed outcomes');
+  });
+});
