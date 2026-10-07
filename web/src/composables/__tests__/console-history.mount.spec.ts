@@ -137,6 +137,26 @@ describe('the browser back button in the Console', () => {
     expect(router.currentRoute.value.query).toEqual({ view: 'teams' });
   });
 
+  it('writes no address when the Concierge moves the current team, so no open dialog is closed by it', async () => {
+    const router = await open('/console');
+    await openTeam('alpha');
+    const before = router.currentRoute.value.fullPath;
+    let navigations = 0;
+    router.afterEach(() => navigations++);
+
+    useConsoleStore().applyCurrentTeam('beta');
+    await settle();
+
+    expect(useConsoleStore().activeTeamId).toBe('beta');
+    expect(navigations).toBe(0);
+    expect(router.currentRoute.value.fullPath).toBe(before);
+
+    // The person's next switch writes theirs.
+    useConsoleStore().showTeamsView();
+    await settle();
+    expect(router.currentRoute.value.query).toEqual({ view: 'teams' });
+  });
+
   it('leaves every other key in the address alone', async () => {
     const router = await open('/console?connection=done');
     await openTeam('alpha');

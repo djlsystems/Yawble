@@ -33,6 +33,20 @@ export function useConsoleHistory() {
   const storePlace = computed(() => placeOf(board.view, board.activeTeamId));
   let written = false;
 
+  // A MOVE THE PERSON DID NOT MAKE WRITES NO ADDRESS. The Concierge switching the current team, or
+  // the board correcting a team that is gone, moves the store too - and any change of address
+  // closes every open dialog, so writing one there would close a dialog a person is typing in. The
+  // address is left as it was; the person's next switch writes theirs.
+  const platformActions = new Set(['applyCurrentTeam', 'applyPendingCurrentTeam', 'reconcileActiveTeam']);
+  let platformPlace: ConsolePlace | null | undefined;
+  board.$onAction(({ name, after }) => {
+    if (!platformActions.has(name)) return;
+    const before = storePlace.value;
+    after(() => {
+      if (!samePlace(before, storePlace.value)) platformPlace = storePlace.value;
+    });
+  });
+
   function write(place: ConsolePlace, replace: boolean) {
     const target = { path: '/console', query: queryFor(place, route.query) };
     void (replace ? router.replace(target) : router.push(target));
@@ -69,6 +83,12 @@ export function useConsoleHistory() {
     storePlace,
     (place) => {
       if (!onConsole() || place === null) return;
+      // Not before the first write: the place the board opens on is written once, replacing.
+      if (written && platformPlace !== undefined && samePlace(place, platformPlace)) {
+        platformPlace = undefined;
+        return;
+      }
+      platformPlace = undefined;
       if (samePlace(place, placeFromQuery(route.query))) {
         written = true;
         return;
