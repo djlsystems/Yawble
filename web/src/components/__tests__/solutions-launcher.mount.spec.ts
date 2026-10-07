@@ -355,7 +355,7 @@ describe('the solutions launcher', () => {
 
     bodyFind('[data-install-from-folder]')!.click();
     await settle();
-    expect(bodyText()).toContain('Choose the solution folder');
+    expect(bodyFind('[data-install-dialog]')?.textContent).toContain('a folder holding its solution.json');
   });
 
   it('says why when the list cannot be read', async () => {

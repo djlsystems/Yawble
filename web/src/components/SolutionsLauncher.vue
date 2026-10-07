@@ -4,7 +4,7 @@ import { solutionsInstalled } from '../api/client';
 import type { InstalledSolution, SolutionStateKind } from '../api/types';
 import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
 import FilterText from './FilterText.vue';
-import HostPathPicker from './HostPathPicker.vue';
+import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
 
 /**
@@ -21,7 +21,8 @@ import SolutionWizard from './SolutionWizard.vue';
  *
  * With nothing installed it says how solutions arrive: a package a team built, whose Review and
  * install link appears in that team's Activity feed and on its backlog item - or install from a
- * folder, which is offered here as well, through the same wizard Admin -> Plugins opens.
+ * folder, which is offered here as well, through the install dialog and the wizard Admin -> Plugins
+ * opens (`InstallFromFolderDialog`).
  */
 const open = defineModel<boolean>({ required: true });
 
@@ -62,10 +63,11 @@ const detailsRow = ref<InstalledSolution | null>(null);
 
 // --- Install from a folder: the wizard, as Admin -> Plugins opens it ------------------------------
 
-const pickerOpen = ref(false);
+const installOpen = ref(false);
 const wizard = ref<{ open: boolean; folder: string }>({ open: false, folder: '' });
 
-function chose(folder: string) {
+function install(folder: string) {
+  installOpen.value = false;
   wizard.value = { open: true, folder };
 }
 
@@ -88,7 +90,7 @@ watch(() => wizard.value.open, (showing, was) => {
           icon="create_new_folder"
           label="Install from a folder"
           data-install-from-folder
-          @click="pickerOpen = true"
+          @click="installOpen = true"
         />
         <q-btn flat dense no-caps icon="refresh" label="Refresh" :loading="loading" @click="load" />
         <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
@@ -285,11 +287,11 @@ watch(() => wizard.value.open, (showing, was) => {
     </q-card>
   </q-dialog>
 
-  <HostPathPicker
-    v-model="pickerOpen"
-    instance-only
-    title="Choose the solution folder"
-    @chose="chose"
+  <InstallFromFolderDialog
+    v-model="installOpen"
+    caption="A solution package inside this instance: a folder holding its solution.json."
+    picker-title="Choose the solution folder"
+    @install="install"
   />
 
   <SolutionWizard v-model="wizard.open" :folder="wizard.folder" />

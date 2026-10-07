@@ -406,7 +406,7 @@ describe('PluginsDialog, installing from a folder', () => {
     wrapper.unmount();
   });
 
-  it('browses with the folder picker, offering the data root only, and fills the folder', async () => {
+  it("browses with the install picker, which opens in the teams' Documents, and fills the folder", async () => {
     const wrapper = await mountPlugins();
 
     fileSystemRoots.mockResolvedValue({
@@ -415,7 +415,12 @@ describe('PluginsDialog, installing from a folder', () => {
         { name: 'Host home', path: '/home/op', isInstance: false, allowCreate: false, allowUpdate: false },
       ],
     });
-    browseFileSystem.mockResolvedValue({ path: '/data', parent: null, entries: [] });
+    browseFileSystem.mockImplementation(async (path: string) => ({
+      path,
+      parent: null,
+      permissions: { allowCreate: false, allowUpdate: false, allowDelete: false },
+      entries: path === '/data/documents' ? [{ name: 'sample-echo', type: 'dir' }] : [],
+    }));
 
     button('Install from a folder…').click();
     await settle();
@@ -424,8 +429,15 @@ describe('PluginsDialog, installing from a folder', () => {
     await settle();
 
     expect(bodyText()).toContain('Choose the plugin folder');
-    expect(bodyText()).toContain('Instance data');
+    expect(browseFileSystem).toHaveBeenCalledWith('/data/documents');
     expect(bodyText()).not.toContain('Host home');
+
+    [...document.body.querySelectorAll<HTMLElement>('.q-item__label')].find((label) => label.textContent?.trim() === 'sample-echo')!.click();
+    await settle();
+    button('Choose this folder').click();
+    await settle();
+
+    expect((bodyFind('[data-install-dialog] input') as HTMLInputElement).value).toBe('/data/documents/sample-echo');
 
     wrapper.unmount();
   });
