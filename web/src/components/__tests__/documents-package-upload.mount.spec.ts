@@ -8,7 +8,8 @@
 //
 // SEEN TO FAIL: with the dialog as it was (no folder or zip upload) every case fails; each was also
 // reddened on its own - relativePath not sent, the choice not passed on (always `ask`), the zip
-// sent to the folder route, and a refusal dropped instead of shown.
+// sent to the folder route, and a refusal dropped instead of shown. The 413 cases showed the bare
+// status ("413", or a proxy's page) before the size sentence was added.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const q = vi.hoisted(() => ({
@@ -109,6 +110,20 @@ describe('Upload a .zip', () => {
 
     expect(errorText()).toBe('The zip was not unpacked: evil/link is a link.');
     expect(document.body.querySelector('.documents-error')!.getAttribute('role')).toBe('alert');
+  });
+
+  // A 413 comes from the server's body limit before the route runs, with no sentence of its own
+  // (or a proxy's HTML page), so the person is told the limit instead of a bare status.
+  it.each([
+    ['upload-zip', '[data-upload-zip-input]', () => [new File(['PK'], 'big.zip')], undefined, 'That zip is larger than 25 MB.'],
+    ['upload-folder', '[data-upload-folder-input]', () => [picked('big/a.bin')], undefined, 'That folder is larger than 100 MB.'],
+    ['upload-zip', '[data-upload-zip-input]', () => [new File(['PK'], 'big.zip')], '<html>413 Request Entity Too Large</html>', 'That zip is larger than 25 MB.'],
+  ] as const)('%s answering 413 says how large it may be, not the status', async (route, input, files, body, sentence) => {
+    await inReports();
+    server.reply(route, 413, body);
+    await choose(input, files());
+
+    expect(errorText()).toBe(sentence);
   });
 });
 

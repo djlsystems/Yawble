@@ -301,6 +301,18 @@ describe('Upload a package (.zip)', () => {
     wrapper.unmount();
   });
 
+  it('says how large a zip may be when the upload answers 413, and leaves Folder empty', async () => {
+    const wrapper = await openWithActiveTeam('alpha');
+    server.reply('upload-zip', 413);
+    await chooseZip('big.zip');
+
+    expect(bodyFind('[data-upload-package-error]')?.textContent).toContain('That zip is larger than 25 MB.');
+    expect(bodyFind('[data-upload-package-error]')?.textContent).not.toContain('413');
+    expect(field('Folder').value).toBe('');
+
+    wrapper.unmount();
+  });
+
   it.each([
     ['Solutions', () => mountDialog(SolutionsLauncher, {}, { pinia: false }), '[data-install-from-folder]'],
     ['Plugins', () => mountDialog(PluginsDialog, {}, { pinia: false }), null],
