@@ -94,6 +94,9 @@ public sealed class LandedSurvivesCleanupTests : IAsyncDisposable
         Assert.Equal(DateTimeOffset.Parse(stored.LandedAt!, System.Globalization.CultureInfo.InvariantCulture),
             after.GetProperty("landedAt").GetDateTimeOffset());
         Assert.Contains(sha[..7], after.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        // WHEN IT WAS PROVEN rides as landedAt for the screen to read on the person's own clock; the
+        // sentence carries no server-formatted UTC stamp.
+        Assert.DoesNotContain("UTC", after.GetProperty("detail").GetString(), StringComparison.Ordinal);
 
         var kept = await CurrentDispatchAsync(item);
         Assert.Equal(stored.LandedAt, kept.LandedAt);

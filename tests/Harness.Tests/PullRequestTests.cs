@@ -206,8 +206,11 @@ public sealed class PullRequestTests : IAsyncDisposable
         if (gitHubSays is null)
         {
             // Unreachable is unknown - the last answer and when it was read are said, not passed off.
+            // When is data, not words: the screen reads it on the person's own clock, so the
+            // sentence carries no server-formatted UTC stamp.
             Assert.Contains("could not say", landed.Detail, StringComparison.Ordinal);
-            Assert.Contains("2026-09-25 08:00 UTC", landed.Detail, StringComparison.Ordinal);
+            Assert.Contains("The last answer was open", landed.Detail, StringComparison.Ordinal);
+            Assert.DoesNotContain("UTC", landed.Detail, StringComparison.Ordinal);
             Assert.Equal(earlier, landed.ReadAt);
             Assert.Equal(PullRequestStates.Open, registry.ContributorFor(team, Repo).PullRequest?.State);
         }

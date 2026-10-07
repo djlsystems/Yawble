@@ -70,11 +70,22 @@ describe('triggerSentence', () => {
     })).toBe('weekdays at 09:00 Europe/London')
   })
 
-  it('describes a one-off schedule with a fixed UTC instant', () => {
-    expect(triggerSentence({
-      kind: 'Once',
-      fireAt: '2026-08-26T14:30:00Z',
-    })).toBe('once, at 2026-08-26 14:30 UTC')
+  /**
+   * THE EDITOR TAKES A ONE-OFF TIME ON THE BROWSER'S CLOCK, so the summary reads it back on the same
+   * clock. The zone is pinned to New York, where 14:30 UTC is 10:30; in the container's default UTC
+   * the two clocks agree and a UTC summary would pass unnoticed.
+   */
+  it('describes a one-off schedule on the browser\'s own clock, as the editor takes it', () => {
+    const zone = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    try {
+      expect(triggerSentence({
+        kind: 'Once',
+        fireAt: '2026-08-26T14:30:00Z',
+      })).toBe('once, at 2026-08-26 10:30')
+    } finally {
+      process.env.TZ = zone
+    }
   })
 
   it('still renders every schedule shape', () => {

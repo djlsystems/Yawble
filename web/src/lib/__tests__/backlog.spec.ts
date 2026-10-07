@@ -432,6 +432,28 @@ describe('landedMark', () => {
    * wire - which branch, which remote, how far behind - and dropping it would leave the screen
    * with four words where the server sent an explanation.
    */
+  /**
+   * WHEN IT WAS PROVEN, OR WHEN GITHUB LAST ANSWERED, IS READ ON THE PERSON'S OWN CLOCK. The server
+   * sends the instant as data and its sentence leaves the time out; the long form adds it here, in
+   * the browser's zone. Pinned to New York, where 23:34 UTC on 6 October is 7:34 PM the same day.
+   */
+  it('says when landed was proven, and when GitHub was read, in the browser\'s own zone', () => {
+    const zone = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    try {
+      const proven = landedMark({ ...landing('landed', 'abc1234 was on origin/main when it was proven.'), landedAt: '2026-10-06T23:34:00Z' })!
+      const read = landedMark({ ...landing('in-review', 'pull request #7 is open upstream, in review.'), readAt: '2026-10-06T23:34:00Z' })!
+      const local = new Date('2026-10-06T23:34:00Z').toLocaleString()
+
+      expect(local).toContain('7:34')
+      expect(proven.title).toContain(`Proven ${local}.`)
+      expect(read.title).toContain(`Read ${local}.`)
+      expect(proven.title).not.toContain('UTC')
+    } finally {
+      process.env.TZ = zone
+    }
+  })
+
   it('carries the server detail into the long form', () => {
     const mark = landedMark(landing('local', 'No branch on origin; 5 commits in the clone.'))!
 
