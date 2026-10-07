@@ -113,7 +113,7 @@ func TestDoctorShowsTheEnginesOwnStatsOnBothEngines(t *testing.T) {
 	for _, c := range cases {
 		s, yawble := runningOn(t, c.engine)
 		s.On(c.line, engine.Result{Stdout: c.answer})
-		code, out, errOut := yawble("doctor")
+		code, out, errOut := yawble("doctor", "--details")
 		if code != 0 || !strings.Contains(out, c.want) {
 			t.Errorf("%s: exit %d %s\n%s", c.engine, code, errOut, out)
 		}

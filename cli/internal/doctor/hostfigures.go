@@ -59,8 +59,14 @@ func runLimitRow(r *HostReport) Check {
 			allowed = *l.MemoryBound
 		}
 		if l.Limit == 0 || l.Limit > allowed {
-			return Check{name, Warn, detail + fmt.Sprintf("; the Host's own bounds allow %d", allowed),
-				"yawble config set maxRunning 0 (the Host's default), then yawble up; or lower the tenant setting wip.maxRunning"}
+			// In the default list, so in words a person can act on: where the limit was set,
+			// not which of the Host's bounds it came from.
+			where := "set in the board's settings"
+			if l.Bound == "configuration" {
+				where = "set with yawble config set maxRunning"
+			}
+			return Check{name, Warn, fmt.Sprintf("%s, %s; this computer allows %d", limit, where, allowed),
+				"yawble config set maxRunning 0, then yawble up, to use the limit Yawble works out for this computer; or lower \"Agents running at once\" in the board's settings"}
 		}
 	}
 	return Check{name, OK, detail, ""}
@@ -88,7 +94,8 @@ func runMemoryRow(r *HostReport) Check {
 			text += ", figure not known"
 		}
 	case "none":
-		text = "not enforced"
+		// How this engine is, not something gone wrong: the Host's sentence would only repeat it.
+		return Check{name, Info, "no per-run memory cap: this engine offers none, so runs share the worker's memory (a fact of the engine, not a fault)", ""}
 	default:
 		text = fmt.Sprintf("not known (the Host said %q)", m.Mechanism)
 	}

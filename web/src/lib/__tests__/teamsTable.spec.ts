@@ -196,30 +196,6 @@ describe('compareTeams', () => {
       .toBeGreaterThan(0);
   });
 
-  /** A team that has never run has no instant, and must not sort as if it ran at the epoch. */
-  it('puts teams with no workflow last, in both directions', () => {
-    const asc = { column: 'workflow', descending: false } as const;
-    const desc = { column: 'workflow', descending: true } as const;
-    const ran = row({ startedAt: 1_000 });
-    const never = row({ startedAt: null });
-
-    expect(compareTeams(ran, never, asc)).toBeLessThan(0);
-    expect(compareTeams(ran, never, desc)).toBeLessThan(0);
-  });
-
-  /**
-   * ASCENDING IS OLDEST FIRST, which is what makes the header's `arrow_upward` honest. It read
-   * `b - a` and sorted newest-first under an up arrow - a control saying the opposite of what it
-   * did, and the nulls test above could not see it because neither row had an instant.
-   */
-  it('sorts two real instants oldest-first ascending, and reverses descending', () => {
-    const older = row({ startedAt: 1_000 });
-    const newer = row({ startedAt: 2_000 });
-
-    expect(compareTeams(older, newer, { column: 'workflow', descending: false })).toBeLessThan(0);
-    expect(compareTeams(older, newer, { column: 'workflow', descending: true })).toBeGreaterThan(0);
-  });
-
   /**
    * THE COARSE COLUMNS NEED A SECOND KEY. Status has seven values and Members is a small
    * integer, so most of the table ties on them - and a comparator answering 0 leaves those rows in whatever order the
@@ -359,6 +335,9 @@ describe('the stored sort', () => {
     expect(readTeamSort(null)).toEqual(DefaultTeamSort);
     expect(readTeamSort('{')).toEqual(DefaultTeamSort);
     expect(readTeamSort('{"column":"nonsense","descending":false}')).toEqual(DefaultTeamSort);
+    // The Workflows and Last workflow columns are gone: a sort a person stored on either reads as the default.
+    expect(readTeamSort('{"column":"workflow","descending":true}')).toEqual(DefaultTeamSort);
+    expect(readTeamSort('{"column":"workflows","descending":false}')).toEqual(DefaultTeamSort);
     expect(readTeamSort('{"column":"name","descending":"yes"}')).toEqual(DefaultTeamSort);
   });
 });

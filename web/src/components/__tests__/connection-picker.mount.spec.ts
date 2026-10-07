@@ -2,8 +2,9 @@
 //
 // THE BINDING PICKER: one per connection slot a plugin's manifest declares, at hire (Add member)
 // and after it (Member settings). It lists only connections of a provider the slot allows, stores
-// the connection's ID and never a token, and says before the save what the Host would refuse: a
-// required slot left unbound, and a connection without a scope the slot needs - offering Reconnect.
+// the connection's ID and never a token, says a required slot left unbound is still to choose (no
+// red line: the picker is right there), and says before the save what the Host would refuse: a
+// connection without a scope the slot needs - offering Reconnect.
 //
 // THE MOCK IS OF `api/client`, in the shapes connections-api.md gives; the Host's own checks are
 // pinned server-side.
@@ -142,6 +143,7 @@ async function choose(wrapper: Parameters<typeof select>[0], label: string, valu
 }
 
 const refusal = () => bodyFind('[data-connection-slot="mail"] [data-binding-refusal]')?.textContent ?? '';
+const unbound = () => bodyFind('[data-connection-slot="mail"] [data-slot-unbound]')?.textContent?.trim() ?? '';
 
 async function mountHire() {
   const wrapper = await mountDialog(AddMemberDialog, { team: 'alpha' as TeamId, teamName: 'Alpha', memberAgents: ['claude'] });
@@ -163,12 +165,11 @@ describe('the binding picker, at hire', () => {
     wrapper.unmount();
   });
 
-  it("says what an unbound required slot's runs will be blocked with, and still hires", async () => {
+  it('says an unbound required slot blocks the runs, with no red refusal beside its picker, and still hires', async () => {
     const wrapper = await mountHire();
 
-    expect(refusal()).toBe(
-      "This member has no connection bound for the plugin's required slot `mail`. A person binds one in the member's settings.",
-    );
+    expect(refusal()).toBe('');
+    expect(unbound()).toBe("Required: the member's runs are blocked until a connection is chosen here.");
     // The Host hires a member with the slot unbound and blocks its runs instead.
     expect(isDisabled('Add member')).toBe(false);
     button('Add member').click();
@@ -268,14 +269,16 @@ describe('the binding picker, in Member settings', () => {
     return wrapper;
   }
 
-  it('shows the stored binding, and unbinding the required slot says what the runs would be blocked with', async () => {
+  it('shows the stored binding, and unbinding the required slot says the runs would be blocked', async () => {
     const wrapper = await mountSettings({ mail: 'conn-work' });
 
     expect(select(wrapper, 'Connection for mail').props('modelValue')).toBe('conn-work');
     expect(refusal()).toBe('');
+    expect(unbound()).toBe('');
 
     await choose(wrapper, 'Connection for mail', null);
-    expect(refusal()).toContain('required slot `mail`');
+    expect(refusal()).toBe('');
+    expect(unbound()).toContain("the member's runs are blocked");
 
     wrapper.unmount();
   });

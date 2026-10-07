@@ -12,11 +12,10 @@ import {
 } from '../api/client';
 import { useConsoleStore } from '../stores/console';
 import { useWipStore, wipLine } from '../stores/wip';
-import { StalledBadgeGrace, WaitingForSlot, chipStateClass } from '../lib/teamKpis';
+import { StalledBadgeGrace } from '../lib/teamKpis';
 import {
   DefaultTeamSort,
   compareTeams,
-  lastWorkflowText,
   nextSort,
   proposeCloneName,
   readTeamSort,
@@ -30,6 +29,7 @@ import { ariaSort } from '../lib/tableSort';
 import type { LocalRepo, Team, TeamDeleted, TeamId } from '../api/types';
 import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
+import TeamStatisticsTile from './TeamStatisticsTile.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
 
 const board = useConsoleStore();
@@ -92,8 +92,6 @@ const Headings: { key: TeamSort['column']; label: string }[] = [
   { key: 'name', label: 'Team' },
   { key: 'members', label: 'Members' },
   { key: 'status', label: 'Status' },
-  { key: 'workflows', label: 'Workflows' },
-  { key: 'workflow', label: 'Last workflow' },
 ];
 
 /** What the click MEANS is `nextSort`'s; persisting the answer is this component's. */
@@ -107,31 +105,9 @@ function sortBy(column: TeamSort['column']) {
   }
 }
 
-/**
- * A ROW PLUS ITS RENDERED WORKFLOW CELL, which is the one thing the table shows that is not
- * sortable data. `TeamRow` is what {@link compareTeams} orders and deliberately holds the sortable
- * INSTANT rather than the words; the words and their tooltip are two halves of one reading and
- * belong together, so they are computed here rather than twice in the template.
- */
-type TeamTableRow = TeamRow & { workflow: { text: string; hint: string } };
-
-const rows = computed<TeamTableRow[]>(() =>
+const rows = computed<TeamRow[]>(() =>
   board.teams
-    .map((team) => {
-      // ONE READ of this team's timing, feeding both the status column and the workflow cell.
-      // Two reads is two chances for the tooltip to disagree with the words above it - and a
-      // getter read again between them is a getter that can answer differently.
-      const timing = board.workflowFor(team.id);
-
-      // THE PLURAL PROJECTION - the same one the team's own tile reads - fed into `teamRowFrom` so
-      // the new Workflows column and that tile can never disagree about which workflow is loudest.
-      const workflows = board.workflowsFor(team.id);
-
-      return {
-        ...teamRowFrom(team, timing, workflows, now.value),
-        workflow: lastWorkflowText(timing),
-      };
-    })
+    .map((team) => teamRowFrom(team, board.workflowFor(team.id), board.workflowsFor(team.id), now.value))
     .sort((a, b) => compareTeams(a, b, sort.value)),
 );
 
@@ -531,6 +507,9 @@ async function setPaused(team: Team | null, paused: boolean) {
             </q-btn>
           </th>
 
+          <!-- NOT SORTABLE: lanes over time have no single value to order by. -->
+          <th data-col="activity" class="text-left">Activity</th>
+
           <!-- No label: the column carries live controls rather than sortable data. -->
           <th class="text-right" />
         </tr>
@@ -567,22 +546,16 @@ async function setPaused(team: Team | null, paused: boolean) {
             <div v-if="slotLine(row.id)" class="text-caption os-text-muted">{{ slotLine(row.id) }}</div>
           </td>
 
-          <!-- THE PROJECTION, BESIDE THE ROSTER RATHER THAN INSTEAD OF IT - see `TeamRow.workflows`'s
-               own comment for why. An em dash for a team whose plural payload has not landed; never a
-               stand-in word. Otherwise the loudest open workflow's word, with the count beside it -
-               `chipStateClass` gives it a CSS-safe class, since `WorkflowState` carries a two-word
-               member (`NO RESULT`) that a raw label would split into two classes. -->
-          <td>
-            <span v-if="row.workflows" class="console-tab-status" :class="`console-tab-status--${chipStateClass(row.workflows.label)}`">
-              <template v-if="row.workflows.label === WaitingForSlot">{{ row.workflows.label }} · {{ row.workflows.held.join(', ') }}</template>
-              <template v-else><template v-if="row.workflows.label">{{ row.workflows.label }} · </template>{{ row.workflows.count }}</template>
-            </span>
-            <span v-else>—</span>
-          </td>
-
-          <td>
-            {{ row.workflow.text }}
-            <q-tooltip>{{ row.workflow.hint }}</q-tooltip>
+          <!-- THE TEAM'S ACTIVITY TILE, lanes only: the same chart its page shows, without the
+               label and the caption. A click on it opens the Activity dialog for this team, not the
+               team itself, so the row's own click is stopped here. -->
+          <td class="teams-activity" @click.stop @keydown.enter.stop @keydown.space.stop>
+            <TeamStatisticsTile
+              compact
+              :team-id="row.id"
+              :containers="teamFor(row)?.containers ?? []"
+              :workflows="board.workflowsFor(row.id)"
+            />
           </td>
 
           <!-- `.stop` because these controls sit inside the whole-row click handler that switches

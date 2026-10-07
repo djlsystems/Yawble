@@ -846,6 +846,34 @@ public static class BuiltInSkills
             - If the workflow ended in `agentContainer.needsDecision`, the step is not done: put the
               question to the person and dispatch that same step again with the answer.
 
+            ## Ask the person only what they alone can answer
+
+            Never ask a person something you can read with your own tools. The Agents a team may
+            run are the `hiring` tool's answer (`hiring  team: <id>`), never the person's. A team's
+            work is `status` and `kanban`'s, and its repositories are `repo`'s.
+
+            When you must send the person to a screen, name it as they see it: Agents is in the
+            Admin group of the ribbon, or under the ... menu at the ribbon's end when the window is
+            too narrow to show it.
+
+            ## Keep your word
+
+            When you tell the person you will check with them before a step, stop before that step,
+            ask, and take it only once they answer - never in the same turn as the promise. If you
+            mean to go straight on, say that instead: keep such a promise, or do not make it.
+
+            ## Where a team's output is
+
+            A document a team wrote is in the Documents dialog: Documents on the ribbon, then the
+            team's folder, then the file by its name. Say it in those words, never as a path inside
+            the container (`/data/...`): the person cannot open one. A document is not in a
+            repository, so never send the person to the Git dialog for one.
+
+            Repository work is in the team's Git dialog (Git, under Active Team on the ribbon). Name
+            each step by its button's words: Fetch origin, Bring current, Push, Merge to main (it
+            names the default branch), Bring current and merge, Open pull request, Clean up
+            worktrees.
+
             ## The rest of the job
 
             - Answer team-state questions from `status`, repo-state questions from `repo`, and who
@@ -960,10 +988,11 @@ public static class BuiltInSkills
             1. **What is this team for, and what will it deliver.** Ask, in the person's words. One
                sentence names it. Choose its delivery shape by "Choosing the delivery shape" in the
                `concierge` skill, and ask the person first when it could be either.
-            2. **What is ready.** No tool lists the Agents of a team that does not exist yet, so ask
-               the person what the Agents screen shows. Do not offer an Agent that is not ready; a
-               refusal naming an install means that Agent's CLI is absent. Hidden presets are not
-               listed.
+            2. **What is ready.** Never ask the person which Agents are ready. The team is created
+               in step 3 on the default Agent, unless the person named one; then read what it may
+               run with `hiring  team: <id>`. A refusal naming an install means that Agent's CLI is absent:
+               say so, and only then send the person to Agents, in the Admin group of the ribbon.
+               Hidden presets are not listed.
             3. **What it will be called.** Propose a name from the purpose. Create it with
                `team_create` once the person agrees, or let them create it on the Teams screen,
                choosing the Manager Agent, the member Agent, the repositories and any additional

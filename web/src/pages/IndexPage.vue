@@ -13,6 +13,7 @@ import TeamKpiStrip from '../components/TeamKpiStrip.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
 import TeamsView from '../components/TeamsView.vue';
 import SolutionBlockedBanner from '../components/SolutionBlockedBanner.vue';
+import TellManagerBox from '../components/TellManagerBox.vue';
 import TeamSiteLinks from '../components/TeamSiteLinks.vue';
 import { panelPath } from '../lib/solutionPanel';
 import { useDisplayStore } from '../stores/display';
@@ -564,10 +565,11 @@ onUnmounted(() => {
         </q-btn>
       </div>
 
-      <!-- HOW WORK REACHES A TEAM, said where people look for it: there is no box on a Manager's
-           card, and a person who opened a team to give it work found nothing that said where. -->
+      <!-- HOW WORK REACHES A TEAM, where people look for it: a person who opened a team to give it
+           work found no input. The box tells the Manager; the Concierge stays another way in. -->
+      <TellManagerBox :team="activeTeam.id" :workflows="board.workflowsFor(activeTeam.id)?.workflows ?? []" />
       <div class="text-caption os-text-muted q-mb-sm" data-team-work-hint>
-        To give this team work, open the Concierge (bottom right) and tell it what you want done.
+        You can also ask the Concierge (bottom right).
       </div>
 
       <!-- A team installed from a solution package that still waits for its person. -->

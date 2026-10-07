@@ -59,6 +59,7 @@ import type {
   PluginInstallResult,
   PluginRemoveResult,
   PluginMemberSettings,
+  SecretKeyState,
   ContainerSnapshot,
   MemberDeleted,
   MemberDetail,
@@ -1402,6 +1403,12 @@ export const removePlugin = (id: string, version?: string | null) =>
     { method: 'DELETE' },
   )
 
+/**
+ * Whether one secret KEY is set on this Host, by its name - never its value: what a solution's
+ * preview says of each key it binds, for the key a person types at a hire. A person's.
+ */
+export const getSecretKey = (key: string) => json<SecretKeyState>(`/api/secrets/${encodeURIComponent(key)}`)
+
 const pluginSettingsPath = (team: string, member: string) =>
   `/api/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(member)}/plugin-settings`
 
@@ -1548,13 +1555,18 @@ export const deleteMember = (team: TeamId, name: MemberId) =>
     { method: 'DELETE' },
   )
 
-export const tell =(team: TeamId, container: MemberId, instruction: string) =>
+/**
+ * A person's instruction to a member. `causation` joins an open workflow instead of starting a new
+ * one: pass the workflow's correlation id, the same number `publishSteering` hands the Concierge.
+ * Omitted, the instruction heads a new workflow.
+ */
+export const tell = (team: TeamId, container: MemberId, instruction: string, causation?: number | null) =>
   json<{ seq: number; correlationId: number }>(
     `/api/teams/${encodeURIComponent(team)}/containers/${encodeURIComponent(container)}/tell`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ instruction }),
+      body: JSON.stringify(causation == null ? { instruction } : { instruction, causation: String(causation) }),
     },
   )
 

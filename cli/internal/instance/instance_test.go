@@ -558,11 +558,15 @@ func TestAQuickStartShowsNoProgress(t *testing.T) {
 // `up` states a configured limit as itself, and the Host's default as the Host's to name: the
 // CLI computes no figure of its own.
 func TestUpStatesTheHostsDefaultWithoutComputingIt(t *testing.T) {
-	if got := instance.RunLimitText(instance.Settings{CPUs: 8, Memory: "12g"}); got != "the Host's default (yawble doctor names it)" {
+	if got := instance.RunLimitText(instance.Settings{CPUs: 8, Memory: "12g"}); got != "set from the worker's size (yawble doctor shows the number)" {
 		t.Errorf("RunLimitText = %q", got)
 	}
 	if got := instance.RunLimitText(instance.Settings{CPUs: 8, Memory: "12g", MaxRunning: 3}); got != "3" {
 		t.Errorf("RunLimitText configured = %q", got)
+	}
+	// The first up repeats the number its size screen just said, never another.
+	if got := instance.RunLimitText(instance.Settings{CPUs: 8, Memory: "12g", RunsShown: 5}); got != "5" {
+		t.Errorf("RunLimitText shown = %q", got)
 	}
 }
 
@@ -580,7 +584,7 @@ func TestUpPassesNoRunningLimitWhenNoneIsConfigured(t *testing.T) {
 	if !strings.Contains(calls, "podman run -d") || strings.Contains(calls, "Wip__MaxRunning") {
 		t.Errorf("the Host's default should apply, with no Wip__MaxRunning:\n%s", calls)
 	}
-	if !strings.Contains(out.String(), "running limit the Host's default (yawble doctor names it)") {
-		t.Errorf("output %q does not state the Host's default", out.String())
+	if !strings.Contains(out.String(), "running limit set from the worker's size (yawble doctor shows the number)") {
+		t.Errorf("output %q does not point at the Host's figure", out.String())
 	}
 }

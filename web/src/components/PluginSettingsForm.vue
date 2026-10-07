@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { listConnectionProviders, listConnections } from '../api/client';
-import type { Connection, ConnectionProvider } from '../api/types';
+import type { Connection, ConnectionProvider, SecretKeyState } from '../api/types';
 import {
   defaultLabel,
   defaultValue,
@@ -10,6 +10,7 @@ import {
   isDefault,
   missingRequired,
   outOfRange,
+  secretKeySentence,
   setByPerson,
   settingsBody,
   type PluginFieldValues,
@@ -30,7 +31,8 @@ import ConnectionPicker from './ConnectionPicker.vue';
  * set it, and can be put back to its default. A number field with manifest bounds says them in its
  * hint and shows a value outside them as out of range - typed, or already stored - and the dialogs
  * hold Save until it is fixed, as they do for a missing required field (`outOfRange`). Secrets are KEY NAMES, the logical key set with
- * `secret set`, never a value: no route carries one. Connection slots are one picker each
+ * `secret set`, never a value: no route carries one. Given `checkKey`, each key typed says whether
+ * the Host has it set and, when not, how to set it. Connection slots are one picker each
  * (`ConnectionPicker`), storing a connection's id, never a token.
  *
  * The "as JSON" view is read-only, and it is exactly `settingsBody` - what will be stored - for
@@ -42,6 +44,8 @@ const props = defineProps<{
   plugin?: string | undefined;
   /** Binds a slot of the member being edited at the Host, throwing its refusal. Absent at hire. */
   bindSlot?: ((slot: string, connectionId: string) => Promise<void>) | undefined;
+  /** Asks the Host whether a key is set, by name. Absent: no state is shown under a secret. */
+  checkKey?: ((key: string) => Promise<SecretKeyState>) | undefined;
 }>();
 
 const config = defineModel<PluginFieldValues>('config', { required: true });
@@ -77,6 +81,37 @@ async function loadConnections() {
 
 onMounted(() => void loadConnections());
 watch(() => props.shape, () => void loadConnections());
+
+/**
+ * EACH SECRET KEY'S STATE ON THE HOST, by the key as typed: asked a moment after typing stops, once
+ * per key. A failed ask shows nothing rather than a guess.
+ */
+const keyStates = ref<Record<string, SecretKeyState>>({});
+let keyTimer: ReturnType<typeof setTimeout> | undefined;
+
+function checkKeys() {
+  clearTimeout(keyTimer);
+  const check = props.checkKey;
+  if (!check) return;
+
+  keyTimer = setTimeout(() => {
+    for (const key of new Set(Object.values(secrets.value).map((value) => value.trim()))) {
+      if (key === '' || keyStates.value[key]) continue;
+      check(key).then(
+        (state) => (keyStates.value = { ...keyStates.value, [key]: state }),
+        () => undefined,
+      );
+    }
+  }, 250);
+}
+
+function keyState(field: string | number): SecretKeyState | null {
+  const key = (secrets.value[field] ?? '').trim();
+  return key === '' ? null : keyStates.value[key] ?? null;
+}
+
+watch(secrets, checkKeys, { immediate: true });
+onBeforeUnmount(() => clearTimeout(keyTimer));
 
 const showJson = ref(false);
 const json = computed(() => JSON.stringify(body.value, null, 2));
@@ -187,6 +222,15 @@ function secretHint(description: string | null | undefined, required: boolean) {
         spellcheck="false"
         @update:model-value="(value) => (secrets = { ...secrets, [key]: value === null ? '' : String(value) })"
       />
+      <div
+        v-if="keyState(key)"
+        class="text-caption q-mt-xs"
+        :class="keyState(key)!.set ? 'os-text-muted' : 'text-warning'"
+        :data-secret-key-state="keyState(key)!.set ? 'set' : 'unset'"
+        :data-secret-field="key"
+      >
+        {{ secretKeySentence(keyState(key)!, secret.required) }}
+      </div>
     </template>
 
     <!-- CONNECTION SLOTS: one picker each, listing connections of an allowed provider. The member

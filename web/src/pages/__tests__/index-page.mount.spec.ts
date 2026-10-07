@@ -51,7 +51,7 @@ function team(id: string, over: Record<string, unknown> = {}) {
 }
 
 /** Children are stubbed: this page is about WHICH of them is on screen and in what order. */
-const stubs = { TeamsView: true, KanbanBoard: true, TeamKpiStrip: true, ContainerCard: true };
+const stubs = { TeamsView: true, KanbanBoard: true, TeamKpiStrip: true, ContainerCard: true, TellManagerBox: true };
 
 let wrapper: VueWrapper | undefined;
 let board: ReturnType<typeof useConsoleStore>;
@@ -237,11 +237,19 @@ describe('a team\'s marks', () => {
     expect(page.find('[data-manage-solution]').exists()).toBe(false);
   });
 
-  it('says on the team where its work comes from: the Concierge', async () => {
+  it('gives the team work on the team page itself, through a Tell the Manager box', async () => {
+    const page = await mountPage([team('alpha')]);
+
+    const box = page.findComponent({ name: 'TellManagerBox' });
+    expect(box.exists()).toBe(true);
+    expect(box.props('team')).toBe('alpha');
+  });
+
+  it('no longer says the page cannot take work, and still names the Concierge as another way', async () => {
     const page = await mountPage([team('alpha')]);
 
     expect(page.find('[data-team-work-hint]').text()).toBe(
-      'To give this team work, open the Concierge (bottom right) and tell it what you want done.');
+      'You can also ask the Concierge (bottom right).');
   });
 
   it('does not mark a running team paused', async () => {
@@ -288,6 +296,37 @@ describe('what the page re-reads', () => {
     await flushPromises();
 
     expect(order).toEqual(['loadIfShowing', 'refreshRollupIfShowing', 'connectHub']);
+  });
+
+  /**
+   * The Teams table lists every team, so it hears every team's pushes - a team with no tab
+   * included. Joining only the open tabs left such a row reading the last overview (IDLE, one
+   * member) beside a WIP ledger line saying two of its members were running.
+   */
+  it('joins every team\'s live updates on the Teams table, tab or no tab', async () => {
+    const joined: string[] = [];
+    connectHub.mockImplementationOnce((handlers: HubHandlers) => {
+      hub.handlers = handlers;
+      return Promise.resolve({ stop: vi.fn() } as never);
+    });
+
+    setActivePinia(createPinia());
+    const boardStore = useConsoleStore();
+    boardStore.$patch({ teams: [team('alpha'), team('beta')] as never, activeTeamId: '' as never, openTeamTabs: [] });
+    boardStore.view = 'teams';
+    vi.spyOn(boardStore, 'refresh').mockResolvedValue();
+    vi.spyOn(boardStore, 'refreshRollupIfShowing').mockImplementation(() => {});
+    vi.spyOn(boardStore, 'switchHubTeam').mockImplementation(async (_connection, id) => {
+      joined.push(id);
+      return true;
+    });
+    vi.spyOn(useKanbanStore(), 'loadIfShowing').mockImplementation(() => {});
+    useSessionStore().$patch({ user: { email: 'person@example.com' } as never, checked: true });
+
+    wrapper = mount(IndexPage, { global: { stubs } });
+    await flushPromises();
+
+    expect(joined.sort()).toEqual(['alpha', 'beta']);
   });
 
   /** Container activity IS kanban activity, and the Teams table's only refresh once it is open. */

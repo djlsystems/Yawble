@@ -517,7 +517,7 @@ func TestDoctorNamesTheNewestBackupAndItsAgeWithoutFailing(t *testing.T) {
 	deps := stubbed(s)
 	deps.ConfigDir = t.TempDir()
 	_, out, _ := run(t, deps, "doctor", "--json")
-	if v, d, _ := verdict(t, parseDoctor(t, out), "backup"); v != "info" || !strings.Contains(d, "no backup") {
+	if v, d, _ := verdict(t, parseDoctor(t, out), "backups"); v == "FAIL" || !strings.Contains(d, "no copy on this computer") {
 		t.Errorf("before any backup: %s %s", v, d)
 	}
 
@@ -529,12 +529,12 @@ func TestDoctorNamesTheNewestBackupAndItsAgeWithoutFailing(t *testing.T) {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
 	_, out, _ = run(t, deps, "doctor", "--json")
-	if v, d, _ := verdict(t, parseDoctor(t, out), "backup"); v != "info" || !strings.Contains(d, path) || !strings.Contains(d, "just now") {
+	if v, d, _ := verdict(t, parseDoctor(t, out), "backups"); v == "FAIL" || !strings.Contains(d, path) || !strings.Contains(d, "just now") {
 		t.Errorf("after a backup: %s %s", v, d)
 	}
 	_ = os.Remove(path)
 	_, out, _ = run(t, deps, "doctor", "--json")
-	if v, d, _ := verdict(t, parseDoctor(t, out), "backup"); v != "info" || !strings.Contains(d, "no longer") {
+	if v, d, _ := verdict(t, parseDoctor(t, out), "backups"); v == "FAIL" || !strings.Contains(d, "no longer") {
 		t.Errorf("after the file moved: %s %s", v, d)
 	}
 }

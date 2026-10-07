@@ -36,6 +36,11 @@ const props = defineProps<{
   containers: ContainerSnapshot[];
   /** The team's workflow list: the open count for the caption, and a change in it refetches. */
   workflows: TeamWorkflows | null;
+  /**
+   * THE TEAMS LIST'S CELL: the lanes alone, with no label and no caption under them, and any click
+   * or tap opens the Activity dialog (there is no label to tap on a phone).
+   */
+  compact?: boolean;
 }>();
 
 /** A lane is never shorter than this, so its initials stay legible. */
@@ -290,7 +295,7 @@ function openActivity() {
 }
 
 function onTileClick() {
-  if (lastTapWasTouch) return;
+  if (lastTapWasTouch && !props.compact) return;
 
   openActivity();
 }
@@ -299,13 +304,15 @@ function onTileClick() {
 <template>
   <div
     class="team-kpi team-kpi--statistics"
+    :class="{ 'team-kpi--compact': compact }"
+    :data-activity-compact="compact ? '' : undefined"
     role="group"
     ref="tileEl"
     :aria-label="summary"
     @pointerdown="notePointer"
     @click="onTileClick"
   >
-    <button type="button" class="team-kpi-label stats-label" @click.stop="openActivity">Activity</button>
+    <button v-if="!compact" type="button" class="team-kpi-label stats-label" @click.stop="openActivity">Activity</button>
 
     <div v-if="hasChart" class="stats-body">
       <div class="stats-initials" aria-hidden="true">
@@ -327,7 +334,8 @@ function onTileClick() {
       />
     </div>
 
-    <div class="stats-caption">{{ caption }}</div>
+    <div v-if="!compact" class="stats-caption">{{ caption }}</div>
+    <div v-else-if="!hasChart" class="os-text-muted" data-activity-none>—</div>
 
     <TeamStatisticsDialog
       v-model="statisticsOpen"
@@ -395,4 +403,13 @@ function onTileClick() {
   color: var(--os-ink-muted);
 }
 
+
+/* THE TEAMS LIST'S CELL: the lanes alone, flush with the row, wide enough to read across. */
+.team-kpi--compact {
+  min-width: 14rem;
+}
+
+.team-kpi--compact .stats-body {
+  margin-top: 0;
+}
 </style>

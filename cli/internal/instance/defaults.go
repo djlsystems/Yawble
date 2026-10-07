@@ -37,6 +37,9 @@ type Settings struct {
 	// KeyFile is the worker key's env file and KeyHash a digest of the key (never the key), so a
 	// new key replaces the containers. Empty until `up` has made the key.
 	KeyFile, KeyHash string
+	// RunsShown is how many runs at once the first up's size screen just told the person, so the
+	// started line repeats that number; 0 on every other up.
+	RunsShown int
 }
 
 // EnvFiles are the env files every instance container is given, in order: the env file, then

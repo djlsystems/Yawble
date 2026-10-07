@@ -157,10 +157,14 @@ func TestDoctorOnAStoppedInstanceFailsTheContainerAndSkipsTheInstanceChecks(t *t
 	if v, _, fix := verdict(t, got, "container"); v != "FAIL" || !strings.Contains(fix, "yawble up") {
 		t.Errorf("container %s %s", v, fix)
 	}
-	for _, name := range []string{"health", "data root", "database", "backups", "agents"} {
+	for _, name := range []string{"health", "data root", "database", "agents"} {
 		if v, _, _ := verdict(t, got, name); v != "skip" {
 			t.Errorf("%s should be skip, got %s", name, v)
 		}
+	}
+	// The daily copies in the volume cannot be read; the copies on this computer still can.
+	if _, detail, _ := verdict(t, got, "backups"); !strings.Contains(detail, "daily copies in the data volume: not known") {
+		t.Errorf("backups %q", detail)
 	}
 	for _, c := range s.Calls {
 		if strings.HasPrefix(c, "podman exec") {
@@ -245,7 +249,7 @@ func TestDoctorFixJSONIsStillJSONAndNamesWhatItFixed(t *testing.T) {
 func TestDoctorOnAHealthyInstanceRunsTheHostsDoctorAndExitsZero(t *testing.T) {
 	s := runningScript()
 	s.On(doctorExec, engine.Result{Stdout: doctorStdout})
-	code, out, errOut := run(t, stubbed(s), "doctor")
+	code, out, errOut := run(t, stubbed(s), "doctor", "--details")
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
@@ -440,17 +444,17 @@ func withWip(runMemory string) string {
 	return strings.TrimSuffix(doctorStdout, "}\n") + wip
 }
 
-// Doctor's running-limit and run-memory lines are the Host's answers, each mechanism
-// said in the Host's words, "not enforced" included.
+// Doctor's running-limit and run-memory lines are the Host's answers, each mechanism said in the
+// Host's words, and no per-run cap said as a fact of the engine.
 func TestDoctorShowsTheHostsRunningLimitAndRunMemory(t *testing.T) {
 	for _, c := range []struct{ runMemory, want string }{
 		{`{"mechanism":"cgroup","perRunMb":null,"detail":"each run in its own cgroup"}`, "info  run memory     cgroup: each run in its own cgroup"},
 		{`{"mechanism":"rlimit","perRunMb":1792,"detail":"runs.memoryLimitMb, prlimit --data"}`, "info  run memory     rlimit, 1792 MB per run: runs.memoryLimitMb, prlimit --data"},
-		{`{"mechanism":"none","perRunMb":null,"detail":"runs.memoryLimitMb is not set"}`, "info  run memory     not enforced: runs.memoryLimitMb is not set"},
+		{`{"mechanism":"none","perRunMb":null,"detail":"runs.memoryLimitMb is not set"}`, "info  run memory     no per-run memory cap: this engine offers none, so runs share the worker's memory (a fact of the engine, not a fault)"},
 	} {
 		s := runningScript()
 		s.On(doctorExec, engine.Result{Stdout: withWip(c.runMemory)})
-		code, out, errOut := run(t, stubbed(s), "doctor")
+		code, out, errOut := run(t, stubbed(s), "doctor", "--details")
 		if code != 0 {
 			t.Fatalf("exit %d: %s %s", code, out, errOut)
 		}

@@ -359,6 +359,16 @@ func HostChecks(o Observed) []Check {
 // an instance that is not running, or an image without --doctor, cannot be measured and every
 // check is Skip; anything else is the Host's doctor FAILING, said once, then the skips.
 func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
+	return instanceChecks(r, err, now, false)
+}
+
+// InstanceChecksDetails is InstanceChecks for --details and --json: the agents row also says where
+// each sign-in comes from and when the sign-ins were measured.
+func InstanceChecksDetails(r *HostReport, err error, now time.Time) []Check {
+	return instanceChecks(r, err, now, true)
+}
+
+func instanceChecks(r *HostReport, err error, now time.Time, details bool) []Check {
 	names := []string{"data root", "database", "backups", "agents"}
 	// The Host's figures, never estimated here: with no report they are not known.
 	figures := []string{"running limit", "run memory"}
@@ -409,22 +419,27 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 
 	switch {
 	case r.Backups.DailyCount == 0 || r.Backups.NewestDailyAt == nil:
-		checks = append(checks, Check{"backups", Warn, "no daily backup yet (the Host writes one a day into " + r.Backups.Directory + ")", ""})
+		checks = append(checks, Check{"backups", Warn, "no daily copy in the data volume yet (the Host writes one a day into " + r.Backups.Directory + ")", ""})
 	default:
 		newest, parseErr := time.Parse(time.RFC3339, *r.Backups.NewestDailyAt)
 		age := now.Sub(newest)
 		switch {
 		case parseErr != nil:
-			checks = append(checks, Check{"backups", Skip, "the newest backup's time could not be read: " + *r.Backups.NewestDailyAt, ""})
+			checks = append(checks, Check{"backups", Skip, "the newest daily copy's time could not be read: " + *r.Backups.NewestDailyAt, ""})
 		case age > 48*time.Hour:
-			checks = append(checks, Check{"backups", Warn, fmt.Sprintf("newest daily backup is %d days old (%d kept)", int(age.Hours()/24), r.Backups.DailyCount), "yawble logs, and check the Host is running daily"})
+			checks = append(checks, Check{"backups", Warn, fmt.Sprintf("the newest daily copy in the data volume is %d days old (%d kept), and copies there are lost if the volume is lost", int(age.Hours()/24), r.Backups.DailyCount), "yawble logs, and check the Host is running daily"})
 		default:
-			checks = append(checks, Check{"backups", OK, fmt.Sprintf("%d daily, newest %s", r.Backups.DailyCount, newest.UTC().Format("2006-01-02 15:04 UTC")), ""})
+			checks = append(checks, Check{"backups", OK, fmt.Sprintf("%s in the data volume (newest %s), lost if the volume is lost", dailyCopies(r.Backups.DailyCount), newest.UTC().Format("2006-01-02 15:04 UTC")), ""})
 		}
 	}
 
 	var parts []string
 	verdict := OK
+	// With one agent able to run, an agent nobody signed in is not in use, not a fault: a
+	// Claude-only install is not warned about the others, and one that is signed in but did not
+	// start is named, pointing at `yawble agents`, without a warning. With none able to run every
+	// gap is a warning, as it was.
+	anyRuns := AnyCanRun(r.Agents)
 	for _, a := range r.Agents {
 		var part string
 		switch {
@@ -435,6 +450,9 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 		case a.Installed == nil:
 			// Not measured: no worker answered the Host's probe. Never "not installed", never a failure.
 			parts = append(parts, a.Agent+" not measured")
+			continue
+		case anyRuns && a.NotInUse():
+			parts = append(parts, a.Agent+" not in use ("+a.whyNotInUse()+")")
 			continue
 		case !*a.Installed:
 			parts = append(parts, a.Agent+" not installed")
@@ -447,16 +465,22 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 			part = a.Agent + " NOT signed in"
 			verdict = Warn
 		}
-		if source := a.SourceText(); source != "" {
+		// The source is developer detail, except when it is why the row warns.
+		unset := a.Issued() && a.IssuedSet != nil && !*a.IssuedSet
+		if source := a.SourceText(); source != "" && (details || unset) {
 			part += ", source " + source
 		}
-		if a.Issued() && a.IssuedSet != nil && !*a.IssuedSet {
+		if unset {
 			verdict = Warn
 		}
 		// Beside the sign-in: whether the CLI starts the way a member run launches it.
 		part += ", launch " + a.LaunchText()
-		if a.Launch != nil && a.Launch.Result == "failed" {
-			verdict = Warn
+		if a.LaunchFailed() {
+			if anyRuns {
+				part += ", see yawble agents"
+			} else {
+				verdict = Warn
+			}
 		}
 		parts = append(parts, part)
 	}
@@ -466,7 +490,7 @@ func InstanceChecks(r *HostReport, err error, now time.Time) []Check {
 	}
 	summary := strings.Join(parts, " · ")
 	for _, a := range r.Agents {
-		if measured := a.MeasuredText(); measured != "" {
+		if measured := a.MeasuredText(); measured != "" && details {
 			summary += " (sign-ins measured " + measured + ")"
 			break
 		}
@@ -505,20 +529,22 @@ func SignInHint(a Agent) string {
 	case a.Installed == nil:
 		return ""
 	case !*a.Installed:
-		return "not installed in the instance; the image's first start installs it, or install it by hand inside the container"
+		return "not installed in the instance; a worker installs it when it starts: yawble down, then yawble up"
 	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
 		return "its source is issued and no credential is set: yawble agents credential set " + a.Agent +
 			" (or yawble agents source " + a.Agent + " home)"
+	case a.Authenticated != nil && *a.Authenticated && a.LaunchFailed():
+		return "it is signed in but did not start: yawble agents --details shows why; yawble down, then yawble up starts it again"
 	case a.Authenticated != nil && *a.Authenticated:
 		return ""
 	case a.Issued():
 		return "its source is issued: replace its credential with yawble agents credential set " + a.Agent
 	}
-	hint := "open a Concierge on " + a.Agent + " in the board and sign in there"
+	concierge := "open a Concierge on " + a.Agent + " in the board and sign in there"
 	if a.CredentialVariable != nil && *a.CredentialVariable != "" {
-		hint += ", or put " + *a.CredentialVariable + "=... in the env file beside yawble's config and run `yawble up`"
+		return "yawble secret set " + *a.CredentialVariable + ", then yawble up; or " + concierge
 	}
-	return hint
+	return concierge
 }
 
 // GitHubObserved is what GitHub said about the GH_TOKEN set with `yawble secret`: not set, its

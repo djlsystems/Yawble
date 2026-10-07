@@ -28,6 +28,7 @@ import {
   effectiveFilters,
   lanesToRender,
   filterValues,
+  proposedMatchingFilters,
   swimlaneTeams,
   sameFilters,
   teamsOf,
@@ -184,6 +185,15 @@ export const useKanbanStore = defineStore('kanban', {
     /** How many cards are ON SCREEN, which is what the header beside them claims to count. */
     cardCount(): number {
       return this.rendered?.cards.length ?? 0
+    },
+
+    /**
+     * THE PROPOSED OUTCOMES NEEDS YOU DRAWS: `proposed`, which is every team's, narrowed by the
+     * filters in effect and the search box exactly as the cards are. The lane, its count, the
+     * Outcomes row in Swimlanes, the header and the empty state all read this one list.
+     */
+    proposedShown(state): Outcome[] {
+      return proposedMatchingFilters(state.proposed, effectiveFilters(state.filters, state.view), state.text)
     },
 
     /**

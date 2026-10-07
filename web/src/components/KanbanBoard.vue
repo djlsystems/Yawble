@@ -2,9 +2,9 @@
 import { computed, onBeforeUpdate, onMounted, onUnmounted, onUpdated, ref, watch, watchPostEffect } from 'vue';
 import type { KanbanLane } from '../api/kanban';
 import { useKanbanStore, type KanbanView } from '../stores/kanban';
-import { inProgressHeader, useWipStore } from '../stores/wip';
+import { runningAcrossTeams, useWipStore } from '../stores/wip';
 import { useAgentUpdatesStore } from '../stores/agentUpdates';
-import { cardShowsWaiting, laneOverLimit, NeedsYouLaneId } from '../lib/kanban';
+import { boardCountText, cardShowsWaiting, laneOverLimit, NeedsYouLaneId } from '../lib/kanban';
 import { isRunningLane } from '../lib/tenantSettings';
 import KanbanCard from './KanbanCard.vue';
 import KanbanFilterBar from './KanbanFilterBar.vue';
@@ -48,31 +48,14 @@ const viewOptions: { label: string; value: KanbanView; icon: string }[] = [
 ];
 
 /**
- * THE RUNNING LANE'S HEADER (In Progress) COUNTS AGENTS RUNNING, AGAINST THE LEDGER'S LIMIT - `3 / 4 running`. The
- * limit is `wip.maxRunning`, instance-wide, so the figure is the ledger's and not this board's
- * card count. Before the ledger answers it falls back to the lane's own `wipLimit` and its running
- * cards, and with no limit either, to the plain card count.
+ * THE RUNNING LANE (In Progress) COUNTS ITS CARDS, like every lane, and shows the ledger's figure
+ * on a line of its own that says what it counts: `3 / 4 agents running, all teams`. The ledger is
+ * instance-wide - every team's runs, a Manager's with no card among them, whatever the board is
+ * filtered to - so given as the lane's count it read `1 / 2 running` over an empty lane. Before the
+ * ledger answers there is no line.
  */
-function inProgressText(lane: KanbanLane): string {
-  const figure = runningFigure(lane);
-
-  // With neither the ledger nor a limit there is nothing to read the lane against: its card count.
-  return figure ? inProgressHeader(figure.running, figure.max) : laneCountText(lane);
-}
-
-/**
- * The running figure and the limit the running lane's header reads, or null when it has neither
- * and falls back to its card count. ONE ANSWER for the header text and the amber, so the lane
- * turns amber over exactly the figure it shows.
- */
-function runningFigure(lane: KanbanLane): { running: number; max: number | null } | null {
-  if (wip.view) return { running: wip.runningCount, max: wip.max };
-
-  if (typeof lane.wipLimit !== 'number') return null;
-
-  const running = kanban.laneCards(lane.id).filter((card) => card.status === 'running').length;
-
-  return { running, max: lane.wipLimit };
+function ledgerText(lane: KanbanLane): string {
+  return isRunningLane(lane.id) && wip.view ? runningAcrossTeams(wip.runningCount, wip.max) : '';
 }
 
 /**
@@ -82,24 +65,33 @@ function runningFigure(lane: KanbanLane): { running: number; max: number | null 
 function laneCount(lane: KanbanLane): number {
   const cards = kanban.laneCards(lane.id).length;
 
-  return lane.id === NeedsYouLaneId ? cards + kanban.proposed.length : cards;
-}
-
-/** Every other lane with a limit: `count / limit`, amber once over it. Advisory, never a block. */
-function laneCountText(lane: KanbanLane): string {
-  const count = laneCount(lane);
-
-  return typeof lane.wipLimit === 'number' && lane.wipLimit > 0 ? `${count} / ${lane.wipLimit}` : `${count}`;
+  return lane.id === NeedsYouLaneId ? cards + kanban.proposedShown.length : cards;
 }
 
 /**
- * Amber once over the limit, IN PROGRESS INCLUDED: `4 / 2 running` is
- * over its limit like any other lane. A running lane is read against the figure its header shows.
+ * A lane's count: `count / limit` with an advisory limit, amber once over it - never a block. A
+ * running lane's limit is the ledger's, counted in agents rather than cards, so its count is its
+ * cards alone and the limit is on the ledger line beside it.
+ */
+function laneCountText(lane: KanbanLane): string {
+  const count = laneCount(lane);
+
+  return !isRunningLane(lane.id) && typeof lane.wipLimit === 'number' && lane.wipLimit > 0
+    ? `${count} / ${lane.wipLimit}`
+    : `${count}`;
+}
+
+/**
+ * Amber once over the limit, IN PROGRESS INCLUDED: over the ledger line it shows
+ * (`4 / 2 agents running, all teams`), or, before the ledger answers, over its running cards
+ * against the lane's limit.
  */
 function laneOver(lane: KanbanLane): boolean {
   if (isRunningLane(lane.id)) {
-    const figure = runningFigure(lane);
-    if (figure) return laneOverLimit(figure.running, figure.max);
+    if (wip.view) return laneOverLimit(wip.runningCount, wip.max);
+
+    const running = kanban.laneCards(lane.id).filter((card) => card.status === 'running').length;
+    return laneOverLimit(running, lane.wipLimit);
   }
 
   return laneOverLimit(laneCount(lane), lane.wipLimit);
@@ -277,7 +269,7 @@ onUpdated(() => {
 });
 
 // A proposed outcome keeps the lanes up: Needs You has something to show with no card on the board.
-const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0 && kanban.proposed.length === 0);
+const empty = computed(() => kanban.hasBoard && kanban.cardCount === 0 && kanban.proposedShown.length === 0);
 
 /**
  * MANAGE OUTCOMES, opened from the filter bar's button at the list, and from a card's outcome tag
@@ -297,7 +289,7 @@ function openOutcomes(id: string | null = null) {
     <div class="row items-center q-gutter-sm q-mb-sm">
       <div class="text-h6">Kanban</div>
       <div class="text-caption os-text-muted">
-        {{ kanban.cardCount }} card{{ kanban.cardCount === 1 ? '' : 's' }}
+        {{ boardCountText(kanban.cardCount, kanban.proposedShown.length) }}
       </div>
 
       <q-space />
@@ -362,17 +354,18 @@ function openOutcomes(id: string | null = null) {
         :data-lane-id="lane.id"
       >
         <span class="k-lane-title">{{ lane.title }}</span>
-        <span class="k-lane-count">{{ isRunningLane(lane.id) ? inProgressText(lane) : laneCountText(lane) }}</span>
+        <span class="k-lane-count">{{ laneCountText(lane) }}</span>
+        <span v-if="ledgerText(lane)" class="k-lane-wip" data-lane-wip>{{ ledgerText(lane) }}</span>
       </header>
 
       <!-- PROPOSED OUTCOMES BELONG TO NO TEAM: an outcome is instance-wide, so they have a row of
            their own, with entries in Needs You's column only. -->
-      <template v-if="kanban.proposed.length">
+      <template v-if="kanban.proposedShown.length">
         <div class="k-swim-team k-swim-sticky-left">Outcomes</div>
         <div v-for="lane in kanban.lanes" :key="`outcomes-${lane.id}`" class="k-lane-cards k-swim-cell">
           <KanbanProposedOutcomes
             v-if="lane.id === NeedsYouLaneId"
-            :outcomes="kanban.proposed"
+            :outcomes="kanban.proposedShown"
             @open="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
           />
         </div>
@@ -409,12 +402,13 @@ function openOutcomes(id: string | null = null) {
       <section class="k-lane" :data-lane-id="lane.id">
         <header class="k-lane-head" :class="{ 'k-lane-head--over': laneOver(lane) }">
           <span class="k-lane-title">{{ lane.title }}</span>
-          <span class="k-lane-count">{{ isRunningLane(lane.id) ? inProgressText(lane) : laneCountText(lane) }}</span>
+          <span class="k-lane-count">{{ laneCountText(lane) }}</span>
+          <span v-if="ledgerText(lane)" class="k-lane-wip" data-lane-wip>{{ ledgerText(lane) }}</span>
         </header>
 
         <KanbanProposedOutcomes
           v-if="lane.id === NeedsYouLaneId"
-          :outcomes="kanban.proposed"
+          :outcomes="kanban.proposedShown"
           @open="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
         />
 
@@ -501,6 +495,7 @@ function openOutcomes(id: string | null = null) {
 
 .k-lane-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
@@ -512,6 +507,14 @@ function openOutcomes(id: string | null = null) {
 
 .k-lane-count {
   font-family: 'IBM Plex Mono', monospace;
+}
+
+/* The ledger's line under the running lane's title and count: a whole row of its own, in the
+   header's colour, so it turns amber with it. Not upper-cased: it is a sentence. */
+.k-lane-wip {
+  flex: 1 0 100%;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 /* OVER AN ADVISORY LIMIT. Amber, and the count beside it says by how much - colour is never the
