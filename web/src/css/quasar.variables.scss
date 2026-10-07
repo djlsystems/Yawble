@@ -45,3 +45,6 @@ $typography-font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-syste
 // it. THE MONO FACE IS NOT DECORATION: it marks a value the machine addresses, and the rule it
 // serves is written out in app.scss.
 $mono-font-family: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+// Every q-tooltip in the app. Quasar's default is 10px, too small to read at a glance.
+$tooltip-fontsize: 13px;

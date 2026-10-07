@@ -803,7 +803,7 @@ async function setPaused(team: Team | null, paused: boolean) {
               :disable="busy || cloneBusy"
               @click.stop="askClone(teamFor(row))"
             >
-              <q-tooltip>Clone this team's repos, env and roster into a new one</q-tooltip>
+              <q-tooltip>Clone team</q-tooltip>
             </q-btn>
             <q-btn
               v-if="!teamFor(row)?.archived"
@@ -815,7 +815,7 @@ async function setPaused(team: Team | null, paused: boolean) {
               :disable="busy || cloneBusy || archiveBusy"
               @click.stop="askArchive(teamFor(row))"
             >
-              <q-tooltip>Put this team away: kept whole, doing no work, still a template to clone</q-tooltip>
+              <q-tooltip>Archive team</q-tooltip>
             </q-btn>
             <q-btn
               flat
@@ -827,7 +827,7 @@ async function setPaused(team: Team | null, paused: boolean) {
               :disable="busy"
               @click.stop="ask(teamFor(row))"
             >
-              <q-tooltip>Delete this team and everything that names it</q-tooltip>
+              <q-tooltip>Delete team</q-tooltip>
             </q-btn>
           </td>
         </tr>
@@ -1096,6 +1096,22 @@ async function setPaused(team: Team | null, paused: boolean) {
 .teams-activity-cell > :first-child {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* 350px UNTIL A PERSON RESIZES THE COLUMN. Under the browser's automatic layout the chart's canvas
+   is its own width, so the column only ever grew and pushed the actions off the page. Once a
+   column is resized, `lib/resizableColumns.ts` marks the table `os-cols-fixed` at run time and the
+   cell fills the width it was given. */
+.teams-activity-cell {
+  width: 350px;
+}
+
+:deep(.os-cols-fixed) .teams-activity-cell {
+  width: auto;
+}
+
+.teams-table [data-col-actions] {
+  white-space: nowrap;
 }
 
 .teams-table {
