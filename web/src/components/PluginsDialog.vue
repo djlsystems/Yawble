@@ -8,7 +8,7 @@ import { slotSummary } from '../lib/connections';
 import { useConsoleStore } from '../stores/console';
 import { filterWords, matchesWords } from '../lib/filterWords';
 import FilterText from './FilterText.vue';
-import HostPathPicker from './HostPathPicker.vue';
+import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
 import { checkSolution } from '../api/client';
@@ -25,9 +25,9 @@ import type { SolutionCheck } from '../api/types';
  * hired on it - each a link to that member's settings, where a plugin member's settings are edited.
  *
  * Rescan re-reads the directory; View manifest shows `plugin.json` read-only; Install from a folder
- * installs a built plugin that is already inside the instance - chosen with the host folder picker,
- * offered the data root only, because the Host refuses a path anywhere else - and shows the Host's
- * verdict, which refuses an existing version unless Replace is ticked. Remove takes one version, or
+ * installs a built plugin that is already inside the instance - through the install dialog Solutions
+ * opens too (`InstallFromFolderDialog`), whose picker opens in the teams' Documents - and shows the
+ * Host's verdict, which refuses an existing version unless Replace is ticked. Remove takes one version, or
  * the whole plugin, with `plugin remove`'s rules: it asks first, and the Host refuses the
  * whole plugin while members are hired on it (naming them) and the active version while others are
  * kept - its sentence is shown in the question. Every one of these is a person's: the routes that
@@ -163,22 +163,16 @@ function openMember(member: PluginMemberRef) {
 // --- Install from a folder -----------------------------------------------------------------------
 
 const installOpen = ref(false);
-const pickerOpen = ref(false);
-const installPath = ref('');
-const replace = ref(false);
 const installing = ref(false);
 const verdict = ref<PluginInstallResult | null>(null);
 
 function startInstall() {
-  installPath.value = '';
-  replace.value = false;
   verdict.value = null;
   installOpen.value = true;
 }
 
-async function install() {
-  const path = installPath.value.trim();
-  if (!path || installing.value) return;
+async function install(path: string, replace: boolean) {
+  if (installing.value) return;
 
   installing.value = true;
   verdict.value = null;
@@ -194,7 +188,7 @@ async function install() {
   }
 
   try {
-    verdict.value = await installPlugin(path, replace.value);
+    verdict.value = await installPlugin(path, replace);
   } catch (cause) {
     // A refusal is the Host's verdict too: its sentence names why, and nothing was written. A 409
     // is an existing version without Replace; the body names the id and version when it read them.
@@ -596,72 +590,27 @@ const verdictText = computed(() => {
     </q-card>
   </q-dialog>
 
-  <!-- INSTALL FROM A FOLDER: a built plugin already inside the instance. The Host's verdict is shown
-       as it gave it; a refusal names why, and nothing was written. -->
-  <q-dialog v-model="installOpen">
-    <q-card class="os-dialog-md" data-install-dialog>
-      <q-card-section>
-        <div class="os-dialog-title">Install from a folder</div>
-        <div class="text-caption os-text-muted">
-          A built plugin folder inside this instance's data root, holding its plugin.json. It is
-          installed as the active version of its plugin.
-        </div>
-      </q-card-section>
-
-      <q-card-section class="q-gutter-md">
-        <q-input
-          v-model="installPath"
-          outlined
-          dense
-          label="Folder"
-          spellcheck="false"
-          autocomplete="off"
-        >
-          <template #after>
-            <q-btn flat dense no-caps icon="folder_open" label="Browse…" @click="pickerOpen = true" />
-          </template>
-        </q-input>
-
-        <q-checkbox
-          v-model="replace"
-          dense
-          label="Replace"
-        />
-        <div class="text-caption os-text-muted">
-          Tick to install over a version that is already installed. Without it, the Host refuses.
-        </div>
-
-        <q-banner
-          v-if="verdict"
-          dense
-          :class="verdict.installed ? 'os-bg-tint-ok text-positive' : 'os-bg-tint-error text-negative'"
-          data-install-verdict
-        >
-          <template #avatar><q-icon :name="verdict.installed ? 'check_circle' : 'error'" /></template>
-          {{ verdictText }}
-        </q-banner>
-      </q-card-section>
-
-      <q-card-actions align="right">
-        <q-btn v-close-popup flat no-caps label="Close" :disable="installing" />
-        <q-btn
-          color="primary"
-          no-caps
-          label="Install"
-          :loading="installing"
-          :disable="installing || installPath.trim() === ''"
-          @click="install"
-        />
-      </q-card-actions>
-    </q-card>
-  </q-dialog>
-
-  <HostPathPicker
-    v-model="pickerOpen"
-    instance-only
-    title="Choose the plugin folder"
-    @chose="installPath = $event"
-  />
+  <!-- INSTALL FROM A FOLDER: a built plugin already inside the instance, through the dialog
+       Solutions shares. The Host's verdict is shown as it gave it; a refusal names why, and nothing
+       was written. -->
+  <InstallFromFolderDialog
+    v-model="installOpen"
+    caption="A built plugin folder inside this instance's data root, holding its plugin.json, or a solution package. A plugin is installed as the active version of its plugin."
+    picker-title="Choose the plugin folder"
+    offer-replace
+    :installing="installing"
+    @install="install"
+  >
+    <q-banner
+      v-if="verdict"
+      dense
+      :class="verdict.installed ? 'os-bg-tint-ok text-positive' : 'os-bg-tint-error text-negative'"
+      data-install-verdict
+    >
+      <template #avatar><q-icon :name="verdict.installed ? 'check_circle' : 'error'" /></template>
+      {{ verdictText }}
+    </q-banner>
+  </InstallFromFolderDialog>
 
   <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :check="wizard.check" @opened="open = false" />
 

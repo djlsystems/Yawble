@@ -54,6 +54,24 @@ function truncationNote(listing: DirectoryListing): string | null {
     + 'subfolder to narrow it down.'
 }
 
+/** A listing's entries as folder-mode rows, sorted. */
+function folderModeEntries(listing: DirectoryListing): FileBrowserEntry[] {
+  return sortEntries(listing.entries).map((entry): FileBrowserEntry => ({
+    path: childOf(listing.path, entry.name),
+    name: entry.name,
+    isFolder: entry.type === 'dir',
+
+    // FOLDER MODE. A file row is rendered but not navigable, so a person can see a folder
+    // is not empty even when nothing in it is choosable. A later file mode widens the
+    // picker's `mode` type and this line together, deliberately.
+    disabled: entry.type === 'file',
+
+    // No `downloadUrl` and no `caption`: `/api/fs` has no content route, and the second
+    // line is the roots' own business. Omitted rather than passed as `undefined` -
+    // `exactOptionalPropertyTypes` tells those two apart.
+  }))
+}
+
 /**
  * A browser over the Host's own filesystem, opening at the ROOTS LEVEL.
  *
@@ -152,20 +170,7 @@ export function hostFileBrowser(options: { instanceOnly?: boolean } = {}): HostB
 
           note: truncationNote(listing),
 
-          entries: sortEntries(listing.entries).map((entry): FileBrowserEntry => ({
-            path: childOf(listing.path, entry.name),
-            name: entry.name,
-            isFolder: entry.type === 'dir',
-
-            // FOLDER MODE. A file row is rendered but not navigable, so a person can see a folder
-            // is not empty even when nothing in it is choosable. A later file mode widens the
-            // picker's `mode` type and this line together, deliberately.
-            disabled: entry.type === 'file',
-
-            // No `downloadUrl` and no `caption`: `/api/fs` has no content route, and the second
-            // line is the roots' own business. Omitted rather than passed as `undefined` -
-            // `exactOptionalPropertyTypes` tells those two apart.
-          })),
+          entries: folderModeEntries(listing),
         }
       },
 
@@ -183,6 +188,87 @@ export function hostFileBrowser(options: { instanceOnly?: boolean } = {}): HostB
       // A PREVIEW of `IsSingleSegmentName` in `FileSystemEndpoints.cs`, so a person is told before
       // they press Create rather than after. The server re-checks regardless of what this says.
       checkName: (name: string) => (isLegalSegment(name) ? null : `'${name}' is not a legal folder name.`),
+    },
+  }
+}
+
+/**
+ * THE INSTALL PICKER'S BROWSER: the teams' Documents (`documents` in the instance's data root),
+ * where a person uploads a package, and nothing above it.
+ *
+ * It opens IN Documents and Documents is its top: no `..` row and no crumb climbs to the data
+ * root, so the data root's own folders (agent-credentials, backups, bin, ...) are never listed.
+ * A dot-entry is never listed at any level - `.harness-team` marks a team's folder, and nothing
+ * whose name starts with a dot is a package.
+ *
+ * THIS IS WHAT THE PICKER SHOWS, NOT A BOUNDARY. The same four `/api/fs` routes answer it, under
+ * `FileBrowserPolicy` as ever, and the install routes refuse a folder outside the data root on
+ * their own. A path typed into the install dialog still reaches any folder those routes accept.
+ *
+ * `activeRoot` is Documents itself, so the picker can tell its top apart: Documents holds every
+ * team's folder and is nobody's package, so it is not a choice.
+ */
+export function packageFolderBrowser(): HostBrowser {
+  const activeRoot = ref<FileSystemRoot | null>(null)
+
+  /** Documents in the instance's data root, read once per source; `null` when no root is the
+   *  instance's (an operator's data root that `FileBrowserPolicy` dropped). */
+  let documents: FileSystemRoot | null | undefined
+
+  async function top(): Promise<FileSystemRoot | null> {
+    if (documents === undefined) {
+      const instance = (await fileSystemRoots()).roots.find((root) => root.isInstance)
+      documents = instance
+        ? { ...instance, name: 'Documents', path: childOf(instance.path, 'documents'), isInstance: false }
+        : null
+    }
+
+    return documents
+  }
+
+  return {
+    activeRoot,
+
+    source: {
+      start: '',
+
+      async list(path: string): Promise<FileBrowserListing> {
+        const root = await top()
+        activeRoot.value = root
+
+        // No instance root: nothing to open, and the picker's empty slot says so.
+        if (!root) return { path: '', crumbs: [], up: null, writes: 'absent', entries: [] }
+
+        const listing = await browseFileSystem(path === '' ? root.path : path)
+        const crumbs = breadcrumbs(root.path, listing.path)
+        if (crumbs[0]) crumbs[0] = { ...crumbs[0], label: root.name }
+
+        return {
+          path: listing.path,
+          crumbs,
+
+          // UP STOPS AT DOCUMENTS: the data root above it is not offered.
+          up: parentWithin(root.path, listing.path),
+
+          // Picking, not writing: a package is uploaded through Documents.
+          writes: 'absent',
+
+          note: truncationNote(listing),
+
+          entries: folderModeEntries({
+            ...listing,
+            entries: listing.entries.filter((entry) => !entry.name.startsWith('.')),
+          }),
+        }
+      },
+
+      createFolder: async (path: string, name: string) => {
+        await createHostDirectory(path, name)
+      },
+
+      upload: async (path: string, file: File) => {
+        await uploadHostFile(path, file)
+      },
     },
   }
 }

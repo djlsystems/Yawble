@@ -467,6 +467,23 @@ export type DocumentsUploadAnswer =
   | { kind: 'skipped'; path: string }
   | { kind: 'clash'; error: string; clashes: DocumentsClash[] }
 
+/** Where an uploaded folder or unpacked .zip landed: the folder made (its keep-both name shows
+ *  here) and every file written. */
+export interface DocumentsPackageSaved {
+  path: string
+  name: string
+  isFolder: true
+  files: string[]
+  size: number
+}
+
+/** What a folder or .zip upload answered. A refusal (an unsafe zip, a bad path) is thrown with
+ *  the server's sentence. */
+export type DocumentsPackageAnswer =
+  | { kind: 'saved'; saved: DocumentsPackageSaved }
+  | { kind: 'skipped'; path: string }
+  | { kind: 'clash'; error: string; clashes: DocumentsClash[] }
+
 export interface TeamCloned {
   team: Team
   repos: number

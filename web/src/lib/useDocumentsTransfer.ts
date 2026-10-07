@@ -1,4 +1,11 @@
-import { copyDocuments, moveDocuments, uploadDocument } from '../api/documents';
+import {
+  copyDocuments,
+  moveDocuments,
+  uploadDocument,
+  uploadDocumentFolder,
+  uploadDocumentZip,
+  type FolderUploadFile,
+} from '../api/documents';
 import type {
   DocumentsChangeAnswer,
   DocumentsChangeResult,
@@ -44,7 +51,11 @@ export interface DocumentsTransfer {
     to: DropTarget,
   ) => Promise<TransferOutcome>;
   uploadInto: (folder: DocumentsFolderKey, path: string, files: File[]) => Promise<TransferOutcome>;
+  uploadPackage: (folder: DocumentsFolderKey, path: string, upload: PackageUpload) => Promise<TransferOutcome>;
 }
+
+/** A whole folder (each file with its relative path) or one .zip, to be unpacked into its folder. */
+export type PackageUpload = { kind: 'folder'; files: FolderUploadFile[] } | { kind: 'zip'; file: File };
 
 /** A clash that keeps coming back (something keeps appearing) is asked about at most this often. */
 const MostRounds = 3;
@@ -158,5 +169,48 @@ export function useDocumentsTransfer(deps: DocumentsTransferDeps): DocumentsTran
     return outcome;
   }
 
-  return { transfer, uploadInto };
+  /**
+   * A folder or a .zip, sent with `onClash: 'ask'`. Its one clash - the top folder's name - is put
+   * to the person in the same clash dialog, and the upload sent again with the choice. A refusal
+   * (an unsafe zip, a bad path) comes back as `refused` with the server's sentence.
+   */
+  async function uploadPackage(folder: DocumentsFolderKey, path: string, upload: PackageUpload): Promise<TransferOutcome> {
+    const to: DropTarget = { folder, path };
+    const base = { verb: 'upload', to, from: null } as const;
+    const name =
+      upload.kind === 'zip'
+        ? upload.file.name.replace(/\.zip$/i, '')
+        : (upload.files[0]?.relativePath.replace(/^\/+/, '').split('/')[0] ?? '');
+    const send = (onClash: 'ask' | OnClash) =>
+      upload.kind === 'zip'
+        ? uploadDocumentZip(folder, upload.file, path, onClash)
+        : uploadDocumentFolder(folder, upload.files, path, onClash);
+
+    const outcome = await (async (): Promise<TransferOutcome> => {
+      let onClash: 'ask' | OnClash = 'ask';
+
+      try {
+        for (let round = 0; round < MostRounds; round++) {
+          const answer = await send(onClash);
+
+          if (answer.kind === 'saved') return { kind: 'done', ...base, results: [{ from: name, to: answer.saved.path, outcome: 'done' }] };
+          if (answer.kind === 'skipped') return { kind: 'done', ...base, results: [{ from: name, to: answer.path, outcome: 'skipped', reason: 'Skipped' }] };
+
+          const clash = answer.clashes[0] ?? { from: name, to: name, isFolder: true };
+          const chosen = await clashQueue([{ ...clash, from: name }], deps.askClash);
+          if (!chosen) return { kind: 'cancelled', ...base };
+          onClash = chosen.get(name) ?? 'skip';
+        }
+
+        return { kind: 'refused', ...base, error: 'The names kept clashing; nothing more was sent. Refresh and try again.' };
+      } catch (failure) {
+        return { kind: 'refused', ...base, error: sentence(failure) };
+      }
+    })();
+
+    deps.settled(outcome);
+    return outcome;
+  }
+
+  return { transfer, uploadInto, uploadPackage };
 }

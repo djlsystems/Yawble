@@ -11,13 +11,14 @@ import { asDocumentsFolderKey, asTeamId, type DocumentEntry, type DocumentsFolde
  *
  * The shapes are the 3.2 contract's: `GET /api/documents` answers `{ folders, root }`; a listing is
  * an array of entries; move, copy and rename answer `{ results }`, or 409 with `clashes` or
- * `results`; upload answers the entry, `{ skipped, path }`, or 409 with `clashes`.
+ * `results`; upload answers the entry, `{ skipped, path }`, or 409 with `clashes`; a folder or zip
+ * upload answers the folder it made (`{ path, name, isFolder, files, size }`).
  */
 
 export interface DocumentsCall {
   method: string;
   url: string;
-  route: 'root' | 'list' | 'move' | 'copy' | 'rename' | 'upload' | 'folders' | 'delete' | 'other';
+  route: 'root' | 'list' | 'move' | 'copy' | 'rename' | 'upload' | 'upload-folder' | 'upload-zip' | 'folders' | 'delete' | 'other';
   folder: string;
   query: URLSearchParams;
   /** The JSON body, or the multipart form's fields as an object. */
@@ -93,10 +94,13 @@ function respond(reply: Reply) {
   };
 }
 
+/** A repeated field (a folder upload's `file` and `relativePath`) becomes an array, in order. */
 function formFields(form: FormData): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
   form.forEach((value, name) => {
-    fields[name] = typeof value === 'string' ? value : (value as File).name;
+    const text = typeof value === 'string' ? value : (value as File).name;
+    const before = fields[name];
+    fields[name] = before === undefined ? text : [...(Array.isArray(before) ? before : [before]), text];
   });
 
   return fields;
@@ -157,6 +161,15 @@ export function documentsServer(
         const fields = call.body as { file: string; path: string };
         return { status: 200, body: aFile(join(fields.path, fields.file)) };
       }
+      case 'upload-folder':
+      case 'upload-zip': {
+        const fields = call.body as { file: string | string[]; relativePath?: string | string[]; path: string };
+        const relative = [fields.relativePath ?? []].flat();
+        const name = call.route === 'upload-zip' ? String(fields.file).replace(/\.zip$/i, '') : relative[0]!.split('/')[0]!;
+        const at = join(fields.path, name);
+        const files = call.route === 'upload-zip' ? [join(at, 'solution.json')] : relative.map((path) => join(fields.path, path));
+        return { status: 200, body: { path: at, name, isFolder: true, files, size: 12 * files.length } };
+      }
       case 'folders':
         return { status: 200, body: aDir((call.body as { path: string }).path, 0) };
       case 'delete':
@@ -170,7 +183,7 @@ export function documentsServer(
     const url = String(input);
     const method = init?.method ?? 'GET';
     const parsed = new URL(url, 'http://test');
-    const team = parsed.pathname.match(/^\/api\/teams\/([^/]+)\/documents(\/[a-z]+)?$/);
+    const team = parsed.pathname.match(/^\/api\/teams\/([^/]+)\/documents(\/[a-z-]+)?$/);
 
     let route: DocumentsCall['route'] = 'other';
     if (parsed.pathname === '/api/documents') route = 'root';
@@ -178,7 +191,7 @@ export function documentsServer(
       const suffix = team[2] ?? '';
       if (suffix === '' && method === 'GET') route = 'list';
       else if (suffix === '' && method === 'DELETE') route = 'delete';
-      else if (['/move', '/copy', '/rename', '/upload', '/folders'].includes(suffix)) route = suffix.slice(1) as DocumentsCall['route'];
+      else if (['/move', '/copy', '/rename', '/upload', '/upload-folder', '/upload-zip', '/folders'].includes(suffix)) route = suffix.slice(1) as DocumentsCall['route'];
     }
 
     let body: unknown = undefined;

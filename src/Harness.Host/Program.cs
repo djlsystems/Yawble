@@ -6320,13 +6320,134 @@ documents.MapPost("/upload", async (
         "A multipart form with the file in `file` and an optional destination folder in `path`.\n\n"
         + "Only the LEAF of the uploaded filename is kept, so a name carrying directory separators "
         + "cannot place the file anywhere but where `path` says. 400 for a missing file, an empty "
-        + $"one, or one larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB. Audited as "
+        + "one, one named for the documents marker (under every `onClash`), "
+        + $"or one larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB. Audited as "
         + "`document.uploaded`, with the path and size and never the contents.\n\n"
         + "An optional `onClash` says what to do when the name is already taken. Absent, a file of "
         + "that name is replaced, as it always has been. `ask` answers 409 with `clashes` and "
         + "writes nothing; `keep-both` saves under the first free `name (copy).ext`; `replace` "
         + "replaces a file and refuses a folder of that name with 409; `skip` answers "
         + "`{ skipped: true, path }` and writes nothing."
+        + Describe.Documents);
+
+const string PackageClashDescription =
+    "An optional `onClash` says what to do when the folder's name is already taken, as for a file "
+    + "upload. Absent, a folder of that name takes the files, each replacing a file of its path, "
+    + "and a file of that name is 409. `ask` answers 409 with `clashes` and writes nothing; "
+    + "`keep-both` makes the first free `name (copy)`; `replace` lets a file of that name give way "
+    + "and refuses a folder with 409; `skip` answers `{ skipped: true, path }` and writes nothing. "
+    + "A link, a file where a folder is needed or a folder where a file would go is 409, and "
+    + "nothing is written. Audited as one `document.uploaded` with the path, file count and size.";
+
+documents.MapPost("/upload-folder", async (
+    [Description(Describe.Team)] string team,
+    HttpRequest request, TeamRegistry teams, TeamDocuments docs, FolderWatch folders,
+    TenantLogging audit, HttpContext context, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored)
+    {
+        return Results.NotFound(new { error = $"No team '{team}'." });
+    }
+
+    if (!request.HasFormContentType) return Results.BadRequest(new { error = "Send a folder." });
+
+    var form = await request.ReadFormAsync(ct);
+    var files = form.Files.GetFiles("file");
+    var relativePaths = form["relativePath"];
+
+    if (files.Count == 0) return Results.BadRequest(new { error = "Send a folder." });
+
+    if (relativePaths.Count != files.Count)
+    {
+        return Results.BadRequest(new { error = "Send one relativePath for each file, in the same order." });
+    }
+
+    return await DocumentsAsync(() => UploadPackageAsync(
+        stored, form,
+        () => TeamDocuments.FolderUpload(
+            [.. files.Select((file, i) => (relativePaths[i] ?? "", file.Length, (Func<Stream>)file.OpenReadStream))]),
+        "folder", docs, folders, audit, context, ct));
+})
+    .HumansOnly()
+    .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(TeamDocuments.MaximumPackageBytes + 1024 * 1024))
+    .WithSummary("Upload a folder")
+    .WithDescription(
+        "A multipart form with one `file` part per file and, in the same order, one `relativePath` "
+        + "per file: its path inside the folder, top folder first, as a browser's folder upload gives "
+        + "it (`File.webkitRelativePath`). Every path is in one top folder, which is made in the "
+        + "optional destination folder `path` with the subfolders kept.\n\n"
+        + $"At most {TeamDocuments.MaximumPackageFiles} files, each at most "
+        + $"{TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB and "
+        + $"{TeamDocuments.MaximumPackageBytes / (1024 * 1024)} MB together. A path that is absolute, "
+        + "has a `..`, `.` or empty segment, or names the documents marker is refused with 400 and "
+        + "nothing is written.\n\n"
+        + PackageClashDescription
+        + Describe.Documents);
+
+documents.MapPost("/upload-zip", async (
+    [Description(Describe.Team)] string team,
+    HttpRequest request, TeamRegistry teams, TeamDocuments docs, FolderWatch folders,
+    TenantLogging audit, HttpContext context, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored)
+    {
+        return Results.NotFound(new { error = $"No team '{team}'." });
+    }
+
+    if (!request.HasFormContentType) return Results.BadRequest(new { error = "Send a .zip file." });
+
+    var form = await request.ReadFormAsync(ct);
+    var file = form.Files.GetFile("file");
+
+    if (file is null || file.Length == 0 || !file.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { error = "Send a .zip file." });
+    }
+
+    if (file.Length > TeamDocuments.MaximumUploadBytes)
+    {
+        return Results.BadRequest(new
+        {
+            error = $"That zip is larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB.",
+        });
+    }
+
+    await using var content = file.OpenReadStream();
+    System.IO.Compression.ZipArchive archive;
+
+    try
+    {
+        archive = new System.IO.Compression.ZipArchive(content, System.IO.Compression.ZipArchiveMode.Read);
+    }
+    catch (InvalidDataException)
+    {
+        return Results.BadRequest(new { error = "That file is not a zip that can be read." });
+    }
+
+    using (archive)
+    {
+        return await DocumentsAsync(() => UploadPackageAsync(
+            stored, form, () => TeamDocuments.ZipUpload(file.FileName, archive), "zip", docs, folders, audit, context, ct));
+    }
+})
+    .HumansOnly()
+    // THE BODY LIMIT IS THE ZIP'S OWN, plus room for the form around it: one over it is refused
+    // before it is read, and one just under it reaches the size check and its sentence.
+    .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(TeamDocuments.MaximumUploadBytes + 1024 * 1024))
+    .WithSummary("Upload a .zip and unpack it")
+    .WithDescription(
+        "A multipart form with the zip in `file` and an optional destination folder in `path`. The "
+        + "zip is unpacked into a folder named after it (`job-tracker.zip` makes `job-tracker`); when "
+        + "every entry already sits in a folder of that name it is not doubled, and `__MACOSX/` is "
+        + "left out.\n\n"
+        + "REFUSED WHOLE, with 400 and nothing written, when any entry is a link (or anything but a "
+        + "plain file or folder), an absolute path, or a path with a `..` in it, when the zip's name "
+        + "is not a plain folder name (`..zip`, `...zip`) or is the documents marker's, and when the zip "
+        + $"cannot be read, is over {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB, holds more "
+        + $"than {TeamDocuments.MaximumPackageFiles} entries, or unpacks to more than "
+        + $"{TeamDocuments.MaximumPackageBytes / (1024 * 1024)} MB. A request body more than 1 MB over "
+        + "the zip's limit is refused with 413 before it is read.\n\n"
+        + PackageClashDescription
         + Describe.Documents);
 
 documents.MapDelete("", async (
@@ -8632,6 +8753,74 @@ static async Task<IResult> DocumentsAsync(Func<Task<IResult>> action)
     {
         return Results.Conflict(new { error = ex.Message });
     }
+}
+
+// A FOLDER OR A ZIP, given the clash choices a file upload has, applied to the folder it makes: ask
+// answers 409 naming it, keep-both makes `name (copy)`, replace lets a file of that name give way and
+// refuses a folder (an upload writes no row before it acts, so it never removes a tree), skip writes
+// nothing. Without one, a folder of that name takes the files, as uploading each file would.
+static async Task<IResult> UploadPackageAsync(
+    string stored, IFormCollection form, Func<PackageUpload> read, string kind, TeamDocuments docs, FolderWatch folders,
+    TenantLogging audit, HttpContext context, CancellationToken ct)
+{
+    var onClash = form["onClash"].ToString() is { Length: > 0 } sent ? sent : null;
+
+    if (onClash is not (null or "ask" or TeamDocuments.KeepBoth or TeamDocuments.Replace or TeamDocuments.Skip))
+    {
+        return Results.BadRequest(new { error = "onClash is ask, keep-both, replace or skip." });
+    }
+
+    // READ AND CHECKED WHOLE before the clash is even looked at: a refused package writes nothing.
+    var upload = read();
+    var name = upload.Name;
+    var replaceFile = false;
+
+    if (onClash is not null && docs.UploadTarget(stored, form["path"], name) is { } target
+        && (target.IsFile || target.IsFolder))
+    {
+        var where = Path.GetDirectoryName(target.Path)?.Replace('\\', '/') is { Length: > 0 } parent ? parent : stored;
+
+        switch (onClash)
+        {
+            case "ask":
+                return Results.Json(
+                    new
+                    {
+                        error = $"{target.Name} is already in {where}. Choose Keep both, Replace or Skip.",
+                        clashes = new[] { new DocumentsClash(target.Name, target.Path, target.IsFolder) },
+                    },
+                    statusCode: StatusCodes.Status409Conflict);
+            case TeamDocuments.Skip:
+                return Results.Ok(new { skipped = true, path = target.Path });
+            case TeamDocuments.Replace when target.IsFolder:
+                return Results.Conflict(new { error = $"{target.Name} is a folder in {where}; an upload replaces only a file." });
+            case TeamDocuments.Replace:
+                replaceFile = true;
+                break;
+            case TeamDocuments.KeepBoth:
+                var directory = Path.GetDirectoryName(Path.Combine(docs.RootFor(stored), target.Path))!;
+                name = TeamDocuments.FreeName(target.Name, isFolder: true, free => Path.Exists(Path.Combine(directory, free)));
+                break;
+        }
+    }
+
+    var saved = await docs.SavePackageAsync(stored, form["path"], name, upload, replaceFile, ct);
+    var actor = context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown";
+
+    // ONE ANNOUNCEMENT PER FOLDER that got files, as a recursive delete announces.
+    foreach (var group in saved.Files.GroupBy(
+        file => Path.GetDirectoryName(file)?.Replace('\\', '/') ?? "", StringComparer.Ordinal))
+    {
+        await folders.AnnounceAsync(stored, group.Key, [.. group], actor, ct);
+    }
+
+    // ONE ROW FOR THE UPLOAD: where it went, how many files and how big. Never the contents.
+    await audit.WriteAsync(
+        context, TenantActions.DocumentUploaded, stored, saved.Path,
+        new { team = stored, path = saved.Path, size = saved.Size, files = saved.Files.Count, kind, onClash },
+        ct);
+
+    return Results.Ok(saved);
 }
 
 // ISO-8601 UTC, `Z`-suffixed, as the member routes answer it.

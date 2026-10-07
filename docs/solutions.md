@@ -269,10 +269,38 @@ refuses:
   skill or site named by a path, a plugin's executable or skill outside its folder, and any link in
   the package that is absolute or leads out of it.
 
+## Getting a package in
+
+A package is installed from a folder inside the instance, so it goes into Documents first:
+
+1. Open **Documents**, pick your team's folder, and upload the package: **Upload a folder** for the
+   whole folder (its subfolders are kept), or **Upload a .zip**, which is unpacked into a folder of
+   the zip's name.
+2. Open **Solutions → Install from a folder** (or **Admin → Plugins → Install from a folder**: the
+   same dialog). **Browse…** opens in the teams' Documents; open the package's folder (the one
+   holding `solution.json`) and press **Choose this folder**, then **Install**. The folder can also
+   be typed: any folder inside the instance's data root.
+
+**Shortcut: Upload a package (.zip).** In that same install dialog, **Upload a package (.zip)** takes
+a `.zip` from your computer, puts it at the top of a team's folder in Documents - your active team's,
+or the one you pick next to the button; the line under it says where - unpacks it into a folder of
+the zip's name, and fills **Folder** with that folder, so the next press is **Install**. If a folder
+of that name is already there you are asked Keep both, Replace or Skip, as any Documents upload asks
+(Skip fills **Folder** with the one already there). A zip holding a link, an absolute path or a `..`
+entry is refused whole, with the reason shown, and nothing is written.
+
+The picker shows only Documents and what is under it - not the data root's own folders, and no
+dot-files such as `.harness-team` - and "Choose this folder" stays disabled until a folder below
+Documents is open. A package a team built in its own folder arrives with a **Review and install**
+link instead (see the deep link below), and the CLI's `yawble solution check` copies a folder from
+your computer.
+
 ## The install
 
-**Admin → Plugins → Install from a folder** opens the install wizard when the folder holds
-`solution.json` (a plain plugin folder installs as before). The wizard's steps:
+**Solutions → Install from a folder** opens the install wizard on the chosen folder. **Admin →
+Plugins → Install from a folder**, the same dialog with a **Replace** option for a plugin version
+already installed, opens the wizard when the folder holds `solution.json` (a plain plugin folder
+installs as before). The wizard's steps:
 
 1. **Team**: a new team, named after the package by default (editable, and checked as any team name
    is), with a new local repository unless unticked; or **update an existing team** that was

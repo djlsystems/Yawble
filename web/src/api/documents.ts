@@ -6,6 +6,8 @@ import type {
   DocumentsChangeResult,
   DocumentsFolder,
   DocumentsFolderKey,
+  DocumentsPackageAnswer,
+  DocumentsPackageSaved,
   DocumentsRenameItem,
   DocumentsTransfer,
   DocumentsUploadAnswer,
@@ -28,6 +30,8 @@ export type { DocumentEntry } from './types'
  * | read a file | `GET /api/teams/{folder}/documents/content` |
  * | create a folder | `POST /api/teams/{folder}/documents/folders` |
  * | upload | `POST /api/teams/{folder}/documents/upload` |
+ * | upload a folder | `POST /api/teams/{folder}/documents/upload-folder` |
+ * | upload a .zip | `POST /api/teams/{folder}/documents/upload-zip` |
  * | delete | `DELETE /api/teams/{folder}/documents` |
  * | rename | `POST /api/teams/{folder}/documents/rename` |
  * | move | `POST /api/teams/{folder}/documents/move` |
@@ -128,6 +132,79 @@ export async function uploadDocument(
   } catch (failure) {
     const clash = clashOf(failure)
     if (clash) return clash
+
+    throw failure
+  }
+}
+
+/** One file of a folder upload, with its path inside the folder, top folder first
+ *  (`File.webkitRelativePath`). */
+export interface FolderUploadFile {
+  file: File
+  relativePath: string
+}
+
+/**
+ * A whole folder into `path`, its subfolders kept: one `file` and one `relativePath` per file, in
+ * the same order. The clash is about the top folder, with the single upload's `onClash` choices.
+ */
+export const uploadDocumentFolder = (
+  folder: DocumentsFolderKey,
+  files: FolderUploadFile[],
+  path: string,
+  onClash: 'ask' | OnClash,
+) => {
+  const form = new FormData()
+  for (const { file, relativePath } of files) {
+    form.append('file', file)
+    form.append('relativePath', relativePath)
+  }
+
+  return sendPackage(docs(folder, '/upload-folder'), form, path, onClash, 'That folder is larger than 100 MB.')
+}
+
+/**
+ * A .zip into `path`, unpacked into a folder named after it. A zip holding a link, an absolute
+ * path or a `..` is refused whole and nothing is written; that refusal is thrown with its sentence.
+ */
+export const uploadDocumentZip = (
+  folder: DocumentsFolderKey,
+  zip: File,
+  path: string,
+  onClash: 'ask' | OnClash,
+) => {
+  const form = new FormData()
+  form.append('file', zip)
+
+  return sendPackage(docs(folder, '/upload-zip'), form, path, onClash, 'That zip is larger than 25 MB.')
+}
+
+/**
+ * A 413 is the server's body limit refusing the request before the route reads it, so it carries
+ * no sentence of the route's (a proxy in front may send an HTML page instead): it is thrown as
+ * `tooLarge`, the route's own size sentence, never as a bare status.
+ */
+async function sendPackage(
+  url: string,
+  form: FormData,
+  path: string,
+  onClash: 'ask' | OnClash,
+  tooLarge: string,
+): Promise<DocumentsPackageAnswer> {
+  form.append('path', path)
+  form.append('onClash', onClash)
+
+  try {
+    const answer = await json<DocumentsPackageSaved | { skipped: true; path: string }>(url, { method: 'POST', body: form })
+
+    if ('skipped' in answer && answer.skipped) return { kind: 'skipped', path: answer.path }
+
+    return { kind: 'saved', saved: answer as DocumentsPackageSaved }
+  } catch (failure) {
+    const clash = clashOf(failure)
+    if (clash) return clash
+
+    if ((failure as { status?: number }).status === 413) throw Object.assign(new Error(tooLarge), { status: 413 })
 
     throw failure
   }
