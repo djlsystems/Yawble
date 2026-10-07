@@ -199,7 +199,7 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
         await bed.TellAndSettleAsync(team, "Dev", "work");
         await bed.QuietAsync(team);
 
-        var before = await bed.ActivityAsync(team);
+        var before = await bed.SettledActivityAsync(team);
         await Task.Delay(TimeSpan.FromSeconds(1.5), Ct);
         var after = await bed.ActivityAsync(team);
 
@@ -741,6 +741,29 @@ public sealed class TeamActivityTests(TeamActivityTests.Bed bed) : IClassFixture
             var body = await response.Content.ReadAsStringAsync(Ct);
             Assert.True(response.StatusCode == HttpStatusCode.OK, $"{(int)response.StatusCode} from {url}: {body}");
             return JsonDocument.Parse(body).RootElement.Clone();
+        }
+
+        /// <summary>
+        /// THE DEFAULT WINDOW ONCE IT HAS STOPPED MOVING: two reads 600 ms apart with the same end.
+        /// Quiet as <see cref="QuietAsync"/> judges it (no run going, nothing queued) can still have
+        /// one more row of the workflow on its way - under a release's load one landed 0.7 s after
+        /// the team read quiet and moved the window's end - so a test that compares two windows
+        /// over time takes its first only once the end has held.
+        /// </summary>
+        public async Task<JsonElement> SettledActivityAsync(string team)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            var previous = await ActivityAsync(team);
+
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(600, Ct);
+                var current = await ActivityAsync(team);
+                if (current.GetProperty("to").GetString() == previous.GetProperty("to").GetString()) return current;
+                previous = current;
+            }
+
+            throw new TimeoutException($"{team}'s activity window did not settle.");
         }
 
         public async Task<Message> AwaitRowAsync(Func<Message, bool> match, string what)
