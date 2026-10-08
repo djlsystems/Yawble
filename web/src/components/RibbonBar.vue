@@ -148,7 +148,7 @@ const overflowGroups = computed(() => {
           :icon="entry.item.icon"
           :label="entry.item.label"
         >
-          <RibbonTeamList @pick="board.setActiveTeam" />
+          <RibbonTeamList @pick="board.openTeam" />
         </q-btn-dropdown>
 
         <span v-else class="ribbon-item-wrap">
@@ -214,7 +214,7 @@ const overflowGroups = computed(() => {
                 </q-item-section>
 
                 <q-menu anchor="top start" self="top end" class="above-concierge">
-                  <RibbonTeamList @pick="board.setActiveTeam" />
+                  <RibbonTeamList @pick="board.openTeam" />
                 </q-menu>
               </q-item>
 

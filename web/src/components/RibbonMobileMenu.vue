@@ -38,7 +38,7 @@ function run(item: RibbonItem) {
 }
 
 function pickTeam(id: TeamId) {
-  board.setActiveTeam(id);
+  board.openTeam(id);
   emit('close');
 }
 

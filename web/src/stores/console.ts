@@ -633,6 +633,16 @@ export const useConsoleStore = defineStore('console', {
     },
 
     /**
+     * A team picked from a list - the Teams list's row, the ribbon's Choose Team - opens on its
+     * board: the board is shown, then the team made active. Making it active alone opened its tab
+     * but left the Teams list or the Kanban on screen when no team's board was showing.
+     */
+    openTeam(id: TeamId) {
+      this.showBoard();
+      this.setActiveTeam(id);
+    },
+
+    /**
      * A current team that moved somewhere else - another device, or `harness team switch` inside
      * the Concierge.
      *

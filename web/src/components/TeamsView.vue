@@ -191,8 +191,7 @@ function open(id: TeamId) {
   // An archived team has no board to open: it has no tab until it is unarchived.
   if (board.teams.find((team) => team.id === id)?.archived === true) return;
 
-  board.showBoard();
-  board.setActiveTeam(id);
+  board.openTeam(id);
 }
 
 /**
