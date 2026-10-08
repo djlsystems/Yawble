@@ -257,7 +257,13 @@ describe('Admin > Sites', () => {
 
     const doc = bodyFind('[data-site-doc="n1"]')!;
     expect(doc.textContent).toContain('visitor');
-    expect(doc.querySelector('pre')?.textContent).toBe(JSON.stringify(hostile.doc, null, 2));
+    expect(doc.querySelector('[data-site-doc-field] dd')?.textContent).toBe('<img src=x onerror=alert(1)>');
+    expect(document.body.querySelector('img')).toBeNull();
+
+    bodyFind('[data-show-json]')!.click();
+    await settle();
+
+    expect(bodyFind('[data-site-doc="n1"] pre')?.textContent).toBe(JSON.stringify(hostile.doc, null, 2));
     expect(bodyText()).toContain('<img src=x onerror=alert(1)>');
     expect(document.body.querySelector('img')).toBeNull();
   });

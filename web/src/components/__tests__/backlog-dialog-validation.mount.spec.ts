@@ -165,6 +165,30 @@ describe('BacklogDialog: Add', () => {
   });
 });
 
+describe('BacklogDialog: Add has a title bar with its close', () => {
+  /** As the item dialog has: the title on the left, its close as the bar's last control. */
+  it('closes from the close in its title bar, adding nothing', async () => {
+    await open();
+
+    button('Add item').click();
+    await flushPromises();
+
+    const bar = document.querySelector('[data-backlog-add-bar]');
+    expect(bar).not.toBeNull();
+    expect(bar!.textContent).toContain('Add a backlog item');
+    const close = [...bar!.querySelectorAll('button')].at(-1)!;
+    expect(close.getAttribute('aria-label')).toBe('Close');
+
+    close.click();
+    await flushPromises();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await flushPromises();
+
+    expect(document.querySelector('[data-backlog-add-bar]')).toBeNull();
+    expect(createBacklogItem).not.toHaveBeenCalled();
+  });
+});
+
 describe('BacklogDialog: Dispatch to a new team', () => {
   it('refuses a new-team name that is not an identifier', async () => {
     remember([]);

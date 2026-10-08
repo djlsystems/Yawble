@@ -1498,7 +1498,21 @@ function down(index: number) {
   <!-- Add. A `q-dialog` in this component's own template, never `$q.dialog()`. -->
   <q-dialog v-model="adding">
     <q-card class="backlog-add-card os-dialog-md">
-      <q-card-section class="os-dialog-title">Add a backlog item</q-card-section>
+      <!-- THE TITLE BAR, as the item dialog's: its title on the left and its close on the right. -->
+      <q-card-section class="backlog-item-bar row items-center no-wrap" data-backlog-add-bar>
+        <div class="backlog-item-title">Add a backlog item</div>
+        <q-space />
+        <q-btn
+          flat dense round
+          icon="close"
+          aria-label="Close"
+          class="backlog-detail-close"
+          :disable="busy"
+          @click="adding = false"
+        >
+          <q-tooltip>Close</q-tooltip>
+        </q-btn>
+      </q-card-section>
       <q-form lazy-rules="ondemand" @submit="add">
         <q-card-section class="q-gutter-sm">
           <q-input v-model="draftTitle" dense outlined autofocus label="Title" :rules="titleRules" />
