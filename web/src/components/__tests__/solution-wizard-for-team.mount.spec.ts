@@ -58,6 +58,8 @@ describe('Solution wizard - opened for a team', () => {
     await settle();
     wrapper.findComponent(HostPathPicker).vm.$emit('chose', Folder);
     await settle();
+    button('Update').click();
+    await settle();
     await settle();
 
     expect(wrapper.findComponent(SolutionWizard).props('team')).toBe('job-tracker');
