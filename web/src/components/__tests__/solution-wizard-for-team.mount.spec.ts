@@ -6,12 +6,13 @@
 // a second team of the same name. Opened anywhere else it starts as before.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { enableAutoUnmount } from '@vue/test-utils';
 
 import SolutionPanel from '../SolutionPanel.vue';
 import HostPathPicker from '../HostPathPicker.vue';
 import SolutionWizard from '../SolutionWizard.vue';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
-import { button, settle } from '../../test/formProbe';
+import { button, isDisabled, settle } from '../../test/formProbe';
 import {
   Folder,
   fakeHost,
@@ -42,12 +43,42 @@ beforeEach(() => {
   serve();
 });
 
+// An earlier test's wizard, left mounted, would still ask about its name after a pause.
+enableAutoUnmount(afterEach);
+
 afterEach(() => {
   vi.unstubAllGlobals();
   resetBody();
 });
 
 const checked = (selector: string) => bodyFind(selector)?.getAttribute('aria-checked');
+
+/** Longer than the pause after which a changed new-team name is asked about. */
+const pastNamePause = () => new Promise((resolve) => setTimeout(resolve, 500));
+
+const Clash = "A team called 'Job Tracker' already exists and has no package installed or kept that this one can update or reinstall onto.";
+
+/** Another team holds the package's own name, and has no package: the hidden new-team name clashes. */
+function serveWithClash() {
+  calls = [];
+  const updateOfSecond: Route = (call) =>
+    call.url === '/api/solutions/preview' && (call.body as { team?: string }).team === 'job-tracker-2'
+      ? reply(200, updatePreview('job-tracker-2'))
+      : undefined;
+  const clashingName: Route = (call) =>
+    call.url === '/api/solutions/preview' && (call.body as { team?: string }).team === 'Job Tracker'
+      ? reply(200, { ok: false, error: Clash })
+      : undefined;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      fakeHost(
+        [updateOfSecond, clashingName, ...wizardRoutes({ installed: [installedRow('job-tracker-2', 'Job Tracker 2', '1.0.0')] })],
+        calls,
+      ),
+    ),
+  );
+}
 
 describe('Solution wizard - opened for a team', () => {
   it("from the team's panel, Update from a folder starts on updating that team, not a new one", async () => {
@@ -87,5 +118,36 @@ describe('Solution wizard - opened for a team', () => {
 
     expect(checked('[data-mode-install]')).toBe('true');
     expect(bodyFind('[data-update-team="job-tracker"]')!.getAttribute('data-selectable')).toBe('false');
+  });
+
+  it('with the update chosen, a clashing new-team name is neither checked nor shown, and Next follows the update', async () => {
+    serveWithClash();
+    await mountDialog(SolutionWizard, { folder: Folder, team: 'job-tracker-2' }, { pinia: false });
+    await settle();
+    await pastNamePause();
+    await settle();
+
+    expect(checked('[data-mode-update]')).toBe('true');
+    expect(bodyFind('[data-preview-problem]')).toBeNull();
+    expect(document.body.textContent).not.toContain(Clash);
+    expect(isDisabled('Next')).toBe(false);
+    expect(sent(calls, 'POST', '/api/solutions/preview').map((call) => (call.body as { team?: string }).team)).not.toContain(
+      'Job Tracker',
+    );
+  });
+
+  it('switching to Install as a new team checks the name again: the clash shows and Next is disabled', async () => {
+    serveWithClash();
+    await mountDialog(SolutionWizard, { folder: Folder, team: 'job-tracker-2' }, { pinia: false });
+    await settle();
+    await pastNamePause();
+    await settle();
+
+    bodyFind('[data-mode-install]')!.click();
+    await settle();
+
+    expect(checked('[data-mode-install]')).toBe('true');
+    expect(bodyFind('[data-preview-problem]')!.textContent).toContain(Clash);
+    expect(isDisabled('Next')).toBe(true);
   });
 });
