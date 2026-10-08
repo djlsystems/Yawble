@@ -46,6 +46,7 @@ import {
   nextFireLine,
   parseCap,
   RunWatchEveryMs,
+  RunWatchSlowEveryMs,
   RunWatchTries,
   runKeys,
   sizeWords,
@@ -263,12 +264,15 @@ async function runNow(trigger: SolutionPanelTrigger) {
     }
   });
   if (said) notice.value = said;
-  if (fired && !problem.value) watchForRun(seen);
+  if (fired && !problem.value) watchForRun(seen, said);
 }
 
 // The run route answers once the run is queued, not when it ends: read the panel again on a short
-// bounded timer until a run it had not seen shows, so Recent runs, each member's last run and the
-// status line catch up without Refresh. Only the panel is re-read - settings being edited are kept.
+// timer until a run it had not seen shows, so Recent runs, each member's last run and the status
+// line catch up without Refresh. Only the panel is re-read - settings being edited are kept.
+// The run showing there means it has ended, so its "is running now" line goes with it. Past the
+// short tries a long run is still watched, more slowly, while that line is up; once another
+// notice replaces it there is nothing left to correct and the watch stops.
 let runWatch: ReturnType<typeof setTimeout> | undefined;
 
 function stopWatchingRun() {
@@ -276,7 +280,7 @@ function stopWatchingRun() {
   runWatch = undefined;
 }
 
-function watchForRun(seen: ReadonlySet<string>, triesLeft = RunWatchTries) {
+function watchForRun(seen: ReadonlySet<string>, running: string, triesLeft = RunWatchTries) {
   stopWatchingRun();
   const team = props.team;
   runWatch = setTimeout(async () => {
@@ -290,10 +294,13 @@ function watchForRun(seen: ReadonlySet<string>, triesLeft = RunWatchTries) {
     if (team !== props.team || !open.value) return;
     if (read) {
       panel.value = read;
-      if (hasNewRun(seen, read.recentRuns)) return;
+      if (hasNewRun(seen, read.recentRuns)) {
+        if (notice.value === running) notice.value = '';
+        return;
+      }
     }
-    if (triesLeft > 1) watchForRun(seen, triesLeft - 1);
-  }, RunWatchEveryMs);
+    if (triesLeft > 1 || notice.value === running) watchForRun(seen, running, triesLeft - 1);
+  }, triesLeft > 0 ? RunWatchEveryMs : RunWatchSlowEveryMs);
 }
 
 onBeforeUnmount(stopWatchingRun);

@@ -14,6 +14,15 @@ export interface LocalTimeOptions {
 
 const zoned = (timeZone: string | undefined): Intl.DateTimeFormatOptions => (timeZone ? { timeZone } : {})
 
+/**
+ * A wire time as an instant, or NaN for what is not a time. The Host means UTC by every time it
+ * sends, so a date-time that came without its offset is read as UTC - `new Date` alone would read it
+ * as the browser's local time, hours away from the same moment sent with its Z.
+ */
+export function wireInstant(iso: string): number {
+  return Date.parse(/T\d\d:\d\d(:\d\d(\.\d+)?)?$/.test(iso) ? `${iso}Z` : iso)
+}
+
 /** An instant's time of day with seconds, or its date and time. */
 export function localTime(ms: number, options: LocalTimeOptions = {}): string {
   const at = new Date(ms)

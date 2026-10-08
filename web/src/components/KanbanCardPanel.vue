@@ -4,6 +4,7 @@ import { useQuasar } from 'quasar';
 import { useKanbanStore } from '../stores/kanban';
 import { KanbanStatusLabel, bodyToRender, colourFor, trailRows } from '../lib/kanban';
 import { workflowNumberTitle } from '../lib/workflowNumber';
+import { localTime, wireInstant } from '../lib/localTime';
 import { KanbanStatuses, type KanbanCardAttributes, type KanbanStatus } from '../api/kanban';
 
 /**
@@ -171,9 +172,9 @@ async function postComment() {
 function when(value: string | null | undefined): string {
   if (!value) return '';
 
-  const parsed = new Date(value);
+  const parsed = wireInstant(value);
 
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+  return Number.isNaN(parsed) ? value : localTime(parsed, { date: true });
 }
 </script>
 
@@ -234,7 +235,7 @@ function when(value: string | null | undefined): string {
         </div>
         <div v-else class="text-caption os-text-muted">
           <span v-if="kanban.detailLoading">Loading…</span>
-          <span v-else>
+          <span v-else data-card-times>
             None reported. Created {{ when(card.createdAt) }}, last moved {{ when(card.updatedAt) }}.
           </span>
         </div>
