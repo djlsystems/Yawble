@@ -211,9 +211,13 @@ function textOf(message: Message): string {
       // "nothing could say why" while the card above said exactly why.
       const rest = failureText(payload).trim()
       const resumeSentence = resume === null ? '' : ` Resuming at ${resume}.`
-      const reason = rest === '' ? '' : `${rest}${/[.!?]$/.test(rest) ? '' : '.'} `
+      const reason = rest === '' ? '' : `${rest}${/[.!?]$/.test(rest) ? '' : '.'}`
 
-      return `[${failureClass}] ${reason}${words}.${resumeSentence}`
+      // AN UNKNOWN FAILURE THAT SAID WHY IS NOT FOLLOWED BY "nothing could say why": the class
+      // sentence would contradict the reason just before it. Without a reason it is all there is.
+      const sentence = failureClass === 'unknown' && reason !== '' ? '' : `${words}.`
+
+      return `[${failureClass}] ${[reason, sentence].filter((part) => part !== '').join(' ')}${resumeSentence}`
     }
   }
 

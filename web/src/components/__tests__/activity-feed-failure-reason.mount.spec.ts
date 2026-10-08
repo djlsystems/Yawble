@@ -47,4 +47,22 @@ describe('ActivityFeed: a failed plugin run', () => {
     expect(mark?.kind).toBe('failed');
     expect(line.startsWith(`[unknown] ${(mark as { reason: string }).reason}`)).toBe(true);
   });
+
+  it('does not follow its own reason with "nothing could say why"', () => {
+    const wrapper = mount(ActivityFeed, { props: { feed: [failedRow], team: 'Mail', name: 'Echo', sinceSeq: 0 } });
+    const line = wrapper.find('.feed-line').text();
+
+    expect(line).toContain(reason);
+    expect(line.toLowerCase()).not.toContain('nothing could say why');
+  });
+
+  it('still says "nothing could say why" when an unknown failure gave no reason', () => {
+    const silentRow: Message = {
+      ...failedRow,
+      payload: JSON.stringify({ exitCode: 1, output: '', launchError: null, failureClass: 'unknown' }),
+    };
+    const wrapper = mount(ActivityFeed, { props: { feed: [silentRow], team: 'Mail', name: 'Echo', sinceSeq: 0 } });
+
+    expect(wrapper.find('.feed-line').text().toLowerCase()).toContain('nothing could say why');
+  });
 });
