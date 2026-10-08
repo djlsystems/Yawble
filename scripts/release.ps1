@@ -94,12 +94,27 @@ On Linux without a machine, run the same podman command with sudo on the host.
 if ($SkipTests) {
     Write-Host '== Suites skipped (-SkipTests) =='
 } else {
+# Every suite's per-test results are kept in the test history (scripts/test-history.ps1), passed
+# or failed, so slow tests and flakes can be read across releases.
+$history = Join-Path $root 'scripts/test-history.ps1'
+$results = Join-Path ([IO.Path]::GetTempPath()) "release-results-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+New-Item -ItemType Directory -Force $results | Out-Null
+function Save-Results([string]$Suite, [string]$File) {
+    if (Test-Path -LiteralPath $File) {
+        try { & $history add -Suite $Suite -File $File -Commit $head -Source release } catch { Write-Warning "Test history: $_" }
+    }
+}
+
 # 2a. Web suite, here.
 Write-Host '== Web suite (local) =='
 Push-Location (Join-Path $root 'web')
 try {
     Invoke-Checked 'npm ci' { npm ci --no-audit --no-fund }
-    Invoke-Checked 'The web suite' { npm test }
+    $webJson = Join-Path $results 'web.json'
+    npm test -- --reporter=default --reporter=json "--outputFile.json=$webJson"
+    $code = $LASTEXITCODE
+    Save-Results web $webJson
+    if ($code -ne 0) { throw "The web suite failed (exit code $code)." }
 } finally {
     Pop-Location
 }
@@ -134,9 +149,14 @@ try {
         "git checkout -q --detach $head",
         'dotnet build tests/Harness.Tests/Harness.Tests.csproj -c Debug -nologo -v quiet',
         "chmod 1777 $scratch/tmp && chmod o+rx $scratch $scratch/src && chmod -R o+rX tests/Harness.Tests/bin",
-        'dotnet tests/Harness.Tests/bin/Debug/net10.0/Harness.Tests.dll < /dev/null'
+        "dotnet tests/Harness.Tests/bin/Debug/net10.0/Harness.Tests.dll --report-trx --report-trx-filename dotnet.trx --results-directory $scratch/results < /dev/null"
     ) -join "`n"
-    Invoke-Checked 'The .NET suite' { podman exec $Container sh -c (ConvertTo-ShArgument $suite) }
+    podman exec $Container sh -c (ConvertTo-ShArgument $suite)
+    $code = $LASTEXITCODE
+    $trx = Join-Path $results 'dotnet.trx'
+    podman cp "${Container}:$scratch/results/dotnet.trx" $trx 2>$null | Out-Null
+    Save-Results dotnet $trx
+    if ($code -ne 0) { throw "The .NET suite failed (exit code $code)." }
 } finally {
     Remove-Item -Force $bundle -ErrorAction SilentlyContinue
     podman exec $Container rm -rf $scratch | Out-Null
@@ -147,7 +167,18 @@ Write-Host '== CLI suite (local) =='
 Push-Location $cliDir
 try {
     Invoke-Checked 'go vet' { go vet ./... }
-    Invoke-Checked 'The CLI suite' { go test ./... }
+    # -json for the history; on a failure the failing tests' own output is printed from it.
+    $goJson = Join-Path $results 'cli.json'
+    go test -json ./... > $goJson
+    $code = $LASTEXITCODE
+    Save-Results cli $goJson
+    if ($code -ne 0) {
+        Get-Content $goJson | ForEach-Object { try { $_ | ConvertFrom-Json } catch { } } |
+            Where-Object { $_.Action -eq 'output' -and $_.Test } | Group-Object Test |
+            Where-Object { ($_.Group.Output -join '') -match '--- FAIL' } |
+            ForEach-Object { Write-Host ($_.Group.Output -join '') }
+        throw "The CLI suite failed (exit code $code)."
+    }
 } finally {
     Pop-Location
 }

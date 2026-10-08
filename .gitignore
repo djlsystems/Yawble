@@ -13,3 +13,6 @@ TestResults/
 
 # Plan execution scratch (superpowers ledgers and briefs)
 .superpowers/
+
+# Per-test results of every suite run (scripts/test-history.ps1)
+.test-history/
