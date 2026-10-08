@@ -250,6 +250,117 @@ describe('Advanced…, Gmail through a Google app of your own', () => {
   });
 });
 
+describe('What Advanced… chooses, and whose permissions are listed', () => {
+  const chosen = () => bodyFind('[data-advanced-choice]');
+  const pressed = (element: Element | null) => element?.getAttribute('aria-pressed') ?? null;
+  const heading = () => bodyFind('[data-scopes-heading]')?.textContent?.trim() ?? null;
+  const scopeLines = () => document.body.querySelectorAll('[data-connect-scope]').length;
+
+  it('shows the Google sign-in as a chosen choice, and the permissions under a heading that names Google', async () => {
+    const wrapper = await openAdd();
+    await click(bodyFind('[data-connect-advanced]'));
+
+    expect(pressed(chosen())).toBe('true');
+    expect(chosen()!.textContent).toContain('Google account');
+    expect(chosen()!.textContent).toContain('Sign in with Google');
+    expect(heading()).toBe('Google will allow the plugins to:');
+    expect(bodyFind('[data-scope-words]')!.textContent!.trim()).toBe('Read, change and send your Gmail');
+
+    wrapper.unmount();
+  });
+
+  it('a tile chosen after Advanced… clears the Google choice, and its own provider heads the list', async () => {
+    getConnectionNeeds.mockImplementation(async (id: string) =>
+      id === 'microsoft'
+        ? { provider: 'microsoft', needs: [], scopes: [{ scope: 'Mail.Read', words: 'Read your mail', plugins: ['mail-helper'] }], apis: [] }
+        : googleNeeds);
+    const wrapper = await openAdd();
+    await click(bodyFind('[data-connect-advanced]'));
+    await click(tile('outlook'));
+
+    expect(pressed(chosen())).not.toBe('true');
+    expect(pressed(tile('outlook'))).toBe('true');
+    expect(heading()).toBe('Microsoft will allow the plugins to:');
+
+    // And Advanced… chosen again clears the tile.
+    await click(bodyFind('[data-connect-advanced]'));
+    expect(pressed(tile('outlook'))).toBe('false');
+    expect(pressed(chosen())).toBe('true');
+
+    wrapper.unmount();
+  });
+
+  it('lists no permissions with nothing chosen, nor with a mailbox tile chosen after Advanced…', async () => {
+    const wrapper = await openAdd();
+    expect(scopeLines()).toBe(0);
+    expect(heading()).toBeNull();
+
+    await click(bodyFind('[data-connect-advanced]'));
+    expect(scopeLines()).toBe(1);
+    await click(tile('gmail'));
+    expect(step()).toBe('mailbox');
+    await click(button('Back'));
+
+    expect(step()).toBe('service');
+    expect(scopeLines()).toBe(0);
+    expect(heading()).toBeNull();
+    expect(pressed(tile('gmail'))).toBe('true');
+    expect(pressed(chosen())).not.toBe('true');
+
+    wrapper.unmount();
+  });
+});
+
+describe('Advanced… chosen after a tile, and a heading the Host names', () => {
+  const pressed = (element: Element | null) => element?.getAttribute('aria-pressed') ?? null;
+  const tilesPressed = () => [...document.body.querySelectorAll('[data-provider-tile]')].map((t) => t.getAttribute('aria-pressed'));
+  const heading = () => bodyFind('[data-scopes-heading]')?.textContent?.trim() ?? null;
+  const words = () => [...document.body.querySelectorAll('[data-scope-words]')].map((w) => w.textContent?.trim());
+
+  it('leaves no tile pressed once Advanced… is chosen after a mailbox tile', async () => {
+    const wrapper = await openAdd();
+    await click(tile('gmail'));
+    await click(button('Back'));
+    expect(pressed(tile('gmail'))).toBe('true');
+
+    await click(bodyFind('[data-connect-advanced]'));
+    expect(tilesPressed()).toEqual(['false', 'false', 'false', 'false', 'false']);
+    expect(pressed(bodyFind('[data-advanced-choice]'))).toBe('true');
+
+    // And from the Gmail screen's own way to Advanced….
+    await click(tile('gmail'));
+    await click(bodyFind('[data-mailbox-advanced]'));
+    expect(step()).toBe('service');
+    expect(tilesPressed()).toEqual(['false', 'false', 'false', 'false', 'false']);
+    expect(pressed(bodyFind('[data-advanced-choice]'))).toBe('true');
+
+    wrapper.unmount();
+  });
+
+  it("heads the list with the provider's name as the Host gives it, over the Host's own words", async () => {
+    listConnectionProviders.mockResolvedValue([{ ...googleBare, name: 'Google Workspace' }, microsoft]);
+    const auth = 'https://www.googleapis.com/auth/';
+    getConnectionNeeds.mockResolvedValue({
+      provider: 'google',
+      needs: [],
+      scopes: [
+        { scope: auth + 'gmail.readonly', words: 'Read your Gmail', plugins: ['mail-helper'] },
+        { scope: auth + 'gmail.modify', words: 'Read, change and send your Gmail', plugins: ['mail-helper'] },
+        { scope: auth + 'gmail.compose', words: 'Draft and send email as you', plugins: ['mail-helper'] },
+      ],
+      apis: [],
+    });
+    const wrapper = await openAdd();
+    await click(bodyFind('[data-connect-advanced]'));
+
+    expect(heading()).toBe('Google Workspace will allow the plugins to:');
+    expect(bodyFind('[data-advanced-choice] [data-tile-name]')!.textContent!.trim()).toBe('Google Workspace account');
+    expect(words()).toEqual(['Read your Gmail', 'Read, change and send your Gmail', 'Draft and send email as you']);
+
+    wrapper.unmount();
+  });
+});
+
 describe("A slot's Connect", () => {
   const slot = (providers: string[]): ConnectionSlot => ({
     description: null,

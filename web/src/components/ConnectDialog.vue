@@ -78,6 +78,10 @@ import MailboxForm from './MailboxForm.vue';
  * a slot that does not take `imap`, or an older Host with no presets - the Google tile is that app.
  * A slot shows the tiles of the kinds it takes, `imap` included.
  *
+ * ONE CHOICE IS MARKED CHOSEN at a time - a tile, or Advanced…'s Google sign-in shown as a tile of its
+ * own - and choosing one clears the other. What the plugins will be allowed to do is listed only under
+ * a chosen provider that asks for permissions, and its heading names that provider: a mailbox asks none.
+ *
  * WHAT IS TYPED IS NOT LOST TO A STRAY CLICK OR A ROUTE CHANGE. Once anything is typed the dialog is
  * persistent: a click on the backdrop - a palm on a trackpad, mid-word - no longer closes it, and
  * only Close does. Nor does a route change close it (`no-route-dismiss`): the Console changes its
@@ -256,6 +260,14 @@ const tiles = computed<Tile[]>(() => {
 /** Gmail through a Google app of one's own, when the Gmail tile is the app password. */
 const advanced = computed(() => offers('google') && tiles.value.some((tile) => tile.preset === 'gmail'));
 
+/** The tile marked chosen: its service signed in to, or its mailbox opened. */
+function isChosen(tile: Tile) {
+  return tile.service ? providerId.value === tile.service : providerId.value === null && mailboxPreset.value === tile.preset;
+}
+
+/** Advanced…'s Google sign-in, chosen: there is no Google tile beside it to mark instead. */
+const advancedChosen = computed(() => advanced.value && providerId.value === 'google');
+
 function chooseTile(tile: Tile) {
   if (tile.preset) chooseMailbox(tile.preset);
   else if (tile.service) void choose(tile.service);
@@ -268,6 +280,9 @@ function chooseAdvanced() {
 }
 
 function chooseMailbox(id: string) {
+  // A mailbox asks for no permissions: a provider chosen before it, and its list, are let go.
+  providerId.value = null;
+  needs.value = null;
   mailboxPreset.value = id;
   mailboxSaved.value = false;
   problem.value = '';
@@ -282,6 +297,7 @@ function mailboxConnected(connection: Connection) {
 
 async function choose(id: string) {
   providerId.value = id;
+  mailboxPreset.value = '';
   needs.value = null;
   unticked.value = new Set();
   problem.value = '';
@@ -691,8 +707,9 @@ const stepLabels = computed(() => [
             no-caps
             align="left"
             class="connect-tile"
-            :outline="!(tile.service && providerId === tile.service)"
-            :color="tile.service && providerId === tile.service ? 'primary' : undefined"
+            :outline="!isChosen(tile)"
+            :color="isChosen(tile) ? 'primary' : undefined"
+            :aria-pressed="isChosen(tile) ? 'true' : 'false'"
             :data-provider-tile="tile.id"
             :data-mailbox-preset="tile.preset"
             :data-connect-service="tile.service"
@@ -706,6 +723,23 @@ const stepLabels = computed(() => [
         </div>
         <div v-if="advanced">
           <q-btn
+            v-if="advancedChosen"
+            no-caps
+            align="left"
+            class="connect-tile"
+            color="primary"
+            aria-pressed="true"
+            data-connect-service="google"
+            data-advanced-choice
+            @click="choose('google')"
+          >
+            <div class="column items-start">
+              <div class="text-weight-medium" data-tile-name>{{ provider?.name ?? 'Google' }} account</div>
+              <div class="text-caption" data-tile-way>Sign in with {{ provider?.name ?? 'Google' }}</div>
+            </div>
+          </q-btn>
+          <q-btn
+            v-else
             flat
             dense
             no-caps
@@ -733,7 +767,7 @@ const stepLabels = computed(() => [
               the account's name and email address.
             </div>
             <template v-else>
-              <div>The plugins will be allowed to:</div>
+              <div data-scopes-heading>{{ provider.name }} will allow the plugins to:</div>
               <div
                 v-for="line in needs.scopes"
                 :key="line.scope"
