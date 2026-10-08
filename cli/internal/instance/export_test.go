@@ -9,13 +9,6 @@ func SetNoteAtForTests(at time.Duration) func() {
 	return func() { healthNoteAt = old }
 }
 
-// SetPollingForTests shortens the health wait so a test can watch it give up.
-func SetPollingForTests(interval, timeout time.Duration) func() {
-	oldInterval, oldTimeout := healthInterval, healthTimeout
-	healthInterval, healthTimeout = interval, timeout
-	return func() { healthInterval, healthTimeout = oldInterval, oldTimeout }
-}
-
 // SetDrainPollingForTests shortens the drain wait so a test watches runs end without sleeping:
 // interval paces every read of control's record, and stands for one record period; timeout
 // bounds both the wait for the drain to show and the wait for runs to end.

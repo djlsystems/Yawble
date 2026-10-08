@@ -169,8 +169,9 @@ describe('CreateTeamDialog: the per-workflow budget', () => {
 
     // THE BUDGET IS ON THE ADVANCED TAB, which renders only once it is opened.
     document.body.querySelector<HTMLElement>('[data-advanced-tab]')!.click();
-    await validated();
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.waitFor(() => {
+      if (!document.body.querySelector('[data-advanced-settings]')) throw new Error('the Advanced panel has not rendered');
+    });
     await validated();
 
     return wrapper;

@@ -13,10 +13,12 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/backup"
 	"github.com/djlsystems/yawble/cli/internal/cli"
 	"github.com/djlsystems/yawble/cli/internal/engine"
+	"github.com/djlsystems/yawble/cli/internal/instance"
 )
 
 // helper is the start of every helper container's command line: the same flags on both engines.
@@ -329,6 +331,8 @@ func restoredNames(t *testing.T, s *engine.Scripted) []string {
 }
 
 func TestRestoreIntoAnEmptyVolumeAsksNothingThenStartsAndWaitsForHealth(t *testing.T) {
+	// The health poll in milliseconds, not its real two seconds: the stub answers 503 then 200.
+	defer instance.SetPollingForTests(10*time.Millisecond, 10*time.Second)()
 	for _, program := range []string{"podman", "docker"} {
 		t.Run(program, func(t *testing.T) {
 			s := restoreScript(t, program, "", "exited")

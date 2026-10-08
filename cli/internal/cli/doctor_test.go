@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/cli"
 	"github.com/djlsystems/yawble/cli/internal/engine"
@@ -201,6 +202,8 @@ func TestDoctorWithNoPodAndAHeldPortWarns(t *testing.T) {
 }
 
 func TestDoctorFixStartsAStoppedContainerWaitsForHealthAndReportsIt(t *testing.T) {
+	// The health poll in milliseconds, not its real two seconds: the stub answers 503 then 200.
+	defer instance.SetPollingForTests(10*time.Millisecond, 10*time.Second)()
 	s := engine.NewScripted()
 	s.On("podman version", engine.Result{Stdout: "6.0.2\n"})
 	s.On("podman image exists", engine.Result{})

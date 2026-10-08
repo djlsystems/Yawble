@@ -463,11 +463,12 @@ function advancedSettings(): HTMLElement | null {
   return document.body.querySelector<HTMLElement>('[data-advanced-settings]');
 }
 
-/** Opens the Advanced tab and waits for its panel. */
+/** Opens the Advanced tab and waits for its panel to be rendered, never a fixed time. */
 async function openAdvanced(): Promise<void> {
   advancedTab().click();
-  await validated();
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  await vi.waitFor(() => {
+    if (!advancedSettings()) throw new Error('the Advanced panel has not rendered');
+  });
   await validated();
 }
 
