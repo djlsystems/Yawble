@@ -101,6 +101,7 @@ func NewRoot(deps Deps) *cobra.Command {
 				version = "development build"
 			}
 			fmt.Fprintf(out, welcome, version)
+			sayIfNewer(cmd.Context(), deps, out)
 			return nil
 		},
 	}

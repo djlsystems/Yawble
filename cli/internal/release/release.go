@@ -29,7 +29,9 @@ const (
 // Release is the latest release as far as one target cares: its tag, the archive for this OS and
 // architecture, and the checksum file.
 type Release struct {
-	Tag          string
+	Tag string
+	// Prerelease is whether GitHub lists this release as a pre-release.
+	Prerelease   bool
 	AssetName    string
 	AssetURL     string
 	ChecksumsURL string
@@ -89,7 +91,7 @@ func Latest(ctx context.Context, client *http.Client, baseURL, token, goos, goar
 		}
 		return Release{}, fmt.Errorf("no release is available yet: %s has published none", Repository)
 	}
-	rel := Release{Tag: body.Tag}
+	rel := Release{Tag: body.Tag, Prerelease: body.Prerelease}
 	suffix := ".tar.gz"
 	if goos == "windows" {
 		suffix = ".zip"
