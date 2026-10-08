@@ -170,13 +170,14 @@ describe('the control panel: Controls', () => {
     expect(bodyFind('[data-control-notice]')?.textContent).toBe('Scan for postings is running now.');
   });
 
-  it('stops re-reading after a bounded number of tries when no new run shows', async () => {
+  it('stops its quick re-reads after a bounded number of tries when no new run shows', async () => {
     await controls();
     const reads = () => sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length;
     const readsBefore = reads();
     await click('[data-control-trigger="trg_scan"] [data-run-now]');
 
-    // One read as the route answers, then the three bounded tries - and no more.
+    // One read as the route answers, then the three quick tries - the slow watch past them is
+    // in solution-panel-long-run.mount.spec.ts.
     await vi.waitFor(() => expect(reads()).toBe(readsBefore + 1 + 3));
     await new Promise((resolve) => setTimeout(resolve, 60));
     await settle();

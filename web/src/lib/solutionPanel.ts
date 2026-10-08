@@ -132,10 +132,13 @@ export const LauncherPath = '/solutions';
 /**
  * AFTER RUN NOW, THE PANEL WATCHES FOR THE RUN TO FINISH: the run route answers as soon as the run
  * is queued, so the panel reads itself again every `RunWatchEveryMs` until a run it had not seen
- * shows in Recent runs - bounded to `RunWatchTries` reads, after which Refresh is still there.
+ * shows in Recent runs - `RunWatchTries` reads at that pace. A run that takes longer is still
+ * watched, every `RunWatchSlowEveryMs`, for as long as the panel says it is running, so that line
+ * never outlives the run.
  */
 export const RunWatchEveryMs = 2000;
 export const RunWatchTries = 90;
+export const RunWatchSlowEveryMs = 30000;
 
 export const runKeys = (runs: readonly Pick<SolutionPanelRun, 'member' | 'seq'>[]) =>
   new Set(runs.map((run) => `${run.member}/${run.seq}`));
