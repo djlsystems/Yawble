@@ -13,12 +13,12 @@ import {
   type SiteDocument,
 } from '../api/sites';
 import { useConsoleStore } from '../stores/console';
-import { vResizableColumns } from '../lib/resizableColumns';
+import { documentFields } from '../lib/siteDocumentFields';
 
 /**
  * ADMIN > SITES: every site across teams, from `GET /api/sites` - its team, live version, who
  * published it and when, and how much data it holds. Open shows it in a new tab; Versions lists
- * the kept versions and rolls back to one; Unpublish takes it down and keeps its files and data;
+ * the kept versions and rolls back to one, or, for a site not published, publishes its newest again; Unpublish takes it down and keeps its files and data;
  * Data reads its collections, read-only. Delete asks first, with the Host's own sentence saying
  * what would be lost. Every refusal is shown as the Host worded it.
  *
@@ -230,6 +230,31 @@ async function pickCollection(name: string) {
 function pretty(doc: unknown) {
   return JSON.stringify(doc, null, 2);
 }
+
+/**
+ * EACH DOCUMENT AS FIELDS AND VALUES, its JSON behind the Show JSON switch, as Admin > Log keeps its
+ * details. One switch for every document shown. A document with no fields to name (not an object)
+ * shows its JSON either way.
+ */
+const showJson = ref(false);
+
+function shownFields(doc: unknown) {
+  return showJson.value ? null : documentFields(doc);
+}
+
+/**
+ * The newest kept version, when the site is not published: its action puts the site back live as
+ * it was, so it says Publish rather than Roll back. Versions arrive newest first.
+ */
+const republishable = computed(() =>
+  detail.value && detail.value.site.liveVersion === null ? (detail.value.versions[0]?.version ?? null) : null,
+);
+
+function versionAction(version: number) {
+  return version === republishable.value
+    ? { icon: 'publish', label: `Publish v${version}` }
+    : { icon: 'undo', label: `Roll back to v${version}` };
+}
 </script>
 
 <template>
@@ -394,6 +419,7 @@ function pretty(doc: unknown) {
           <div class="text-caption os-text-muted mono">{{ key(detailSite) }}</div>
         </div>
         <q-space />
+        <q-toggle v-if="detailView === 'data'" v-model="showJson" dense label="Show JSON" class="q-mr-sm" data-show-json />
         <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
       </q-card-section>
 
@@ -402,7 +428,11 @@ function pretty(doc: unknown) {
 
         <template v-if="detail && detailView === 'versions'">
           <div v-if="detail.versions.length === 0" class="os-body os-text-muted">No versions kept.</div>
-          <q-markup-table v-else v-resizable-columns="'site-versions'" flat bordered dense separator="horizontal">
+          <!-- LAID OUT BY THE BROWSER EVERY TIME, not resizable: a pinned width pushed the actions past
+               the dialog's edge, cut "Roll back to v1" short, and a click there scrolled the table
+               sideways and the Version column out of sight. Long text wraps instead; the action
+               column takes the width of its words. -->
+          <q-markup-table v-else class="site-versions" flat bordered dense separator="horizontal" data-site-versions>
             <thead>
               <tr>
                 <th class="text-left">Version</th>
@@ -416,7 +446,7 @@ function pretty(doc: unknown) {
               <tr v-for="version in detail.versions" :key="version.version" :data-site-version="version.version">
                 <td class="text-left">
                   v{{ version.version }}
-                  <q-badge v-if="version.live" color="positive" label="Live" class="q-ml-xs" />
+                  <q-badge v-if="version.live" color="positive" label="Live" class="q-ml-xs" data-site-version-live />
                 </td>
                 <td class="text-left">
                   {{ when(version.publishedAt) }}
@@ -427,14 +457,14 @@ function pretty(doc: unknown) {
                   {{ version.files }}
                   <div class="text-caption os-text-muted">{{ size(version.bytes) }}</div>
                 </td>
-                <td class="text-right">
+                <td class="text-right site-version-action">
                   <q-btn
                     v-if="!version.live"
                     flat
                     dense
                     no-caps
-                    icon="undo"
-                    :label="`Roll back to v${version.version}`"
+                    :icon="versionAction(version.version).icon"
+                    :label="versionAction(version.version).label"
                     :loading="rollingBack === version.version"
                     :disable="rollingBack !== null"
                     @click="rollback(version.version)"
@@ -469,7 +499,13 @@ function pretty(doc: unknown) {
               <span class="mono">{{ doc.id }}</span>
               <span class="os-text-muted"> · {{ when(doc.updatedAt) }} by {{ doc.updatedBy }}</span>
             </div>
-            <pre class="site-doc mono">{{ pretty(doc.doc) }}</pre>
+            <dl v-if="shownFields(doc.doc)" class="site-doc-fields">
+              <div v-for="entry in shownFields(doc.doc)" :key="entry.field" class="site-doc-field" data-site-doc-field>
+                <dt class="os-text-muted mono">{{ entry.field }}</dt>
+                <dd>{{ entry.value }}</dd>
+              </div>
+            </dl>
+            <pre v-else class="site-doc mono">{{ pretty(doc.doc) }}</pre>
           </div>
         </template>
       </q-card-section>
@@ -508,6 +544,41 @@ function pretty(doc: unknown) {
 .site-detail-body {
   max-height: 70vh;
   overflow-y: auto;
+}
+
+/* The versions table fits the dialog and never scrolls sideways: long text wraps anywhere, the
+   action column is as wide as its words and no wider. */
+.site-versions {
+  overflow-x: hidden;
+}
+
+.site-versions td {
+  overflow-wrap: anywhere;
+}
+
+.site-version-action {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.site-doc-fields {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 2px;
+}
+
+/* Each field's pair sits in the parent grid, so every name lines up in one column. */
+.site-doc-field {
+  display: contents;
+}
+
+.site-doc-fields dt,
+.site-doc-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .site-doc {
