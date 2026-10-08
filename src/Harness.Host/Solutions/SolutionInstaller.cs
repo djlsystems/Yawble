@@ -687,7 +687,9 @@ public sealed class SolutionInstaller(
 
         if (await store.FindAsync(stored, ct) is not { } row)
         {
-            return (null, $"'{label}' was not installed from a solution package, so it cannot be updated from one. Choose a new team name instead.");
+            // Only what is known: no package is recorded for the team now, nor one it kept for this
+            // package. Whether it ever came from a package is not.
+            return (null, $"A team called '{label}' already exists and has no package installed or kept that this one can update or reinstall onto. Choose another name, or delete that team first.");
         }
 
         if (!string.Equals(row.PackageId, package.Manifest.Id, StringComparison.Ordinal))
