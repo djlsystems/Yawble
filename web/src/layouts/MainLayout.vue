@@ -201,10 +201,6 @@ const conciergeOpen = ref(false);
  *  opens it again. */
 const firstRunGuideOpen = ref(false);
 
-/** The guide's own button opens the Concierge; it never toggles one already open shut. */
-function openConciergeFromGuide() {
-  conciergeOpen.value = true;
-}
 const conciergeLaunchTeam = ref<TeamId | null>(null);
 const conciergeLaunchTeamName = ref<string | undefined>(undefined);
 const conciergeActiveTeam = computed(() => board.activeWorkTeam ?? null);
@@ -605,8 +601,6 @@ async function signOut() {
       v-if="session.user"
       v-model:open="firstRunGuideOpen"
       :concierge-open="conciergeOpen"
-      @open-concierge="openConciergeFromGuide"
-      @new-team="onRibbonAction('admin-new-team')"
     />
 
     <ConciergePanel

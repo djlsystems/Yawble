@@ -20,8 +20,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:open': [open: boolean];
-  'open-concierge': [];
-  'new-team': [];
 }>();
 
 /** Null until the platform has been asked. */
@@ -35,7 +33,7 @@ async function refresh() {
   try {
     signIn.value = agentSignIn(await getAgentAuth());
   } catch {
-    // NO ANSWER IS NOT AN ANSWER: the guide says not measured, never signed in or signed out.
+    // NO ANSWER IS NOT AN ANSWER: never signed in or signed out, so the guide says neither.
     signIn.value = 'not-measured';
   }
 }
@@ -89,18 +87,16 @@ function dismiss() {
       </q-card-section>
 
       <q-card-section class="q-pt-sm q-pb-none">
-        <div class="first-run-guide-status" data-test="first-run-guide-status">
+        <!-- NOTHING IS SAID when the platform could not answer: the steps below hold either way, and
+             a guess would be wrong half the time. -->
+        <div v-if="signIn === 'signed-in' || signIn === 'signed-out'" class="first-run-guide-status" data-test="first-run-guide-status">
           <template v-if="signIn === 'signed-in'">
             <q-icon name="verified_user" class="q-mr-xs" />
             An agent is signed in, so teams can work.
           </template>
-          <template v-else-if="signIn === 'signed-out'">
+          <template v-else>
             <q-icon name="no_accounts" class="q-mr-xs" />
             No agent is signed in yet. A team cannot work until one is.
-          </template>
-          <template v-else>
-            <q-icon name="help" class="q-mr-xs" />
-            Not measured: the platform could not say whether an agent is signed in.
           </template>
         </div>
 
@@ -122,18 +118,6 @@ function dismiss() {
         </ol>
       </q-card-section>
 
-      <q-card-actions align="right">
-        <q-btn flat no-caps label="New Team" data-test="first-run-guide-new-team" @click="emit('new-team')" />
-        <q-btn
-          unelevated
-          no-caps
-          color="primary"
-          label="Open the Concierge"
-          data-test="first-run-guide-concierge"
-          @click="emit('open-concierge')"
-        />
-      </q-card-actions>
-
       <div class="text-caption os-text-muted q-px-md q-pb-sm">
         You can open this guide again from the account menu, under Getting started.
       </div>
@@ -144,6 +128,7 @@ function dismiss() {
 <style scoped>
 .first-run-guide {
   width: min(360px, calc(100vw - 36px));
+  border: 3px solid var(--os-primary);
   position: relative;
   overflow: visible;
 }
@@ -157,6 +142,8 @@ function dismiss() {
   width: 16px;
   height: 16px;
   background: inherit;
+  border-right: 3px solid var(--os-primary);
+  border-bottom: 3px solid var(--os-primary);
   transform: rotate(45deg);
   box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.12);
 }

@@ -126,6 +126,9 @@ describe('the first-run guide', () => {
     expect(text).toContain('Sign in there');
     expect(text).toContain('ask the Concierge for a team');
     expect(text).toContain('New Team');
+    // No buttons of its own: the Concierge button below it and the ribbon's New Team are the way in.
+    expect(document.body.querySelector('[data-test="first-run-guide-new-team"]')).toBeNull();
+    expect(document.body.querySelector('[data-test="first-run-guide-concierge"]')).toBeNull();
     // Plain words: no internal terms, and no setting keys.
     expect(text.toLowerCase()).not.toContain('container');
     expect(text).not.toMatch(/\b[a-z]+\.[a-z][A-Za-z]+\b/);
@@ -172,7 +175,7 @@ describe('the first-run guide', () => {
     reloaded.unmount();
   });
 
-  it('says not measured when the platform does not answer, never signed in or signed out', async () => {
+  it('says nothing about sign-in when the platform does not answer, never signed in or signed out', async () => {
     getAgentAuth.mockRejectedValue(new Error('503'));
 
     const wrapper = await mountShell();
@@ -180,14 +183,16 @@ describe('the first-run guide', () => {
     expect(guide(), 'the guide did not open when the answer was unavailable').not.toBeNull();
 
     const text = guideText();
-    expect(text).toContain('Not measured');
+    expect(text).not.toContain('Not measured');
+    expect(document.body.querySelector('[data-test="first-run-guide-status"]')).toBeNull();
+    expect(text).toContain('The Concierge');
     expect(text).not.toContain('No agent is signed in');
     expect(text).not.toContain('An agent is signed in');
 
     wrapper.unmount();
   });
 
-  it('says not measured when the platform could not ask an agent', async () => {
+  it('says nothing about sign-in when the platform could not ask an agent', async () => {
     getAgentAuth.mockResolvedValue([
       report({ authenticated: false }),
       report({ agent: 'codex', command: 'codex', installed: null, authenticated: null, detail: 'no answer' }),
@@ -196,7 +201,9 @@ describe('the first-run guide', () => {
     const wrapper = await mountShell();
 
     const text = guideText();
-    expect(text).toContain('Not measured');
+    expect(text).not.toContain('Not measured');
+    expect(document.body.querySelector('[data-test="first-run-guide-status"]')).toBeNull();
+    expect(text).toContain('The Concierge');
     expect(text).not.toContain('No agent is signed in');
     expect(text).not.toContain('An agent is signed in');
 

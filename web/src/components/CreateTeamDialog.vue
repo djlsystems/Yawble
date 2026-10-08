@@ -267,14 +267,12 @@ const budgetWords = computed(() => {
 });
 
 /**
- * ADVANCED..., COLLAPSED ON EVERY OPEN: where the files go, which machines have an agent, how the
- * allowlist picks among agents, and the budget. Each has a working default, so a first-time person
- * makes a team without meeting any of them. A budget the field refuses keeps the section open: a
- * disabled Create with its reason folded away would say nothing.
+ * THE ADVANCED TAB: where the files go, which machines have an agent, and the budget. Each has a
+ * working default, so a first-time person makes a team without opening it. A budget the field
+ * refuses marks the tab (`alert`), so a disabled Create is never left with its reason out of sight.
  */
-const advancedOpen = ref(false);
 const advancedPanel = ref<HTMLElement | null>(null);
-const showAdvanced = computed(() => advancedOpen.value || !budgetFieldIsLegal(budgetTokens.value));
+const budgetRefused = computed(() => !budgetFieldIsLegal(budgetTokens.value));
 
 const getAgentStatus = (agentName: string | null) => {
   if (!agentName || !installations.value) return null;
@@ -353,18 +351,17 @@ async function loadDefaults() {
  * to check. A failing field, or a repository the Host refused, brings its own tab forward rather
  * than leaving the error on a tab nobody is looking at.
  */
-const tab = ref<'general' | 'code'>('general');
+const tab = ref<'general' | 'code' | 'advanced'>('general');
 const codePanel = ref<HTMLElement | null>(null);
 
 function showFailingTab(component: { $el?: Element }) {
-  tab.value = component.$el && codePanel.value?.contains(component.$el) ? 'code' : 'general';
-  if (component.$el && advancedPanel.value?.contains(component.$el)) advancedOpen.value = true;
+  const el = component.$el;
+  tab.value = el && codePanel.value?.contains(el) ? 'code' : el && advancedPanel.value?.contains(el) ? 'advanced' : 'general';
 }
 
 watch(open, (showing) => {
   if (showing) {
     tab.value = 'general';
-    advancedOpen.value = false;
     carriesOn.value = '';
     void loadDefaults();
   }
@@ -642,15 +639,13 @@ async function submit() {
     <q-card class="os-dialog-md">
       <q-card-section>
         <div class="os-dialog-title">New team</div>
-        <div class="text-caption os-text-muted">
-          Every team starts with a Manager: an agent that plans the work and hires members to do it.
-        </div>
       </q-card-section>
 
       <q-form lazy-rules="ondemand" @submit="submit" @validation-error="showFailingTab">
         <DialogTabs v-model="tab">
           <q-tab name="general" label="General" />
           <q-tab name="code" label="Code" />
+          <q-tab name="advanced" label="Advanced" data-advanced-tab :alert="budgetRefused ? 'negative' : false" />
         </DialogTabs>
 
         <q-separator />
@@ -677,7 +672,7 @@ async function submit() {
                    The Concierge has no picker here — it belongs to the instance, not to a team, and
                    lives on Admin → Concierge.
 
-                   ONLY A PROBLEM IS SAID HERE. Which machines have the agent is under Advanced...;
+                   ONLY A PROBLEM IS SAID HERE. Which machines have the agent is on the Advanced tab;
                    one that lacks it is something a first-time person has to know before Create. -->
               <div>
                 <q-select v-model="agent" :options="agents" outlined dense label="Manager agent" />
@@ -697,8 +692,8 @@ async function submit() {
                    General, deliberately - a person who has met one has met the other. It is every member's
                    list, not only a Manager's hire: the member settings and Add member dialogs offer only
                    these, so the heading says so. Not preselected: a team created on whatever sorted first
-                   is a team hiring on a CLI nobody chose. Visible because Create needs one; what
-                   "headless" and "tag" mean is under Advanced.... -->
+                   is a team hiring on a CLI nobody chose. Visible because Create needs one. The dialog no longer explains
+                   "headless" or "tag": a person asked for that paragraph to go. -->
               <div class="text-subtitle2 q-mt-sm" data-member-agents-heading>Agents this team's members may use</div>
               <div class="text-caption os-text-muted">
                 Applies when you hire a member or change its agent, and when a Manager hires one. The first is used when nobody chooses.
@@ -795,21 +790,13 @@ async function submit() {
                 />
               </section>
 
-              <!-- ADVANCED..., see `advancedOpen`. A link rather than an expansion item, so it reads as
-                   optional. `v-show` and not `v-if`: the budget field stays registered with the form
-                   while folded, so its rule still runs on Create. -->
-              <div>
-                <a
-                  href="#"
-                  class="text-primary"
-                  role="button"
-                  :aria-expanded="showAdvanced ? 'true' : 'false'"
-                  data-advanced-link
-                  @click.prevent="advancedOpen = !showAdvanced"
-                >{{ showAdvanced ? 'Fewer settings' : 'Advanced...' }}</a>
-              </div>
+            </div>
+          </q-tab-panel>
 
-              <div v-show="showAdvanced" ref="advancedPanel" class="q-gutter-md" data-advanced-settings>
+          <!-- ADVANCED, see `advancedPanel`. `keep-alive` keeps the budget field registered with the
+               form once visited, so its rule still runs on Create. -->
+          <q-tab-panel name="advanced">
+              <div ref="advancedPanel" class="q-gutter-md" data-advanced-settings>
                 <!-- Where this team's files go. NO q-col-gutter here: that class gives every child
                      `padding-top: 8px` and a `q-btn`'s own padding rule beats it on source order at equal
                      specificity, so the input takes the 8px and the button rides above it. `row items-center
@@ -867,13 +854,6 @@ async function submit() {
                   </span>
                 </div>
 
-                <div class="text-caption os-text-muted" data-allowlist-terms>
-                  Only headless presets are offered: agents that work on their own, woken by messages,
-                  rather than a terminal somebody types into. When a Manager hires for a tag, such as
-                  developer or tester, members are spread across the agents carrying that tag and the
-                  earlier one in the list wins a tie; with no tag, the first is used.
-                </div>
-
                 <!-- THE PER-WORKFLOW BUDGET, prefilled, which is the shape the argument needs: nobody
                      has to answer it to make a team, and anybody who wants to can.
 
@@ -900,7 +880,6 @@ async function submit() {
                   </div>
                 </div>
               </div>
-            </div>
           </q-tab-panel>
 
           <q-tab-panel name="code">

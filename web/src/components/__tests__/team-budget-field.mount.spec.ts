@@ -165,7 +165,15 @@ describe('CreateTeamDialog: the per-workflow budget', () => {
     const session = useSessionStore();
     session.$patch({ user: { id: 'u1', email: 'admin@example.com' } });
 
-    return mountDialog(CreateTeamDialog, {}, { pinia: false });
+    const wrapper = await mountDialog(CreateTeamDialog, {}, { pinia: false });
+
+    // THE BUDGET IS ON THE ADVANCED TAB, which renders only once it is opened.
+    document.body.querySelector<HTMLElement>('[data-advanced-tab]')!.click();
+    await validated();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await validated();
+
+    return wrapper;
   }
 
   /**

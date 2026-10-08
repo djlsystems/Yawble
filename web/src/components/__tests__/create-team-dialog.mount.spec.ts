@@ -310,7 +310,7 @@ describe('CreateTeamDialog validation', () => {
   it('puts the repositories on a Code tab after General, with the local repository ticked by default', async () => {
     const wrapper = await open();
 
-    expect([...document.body.querySelectorAll('.q-tab')].map((tab) => tab.textContent?.trim())).toEqual(['General', 'Code']);
+    expect([...document.body.querySelectorAll('.q-tab')].map((tab) => tab.textContent?.trim())).toEqual(['General', 'Code', 'Advanced']);
     expect(activeTab()).toBe('General');
     expect(() => field(wrapper, 'GitHub Repos')).toThrow();
 
@@ -453,34 +453,42 @@ function visibleText(): string {
   return (copy.textContent ?? '').replace(/\s+/g, ' ');
 }
 
-function advancedLink(): HTMLElement {
-  const found = document.body.querySelector<HTMLElement>('[data-advanced-link]');
-  if (!found) throw new Error('no Advanced... link in the rendered dialog');
+function advancedTab(): HTMLElement {
+  const found = document.body.querySelector<HTMLElement>('[data-advanced-tab]');
+  if (!found) throw new Error('no Advanced tab in the rendered dialog');
   return found;
 }
 
-function advancedSettings(): HTMLElement {
-  const found = document.body.querySelector<HTMLElement>('[data-advanced-settings]');
-  if (!found) throw new Error('no advanced settings in the rendered dialog');
-  return found;
+function advancedSettings(): HTMLElement | null {
+  return document.body.querySelector<HTMLElement>('[data-advanced-settings]');
+}
+
+/** Opens the Advanced tab and waits for its panel. */
+async function openAdvanced(): Promise<void> {
+  advancedTab().click();
+  await validated();
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  await validated();
 }
 
 function budgetWords(): string {
   return document.body.querySelector('[data-budget-words]')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
-/** A first-time person meets plain words; the folder, the machines, the agent terms and the budget
- *  wait behind Advanced.... */
+/** A first-time person meets plain words; the folder, the machines and the budget wait on the
+ *  Advanced tab. */
 describe('CreateTeamDialog for a first-time person', () => {
   afterEach(async () => {
     listCatalog.mockResolvedValue({ agents: [] });
     await refreshAgentInstallations();
   });
 
-  it('says what a team starts with in plain words', async () => {
+  it('carries no caption under its title and no paragraph on headless presets and tags', async () => {
     await open();
+    await openAdvanced();
 
-    expect(visibleText()).toContain('Every team starts with a Manager: an agent that plans the work and hires members to do it.');
+    expect(bodyText()).not.toContain('Every team starts with a Manager');
+    expect(bodyText()).not.toContain('Only headless presets are offered');
     expect(bodyText()).not.toContain('door into it');
   });
 
@@ -498,7 +506,7 @@ describe('CreateTeamDialog for a first-time person', () => {
     expect(shown).not.toMatch(/headless preset|\btag\b/i);
   });
 
-  it('folds the folder, the machines, the agent terms and the budget behind Advanced..., hidden until it is clicked', async () => {
+  it('puts the folder, the machines and the budget on the Advanced tab, not on General', async () => {
     listCatalog.mockResolvedValue({
       agents: [{ name: 'claude-headless', mode: 'Headless' }],
       installations: [{
@@ -519,47 +527,38 @@ describe('CreateTeamDialog for a first-time person', () => {
     await field(wrapper, 'Team name').setValue('QuickNotes');
     await validated();
 
-    expect(advancedLink().textContent?.trim()).toBe('Advanced...');
-    expect(advancedLink().getAttribute('aria-expanded')).toBe('false');
-    expect(advancedSettings().style.display).toBe('none');
+    expect(advancedTab().textContent?.trim()).toBe('Advanced');
+    expect(document.body.querySelector('[data-advanced-link]')).toBeNull();
 
-    const folded = visibleText();
-    expect(folded).not.toContain('Place team in');
-    expect(folded).not.toContain('New team folder will be /data/teams/QuickNotes');
-    expect(folded).not.toContain('Installed on worker-1');
-    expect(folded).not.toContain('Budget for one workflow');
-    expect(folded).not.toContain('100000000');
+    const general = visibleText();
+    expect(general).not.toContain('Place team in');
+    expect(general).not.toContain('Budget for one workflow');
 
-    advancedLink().click();
-    await validated();
+    await openAdvanced();
 
-    expect(advancedLink().getAttribute('aria-expanded')).toBe('true');
-    expect(advancedSettings().style.display).toBe('');
     const shown = visibleText();
     expect(shown).toContain('Place team in');
     expect(shown).toContain('New team folder will be /data/teams/QuickNotes');
     expect(shown).toContain('Manager agent: Installed on worker-1');
-    expect(shown).toContain('Only headless presets are offered');
-    expect(advancedSettings().contains(field(wrapper, 'Budget for one workflow (tokens)').element)).toBe(true);
+    expect(advancedSettings()!.contains(field(wrapper, 'Budget for one workflow (tokens)').element)).toBe(true);
   });
 
-  it('folds Advanced... again on every open', async () => {
+  it('opens on General again on every open', async () => {
     const wrapper = await open();
-    advancedLink().click();
-    await validated();
-    expect(advancedSettings().style.display).toBe('');
+    await openAdvanced();
+    expect(advancedSettings()).not.toBeNull();
 
     await wrapper.setProps({ modelValue: false });
     await wrapper.setProps({ modelValue: true });
     await validated();
 
-    expect(advancedSettings().style.display).toBe('none');
+    expect(visibleText()).not.toContain('Place team in');
+    expect(visibleText()).toContain('Team name');
   });
 
   it('says the budget in words: rounded to millions, and no limit for 0', async () => {
     const wrapper = await open(true, 100_000_000);
-    advancedLink().click();
-    await validated();
+    await openAdvanced();
 
     expect(budgetWords()).toBe('Budget for one workflow: 100 million tokens');
 
@@ -578,24 +577,21 @@ describe('CreateTeamDialog for a first-time person', () => {
 
   it('says no limit for an instance with no budget', async () => {
     const wrapper = await open(true, null);
-    advancedLink().click();
-    await validated();
+    await openAdvanced();
 
     expect(budgetWords()).toBe("Budget for one workflow: no limit, the instance's own figure");
     wrapper.unmount();
   });
 
-  it('keeps Advanced... open while the budget there is refused', async () => {
+  it('marks the Advanced tab while the budget there is refused', async () => {
     const wrapper = await open(true, 100_000_000);
-    advancedLink().click();
-    await validated();
+    await openAdvanced();
+    expect(advancedTab().querySelector('.q-tab__alert')).toBeNull();
+
     await field(wrapper, 'Budget for one workflow (tokens)').setValue(1.5);
     await validated();
 
-    advancedLink().click();
-    await validated();
-
-    expect(advancedSettings().style.display).toBe('');
+    expect(advancedTab().querySelector('.q-tab__alert')).not.toBeNull();
     expect(button('Create team').hasAttribute('disabled')).toBe(true);
   });
 });
