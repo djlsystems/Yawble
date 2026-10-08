@@ -1082,6 +1082,6 @@ async function submit() {
    nearly empty, and a card that resized on every switch would move the tab strip under the
    pointer that clicked it. See `.os-tab-panels` in `css/app.scss`. */
 .create-panels {
-  --os-tab-panels-height: 30rem;
+  --os-tab-panels-height: 40rem;
 }
 </style>
