@@ -216,7 +216,7 @@ public sealed class TeamArchiveTests : IAsyncLifetime
         await ArchiveAsync();
 
         // Work reaching it by a road no route guards: queued, never run.
-        await Log.AppendAsync(new NewMessage(
+        var queued = await Log.AppendAsync(new NewMessage(
             MessageTypes.InstructionFor(Dev), WakeManagerPolicy.InstructionPayload("do it later", "never"), "person"), Ct);
         await Task.Delay(500, Ct);
         Assert.Equal(0, _agents.RunsFor(Dev));
@@ -239,10 +239,11 @@ public sealed class TeamArchiveTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
         Assert.Equal(TeamArchive.NotArchived(Teams.LabelFor(_team)), await ErrorAsync(again));
 
-        // Resume runs the queued work.
+        // Resume runs the queued work: the run that answers it is the one caused by that instruction.
+        // Not a count of runs: once that run leaves its workflow open the platform's idle-workflow
+        // offer wakes Dev again, and whether that second run has finished yet depends on the load.
         Assert.Equal(HttpStatusCode.NoContent, (await _person.PostAsync($"/api/teams/{_team}/resume", null, Ct)).StatusCode);
-        await AwaitRowAsync([MessageTypes.Completed], m => m.Source == Dev.ToString(), "Dev's run after Resume");
-        Assert.Equal(1, _agents.RunsFor(Dev));
+        await AwaitRowAsync([MessageTypes.Completed], m => m.Source == Dev.ToString() && m.CausationSeq == queued.Seq, "Dev's run of the queued instruction after Resume");
     }
 
     [Fact]
