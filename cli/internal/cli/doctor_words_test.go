@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/engine"
 )
@@ -27,7 +28,11 @@ const claudeOnlyReport = `{"at":"2026-10-06T21:04:19+00:00","dataRoot":{"path":"
 
 func claudeOnly(t *testing.T) (*engine.Scripted, string) {
 	s := runningScript()
-	s.On(doctorExec, engine.Result{Stdout: "Host log: /data/logs/x\n" + claudeOnlyReport})
+	// THE DAILY COPY IS AN HOUR OLD, whatever day the test runs: a fixed time read as "2 days old",
+	// and stale, once the calendar passed it.
+	recent := `"newestDailyAt":"` + time.Now().UTC().Add(-time.Hour).Format(time.RFC3339) + `"`
+	report := strings.Replace(claudeOnlyReport, `"newestDailyAt":"2026-10-06T18:47:24+00:00"`, recent, 1)
+	s.On(doctorExec, engine.Result{Stdout: "Host log: /data/logs/x\n" + report})
 	return s, t.TempDir()
 }
 
