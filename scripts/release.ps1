@@ -19,6 +19,9 @@ param(
     # keeps the toolchain layers between releases, so its operating-system packages age; run with
     # -NoCache now and then (monthly, or for a security fix) to take the current ones.
     [switch]$NoCache,
+    # Skip the web, .NET and CLI suites (steps 2a-2c), only when the owner asks for a release
+    # without them. Everything else - the checks, the tag, the images, the CLI - is unchanged.
+    [switch]$SkipTests,
     # The running container the Linux .NET suite is run in. Empty: the instance's first worker when it
     # has one (the control image carries no .NET SDK), else the single-process container.
     [string]$Container = ''
@@ -88,6 +91,9 @@ On Linux without a machine, run the same podman command with sudo on the host.
     }
 }
 
+if ($SkipTests) {
+    Write-Host '== Suites skipped (-SkipTests) =='
+} else {
 # 2a. Web suite, here.
 Write-Host '== Web suite (local) =='
 Push-Location (Join-Path $root 'web')
@@ -144,6 +150,7 @@ try {
     Invoke-Checked 'The CLI suite' { go test ./... }
 } finally {
     Pop-Location
+}
 }
 
 # 3. Today's next version, from the tags on origin: one tag names core and CLI.
