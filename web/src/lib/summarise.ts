@@ -206,10 +206,18 @@ function textOf(message: Message): string {
           ? resumeTimeText(payload.retryAfter)
           : null
 
-      const rest = failureText(payload)
+      // THE REASON STRAIGHT AFTER THE CLASS, then the class's sentence: the card's order. The
+      // sentence is the longer of the two, and ahead of the reason it filled the two lines with
+      // "nothing could say why" while the card above said exactly why.
+      const rest = failureText(payload).trim()
       const resumeSentence = resume === null ? '' : ` Resuming at ${resume}.`
+      const reason = rest === '' ? '' : `${rest}${/[.!?]$/.test(rest) ? '' : '.'}`
 
-      return `[${failureClass}] ${words}.${resumeSentence}${rest === '' ? '' : ` ${rest}`}`
+      // AN UNKNOWN FAILURE THAT SAID WHY IS NOT FOLLOWED BY "nothing could say why": the class
+      // sentence would contradict the reason just before it. Without a reason it is all there is.
+      const sentence = failureClass === 'unknown' && reason !== '' ? '' : `${words}.`
+
+      return `[${failureClass}] ${[reason, sentence].filter((part) => part !== '').join(' ')}${resumeSentence}`
     }
   }
 

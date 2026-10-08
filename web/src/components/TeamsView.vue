@@ -195,6 +195,25 @@ function open(id: TeamId) {
 }
 
 /**
+ * A CLICK ANYWHERE ON THE ROW OPENS THE TEAM, but not one that a control inside it already
+ * answered: a button (a disabled one too, whose click a browser may still deliver to the row) and
+ * the Activity chart, which stops its own click on the way out.
+ */
+function rowClicked(event: MouseEvent, id: TeamId) {
+  if ((event.target as Element | null)?.closest?.('button, a, input')) return;
+
+  open(id);
+}
+
+/** Enter or Space on the ROW ITSELF: the same keys on a focused button are that button's. */
+function rowKey(event: KeyboardEvent, id: TeamId) {
+  if (event.target !== event.currentTarget) return;
+
+  event.preventDefault();
+  open(id);
+}
+
+/**
  * Deletion lives here, on the one screen listing teams - two screens listing teams is how two
  * screens start disagreeing. Offered to every signed-in person, matching the route: every person
  * is an administrator, so there is nobody to hide it from.
@@ -691,7 +710,7 @@ async function setPaused(team: Team | null, paused: boolean) {
                 dense
                 size="xs"
                 data-activity-relative
-                label="Relative"
+                label="Same time span"
                 :model-value="relative"
                 @update:model-value="setRelative"
               >
@@ -714,9 +733,9 @@ async function setPaused(team: Team | null, paused: boolean) {
           :data-team="row.id"
           class="teams-row"
           tabindex="0"
-          @click="open(row.id)"
-          @keydown.enter="open(row.id)"
-          @keydown.space.prevent="open(row.id)"
+          @click="rowClicked($event, row.id)"
+          @keydown.enter="rowKey($event, row.id)"
+          @keydown.space="rowKey($event, row.id)"
         >
           <td>{{ row.name }}</td>
 
@@ -742,11 +761,13 @@ async function setPaused(team: Team | null, paused: boolean) {
 
           <!-- THE TEAM'S ACTIVITY TILE, lanes only: the same chart its page shows, without the
                label and the caption. A click on it opens the Activity dialog for this team, not the
-               team itself, so the row's own click is stopped here. -->
-          <td class="teams-activity" @click.stop @keydown.enter.stop @keydown.space.stop>
+               team itself, so the row's own click is stopped on the chart - and only there: the
+               status icon and the room around the chart open the team as the rest of the row does. -->
+          <td class="teams-activity">
             <div class="teams-activity-cell">
               <TeamStatisticsTile
                 compact
+                @click.stop
                 :team-id="row.id"
                 :containers="teamFor(row)?.containers ?? []"
                 :workflows="board.workflowsFor(row.id)"
@@ -1077,7 +1098,7 @@ async function setPaused(team: Team | null, paused: boolean) {
 </template>
 
 <style scoped>
-/* The Activity heading: its word, then the Relative switch beside it. */
+/* The Activity heading: its word, then the Same time span switch beside it. */
 .teams-activity-heading {
   display: flex;
   align-items: center;

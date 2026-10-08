@@ -177,7 +177,7 @@ describe('the Teams list', () => {
 
     // The sorted heading carries its arrow's icon name as text; the words are what is checked.
     const headings = view.findAll('thead th').map((th) => th.text().replace(/arrow_(up|down)ward/, '').replace(/\s+/g, ' ').trim());
-    expect(headings).toEqual(['Team', 'Members', 'Status', 'ActivityRelative', '']);
+    expect(headings).toEqual(['Team', 'Members', 'Status', 'ActivitySame time span', '']);
     expect(view.find('thead th[data-col="activity"]').exists()).toBe(true);
   });
 
@@ -191,12 +191,55 @@ describe('the Teams list', () => {
     expect(tile.props('containers')).toHaveLength(2);
   });
 
-  it('does not open the team when its Activity cell is clicked', async () => {
+  it('does not open the team when its Activity chart is clicked', async () => {
     const { view, setActive } = await mountView();
 
-    await view.find('td.teams-activity').trigger('click');
+    await view.find('td.teams-activity .tile-stub').trigger('click');
 
     expect(setActive).not.toHaveBeenCalled();
+  });
+
+  /**
+   * THE WHOLE ROW OPENS THE TEAM: every cell, the status icon beside the chart and the empty room
+   * around the chart and the buttons, not only the name. The chart and the buttons keep their own
+   * clicks and open nothing.
+   */
+  it('opens the team from anywhere on its row but the chart and the buttons', async () => {
+    const { view, setActive } = await mountView('Completed');
+    const row = view.find('tr.teams-row');
+    const targets = [
+      row.findAll('td')[0]!,
+      row.findAll('td')[1]!,
+      row.find('[data-col-status]'),
+      row.find('td.teams-activity'),
+      row.find('td.teams-activity [data-team-status]'),
+      row.find('[data-col-actions]'),
+    ];
+
+    for (const target of targets) {
+      setActive.mockClear();
+      await target.trigger('click');
+      expect(setActive, target.html().slice(0, 80)).toHaveBeenCalledWith('alpha');
+    }
+  });
+
+  it('does not open the team when a row button is clicked or pressed from the keyboard', async () => {
+    const { view, setActive } = await mountView();
+    const pause = view.findAll('[data-col-actions] button').find((b) => b.text().includes('Pause'))!;
+
+    await pause.trigger('keydown', { key: 'Enter' });
+    await pause.trigger('keydown', { key: ' ' });
+    await view.find('[data-col-actions] [aria-label="Clone this team"]').trigger('keydown', { key: 'Enter' });
+
+    expect(setActive).not.toHaveBeenCalled();
+  });
+
+  it('opens the team from the keyboard on the row itself', async () => {
+    const { view, setActive } = await mountView();
+
+    await view.find('tr.teams-row').trigger('keydown', { key: 'Enter' });
+
+    expect(setActive).toHaveBeenCalledWith('alpha');
   });
   it('shows a green check to the right of the chart for a team whose latest workflow was completed', async () => {
     const { view } = await mountView('Completed');
@@ -228,8 +271,17 @@ describe('the Teams list', () => {
     expect(view.find('td.teams-activity [data-team-status]').exists()).toBe(false);
   });
 
-  describe('the Relative switch in the Activity heading', () => {
+  describe('the Same time span switch in the Activity heading', () => {
     beforeEach(() => localStorage.removeItem('harness.teamsActivityRelative'));
+
+    /** Named for what On does: one shared time span for every chart, not a "relative" one. */
+    it('is named for what turning it on does', async () => {
+      const { view } = await mountView();
+
+      const toggle = view.find('[data-activity-relative]');
+      expect(toggle.text()).toBe('Same time span');
+      expect(toggle.attributes('aria-label') ?? toggle.text()).not.toContain('Relative');
+    });
 
     const tileFor = (view: VueWrapper, id: string) =>
       view.findAllComponents(TeamStatisticsTile).find((tile) => tile.props('teamId') === id)!;
