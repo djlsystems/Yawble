@@ -126,7 +126,11 @@ public sealed class LiveViewOnWorkerProcessTests
         File.Delete(path);
         bed.StartFakeWorker("w2");
         await bed.UntilWorkerAsync("w2", WorkersView.Connected);
-        var gone = await bed.Person.GetAsync(route, Ct);
+        // Listed as connected a moment before control can send it a request (WorkerConnections.Attached):
+        // a read in that moment is still the 503 above, so wait until the worker answers.
+        HttpResponseMessage gone = null!;
+        await bed.UntilAsync("w2 answers the read", async () =>
+            (gone = await bed.Person.GetAsync(route, Ct)).StatusCode != HttpStatusCode.ServiceUnavailable);
         Assert.Equal(HttpStatusCode.Gone, gone.StatusCode);
         Assert.Equal("This run's transcript is no longer on disk.", await gone.Content.ReadAsStringAsync(Ct));
     }
