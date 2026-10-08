@@ -13,15 +13,25 @@ import UpdatesDialog from './UpdatesDialog.vue';
  */
 const RereadEvery = 60 * 60 * 1000;
 
+/** UNTIL THE HOST HAS AN ANSWER, asked again this often. A page opened right after the Host
+ *  starts reads "not checked yet" (its first read of the release list takes a few seconds), and
+ *  waiting an hour after that would hide a newer release for an hour. */
+const RereadUntilCheckedEvery = 30 * 1000;
+
 const status = ref<UpdateStatus | null>(null);
 const open = ref(false);
 let timer: ReturnType<typeof setInterval> | undefined;
+let soon: ReturnType<typeof setTimeout> | undefined;
 
 async function read() {
+  clearTimeout(soon);
   try {
     status.value = await readUpdateStatus();
   } catch {
     // Not known is not an alert; the dialog says why when it is opened from a later answer.
+  }
+  if (status.value?.enabled !== false && status.value?.checked !== true) {
+    soon = setTimeout(() => void read(), RereadUntilCheckedEvery);
   }
 }
 
@@ -30,7 +40,10 @@ onMounted(() => {
   timer = setInterval(() => void read(), RereadEvery);
 });
 
-onBeforeUnmount(() => clearInterval(timer));
+onBeforeUnmount(() => {
+  clearInterval(timer);
+  clearTimeout(soon);
+});
 </script>
 
 <template>
