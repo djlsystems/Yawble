@@ -58,6 +58,7 @@ public record KanbanCard(
     string LaneId,
     string Color,
     IReadOnlyList<ProgressItem> Progress,
+    /// <summary>UTC-KIND, so it serialises with a Z: the panel shows it beside the trail's times.</summary>
     DateTime CreatedAt,
     DateTime UpdatedAt,
     bool AwaitingManager,
@@ -147,10 +148,10 @@ public sealed record ProgressItem(DateTime At, string Text);
 /// <param name="Type">What happened, verbatim. The panel renders it, so it is not prettified here.</param>
 /// <param name="Source">Who published it: a container's qualified id, a user id, `console`.</param>
 /// <param name="OccurredAt">
-/// A <see cref="DateTimeOffset"/> rather than the naked <see cref="DateTime"/> the card's own
-/// timestamps use, because this one is READ AGAINST A WALL CLOCK. A UTC instant serialised with no
-/// offset is parsed as local time by every browser, so a trail row would be wrong by the viewer's
-/// offset - visible only to someone who knows when the thing actually happened.
+/// A <see cref="DateTimeOffset"/>, because this one is READ AGAINST A WALL CLOCK. A UTC instant
+/// serialised with no offset is parsed as local time by every browser, so a trail row would be wrong
+/// by the viewer's offset - visible only to someone who knows when the thing actually happened. The
+/// card's own times are read beside it, so they are UTC-kind and go out with a Z for the same reason.
 /// </param>
 /// <param name="Text">
 /// What the row SAYS - the note, the comment, the progress line, the output. Never null: a row
