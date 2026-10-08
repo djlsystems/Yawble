@@ -250,6 +250,67 @@ describe('Advanced…, Gmail through a Google app of your own', () => {
   });
 });
 
+describe('What Advanced… chooses, and whose permissions are listed', () => {
+  const chosen = () => bodyFind('[data-advanced-choice]');
+  const pressed = (element: Element | null) => element?.getAttribute('aria-pressed') ?? null;
+  const heading = () => bodyFind('[data-scopes-heading]')?.textContent?.trim() ?? null;
+  const scopeLines = () => document.body.querySelectorAll('[data-connect-scope]').length;
+
+  it('shows the Google sign-in as a chosen choice, and the permissions under a heading that names Google', async () => {
+    const wrapper = await openAdd();
+    await click(bodyFind('[data-connect-advanced]'));
+
+    expect(pressed(chosen())).toBe('true');
+    expect(chosen()!.textContent).toContain('Google account');
+    expect(chosen()!.textContent).toContain('Sign in with Google');
+    expect(heading()).toBe('Google will allow the plugins to:');
+    expect(bodyFind('[data-scope-words]')!.textContent!.trim()).toBe('Read, change and send your Gmail');
+
+    wrapper.unmount();
+  });
+
+  it('a tile chosen after Advanced… clears the Google choice, and its own provider heads the list', async () => {
+    getConnectionNeeds.mockImplementation(async (id: string) =>
+      id === 'microsoft'
+        ? { provider: 'microsoft', needs: [], scopes: [{ scope: 'Mail.Read', words: 'Read your mail', plugins: ['mail-helper'] }], apis: [] }
+        : googleNeeds);
+    const wrapper = await openAdd();
+    await click(bodyFind('[data-connect-advanced]'));
+    await click(tile('outlook'));
+
+    expect(pressed(chosen())).not.toBe('true');
+    expect(pressed(tile('outlook'))).toBe('true');
+    expect(heading()).toBe('Microsoft will allow the plugins to:');
+
+    // And Advanced… chosen again clears the tile.
+    await click(bodyFind('[data-connect-advanced]'));
+    expect(pressed(tile('outlook'))).toBe('false');
+    expect(pressed(chosen())).toBe('true');
+
+    wrapper.unmount();
+  });
+
+  it('lists no permissions with nothing chosen, nor with a mailbox tile chosen after Advanced…', async () => {
+    const wrapper = await openAdd();
+    expect(scopeLines()).toBe(0);
+    expect(heading()).toBeNull();
+
+    await click(bodyFind('[data-connect-advanced]'));
+    expect(scopeLines()).toBe(1);
+    await click(tile('gmail'));
+    expect(step()).toBe('mailbox');
+    await click(button('Back'));
+
+    expect(step()).toBe('service');
+    expect(scopeLines()).toBe(0);
+    expect(heading()).toBeNull();
+    expect(pressed(tile('gmail'))).toBe('true');
+    expect(pressed(chosen())).not.toBe('true');
+
+    wrapper.unmount();
+  });
+});
+
 describe("A slot's Connect", () => {
   const slot = (providers: string[]): ConnectionSlot => ({
     description: null,
