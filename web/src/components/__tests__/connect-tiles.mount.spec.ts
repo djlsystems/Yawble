@@ -311,6 +311,56 @@ describe('What Advanced… chooses, and whose permissions are listed', () => {
   });
 });
 
+describe('Advanced… chosen after a tile, and a heading the Host names', () => {
+  const pressed = (element: Element | null) => element?.getAttribute('aria-pressed') ?? null;
+  const tilesPressed = () => [...document.body.querySelectorAll('[data-provider-tile]')].map((t) => t.getAttribute('aria-pressed'));
+  const heading = () => bodyFind('[data-scopes-heading]')?.textContent?.trim() ?? null;
+  const words = () => [...document.body.querySelectorAll('[data-scope-words]')].map((w) => w.textContent?.trim());
+
+  it('leaves no tile pressed once Advanced… is chosen after a mailbox tile', async () => {
+    const wrapper = await openAdd();
+    await click(tile('gmail'));
+    await click(button('Back'));
+    expect(pressed(tile('gmail'))).toBe('true');
+
+    await click(bodyFind('[data-connect-advanced]'));
+    expect(tilesPressed()).toEqual(['false', 'false', 'false', 'false', 'false']);
+    expect(pressed(bodyFind('[data-advanced-choice]'))).toBe('true');
+
+    // And from the Gmail screen's own way to Advanced….
+    await click(tile('gmail'));
+    await click(bodyFind('[data-mailbox-advanced]'));
+    expect(step()).toBe('service');
+    expect(tilesPressed()).toEqual(['false', 'false', 'false', 'false', 'false']);
+    expect(pressed(bodyFind('[data-advanced-choice]'))).toBe('true');
+
+    wrapper.unmount();
+  });
+
+  it("heads the list with the provider's name as the Host gives it, over the Host's own words", async () => {
+    listConnectionProviders.mockResolvedValue([{ ...googleBare, name: 'Google Workspace' }, microsoft]);
+    const auth = 'https://www.googleapis.com/auth/';
+    getConnectionNeeds.mockResolvedValue({
+      provider: 'google',
+      needs: [],
+      scopes: [
+        { scope: auth + 'gmail.readonly', words: 'Read your Gmail', plugins: ['mail-helper'] },
+        { scope: auth + 'gmail.modify', words: 'Read, change and send your Gmail', plugins: ['mail-helper'] },
+        { scope: auth + 'gmail.compose', words: 'Draft and send email as you', plugins: ['mail-helper'] },
+      ],
+      apis: [],
+    });
+    const wrapper = await openAdd();
+    await click(bodyFind('[data-connect-advanced]'));
+
+    expect(heading()).toBe('Google Workspace will allow the plugins to:');
+    expect(bodyFind('[data-advanced-choice] [data-tile-name]')!.textContent!.trim()).toBe('Google Workspace account');
+    expect(words()).toEqual(['Read your Gmail', 'Read, change and send your Gmail', 'Draft and send email as you']);
+
+    wrapper.unmount();
+  });
+});
+
 describe("A slot's Connect", () => {
   const slot = (providers: string[]): ConnectionSlot => ({
     description: null,
