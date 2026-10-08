@@ -127,6 +127,49 @@ describe('the control panel: Controls', () => {
     expect(bodyFind('[data-run="42"] [data-run-output]')?.textContent).toBe('5 new postings');
   });
 
+  it('drops "is running now" once the run it started ends, without Refresh', async () => {
+    const before = panelRead();
+    const finished: PanelShape = {
+      ...before,
+      recentRuns: [{ ...before.recentRuns[0]!, seq: 42, endedAt: '2026-09-30T10:00:00Z' }, ...before.recentRuns],
+    };
+    // The read as the route answers and the first re-read still show the old runs; the run ends
+    // before the second re-read. What the panel said while it ran is taken as that read comes in.
+    let readsSinceRun = -1;
+    let saidWhileRunning: string | undefined;
+    serve([
+      (call) => {
+        if (call.method === 'POST' && call.url === '/api/teams/job-tracker/triggers/trg_scan/run') readsSinceRun = 0;
+        if (call.method === 'GET' && call.url === '/api/teams/job-tracker/solution/panel' && readsSinceRun >= 0) {
+          readsSinceRun++;
+          if (readsSinceRun < 3) return reply(200, before);
+          if (readsSinceRun === 3) saidWhileRunning = bodyFind('[data-control-notice]')?.textContent;
+          return reply(200, finished);
+        }
+        return undefined;
+      },
+    ]);
+    await controls();
+
+    await click('[data-control-trigger="trg_scan"] [data-run-now]');
+    await vi.waitFor(() => expect(readsSinceRun).toBe(3));
+    await settle();
+
+    expect(saidWhileRunning).toBe('Scan for postings is running now.');
+    expect(bodyFind('[data-control-notice]')).toBeNull();
+  });
+
+  it('keeps "is running now" while no run it had not seen shows', async () => {
+    await controls();
+    const reads = () => sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length;
+    const readsBefore = reads();
+    await click('[data-control-trigger="trg_scan"] [data-run-now]');
+
+    await vi.waitFor(() => expect(reads()).toBe(readsBefore + 1 + 3));
+    await settle();
+    expect(bodyFind('[data-control-notice]')?.textContent).toBe('Scan for postings is running now.');
+  });
+
   it('stops re-reading after a bounded number of tries when no new run shows', async () => {
     await controls();
     const reads = () => sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length;
