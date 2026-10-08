@@ -85,7 +85,7 @@ public static class SkillsEndpoints
 
         await AfterWriteAsync(skills, directory, teams, ct);
         await audit.WriteAsync(
-            context, TenantActions.SkillCreated, null, null,
+            context, TenantActions.SkillCreated, created.Name, created.Name,
             new { name = created.Name, roles = created.Roles }, ct);
 
         return Results.Created($"/api/skills/{created.Name}", Dto(created));
@@ -200,7 +200,7 @@ public static class SkillsEndpoints
 
             await AfterWriteAsync(skills, directory, teams, ct);
             await audit.WriteAsync(
-                context, TenantActions.SkillChanged, null, null,
+                context, TenantActions.SkillChanged, updated.Name, updated.Name,
                 new { name, to = updated.Name, roles = updated.Roles }, ct);
 
             return Results.Ok(Dto(updated));
@@ -230,7 +230,7 @@ public static class SkillsEndpoints
             }
 
             await AfterWriteAsync(skills, directory, teams, ct);
-            await audit.WriteAsync(context, TenantActions.SkillDeleted, null, null, new { name }, ct);
+            await audit.WriteAsync(context, TenantActions.SkillDeleted, name, name, new { name }, ct);
 
             return Results.NoContent();
         })
