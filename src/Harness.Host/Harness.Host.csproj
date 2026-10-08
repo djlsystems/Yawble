@@ -1,5 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <!-- MINIMAL-API HANDLERS GENERATED AT BUILD TIME. Without the Request Delegate Generator every
+       Host compiles an expression tree per endpoint when it builds its pipeline (several hundred
+       here), which made a Host start ~0.8 s alone and several seconds with the test suite starting
+       many at once; generated, a warm start is ~0.3 s and the .NET suite went from 13.8 to about
+       5 minutes. An endpoint it cannot generate is built at runtime as before, with an RDG
+       warning, which TreatWarningsAsErrors turns into a build error to fix (a private request type
+       is the usual one: make it internal). -->
+  <PropertyGroup>
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Harness.Contracts\Harness.Contracts.csproj" />
     <ProjectReference Include="..\Harness.Messaging\Harness.Messaging.csproj" />

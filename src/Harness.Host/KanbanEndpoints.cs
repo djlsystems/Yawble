@@ -403,9 +403,9 @@ public static class KanbanEndpoints
         }
     }
 
-    private sealed record MoveRequest(string LaneId, string? Note = null);
-    private sealed record EditRequest(string? Title = null, string? Status = null, string? Note = null);
-    private sealed record CommentRequest(string Text);
+    internal sealed record MoveRequest(string LaneId, string? Note = null);
+    internal sealed record EditRequest(string? Title = null, string? Status = null, string? Note = null);
+    internal sealed record CommentRequest(string Text);
 
     private static async Task<IResult> MoveCardAsync(
         string team,
