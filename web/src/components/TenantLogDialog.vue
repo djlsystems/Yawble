@@ -47,33 +47,11 @@ function when(value: string) {
   return new Date(value).toLocaleString();
 }
 
-const wording: Record<string, string> = {
-  'user.signed-in': 'signed in',
-  'user.signed-out': 'signed out',
-  'user.created': 'created account',
-  'user.changed': 'changed account',
-  'user.deleted': 'deleted account',
-  'user.password-reset': 'reset password',
-  'team.created': 'created team',
-  'team.renamed': 'relabelled team',
-  'team.cloned': 'cloned team',
-  'team.deleted': 'deleted team',
-  'removal.retried': 'retried an unfinished removal',
-  'team.concierge-changed': 'changed Concierge',
-  'concierge.ended-idle': 'Concierge ended (idle)',
-  'member.added': 'added member',
-  'member.changed': 'changed member',
-  'agents.saved': 'saved Agent catalog',
-  'plugins.rescanned': 'rescanned plugins',
-  'key.minted': 'minted an API key',
-  'key.revoked': 'revoked an API key',
-};
-
 /**
- * THE DETAIL IN WORDS for the common acts (a trigger turned off or on, a cap set, a setting
- * changed), the JSON behind the Show JSON toggle. One toggle for the whole table rather than one per
- * row: the virtual scroll lays rows out at one height, and a row that opened would break it. A row
- * the words do not know shows its JSON either way.
+ * THE DETAIL IN WORDS for every act the Host writes (`lib/tenantLogWords`), the JSON behind the
+ * Show JSON toggle. One toggle for the whole table rather than one per row: the virtual scroll
+ * lays rows out at one height, and a row that opened would break it. A row the words do not know
+ * shows its JSON either way.
  */
 const showJson = ref(false);
 
@@ -152,7 +130,7 @@ watch(open, (showing) => {
               <td class="tenant-log-when">{{ when(row.occurredAt) }}</td>
               <td>{{ row.actorEmail }}</td>
               <td :class="destructive(row.action) ? 'text-negative' : ''">
-                {{ didWords(row) ?? wording[row.action] ?? row.action }}
+                {{ didWords(row) ?? row.action }}
               </td>
               <td>{{ row.subjectName }}</td>
               <!-- A detail the words do not know is JSON and can be long. Truncated in the cell with the whole

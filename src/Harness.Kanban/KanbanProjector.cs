@@ -195,7 +195,7 @@ public static class KanbanProjector
             if (CardFor(msg, cardStates) is { } moved)
             {
                 Record(moved, msg, FirstStringField(msg, PayloadFields.Reason));
-                moved.UpdatedAt = msg.OccurredAt.DateTime;
+                moved.UpdatedAt = msg.OccurredAt.UtcDateTime;
             }
         }
         else if (msgType == MessageTypes.AgentForeignTools)
@@ -259,8 +259,8 @@ public static class KanbanProjector
             Color = KanbanLanes.ColourForStatus("queued"),
             Progress = new List<ProgressItem>(),
             Trail = new List<KanbanTrailEntry>(),
-            CreatedAt = msg.OccurredAt.DateTime,
-            UpdatedAt = msg.OccurredAt.DateTime,
+            CreatedAt = msg.OccurredAt.UtcDateTime,
+            UpdatedAt = msg.OccurredAt.UtcDateTime,
             AwaitingManager = false,
             Created = true,
         };
@@ -295,7 +295,7 @@ public static class KanbanProjector
             if (!string.Equals(state.Member, member, StringComparison.OrdinalIgnoreCase)) continue;
 
             state.Member = null;
-            state.UpdatedAt = msg.OccurredAt.DateTime;
+            state.UpdatedAt = msg.OccurredAt.UtcDateTime;
 
             Record(state, msg, "");
         }
@@ -334,7 +334,7 @@ public static class KanbanProjector
             state.LaneId = KanbanLanes.ForStatus("queued");
             state.Color = KanbanLanes.ColourForStatus("queued");
             state.Created = true;
-            state.CreatedAt = msg.OccurredAt.DateTime;
+            state.CreatedAt = msg.OccurredAt.UtcDateTime;
             (state.Title, state.Body) = (subject, body);
         }
 
@@ -344,7 +344,7 @@ public static class KanbanProjector
             ? whole
             : body.Length == 0 ? subject : $"{subject}\n{body}");
 
-        state.UpdatedAt = msg.OccurredAt.DateTime;
+        state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
 
     private static void HandleContainerStarted(
@@ -363,7 +363,7 @@ public static class KanbanProjector
         if (state.LaneId == KanbanLanes.Done && !state.InstructedSinceDone && !StartedByInstruction(msg))
         {
             Record(state, msg, "");
-            state.UpdatedAt = msg.OccurredAt.DateTime;
+            state.UpdatedAt = msg.OccurredAt.UtcDateTime;
             return;
         }
 
@@ -374,7 +374,7 @@ public static class KanbanProjector
         // No prose, and none invented. The payload carries the trigger's type and nothing a person
         // wants read back; the row's TYPE and its time are the whole of what happened.
         Record(state, msg, "");
-        state.UpdatedAt = msg.OccurredAt.DateTime;
+        state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
 
     /// <summary>
@@ -394,11 +394,11 @@ public static class KanbanProjector
         var text = ExtractProgressText(msg);
         if (!string.IsNullOrEmpty(text))
         {
-            state.Progress.Add(new ProgressItem(msg.OccurredAt.DateTime, text));
+            state.Progress.Add(new ProgressItem(msg.OccurredAt.UtcDateTime, text));
             Record(state, msg, text);
         }
 
-        state.UpdatedAt = msg.OccurredAt.DateTime;
+        state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
 
     private static void HandleContainerBlocked(
@@ -414,7 +414,7 @@ public static class KanbanProjector
             state.Color = KanbanLanes.ColourForStatus("blocked");
         }
         Record(state, msg, FirstStringField(msg, PayloadFields.Reason, PayloadFields.Item));
-        state.UpdatedAt = msg.OccurredAt.DateTime;
+        state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
 
     /// <summary>
@@ -458,7 +458,7 @@ public static class KanbanProjector
         }
 
         Record(state, msg, FirstStringField(msg, PayloadFields.Delivered, PayloadFields.Output));
-        state.UpdatedAt = msg.OccurredAt.DateTime;
+        state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
 
     private static void HandleContainerFailed(
@@ -478,7 +478,7 @@ public static class KanbanProjector
         // has an output field carrying nothing, and a trail that showed that instead would lose the
         // one sentence naming why.
         Record(state, msg, FirstStringField(msg, PayloadFields.LaunchError, PayloadFields.Output));
-        state.UpdatedAt = msg.OccurredAt.DateTime;
+        state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
 
     private static void HandleContainerCompleted(
@@ -505,7 +505,7 @@ public static class KanbanProjector
         }
 
         Record(state, msg, FirstStringField(msg, PayloadFields.Output));
-        state.UpdatedAt = msg.OccurredAt.DateTime;
+        state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
 
     /// <summary>
@@ -595,7 +595,7 @@ public static class KanbanProjector
             state.LaneId = KanbanLanes.ForStatus("done");
             state.Color = KanbanLanes.ColourForStatus("done");
             Record(state, msg, FirstStringField(msg, PayloadFields.Delivered, PayloadFields.Output));
-            state.UpdatedAt = msg.OccurredAt.DateTime;
+            state.UpdatedAt = msg.OccurredAt.UtcDateTime;
         }
     }
 
@@ -633,7 +633,7 @@ public static class KanbanProjector
         {
             state.Paused = paused;
             Record(state, msg, FirstStringField(msg, PayloadFields.Reason));
-            state.UpdatedAt = msg.OccurredAt.DateTime;
+            state.UpdatedAt = msg.OccurredAt.UtcDateTime;
         }
     }
 
@@ -650,7 +650,7 @@ public static class KanbanProjector
             state.Color = KanbanLanes.ColourForStatus("needs-decision");
         }
         Record(state, msg, FirstStringField(msg, PayloadFields.Question, PayloadFields.Reason, PayloadFields.Output));
-        state.UpdatedAt = msg.OccurredAt.DateTime;
+        state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
 
     /// <summary>
@@ -760,7 +760,7 @@ public static class KanbanProjector
         // it. Not keyed on the name `Manager`: a member told to update a card has answered just as
         // much, and a projection has no business knowing `TeamRegistry.DefaultManagerName`.
         state.AwaitingManager = !FromContainerOf(msg, state.Team);
-        state.UpdatedAt = msg.OccurredAt.DateTime;
+        state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
 
     /// <summary>
@@ -877,8 +877,8 @@ public static class KanbanProjector
                 Color = "slate",
                 Progress = new List<ProgressItem>(),
                 Trail = new List<KanbanTrailEntry>(),
-                CreatedAt = msg.OccurredAt.DateTime,
-                UpdatedAt = msg.OccurredAt.DateTime,
+                CreatedAt = msg.OccurredAt.UtcDateTime,
+                UpdatedAt = msg.OccurredAt.UtcDateTime,
                 AwaitingManager = false,
             };
             state.JoinWorkflow(msg.CorrelationId);

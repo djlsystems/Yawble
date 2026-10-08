@@ -16,6 +16,10 @@ import { mailboxHint } from '../lib/mailboxHints';
  * Gmail who cannot make one - pointed to Advanced, Gmail through a Google app of one's own, when the
  * dialog can offer it (`advanced`).
  *
+ * USERNAME IS THE SERVER LOGIN, Name the connection's label. For a provider's tile the login is the
+ * email address, so Username waits under an Advanced disclosure for the provider that asks for
+ * something else; Other shows it plainly. Either way, what is typed there is sent.
+ *
  * THE APP PASSWORD IS WRITE-ONLY: typed, sent once, cleared once saved, never filled from anything.
  * A saved mailbox says only that its password is set.
  */
@@ -46,6 +50,9 @@ const smtpPort = ref('');
 const smtpSecurity = ref<MailSecurity>('TLS');
 
 const hint = computed(() => mailboxHint(presetId.value));
+
+/** Whether the login is the email address unless said otherwise: every tile but Other. */
+const loginIsAddress = computed(() => presetId.value !== 'other');
 
 const securities: MailSecurity[] = ['TLS', 'STARTTLS'];
 
@@ -149,11 +156,12 @@ defineExpose({ save, ready, busy, connected, typed });
 
       <q-input v-model="account" outlined dense label="Email address" type="email" autocomplete="off" spellcheck="false" />
       <q-input
+        v-if="!loginIsAddress"
         v-model="username"
         outlined
         dense
         label="Username"
-        hint="Leave empty to use the email address."
+        hint="The server login. Leave empty to use the email address."
         autocomplete="off"
         spellcheck="false"
       />
@@ -204,10 +212,28 @@ defineExpose({ save, ready, busy, connected, typed });
         outlined
         dense
         label="Name (optional)"
-        hint="Leave empty to use the email address."
+        hint="The label shown in Connections. Leave empty to use the email address."
         maxlength="80"
         autocomplete="off"
       />
+
+      <q-expansion-item v-if="loginIsAddress" dense dense-toggle label="Advanced" data-mailbox-login-advanced>
+        <div class="q-pt-sm q-gutter-y-sm">
+          <div class="text-caption">
+            Username is the server login. It is needed only when the provider asks for something other than the email
+            address - iCloud's IMAP may take the part before the @ alone.
+          </div>
+          <q-input
+            v-model="username"
+            outlined
+            dense
+            label="Username"
+            hint="Leave empty to use the email address."
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+      </q-expansion-item>
     </template>
 
     <div v-if="sentence" :class="connected ? 'text-positive' : 'text-negative'" data-mailbox-sentence>{{ sentence }}</div>
