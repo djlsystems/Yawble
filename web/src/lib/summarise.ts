@@ -206,10 +206,14 @@ function textOf(message: Message): string {
           ? resumeTimeText(payload.retryAfter)
           : null
 
-      const rest = failureText(payload)
+      // THE REASON STRAIGHT AFTER THE CLASS, then the class's sentence: the card's order. The
+      // sentence is the longer of the two, and ahead of the reason it filled the two lines with
+      // "nothing could say why" while the card above said exactly why.
+      const rest = failureText(payload).trim()
       const resumeSentence = resume === null ? '' : ` Resuming at ${resume}.`
+      const reason = rest === '' ? '' : `${rest}${/[.!?]$/.test(rest) ? '' : '.'} `
 
-      return `[${failureClass}] ${words}.${resumeSentence}${rest === '' ? '' : ` ${rest}`}`
+      return `[${failureClass}] ${reason}${words}.${resumeSentence}`
     }
   }
 

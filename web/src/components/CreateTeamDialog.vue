@@ -636,7 +636,7 @@ async function submit() {
        to go through a prop or a global rule, or the second dialog below has to be nested (it is
        not, deliberately - see its own comment). -->
   <q-dialog v-model="open">
-    <q-card class="os-dialog-md">
+    <q-card class="os-dialog-md create-card">
       <q-card-section>
         <div class="os-dialog-title">New team</div>
       </q-card-section>
@@ -781,7 +781,7 @@ async function submit() {
                   v-model="additionalInstructions"
                   type="textarea"
                   autogrow
-                  :input-style="{ minHeight: '9em' }"
+                  :input-style="{ minHeight: '5em' }"
                   outlined
                   dense
                   class="q-mt-xs"
@@ -1080,8 +1080,38 @@ async function submit() {
 <style scoped>
 /* ONE HEIGHT FOR BOTH TABS, as Team Settings has: General is the long form and Code may be
    nearly empty, and a card that resized on every switch would move the tab strip under the
-   pointer that clicked it. See `.os-tab-panels` in `css/app.scss`. */
+   pointer that clicked it. See `.os-tab-panels` in `css/app.scss`.
+
+   UP TO THAT HEIGHT, AND NEVER MORE THAN THE WINDOW LEAVES. The card is a column the dialog
+   already caps at the window's height; the title, the tabs, any banner and the buttons keep their
+   own heights, and the panels take the rest, scrolling inside below it. The window-height reserve
+   `.os-tab-panels` keeps for every other dialog (15rem) is more than this card's own title, tabs
+   and buttons, so General scrolled at 1280x783 with room to spare. */
+.create-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.create-card > *,
+.create-card > form > * {
+  flex-shrink: 0;
+}
+
+.create-card > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.create-card > form > .create-panels {
+  flex-shrink: 1;
+}
+
 .create-panels {
   --os-tab-panels-height: 40rem;
+  flex: 0 1 auto;
+  max-height: none;
+  min-height: 10rem;
 }
 </style>
