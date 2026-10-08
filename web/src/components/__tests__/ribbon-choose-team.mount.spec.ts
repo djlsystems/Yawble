@@ -60,6 +60,11 @@ describe('Choose Team on the ribbon', () => {
 
     expect(board.activeTeamId).toBe('alpha');
     expect(board.view).toBe('board');
+    // The menu closes after the pick: unmounting mid-animation leaves Quasar's cancelled animation
+    // as an unhandled rejection, which fails the run though every test passed.
+    await vi.waitFor(() => {
+      if (document.body.querySelector('.q-menu')) throw new Error('the menu is still closing');
+    });
     ribbon.unmount();
   });
 
@@ -82,6 +87,13 @@ describe('Choose Team on the ribbon', () => {
 
     expect(board.activeTeamId).toBe('alpha');
     expect(board.view).toBe('board');
+    // Choose Team slides open: unmounting mid-slide cancels the animation, an unhandled rejection
+    // that fails the run though every test passed.
+    await vi.waitFor(() => {
+      const sliding = [...document.body.querySelectorAll('*')]
+        .some((element) => element.getAnimations().some((animation) => animation.playState === 'running'));
+      if (sliding) throw new Error('still sliding');
+    });
     menu.unmount();
   });
 });
