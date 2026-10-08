@@ -495,7 +495,7 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         using var person = await host.PersonAsync();
 
         var taken = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/preview", new { folder = Package(), team = "Beta" }, Ct));
-        Assert.Contains("was not installed from a solution package", taken.GetProperty("error").GetString());
+        Assert.Contains("already exists and has no package", taken.GetProperty("error").GetString());
 
         var fresh = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/preview", new { folder = Package() }, Ct));
         Assert.Equal("install", fresh.GetProperty("mode").GetString());
@@ -504,6 +504,20 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         var listed = await JsonAsync(await person.GetAsync("/api/solutions/installed", Ct));
         var row = listed.EnumerateArray().Single(r => r.GetProperty("team").GetString() == team);
         Assert.Equal(("job-tracker", "1.0.0", name), (row.GetProperty("id").GetString(), row.GetProperty("version").GetString(), row.GetProperty("teamName").GetString()));
+    }
+
+    [Fact]
+    public async Task A_name_a_team_without_a_package_holds_is_refused_with_only_what_the_Host_knows()
+    {
+        using var person = await host.PersonAsync();
+
+        var taken = await JsonAsync(await person.PostAsJsonAsync("/api/solutions/preview", new { folder = Package(), team = "Beta" }, Ct));
+
+        Assert.False(taken.GetProperty("ok").GetBoolean());
+        Assert.Equal(
+            "A team called 'Beta' already exists and has no package installed or kept that this one can update or reinstall onto. Choose another name, or delete that team first.",
+            taken.GetProperty("error").GetString());
+        Assert.DoesNotContain("not installed from", taken.GetProperty("error").GetString());
     }
 
     [Fact]

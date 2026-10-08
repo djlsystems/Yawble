@@ -290,8 +290,9 @@ async function runPreview(team: string | undefined) {
   }
 }
 
+/** Asks about the new-team name; only while that is the choice in force. */
 async function previewName() {
-  if (!checkPlan.value || nameProblem.value) return;
+  if (!checkPlan.value || mode.value !== 'install' || nameProblem.value) return;
   await runPreview(teamName.value.trim());
 }
 
@@ -307,11 +308,15 @@ watch(teamName, () => {
   }, 400);
 });
 
-onBeforeUnmount(() => {
+function cancelNamePause() {
   if (nameTimer) clearTimeout(nameTimer);
-});
+  nameTimer = null;
+}
+
+onBeforeUnmount(cancelNamePause);
 
 async function chooseMode(next: 'install' | 'update') {
+  cancelNamePause();
   mode.value = next;
   preview.value = null;
   previewProblem.value = '';
@@ -320,6 +325,7 @@ async function chooseMode(next: 'install' | 'update') {
 }
 
 async function chooseUpdateTeam(team: string) {
+  cancelNamePause();
   updateTeam.value = team;
   mode.value = 'update';
   preview.value = null;
@@ -335,17 +341,14 @@ const teamReady = computed(() => {
 /** Next is offered while the name is legal and the Host has not refused it; Next itself re-asks. */
 const teamCanAdvance = computed(() => {
   if (!checkPlan.value || previewing.value) return false;
-  if (mode.value === 'install') return !nameProblem.value && !nameRefusal.value;
+  if (mode.value === 'install') return !nameProblem.value && !nameRefusal.value && !previewProblem.value;
   return !!updatePreview.value && updatePreview.value.team === updateTeam.value;
 });
 
 /** Next from Team asks the Host again about the name as it stands, so a debounce cannot be skipped. */
 async function nextFromTeam() {
   if (mode.value === 'install') {
-    if (nameTimer) {
-      clearTimeout(nameTimer);
-      nameTimer = null;
-    }
+    cancelNamePause();
     if (nameProblem.value) return;
     if (!installPreview.value || installPreview.value.teamName !== teamName.value.trim()) await previewName();
   }

@@ -57,7 +57,7 @@ import { spentTodayLine } from '../lib/triggers';
 import ConnectionPicker from './ConnectionPicker.vue';
 import { bindSlot } from '../lib/slotBinding';
 import { guidedProviders } from '../lib/connections';
-import HostPathPicker from './HostPathPicker.vue';
+import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 import SolutionWizard from './SolutionWizard.vue';
 import DialogTabs from './DialogTabs.vue';
@@ -78,7 +78,8 @@ import DialogTabs from './DialogTabs.vue';
  *   settings the package lists first, "All settings" for the rest (person-only included), and the
  *   connection bindings.
  * - **Results**: the package's output folders, newest first, with downloads; recent runs and their output.
- * - **Maintenance**: version and source folder, Update from a folder (the wizard's update path),
+ * - **Maintenance**: version and source folder, Update from a folder (the install dialog - a typed,
+ *   picked or uploaded folder - then the wizard's update path),
  *   and Uninstall, which asks first.
  *
  * Members, triggers and sites are tiles in the shared grid (`os-tiles` / `os-tile`,
@@ -453,12 +454,17 @@ async function toggleTranscript(run: SolutionPanelRun) {
 
 // --- Maintenance ---------------------------------------------------------------------------------
 
-const pickerOpen = ref(false);
+const updateOpen = ref(false);
 const wizard = ref<{ open: boolean; folder: string }>({ open: false, folder: '' });
 
 watch(() => wizard.value.open, (showing, was) => {
   if (was && !showing && open.value) void load();
 });
+
+function update(folder: string) {
+  updateOpen.value = false;
+  wizard.value = { open: true, folder };
+}
 
 const uninstall = ref<{
   asking: boolean;
@@ -947,9 +953,9 @@ function closeUninstall() {
             <div class="col">
               <div class="solution-heading">Update from a folder</div>
               <div class="text-caption os-text-muted q-mb-xs">
-                Choose the folder of a newer version. You review what changes before anything is written; your settings, bindings and documents are kept.
+                Choose, type or upload the folder of a newer version. You review what changes before anything is written; your settings, bindings and documents are kept.
               </div>
-              <q-btn outline dense no-caps icon="upgrade" label="Update from a folder" data-update-from-folder @click="pickerOpen = true" />
+              <q-btn outline dense no-caps icon="upgrade" label="Update from a folder" data-update-from-folder @click="updateOpen = true" />
             </div>
             <div class="col">
               <div class="solution-heading">Uninstall</div>
@@ -1048,7 +1054,15 @@ function closeUninstall() {
     </q-card>
   </q-dialog>
 
-  <HostPathPicker v-model="pickerOpen" instance-only title="Choose the folder of the newer version" @chose="(folder: string) => (wizard = { open: true, folder })" />
+  <InstallFromFolderDialog
+    v-model="updateOpen"
+    title="Update from a folder"
+    caption="The folder of a newer version of this solution, inside this instance."
+    picker-title="Choose the folder of the newer version"
+    action="Update"
+    instance-only
+    @install="update"
+  />
 
   <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :team="panel?.team ?? team" />
 

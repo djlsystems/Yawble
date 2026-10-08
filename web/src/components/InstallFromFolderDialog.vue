@@ -13,6 +13,11 @@ import UploadPackageAction from './UploadPackageAction.vue';
  * uploaded, with nothing above it and no dot-entries, and Choose disabled until a folder below
  * Documents is open.
  *
+ * `action` names the button (Install, or Update on a solution's panel), and `instanceOnly` widens
+ * Browse to the whole instance for a caller whose route takes any folder inside it (the update's
+ * newer version may sit where the installed one came from); a typed folder goes the same way as a
+ * picked one, to the caller, which checks either the same way.
+ *
  * `offerReplace` shows Replace, for a screen whose Host route takes it (a plugin version already
  * installed); a screen without one is not shown a box that would do nothing.
  *
@@ -24,12 +29,16 @@ const props = withDefaults(defineProps<{
   title?: string;
   caption?: string;
   pickerTitle?: string;
+  action?: string;
+  instanceOnly?: boolean;
   offerReplace?: boolean;
   installing?: boolean;
 }>(), {
   title: 'Install from a folder',
   caption: 'A package folder inside this instance.',
   pickerTitle: 'Choose the package folder',
+  action: 'Install',
+  instanceOnly: false,
   offerReplace: false,
   installing: false,
 });
@@ -101,7 +110,7 @@ function install() {
         <q-btn
           color="primary"
           no-caps
-          label="Install"
+          :label="action"
           :loading="installing"
           :disable="installing || folder.trim() === ''"
           @click="install"
@@ -112,7 +121,8 @@ function install() {
 
   <HostPathPicker
     v-model="pickerOpen"
-    packages
+    :packages="!instanceOnly"
+    :instance-only="instanceOnly"
     :title="pickerTitle"
     @chose="folder = $event"
   />
