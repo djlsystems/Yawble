@@ -94,16 +94,41 @@ public sealed class CliVersionHistory(string path)
         return new CliVersionNow(cli, version, null, since);
     }
 
+    /// <summary>One writer at a time per record, across every <see cref="CliVersionHistory"/> on it.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> Writers =
+        new(StringComparer.Ordinal);
+
     /// <summary>
     /// Appends a line: the newest line's versions with <paramref name="changed"/> laid over them,
     /// marked <paramref name="by"/>, keeping the newest <see cref="MaxTake"/>. Rewritten IN PLACE,
     /// never moved over, for the start script's reason: the Host may write the file and may not
     /// replace an entry in the data root. False when it could not be written; never throws.
     /// <paramref name="person"/> is the email of the person who asked, written as `person` when known.
+    ///
+    /// ONE WRITER AT A TIME, AND NEVER EMPTIED: an update's line and the re-measure pass its end
+    /// starts can append together, and each used to read the file and write it back whole, so one
+    /// line was lost; and the file was emptied before it was written, so a read in between found no
+    /// lines. Below <see cref="MaxTake"/> a line is appended; at it, the kept lines are written over
+    /// the old ones and the file is cut to their length afterwards, never before.
     /// </summary>
     public async Task<bool> AppendAsync(
         IReadOnlyDictionary<string, string?> changed, string by, CancellationToken ct = default, string? person = null,
         string? worker = null)
+    {
+        var gate = Writers.GetOrAdd(System.IO.Path.GetFullPath(Path), _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            return await AppendLockedAsync(changed, by, ct, person, worker);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<bool> AppendLockedAsync(
+        IReadOnlyDictionary<string, string?> changed, string by, CancellationToken ct, string? person, string? worker)
     {
         try
         {
@@ -122,14 +147,26 @@ public sealed class CliVersionHistory(string path)
             if (worker is not null) fields["worker"] = worker;
             var line = JsonSerializer.Serialize(fields);
 
-            var lines = File.Exists(Path) ? [.. await File.ReadAllLinesAsync(Path, ct)] : new List<string>();
-            lines.Add(line);
-            var kept = lines.Where(l => !string.IsNullOrWhiteSpace(l)).TakeLast(MaxTake);
+            var existing = File.Exists(Path) ? await File.ReadAllTextAsync(Path, ct) : "";
+            var lines = existing.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
 
+            if (lines.Count < MaxTake)
+            {
+                // Room left: the line goes on the end, after a newline if the last line has none.
+                var separator = existing.Length > 0 && !existing.EndsWith('\n') ? "\n" : "";
+                await using var append = new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.Read);
+                await using var appender = new StreamWriter(append);
+                await appender.WriteAsync((separator + line + "\n").AsMemory(), ct);
+                return true;
+            }
+
+            lines.Add(line);
             await using var file = new FileStream(Path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
-            file.SetLength(0);
-            await using var writer = new StreamWriter(file);
-            foreach (var l in kept) await writer.WriteLineAsync(l.AsMemory(), ct);
+            await using (var writer = new StreamWriter(file, leaveOpen: true))
+            {
+                foreach (var l in lines.TakeLast(MaxTake)) await writer.WriteAsync((l + "\n").AsMemory(), ct);
+            }
+            file.SetLength(file.Position);
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

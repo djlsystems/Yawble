@@ -245,10 +245,13 @@ public sealed class PluginMemberRunnerTests : IDisposable
         var (bed, _, row) = await RunAsync(
             """
             cat >/dev/null
-            for i in 1 2 3 4; do echo '{"t":"progress","status":"tick"}'; sleep 0.5; done
+            for i in 1 2 3 4 5 6 7 8; do echo '{"t":"progress","status":"tick"}'; sleep 0.5; done
             echo '{"t":"result","ok":true,"output":"survived"}'
             """,
-            manifest: m => m["timeoutSeconds"] = 1);
+            // Four seconds of run against a three-second idle limit: only the progress records keep
+            // it alive. The limit is not tighter because a loaded machine can take over a second to
+            // start the shell and print the first record (1 s here failed about one suite run in five).
+            manifest: m => m["timeoutSeconds"] = 3);
         await using var _ = bed;
 
         Assert.Equal(MessageTypes.Completed, row.Type);
