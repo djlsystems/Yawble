@@ -16,11 +16,7 @@ const RereadEvery = 60 * 60 * 1000;
 /** UNTIL THE HOST HAS AN ANSWER, asked again this often. A page opened right after the Host
  *  starts reads "not checked yet" (its first read of the release list takes a few seconds), and
  *  waiting an hour after that would hide a newer release for an hour. */
-const RereadUntilCheckedEvery = 30 * 1000;
-
-/** And for no longer than this after the page opened; then hourly as before. */
-const RereadUntilCheckedFor = 3 * 60 * 1000;
-let openedAt = 0;
+const RereadUntilCheckedEvery = 3 * 60 * 1000;
 
 const status = ref<UpdateStatus | null>(null);
 const open = ref(false);
@@ -34,14 +30,12 @@ async function read() {
   } catch {
     // Not known is not an alert; the dialog says why when it is opened from a later answer.
   }
-  const stillEarly = Date.now() - openedAt + RereadUntilCheckedEvery <= RereadUntilCheckedFor;
-  if (stillEarly && status.value?.enabled !== false && status.value?.checked !== true) {
+  if (status.value?.enabled !== false && status.value?.checked !== true) {
     soon = setTimeout(() => void read(), RereadUntilCheckedEvery);
   }
 }
 
 onMounted(() => {
-  openedAt = Date.now();
   void read();
   timer = setInterval(() => void read(), RereadEvery);
 });
