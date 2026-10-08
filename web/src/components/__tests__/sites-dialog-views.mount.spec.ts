@@ -205,6 +205,12 @@ describe('the Versions table', () => {
     const actions = table.querySelectorAll('td.site-version-action');
     expect(actions.length).toBe(3);
 
+    // Quasar's markup table sets white-space: nowrap on EVERY cell unless it is told to wrap, and
+    // then no wrap rule of this screen applies: the actions clip and the table scrolls sideways.
+    // Only the action cell keeps its words on one line.
+    expect(table.classList.contains('q-table--no-wrap')).toBe(false);
+    expect(table.querySelector('.q-table--no-wrap')).toBeNull();
+
     // happy-dom lays nothing out, so the rules that do it are pinned.
     const vue = source('../SitesDialog.vue');
     const rule = (selector: string) =>

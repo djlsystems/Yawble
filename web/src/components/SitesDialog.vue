@@ -430,9 +430,9 @@ function versionAction(version: number) {
           <div v-if="detail.versions.length === 0" class="os-body os-text-muted">No versions kept.</div>
           <!-- LAID OUT BY THE BROWSER EVERY TIME, not resizable: a pinned width pushed the actions past
                the dialog's edge, cut "Roll back to v1" short, and a click there scrolled the table
-               sideways and the Version column out of sight. Long text wraps instead; the action
-               column takes the width of its words. -->
-          <q-markup-table v-else class="site-versions" flat bordered dense separator="horizontal" data-site-versions>
+               sideways and the Version column out of sight. Long text wraps instead (wrap-cells: without
+               it Quasar keeps every cell on one line); the action column takes the width of its words. -->
+          <q-markup-table v-else class="site-versions" flat bordered dense wrap-cells separator="horizontal" data-site-versions>
             <thead>
               <tr>
                 <th class="text-left">Version</th>
