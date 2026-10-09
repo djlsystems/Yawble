@@ -1,5 +1,5 @@
 // SAMPLE ECHO, GO: the Go template for a plugin member, protocol harness.member/1. It behaves
-// exactly as samples/plugins/sample-echo (the .NET template) does, instruction for instruction.
+// exactly as the .NET sample-echo plugin does, instruction for instruction.
 //
 // In:  ONE JSON request on stdin - { protocol, member, causation, work: [{ seq, instruction, ... }],
 //

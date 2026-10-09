@@ -46,7 +46,9 @@ func newPluginCommand(deps Deps) *cobra.Command {
 		Short: "Install, list and remove the plugins members can be hired on",
 		Long: "A plugin is a program a team member runs instead of an agent CLI (docs/plugins.md). These commands " +
 			"put a built plugin into the running instance, show what the Host made of each one, and take one out. " +
-			"The Host picks up every change at once: no restart, no API key.",
+			"The Host picks up every change at once: no restart, no API key.\n\n" +
+			"Plugins to install are on the marketplace, yawble.ai. To build one, start from the Go template, " +
+			"templates/plugin-go in the Yawble repository (docs/plugins.md).",
 	}
 	cmd.AddCommand(newPluginInstallCommand(deps), newPluginListCommand(deps), newPluginRemoveCommand(deps))
 	return cmd

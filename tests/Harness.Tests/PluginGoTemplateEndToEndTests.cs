@@ -14,12 +14,12 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// THE GO TEMPLATE, END TO END, ON THE REAL HOST: <c>samples/plugins/sample-echo-go</c> is built as
+/// THE GO TEMPLATE, END TO END, ON THE REAL HOST: <c>templates/plugin-go</c> is built as
 /// the two static binaries its manifest's <c>platforms</c> names (<c>GOARCH=amd64</c> and
 /// <c>arm64</c>, <c>CGO_ENABLED=0</c>), installed under a data root as docs/plugins.md tells an
 /// operator to, hired by a person through the ordinary member route, and told work through the
 /// ordinary `tell` route - on whichever processor this Host runs on, as
-/// <see cref="PluginMemberEndToEndTests"/> does for the .NET template. Go is in the product image,
+/// <see cref="PluginMemberEndToEndTests"/> does for the .NET test plugin. Go is in the product image,
 /// where the release runs this suite; without it the build fails, naming the missing command.
 /// </summary>
 public sealed class PluginGoTemplateEndToEndTests : IAsyncLifetime
@@ -83,7 +83,7 @@ public sealed class PluginGoTemplateEndToEndTests : IAsyncLifetime
     [Fact]
     public void Both_binaries_are_static_linux_executables_for_the_processor_the_manifest_names()
     {
-        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(SamplePath(), "plugin.json")));
+        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(TemplatePath(), "plugin.json")));
         var platforms = manifest.RootElement.GetProperty("platforms");
         Assert.False(manifest.RootElement.TryGetProperty("requires", out _), "a static Go binary needs no runtime from the image");
 
@@ -132,7 +132,7 @@ public sealed class PluginGoTemplateEndToEndTests : IAsyncLifetime
         Assert.Equal("asked to fail: on purpose", Services.GetRequiredService<ContainerHost>().Find(Echo)!.Snapshot().Failed);
     }
 
-    /// <summary>What sample-echo-go's README tells an operator to do: build.sh's output (both
+    /// <summary>What the template's README tells an operator to do: build.sh's output (both
     /// binaries, the manifest, the skill) in <c>plugins/sample-echo-go/0.1.0</c>, <c>active</c>
     /// naming it.</summary>
     private static void Install(string dataRoot)
@@ -144,7 +144,7 @@ public sealed class PluginGoTemplateEndToEndTests : IAsyncLifetime
 
     private static string BuildBothBinaries()
     {
-        var sample = SamplePath();
+        var sample = TemplatePath();
         var go = PathSearch.Find("go") ?? PathSearch.Find("/usr/local/go/bin/go")
             ?? throw new InvalidOperationException("`go` is not on PATH; the Go template's end-to-end test builds it (Go is in the product image).");
         var output = Path.Combine(Path.GetTempPath(), $"harness-sample-echo-go-{Guid.NewGuid():N}");
@@ -241,6 +241,6 @@ public sealed class PluginGoTemplateEndToEndTests : IAsyncLifetime
 
     private static JsonElement Payload(Message row) => JsonDocument.Parse(row.Payload).RootElement.Clone();
 
-    private static string SamplePath([CallerFilePath] string caller = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(caller)!, "..", "..", "samples", "plugins", Id));
+    private static string TemplatePath([CallerFilePath] string caller = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(caller)!, "..", "..", "templates", "plugin-go"));
 }

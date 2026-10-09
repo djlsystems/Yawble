@@ -8,18 +8,20 @@ import (
 	"testing"
 )
 
-// The samples in the repository are what the docs install; each must pass as it is. The Go
-// template names one static binary per processor, both marked executable; the connections sample
-// binds a Google slot. An empty version or executables is not checked for that sample.
-func TestTheSampleManifestsAreAccepted(t *testing.T) {
-	cases := []struct{ sample, version, executables string }{
-		{"sample-echo", "0.1.0", "sample-echo"},
-		{"sample-echo-go", "", "bin/linux-x64/sample-echo-go,bin/linux-arm64/sample-echo-go,bin/linux-x64/sample-echo-go"},
-		{"sample-whoami-go", "", ""},
+// The Go template and the test plugins' manifests must pass as they are. The Go template names one
+// static binary per processor, both marked executable; the connections test plugin binds a Google
+// slot. An empty version or executables is not checked for that plugin.
+func TestTheTemplateAndTestManifestsAreAccepted(t *testing.T) {
+	repo := filepath.Join("..", "..", "..")
+	fixtures := filepath.Join(repo, "tests", "Fixtures", "Packages")
+	cases := []struct{ sample, folder, version, executables string }{
+		{"sample-echo", filepath.Join(fixtures, "sample-echo"), "0.1.0", "sample-echo"},
+		{"sample-echo-go", filepath.Join(repo, "templates", "plugin-go"), "", "bin/linux-x64/sample-echo-go,bin/linux-arm64/sample-echo-go,bin/linux-x64/sample-echo-go"},
+		{"sample-whoami-go", filepath.Join(fixtures, "sample-whoami-go"), "", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.sample, func(t *testing.T) {
-			raw, err := os.ReadFile(filepath.Join("..", "..", "..", "samples", "plugins", c.sample, "plugin.json"))
+			raw, err := os.ReadFile(filepath.Join(c.folder, "plugin.json"))
 			if err != nil {
 				t.Fatal(err)
 			}

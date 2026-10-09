@@ -14,7 +14,7 @@ namespace Harness.Tests;
 
 /// <summary>
 /// THE PROOF OF CONCEPT, END TO END, ON THE REAL HOST: the sample plugin in
-/// <c>samples/plugins/sample-echo</c>, built with the tests, installed under a data root the way
+/// <c>tests/Fixtures/Packages/sample-echo</c> (test data), built with the tests, installed under a data root the way
 /// docs/plugins.md tells an operator to, hired by a person through the ordinary member route into
 /// an ordinary team beside an agent member, and told work through the ordinary `tell` route.
 ///
@@ -130,7 +130,7 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
     }
 
     private static string SamplePath([CallerFilePath] string caller = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(caller)!, "..", "..", "samples", "plugins", "sample-echo"));
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(caller)!, "..", "Fixtures", "Packages", "sample-echo"));
 
     /// <summary>Tells <paramref name="who"/> through the person's `tell` route and waits for the
     /// terminal row that run writes.</summary>
@@ -528,7 +528,7 @@ public sealed class PluginMemberEndToEndTests : IAsyncLifetime
     [Fact]
     public void P7_Nothing_plugin_specific_is_in_the_pump()
     {
-        var containers = Path.GetFullPath(Path.Combine(SamplePath(), "..", "..", "..", "src", "Harness.Containers"));
+        var containers = Path.Combine(SolutionSamples.RepoRoot(), "src", "Harness.Containers");
 
         foreach (var file in Directory.EnumerateFiles(containers, "*.cs", SearchOption.AllDirectories)
                      .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("/bin/", StringComparison.Ordinal)))
