@@ -72,11 +72,13 @@ type applied struct {
 	Image      string `json:"image"`
 	EnvHash    string `json:"envHash"`
 	KeyHash    string `json:"keyHash"`
+	// Catalog is omitted when none is passed, so a label from before it reads the same.
+	Catalog string `json:"marketplaceCatalog,omitempty"`
 }
 
 // controlApplied is control's label for the settings now: its own fixed allowance, not a worker's.
 func controlApplied(s Settings) applied {
-	return applied{RoleControl, s.Port, ControlMemory, ControlCPUs, s.MaxRunning, s.Image, s.EnvFileHash, s.KeyHash}
+	return applied{RoleControl, s.Port, ControlMemory, ControlCPUs, s.MaxRunning, s.Image, s.EnvFileHash, s.KeyHash, s.MarketplaceCatalog}
 }
 
 // PreSplit says whether control's label is from before control and workers: a yawble label with
@@ -125,6 +127,9 @@ func Changes(label string, s Settings) []string {
 	}
 	if was.KeyHash != now.KeyHash {
 		out = append(out, "the worker key changed")
+	}
+	if was.Catalog != now.Catalog {
+		out = append(out, fmt.Sprintf("marketplaceCatalog %q -> %q", was.Catalog, now.Catalog))
 	}
 	return out
 }
@@ -287,6 +292,11 @@ func controlSpec(s Settings) engine.RunSpec {
 	env := map[string]string{"HARNESS_ROLE": RoleControl, "HARNESS_RELEASE_REPOSITORY": release.Repository}
 	if s.MaxRunning > 0 {
 		env["Wip__MaxRunning"] = fmt.Sprint(s.MaxRunning)
+	}
+	// HARNESS_MARKETPLACE_CATALOG is where the Host reads the package catalog for Get started; with
+	// none the Host says the catalog is not checked.
+	if s.MarketplaceCatalog != "" {
+		env["HARNESS_MARKETPLACE_CATALOG"] = s.MarketplaceCatalog
 	}
 	return engine.RunSpec{
 		Name: ContainerName, Pod: PodName, Image: s.Image,

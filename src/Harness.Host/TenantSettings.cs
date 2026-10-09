@@ -98,6 +98,7 @@ public sealed class TenantSettings
     public const string ConciergeMayArchiveName = "concierge.mayArchive";
     public const string LeasesHeavyHoldersName = "leases.heavy.holders";
     public const string UpdatesCheckName = "updates.check";
+    public const string MarketplaceCheckName = "marketplace.check";
 
     private readonly SqliteTenantSettingsStore _store;
     private readonly IConfiguration _configuration;
@@ -277,6 +278,12 @@ public sealed class TenantSettings
                 "Whether the instance reads the published release list about every 12 hours, so the "
                 + "version in the top bar can say when a newer release is out, what changed and how to "
                 + "update. It reads the list only; nothing is updated. Applies at the next read.",
+                Choices: ["off", "on"]),
+            new(MarketplaceCheckName, TenantSettingKind.Choice, "on", "Marketplace:Check",
+                "Whether the instance reads the published package catalog about every 12 hours, so "
+                + "Solutions can list the packages that may be added and whether each is installed or has "
+                + "an update. It reads the catalog only; nothing is fetched or installed by itself. "
+                + "Applies at the next read.",
                 Choices: ["off", "on"]),
         ];
 
@@ -567,6 +574,10 @@ public sealed class TenantSettings
     /// <summary><c>updates.check</c>: whether the release check reads the release list. Read through
     /// a delegate by <see cref="ReleaseCheck"/>, never captured.</summary>
     public bool UpdatesCheck => Current(UpdatesCheckName) == "on";
+
+    /// <summary><c>marketplace.check</c>: whether the package catalog is read. Read through a
+    /// delegate by <see cref="Marketplace"/>, never captured.</summary>
+    public bool MarketplaceCheck => Current(MarketplaceCheckName) == "on";
 
     /// <summary><c>system.packages</c>: what the entrypoint installs at the next start.</summary>
     public IReadOnlyList<string> SystemPackages =>

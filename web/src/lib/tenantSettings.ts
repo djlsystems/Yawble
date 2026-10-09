@@ -38,6 +38,7 @@ export const AgentCredentialSources = 'agents.credentialSource'
 export const ConciergeMayMerge = 'concierge.mayMerge'
 export const ConciergeMayArchive = 'concierge.mayArchive'
 export const UpdatesCheck = 'updates.check'
+export const MarketplaceCheck = 'marketplace.check'
 
 /** This sentence is put in front of a person, word for word: what the setting allows, and that it is off unless turned on. */
 export const ConciergeMayMergeSentence =
@@ -164,6 +165,13 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     kind: 'toggle',
     label: 'Check for updates',
     hint: 'Reads the list of published releases about twice a day, so the version in the top bar can say when a newer release is out, what changed and how to update. Nothing is updated by itself.',
+  },
+  {
+    name: MarketplaceCheck,
+    tab: 'system',
+    kind: 'toggle',
+    label: 'Read the package catalog',
+    hint: 'Reads the published package catalog about twice a day, so Solutions > Get started can list what may be added and whether each is installed or has an update. Nothing is fetched or installed by itself.',
   },
   {
     name: SystemPackages,

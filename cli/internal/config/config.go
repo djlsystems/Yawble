@@ -31,16 +31,23 @@ type Config struct {
 	// GitHubAsked records that the first `up` asked whether teams will use GitHub, so it asks
 	// once. Not a `config set` key: `yawble github` asks again whenever a person wants.
 	GitHubAsked bool `toml:"githubAsked,omitempty" json:"-"`
+	// MarketplaceCatalog is the address of the package catalog the Host reads for Get started.
+	// nil is not chosen, which is DefaultMarketplaceCatalog; an empty value turns the catalog off.
+	MarketplaceCatalog *string `toml:"marketplaceCatalog,omitempty" json:"marketplaceCatalog"`
 }
 
 // Keys are the names `config get` and `config set` accept, in the order they are listed.
-var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image", "workers", "workerImage"}
+var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image", "workers", "workerImage", "marketplaceCatalog"}
 
 const FileName = "config.toml"
 
 // DefaultPort is the one default this package knows, because `config get port` must answer a
 // number and 8080 is what the Host listens on inside the container.
 const DefaultPort = 8080
+
+// DefaultMarketplaceCatalog is where the published package catalog is, unless the config names
+// another address or none.
+const DefaultMarketplaceCatalog = "https://github.com/djlsystems/Yawble-packages/releases/latest/download/catalog.json"
 
 func Path(dir string) string { return filepath.Join(dir, FileName) }
 
@@ -56,6 +63,8 @@ var envNames = map[string]string{
 	"image":       "YAWBLE_IMAGE",
 	"workers":     "YAWBLE_WORKERS",
 	"workerImage": "YAWBLE_WORKER_IMAGE",
+	// Only an address: an empty variable is not set, so the file is where the catalog is turned off.
+	"marketplaceCatalog": "YAWBLE_MARKETPLACE_CATALOG",
 }
 
 // WorkerCount is the number of workers the config asks for: 1 when none was chosen.
@@ -64,6 +73,15 @@ func (c Config) WorkerCount() int {
 		return 1
 	}
 	return c.Workers
+}
+
+// Catalog is the package catalog's address `up` passes to the Host: the default when none was
+// chosen, and "" when the config turned it off.
+func (c Config) Catalog() string {
+	if c.MarketplaceCatalog == nil {
+		return DefaultMarketplaceCatalog
+	}
+	return *c.MarketplaceCatalog
 }
 
 // Load reads the file if it exists, then applies YAWBLE_* overrides. A missing file is the zero
@@ -143,6 +161,8 @@ func (c Config) Get(key string) (string, error) {
 		return strconv.Itoa(c.WorkerCount()), nil
 	case "workerImage":
 		return c.WorkerImage, nil
+	case "marketplaceCatalog":
+		return c.Catalog(), nil
 	}
 	return "", unknownKey(key)
 }
@@ -200,6 +220,11 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("workerImage must be one reference like ghcr.io/djlsystems/yawble:2026.09.24.1-worker, not %q", value)
 		}
 		c.WorkerImage = value
+	case "marketplaceCatalog":
+		if value != "" && (strings.ContainsAny(value, " \t") || !(strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "http://"))) {
+			return fmt.Errorf("marketplaceCatalog must be the address of a catalog.json like %s (or empty to turn the catalog off), not %q", DefaultMarketplaceCatalog, value)
+		}
+		c.MarketplaceCatalog = &value
 	default:
 		return unknownKey(key)
 	}
@@ -223,6 +248,9 @@ func (c *Config) validate() error {
 	}
 	if c.Port != 0 {
 		checks = append(checks, struct{ key, value string }{"port", strconv.Itoa(c.Port)})
+	}
+	if c.MarketplaceCatalog != nil {
+		checks = append(checks, struct{ key, value string }{"marketplaceCatalog", *c.MarketplaceCatalog})
 	}
 	for _, check := range checks {
 		if err := probe.Set(check.key, check.value); err != nil {

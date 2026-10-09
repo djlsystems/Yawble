@@ -228,6 +228,11 @@ public static class TenantActions
     /// Written BEFORE the delete, which does not happen when this row cannot be.</summary>
     public const string DocumentsDeleted = "documents.deleted";
 
+    /// <summary>A person fetched a package of the catalog into the instance's documents. Written
+    /// BEFORE it is unpacked, which does not happen when this row cannot be. Detail: id, version,
+    /// kind, sha256 and the folder.</summary>
+    public const string MarketplaceFetched = "marketplace.fetched";
+
     /// <summary>A documents delete that left something: written after it, naming each path left
     /// and why, so the log never claims a deletion that did not happen.</summary>
     public const string DocumentsDeleteIncomplete = "documents.delete-incomplete";

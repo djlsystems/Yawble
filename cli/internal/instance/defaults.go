@@ -40,6 +40,8 @@ type Settings struct {
 	// RunsShown is how many runs at once the first up's size screen just told the person, so the
 	// started line repeats that number; 0 on every other up.
 	RunsShown int
+	// MarketplaceCatalog is the package catalog's address control is given; "" passes none.
+	MarketplaceCatalog string
 }
 
 // EnvFiles are the env files every instance container is given, in order: the env file, then
@@ -83,7 +85,7 @@ const (
 // because a number that looks measured and was not is the thing this product refuses to do.
 func Defaults(c config.Config, m Machine, pinned string) (Settings, []string) {
 	var notes []string
-	s := Settings{Port: config.DefaultPort, Memory: c.Memory, CPUs: c.CPUs, MaxRunning: c.MaxRunning, Image: c.Image, Workers: c.WorkerCount(), WorkerImage: c.WorkerImage}
+	s := Settings{Port: config.DefaultPort, Memory: c.Memory, CPUs: c.CPUs, MaxRunning: c.MaxRunning, Image: c.Image, Workers: c.WorkerCount(), WorkerImage: c.WorkerImage, MarketplaceCatalog: c.Catalog()}
 	if c.Port != 0 {
 		s.Port = c.Port
 	}
