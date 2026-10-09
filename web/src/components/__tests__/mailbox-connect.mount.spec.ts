@@ -282,3 +282,109 @@ describe('Admin, Connections, a mailbox', () => {
     wrapper.unmount();
   });
 });
+
+// THE APP-PASSWORD SHAPE WARNING: a password that does not look like the provider's app password gets
+// a plain warning beside the field, never a refusal - Save and Update password still go through, and
+// the Host's login test decides. Only a shape the provider publishes warns: Google's (16 characters,
+// spaces and hyphens ignored). Apple and Yahoo publish none, so iCloud and Yahoo never warn, nor Other.
+const ordinary = 'hunter2pwd';
+const sixteenWithHyphens = 'abcd-efgh-ijkl-mnop';
+
+const warning = () => bodyFind('[data-app-password-warning]');
+
+describe('A password that is not app-password shaped', () => {
+  it('on Add connection, Gmail, a 10-character password is warned about and Save still goes through', async () => {
+    addMailbox.mockResolvedValue({ sentence: 'Connected: 3 messages in Inbox', connection: saved });
+    const wrapper = await openAdd();
+
+    await choosePreset('gmail');
+    await type('Email address', 'me@gmail.com');
+    await type('App password', ordinary);
+
+    expect(warning()).not.toBeNull();
+    expect(warning()!.textContent).toContain('looks like an ordinary account password');
+    expect(warning()!.textContent).toContain('Gmail wants an app password');
+    expect(warning()!.textContent).toContain('For Gmail, make an app password: it needs 2-Step Verification.');
+    expect(warning()!.classList.contains('text-negative')).toBe(false);
+    expect(isDisabled('Save')).toBe(false);
+
+    button('Save').click();
+    await settle();
+    expect(addMailbox).toHaveBeenCalledWith(expect.objectContaining({ preset: 'gmail', password: ordinary }));
+    // The warning never repeats the password.
+    expect(bodyText()).not.toContain(ordinary);
+
+    wrapper.unmount();
+  });
+
+  it('on Add connection, Gmail, 16 letters with hyphens is not warned about', async () => {
+    const wrapper = await openAdd();
+
+    await choosePreset('gmail');
+    await type('App password', sixteenWithHyphens);
+    expect(warning()).toBeNull();
+    await type('App password', appPassword);
+    expect(warning()).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it.each(['other', 'icloud', 'yahoo'])('on Add connection, %s is never warned about, whatever is typed', async (preset) => {
+    const wrapper = await openAdd();
+
+    await choosePreset(preset);
+    for (const typed of [ordinary, 'x', sixteenWithHyphens, 'a much longer ordinary password!']) {
+      await type('App password', typed);
+      expect(warning()).toBeNull();
+    }
+
+    wrapper.unmount();
+  });
+
+  async function openUpdate(connection: Connection) {
+    listConnections.mockResolvedValue([connection]);
+    const wrapper = await mountDialog(ConnectionsDialog);
+    await settle();
+    (bodyFind(`[aria-label="Update password ${connection.name}"]`) as HTMLElement).click();
+    await settle();
+    return wrapper;
+  }
+
+  it('on Update password, a Gmail mailbox, a 10-character password is warned about and the update still goes through', async () => {
+    updateMailboxPassword.mockResolvedValue({ sentence: 'Connected: 3 messages in Inbox', connection: saved });
+    const wrapper = await openUpdate(mailbox({ id: 'conn-mail', status: 'needs-reconnect', statusReason: refusedSentence }));
+
+    await type('New app password', ordinary);
+
+    expect(warning()).not.toBeNull();
+    expect(warning()!.textContent).toContain('looks like an ordinary account password');
+    expect(warning()!.textContent).toContain('Gmail wants an app password');
+    expect(isDisabled('Update password')).toBe(false);
+
+    button('Update password').click();
+    await settle();
+    expect(updateMailboxPassword).toHaveBeenLastCalledWith('conn-mail', ordinary);
+
+    wrapper.unmount();
+  });
+
+  it('on Update password, a Gmail mailbox, 16 letters with hyphens is not warned about', async () => {
+    const wrapper = await openUpdate(mailbox({ id: 'conn-mail' }));
+
+    await type('New app password', sixteenWithHyphens);
+    expect(warning()).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it.each(['other', 'icloud', 'yahoo', null])('on Update password, a %s mailbox is never warned about, whatever is typed', async (preset) => {
+    const wrapper = await openUpdate(mailbox({ id: 'conn-mail', preset }));
+
+    for (const typed of [ordinary, 'x', sixteenWithHyphens]) {
+      await type('New app password', typed);
+      expect(warning()).toBeNull();
+    }
+
+    wrapper.unmount();
+  });
+});
