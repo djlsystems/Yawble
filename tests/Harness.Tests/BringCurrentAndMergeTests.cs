@@ -331,11 +331,14 @@ public sealed class BringCurrentAndMergeTests : IAsyncDisposable
         // pushes the team branch before Merge to main makes its own busy check, so a wake starting
         // between the two refuses the second half of a button whose first half already landed; a
         // retry would then find the branch current and say nothing was merged.
+        // That wake is two runs: the repositories-ready notice, then the platform's idle offer for
+        // the notice's workflow, which the fake agent never declares. Waiting for the first alone
+        // let the offer start between the button's two halves.
         var manager = registry.ContainerIdsOf(team).First(id => id.Name == TeamRegistry.DefaultManagerName);
-        var host = services.GetRequiredService<ContainerHost>();
         var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (_agent.RunsFor(manager) == 0
-            || host.Find(manager) is { State: ContainerState.Running } or { QueueDepth: > 0 })
+        while (!_agent.Invocations.Any(i => i.Container == manager
+                   && i.Prompt.Contains("This workflow is open and nobody is working it", StringComparison.Ordinal))
+            || !await TeamQuiet.IsQuietAsync(services, team, Ct))
         {
             Assert.True(DateTime.UtcNow < deadline, "the Manager's wake on repo attach did not end");
             await Task.Delay(20, Ct);
