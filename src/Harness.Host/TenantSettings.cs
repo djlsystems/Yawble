@@ -96,6 +96,15 @@ public sealed class TenantSettings
         ["usd", "eur", "gbp", "cad", "aud", "nzd", "chf", "jpy", "cny", "inr", "sek", "nok", "dkk", "pln", "brl", "mxn", "zar", "sgd", "hkd"];
     public const string ConciergeMayMergeName = "concierge.mayMerge";
     public const string ConciergeMayArchiveName = "concierge.mayArchive";
+
+    /// <summary>
+    /// WHERE A PERSON TURNS AN INSTANCE-WIDE SETTING ON, as the console labels it: the ribbon's Admin
+    /// group, its Settings, then the dialog's tab. Every sentence saying such a setting is off names
+    /// the place with one of these; a test reads the labels from the web source.
+    /// </summary>
+    public const string SystemTab = "Admin > Settings > System";
+
+    public const string ConciergeTab = "Admin > Settings > Concierge";
     public const string LeasesHeavyHoldersName = "leases.heavy.holders";
     public const string UpdatesCheckName = "updates.check";
     public const string MarketplaceCheckName = "marketplace.check";

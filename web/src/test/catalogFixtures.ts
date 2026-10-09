@@ -218,14 +218,14 @@ export const HostSentences: Record<Entry['id'], string[]> = {
     'Needs python3 on the instance.',
   ],
   mail: [
-    'Needs a mailbox account connected (imap, microsoft or google): Your mailbox, connected in Admin, Connections: an app password for Gmail, iCloud, Yahoo or another IMAP mailbox (the simplest), or a Microsoft or Google account. Mailer reads, drafts and sends from it.',
+    'Needs a mailbox account connected (a mailbox by app password, a Microsoft account or a Google account): Your mailbox, connected in Admin, Connections: an app password for Gmail, iCloud, Yahoo or another IMAP mailbox (the simplest), or a Microsoft or Google account. Mailer reads, drafts and sends from it.',
     'Can take the setting mode at install: draft (the default) only saves drafts you send yourself; nothing is ever sent. send sends email, and only to the addresses and domains in sendAllowlist.',
     'Can take the setting sendAllowlist at install: The only addresses (person+tag@example.com) or whole domains (@example.com) Mailer may draft to or send to. Every recipient must be on it, in draft mode too. Send mode with an empty list refuses every run.',
     'Can take the setting markRead at install: Off (the default): Mailer never changes whether a message is read. On: it may mark messages read or unread when asked.',
     'Can take the setting moveTo at install: The only folders and labels Mailer may move mail to or label it with (Archive, Receipts). Empty (the default): it never moves or labels anything. It never deletes.',
   ],
   'sample-whoami-go': [
-    'Needs an account connected (google): The Google account to report on.',
+    'Needs an account connected (a Google account): The Google account to report on.',
     'Can take the setting userinfoUrl at install: Where the access token is sent to read the account. Change it only to point at a test double.',
   ],
 };

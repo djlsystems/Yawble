@@ -131,7 +131,7 @@ public sealed class ReleaseCheck(IReleaseFeed feed, Func<bool> enabled, Func<Dat
     {
         var current = running.Split('+')[0];
         if (!enabled())
-            return new UpdateStatus(current, false, false, null, "Checking for updates is turned off in Settings.", null, false, null, []);
+            return new UpdateStatus(current, false, false, null, $"Checking for updates is turned off in {TenantSettings.SystemTab}.", null, false, null, []);
         if (feed.Repository is null)
             return new UpdateStatus(current, true, false, null,
                 "Not checked: this build was not told where its releases are published.", null, false, null, []);

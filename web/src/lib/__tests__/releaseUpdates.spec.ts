@@ -22,8 +22,8 @@ describe('the update words', () => {
 
   it('never says up to date when nothing is known', () => {
     expect(updateHeadline({ ...base, checked: false, detail: 'Not checked yet.' })).toBe('Not checked yet.');
-    expect(updateHeadline({ ...base, enabled: false, checked: false, detail: 'Checking for updates is turned off in Settings.' }))
-      .toBe('Checking for updates is turned off in Settings.');
+    expect(updateHeadline({ ...base, enabled: false, checked: false, detail: 'Checking for updates is turned off in Admin > Settings > System.' }))
+      .toBe('Checking for updates is turned off in Admin > Settings > System.');
     expect(updateHeadline(base)).toBe('You are on v2026.10.06.1, the newest release offered to this build.');
   });
 
