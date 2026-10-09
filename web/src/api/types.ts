@@ -4033,14 +4033,26 @@ export interface MarketplacePackage {
   name: string
   summary: string
   version: string
-  /** What it needs, each a sentence for a person. */
+  /** What it needs, each a sentence for a person: the full lines, under a card's Details. */
   needs: string[]
+  /** The catalog's own needs fields, which the card words in short lines (lib/marketplace). */
+  catalogNeeds: CatalogNeeds
   installed: boolean
   installedVersion: string | null
   /** The teams a solution is installed on; empty for a plugin. */
   installedOn: string[]
   /** The catalog's version is newer than the one installed. */
   updateAvailable: boolean
+}
+
+/** A package's `needs` as the catalog writes them, without their `why` texts. */
+export interface CatalogNeeds {
+  connections: { slot: string; providers: string[]; required: boolean }[]
+  /** `when` is the catalog's plain words ("when the sources setting includes adzuna"), or null. */
+  secrets: { key: string; when: string | null }[]
+  /** `kind` is `documents` (the name is a folder) or `setting`. */
+  inputs: { name: string; kind: string; required: boolean }[]
+  runtimes: string[]
 }
 
 /**

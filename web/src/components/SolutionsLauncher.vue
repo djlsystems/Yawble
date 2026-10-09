@@ -26,7 +26,7 @@ import SolutionWizard from './SolutionWizard.vue';
  * With nothing installed it says how solutions arrive: a package a team built, whose Review and
  * install link appears in that team's Activity feed and on its backlog item - or install from a
  * folder, which is offered here as well, through the install dialog and the wizard Admin -> Plugins
- * opens (`InstallFromFolderDialog`).
+ * opens (`InstallFromFolderDialog`) - or Get started, the published packages.
  *
  * GET STARTED, the second tab, lists the published package catalog (`GetStartedTab`). Its Get hands
  * back the folder the Host fetched the package into, and this opens on it exactly what Install from
@@ -140,7 +140,7 @@ watch(() => wizard.value.open, (showing, was) => {
           <p class="q-mb-sm">No solutions are installed yet.</p>
           <p class="q-mb-sm">
             A solution is a package a team built: a whole team in one package, with its members, schedules, skills and a site to use it from.
-            There are two ways to get one:
+            There are three ways to get one:
           </p>
           <ul class="q-my-none">
             <li>
@@ -149,6 +149,7 @@ watch(() => wizard.value.open, (showing, was) => {
               <strong>Review and install</strong> link that opens the install wizard here.
             </li>
             <li><strong>Install from a folder</strong> that holds a <code>solution.json</code>, with the button above.</li>
+            <li><strong>Get started</strong>, the tab above, lists the packages published for this product: Get one and its install opens here.</li>
           </ul>
         </div>
 

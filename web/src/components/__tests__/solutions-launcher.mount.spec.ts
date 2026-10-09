@@ -176,6 +176,18 @@ describe('the solutions launcher', () => {
     expect(bodyFind('[data-install-from-folder]')).not.toBeNull();
   });
 
+  it('names Get started as the third way to get a solution when none is installed', async () => {
+    await launcher([]);
+
+    const empty = bodyFind('[data-solutions-empty]')?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(empty).toContain('There are three ways to get one:');
+    expect([...bodyFind('[data-solutions-empty]')!.querySelectorAll('li strong:first-child')].map((way) => way.textContent)).toEqual([
+      'Ask the Concierge',
+      'Install from a folder',
+      'Get started',
+    ]);
+  });
+
   it('lays the tiles out on the shared grid: head, lines, then the actions', async () => {
     await launcher([launcherRow(), launcherRow({ team: 'news', teamName: 'News desk' })]);
 

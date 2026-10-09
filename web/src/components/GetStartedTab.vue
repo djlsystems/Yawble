@@ -3,13 +3,14 @@ import { onMounted, ref } from 'vue';
 import { fetchMarketplacePackage, getMarketplace, refreshMarketplace } from '../api/client';
 import { listDocumentsRoot } from '../api/documents';
 import type { MarketplaceCatalog, MarketplacePackage } from '../api/types';
-import { fetchedFolder, installedWords, kindWords, notCheckedWords, refusedWords, unreachableWords } from '../lib/marketplace';
+import { fetchedFolder, installedWords, kindWords, notCheckedWords, plainNeeds, refusedWords, unreachableWords } from '../lib/marketplace';
 import { whenWords } from '../lib/solutionPanel';
 
 /**
  * SOLUTIONS > GET STARTED: the published package catalog as the Host read it, one tile per package -
- * its name, summary, kind, version, what it needs in words, and whether this instance has it - and
- * Refresh, which asks the Host to read the catalog again.
+ * its name, summary, kind, version, what it needs in a few short plain lines (the full lines under a
+ * Details expander, closed until asked), and whether this instance has it - and Refresh, which asks
+ * the Host to read the catalog again.
  *
  * GET FETCHES, IT NEVER INSTALLS: the Host downloads and checks the package and unpacks it into the
  * documents; `get` hands the folder to the caller, which opens the install wizard (a solution) or the
@@ -26,6 +27,7 @@ const loading = ref(false);
 const unreachable = ref('');
 const getting = ref('');
 const refused = ref<{ id: string; text: string } | null>(null);
+const details = ref<Record<string, boolean>>({});
 
 async function read(how: () => Promise<MarketplaceCatalog>) {
   loading.value = true;
@@ -98,13 +100,27 @@ async function get(pkg: MarketplacePackage) {
         </div>
         <div class="os-tile-line os-text-muted" data-package-kind>{{ kindWords(pkg.kind) }}</div>
         <div class="os-tile-line get-started-text" data-package-summary>{{ pkg.summary }}</div>
-        <div v-if="pkg.needs.length" class="os-tile-line get-started-text" data-package-needs>
-          <div class="os-text-muted">It needs:</div>
-          <ul class="q-my-none q-pl-md">
+        <div v-if="plainNeeds(pkg.catalogNeeds).length" class="os-tile-line get-started-text" data-package-needs>
+          <div v-for="(need, i) in plainNeeds(pkg.catalogNeeds)" :key="i" data-package-need>{{ need }}</div>
+        </div>
+        <div v-else class="os-tile-line os-text-muted" data-package-needs>It needs nothing more.</div>
+        <div v-if="pkg.needs.length" class="os-tile-line get-started-text">
+          <q-btn
+            flat
+            dense
+            no-caps
+            size="sm"
+            class="get-started-details"
+            :icon="details[pkg.id] ? 'keyboard_arrow_up' : 'keyboard_arrow_down'"
+            label="Details"
+            :aria-expanded="details[pkg.id] ? 'true' : 'false'"
+            data-package-details-toggle
+            @click="details[pkg.id] = !details[pkg.id]"
+          />
+          <ul v-if="details[pkg.id]" class="q-my-none q-pl-md" data-package-details>
             <li v-for="(need, i) in pkg.needs" :key="i">{{ need }}</li>
           </ul>
         </div>
-        <div v-else class="os-tile-line os-text-muted" data-package-needs>It needs nothing more.</div>
         <div class="os-tile-line" :class="pkg.updateAvailable ? 'text-warning' : pkg.installed ? 'text-positive' : 'os-text-muted'" data-package-installed>
           {{ installedWords(pkg) }}
         </div>
@@ -156,6 +172,10 @@ async function get(pkg: MarketplacePackage) {
 
 .get-started-text {
   overflow-wrap: anywhere;
+}
+
+.get-started-details {
+  margin-left: -6px;
 }
 
 .get-started-actions {

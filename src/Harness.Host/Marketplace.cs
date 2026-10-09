@@ -82,15 +82,40 @@ public sealed class MarketplaceRefusal(string sentence, int status = StatusCodes
         new($"The package is larger than {maxBytes / (1024 * 1024)} MB, so it was not fetched.");
 }
 
-/// <summary>One package as the catalog lists it (schema 1), with what it needs already in words.</summary>
+/// <summary>One package as the catalog lists it (schema 1), with what it needs already in words, and
+/// the catalog's own needs fields beside them.</summary>
 public sealed record CatalogPackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
-    Uri DownloadUrl, string Sha256, long Bytes);
+    Uri DownloadUrl, string Sha256, long Bytes, CatalogNeeds CatalogNeeds);
+
+/// <summary>
+/// A package's <c>needs</c> as the catalog writes them, without the <c>why</c> texts (those are in the
+/// sentences): the console words a card's short lines from these, so a provider id is never shown to a
+/// person as it is.
+/// </summary>
+public sealed record CatalogNeeds(
+    IReadOnlyList<CatalogConnection> Connections,
+    IReadOnlyList<CatalogSecret> Secrets,
+    IReadOnlyList<CatalogInput> Inputs,
+    IReadOnlyList<string> Runtimes)
+{
+    public static readonly CatalogNeeds None = new([], [], [], []);
+}
+
+public sealed record CatalogConnection(string Slot, IReadOnlyList<string> Providers, bool Required);
+
+/// <summary><paramref name="When"/> is the catalog's plain words, "when the sources setting includes
+/// adzuna", or null for a secret always needed.</summary>
+public sealed record CatalogSecret(string Key, string? When);
+
+/// <summary><paramref name="Kind"/> is <c>documents</c> (the name is a folder) or <c>setting</c>.</summary>
+public sealed record CatalogInput(string Name, string Kind, bool Required);
 
 /// <summary>One package of <c>GET /api/marketplace</c>.</summary>
 public sealed record MarketplacePackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
-    bool Installed, string? InstalledVersion, IReadOnlyList<string> InstalledOn, bool UpdateAvailable);
+    bool Installed, string? InstalledVersion, IReadOnlyList<string> InstalledOn, bool UpdateAvailable,
+    CatalogNeeds CatalogNeeds);
 
 /// <summary>What <c>GET /api/marketplace</c> and its refresh answer. <paramref name="Checked"/> false
 /// is "not known", never an empty catalog, and <paramref name="Reason"/> says why.</summary>
@@ -363,7 +388,8 @@ public sealed partial class Marketplace(
         return new MarketplacePackage(
             package.Id, package.Kind, package.Name, package.Summary, package.Version, package.Needs,
             version is not null, version, on,
-            version is not null && ReleaseCheck.Compare(package.Version, version) > 0);
+            version is not null && ReleaseCheck.Compare(package.Version, version) > 0,
+            package.CatalogNeeds);
     }
 
     private static MarketplaceStatus NotChecked(string reason, DateTimeOffset? at) => new(false, reason, at, []);
@@ -458,7 +484,35 @@ public sealed partial class Marketplace(
 
         return new CatalogPackage(
             id, kind, Text(entry, "name", at), Text(entry, "summary", at), version,
-            Needs(entry), url, sha256, bytes);
+            Needs(entry), url, sha256, bytes, Fields(entry));
+    }
+
+    /// <summary>The catalog's needs fields as written, each list empty when the catalog has none.</summary>
+    public static CatalogNeeds Fields(JsonElement entry)
+    {
+        if (!entry.TryGetProperty("needs", out var needs) || needs.ValueKind != JsonValueKind.Object) return CatalogNeeds.None;
+
+        IEnumerable<JsonElement> Each(string field) =>
+            needs.TryGetProperty(field, out var list) && list.ValueKind == JsonValueKind.Array
+                ? list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object)
+                : [];
+
+        static string? Field(JsonElement from, string field) =>
+            from.TryGetProperty(field, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+        static bool Required(JsonElement from) =>
+            from.TryGetProperty("required", out var value) && value.ValueKind == JsonValueKind.True;
+
+        static IReadOnlyList<string> Strings(JsonElement from, string field) =>
+            from.TryGetProperty(field, out var list) && list.ValueKind == JsonValueKind.Array
+                ? [.. list.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.String).Select(p => p.GetString()!)]
+                : [];
+
+        return new CatalogNeeds(
+            [.. Each("connections").Select(c => new CatalogConnection(Field(c, "slot") ?? "", Strings(c, "providers"), Required(c)))],
+            [.. Each("secrets").Select(s => new CatalogSecret(Field(s, "key") ?? "", string.IsNullOrWhiteSpace(Field(s, "when")) ? null : Field(s, "when")))],
+            [.. Each("inputs").Select(i => new CatalogInput(Field(i, "name") ?? "", Field(i, "kind") ?? "", Required(i)))],
+            Strings(needs, "runtimes"));
     }
 
     /// <summary>What a package needs, each in a sentence a person reads as text.</summary>
@@ -488,12 +542,17 @@ public sealed partial class Marketplace(
 
         foreach (var connection in Each(needs, "connections"))
         {
-            var slot = Field(connection, "slot") ?? "an";
+            // A SLOT NAMED "account" is not said twice: "an account connected", never "a account account".
+            var slot = Field(connection, "slot");
+            var account = string.IsNullOrWhiteSpace(slot) ? "account"
+                : slot.EndsWith("account", StringComparison.OrdinalIgnoreCase) ? slot
+                : $"{slot} account";
+            var article = "aeiouAEIOU".Contains(account[0]) ? "an" : "a";
             var providers = connection.TryGetProperty("providers", out var list) && list.ValueKind == JsonValueKind.Array
                 ? list.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.String).Select(p => p.GetString()!).ToList()
                 : [];
             var through = providers.Count > 0 ? $" ({Or(providers)})" : "";
-            sentences.Add(With($"{(Required(connection) ? "Needs" : "Can use")} a {slot} account connected{through}", Field(connection, "why")));
+            sentences.Add(With($"{(Required(connection) ? "Needs" : "Can use")} {article} {account} connected{through}", Field(connection, "why")));
         }
 
         foreach (var secret in Each(needs, "secrets"))
@@ -552,7 +611,9 @@ public static class MarketplaceEndpoints
             + "catalog - and `reason` says why in a sentence (before a read answered, after one failed, with "
             + "no catalog address, with the tenant setting marketplace.check off, or a schema this build does "
             + "not read). Each package is `{ id, kind (solution|plugin), name, summary, version, needs "
-            + "(sentences, as text), installed, installedVersion, installedOn (the teams a solution is "
+            + "(sentences, as text), catalogNeeds (the catalog's needs fields without their `why`: "
+            + "`{ connections: [{ slot, providers, required }], secrets: [{ key, when }], inputs: [{ name, kind, "
+            + "required }], runtimes }`), installed, installedVersion, installedOn (the teams a solution is "
             + "installed on), updateAvailable }`; a solution matches by package id on each team, a plugin "
             + "by id and its active version, and `updateAvailable` is true when the catalog's version is newer.";
 

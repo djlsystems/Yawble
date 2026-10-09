@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 //
 // SOLUTIONS > GET STARTED: the package catalog the Host read (`GET /api/marketplace`), one tile per
-// package - name, summary, kind, version, what it needs in words, and Installed / Update available -
+// package - name, summary, kind, version, what it needs in a few short plain lines (the Host's full
+// sentences under Details, closed by default), and Installed / Update available -
 // with Refresh (`POST /api/marketplace/refresh`). Get fetches the package (`POST
 // /api/marketplace/{id}/fetch`) and opens on the folder it answered what Install from a folder
 // opens: the wizard for a solution, the plugin install dialog for a plugin. Nothing is installed by
@@ -14,6 +15,7 @@ import type { MarketplaceCatalog, MarketplacePackage } from '../../api/types';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, field, settle } from '../../test/formProbe';
 import { fakeHost, reply, sent, wizardRoutes, type Call, type Route } from '../../test/solutionFixtures';
+import { HostSentences, published } from '../../test/catalogFixtures';
 
 const Root = '/data/documents';
 
@@ -23,6 +25,7 @@ function pkg(fields: Partial<MarketplacePackage> & Pick<MarketplacePackage, 'id'
     summary: `${fields.name} does its one job.`,
     version: '1.0.0',
     needs: [],
+    catalogNeeds: { connections: [], secrets: [], inputs: [], runtimes: [] },
     installed: false,
     installedVersion: null,
     installedOn: [],
@@ -36,7 +39,13 @@ const Mail = pkg({
   name: 'Mail',
   version: '1.2.0',
   summary: 'Reads your mailbox and drafts replies.',
-  needs: ['A mailbox connection: IMAP, Microsoft or Google.', 'python3 in the image.'],
+  needs: ['Needs a mailbox account connected (imap, microsoft or google).', 'Needs python3 on the instance.'],
+  catalogNeeds: {
+    connections: [{ slot: 'mailbox', providers: ['imap', 'microsoft', 'google'], required: true }],
+    secrets: [],
+    inputs: [],
+    runtimes: ['python3'],
+  },
 });
 const JobTracker = pkg({
   id: 'job-tracker',
@@ -95,6 +104,12 @@ async function getStarted() {
 
 const tile = (id: string) => bodyFind(`[data-catalog-package="${id}"]`)!;
 const part = (id: string, name: string) => tile(id).querySelector(`[data-package-${name}]`)?.textContent?.trim();
+const needLines = (id: string) => [...tile(id).querySelectorAll('[data-package-need]')].map((line) => line.textContent?.trim());
+const detailLines = (id: string) => [...tile(id).querySelectorAll('[data-package-details] li')].map((line) => line.textContent?.trim());
+
+/** Every provider id the Host knows: `PluginConnectionSlot.Parse` takes google, microsoft, custom and imap (and custom-<id>). */
+const HostProviders = ['google', 'microsoft', 'custom', 'imap'];
+const ProviderId = new RegExp(`\\b(${HostProviders.join('|')})\\b`);
 
 describe('Solutions > Get started', () => {
   it('lists each package with its name, summary, kind, version, needs and whether it is installed', async () => {
@@ -107,10 +122,7 @@ describe('Solutions > Get started', () => {
     expect(part('mail', 'version')).toBe('1.2.0');
     expect(part('mail', 'kind')).toBe('Solution');
     expect(part('mail', 'summary')).toBe('Reads your mailbox and drafts replies.');
-    expect([...tile('mail').querySelectorAll('[data-package-needs] li')].map((li) => li.textContent)).toEqual([
-      'A mailbox connection: IMAP, Microsoft or Google.',
-      'python3 in the image.',
-    ]);
+    expect(needLines('mail')).toEqual(['Needs a mailbox: Gmail, iCloud, Yahoo, Outlook or another IMAP mailbox', 'Runs on Python 3']);
     expect(part('mail', 'installed')).toBe('Not installed');
 
     expect(part('job-tracker', 'installed')).toBe('Installed 1.1.0 on job-tracker · Update available: 1.2.0');
@@ -199,13 +211,96 @@ describe('Solutions > Get started', () => {
   });
 
   it('shows package text that looks like HTML as its characters', async () => {
-    serve(catalogRoute(read([pkg({ id: 'odd', name: '<i>Odd</i>', summary: '<img src=x onerror=alert(1)>', needs: ['<b>a key</b>'] })])));
+    serve(
+      catalogRoute(
+        read([
+          pkg({
+            id: 'odd',
+            name: '<i>Odd</i>',
+            summary: '<img src=x onerror=alert(1)>',
+            needs: ['<b>a key</b>'],
+            catalogNeeds: { connections: [], secrets: [], inputs: [{ name: '<b>Docs</b>', kind: 'documents', required: true }], runtimes: [] },
+          }),
+        ]),
+      ),
+    );
 
     await getStarted();
+    tile('odd').querySelector<HTMLElement>('[data-package-details-toggle]')!.click();
+    await settle();
 
     expect(part('odd', 'name')).toBe('<i>Odd</i>');
     expect(part('odd', 'summary')).toBe('<img src=x onerror=alert(1)>');
-    expect(tile('odd').querySelector('[data-package-needs] li')?.textContent).toBe('<b>a key</b>');
+    expect(needLines('odd')).toEqual(['Needs a file in <b>Docs</b>']);
+    expect(detailLines('odd')).toEqual(['<b>a key</b>']);
     expect(tile('odd').querySelector('img, b, [data-package-name] i')).toBeNull();
+  });
+
+  it('words the three published packages in short plain lines, by what a person has, with no provider id', async () => {
+    serve(catalogRoute(read([published('job-tracker'), published('mail'), published('sample-whoami-go')])));
+
+    await getStarted();
+
+    expect(needLines('sample-whoami-go')).toEqual(['Needs a Google account']);
+    expect(needLines('mail')).toEqual(['Needs a mailbox: Gmail, iCloud, Yahoo, Outlook or another IMAP mailbox']);
+    expect(needLines('job-tracker')).toEqual([
+      'Needs a file in Resume',
+      'Needs keys set on the Host for some of its settings: sources',
+      'Runs on Python 3',
+    ]);
+    for (const id of ['job-tracker', 'mail', 'sample-whoami-go']) {
+      const text = tile(id).textContent ?? '';
+      expect(text).not.toMatch(ProviderId);
+      expect(text).not.toMatch(/account account/);
+      // OPTIONAL SETTINGS are asked in the install wizard, not listed on the card.
+      expect(text).not.toMatch(/setting (mode|sendAllowlist|markRead|moveTo|userinfoUrl|sources) at install/);
+      expect(tile(id).querySelector('[data-package-details]')).toBeNull();
+    }
+  });
+
+  it('opens Details on a card to show the full lines, closed again by default on the others', async () => {
+    serve(catalogRoute(read([published('job-tracker'), published('mail'), published('sample-whoami-go')])));
+    await getStarted();
+
+    const toggle = tile('job-tracker').querySelector<HTMLElement>('[data-package-details-toggle]')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    toggle.click();
+    await settle();
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(detailLines('job-tracker')).toEqual(HostSentences['job-tracker']);
+    expect(tile('mail').querySelector('[data-package-details]')).toBeNull();
+
+    tile('mail').querySelector<HTMLElement>('[data-package-details-toggle]')!.click();
+    await settle();
+    expect(detailLines('mail')).toEqual(HostSentences.mail);
+  });
+
+  it('reads a provider id it has no words for as itself, never blank', async () => {
+    const odd = pkg({
+      id: 'odd',
+      name: 'Odd',
+      catalogNeeds: {
+        connections: [
+          { slot: 'account', providers: ['acme'], required: true },
+          { slot: 'other', providers: ['google', 'custom-acme'], required: false },
+          { slot: 'mailbox', providers: ['imap', 'acme'], required: true },
+        ],
+        secrets: [{ key: 'ALWAYS', when: null }],
+        inputs: [],
+        runtimes: ['deno'],
+      },
+    });
+    serve(catalogRoute(read([odd])));
+
+    await getStarted();
+
+    expect(needLines('odd')).toEqual([
+      'Needs an acme account',
+      'Can use a Google or custom-acme account',
+      'Needs a mailbox: Gmail, iCloud, Yahoo, acme or another IMAP mailbox',
+      'Needs keys set on the Host',
+      'Runs on deno',
+    ]);
   });
 });

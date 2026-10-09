@@ -726,8 +726,7 @@ public sealed record PluginConnectionSlot(
 
         foreach (var provider in providersElement.EnumerateArray().Select(p => p.GetString()!))
         {
-            if (provider is not (ConnectionProviders.Google or ConnectionProviders.Microsoft or ConnectionProviders.Custom or MailboxSettings.Kind)
-                && !ConnectionProviders.IsCustomId(provider))
+            if (!ConnectionProviders.ManifestProviders.Contains(provider) && !ConnectionProviders.IsCustomId(provider))
             {
                 return (null, $"`connections.{name}.providers` names '{provider}', which is not a provider this Host knows (google, microsoft, custom, custom-<id>, or imap for a mailbox).");
             }

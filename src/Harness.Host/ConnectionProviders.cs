@@ -106,6 +106,10 @@ public static class ConnectionProviders
 
     public static IReadOnlyList<string> BuiltIns { get; } = [Google, Microsoft];
 
+    /// <summary>Every provider word a plugin manifest's <c>connections.&lt;slot&gt;.providers</c> may
+    /// name, besides <c>custom-&lt;id&gt;</c>. The console's provider wording table has words for each.</summary>
+    public static IReadOnlyList<string> ManifestProviders { get; } = [Google, Microsoft, Custom, MailboxSettings.Kind];
+
     public static bool IsBuiltIn(string id) => id is Google or Microsoft;
 
     /// <summary><c>custom-</c> then lowercase letters, digits and hyphens, at most 40 characters.</summary>
