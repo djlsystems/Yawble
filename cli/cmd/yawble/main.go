@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/djlsystems/yawble/cli/internal/cli"
+	"github.com/djlsystems/yawble/cli/internal/maskedinput"
 	"github.com/djlsystems/yawble/cli/internal/release"
 	"golang.org/x/term"
 )
@@ -46,11 +47,23 @@ func main() {
 	}), os.Args[1:]))
 }
 
-// readHidden shows prompt on stderr and reads a line from the terminal without echoing it, so a
-// secret typed at `yawble secret set NAME` is never on screen.
+// readHidden shows prompt on stderr and reads a line from the terminal with one * echoed per
+// character, so a secret typed or pasted at `yawble secret set NAME` is never on screen but the
+// person sees that the paste landed. A terminal that cannot be put in raw mode falls back to
+// reading with no echo at all.
 func readHidden(prompt string) (string, error) {
 	fmt.Fprint(os.Stderr, prompt)
-	value, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fd := int(os.Stdin.Fd())
+
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		value, err := term.ReadPassword(fd)
+		fmt.Fprintln(os.Stderr)
+		return string(value), err
+	}
+
+	value, err := maskedinput.Read(os.Stdin, os.Stderr)
+	_ = term.Restore(fd, state)
 	fmt.Fprintln(os.Stderr)
-	return string(value), err
+	return value, err
 }

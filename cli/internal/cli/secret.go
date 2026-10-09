@@ -73,7 +73,7 @@ func readSecretValue(deps Deps, name string) (string, error) {
 		if deps.ReadSecret == nil {
 			return "", UsageError{fmt.Sprintf("cannot ask for %s here; pipe it in: <command> | yawble secret set %s", name, name)}
 		}
-		return deps.ReadSecret(fmt.Sprintf("Value for %s (typing is hidden): ", name))
+		return deps.ReadSecret(fmt.Sprintf("Value for %s (shown as *): ", name))
 	}
 	if deps.Stdin == nil {
 		return "", UsageError{fmt.Sprintf("no value for %s: pipe it in (<command> | yawble secret set %s) or run this in a terminal to be asked", name, name)}

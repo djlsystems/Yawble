@@ -245,7 +245,7 @@ func readCredentialValue(deps Deps, name string) (string, error) {
 		if deps.ReadSecret == nil {
 			return "", UsageError{fmt.Sprintf("cannot ask for the credential here; pipe it in: <command> | yawble agents credential set %s", name)}
 		}
-		return deps.ReadSecret(fmt.Sprintf("Credential for %s (typing is hidden): ", name))
+		return deps.ReadSecret(fmt.Sprintf("Credential for %s (shown as *): ", name))
 	}
 	if deps.Stdin == nil {
 		return "", UsageError{fmt.Sprintf("no credential for %s: pipe it in (<command> | yawble agents credential set %s) or run this in a terminal to be asked", name, name)}

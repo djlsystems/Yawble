@@ -187,7 +187,7 @@ func TestCredentialSetAsksAtAHiddenPromptOnATerminal(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
-	if !strings.Contains(asked, "hidden") || len(h.requests) != 1 || h.requests[0]["value"] != secretValue {
+	if !strings.Contains(asked, "shown as *") || len(h.requests) != 1 || h.requests[0]["value"] != secretValue {
 		t.Errorf("prompt %q, requests %+v", asked, h.requests)
 	}
 }

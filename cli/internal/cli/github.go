@@ -85,7 +85,7 @@ func setUpGitHub(ctx context.Context, deps Deps, out io.Writer) (bool, error) {
 		return false, UsageError{"cannot ask for the token here; pipe it in: <command> | yawble secret set GH_TOKEN"}
 	}
 	for try := 0; try < 3; try++ {
-		token, err := deps.ReadSecret("Paste the token (typing is hidden; Enter to skip): ")
+		token, err := deps.ReadSecret("Paste the token (shown as *; Enter to skip): ")
 		if err != nil {
 			return false, err
 		}
