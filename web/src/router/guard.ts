@@ -46,10 +46,10 @@ export async function sessionGuard(to: RouteLocationNormalized): Promise<true | 
     }
   }
 
-  // Someone already signed in has no business on the credential page. The landing page is
-  // deliberately NOT redirected: it is the product's front page, and it shows a Console button
-  // rather than a form once there is a session.
-  if (to.path === '/login' && session.user) return returnPath(to.query);
+  // Someone already signed in has no business on the front door: `/` and `/login` go on to where
+  // they were headed, decided here - the session is already known - so the sign-in form never
+  // draws for a moment before the page's own redirect, which a person saw as a flash.
+  if ((to.path === '/' || to.path === '/login') && session.user) return returnPath(to.query);
 
   if (isPublic) return true;
 
