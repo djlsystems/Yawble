@@ -171,7 +171,7 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     tab: 'system',
     kind: 'toggle',
     label: 'Read the package catalog',
-    hint: 'Reads the published package catalog about twice a day, so Solutions > Get started can list what may be added and whether each is installed or has an update. Nothing is fetched or installed by itself.',
+    hint: 'Reads the published package catalog about twice a day, so Marketplace > Browse can list what may be added and whether each is installed or has an update. Nothing is fetched or installed by itself.',
   },
   {
     name: SystemPackages,

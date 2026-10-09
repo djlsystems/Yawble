@@ -113,7 +113,8 @@ function dismiss() {
             them until it is ready for your questions.
           </li>
           <li>
-            <strong>Then ask the Concierge for a team</strong>, or use <strong>New Team</strong>.
+            <strong>Then ask the Concierge for a team</strong>, use <strong>New Team</strong>, or get a ready-made one from
+            <strong>Marketplace</strong> on the ribbon.
           </li>
         </ol>
       </q-card-section>

@@ -24,7 +24,7 @@ import type { SolutionCheck } from '../api/types';
  *
  * Rescan re-reads the directory; View manifest shows `plugin.json` read-only; Install from a folder
  * installs a built plugin that is already inside the instance - through the plugin install dialog
- * (`PluginInstallDialog`, on the install dialog Solutions opens too), whose picker opens in the teams' Documents - and shows the
+ * (`PluginInstallDialog`, on the install dialog Marketplace opens too), whose picker opens in the teams' Documents - and shows the
  * Host's verdict, which refuses an existing version unless Replace is ticked. Remove takes one version, or
  * the whole plugin, with `plugin remove`'s rules: it asks first, and the Host refuses the
  * whole plugin while members are hired on it (naming them) and the active version while others are

@@ -88,8 +88,9 @@ export const TeamDocumentsAction = 'team-documents';
 export const TeamSitesAction = 'team-sites';
 
 /**
- * Solutions, the launcher: one tile per team installed from a solution package, each opening its
- * site and its control panel. NEAR THE START and NOT UNDER ADMIN: it is where a person goes every
+ * Marketplace (the action keeps its old name, `solutions`): the package catalog to browse and get
+ * from, and one tile per team installed from a solution package, each opening its site and its
+ * control panel. NEAR THE START and NOT UNDER ADMIN: it is where a person goes every
  * day, not a place they configure the instance. UNPREFIXED, like `backlog`: it needs no active team.
  */
 export const SolutionsAction = 'solutions';
@@ -108,8 +109,17 @@ export const Ribbon: RibbonSpec = {
     },
     {
       id: 'solutions',
-      label: 'Solutions',
-      items: [{ kind: 'button', action: SolutionsAction, label: 'Solutions', icon: 'apps', size: 'large' }],
+      label: 'Marketplace',
+      items: [
+        {
+          kind: 'button',
+          action: SolutionsAction,
+          label: 'Marketplace',
+          icon: 'apps',
+          size: 'large',
+          tooltip: 'Marketplace: browse and get packages, and manage the ones installed',
+        },
+      ],
     },
     {
       id: 'teams',

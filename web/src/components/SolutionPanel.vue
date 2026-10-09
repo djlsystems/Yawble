@@ -540,8 +540,8 @@ function closeUninstall() {
   <q-dialog v-model="open" no-route-dismiss>
     <q-card class="os-dialog-xl solution-panel" data-solution-panel>
       <q-card-section class="row items-center q-pb-none no-wrap">
-        <q-btn flat dense round icon="arrow_back" aria-label="All solutions" data-panel-back @click="emit('launcher')">
-          <q-tooltip>All solutions</q-tooltip>
+        <q-btn flat dense round icon="arrow_back" aria-label="Back to Marketplace" data-panel-back @click="emit('launcher')">
+          <q-tooltip>Back to Marketplace</q-tooltip>
         </q-btn>
         <div class="os-dialog-title ellipsis q-ml-xs" data-panel-title>
           <template v-if="panel">{{ panel.name }} <span class="os-text-muted text-body2">{{ panel.version }}</span></template>

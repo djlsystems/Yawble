@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// INSTALL FROM A FOLDER: ONE DIALOG FOR SOLUTIONS AND FOR ADMIN > PLUGINS. A typed folder with
+// INSTALL FROM A FOLDER: ONE DIALOG FOR MARKETPLACE > ADVANCED AND FOR ADMIN > PLUGINS. A typed folder with
 // Browse, the screen's own options (Replace, for a plugin), and a place for uploading a package.
 //
 // ITS PICKER OPENS IN THE TEAMS' DOCUMENTS, where a package is uploaded, and goes no higher: the
@@ -173,10 +173,12 @@ describe('The install picker', () => {
   });
 });
 
-describe('Solutions and Plugins share the one install dialog', () => {
-  it('Solutions opens the shared dialog, with no Replace, and its Install opens the wizard on the folder', async () => {
+describe('Marketplace and Plugins share the one install dialog', () => {
+  it('Marketplace > Advanced opens the shared dialog, with no Replace, and its Install opens the wizard on the folder', async () => {
     const wrapper = await mountDialog(SolutionsLauncher, {});
 
+    bodyFind('[data-solutions-tab="advanced"]')!.click();
+    await settle();
     bodyFind('[data-install-from-folder]')!.click();
     await settle();
 
@@ -314,14 +316,18 @@ describe('Upload a package (.zip)', () => {
   });
 
   it.each([
-    ['Solutions', () => mountDialog(SolutionsLauncher, {}, { pinia: false }), '[data-install-from-folder]'],
+    ['Marketplace', () => mountDialog(SolutionsLauncher, {}, { pinia: false }), '[data-install-from-folder]'],
     ['Plugins', () => mountDialog(PluginsDialog, {}, { pinia: false }), null],
   ] as const)('works from %s', async (_screen, mountScreen, opener) => {
     setActivePinia(createPinia());
     useConsoleStore().activeTeamId = asTeamId('alpha');
     const wrapper = await mountScreen();
     await settle();
-    if (opener) bodyFind(opener)!.click();
+    if (opener) {
+      bodyFind('[data-solutions-tab="advanced"]')!.click();
+      await settle();
+      bodyFind(opener)!.click();
+    }
     else button('Install from a folder…').click();
     await settle();
     await settle();

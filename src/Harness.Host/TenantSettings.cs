@@ -290,7 +290,7 @@ public sealed class TenantSettings
                 Choices: ["off", "on"]),
             new(MarketplaceCheckName, TenantSettingKind.Choice, "on", "Marketplace:Check",
                 "Whether the instance reads the published package catalog about every 12 hours, so "
-                + "Solutions can list the packages that may be added and whether each is installed or has "
+                + "Marketplace can list the packages that may be added and whether each is installed or has "
                 + "an update. It reads the catalog only; nothing is fetched or installed by itself. "
                 + "Applies at the next read.",
                 Choices: ["off", "on"]),
