@@ -469,6 +469,17 @@ public sealed class MarketplaceTests : IDisposable
             }
 
             Assert.True(File.Exists(Path.Combine(dataRoot, "documents", "Marketplace", "mail-2.0.3", "solution.json")));
+
+            // THE SEAM THE WEB'S GET CROSSES: the documents root `GET /api/documents` answers, joined
+            // with the folder the fetch answered, is a folder the install wizard's check takes - the
+            // same form Upload a package (.zip) fills Folder with.
+            using (var documents = JsonDocument.Parse(await person.GetStringAsync("/api/documents", Ct)))
+            {
+                var folder = $"{documents.RootElement.GetProperty("root").GetString()!.TrimEnd('/')}/Marketplace/mail-2.0.3";
+                var check = await person.PostAsJsonAsync("/api/solutions/check", new { folder }, Ct);
+                Assert.True(check.StatusCode == HttpStatusCode.OK, await check.Content.ReadAsStringAsync(Ct));
+            }
+
             var rows = await factory.Services.GetRequiredService<ITenantLog>().ReadAsync(ct: Ct);
             Assert.Contains(rows.Events, e => e.Action == TenantActions.MarketplaceFetched && e.Subject == "mail");
 
