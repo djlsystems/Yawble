@@ -1381,9 +1381,10 @@ public static class BuiltInSkills
 
             ## 9. Where the code lives and how it ships
 
-            A plugin lives in its own repository, built by a team from a template:
-            `samples/plugins/sample-echo-go` for Go, `samples/plugins/sample-echo` for .NET (see 11
-            for which). The person installs a built version with the operator CLI's plugin install
+            A plugin lives in its own repository, built by a team from a template: for Go the Go
+            plugin template, the `sample-echo-go` plugin on the marketplace; for .NET the
+            marketplace's `sample-echo` (see 11 for which). Plugins to install are on the marketplace
+            too. The person installs a built version with the operator CLI's plugin install
             command, on the machine that runs the platform; a version built inside the instance, in a
             team's worktree or your workspace, is installed where it is with `--from-instance` and
             its path, or from Admin, Plugins, "Install from a folder", with no copy out of the
@@ -1825,7 +1826,7 @@ public static class BuiltInSkills
 
             ## 5. Worked example: a plugin's data, an action, a member woken
 
-            `samples/sites/triage` in the platform's repository is this example, ready to publish.
+            The triage site on the marketplace is this example, ready to publish.
 
             1. **Data.** A plugin member of the team writes each item it finds, one record per line
                on its output:

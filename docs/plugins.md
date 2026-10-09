@@ -158,37 +158,18 @@ per refused directory, naming the field that is wrong. `GET /api/plugins` lists 
 person can still rescan with `POST /api/plugins/rescan`. A member already pointing at the plugin runs
 the new version on its next wake.
 
-### Example: sample-echo
+### Plugins to install, and the template to build one
 
-`samples/plugins/sample-echo` is the proof-of-concept plugin. It is deterministic: it upper-cases or
-reverses each instruction's text. It is a .NET console app with no dependencies, and its launcher
-runs it with `dotnet`, which the image guarantees.
+A plugin to install comes from the marketplace, [yawble.ai](https://yawble.ai), not from this
+repository: `sample-echo` (the proof-of-concept plugin: deterministic, it upper-cases or reverses
+each instruction's text; a .NET console app its launcher runs with `dotnet`), `sample-echo-go`,
+WhoAmI and the rest are packages there, each with its own build and install steps. This repository
+holds no plugin to install. Its tests build their own copies as test data under `tests/Fixtures/`,
+which is never listed, built into an image or shipped.
 
-Run the build **from the repository root**. The sample's project takes its target framework from
-the repository's build properties, so a copy of `samples/` built anywhere else fails with
-`NETSDK1013`. The build writes to a folder **outside** the repository, so it leaves nothing untracked.
-
-```sh
-# From the repository root: build version 0.1.0 outside the repository, then install it.
-B=~/plugins-build/sample-echo/0.1.0
-dotnet publish samples/plugins/sample-echo/src -c Release -o "$B/lib"
-cp samples/plugins/sample-echo/plugin.json samples/plugins/sample-echo/sample-echo "$B/"
-cp -r samples/plugins/sample-echo/skills "$B/"
-yawble plugin install "$B"
-```
-
-On Windows, in PowerShell:
-
-```powershell
-# From the repository root.
-$B = "$HOME\plugins-build\sample-echo\0.1.0"
-dotnet publish samples/plugins/sample-echo/src -c Release -o "$B\lib"
-Copy-Item samples/plugins/sample-echo/plugin.json, samples/plugins/sample-echo/sample-echo $B
-Copy-Item -Recurse samples/plugins/sample-echo/skills $B
-yawble plugin install $B
-```
-
-It prints the Host's verdict:
+A team building a plugin starts from the Go template, `templates/plugin-go` (see
+[The Go template](#the-go-template)), and installs the version folder it builds with
+`yawble plugin install`. That prints the Host's verdict, here for the .NET `sample-echo` 0.1.0:
 
 ```
 copied sample-echo 0.1.0 to /data/plugins/sample-echo/0.1.0 and made it the active version
@@ -197,7 +178,7 @@ the Host reports sample-echo 0.1.0 installed; hire it as plugin:sample-echo
 
 What has been verified, and what has not:
 
-- **Verified here, on Linux.** The build above, with the launcher's execute bit removed as a Windows
+- **Verified here, on Linux.** A build of the .NET `sample-echo`, with the launcher's execute bit removed as a Windows
   copy leaves it, then the real `yawble` binary. The `podman` it ran was a stand-in script that ran
   each `exec` locally, mapped `/data` to a temporary data root, and turned `cp` into a local copy. The
   Host was a real one, started on that data root with no `plugins` directory. `plugin install`
@@ -211,17 +192,18 @@ What has been verified, and what has not:
   `podman cp`/`docker cp` do with a folder from a Windows host, and a hired sample-echo running after
   this install on a real instance.
 
-### Example: sample-echo-go
+### The Go template
 
-`samples/plugins/sample-echo-go` is the same plugin in Go, and the template for a connector (see
-[Choosing a language](#choosing-a-language)). `build.sh` builds two static binaries
+`templates/plugin-go` is how a team builds a plugin, not a package to install: an echo plugin
+(`sample-echo-go`) to copy into the plugin's own repository, rename and fill in. It is the template
+for a connector (see [Choosing a language](#choosing-a-language)). `build.sh` builds two static binaries
 (`CGO_ENABLED=0`, `GOOS=linux`, `GOARCH=amd64` and `arm64`) into `bin/linux-x64/` and
 `bin/linux-arm64/`, which the manifest's `platforms` map names; the Host runs the one for its
 processor. It needs no runtime from the image, so its manifest has no `requires`.
 
 ```sh
-# From the repository root, on your computer or inside the instance.
-samples/plugins/sample-echo-go/build.sh ~/plugins-build/sample-echo-go/0.1.0
+# From the copy's folder, on your computer or inside the instance.
+./build.sh ~/plugins-build/sample-echo-go/0.1.0
 yawble plugin install ~/plugins-build/sample-echo-go/0.1.0
 
 # Built inside the instance, in a team's tree: install it where it is.
@@ -861,9 +843,10 @@ runs in the image. Every run is a new process, so start-up is paid on every run.
 
 - **Go is the default** for connectors to REST APIs, clouds, databases, queues and mail: one small
   static binary per processor, no runtime, a start measured in milliseconds. Template:
-  `samples/plugins/sample-echo-go`.
+  `templates/plugin-go`.
 - **.NET** when the best or only SDK for the target system is .NET: SharePoint, Dynamics, Exchange
-  on-premises, SAP, heavy Office documents. Template: `samples/plugins/sample-echo`.
+  on-premises, SAP, heavy Office documents. There is no .NET template in this repository; the .NET
+  `sample-echo` on the marketplace is the example to start from.
 - **Python** when the library the plugin needs exists only in Python.
 
 A plugin's spec says which language and why: find which language has the official SDK for the
@@ -924,8 +907,8 @@ plugin declares none.
   verdict for a good folder, a refused manifest, an installed version without and with `--force`,
   and a folder outside the data root, and a request the Host never answers being withdrawn; its
   request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side.
-  `cli/internal/plugin` pins the manifest rules against the samples, the `connections` slot rules
-  included.
+  `cli/internal/plugin` pins the manifest rules against the Go template and the test plugins under
+  `tests/Fixtures/Packages`, the `connections` slot rules included.
 - **A site's files folder.** `PluginSiteFilesTests` pins `siteFiles`: own team only, every site, with or without `reads`,
   absolute and existing, `[]` without sites, paths only; `SiteFilesEndToEndTests` pins a file a plugin
   writes there downloading from the page by its stored path, and nothing secret in anything served.
@@ -941,7 +924,7 @@ plugin declares none.
   loopback listener: the start request, the browser's round trip, a redirect with another state
   ignored, the provider's refusal, reconnect by name, the code never on a command line, `list`,
   `remove` refused naming the members, and a request no Host answers withdrawn.
-  `samples/plugins/sample-whoami-go` has its own `go test` against a userinfo double.
+  The WhoAmI plugin on the marketplace has its own `go test` against a userinfo double.
   `PluginRescanRequestTests` shows a plugin installed after start is listed with no restart, and pins
   the report's refusals, its hired members and its `0600` mode. `PrepareVolumeTests` pins
   `/data/plugins` as `harness:agent 0750`, created when missing.

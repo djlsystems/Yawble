@@ -1,8 +1,12 @@
-# sample-echo-go
+# The Go plugin template (`templates/plugin-go`)
 
-The Go template for a plugin member: the same behaviour and skill as `sample-echo` (the .NET
-template), written in Go. Start a connector to a REST API, a cloud, a database, a queue or mail from
-here: see "Choosing a language" in `docs/plugins.md`.
+The template a team builds a plugin member from: copy this folder into the plugin's own repository,
+rename the id `sample-echo-go`, and replace the echo with the plugin's work. It is not a package to
+install: plugins to install are on the marketplace, yawble.ai. Its manifest is the one `plugin.json`
+the repository holds outside `tests/` (`RepositoryPackagesTests` allows it by name).
+
+As it stands it is an echo plugin, `sample-echo-go`. Start a connector to a REST API, a cloud, a
+database, a queue or mail from here: see "Choosing a language" in `docs/plugins.md`.
 
 - **Self-contained.** `main.go` uses the standard library only, and `build.sh` builds it with
   `CGO_ENABLED=0` into one static binary per processor, so the plugin needs nothing from the image.
@@ -16,7 +20,7 @@ here: see "Choosing a language" in `docs/plugins.md`.
 Build a version folder and install it:
 
 ```sh
-samples/plugins/sample-echo-go/build.sh ~/plugins-build/sample-echo-go/0.1.0
+templates/plugin-go/build.sh ~/plugins-build/sample-echo-go/0.1.0
 yawble plugin install ~/plugins-build/sample-echo-go/0.1.0
 ```
 

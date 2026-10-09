@@ -86,8 +86,9 @@ func newSolutionInstallCommand(deps Deps) *cobra.Command {
 			"--team names the team: a team installed from an earlier version of the same package is updated (the changes " +
 			"are printed first, with the versions from and to), keeping its settings, bindings, documents and site data; any " +
 			"other name is the new team's.\n\n" +
-			"With --from-instance, <folder> is an absolute path inside the instance and the package is not copied.",
-		Example: "  yawble solution install samples/solutions/job-tracker\n" +
+			"With --from-instance, <folder> is an absolute path inside the instance and the package is not copied.\n\n" +
+			"Packages to install are on the marketplace, yawble.ai.",
+		Example: "  yawble solution install ./job-tracker-1.0.0\n" +
 			"  yawble solution install ./job-tracker-1.1.0 --team \"Job Tracker\"\n" +
 			"  yawble solution install --from-instance /data/documents/acme/job-tracker-1.0.0 --yes",
 		Args: cobra.ExactArgs(1),

@@ -37,7 +37,8 @@ func newSolutionCommand(deps Deps) *cobra.Command {
 		Use:   "solution",
 		Short: "Check and install solution packages: a whole working team in one folder",
 		Long: "A solution package is a folder holding solution.json and the plugins, skills, sites and tools a team " +
-			"needs (docs/solutions.md). These commands ask the running instance about one.",
+			"needs (docs/solutions.md). These commands ask the running instance about one.\n\n" +
+			"Packages to install are on the marketplace, yawble.ai.",
 	}
 	cmd.AddCommand(newSolutionCheckCommand(deps), newSolutionInstallCommand(deps))
 	return cmd
@@ -56,8 +57,9 @@ func newSolutionCheckCommand(deps Deps) *cobra.Command {
 			"and daily cap, so it can be read before anything runs. One that does not is printed as its problems, each " +
 			"naming the file and the field, and the command exits 1.\n\n" +
 			"With --from-instance, <folder> is an absolute path inside the instance (a package a team wrote to its " +
-			"documents) and nothing is copied.",
-		Example: "  yawble solution check samples/solutions/job-tracker\n" +
+			"documents) and nothing is copied.\n\n" +
+			"Packages to install are on the marketplace, yawble.ai.",
+		Example: "  yawble solution check ./job-tracker-1.0.0\n" +
 			"  yawble solution check --from-instance /data/documents/acme/job-tracker-1.0.0\n" +
 			"  yawble solution check ./job-tracker --json",
 		Args: cobra.ExactArgs(1),

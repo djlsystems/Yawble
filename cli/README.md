@@ -155,16 +155,16 @@ yawble plugin install --from-instance /data/teams/acme/repos/Tools/main/build/sa
 
 `<path>` is the folder's absolute path inside the container. The CLI does not install it itself: it writes the request to `/data/plugins/.install` through the engine, and the running Host installs the folder with the same installer as Admin → Plugins → "Install from a folder…", then answers in `/data/plugins/.install-report.json`. So the checks and their sentences are the Host's: it refuses, before anything is written, a folder outside the data root (`/data`), one reached through a symlink out of it, one holding a symlink that leaves the folder, and a manifest it would refuse; an installed version is refused unless `--force` is given. Otherwise the folder is laid out with the modes above and made active, and the command prints the Host's verdict (exit 1 on a refusal). A Host that does not answer within 60 seconds (an image from before this option) is reported, and the request is withdrawn.
 
-**Language, and what a plugin may rely on.** Go is the default for connectors to REST APIs, clouds, databases, queues and mail (template: `samples/plugins/sample-echo-go`, one static binary per processor). Use .NET when the best SDK for the target system is .NET (template: `samples/plugins/sample-echo`), and Python when the library exists only in Python. A plugin is self-contained: the image guarantees the .NET runtime, Node and Python 3, and everything else the plugin needs is in its own folder (Go libraries compiled in, NuGet packages published beside the build, Python packages in a virtual environment in the folder). Nothing is ever added to the image for a plugin. The manifest's `requires` names the runtimes it needs from the image. `docs/plugins.md` has the details.
+**Language, and what a plugin may rely on.** Go is the default for connectors to REST APIs, clouds, databases, queues and mail (template: `templates/plugin-go` in this repository, one static binary per processor; it is how a team builds a plugin, not a package to install). Use .NET when the best SDK for the target system is .NET (the .NET `sample-echo` on the marketplace, yawble.ai, is the example), and Python when the library exists only in Python. A plugin is self-contained: the image guarantees the .NET runtime, Node and Python 3, and everything else the plugin needs is in its own folder (Go libraries compiled in, NuGet packages published beside the build, Python packages in a virtual environment in the folder). Nothing is ever added to the image for a plugin. The manifest's `requires` names the runtimes it needs from the image. `docs/plugins.md` has the details.
 
 `yawble plugin list` shows each version, active or not, and installed or refused (`--json` too). `yawble plugin remove <id>` asks first (`--yes` answers) and refuses while a member is hired on the plugin, naming the members. `--version <v>` removes one kept version; the active one cannot be removed while others are kept.
 
 ## Solution packages
 
-A solution package is a whole working team in one folder: `solution.json` beside its plugins, skills, sites and tools (`docs/solutions.md` at the repository root). Before installing one, check it:
+A solution package is a whole working team in one folder: `solution.json` beside its plugins, skills, sites and tools (`docs/solutions.md` at the repository root). Packages to install are on the marketplace, yawble.ai; plugins to install are there too. Before installing one, check it:
 
 ```
-yawble solution check samples/solutions/job-tracker
+yawble solution check ./job-tracker-1.0.0
 ```
 
 The folder is copied into a temporary folder in the container, the running Host checks it with the rules `POST /api/solutions/check` applies (through its own `--solution-check` switch, the way `doctor` reads `--doctor`), and the copy is removed. Nothing is installed and nothing is written. A package that passes is printed as its install would create it: the team, each member, each trigger with its schedule or event, the member it wakes, whether it wakes the Manager, its daily cap and its **whole instruction**, the team skills, the sites, the tools and what you will be asked for. One that does not is printed as its problems, each naming the file and the field (`solution.json triggers[1].member: ...`), and the command exits 1. `--json` prints the Host's answer as it is.
@@ -174,7 +174,7 @@ A package already inside the instance (a team wrote it to its documents) is chec
 Then install it:
 
 ```
-yawble solution install samples/solutions/job-tracker
+yawble solution install ./job-tracker-1.0.0
 yawble solution install ./job-tracker-1.1.0 --team "Job Tracker"
 ```
 

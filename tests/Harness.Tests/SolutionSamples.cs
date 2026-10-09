@@ -4,9 +4,9 @@ using System.Text.Json.Nodes;
 namespace Harness.Tests;
 
 /// <summary>
-/// The committed Job Tracker package, copied somewhere a test may change it. <c>1.1.0</c> is the
-/// 1.0.0 folder with <c>samples/solutions/job-tracker-1.1.0.overlay</c> copied over it, exactly as
-/// the sample's README says to make it by hand - so the update tests and a person get the same 1.1.0.
+/// The Job Tracker test package in <c>tests/Fixtures/Packages/job-tracker</c>, copied somewhere a test
+/// may change it. <c>1.1.0</c> is the 1.0.0 folder with <c>tests/Fixtures/Packages/job-tracker-1.1.0.overlay</c>
+/// copied over it. It is test data: the package a person installs is on the marketplace.
 /// </summary>
 public static class SolutionSamples
 {
@@ -21,9 +21,9 @@ public static class SolutionSamples
         return directory?.FullName ?? throw new InvalidOperationException("No Harness.slnx above the test output.");
     }
 
-    public static string SampleFolder => Path.Combine(RepoRoot(), "samples", "solutions", "job-tracker");
+    public static string SampleFolder => Path.Combine(RepoRoot(), "tests", "Fixtures", "Packages", "job-tracker");
 
-    public static string OverlayFolder => Path.Combine(RepoRoot(), "samples", "solutions", "job-tracker-1.1.0.overlay");
+    public static string OverlayFolder => Path.Combine(RepoRoot(), "tests", "Fixtures", "Packages", "job-tracker-1.1.0.overlay");
 
     /// <summary>A fresh copy of Job Tracker <paramref name="version"/> (1.0.0 or 1.1.0) under
     /// <paramref name="parent"/>, or a new temp folder; answers the package folder.</summary>

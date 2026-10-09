@@ -369,13 +369,16 @@ config or secrets are large), with a sentence when some were cut (see
 [plugins.md](plugins.md#reading-site-data-reads)). A page's Delete or Archive is best kept in the
 document itself - a `status` the plugin reads - rather than in a second store of the plugin's own.
 
-## A complete example: `samples/sites/triage`
+## A complete example: the triage site
 
-[`samples/sites/triage`](../samples/sites/triage) is a triage queue over the `items` collection with
-**Done** and **Assign** actions, and the end-to-end check for everything above:
+The triage site is a triage queue over the `items` collection with **Done** and **Assign** actions,
+and the end-to-end check for everything above. It is on the marketplace, [yawble.ai](https://yawble.ai);
+this repository keeps a copy only as test data (`tests/Fixtures/Sites/triage`, which
+`SiteApiTests.The_triage_sample_publishes_through_the_tool_and_is_served_under_the_site_policy`
+publishes through the tool and reads back under the site policy).
 
-1. **Publish** from an agent: `site action: create site: triage`, then
-   `site action: publish site: triage folder: <worktree>/samples/sites/triage`.
+1. **Publish** from an agent, from a folder the team can write holding the site's files:
+   `site action: create site: triage`, then `site action: publish site: triage folder: <folder>`.
 2. **Seed** from a plugin of the team, one record per line:
    `{"t":"site.put","site":"triage","collection":"items","id":"t1","doc":{"title":"Printer on 3 is jammed","status":"open"}}`
    (or `site action: data op: put …` from an agent).

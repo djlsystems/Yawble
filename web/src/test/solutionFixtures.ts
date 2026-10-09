@@ -12,7 +12,7 @@ import type {
 
 /**
  * SOLUTION FIXTURES IN THE HOST'S SHAPE, key for key as the contract writes them (camelCase, every
- * key present), modelled on `samples/solutions/job-tracker`. Shared so the wizard, deep link,
+ * key present), modelled on the Job Tracker test package, `tests/Fixtures/Packages/job-tracker`. Shared so the wizard, deep link,
  * Plugins dialog and banner specs cannot drift into a shape the Host never sends.
  */
 

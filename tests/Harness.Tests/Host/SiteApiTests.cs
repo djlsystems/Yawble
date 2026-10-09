@@ -398,7 +398,7 @@ public sealed class SiteApiTests(HostFixture host) : IClassFixture<HostFixture>
     [Fact]
     public async Task The_triage_sample_publishes_through_the_tool_and_is_served_under_the_site_policy()
     {
-        var sample = Path.Combine(RepoRoot(), "samples", "sites", "triage");
+        var sample = Path.Combine(RepoRoot(), "tests", "Fixtures", "Sites", "triage");
         var index = File.ReadAllText(Path.Combine(sample, "index.html"));
 
         // The site policy allows no inline script or style, and no network but the site's own.
