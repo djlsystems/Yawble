@@ -626,7 +626,7 @@ builder.Services.AddSingleton(sp => new ReleaseCheck(
     () => sp.GetRequiredService<TenantSettings>().UpdatesCheck,
     () => DateTimeOffset.UtcNow,
     sp.GetRequiredService<ILogger<ReleaseCheck>>()));
-builder.Services.AddHostedService<ReleaseCheckLoop>();
+builder.Services.AddHostedService(sp => new ReleaseCheckLoop(sp.GetRequiredService<ReleaseCheck>()));
 
 // THE PACKAGE CATALOG: what may be added from Solutions > Get started. It reads the catalog address
 // the operator CLI names (Marketplace:Catalog, or HARNESS_MARKETPLACE_CATALOG); with none it reads
