@@ -86,7 +86,7 @@ public sealed class MarketplaceRefusal(string sentence, int status = StatusCodes
 /// the catalog's own needs fields beside them.</summary>
 public sealed record CatalogPackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
-    Uri DownloadUrl, string Sha256, long Bytes, CatalogNeeds CatalogNeeds);
+    Uri DownloadUrl, string Sha256, long Bytes, CatalogNeeds CatalogNeeds, string Description = "");
 
 /// <summary>
 /// A package's <c>needs</c> as the catalog writes them, without the <c>why</c> texts (those are in the
@@ -115,7 +115,7 @@ public sealed record CatalogInput(string Name, string Kind, bool Required);
 public sealed record MarketplacePackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
     bool Installed, string? InstalledVersion, IReadOnlyList<string> InstalledOn, bool UpdateAvailable,
-    CatalogNeeds CatalogNeeds);
+    CatalogNeeds CatalogNeeds, string Description = "");
 
 /// <summary>What <c>GET /api/marketplace</c> and its refresh answer. <paramref name="Checked"/> false
 /// is "not known", never an empty catalog, and <paramref name="Reason"/> says why.</summary>
@@ -391,7 +391,7 @@ public sealed partial class Marketplace(
             package.Id, package.Kind, package.Name, package.Summary, package.Version, package.Needs,
             version is not null, version, on,
             version is not null && ReleaseCheck.Compare(package.Version, version) > 0,
-            package.CatalogNeeds);
+            package.CatalogNeeds, package.Description);
     }
 
     private static MarketplaceStatus NotChecked(string reason, DateTimeOffset? at) => new(false, reason, at, []);
@@ -486,7 +486,11 @@ public sealed partial class Marketplace(
 
         return new CatalogPackage(
             id, kind, Text(entry, "name", at), Text(entry, "summary", at), version,
-            Needs(entry, named), url, sha256, bytes, Fields(entry));
+            Needs(entry, named), url, sha256, bytes, Fields(entry),
+            // OPTIONAL: Marketplace > Browse's filter reads it; a catalog without one is not refused.
+            entry.TryGetProperty("description", out var description) && description.ValueKind == JsonValueKind.String
+                ? description.GetString()!
+                : "");
     }
 
     /// <summary>The catalog's needs fields as written, each list empty when the catalog has none.</summary>
@@ -618,7 +622,7 @@ public static class MarketplaceEndpoints
             + "(sentences, as text), catalogNeeds (the catalog's needs fields without their `why`: "
             + "`{ connections: [{ slot, providers, required }], secrets: [{ key, when }], inputs: [{ name, kind, "
             + "required }], runtimes }`), installed, installedVersion, installedOn (the teams a solution is "
-            + "installed on), updateAvailable }`; a solution matches by package id on each team, a plugin "
+            + "installed on), updateAvailable, description (the catalog's own, empty when it has none) }`; a solution matches by package id on each team, a plugin "
             + "by id and its active version, and `updateAvailable` is true when the catalog's version is newer.";
 
         app.MapGet(Route, (Marketplace marketplace) => Results.Ok(marketplace.Status()))

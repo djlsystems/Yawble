@@ -628,7 +628,7 @@ builder.Services.AddSingleton(sp => new ReleaseCheck(
     sp.GetRequiredService<ILogger<ReleaseCheck>>()));
 builder.Services.AddHostedService(sp => new ReleaseCheckLoop(sp.GetRequiredService<ReleaseCheck>()));
 
-// THE PACKAGE CATALOG: what may be added from Solutions > Get started. It reads the catalog address
+// THE PACKAGE CATALOG: what may be added from Marketplace > Browse. It reads the catalog address
 // the operator CLI names (Marketplace:Catalog, or HARNESS_MARKETPLACE_CATALOG); with none it reads
 // nothing and says so. A fetch only brings a package into the documents (see Marketplace).
 builder.Services.AddHttpClient(nameof(HttpMarketplaceFeed), client => client.Timeout = TimeSpan.FromMinutes(10));

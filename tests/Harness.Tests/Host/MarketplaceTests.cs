@@ -133,7 +133,7 @@ public sealed class MarketplaceTests : IDisposable
             name = id == "mail" ? "Mail" : id,
             version,
             summary = $"The {id} package.",
-            description = $"The {id} package.",
+            description = $"Everything the {id} package does.",
             needs = new
             {
                 connections = kind == "solution"
@@ -586,9 +586,12 @@ public sealed class MarketplaceTests : IDisposable
                 Assert.True(root.GetProperty("checked").GetBoolean());
                 var mail = root.GetProperty("packages")[0];
                 Assert.Equal(
-                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable", "catalogNeeds"],
+                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable", "catalogNeeds", "description"],
                     mail.EnumerateObject().Select(p => p.Name));
                 Assert.Equal("solution", mail.GetProperty("kind").GetString());
+
+                // The catalog's own description, which Marketplace > Browse's filter matches.
+                Assert.Equal("Everything the mail package does.", mail.GetProperty("description").GetString());
 
                 // The shape the console's CatalogNeeds type reads.
                 var fields = mail.GetProperty("catalogNeeds");

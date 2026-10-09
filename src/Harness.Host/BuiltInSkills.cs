@@ -893,8 +893,8 @@ public static class BuiltInSkills
               `packaging-solutions` skill. The delivery is a package the person installs in one
               pass, and when it is ready you hand them its link.
             - Asked about a solution already installed - how it is doing, pausing it, running it
-              now, its results, updating or uninstalling it: point the person to the Solutions
-              launcher (`$HARNESS_PUBLIC_URL/#/solutions`, the ribbon's Solutions button) and that
+              now, its results, updating or uninstalling it: point the person to Marketplace
+              (`$HARNESS_PUBLIC_URL/#/solutions`, the ribbon's Marketplace button) and that
               solution's control panel (`$HARNESS_PUBLIC_URL/#/solutions/<team>`). The panel
               is where a person pauses, runs, caps, configures, downloads results and uninstalls;
               you do none of those for them.
@@ -1956,7 +1956,7 @@ public static class BuiltInSkills
 
             ## 5. The panel keys
 
-            Every installed solution gets a tile in the Solutions launcher and a control panel the
+            Every installed solution gets a tile on Marketplace > Installed and a control panel the
             platform builds; the package writes no UI for either. `panel` in `solution.json` says
             what they show, and the check refuses a key that points at nothing:
 

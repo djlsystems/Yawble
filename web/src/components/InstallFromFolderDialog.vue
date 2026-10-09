@@ -4,10 +4,10 @@ import HostPathPicker from './HostPathPicker.vue';
 import UploadPackageAction from './UploadPackageAction.vue';
 
 /**
- * INSTALL FROM A FOLDER: the one dialog Solutions and Admin > Plugins both open. A folder inside
- * the instance - typed, or chosen with Browse - and the screen's own options; the install itself is
- * the caller's (`install`), which is how each screen keeps what it does with the folder: Solutions
- * opens the wizard, Plugins installs a plugin and shows the Host's verdict in the default slot.
+ * INSTALL FROM A FOLDER: the one dialog Marketplace > Advanced and Admin > Plugins both open. A
+ * folder inside the instance - typed, or chosen with Browse - and the screen's own options; the
+ * install itself is the caller's (`install`), which is how each screen keeps what it does with the
+ * folder: Marketplace opens the wizard, Plugins installs a plugin and shows the Host's verdict in the default slot.
  *
  * Browse opens the picker in its `packages` mode: the teams' Documents, where a package is
  * uploaded, with nothing above it and no dot-entries, and Choose disabled until a folder below
@@ -18,7 +18,7 @@ import UploadPackageAction from './UploadPackageAction.vue';
  * newer version may sit where the installed one came from); a typed folder goes the same way as a
  * picked one, to the caller, which checks either the same way.
  *
- * `folder` fills Folder on open: a package Solutions > Get started just fetched, which the person
+ * `folder` fills Folder on open: a package Marketplace > Browse just fetched, which the person
  * still reviews and installs with the button.
  *
  * `offerReplace` shows Replace, for a screen whose Host route takes it (a plugin version already

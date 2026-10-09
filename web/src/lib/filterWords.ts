@@ -1,5 +1,5 @@
 /**
- * THE FILTER BOXES' RULE. Plugins, Agents and the Solutions launcher each narrow their tiles by free
+ * THE FILTER BOXES' RULE. Plugins, Agents and Marketplace's tabs each narrow their tiles by free
  * text the same way: the text split into lower-case words, and a tile shown when every word is
  * found somewhere in what the tile says. Written once here; each dialog decides what its tiles say.
  */

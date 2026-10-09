@@ -184,7 +184,7 @@ default cannot be skipped: its plugin member cannot be hired without it.
 
 ### Panel
 
-Every installed solution has a tile in the **Solutions** launcher and a **control panel** the
+Every installed solution has a tile on **Marketplace → Installed** and a **control panel** the
 platform builds (below, [The launcher and the panel](#the-launcher-and-the-panel)). The package
 writes no UI for either; `panel` says what they show. Every key is optional.
 
@@ -271,27 +271,45 @@ refuses:
 
 ## Getting a package in
 
-**Get started.** **Solutions → Get started** lists the published packages - each one's name,
-summary, kind, version and what it needs in words - and whether this instance has it (Installed, or
-Update available when the catalog's version is newer). **Get** downloads the package from the
-catalog's own release, checks its size and sha256 against the catalog, records the fetch, and
-unpacks it into `Marketplace/<id>-<version>` of the instance's documents by the same checks as
-**Upload a package (.zip)**; then the install wizard (a solution) or the plugin install dialog (a
+**Browse.** **Marketplace**, on the ribbon, is a dialog of three tabs: **Browse**, **Installed** and
+**Advanced**. **Marketplace → Browse** lists the packages published in yawble.ai's catalog
+(`https://yawble.ai/api/marketplace/catalog.json`) - each one's name, summary, kind, version and
+what it needs in words - and whether this instance has it (Installed, or Update available when the
+catalog's version is newer). The filter above the cards narrows them as you type, case-insensitively,
+by name, summary, description and the words for what a package needs; when it keeps none it says so
+in a sentence. **Get** downloads the package, checks its size and sha256 against the catalog,
+records the fetch (the `marketplace.fetched` row, written before anything is unpacked), and unpacks
+it into `Marketplace/<id>-<version>` of the instance's documents - and nowhere else - by the same
+checks as **Upload a package (.zip)**; then the install wizard (a solution) or the plugin install dialog (a
 plugin) opens on that folder, so you review and install as below. Get never installs: nothing is
 installed until you press **Install** there. The catalog is read about every 12 hours and on
 **Refresh**; until a read has answered, after one that failed, with no address set, or with
 **Settings → Read the package catalog** off, the tab says so in a sentence rather than showing an
 empty list, and a refused Get names its reason. The operator CLI gives the Host the catalog address
 on `yawble up`; `yawble config set marketplaceCatalog` changes it, and an empty value turns it off.
-The web side is pinned by `web/src/components/__tests__/solutions-get-started.mount.spec.ts`, and
-the CLI's by `cli/internal/cli/marketplace_test.go`.
+
+**The download rule.** A package is downloaded only from the catalog's own origin: a plain `https`
+address with the same scheme, host and port as the catalog address, under
+`/api/marketplace/download/`, with no query, no escape and no dot segment. Anything else - another
+host, another port, another path, a query, `..` - is refused before a byte is read. A download over
+100 MB is refused, its size and sha256 are checked against the catalog before anything is written,
+and the zip is refused whole if it holds a link, an absolute path or a `..` entry. A fetch never
+installs by itself.
+
+**An update where it is installed.** On **Marketplace → Installed**, a package the catalog lists at
+a newer version than a team has says so (**Update available: 1.1.0**) and offers **Update**, which
+fetches that version as Get does and opens the install wizard on **Update an existing team** for
+that team. Nothing is updated until you press **Update** in the wizard.
+
+The web side is pinned by `web/src/components/__tests__/solutions-get-started.mount.spec.ts` and
+`web/src/components/__tests__/marketplace.mount.spec.ts`, and the CLI's by `cli/internal/cli/marketplace_test.go`.
 
 Otherwise a package is installed from a folder inside the instance, so it goes into Documents first:
 
 1. Open **Documents**, pick your team's folder, and upload the package: **Upload a folder** for the
    whole folder (its subfolders are kept), or **Upload a .zip**, which is unpacked into a folder of
    the zip's name.
-2. Open **Solutions → Install from a folder** (or **Admin → Plugins → Install from a folder**: the
+2. Open **Marketplace → Advanced → Install from a folder** (or **Admin → Plugins → Install from a folder**: the
    same dialog). **Browse…** opens in the teams' Documents; open the package's folder (the one
    holding `solution.json`) and press **Choose this folder**, then **Install**. The folder can also
    be typed: any folder inside the instance's data root.
@@ -312,7 +330,7 @@ your computer.
 
 ## The install
 
-**Solutions → Install from a folder** opens the install wizard on the chosen folder. **Admin →
+**Marketplace → Advanced → Install from a folder** opens the install wizard on the chosen folder. **Admin →
 Plugins → Install from a folder**, the same dialog with a **Replace** option for a plugin version
 already installed, opens the wizard when the folder holds `solution.json` (a plain plugin folder
 installs as before). The wizard's steps:
@@ -415,9 +433,9 @@ exactly what the matching route answers. An agent cannot write there, so it cann
 
 ## The launcher and the panel
 
-**Solutions**, a button near the start of the ribbon, opens the launcher: one tile per installed
-solution, with its name, version and team, its status line, a state badge, **Open** (the primary
-site, when it has one) and **Manage** (the panel). The badge is the first of: **paused** (the team
+**Marketplace**, a button near the start of the ribbon (its address is still `#/solutions`), opens
+on **Installed**: one tile per installed solution, with its name, version and team, its status line, a state badge, **Open** (the primary
+site, when it has one) and **Manage** (the panel), and **Update** when the catalog lists a newer version. The badge is the first of: **paused** (the team
 is paused); **blocked**, naming what the team waits for ("Upload a file to Resume/"); **running**
 (a member is running now); **capped** (a trigger's measured spend today reached its daily cap);
 **idle**. The launcher reads `GET /api/solutions/installed`. A filter above the tiles narrows them
@@ -425,7 +443,7 @@ by words of the name, team or status line, by team and by state - what is shown 
 on a tile lists the package, version, team, folder, who installed it, its plugins, site and status.
 With nothing installed it says where a solution comes from: a package a team built, whose
 **Review and install** link appears in that team's Activity feed and on its backlog item - or
-**Install from a folder**.
+**Install from a folder** on **Advanced**, or **Browse**.
 
 **The control panel** (`GET /api/teams/{team}/solution/panel`) is the platform's own screen, not a
 site: its controls act with the person's authority, which a site is deliberately without. The
