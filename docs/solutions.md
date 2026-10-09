@@ -271,6 +271,16 @@ refuses:
 
 ## Getting a package in
 
+**Solutions → Get started** lists the published packages - each one's name, summary, kind, version
+and what it needs in words - and whether this instance has it (Installed, Update available). **Get**
+downloads the package from the catalog's own release, checks its size and sha256 against the
+catalog, records the fetch, and unpacks it into `Marketplace/<id>-<version>` of the instance's
+documents by the same checks as **Upload a package (.zip)**; then the install wizard (a solution) or
+the plugin install dialog (a plugin) opens on that folder, so you review and install as below. Get
+never installs. The catalog is read about every 12 hours and on **Refresh**; until a read has
+answered, after one that failed, or with **Settings → Read the package catalog** off, the tab says
+so in a sentence rather than showing an empty list.
+
 A package is installed from a folder inside the instance, so it goes into Documents first:
 
 1. Open **Documents**, pick your team's folder, and upload the package: **Upload a folder** for the

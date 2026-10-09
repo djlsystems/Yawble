@@ -627,6 +627,24 @@ builder.Services.AddSingleton(sp => new ReleaseCheck(
     () => DateTimeOffset.UtcNow,
     sp.GetRequiredService<ILogger<ReleaseCheck>>()));
 builder.Services.AddHostedService<ReleaseCheckLoop>();
+
+// THE PACKAGE CATALOG: what may be added from Solutions > Get started. It reads the catalog address
+// the operator CLI names (Marketplace:Catalog, or HARNESS_MARKETPLACE_CATALOG); with none it reads
+// nothing and says so. A fetch only brings a package into the documents (see Marketplace).
+builder.Services.AddHttpClient(nameof(HttpMarketplaceFeed), client => client.Timeout = TimeSpan.FromMinutes(10));
+builder.Services.AddSingleton<IMarketplaceFeed>(sp => new HttpMarketplaceFeed(
+    sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(HttpMarketplaceFeed)),
+    builder.Configuration[Marketplace.CatalogSetting] ?? builder.Configuration[Marketplace.CatalogVariable]));
+builder.Services.AddSingleton(sp => new Marketplace(
+    sp.GetRequiredService<IMarketplaceFeed>(),
+    () => sp.GetRequiredService<TenantSettings>().MarketplaceCheck,
+    () => DateTimeOffset.UtcNow,
+    () => sp.GetRequiredService<TeamRegistry>().All()
+        .Where(team => team.Solution is not null)
+        .Select(team => (team.Id, team.Solution!)),
+    id => sp.GetRequiredService<PluginCatalog>().For(id)?.Manifest.Version,
+    sp.GetRequiredService<ILogger<Marketplace>>()));
+builder.Services.AddHostedService<MarketplaceLoop>();
 builder.Services.AddSingleton<IOAuthEndpoints>(sp => new HttpOAuthEndpoints(
     sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(HttpOAuthEndpoints))));
 // A MAILBOX's login test: IMAP and SMTP over a socket in the Host, no process. Tests replace it with
@@ -2478,6 +2496,7 @@ OutcomeEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
 ReleaseCheckEndpoints.Map(app);
+MarketplaceEndpoints.Map(app);
 // A worker's one connection. In control a worker joins the pool here; a Host that runs its runs
 // itself (all) welcomes none, and a worker that connects to it is told so, in a sentence, and stops.
 var workerConnections = new WorkerConnections(

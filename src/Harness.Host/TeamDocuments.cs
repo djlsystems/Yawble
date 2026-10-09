@@ -86,6 +86,9 @@ public sealed partial class TeamDocuments(
     /// </summary>
     public string RootFor(string team) => Path.GetFullPath(paths.DocsFor(team));
 
+    /// <summary>The instance's own documents: the tenant root every team's folder sits in.</summary>
+    public string InstanceRoot => Path.GetFullPath(paths.TenantDocuments);
+
     /// <summary>
     /// Where a team's documents are, CREATED if they are not there, with the marker that says the
     /// platform made them.
@@ -129,10 +132,11 @@ public sealed partial class TeamDocuments(
     /// `Path.GetFullPath` is pure string normalisation and never touches the filesystem, so a link
     /// pointing outside the root is a way out this comparison does not see.
     /// </summary>
-    public string Resolve(string team, string? relative)
-    {
-        var root = RootFor(team);
+    public string Resolve(string team, string? relative) => ResolveUnder(RootFor(team), relative);
 
+    /// <summary><see cref="Resolve"/> against any root, for the instance's own documents.</summary>
+    private static string ResolveUnder(string root, string? relative)
+    {
         if (string.IsNullOrWhiteSpace(relative)) return root;
 
         var cleaned = relative.Replace('\\', '/').Trim().TrimStart('/');
