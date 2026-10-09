@@ -45,9 +45,9 @@ const FileName = "config.toml"
 // number and 8080 is what the Host listens on inside the container.
 const DefaultPort = 8080
 
-// DefaultMarketplaceCatalog is where the published package catalog is, unless the config names
+// DefaultMarketplaceCatalog is where the published package catalog is - yawble.ai's - unless the config names
 // another address or none.
-const DefaultMarketplaceCatalog = "https://github.com/djlsystems/Yawble-packages/releases/latest/download/catalog.json"
+const DefaultMarketplaceCatalog = "https://yawble.ai/api/marketplace/catalog.json"
 
 func Path(dir string) string { return filepath.Join(dir, FileName) }
 

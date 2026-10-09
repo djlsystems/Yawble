@@ -134,8 +134,8 @@ public sealed record MarketplaceFetched(string Id, string Version, string Kind, 
 /// - Nothing is guessed: until a read has answered, after one that failed, with no address, or with
 ///   <c>marketplace.check</c> off, the answer is not checked with the reason - never an empty catalog.
 /// - A catalog of a schema this build does not know is refused, not misread.
-/// - A zip is downloaded only from the catalog's own release-download prefix (its address up to and
-///   including <c>releases/</c>), refused over <see cref="MaxDownloadBytes"/>, and checked against
+/// - A zip is downloaded only from the catalog's own origin (the same https scheme, host and port as
+///   its address) under <c>/api/marketplace/download/</c>, refused over <see cref="MaxDownloadBytes"/>, and checked against
 ///   the catalog's sha256 and size before anything is written; it is unpacked by the checks Upload a
 ///   package (.zip) uses, and only after its <c>marketplace.fetched</c> row is written.
 /// </summary>
@@ -174,18 +174,16 @@ public sealed partial class Marketplace(
 
     private sealed record Read(DateTimeOffset At, IReadOnlyList<CatalogPackage>? Packages, string? Failure);
 
-    /// <summary>The catalog's release-download prefix: its address up to and including
-    /// <c>releases/</c>, or null when the address has none.</summary>
-    public string? DownloadPrefix
-    {
-        get
-        {
-            if (feed.Address is not { } address) return null;
-            var text = address.GetLeftPart(UriPartial.Path);
-            var cut = text.IndexOf("/releases/", StringComparison.Ordinal);
-            return cut < 0 ? null : text[..(cut + "/releases/".Length)];
-        }
-    }
+    /// <summary>The path on the catalog's origin a package's zip is downloaded from.</summary>
+    public const string DownloadPath = "/api/marketplace/download/";
+
+    /// <summary>Where a package's zip may be downloaded from: the catalog's own https origin (its
+    /// scheme, host and port) followed by <see cref="DownloadPath"/>, or null when the catalog has no
+    /// address or is not read over https.</summary>
+    public string? DownloadPrefix =>
+        feed.Address is { Scheme: "https", UserInfo.Length: 0 } address
+            ? address.GetLeftPart(UriPartial.Authority) + DownloadPath
+            : null;
 
     /// <summary>The last answer, never a fresh read.</summary>
     public MarketplaceStatus Status()
@@ -255,7 +253,7 @@ public sealed partial class Marketplace(
         if (!IsUnderPrefix(url))
         {
             throw new MarketplaceRefusal(
-                $"{url} is not a release download of the catalog it was listed in, so it was not fetched.");
+                $"{url} is not a download from the catalog's own address, so it was not fetched.");
         }
 
         if (package.Bytes > MaxDownloadBytes) throw MarketplaceRefusal.TooLarge(MaxDownloadBytes);
@@ -351,14 +349,18 @@ public sealed partial class Marketplace(
     }
 
     /// <summary>Whether <paramref name="url"/> is a plain https address under <see cref="DownloadPrefix"/>:
-    /// no user, query, fragment, escape or dot segment that a comparison of text could be fooled by.</summary>
+    /// the catalog's scheme, host and port, and no user, query, fragment, escape or dot segment that a
+    /// comparison of text could be fooled by.</summary>
     public bool IsUnderPrefix(Uri url)
     {
-        if (DownloadPrefix is not { } prefix) return false;
+        if (DownloadPrefix is not { } prefix || feed.Address is not { } catalog) return false;
 
         var raw = url.OriginalString;
         return url.IsAbsoluteUri
             && url.Scheme == Uri.UriSchemeHttps
+            && url.Scheme == catalog.Scheme
+            && string.Equals(url.Host, catalog.Host, StringComparison.OrdinalIgnoreCase)
+            && url.Port == catalog.Port
             && url.UserInfo.Length == 0
             && url.Query.Length == 0
             && url.Fragment.Length == 0
@@ -652,8 +654,9 @@ public static class MarketplaceEndpoints
             .WithTags("Solutions")
             .WithSummary("Fetch one package of the catalog into the instance's documents")
             .WithDescription(
-                "Downloads the package's zip only from the catalog's own release-download prefix (the "
-                + "address the catalog was read from, up to and including `releases/`), refuses one over "
+                "Downloads the package's zip only from the catalog's own origin (a plain https address on "
+                + "the same scheme, host and port the catalog was read from, under "
+                + $"`{Marketplace.DownloadPath}`, with no query, escape or dot segment), refuses one over "
                 + $"{Marketplace.MaxDownloadBytes / (1024 * 1024)} MB, checks its sha256 and size against "
                 + "the catalog before anything is written, appends a `marketplace.fetched` tenant row, and "
                 + "only then unpacks it with the checks Upload a package (.zip) uses (no link, no absolute "
@@ -662,7 +665,7 @@ public static class MarketplaceEndpoints
                 + "instance's documents, for the install wizard (a solution) or the plugin install dialog "
                 + "(a plugin). Refusals answer `{ error }` with a sentence: 404 for a package the catalog "
                 + "does not list, 409 before the catalog was read or when that folder is already there, "
-                + "400 for a download outside the prefix, too large, of the wrong size or sha256, or a zip "
+                + "400 for a download from anywhere else, too large, of the wrong size or sha256, or a zip "
                 + "the checks refuse, 502 when the download fails, 500 when the row cannot be written - "
                 + "nothing is written in each case.");
     }
