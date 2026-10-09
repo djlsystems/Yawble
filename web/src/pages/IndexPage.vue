@@ -97,6 +97,16 @@ function teamPaused(team: Team | null | undefined): boolean {
   return team?.paused === true;
 }
 
+/**
+ * WHO IS ON THE TEAM, said under its name: "2 members: Manager, Mailer". The cards are fixed-size
+ * windows the viewer chose, below the tell box and the figures, so on a 1280 x 800 screen a new team
+ * of two showed only the Manager's card and nobody saw it had a second member.
+ */
+function teamMembersLine(team: Team): string {
+  const names = team.containers.map((container) => container.name);
+  return `${names.length} ${names.length === 1 ? 'member' : 'members'}: ${names.join(', ')}`;
+}
+
 function teamRunning(team: Team): boolean {
   return team.containers.some((container) => container.state === 'Running');
 }
@@ -568,6 +578,8 @@ onUnmounted(() => {
           <q-tooltip>{{ teamPauseHint(activeTeam) }}</q-tooltip>
         </q-btn>
       </div>
+
+      <div class="text-body2 os-text-muted q-mb-sm" data-team-members>{{ teamMembersLine(activeTeam) }}</div>
 
       <!-- HOW WORK REACHES A TEAM, where people look for it: a person who opened a team to give it
            work found no input. The box tells the Manager; its hint names the Concierge as another way in. -->

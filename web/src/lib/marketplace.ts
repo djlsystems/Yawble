@@ -60,7 +60,7 @@ export function fetchedFolder(root: string, folder: string): string {
 export const PROVIDER_WORDS: Readonly<Record<string, { name: string; mailboxes: readonly string[] }>> = {
   google: { name: 'Google', mailboxes: ['Gmail'] },
   microsoft: { name: 'Microsoft', mailboxes: ['Outlook'] },
-  imap: { name: 'IMAP mailbox', mailboxes: ['Gmail', 'iCloud', 'Yahoo'] },
+  imap: { name: 'mailbox by app password', mailboxes: ['Gmail', 'iCloud', 'Yahoo'] },
   custom: { name: 'custom sign-in', mailboxes: [] },
 };
 

@@ -176,7 +176,7 @@ public sealed class ConciergeArchiveGate(Func<bool> mayArchive)
     /// <summary>The Concierge's refusal while the setting is off: it names the setting and who turns it on.</summary>
     public const string SettingOff =
         "Archiving a team is a person's step here: the setting " + TenantSettings.ConciergeMayArchiveName
-        + " is off, and only a person turns it on, in Settings. Nothing was changed.";
+        + " is off, and only a person turns it on, in " + TenantSettings.ConciergeTab + ". Nothing was changed.";
 
     /// <summary>Who is archiving, read once per request.</summary>
     /// <param name="Refusal">Non-null when the caller may not; answer it and change nothing.</param>

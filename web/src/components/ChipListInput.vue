@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import type { QSelect } from 'quasar';
 
 /**
  * THE ONE MULTIPLE-ITEM INPUT. Every unordered list a person edits - a plugin's list settings, a
@@ -8,10 +9,11 @@ import { computed, ref } from 'vue';
  *
  * - FROM A FIXED SET (`options`): the dropdown offers what is not chosen yet, and each chosen item is
  *   a removable chip.
- * - FREE TEXT (`freeform`, the default when there are no options): an Add button opens a dialog for
- *   the value, which lands as a removable chip. Several lines add several items. The dialog, not a
- *   box beside the list, so a typed value is either added or explicitly cancelled - never left in a
- *   box that Save silently ignores.
+ * - FREE TEXT (`freeform`, the default when there are no options): typed into the list's own field,
+ *   Return adds it as a removable chip; the Add button opens a dialog for it, where several lines add
+ *   several items. Both make the same check (`accept`): an empty, repeated or refused value adds
+ *   nothing and the one line under the field says why, keeping the text to be corrected. A person who
+ *   typed an address and pressed Return once saw nothing happen and nothing said.
  * - READ-ONLY (`readonly`): the same chips with no remove and no add.
  *
  * ORDERED LISTS ARE NOT THIS. A command line, `KEY=value` lines and a priority allowlist have order
@@ -84,13 +86,66 @@ function onSelect(values: string[] | null) {
   emit('update:modelValue', values ?? []);
 }
 
+/**
+ * THE ONE CHECK BOTH WAYS IN MAKE: the list with `values` added, or the sentence saying why nothing
+ * is - no value, one already there, or one the caller refuses.
+ */
+function accept(values: string[]): { next: string[] } | { problem: string } {
+  if (values.length === 0) return { problem: 'Type a value first.' };
+
+  const next = [...list.value];
+  for (const value of values) {
+    if (has(next, value)) return { problem: `${value} is already in the list.` };
+    const refusal = props.validate?.(value, next) ?? null;
+    if (refusal !== null) return { problem: refusal };
+    next.push(value);
+  }
+  return { next };
+}
+
+/* THE LIST'S OWN FIELD: Return adds what is typed there. */
+const select = ref<QSelect | null>(null);
+const typed = ref('');
+const typedProblem = ref('');
+
+function onTyped(value: string) {
+  typed.value = value;
+  typedProblem.value = '';
+}
+
+/**
+ * Return adds the typed value. With a fixed set as well, an empty Return is left to the dropdown,
+ * which opens or picks the highlighted option; a typed one is added, as its option's value when it
+ * names one.
+ */
+function onFieldKey(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing || !canType.value || props.readonly) return;
+
+  const value = typed.value.trim();
+  if (value === '' && optionEntries.value.length > 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  const named = optionEntries.value.find((option) => option.label === value)?.value ?? value;
+  const outcome = accept(value === '' ? [] : [named]);
+  if ('problem' in outcome) {
+    typedProblem.value = outcome.problem;
+    return;
+  }
+
+  emit('update:modelValue', outcome.next);
+  typed.value = '';
+  select.value?.updateInputValue('', true);
+}
+
 /* THE ADD DIALOG. */
 const adding = ref(false);
 const draft = ref('');
 const problem = ref('');
 
+/** Opens with whatever is typed in the field, so + carries it rather than dropping it. */
 function openAdd() {
-  draft.value = '';
+  draft.value = typed.value.trim();
   problem.value = '';
   adding.value = true;
 }
@@ -99,28 +154,17 @@ function openAdd() {
 const draftValues = computed(() => draft.value.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== ''));
 
 function submitAdd() {
-  const values = draftValues.value;
-  if (values.length === 0) {
-    problem.value = "Type a value first.";
+  const outcome = accept(draftValues.value);
+  if ('problem' in outcome) {
+    problem.value = outcome.problem;
     return;
   }
 
-  const next = [...list.value];
-  for (const value of values) {
-    if (has(next, value)) {
-      problem.value = `${value} is already in the list.`;
-      return;
-    }
-    const refusal = props.validate?.(value, next) ?? null;
-    if (refusal !== null) {
-      problem.value = refusal;
-      return;
-    }
-    next.push(value);
-  }
-
-  emit('update:modelValue', next);
+  emit('update:modelValue', outcome.next);
   adding.value = false;
+  typed.value = '';
+  typedProblem.value = '';
+  select.value?.updateInputValue('', true);
 }
 
 /** Enter adds; Shift+Enter starts another line. It stops here, so no form behind it submits. */
@@ -135,6 +179,7 @@ function onDraftKey(event: KeyboardEvent) {
 <template>
   <div class="chip-list-input" data-chip-list>
     <q-select
+      ref="select"
       :model-value="list"
       :options="remaining"
       option-label="label"
@@ -149,12 +194,16 @@ function onDraftKey(event: KeyboardEvent) {
       :hint="hint"
       :readonly="readonly"
       :disable="disable"
-      :error="error"
-      :error-message="errorMessage"
+      :use-input="canType && !readonly && !disable"
+      input-debounce="0"
+      :error="typedProblem !== '' || error"
+      :error-message="typedProblem || errorMessage"
       :hide-dropdown-icon="readonly || optionEntries.length === 0"
       :popup-content-class="layerClass"
       class="chip-list-select"
       @update:model-value="onSelect"
+      @input-value="onTyped"
+      @keydown="onFieldKey"
     >
       <template #selected>
         <div class="chip-list-chips">
@@ -168,7 +217,7 @@ function onDraftKey(event: KeyboardEvent) {
             :data-chip="item"
             @remove="remove(item)"
           >{{ labelOf(item) }}</q-chip>
-          <span v-if="list.length === 0" class="os-text-muted chip-list-empty">none</span>
+          <span v-if="list.length === 0 && typed === ''" class="os-text-muted chip-list-empty">none</span>
         </div>
       </template>
 
@@ -188,7 +237,7 @@ function onDraftKey(event: KeyboardEvent) {
         </q-btn>
       </template>
 
-      <template #no-option>
+      <template v-if="optionEntries.length > 0" #no-option>
         <q-item dense>
           <q-item-section class="os-text-muted">Everything is chosen.</q-item-section>
         </q-item>

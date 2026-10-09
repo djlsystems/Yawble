@@ -110,6 +110,36 @@ public static class ConnectionProviders
     /// name, besides <c>custom-&lt;id&gt;</c>. The console's provider wording table has words for each.</summary>
     public static IReadOnlyList<string> ManifestProviders { get; } = [Google, Microsoft, Custom, MailboxSettings.Kind];
 
+    /// <summary>
+    /// THE HOST'S PROVIDER WORDS: each provider a manifest may name, as a person says it - "Google" in
+    /// "a Google account". Word for word the console's <c>PROVIDER_WORDS</c> names
+    /// (<c>web/src/lib/marketplace.ts</c>); a test compares the two.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Words { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [Google] = "Google",
+        [Microsoft] = "Microsoft",
+        [MailboxSettings.Kind] = "mailbox by app password",
+        [Custom] = "custom sign-in",
+    };
+
+    /// <summary>
+    /// A provider as a person says it, with its article: "a Google account", "a mailbox by app
+    /// password", a <c>custom-&lt;id&gt;</c> by the name <paramref name="named"/> knows for it ("an Acme
+    /// account"), and the id itself only when nothing better is known.
+    /// </summary>
+    public static string Spoken(string id, Func<string, string?>? named = null)
+    {
+        if (id == MailboxSettings.Kind) return $"a {Words[id]}";
+
+        var name = Words.TryGetValue(id, out var words) ? words
+            : IsCustomId(id) && named?.Invoke(id) is { } own && !string.IsNullOrWhiteSpace(own) ? own.Trim()
+            : null;
+        if (name is null) return string.IsNullOrWhiteSpace(id) ? "an unnamed provider" : id;
+
+        return $"{("aeiouAEIOU".Contains(name[0]) ? "an" : "a")} {name} account";
+    }
+
     public static bool IsBuiltIn(string id) => id is Google or Microsoft;
 
     /// <summary><c>custom-</c> then lowercase letters, digits and hyphens, at most 40 characters.</summary>
