@@ -100,7 +100,7 @@ yawble agents [--details]  per agent: installed, signed in, launches, and what t
 yawble agents credential set <preset|command> [--api-key|--token] | clear <preset|command>   the issued credential of a CLI command; see below
 yawble agents source <preset> home|issued   whether a preset signs in through the shared home or its command's issued credential
 yawble remote enable <cloudflare|tailscale|ngrok> | disable | status
-yawble config get|set     port, engine, memory and cpus (each worker's), running limit, image, workers, workerImage
+yawble config get|set     port, engine, memory and cpus (each worker's), running limit, image, workers, workerImage, marketplaceCatalog (the package catalog address `up` gives the Host for Solutions > Get started; empty turns it off)
 yawble secret set|list|unset   GH_TOKEN and provider API keys for the instance; values are never shown
 yawble plugin install <folder> | --from-instance <path> [--force] | list | remove <id> [--version <v>]   plugins members can be hired on; see below
 yawble solution check <folder> | --from-instance <path> [--json]   what installing a solution package would create, or its problems; see below
