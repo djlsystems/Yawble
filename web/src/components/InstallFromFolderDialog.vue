@@ -18,6 +18,9 @@ import UploadPackageAction from './UploadPackageAction.vue';
  * newer version may sit where the installed one came from); a typed folder goes the same way as a
  * picked one, to the caller, which checks either the same way.
  *
+ * `folder` fills Folder on open: a package Solutions > Get started just fetched, which the person
+ * still reviews and installs with the button.
+ *
  * `offerReplace` shows Replace, for a screen whose Host route takes it (a plugin version already
  * installed); a screen without one is not shown a box that would do nothing.
  *
@@ -33,6 +36,7 @@ const props = withDefaults(defineProps<{
   instanceOnly?: boolean;
   offerReplace?: boolean;
   installing?: boolean;
+  folder?: string;
 }>(), {
   title: 'Install from a folder',
   caption: 'A package folder inside this instance.',
@@ -41,6 +45,7 @@ const props = withDefaults(defineProps<{
   instanceOnly: false,
   offerReplace: false,
   installing: false,
+  folder: '',
 });
 
 const open = defineModel<boolean>({ required: true });
@@ -51,10 +56,11 @@ const folder = ref('');
 const replace = ref(false);
 const pickerOpen = ref(false);
 
-// Every open starts empty: the last folder is the last install's, not this one's.
+// Every open starts empty, or on the folder it was opened for: the last folder is the last
+// install's, not this one's.
 watch(open, (showing) => {
   if (!showing) return;
-  folder.value = '';
+  folder.value = props.folder;
   replace.value = false;
 });
 

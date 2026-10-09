@@ -271,17 +271,22 @@ refuses:
 
 ## Getting a package in
 
-**Solutions → Get started** lists the published packages - each one's name, summary, kind, version
-and what it needs in words - and whether this instance has it (Installed, Update available). **Get**
-downloads the package from the catalog's own release, checks its size and sha256 against the
-catalog, records the fetch, and unpacks it into `Marketplace/<id>-<version>` of the instance's
-documents by the same checks as **Upload a package (.zip)**; then the install wizard (a solution) or
-the plugin install dialog (a plugin) opens on that folder, so you review and install as below. Get
-never installs. The catalog is read about every 12 hours and on **Refresh**; until a read has
-answered, after one that failed, or with **Settings → Read the package catalog** off, the tab says
-so in a sentence rather than showing an empty list.
+**Get started.** **Solutions → Get started** lists the published packages - each one's name,
+summary, kind, version and what it needs in words - and whether this instance has it (Installed, or
+Update available when the catalog's version is newer). **Get** downloads the package from the
+catalog's own release, checks its size and sha256 against the catalog, records the fetch, and
+unpacks it into `Marketplace/<id>-<version>` of the instance's documents by the same checks as
+**Upload a package (.zip)**; then the install wizard (a solution) or the plugin install dialog (a
+plugin) opens on that folder, so you review and install as below. Get never installs: nothing is
+installed until you press **Install** there. The catalog is read about every 12 hours and on
+**Refresh**; until a read has answered, after one that failed, with no address set, or with
+**Settings → Read the package catalog** off, the tab says so in a sentence rather than showing an
+empty list, and a refused Get names its reason. The operator CLI gives the Host the catalog address
+on `yawble up`; `yawble config set marketplaceCatalog` changes it, and an empty value turns it off.
+The web side is pinned by `web/src/components/__tests__/solutions-get-started.mount.spec.ts`, and
+the CLI's by `cli/internal/cli/marketplace_test.go`.
 
-A package is installed from a folder inside the instance, so it goes into Documents first:
+Otherwise a package is installed from a folder inside the instance, so it goes into Documents first:
 
 1. Open **Documents**, pick your team's folder, and upload the package: **Upload a folder** for the
    whole folder (its subfolders are kept), or **Upload a .zip**, which is unpacked into a folder of

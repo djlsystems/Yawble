@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { solutionsInstalled } from '../api/client';
-import type { InstalledSolution, SolutionStateKind } from '../api/types';
+import type { InstalledSolution, MarketplacePackage, SolutionCheck, SolutionStateKind } from '../api/types';
 import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
 import { localInstants } from '../lib/localTime';
+import DialogTabs from './DialogTabs.vue';
 import FilterText from './FilterText.vue';
+import GetStartedTab from './GetStartedTab.vue';
 import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
+import PluginInstallDialog from './PluginInstallDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
 
 /**
@@ -24,10 +27,17 @@ import SolutionWizard from './SolutionWizard.vue';
  * install link appears in that team's Activity feed and on its backlog item - or install from a
  * folder, which is offered here as well, through the install dialog and the wizard Admin -> Plugins
  * opens (`InstallFromFolderDialog`).
+ *
+ * GET STARTED, the second tab, lists the published package catalog (`GetStartedTab`). Its Get hands
+ * back the folder the Host fetched the package into, and this opens on it exactly what Install from
+ * a folder opens: the wizard for a solution, the plugin install dialog Admin -> Plugins opens for a
+ * plugin. Nothing is installed until the person presses Install there.
  */
 const open = defineModel<boolean>({ required: true });
 
 const emit = defineEmits<{ manage: [team: string] }>();
+
+const tab = ref<'installed' | 'get-started'>('installed');
 
 const rows = ref<InstalledSolution[]>([]);
 const loading = ref(false);
@@ -65,11 +75,25 @@ const detailsRow = ref<InstalledSolution | null>(null);
 // --- Install from a folder: the wizard, as Admin -> Plugins opens it ------------------------------
 
 const installOpen = ref(false);
-const wizard = ref<{ open: boolean; folder: string }>({ open: false, folder: '' });
+const wizard = ref<{ open: boolean; folder: string; check: SolutionCheck | null }>({ open: false, folder: '', check: null });
 
 function install(folder: string) {
   installOpen.value = false;
-  wizard.value = { open: true, folder };
+  wizard.value = { open: true, folder, check: null };
+}
+
+// --- Get started: a fetched package opens what Install from a folder opens -------------------------
+
+const pluginInstall = ref<{ open: boolean; folder: string }>({ open: false, folder: '' });
+
+function fetched(pkg: MarketplacePackage, folder: string) {
+  if (pkg.kind === 'solution') wizard.value = { open: true, folder, check: null };
+  else pluginInstall.value = { open: true, folder };
+}
+
+/** The plugin install found a solution.json: the wizard installs it instead, with that check. */
+function pluginWasASolution(folder: string, check: SolutionCheck) {
+  wizard.value = { open: true, folder, check };
 }
 
 // A finished install adds a tile: read the list again when the wizard closes.
@@ -85,6 +109,7 @@ watch(() => wizard.value.open, (showing, was) => {
         <div class="os-dialog-title">Solutions</div>
         <q-space />
         <q-btn
+          v-if="tab === 'installed'"
           flat
           dense
           no-caps
@@ -93,11 +118,20 @@ watch(() => wizard.value.open, (showing, was) => {
           data-install-from-folder
           @click="installOpen = true"
         />
-        <q-btn flat dense no-caps icon="refresh" label="Refresh" :loading="loading" @click="load" />
+        <q-btn v-if="tab === 'installed'" flat dense no-caps icon="refresh" label="Refresh" :loading="loading" @click="load" />
         <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
       </q-card-section>
 
-      <q-card-section>
+      <DialogTabs v-model="tab" class="q-px-md" data-solutions-tabs>
+        <q-tab name="installed" label="Installed" data-solutions-tab="installed" />
+        <q-tab name="get-started" label="Get started" data-solutions-tab="get-started" />
+      </DialogTabs>
+
+      <q-card-section v-if="tab === 'get-started'">
+        <GetStartedTab @get="fetched" />
+      </q-card-section>
+
+      <q-card-section v-else>
         <div v-if="error" class="os-body text-negative" data-launcher-problem>
           Could not list the solutions: {{ error }}
         </div>
@@ -295,7 +329,9 @@ watch(() => wizard.value.open, (showing, was) => {
     @install="install"
   />
 
-  <SolutionWizard v-model="wizard.open" :folder="wizard.folder" />
+  <PluginInstallDialog v-model="pluginInstall.open" :folder="pluginInstall.folder" @solution="pluginWasASolution" />
+
+  <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :check="wizard.check" />
 </template>
 
 <style scoped>

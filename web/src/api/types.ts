@@ -4025,3 +4025,40 @@ export interface ArchiveCheck {
   /** The team's open workflows. They do not block archiving; the confirmation lists them. */
   openWorkflows: { workflow: number; title: string }[]
 }
+
+/** One entry of the package catalog, with whether this instance has it. */
+export interface MarketplacePackage {
+  id: string
+  kind: 'solution' | 'plugin'
+  name: string
+  summary: string
+  version: string
+  /** What it needs, each a sentence for a person. */
+  needs: string[]
+  installed: boolean
+  installedVersion: string | null
+  /** The teams a solution is installed on; empty for a plugin. */
+  installedOn: string[]
+  /** The catalog's version is newer than the one installed. */
+  updateAvailable: boolean
+}
+
+/**
+ * `GET /api/marketplace` and `POST /api/marketplace/refresh`. `checked: false` is never an empty
+ * catalog: the Host has not read one (no address, turned off, not yet, or the read failed) and
+ * `reason` says which.
+ */
+export interface MarketplaceCatalog {
+  checked: boolean
+  reason: string | null
+  checkedAt: string | null
+  packages: MarketplacePackage[]
+}
+
+/** `POST /api/marketplace/{id}/fetch`: the folder it unpacked into, relative to the documents root. */
+export interface MarketplaceFetched {
+  id: string
+  version: string
+  kind: 'solution' | 'plugin'
+  folder: string
+}
