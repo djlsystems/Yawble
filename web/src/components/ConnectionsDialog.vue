@@ -22,6 +22,7 @@ import type {
   ConnectionProviderSave,
   ConnectionUse,
 } from '../api/types';
+import { appPasswordWarning } from '../lib/appPasswordShape';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { productCli } from '../presentation/product';
 import ConnectDialog from './ConnectDialog.vue';
@@ -374,6 +375,8 @@ const passwordFor = ref<Connection | null>(null);
 const newPassword = ref('');
 const passwordProblem = ref('');
 const passwordBusy = ref(false);
+/** A plain warning when the new password is not shaped like the provider's app password; never a refusal. */
+const passwordWarning = computed(() => appPasswordWarning(passwordFor.value?.preset, newPassword.value));
 
 function startPasswordUpdate(connection: Connection) {
   passwordFor.value = connection;
@@ -833,6 +836,7 @@ async function removeProvider(provider: ConnectionProvider) {
           spellcheck="false"
           @keydown.enter.prevent="updatePassword"
         />
+        <div v-if="passwordWarning" class="text-caption text-warning" role="status" data-app-password-warning>{{ passwordWarning }}</div>
         <div v-if="passwordProblem" class="text-negative" data-password-problem>{{ passwordProblem }}</div>
       </q-card-section>
 
