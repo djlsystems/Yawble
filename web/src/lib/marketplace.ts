@@ -1,4 +1,4 @@
-import type { MarketplaceCatalog, MarketplacePackage } from '../api/types';
+import type { CatalogNeeds, MarketplaceCatalog, MarketplacePackage } from '../api/types';
 
 /**
  * THE WORDS OF SOLUTIONS > GET STARTED, kept out of the component so each can be read and tested on
@@ -50,4 +50,99 @@ export function refusedWords(pkg: Pick<MarketplacePackage, 'name'>, message: str
  */
 export function fetchedFolder(root: string, folder: string): string {
   return `${root.replace(/\/+$/, '')}/${folder.replace(/^\/+/, '')}`;
+}
+
+/**
+ * THE WORDING TABLE: each connection provider id the Host knows, as a person says it - `name` in "a
+ * Google account", and `mailboxes`, the mailboxes a person has that it reaches, in "a mailbox: Gmail,
+ * iCloud, ...". The only place a provider id becomes words; an id not here reads as itself.
+ */
+export const PROVIDER_WORDS: Readonly<Record<string, { name: string; mailboxes: readonly string[] }>> = {
+  google: { name: 'Google', mailboxes: ['Gmail'] },
+  microsoft: { name: 'Microsoft', mailboxes: ['Outlook'] },
+  imap: { name: 'IMAP mailbox', mailboxes: ['Gmail', 'iCloud', 'Yahoo'] },
+  custom: { name: 'custom sign-in', mailboxes: [] },
+};
+
+/** The order mailboxes are named in, as the website names them. */
+const MAILBOX_ORDER = ['Gmail', 'iCloud', 'Yahoo', 'Outlook'];
+
+/** Each runtime the catalog names (`needs.runtimes`), as a person says it; one not here reads as itself. */
+export const RUNTIME_WORDS: Readonly<Record<string, string>> = {
+  dotnet: '.NET',
+  node: 'Node.js',
+  python3: 'Python 3',
+};
+
+/** The table's words for a provider id, only its own entries (never `toString` and the like). */
+function wordsOf(id: string) {
+  return Object.hasOwn(PROVIDER_WORDS, id) ? PROVIDER_WORDS[id] : undefined;
+}
+
+/** A provider id as a person says it: its words, or the id itself, never blank. */
+export function providerWords(id: string): string {
+  return wordsOf(id)?.name ?? (id.trim() || 'an unnamed provider');
+}
+
+function joined(items: string[], last: 'or' | 'and'): string {
+  return items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} ${last} ${items[items.length - 1]}`;
+}
+
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? 'an' : 'a';
+}
+
+/** One connection by what a person has: "Needs a Google account", "Needs a mailbox: Gmail, ... or another IMAP mailbox". */
+export function connectionWords(connection: CatalogNeeds['connections'][number]): string {
+  const lead = connection.required ? 'Needs' : 'Can use';
+  const providers = connection.providers;
+
+  if (providers.includes('imap')) {
+    const has = new Set(providers.flatMap((id) => wordsOf(id)?.mailboxes ?? []));
+    const others = providers.filter((id) => !wordsOf(id)?.mailboxes.length).map(providerWords);
+    return `${lead} a mailbox: ${joined([...MAILBOX_ORDER.filter((m) => has.has(m)), ...others, 'another IMAP mailbox'], 'or')}`;
+  }
+
+  if (providers.length === 0) return `${lead} an account connected`;
+
+  const names = providers.map(providerWords);
+  return `${lead} ${article(names[0] ?? '')} ${joined(names, 'or')} account`;
+}
+
+/** The settings the catalog's `when` texts name ("when the sources setting includes adzuna"), each once. */
+function settingsNamed(whens: string[]): string[] {
+  const named = whens.map((when) => /\bthe (\S+) setting\b/.exec(when)?.[1]).filter((name): name is string => !!name);
+  return [...new Set(named)];
+}
+
+/**
+ * A CARD'S NEEDS, a few short lines in the website's words: each connection by what a person has, each
+ * folder a file goes in, a setting only when it is required (optional ones are asked in the install
+ * wizard), every secret as ONE line naming the settings that call for keys, and the runtimes. The full
+ * lines are the Host's sentences, under Details.
+ */
+export function plainNeeds(needs: CatalogNeeds | undefined): string[] {
+  if (!needs) return [];
+  const lines = needs.connections.map(connectionWords);
+
+  for (const input of needs.inputs) {
+    if (input.kind === 'documents') lines.push(`${input.required ? 'Needs' : 'Can take'} a file in ${input.name}`);
+    else if (input.required) lines.push(`Asks for its ${input.name} setting at install`);
+  }
+
+  if (needs.secrets.length) {
+    const always = needs.secrets.some((secret) => !secret.when);
+    const settings = settingsNamed(needs.secrets.map((secret) => secret.when ?? ''));
+    lines.push(
+      always ? 'Needs keys set on the Host'
+      : settings.length ? `Needs keys set on the Host for some of its settings: ${joined(settings, 'and')}`
+      : 'Needs keys set on the Host for some of its settings',
+    );
+  }
+
+  if (needs.runtimes.length) {
+    lines.push(`Runs on ${joined(needs.runtimes.map((id) => (Object.hasOwn(RUNTIME_WORDS, id) ? RUNTIME_WORDS[id] : undefined) ?? id), 'and')}`);
+  }
+
+  return lines;
 }

@@ -205,6 +205,44 @@ public sealed class MarketplaceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_read_catalog_also_answers_its_needs_as_the_catalog_fields_so_the_console_can_word_them()
+    {
+        var status = await Market(MailFeed()).CheckAsync(Ct);
+
+        var fields = Assert.Single(status.Packages).CatalogNeeds;
+        var connection = Assert.Single(fields.Connections);
+        Assert.Equal(("mailbox", true), (connection.Slot, connection.Required));
+        Assert.Equal(["imap", "microsoft", "google"], connection.Providers);
+        var secret = Assert.Single(fields.Secrets);
+        Assert.Equal(("ADZUNA_KEY", "when the sources setting includes adzuna"), (secret.Key, secret.When));
+        var input = Assert.Single(fields.Inputs);
+        Assert.Equal(("Resume", "documents", false), (input.Name, input.Kind, input.Required));
+        Assert.Equal(["python3"], fields.Runtimes);
+    }
+
+    [Fact]
+    public void The_console_has_words_for_every_provider_a_manifest_may_name()
+    {
+        var table = File.ReadAllText(Path.Combine(SolutionSamples.RepoRoot(), "web", "src", "lib", "marketplace.ts"));
+
+        Assert.Equal(["google", "microsoft", "custom", "imap"], ConnectionProviders.ManifestProviders);
+        foreach (var provider in ConnectionProviders.ManifestProviders)
+        {
+            Assert.Contains($"\n  {provider}: {{ name: '", table, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void A_connection_slot_named_account_is_not_said_twice()
+    {
+        using var entry = JsonDocument.Parse("""
+            { "needs": { "connections": [{ "slot": "account", "providers": ["google"], "required": true, "why": "The Google account to report on." }] } }
+            """);
+
+        Assert.Equal(["Needs an account connected (google): The Google account to report on."], Marketplace.Needs(entry.RootElement));
+    }
+
+    [Fact]
     public async Task Nothing_is_guessed_before_a_read_after_a_failed_read_or_without_an_address()
     {
         var feed = MailFeed();
@@ -455,9 +493,16 @@ public sealed class MarketplaceTests : IDisposable
                 Assert.True(root.GetProperty("checked").GetBoolean());
                 var mail = root.GetProperty("packages")[0];
                 Assert.Equal(
-                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable"],
+                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable", "catalogNeeds"],
                     mail.EnumerateObject().Select(p => p.Name));
                 Assert.Equal("solution", mail.GetProperty("kind").GetString());
+
+                // The shape the console's CatalogNeeds type reads.
+                var fields = mail.GetProperty("catalogNeeds");
+                Assert.Equal(["connections", "secrets", "inputs", "runtimes"], fields.EnumerateObject().Select(p => p.Name));
+                Assert.Equal(["slot", "providers", "required"], fields.GetProperty("connections")[0].EnumerateObject().Select(p => p.Name));
+                Assert.Equal(["key", "when"], fields.GetProperty("secrets")[0].EnumerateObject().Select(p => p.Name));
+                Assert.Equal(["name", "kind", "required"], fields.GetProperty("inputs")[0].EnumerateObject().Select(p => p.Name));
             }
 
             var fetch = await person.PostAsync(MarketplaceEndpoints.Route + "/mail/fetch", null, Ct);
