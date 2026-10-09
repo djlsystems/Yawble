@@ -60,3 +60,25 @@ export async function removeChip(root: Element, item: string): Promise<void> {
   chip.click();
   await settle();
 }
+
+/** Types `text` into the list's own text field and presses Return there, as a person does. */
+export async function typeAndReturn(root: Element, text: string): Promise<void> {
+  const input = root.querySelector<HTMLInputElement>('[data-chip-list] input');
+  if (!input) throw new Error('this list has no text field to type in');
+  input.focus();
+  input.value = text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
+  await settle();
+}
+
+/** What the list's text field still holds. */
+export function typedIn(root: Element): string {
+  return root.querySelector<HTMLInputElement>('[data-chip-list] input')?.value ?? '';
+}
+
+/** The one line the list says under itself - a refusal - or '' when it says nothing. */
+export function listProblem(root: Element): string {
+  return root.querySelector('[data-chip-list] .q-field__messages')?.textContent?.trim() ?? '';
+}

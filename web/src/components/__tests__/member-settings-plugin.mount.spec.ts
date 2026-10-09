@@ -40,7 +40,7 @@ import {
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostField, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
 import { blur, button, field, fieldWrapper, hasError, isDisabled, settle, type } from '../../test/formProbe';
-import { addButtonIn, addChips, cancelAddDialog, chipsIn, removeChip, typeInAddDialog } from '../../test/chipList';
+import { addButtonIn, addChips, cancelAddDialog, chipsIn, listProblem, removeChip, typeAndReturn, typedIn, typeInAddDialog } from '../../test/chipList';
 
 const fields: Record<string, PluginConfigField> = {
   greeting: hostField({ type: 'string', description: 'What it says first.', default: 'hello' }),
@@ -189,6 +189,36 @@ describe('MemberSettingsDialog, a plugin member', () => {
 
     await removeChip(setting('recipients'), 'ops');
     expect(chips('recipients')).toEqual(['dev']);
+
+    wrapper.unmount();
+  });
+
+  it('adds a typed list value on Return in the field itself, without saving', async () => {
+    const wrapper = await mountSettings();
+
+    await typeAndReturn(setting('labels'), '  nightly  ');
+
+    expect(chips('labels')).toEqual(['nightly']);
+    expect(typedIn(setting('labels'))).toBe('');
+    expect(listProblem(setting('labels'))).toBe('');
+    expect(savePluginSettings).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+
+  it('adds nothing on Return for an empty or repeated value, and says why in one line', async () => {
+    const wrapper = await mountSettings();
+
+    await typeAndReturn(setting('labels'), '   ');
+    expect(chips('labels')).toEqual([]);
+    expect(listProblem(setting('labels'))).toBe('Type a value first.');
+
+    await typeAndReturn(setting('labels'), 'nightly');
+    await typeAndReturn(setting('labels'), 'nightly');
+    expect(chips('labels')).toEqual(['nightly']);
+    expect(listProblem(setting('labels'))).toBe('nightly is already in the list.');
+    // The refused value stays in the field, to be corrected rather than retyped.
+    expect(typedIn(setting('labels'))).toBe('nightly');
 
     wrapper.unmount();
   });

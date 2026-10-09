@@ -11,7 +11,7 @@ import SolutionWizard from '../SolutionWizard.vue';
 import type { SolutionPlan } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, settle, type } from '../../test/formProbe';
-import { addChips, cancelAddDialog, chipsIn, removeChip, typeInAddDialog } from '../../test/chipList';
+import { addChips, cancelAddDialog, chipsIn, listProblem, removeChip, typeAndReturn, typedIn, typeInAddDialog } from '../../test/chipList';
 import { Folder, fakeHost, hostPlan, reply, sent, steps, wizardRoutes, type Call } from '../../test/solutionFixtures';
 
 let calls: Call[] = [];
@@ -93,6 +93,35 @@ describe('Solution wizard - a list setting', () => {
 
     const body = await install();
     expect((body.settings as Record<string, Record<string, unknown>>).Scout!.positions).toEqual(['Systems Analyst', 'Business Analyst']);
+  });
+
+  it('adds a typed value on Return in the field itself, without moving on, and installs with it', async () => {
+    await yourPart();
+    await type('Scout: region', 'Europe');
+
+    await typeAndReturn(list(), 'Systems Analyst');
+    await typeAndReturn(list(), 'Business Analyst');
+    expect(chips()).toEqual(['Systems Analyst', 'Business Analyst']);
+    expect(typedIn(list())).toBe('');
+    expect(bodyFind('[data-step="inputs"]')).not.toBeNull();
+
+    const body = await install();
+    expect((body.settings as Record<string, Record<string, unknown>>).Scout!.positions).toEqual(['Systems Analyst', 'Business Analyst']);
+  });
+
+  it('adds nothing on Return for an empty or repeated value, and says why in one line', async () => {
+    await yourPart();
+
+    await typeAndReturn(list(), '');
+    expect(chips()).toEqual([]);
+    expect(listProblem(list())).toBe('Type a value first.');
+
+    await typeAndReturn(list(), 'Systems Analyst');
+    expect(listProblem(list())).toBe('');
+    await typeAndReturn(list(), 'Systems Analyst');
+    expect(chips()).toEqual(['Systems Analyst']);
+    expect(listProblem(list())).toBe('Systems Analyst is already in the list.');
+    expect(bodyFind('[data-step="inputs"]')).not.toBeNull();
   });
 
   it('adds nothing when the dialog is cancelled', async () => {
