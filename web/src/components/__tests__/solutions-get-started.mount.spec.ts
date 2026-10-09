@@ -39,7 +39,7 @@ const Mail = pkg({
   name: 'Mail',
   version: '1.2.0',
   summary: 'Reads your mailbox and drafts replies.',
-  needs: ['Needs a mailbox account connected (imap, microsoft or google).', 'Needs python3 on the instance.'],
+  needs: ['Needs a mailbox account connected (a mailbox by app password, a Microsoft account or a Google account).', 'Needs python3 on the instance.'],
   catalogNeeds: {
     connections: [{ slot: 'mailbox', providers: ['imap', 'microsoft', 'google'], required: true }],
     secrets: [],

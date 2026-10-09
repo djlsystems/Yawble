@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
@@ -192,7 +193,7 @@ public sealed class MarketplaceTests : IDisposable
         Assert.Equal(("mail", "solution", "Mail", "2.0.3", "The mail package."), (mail.Id, mail.Kind, mail.Name, mail.Version, mail.Summary));
         Assert.Equal(
             [
-                "Needs a mailbox account connected (imap, microsoft or google): The account it reads.",
+                "Needs a mailbox account connected (a mailbox by app password, a Microsoft account or a Google account): The account it reads.",
                 "Needs the secret ADZUNA_KEY set on the instance, when the sources setting includes adzuna: Searches Adzuna.",
                 "Can take documents in Resume at install: Your resume.",
                 "Needs python3 on the instance.",
@@ -221,15 +222,80 @@ public sealed class MarketplaceTests : IDisposable
     }
 
     [Fact]
-    public void The_console_has_words_for_every_provider_a_manifest_may_name()
+    public void The_console_has_the_hosts_words_for_every_provider_a_manifest_may_name()
     {
         var table = File.ReadAllText(Path.Combine(SolutionSamples.RepoRoot(), "web", "src", "lib", "marketplace.ts"));
 
         Assert.Equal(["google", "microsoft", "custom", "imap"], ConnectionProviders.ManifestProviders);
         foreach (var provider in ConnectionProviders.ManifestProviders)
         {
-            Assert.Contains($"\n  {provider}: {{ name: '", table, StringComparison.Ordinal);
+            var console = Regex.Match(table, $"\n  {provider}: {{ name: '([^']+)'");
+            Assert.True(console.Success, $"The console's PROVIDER_WORDS has no words for {provider}.");
+            Assert.Equal(console.Groups[1].Value, ConnectionProviders.Words[provider]);
         }
+    }
+
+    [Fact]
+    public void The_host_has_words_for_every_provider_a_manifest_may_name_none_of_them_the_id()
+    {
+        foreach (var provider in ConnectionProviders.ManifestProviders)
+        {
+            Assert.True(ConnectionProviders.Words.TryGetValue(provider, out var words), provider);
+            Assert.False(string.IsNullOrWhiteSpace(words), provider);
+            Assert.NotEqual(provider, ConnectionProviders.Spoken(provider), StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void A_provider_is_said_in_words_a_custom_one_by_its_own_name_and_only_an_unknown_one_by_its_id()
+    {
+        var named = new Dictionary<string, string> { ["custom-acme"] = "Acme" };
+
+        Assert.Equal("a Google account", ConnectionProviders.Spoken("google"));
+        Assert.Equal("a Microsoft account", ConnectionProviders.Spoken("microsoft"));
+        Assert.Equal("a mailbox by app password", ConnectionProviders.Spoken("imap"));
+        Assert.Equal("a custom sign-in account", ConnectionProviders.Spoken("custom"));
+        Assert.Equal("an Acme account", ConnectionProviders.Spoken("custom-acme", named.GetValueOrDefault));
+        Assert.Equal("custom-other", ConnectionProviders.Spoken("custom-other", named.GetValueOrDefault));
+        Assert.Equal("acme", ConnectionProviders.Spoken("acme"));
+    }
+
+    /// <summary>The needs of the published catalog's three entries, as released (see
+    /// <c>web/src/test/catalogFixtures.ts</c>, which copies the whole catalog).</summary>
+    private const string PublishedNeeds = """
+        [
+          { "id": "job-tracker", "needs": { "connections": [],
+            "secrets": [{ "key": "ADZUNA_APP_ID", "why": "Your Adzuna application id, from developer.adzuna.com. Needed to read Adzuna.", "when": "when the sources setting includes adzuna" }],
+            "inputs": [{ "name": "Resume", "kind": "documents", "required": true, "why": "Your reference resume, .docx or PDF. The Writer starts every letter from it." }],
+            "runtimes": ["python3"] } },
+          { "id": "mail", "needs": {
+            "connections": [{ "slot": "mailbox", "providers": ["imap", "microsoft", "google"], "required": true,
+              "why": "Your mailbox, connected in Admin, Connections: an app password for Gmail, iCloud, Yahoo or another IMAP mailbox (the simplest), or a Microsoft or Google account. Mailer reads, drafts and sends from it." }],
+            "secrets": [], "inputs": [{ "name": "mode", "kind": "setting", "required": false, "why": "draft (the default) only saves drafts you send yourself." }],
+            "runtimes": [] } },
+          { "id": "sample-whoami-go", "needs": {
+            "connections": [{ "slot": "account", "providers": ["google"], "required": true, "why": "The Google account to report on." }],
+            "secrets": [], "inputs": [], "runtimes": [] } }
+        ]
+        """;
+
+    [Fact]
+    public void The_published_catalogs_details_name_providers_in_words_never_by_id()
+    {
+        using var catalog = JsonDocument.Parse(PublishedNeeds);
+        var lines = catalog.RootElement.EnumerateArray().ToDictionary(e => e.GetProperty("id").GetString()!, e => Marketplace.Needs(e));
+
+        foreach (var line in lines.Values.SelectMany(l => l))
+        {
+            Assert.DoesNotMatch(@"\b(google|microsoft|imap|custom)\b", line);
+        }
+
+        Assert.Equal(
+            "Needs a mailbox account connected (a mailbox by app password, a Microsoft account or a Google account): Your mailbox, "
+            + "connected in Admin, Connections: an app password for Gmail, iCloud, Yahoo or another IMAP mailbox (the simplest), "
+            + "or a Microsoft or Google account. Mailer reads, drafts and sends from it.",
+            lines["mail"][0]);
+        Assert.Equal("Needs an account connected (a Google account): The Google account to report on.", lines["sample-whoami-go"][0]);
     }
 
     [Fact]
@@ -239,7 +305,34 @@ public sealed class MarketplaceTests : IDisposable
             { "needs": { "connections": [{ "slot": "account", "providers": ["google"], "required": true, "why": "The Google account to report on." }] } }
             """);
 
-        Assert.Equal(["Needs an account connected (google): The Google account to report on."], Marketplace.Needs(entry.RootElement));
+        Assert.Equal(["Needs an account connected (a Google account): The Google account to report on."], Marketplace.Needs(entry.RootElement));
+    }
+
+    [Fact]
+    public async Task A_read_catalog_says_a_custom_provider_by_the_name_a_person_gave_it_here()
+    {
+        var feed = MailFeed();
+        feed.Catalog = feed.Catalog!.Replace("\"google\"", "\"custom-acme\"", StringComparison.Ordinal);
+        var market = new Marketplace(
+            feed, () => true, () => Now, () => [], _ => null, NullLogger<Marketplace>.Instance,
+            _ => Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string> { ["custom-acme"] = "Acme" }));
+
+        var mail = Assert.Single((await market.CheckAsync(Ct)).Packages);
+
+        Assert.Equal(
+            "Needs a mailbox account connected (a mailbox by app password, a Microsoft account or an Acme account): The account it reads.",
+            mail.Needs[0]);
+    }
+
+    [Fact]
+    public void A_custom_provider_is_named_as_the_host_knows_it()
+    {
+        using var entry = JsonDocument.Parse("""
+            { "needs": { "connections": [{ "slot": "work", "providers": ["custom-acme", "custom-other"], "required": false }] } }
+            """);
+        var named = new Dictionary<string, string> { ["custom-acme"] = "Acme" };
+
+        Assert.Equal(["Can use a work account connected (an Acme account or custom-other)."], Marketplace.Needs(entry.RootElement, named.GetValueOrDefault));
     }
 
     [Fact]
@@ -280,7 +373,7 @@ public sealed class MarketplaceTests : IDisposable
 
         Assert.Equal(0, feed.Reads);
         Assert.False(status.Checked);
-        Assert.Equal("Reading the package catalog is turned off in Settings.", status.Reason);
+        Assert.Equal($"Reading the package catalog is turned off in {ConsoleSettingsLabels.WhereIs("marketplace.check")}.", status.Reason);
         Assert.Empty(status.Packages);
     }
 

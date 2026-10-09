@@ -183,7 +183,7 @@ public sealed class ReleaseCheckTests
         var status = check.StatusFor("2026.10.06.1");
         Assert.False(status.Enabled);
         Assert.False(status.UpdateAvailable);
-        Assert.Equal("Checking for updates is turned off in Settings.", status.Detail);
+        Assert.Equal($"Checking for updates is turned off in {ConsoleSettingsLabels.WhereIs("updates.check")}.", status.Detail);
     }
 
     [Fact]

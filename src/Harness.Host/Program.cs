@@ -643,7 +643,11 @@ builder.Services.AddSingleton(sp => new Marketplace(
         .Where(team => team.Solution is not null)
         .Select(team => (team.Id, team.Solution!)),
     id => sp.GetRequiredService<PluginCatalog>().For(id)?.Manifest.Version,
-    sp.GetRequiredService<ILogger<Marketplace>>()));
+    sp.GetRequiredService<ILogger<Marketplace>>(),
+    // A custom-<id> provider in the catalog's needs is said by the name a person gave it here.
+    async ct => (await sp.GetRequiredService<ConnectionStore>().ProvidersAsync(ct))
+        .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+        .ToDictionary(p => p.Id, p => p.Name!, StringComparer.Ordinal)));
 builder.Services.AddHostedService<MarketplaceLoop>();
 builder.Services.AddSingleton<IOAuthEndpoints>(sp => new HttpOAuthEndpoints(
     sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(HttpOAuthEndpoints))));

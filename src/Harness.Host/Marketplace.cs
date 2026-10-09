@@ -145,7 +145,8 @@ public sealed partial class Marketplace(
     Func<DateTimeOffset> now,
     Func<IEnumerable<(string Team, TeamSolution Solution)>> solutions,
     Func<string, string?> pluginVersion,
-    ILogger<Marketplace> log)
+    ILogger<Marketplace> log,
+    Func<CancellationToken, Task<IReadOnlyDictionary<string, string>>>? providerNames = null)
 {
     /// <summary>The configuration key (or <c>HARNESS_MARKETPLACE_CATALOG</c>) holding the catalog's
     /// address. The operator CLI sets it on the control container.</summary>
@@ -189,7 +190,7 @@ public sealed partial class Marketplace(
     /// <summary>The last answer, never a fresh read.</summary>
     public MarketplaceStatus Status()
     {
-        if (!enabled()) return NotChecked("Reading the package catalog is turned off in Settings.", null);
+        if (!enabled()) return NotChecked($"Reading the package catalog is turned off in {TenantSettings.SystemTab}.", null);
         if (feed.Address is null) return NotChecked("Not checked: this instance was not told where the package catalog is published.", null);
 
         var last = _last;
@@ -211,7 +212,8 @@ public sealed partial class Marketplace(
             try
             {
                 var text = await feed.ReadCatalogAsync(ct);
-                _last = new Read(now(), Parse(text), null);
+                var names = providerNames is null ? null : await providerNames(ct);
+                _last = new Read(now(), Parse(text, names is null ? null : id => names.GetValueOrDefault(id)), null);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -410,7 +412,7 @@ public sealed partial class Marketplace(
     private static partial Regex Sha256Hex();
 
     /// <summary>Reads a schema 1 catalog, refusing whole what it cannot read faithfully.</summary>
-    public static IReadOnlyList<CatalogPackage> Parse(string text)
+    public static IReadOnlyList<CatalogPackage> Parse(string text, Func<string, string?>? named = null)
     {
         JsonDocument document;
         try
@@ -444,12 +446,12 @@ public sealed partial class Marketplace(
             }
 
             var read = new List<CatalogPackage>();
-            foreach (var entry in packages.EnumerateArray()) read.Add(Package(entry, read.Count));
+            foreach (var entry in packages.EnumerateArray()) read.Add(Package(entry, read.Count, named));
             return read;
         }
     }
 
-    private static CatalogPackage Package(JsonElement entry, int index)
+    private static CatalogPackage Package(JsonElement entry, int index, Func<string, string?>? named)
     {
         string Text(JsonElement from, string field, string where) =>
             from.ValueKind == JsonValueKind.Object && from.TryGetProperty(field, out var value) && value.ValueKind == JsonValueKind.String
@@ -484,7 +486,7 @@ public sealed partial class Marketplace(
 
         return new CatalogPackage(
             id, kind, Text(entry, "name", at), Text(entry, "summary", at), version,
-            Needs(entry), url, sha256, bytes, Fields(entry));
+            Needs(entry, named), url, sha256, bytes, Fields(entry));
     }
 
     /// <summary>The catalog's needs fields as written, each list empty when the catalog has none.</summary>
@@ -515,8 +517,10 @@ public sealed partial class Marketplace(
             Strings(needs, "runtimes"));
     }
 
-    /// <summary>What a package needs, each in a sentence a person reads as text.</summary>
-    public static IReadOnlyList<string> Needs(JsonElement entry)
+    /// <summary>What a package needs, each in a sentence a person reads as text. Providers are said in
+    /// words (<see cref="ConnectionProviders.Spoken"/>); <paramref name="named"/> is the name the Host
+    /// knows for a <c>custom-&lt;id&gt;</c> provider, or null.</summary>
+    public static IReadOnlyList<string> Needs(JsonElement entry, Func<string, string?>? named = null)
     {
         var sentences = new List<string>();
         if (!entry.TryGetProperty("needs", out var needs) || needs.ValueKind != JsonValueKind.Object) return sentences;
@@ -551,7 +555,7 @@ public sealed partial class Marketplace(
             var providers = connection.TryGetProperty("providers", out var list) && list.ValueKind == JsonValueKind.Array
                 ? list.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.String).Select(p => p.GetString()!).ToList()
                 : [];
-            var through = providers.Count > 0 ? $" ({Or(providers)})" : "";
+            var through = providers.Count > 0 ? $" ({Or([.. providers.Select(p => ConnectionProviders.Spoken(p, named))])})" : "";
             sentences.Add(With($"{(Required(connection) ? "Needs" : "Can use")} {article} {account} connected{through}", Field(connection, "why")));
         }
 
