@@ -271,7 +271,19 @@ refuses:
 
 ## Getting a package in
 
-A package is installed from a folder inside the instance, so it goes into Documents first:
+**Get started.** **Solutions → Get started** lists the published package catalog: each package's
+name, summary, kind, version, what it needs, and whether this instance has it (Installed, or Update
+available when the catalog's version is newer). **Get** downloads the package into Documents under
+`Marketplace/<id>-<version>` after the Host checks it, then opens the install wizard on that folder
+for a solution, or the plugin install dialog for a plugin; nothing is installed until you press
+**Install** there. **Refresh** reads the catalog again. A catalog that has not been checked says so
+and why (no address set, turned off, or the read failed), and a refused Get names its reason. The
+operator CLI gives the Host the catalog address on `yawble up`; `yawble config set marketplaceCatalog`
+changes it, and an empty value turns it off. The web side is pinned by
+`web/src/components/__tests__/solutions-get-started.mount.spec.ts`, and the CLI's by
+`cli/internal/cli/marketplace_test.go`.
+
+Otherwise a package is installed from a folder inside the instance, so it goes into Documents first:
 
 1. Open **Documents**, pick your team's folder, and upload the package: **Upload a folder** for the
    whole folder (its subfolders are kept), or **Upload a .zip**, which is unpacked into a folder of

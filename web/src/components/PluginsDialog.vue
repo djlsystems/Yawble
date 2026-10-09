@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ActionRefused, getPluginManifest, installPlugin, listPlugins, removePlugin, rescanPlugins } from '../api/client';
-import type { ContainerSnapshot, InstalledPlugin, PluginInstallResult, PluginList, PluginMemberRef } from '../api/types';
+import { ActionRefused, getPluginManifest, listPlugins, removePlugin, rescanPlugins } from '../api/client';
+import type { ContainerSnapshot, InstalledPlugin, PluginList, PluginMemberRef } from '../api/types';
 import { formatManifest, pluginEvents, pluginRows, pluginSkill, type PluginRow } from '../lib/plugins';
 import { defaultLabel, setByPerson } from '../lib/pluginSettings';
 import { slotSummary } from '../lib/connections';
 import { useConsoleStore } from '../stores/console';
 import { filterWords, matchesWords } from '../lib/filterWords';
 import FilterText from './FilterText.vue';
-import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
+import PluginInstallDialog from './PluginInstallDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
-import { checkSolution } from '../api/client';
-import { isNotAPackage } from '../lib/solutions';
 import type { SolutionCheck } from '../api/types';
 
 /**
@@ -25,8 +23,8 @@ import type { SolutionCheck } from '../api/types';
  * hired on it - each a link to that member's settings, where a plugin member's settings are edited.
  *
  * Rescan re-reads the directory; View manifest shows `plugin.json` read-only; Install from a folder
- * installs a built plugin that is already inside the instance - through the install dialog Solutions
- * opens too (`InstallFromFolderDialog`), whose picker opens in the teams' Documents - and shows the
+ * installs a built plugin that is already inside the instance - through the plugin install dialog
+ * (`PluginInstallDialog`, on the install dialog Solutions opens too), whose picker opens in the teams' Documents - and shows the
  * Host's verdict, which refuses an existing version unless Replace is ticked. Remove takes one version, or
  * the whole plugin, with `plugin remove`'s rules: it asks first, and the Host refuses the
  * whole plugin while members are hired on it (naming them) and the active version while others are
@@ -163,50 +161,14 @@ function openMember(member: PluginMemberRef) {
 // --- Install from a folder -----------------------------------------------------------------------
 
 const installOpen = ref(false);
-const installing = ref(false);
-const verdict = ref<PluginInstallResult | null>(null);
 
 function startInstall() {
-  verdict.value = null;
   installOpen.value = true;
 }
 
-async function install(path: string, replace: boolean) {
-  if (installing.value) return;
-
-  installing.value = true;
-  verdict.value = null;
-
-  // A FOLDER HOLDING solution.json IS A SOLUTION PACKAGE: the wizard installs it instead. Only the
-  // check's "no solution.json" refusal (or a refused folder) goes on to the plain plugin install.
-  const solution = await checkSolution(path).catch(() => null);
-  if (solution && (solution.ok || !isNotAPackage(solution.refusals))) {
-    installing.value = false;
-    installOpen.value = false;
-    Object.assign(wizard.value, { open: true, folder: path, check: solution });
-    return;
-  }
-
-  try {
-    verdict.value = await installPlugin(path, replace);
-  } catch (cause) {
-    // A refusal is the Host's verdict too: its sentence names why, and nothing was written. A 409
-    // is an existing version without Replace; the body names the id and version when it read them.
-    const body = cause instanceof ActionRefused ? cause.body : {};
-    verdict.value = {
-      installed: false,
-      id: typeof body.id === 'string' ? body.id : null,
-      version: typeof body.version === 'string' ? body.version : null,
-      replaced: false,
-      reason: cause instanceof Error ? cause.message : String(cause),
-    };
-  } finally {
-    installing.value = false;
-  }
-
-  // AFTER EVERY INSTALL, whatever the verdict: a 200 with `installed: false` copied the folder and
-  // rescanned before the catalog refused it, so the list has a new row to show with its reason.
-  await load();
+/** A solution package chosen in the plugin install goes to the wizard instead. */
+function installSolution(folder: string, check: SolutionCheck) {
+  Object.assign(wizard.value, { open: true, folder, check });
 }
 
 const wizard = ref<{ open: boolean; folder: string; check: SolutionCheck | null }>({ open: false, folder: '', check: null });
@@ -274,16 +236,6 @@ async function confirmRemove() {
   }
 }
 
-const verdictText = computed(() => {
-  const result = verdict.value;
-  if (!result) return '';
-
-  const what = [result.id, result.version].filter(Boolean).join(' ');
-
-  return result.installed
-    ? `${result.replaced ? 'Replaced' : 'Installed'}${what ? ` ${what}` : ''}. It is the active version.`
-    : `Not installed${what ? ` (${what})` : ''}: ${result.reason ?? 'the Host gave no reason.'}`;
-});
 </script>
 
 <template>
@@ -590,27 +542,8 @@ const verdictText = computed(() => {
     </q-card>
   </q-dialog>
 
-  <!-- INSTALL FROM A FOLDER: a built plugin already inside the instance, through the dialog
-       Solutions shares. The Host's verdict is shown as it gave it; a refusal names why, and nothing
-       was written. -->
-  <InstallFromFolderDialog
-    v-model="installOpen"
-    caption="A built plugin folder inside this instance's data root, holding its plugin.json, or a solution package. A plugin is installed as the active version of its plugin."
-    picker-title="Choose the plugin folder"
-    offer-replace
-    :installing="installing"
-    @install="install"
-  >
-    <q-banner
-      v-if="verdict"
-      dense
-      :class="verdict.installed ? 'os-bg-tint-ok text-positive' : 'os-bg-tint-error text-negative'"
-      data-install-verdict
-    >
-      <template #avatar><q-icon :name="verdict.installed ? 'check_circle' : 'error'" /></template>
-      {{ verdictText }}
-    </q-banner>
-  </InstallFromFolderDialog>
+  <!-- INSTALL FROM A FOLDER: a built plugin already inside the instance, with the Host's verdict. -->
+  <PluginInstallDialog v-model="installOpen" @solution="installSolution" @settled="load" />
 
   <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :check="wizard.check" @opened="open = false" />
 

@@ -2066,3 +2066,18 @@ export const uninstallSolution = (team: string, removePlugins: boolean) =>
     `/api/teams/${encodeURIComponent(team)}/solution/uninstall`,
     postJson({ removePlugins }),
   )
+
+import type { MarketplaceCatalog, MarketplaceFetched } from './types'
+
+/** The package catalog as the Host last read it, each package with whether this instance has it. */
+export const getMarketplace = () => json<MarketplaceCatalog>('/api/marketplace')
+
+/** Reads the catalog again now, a person's Refresh. */
+export const refreshMarketplace = () => json<MarketplaceCatalog>('/api/marketplace/refresh', { method: 'POST' })
+
+/**
+ * Downloads one package, checks it and unpacks it into the documents. Never installs: the answer is
+ * the folder, for the wizard or the plugin install. A refusal is thrown with the Host's sentence.
+ */
+export const fetchMarketplacePackage = (id: string) =>
+  json<MarketplaceFetched>(`/api/marketplace/${encodeURIComponent(id)}/fetch`, { method: 'POST' })
