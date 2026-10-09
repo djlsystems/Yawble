@@ -147,19 +147,42 @@ public sealed partial class TeamDocuments
     /// FILE of that name give way to the folder; a folder of that name takes the files, each one
     /// replacing a file of its path, as an upload of that file would.
     /// </summary>
-    public async Task<PackageSaved> SavePackageAsync(
+    public Task<PackageSaved> SavePackageAsync(
         string team, string? folder, string name, PackageUpload upload, bool replaceFile, CancellationToken ct = default)
     {
         var root = EnsureFor(team);
         var directory = Resolve(team, folder);
-        var top = Resolve(team, Path.Combine(Relative(root, directory), name));
+
+        return SavePackageUnderAsync(
+            root, Relative(root, directory), name, upload, replaceFile, MaximumUploadBytes, MaximumPackageBytes, ct);
+    }
+
+    /// <summary>
+    /// Writes a checked package into the INSTANCE's documents (the tenant root, outside every team's
+    /// folder) at <paramref name="folder"/>/<paramref name="name"/>, by the same plan and the same
+    /// checks as <see cref="SavePackageAsync"/>, with the caller's own size bounds.
+    /// </summary>
+    public Task<PackageSaved> SaveInstancePackageAsync(
+        string folder, string name, PackageUpload upload, long fileLimit, long totalLimit, CancellationToken ct = default)
+    {
+        var root = Path.GetFullPath(paths.TenantDocuments);
+        Directory.CreateDirectory(root);
+
+        return SavePackageUnderAsync(root, folder, name, upload, replaceFile: false, fileLimit, totalLimit, ct);
+    }
+
+    private async Task<PackageSaved> SavePackageUnderAsync(
+        string root, string folder, string name, PackageUpload upload, bool replaceFile,
+        long fileLimit, long totalLimit, CancellationToken ct)
+    {
+        var top = ResolveUnder(root, Path.Combine(folder, name));
 
         if (top.Equals(root, StringComparison.OrdinalIgnoreCase)) throw new DocumentPathException("A folder needs a name.");
 
         var files = upload.Files
-            .Select(file => (File: file, Absolute: Resolve(team, Relative(root, Path.Combine(top, file.Path)))))
+            .Select(file => (File: file, Absolute: ResolveUnder(root, Relative(root, Path.Combine(top, file.Path)))))
             .ToList();
-        var folders = upload.Folders.Select(path => Resolve(team, Relative(root, Path.Combine(top, path)))).Prepend(top).ToList();
+        var folders = upload.Folders.Select(path => ResolveUnder(root, Relative(root, Path.Combine(top, path)))).Prepend(top).ToList();
         var giveWay = replaceFile && File.Exists(top) && new FileInfo(top).LinkTarget is null ? top : null;
 
         foreach (var path in folders) CheckWay(root, path, isFolder: true, giveWay);
@@ -186,14 +209,14 @@ public sealed partial class TeamDocuments
                 await using (var content = file.Open())
                 await using (var output = File.Create(path))
                 {
-                    size += await CopyAtMostAsync(content, output, MaximumUploadBytes, ct);
+                    size += await CopyAtMostAsync(content, output, fileLimit, ct);
                 }
 
                 written.Add(Relative(root, path));
 
-                if (size > MaximumPackageBytes)
+                if (size > totalLimit)
                 {
-                    throw new DocumentPathException($"It is larger than {MaximumPackageBytes / (1024 * 1024)} MB unpacked.");
+                    throw new DocumentPathException($"It is larger than {totalLimit / (1024 * 1024)} MB unpacked.");
                 }
             }
         }

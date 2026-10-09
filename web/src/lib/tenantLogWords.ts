@@ -944,6 +944,14 @@ const words: Record<string, Words> = {
       ]);
     },
   },
+  'marketplace.fetched': {
+    did: 'fetched a package',
+    detail: (d) =>
+      sentence([
+        `fetched ${text(d, 'id') ?? 'a package'}${text(d, 'version') ? ` ${text(d, 'version')}` : ''}${text(d, 'folder') ? ` into ${text(d, 'folder')}` : ''}`,
+        text(d, 'sha256') && `sha256 ${text(d, 'sha256')}`,
+      ]),
+  },
   'solution.updated': {
     did: 'updated a solution',
     detail: (d) => {

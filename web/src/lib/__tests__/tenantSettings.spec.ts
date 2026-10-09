@@ -59,6 +59,7 @@ describe('the Admission field', () => {
       'concierge.mayArchive',
       'concierge.mayMerge',
       'kanban.wipLimits',
+      'marketplace.check',
       'quiet.window',
       'resume.maxAutomatic',
       'runs.memoryLimitMb',
