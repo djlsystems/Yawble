@@ -22,8 +22,16 @@ export const MaxLaneWidth = 640;
 /** One keyboard step on the divider, in CSS pixels. */
 export const LaneWidthStep = 16;
 
-/** The `localStorage` key the width is kept under. */
+/** The `localStorage` key the board view's width is kept under (the key it has always had). */
 export const LaneWidthStorageKey = 'kanban.laneWidth';
+
+/** The `localStorage` key the swimlanes view's width is kept under: each view keeps its own width. */
+export const SwimlaneWidthStorageKey = 'kanban.swimlanes.laneWidth';
+
+/** The key a view's width is kept under: the board's as it always was, the swimlanes' its own. */
+export function laneWidthStorageKey(view: 'board' | 'swimlanes'): string {
+  return view === 'swimlanes' ? SwimlaneWidthStorageKey : LaneWidthStorageKey;
+}
 
 /** A width brought inside the allowed range, rounded to whole pixels; not a number reads as the default. */
 export function clampLaneWidth(width: number): number {
@@ -32,9 +40,12 @@ export function clampLaneWidth(width: number): number {
 }
 
 /** The remembered width, or the default when there is none or it cannot be read. */
-export function loadLaneWidth(storage: Pick<Storage, 'getItem'> | undefined = safeStorage()): number {
+export function loadLaneWidth(
+  storage: Pick<Storage, 'getItem'> | undefined = safeStorage(),
+  key: string = LaneWidthStorageKey,
+): number {
   try {
-    const raw = storage?.getItem(LaneWidthStorageKey);
+    const raw = storage?.getItem(key);
     if (raw === null || raw === undefined || raw.trim() === '') return DefaultLaneWidth;
     return clampLaneWidth(Number(raw));
   } catch {
@@ -43,9 +54,13 @@ export function loadLaneWidth(storage: Pick<Storage, 'getItem'> | undefined = sa
 }
 
 /** Remembers `width` (clamped); nothing happens when storage is not available. */
-export function saveLaneWidth(width: number, storage: Pick<Storage, 'setItem'> | undefined = safeStorage()): void {
+export function saveLaneWidth(
+  width: number,
+  storage: Pick<Storage, 'setItem'> | undefined = safeStorage(),
+  key: string = LaneWidthStorageKey,
+): void {
   try {
-    storage?.setItem(LaneWidthStorageKey, String(clampLaneWidth(width)));
+    storage?.setItem(key, String(clampLaneWidth(width)));
   } catch {
     // Blocked or full storage: the width lasts until the page is reloaded.
   }

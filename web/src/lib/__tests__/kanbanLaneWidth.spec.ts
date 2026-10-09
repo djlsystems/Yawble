@@ -3,6 +3,7 @@ import {
   clampLaneWidth,
   DefaultLaneWidth,
   LaneWidthStorageKey,
+  laneWidthStorageKey,
   loadLaneWidth,
   MaxLaneWidth,
   MinLaneWidth,
@@ -29,6 +30,17 @@ describe('the Kanban lane width', () => {
     expect(clampLaneWidth(5000)).toBe(MaxLaneWidth);
     expect(clampLaneWidth(333.6)).toBe(334);
     expect(clampLaneWidth(Number.NaN)).toBe(DefaultLaneWidth);
+  });
+
+  it('keeps the board and the swimlanes widths apart, the board under the key it always had', () => {
+    const storage = memory({ [LaneWidthStorageKey]: '360' });
+    expect(laneWidthStorageKey('board')).toBe(LaneWidthStorageKey);
+
+    saveLaneWidth(500, storage, laneWidthStorageKey('swimlanes'));
+
+    expect(loadLaneWidth(storage, laneWidthStorageKey('board'))).toBe(360);
+    expect(loadLaneWidth(storage, laneWidthStorageKey('swimlanes'))).toBe(500);
+    expect(loadLaneWidth(memory({ [LaneWidthStorageKey]: '360' }), laneWidthStorageKey('swimlanes'))).toBe(DefaultLaneWidth);
   });
 
   it('remembers a width and reads it back', () => {

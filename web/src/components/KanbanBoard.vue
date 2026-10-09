@@ -13,7 +13,7 @@ import KanbanChangeOutcome from './KanbanChangeOutcome.vue';
 import KanbanProposedOutcomes from './KanbanProposedOutcomes.vue';
 import OutcomesDialog from './OutcomesDialog.vue';
 import { FlipDurationMs, flipShifts, flipTransform, type CardBox } from '../lib/flip';
-import { clampLaneWidth, DefaultLaneWidth, LaneWidthStep, loadLaneWidth, saveLaneWidth } from '../lib/kanbanLaneWidth';
+import { clampLaneWidth, DefaultLaneWidth, laneWidthStorageKey, LaneWidthStep, loadLaneWidth, saveLaneWidth } from '../lib/kanbanLaneWidth';
 
 /**
  * The board: swim lanes from the active template, cards from the projection.
@@ -97,14 +97,24 @@ function laneOver(lane: KanbanLane): boolean {
   return laneOverLimit(laneCount(lane), lane.wipLimit);
 }
 
-// ONE WIDTH FOR EVERY LANE, set by dragging any divider between two lanes and remembered by this
-// browser. It is a CSS variable on the board, so the lanes, the swimlanes grid and a card leaving a
-// lane all read the same figure.
-const laneWidth = ref(loadLaneWidth());
+// ONE WIDTH FOR EVERY LANE OF A VIEW, set by dragging any divider between two lanes and remembered
+// by this browser - the board and the swimlanes each their own, so widening one leaves the other as
+// it was. It is a CSS variable on the board, so a view's lanes and a card leaving a lane read the
+// same figure.
+const laneWidths = ref<Record<KanbanView, number>>({
+  board: loadLaneWidth(undefined, laneWidthStorageKey('board')),
+  swimlanes: loadLaneWidth(undefined, laneWidthStorageKey('swimlanes')),
+});
+const laneWidth = computed(() => laneWidths.value[kanban.view]);
 const boardStyle = computed(() => ({ '--k-lane-width': `${laneWidth.value}px` }));
 
 function setLaneWidth(width: number) {
-  laneWidth.value = clampLaneWidth(width);
+  laneWidths.value = { ...laneWidths.value, [kanban.view]: clampLaneWidth(width) };
+}
+
+/** Remembers the current view's width under that view's own key. */
+function saveCurrentLaneWidth() {
+  saveLaneWidth(laneWidth.value, undefined, laneWidthStorageKey(kanban.view));
 }
 
 /** A drag on a divider moves every lane's width by how far the pointer moved, saved when it is let go. */
@@ -119,7 +129,7 @@ function startLaneResize(event: PointerEvent) {
     handle.removeEventListener('pointermove', move);
     handle.removeEventListener('pointerup', end);
     handle.removeEventListener('pointercancel', end);
-    saveLaneWidth(laneWidth.value);
+    saveCurrentLaneWidth();
   };
 
   handle.addEventListener('pointermove', move);
@@ -137,16 +147,21 @@ function laneResizeKey(event: KeyboardEvent) {
   if (next === null) return;
   event.preventDefault();
   setLaneWidth(next);
-  saveLaneWidth(laneWidth.value);
+  saveCurrentLaneWidth();
 }
 
 function resetLaneWidth() {
   setLaneWidth(DefaultLaneWidth);
-  saveLaneWidth(laneWidth.value);
+  saveCurrentLaneWidth();
 }
 
 /** The swimlane grid: a team column, then one track per lane at the shared lane width. */
 const gridColumns = computed(() => `10rem repeat(${kanban.lanes.length}, var(--k-lane-width))`);
+
+/** The grid's rows - the lane headers, the outcomes row when shown, one per team - which a divider spans. */
+const swimRowCount = computed(
+  () => 1 + (kanban.proposedShown.length ? 1 : 0) + kanban.swimlanes.length,
+);
 
 const lanesEl = ref<HTMLElement | null>(null);
 
@@ -358,6 +373,25 @@ function openOutcomes(id: string | null = null) {
         <span v-if="ledgerText(lane)" class="k-lane-wip" data-lane-wip>{{ ledgerText(lane) }}</span>
       </header>
 
+      <!-- THE SAME DIVIDER the lanes view has, in the gap after every lane but the last and down
+           every row, so a drag anywhere between two lanes widens every lane in every team's row. -->
+      <div
+        v-for="(lane, index) in kanban.lanes.slice(0, -1)"
+        :key="`divider-${lane.id}`"
+        class="k-lane-divider k-swim-divider"
+        :style="{ gridColumn: `${index + 2} / span 1`, gridRow: `1 / span ${swimRowCount}` }"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Lane width"
+        :aria-valuenow="laneWidth"
+        tabindex="0"
+        title="Drag to make every lane wider or narrower; double-click to reset"
+        data-test="lane-divider"
+        @pointerdown.prevent="startLaneResize"
+        @keydown="laneResizeKey"
+        @dblclick="resetLaneWidth"
+      />
+
       <!-- PROPOSED OUTCOMES BELONG TO NO TEAM: an outcome is instance-wide, so they have a row of
            their own, with entries in Needs You's column only. -->
       <template v-if="kanban.proposedShown.length">
@@ -528,6 +562,7 @@ function openOutcomes(id: string | null = null) {
 /* The swimlanes grid. Columns are set inline: a team column, then one track per lane at the shared
    `--k-lane-width` the board's lanes use, so switching views does not reflow a card. */
 .k-swimlanes {
+  position: relative;
   display: grid;
   gap: 8px 12px;
   overflow: auto;
@@ -637,6 +672,21 @@ function openOutcomes(id: string | null = null) {
 
 .k-lane-divider:focus-visible {
   outline: none;
+}
+
+/* In the swimlanes grid the divider is absolutely positioned against its lane's grid area (every
+   row of that column), so it takes no cell from the headers and cards placed around it, and it
+   sits in the 12px column gap after the lane - the same 12px the lanes view's divider takes.
+   Its placement names both lines (`n / span 1`): an absolutely positioned grid item given only a
+   start line runs to the grid's edge, which put every divider at the far right. */
+.k-swim-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -12px;
+  width: 12px;
+  min-height: 0;
+  z-index: 4;
 }
 
 @media (prefers-reduced-motion: reduce) {
