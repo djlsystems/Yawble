@@ -29,8 +29,8 @@ public sealed class MarketplaceTests : IDisposable
 
     private static readonly DateTimeOffset Now = new(2026, 10, 9, 8, 0, 0, TimeSpan.Zero);
 
-    private const string Address = "https://example.test/owner/packages/releases/latest/download/catalog.json";
-    private const string Downloads = "https://example.test/owner/packages/releases/download/catalog-2026.10.09.1/";
+    private const string Address = "https://example.test:8443/api/marketplace/catalog.json";
+    private const string Downloads = "https://example.test:8443/api/marketplace/download/";
 
     private readonly string _root = Directory.CreateTempSubdirectory("harness-marketplace-").FullName;
 
@@ -480,14 +480,24 @@ public sealed class MarketplaceTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(Fetched, "mail-2.0.3")));
     }
 
+    private const string NotFromTheCatalog = "is not a download from the catalog's own address, so it was not fetched.";
+
     public static TheoryData<string, string> Refused => new()
     {
         { "sha256", "The download does not match the catalog's sha256, so nothing was written." },
         { "size", "The download is " },
-        { "host", "is not a release download of the catalog it was listed in, so it was not fetched." },
-        { "outside", "is not a release download of the catalog it was listed in, so it was not fetched." },
-        { "dots", "is not a release download of the catalog it was listed in, so it was not fetched." },
-        { "http", "is not a release download of the catalog it was listed in, so it was not fetched." },
+        { "host", NotFromTheCatalog },
+        { "port", NotFromTheCatalog },
+        { "default-port", NotFromTheCatalog },
+        { "outside", NotFromTheCatalog },
+        { "beside", NotFromTheCatalog },
+        { "folder", NotFromTheCatalog },
+        { "query", NotFromTheCatalog },
+        { "escape", NotFromTheCatalog },
+        { "dots", NotFromTheCatalog },
+        { "dot", NotFromTheCatalog },
+        { "http", NotFromTheCatalog },
+        { "user", NotFromTheCatalog },
         { "oversize", "The package is larger than 100 MB, so it was not fetched." },
         { "link", "The zip was not unpacked: evil is a link." },
         { "parent", "The zip was not unpacked: ../escape.txt leaves the folder." },
@@ -501,10 +511,18 @@ public sealed class MarketplaceTests : IDisposable
         {
             "sha256" => MailFeed(sha256: new string('0', 64)),
             "size" => MailFeed(bytes: MailZip.LongLength + 1),
-            "host" => MailFeed(url: "https://elsewhere.test/owner/packages/releases/download/t/mail-2.0.3.zip"),
-            "outside" => MailFeed(url: "https://example.test/owner/packages/archive/mail-2.0.3.zip"),
-            "dots" => MailFeed(url: "https://example.test/owner/packages/releases/../../other/releases/download/t/mail-2.0.3.zip"),
-            "http" => MailFeed(url: "http://example.test/owner/packages/releases/download/t/mail-2.0.3.zip"),
+            "host" => MailFeed(url: "https://elsewhere.test:8443/api/marketplace/download/mail-2.0.3.zip"),
+            "port" => MailFeed(url: "https://example.test:9443/api/marketplace/download/mail-2.0.3.zip"),
+            "default-port" => MailFeed(url: "https://example.test/api/marketplace/download/mail-2.0.3.zip"),
+            "outside" => MailFeed(url: "https://example.test:8443/api/marketplace/files/mail-2.0.3.zip"),
+            "beside" => MailFeed(url: "https://example.test:8443/api/marketplace/downloads/mail-2.0.3.zip"),
+            "folder" => MailFeed(url: "https://example.test:8443/api/marketplace/download/"),
+            "query" => MailFeed(url: "https://example.test:8443/api/marketplace/download/mail-2.0.3.zip?file=mail-2.0.3.zip"),
+            "escape" => MailFeed(url: "https://example.test:8443/api/marketplace/download/%2e%2e/%2e%2e/admin/mail-2.0.3.zip"),
+            "dots" => MailFeed(url: "https://example.test:8443/api/marketplace/download/../../other/mail-2.0.3.zip"),
+            "dot" => MailFeed(url: "https://example.test:8443/api/marketplace/download/./mail-2.0.3.zip"),
+            "http" => MailFeed(url: "http://example.test:8443/api/marketplace/download/mail-2.0.3.zip"),
+            "user" => MailFeed(url: "https://someone@example.test:8443/api/marketplace/download/mail-2.0.3.zip"),
             "oversize" => MailFeed(bytes: Marketplace.MaxDownloadBytes + 1),
             "link" => MailFeed(zip: Zip(new Dictionary<string, string> { ["solution.json"] = "{}" }, link: "evil")),
             "parent" => MailFeed(zip: Zip(new Dictionary<string, string> { ["solution.json"] = "{}", ["../escape.txt"] = "x" })),
@@ -521,7 +539,33 @@ public sealed class MarketplaceTests : IDisposable
         Assert.Empty(log.Rows);
         Assert.False(Directory.Exists(Fetched));
         Assert.False(File.Exists(Path.Combine(_root, "documents", "escape.txt")));
-        if (bad is "host" or "outside" or "dots" or "http" or "oversize") Assert.Empty(feed.Downloaded);
+        if (sentence == NotFromTheCatalog || bad is "oversize") Assert.Empty(feed.Downloaded);
+    }
+
+    [Theory]
+    [InlineData("http://example.test:8443/api/marketplace/catalog.json")]
+    [InlineData("https://example.test:8443/owner/packages/releases/latest/download/catalog.json")]
+    public async Task A_download_is_fetched_only_when_the_catalog_itself_is_https_and_the_rule_ignores_its_path(string catalog)
+    {
+        // The catalog's own path does not matter: only its scheme, host and port do. And a
+        // catalog read over plain http names no address a download may come from.
+        var feed = new FakeFeed(catalog);
+        feed.Catalog = Catalog(Entry("mail", "solution", "2.0.3", MailZip, null, null, null));
+        feed.Files[$"{Downloads}mail-2.0.3.zip"] = MailZip;
+        var market = Market(feed);
+        await market.CheckAsync(Ct);
+
+        if (catalog.StartsWith("https://", StringComparison.Ordinal))
+        {
+            var fetched = await market.FetchAsync("mail", Documents(), new RecordingLog(), Person, Ct);
+            Assert.Equal("Marketplace/mail-2.0.3", fetched.Folder);
+        }
+        else
+        {
+            var refusal = await Assert.ThrowsAsync<MarketplaceRefusal>(() => market.FetchAsync("mail", Documents(), new RecordingLog(), Person, Ct));
+            Assert.Contains(NotFromTheCatalog, refusal.Message, StringComparison.Ordinal);
+            Assert.Empty(feed.Downloaded);
+        }
     }
 
     [Fact]
@@ -681,7 +725,7 @@ public sealed class MarketplaceTests : IDisposable
             Assert.True(settings.MarketplaceCheck);
             Assert.Equal("on", settings.Current(TenantSettings.MarketplaceCheckName));
             Assert.Equal(new Uri(Address), factory.Services.GetRequiredService<IMarketplaceFeed>().Address);
-            Assert.Equal("https://example.test/owner/packages/releases/", factory.Services.GetRequiredService<Marketplace>().DownloadPrefix);
+            Assert.Equal("https://example.test:8443/api/marketplace/download/", factory.Services.GetRequiredService<Marketplace>().DownloadPrefix);
         }
         finally
         {
