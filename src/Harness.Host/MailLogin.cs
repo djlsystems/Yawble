@@ -138,7 +138,7 @@ public sealed partial class SocketMailLogin(RemoteCertificateValidationCallback?
         : "Connected: Inbox is there";
 
     public static string RefusedSentence(string? provider, bool smtp) =>
-        (smtp ? "The outgoing (SMTP) server refused the password. " : "The server refused the password. ") + Hint(provider);
+        (smtp ? "The outgoing (SMTP) server refused the password. " : "The incoming (IMAP) server refused the password. ") + Hint(provider);
 
     private static string Hint(string? provider) => provider switch
     {

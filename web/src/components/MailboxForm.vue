@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { addMailbox } from '../api/client';
 import type { Connection, MailboxPreset, MailSecurity, MailServer } from '../api/types';
+import { appPasswordWarning } from '../lib/appPasswordShape';
 import { mailboxHint } from '../lib/mailboxHints';
 
 /**
@@ -21,7 +22,8 @@ import { mailboxHint } from '../lib/mailboxHints';
  * something else; Other shows it plainly. Either way, what is typed there is sent.
  *
  * THE APP PASSWORD IS WRITE-ONLY: typed, sent once, cleared once saved, never filled from anything.
- * A saved mailbox says only that its password is set.
+ * A saved mailbox says only that its password is set. One not shaped like the provider's app password
+ * gets a plain warning under the field; Save stays allowed (`appPasswordWarning`).
  */
 const props = defineProps<{
   presets: MailboxPreset[];
@@ -50,6 +52,8 @@ const smtpPort = ref('');
 const smtpSecurity = ref<MailSecurity>('TLS');
 
 const hint = computed(() => mailboxHint(presetId.value));
+
+const passwordWarning = computed(() => appPasswordWarning(presetId.value, password.value));
 
 /** Whether the login is the email address unless said otherwise: every tile but Other. */
 const loginIsAddress = computed(() => presetId.value !== 'other');
@@ -175,6 +179,7 @@ defineExpose({ save, ready, busy, connected, typed });
         autocomplete="new-password"
         spellcheck="false"
       />
+      <div v-if="passwordWarning" class="text-caption text-warning" role="status" data-app-password-warning>{{ passwordWarning }}</div>
 
       <div class="mailbox-server">
         <q-input v-model="imapHost" outlined dense label="IMAP server" autocomplete="off" spellcheck="false" class="mailbox-host" />

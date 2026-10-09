@@ -25,7 +25,7 @@ public interface IReleaseFeed
 }
 
 /// <summary>GitHub's public releases API, read anonymously: the repository is public and one read
-/// every twelve hours is far inside the unauthenticated limit.</summary>
+/// an hour is far inside the unauthenticated limit (see <see cref="ReleaseCheck.Interval"/>).</summary>
 public sealed class GitHubReleaseFeed(HttpClient http, string? repository) : IReleaseFeed
 {
     public string? Repository { get; } = string.IsNullOrWhiteSpace(repository) ? null : repository.Trim();
@@ -57,7 +57,7 @@ public sealed class GitHubReleaseFeed(HttpClient http, string? repository) : IRe
 }
 
 /// <summary>
-/// WHETHER A NEWER RELEASE IS OUT, read about twice a day and kept, so the version chip can say so
+/// WHETHER A NEWER RELEASE IS OUT, read about every hour and kept, so the version chip can say so
 /// and the person can read what changed and how to update. It never updates anything: the update
 /// itself is the operator CLI's, run on the machine, because the Host never starts the container
 /// engine (see AGENTS.md, Containment).
@@ -78,8 +78,11 @@ public sealed class ReleaseCheck(IReleaseFeed feed, Func<bool> enabled, Func<Dat
     public const string RepositorySetting = "Updates:Repository";
     public const string RepositoryVariable = "HARNESS_RELEASE_REPOSITORY";
 
-    /// <summary>How often the background loop reads the feed.</summary>
-    public static readonly TimeSpan Interval = TimeSpan.FromHours(12);
+    /// <summary>How often the background loop reads the feed: hourly, so a release published while a
+    /// Host runs is noticed within about an hour (pre-releases come out several times a day). One read
+    /// an hour stays far inside GitHub's unauthenticated rate limit of 60 requests an hour per IP
+    /// address, leaving the rest for Check now.</summary>
+    public static readonly TimeSpan Interval = TimeSpan.FromHours(1);
 
     /// <summary>The most newer releases one answer lists, newest first.</summary>
     public const int MaxListed = 10;
@@ -184,20 +187,23 @@ public sealed record UpdateStatus(
     string Current, bool Enabled, bool Checked, DateTimeOffset? CheckedAt, string? Detail,
     string? Latest, bool UpdateAvailable, bool? LatestIsPrerelease, IReadOnlyList<PublishedRelease> Newer);
 
-/// <summary>Reads the feed shortly after start, then every <see cref="ReleaseCheck.Interval"/>.</summary>
-public sealed class ReleaseCheckLoop(ReleaseCheck check) : BackgroundService
+/// <summary>Reads the feed shortly after start, then every <see cref="ReleaseCheck.Interval"/>, on
+/// <paramref name="clock"/> (the system's unless a test moves one by hand).</summary>
+public sealed class ReleaseCheckLoop(ReleaseCheck check, TimeProvider? clock = null) : BackgroundService
 {
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
     public static readonly TimeSpan FirstDelay = TimeSpan.FromSeconds(30);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
-            await Task.Delay(FirstDelay, stoppingToken);
+            await Task.Delay(FirstDelay, _clock, stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
                 await check.CheckAsync(stoppingToken);
-                await Task.Delay(ReleaseCheck.Interval, stoppingToken);
+                await Task.Delay(ReleaseCheck.Interval, _clock, stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -219,7 +225,7 @@ public static class ReleaseCheckEndpoints
             .WithTags("Diagnostics")
             .WithSummary("Whether a newer release is out, what changed, and whether it was checked")
             .WithDescription(
-                "The last answer of the release check, read about every 12 hours: `current`, `enabled` "
+                "The last answer of the release check, read about every hour: `current`, `enabled` "
                 + "(the tenant setting updates.check), `checked` (false means not known, never up to "
                 + "date, and `detail` says why), `checkedAt`, `latest`, `updateAvailable`, "
                 + "`latestIsPrerelease` and `newer` (each newer release offered, newest first, with "
