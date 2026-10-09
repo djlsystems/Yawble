@@ -45,6 +45,49 @@ public sealed class ReleaseCheckTests
         new(feed, () => enabled, () => Now, NullLogger<ReleaseCheck>.Instance);
 
     [Fact]
+    public async Task The_loop_reads_on_start_then_once_an_hour_and_not_before()
+    {
+        var feed = new FakeFeed();
+        var clock = new ManualTime(Now);
+        using var loop = new ReleaseCheckLoop(Check(feed), clock);
+        await loop.StartAsync(Ct);
+
+        // The read on start, shortly after it.
+        await WaitingAsync(clock);
+        Assert.Equal(0, feed.Reads);
+        clock.Advance(ReleaseCheckLoop.FirstDelay);
+        await ReadsAsync(feed, 1);
+        await WaitingAsync(clock);
+
+        // No read before the hour...
+        clock.Advance(TimeSpan.FromHours(1) - TimeSpan.FromSeconds(1));
+        await Task.Delay(200, Ct);
+        Assert.Equal(1, feed.Reads);
+
+        // ...and exactly one when it comes.
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await ReadsAsync(feed, 2);
+        await WaitingAsync(clock);
+        Assert.Equal(2, feed.Reads);
+
+        await loop.StopAsync(Ct);
+        Assert.Equal(TimeSpan.FromHours(1), ReleaseCheck.Interval);
+    }
+
+    /// <summary>Until the loop is parked on its next delay, so advancing the clock is measured from it.</summary>
+    private static async Task WaitingAsync(ManualTime clock)
+    {
+        for (var i = 0; i < 500 && clock.Waiting == 0; i++) await Task.Delay(10, Ct);
+        Assert.Equal(1, clock.Waiting);
+    }
+
+    private static async Task ReadsAsync(FakeFeed feed, int reads)
+    {
+        for (var i = 0; i < 500 && feed.Reads < reads; i++) await Task.Delay(10, Ct);
+        Assert.Equal(reads, feed.Reads);
+    }
+
+    [Fact]
     public async Task A_pre_release_build_is_offered_every_newer_pre_release_newest_first_with_its_notes()
     {
         var feed = new FakeFeed();

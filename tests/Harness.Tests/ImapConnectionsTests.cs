@@ -182,9 +182,10 @@ public sealed class ImapConnectionsTests : IAsyncLifetime
     {
         var (status, body) = await AddAsync(password: "wrong wrong wrong", preset: "gmail");
 
+        // The fake IMAP server refused it, and the sentence names that server, as SMTP's names its own.
         Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
         Assert.Equal(
-            "The server refused the password. For Gmail, make an app password: it needs 2-Step Verification.",
+            "The incoming (IMAP) server refused the password. For Gmail, make an app password: it needs 2-Step Verification.",
             JsonDocument.Parse(body).RootElement.GetProperty("error").GetString());
 
         Assert.Empty((await GetAsync("/api/connections")).EnumerateArray());
@@ -292,13 +293,13 @@ public sealed class ImapConnectionsTests : IAsyncLifetime
         Assert.Equal(MessageTypes.Failed, row.Type);
         var words = Words(row);
         Assert.Contains($"Connection 'Work mail' ({Account})", words);
-        Assert.Contains("The server refused the password.", words);
+        Assert.Contains("The incoming (IMAP) server refused the password.", words);
         Assert.Contains("Admin → Connections", words);
         Assert.Equal(linesBefore, File.Exists(Requests) ? File.ReadAllLines(Requests).Length : 0);
 
         var listed = Assert.Single((await GetAsync("/api/connections")).EnumerateArray());
         Assert.Equal("needs-reconnect", listed.GetProperty("status").GetString());
-        Assert.StartsWith("The server refused the password.", listed.GetProperty("statusReason").GetString());
+        Assert.StartsWith("The incoming (IMAP) server refused the password.", listed.GetProperty("statusReason").GetString());
         Assert.Contains(await TenantRowsAsync(), r => r.Action == TenantActions.ConnectionNeedsReconnect);
 
         // A second run does not log in again: it says the same thing.
@@ -329,7 +330,7 @@ public sealed class ImapConnectionsTests : IAsyncLifetime
         var (status, body) = await SendAsync(HttpMethod.Put, $"/api/connections/{id}/password", new { password = "not the password" });
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
-        Assert.StartsWith("The server refused the password.", JsonDocument.Parse(body).RootElement.GetProperty("error").GetString());
+        Assert.StartsWith("The incoming (IMAP) server refused the password.", JsonDocument.Parse(body).RootElement.GetProperty("error").GetString());
         Assert.Equal(before, await ScalarAsync("SELECT password_protected FROM imap_connections"));
         Assert.DoesNotContain(await TenantRowsAsync(), r => r.Action == TenantActions.ConnectionPasswordUpdated);
     }

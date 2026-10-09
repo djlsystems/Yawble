@@ -800,6 +800,12 @@ internal sealed class ManualTime(DateTimeOffset start) : TimeProvider
         lock (_gate) return _now;
     }
 
+    /// <summary>How many timers are waiting for the clock to reach them.</summary>
+    public int Waiting
+    {
+        get { lock (_gate) return _timers.Count; }
+    }
+
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
         var timer = new Timer(this, callback, state);
