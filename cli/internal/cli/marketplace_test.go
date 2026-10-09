@@ -8,8 +8,8 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/config"
 )
 
-// `up` tells the Host where the package catalog is published - yawble.ai's - so Solutions > Get
-// started can list it. The config's marketplaceCatalog replaces the address, and an empty value
+// `up` tells the Host where the package catalog is published - yawble.ai's - so Marketplace > Browse
+// can list it. The config's marketplaceCatalog replaces the address, and an empty value
 // passes none: the Host then says the catalog is not checked.
 const publishedCatalog = "https://yawble.ai/api/marketplace/catalog.json"
 

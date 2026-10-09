@@ -31,7 +31,7 @@ type Config struct {
 	// GitHubAsked records that the first `up` asked whether teams will use GitHub, so it asks
 	// once. Not a `config set` key: `yawble github` asks again whenever a person wants.
 	GitHubAsked bool `toml:"githubAsked,omitempty" json:"-"`
-	// MarketplaceCatalog is the address of the package catalog the Host reads for Get started.
+	// MarketplaceCatalog is the address of the package catalog the Host reads for Marketplace > Browse.
 	// nil is not chosen, which is DefaultMarketplaceCatalog; an empty value turns the catalog off.
 	MarketplaceCatalog *string `toml:"marketplaceCatalog,omitempty" json:"marketplaceCatalog"`
 }

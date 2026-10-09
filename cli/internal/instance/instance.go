@@ -293,7 +293,7 @@ func controlSpec(s Settings) engine.RunSpec {
 	if s.MaxRunning > 0 {
 		env["Wip__MaxRunning"] = fmt.Sprint(s.MaxRunning)
 	}
-	// HARNESS_MARKETPLACE_CATALOG is where the Host reads the package catalog for Get started; with
+	// HARNESS_MARKETPLACE_CATALOG is where the Host reads the package catalog for Marketplace > Browse; with
 	// none the Host says the catalog is not checked.
 	if s.MarketplaceCatalog != "" {
 		env["HARNESS_MARKETPLACE_CATALOG"] = s.MarketplaceCatalog
