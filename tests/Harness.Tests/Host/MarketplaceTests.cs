@@ -462,9 +462,11 @@ public sealed class MarketplaceTests : IDisposable
 
             var fetch = await person.PostAsync(MarketplaceEndpoints.Route + "/mail/fetch", null, Ct);
             Assert.Equal(HttpStatusCode.OK, fetch.StatusCode);
+            string fetched;
             using (var body = JsonDocument.Parse(await fetch.Content.ReadAsStringAsync(Ct)))
             {
-                Assert.Equal("Marketplace/mail-2.0.3", body.RootElement.GetProperty("folder").GetString());
+                fetched = body.RootElement.GetProperty("folder").GetString()!;
+                Assert.Equal("Marketplace/mail-2.0.3", fetched);
                 Assert.Equal("solution", body.RootElement.GetProperty("kind").GetString());
             }
 
@@ -475,9 +477,14 @@ public sealed class MarketplaceTests : IDisposable
             // same form Upload a package (.zip) fills Folder with.
             using (var documents = JsonDocument.Parse(await person.GetStringAsync("/api/documents", Ct)))
             {
-                var folder = $"{documents.RootElement.GetProperty("root").GetString()!.TrimEnd('/')}/Marketplace/mail-2.0.3";
+                var folder = $"{documents.RootElement.GetProperty("root").GetString()!.TrimEnd('/')}/{fetched}";
                 var check = await person.PostAsJsonAsync("/api/solutions/check", new { folder }, Ct);
-                Assert.True(check.StatusCode == HttpStatusCode.OK, await check.Content.ReadAsStringAsync(Ct));
+                var answer = await check.Content.ReadAsStringAsync(Ct);
+                Assert.True(check.StatusCode == HttpStatusCode.OK, answer);
+                using var checkedBody = JsonDocument.Parse(answer);
+                Assert.Equal(
+                    Path.GetFullPath(Path.Combine(dataRoot, "documents", "Marketplace", "mail-2.0.3")),
+                    Path.GetFullPath(checkedBody.RootElement.GetProperty("folder").GetString()!));
             }
 
             var rows = await factory.Services.GetRequiredService<ITenantLog>().ReadAsync(ct: Ct);
