@@ -173,10 +173,14 @@ describe('the solutions launcher', () => {
     expect(bodyFind('[data-solutions-empty]')).not.toBeNull();
     expect(bodyText()).toContain('Ask the Concierge');
     expect(bodyText()).toContain('Install from a folder');
+    // The button itself is on Advanced, which the sentence names.
+    expect(bodyText()).toContain('on the Advanced tab above');
+    bodyFind('[data-solutions-tab="advanced"]')!.click();
+    await settle();
     expect(bodyFind('[data-install-from-folder]')).not.toBeNull();
   });
 
-  it('names Get started as the third way to get a solution when none is installed', async () => {
+  it('names Browse as the third way to get a solution when none is installed', async () => {
     await launcher([]);
 
     const empty = bodyFind('[data-solutions-empty]')?.textContent?.replace(/\s+/g, ' ') ?? '';
@@ -184,7 +188,7 @@ describe('the solutions launcher', () => {
     expect([...bodyFind('[data-solutions-empty]')!.querySelectorAll('li strong:first-child')].map((way) => way.textContent)).toEqual([
       'Ask the Concierge',
       'Install from a folder',
-      'Get started',
+      'Browse',
     ]);
   });
 
@@ -291,7 +295,9 @@ describe('the solutions launcher', () => {
       await pick(wrapper, 'data-solutions-filter-team', null);
       await pick(wrapper, 'data-solutions-filter-state', null);
 
-      expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual(['GET /api/solutions/installed']);
+      // The two reads the dialog makes when it opens: the installed list, and the catalog Browse
+      // reads (which also says where an update is listed). The filter adds none.
+      expect(calls.map((call) => `${call.method} ${call.url}`).sort()).toEqual(['GET /api/marketplace', 'GET /api/solutions/installed']);
       expect(wrapper.emitted('manage')).toEqual([['news']]);
     });
 
@@ -366,6 +372,8 @@ describe('the solutions launcher', () => {
     // No link of its own: with nothing installed there is no package to link to.
     expect(empty.querySelector('a')).toBeNull();
 
+    bodyFind('[data-solutions-tab="advanced"]')!.click();
+    await settle();
     bodyFind('[data-install-from-folder]')!.click();
     await settle();
     expect(bodyFind('[data-install-dialog]')?.textContent).toContain('a folder holding its solution.json');

@@ -4032,6 +4032,9 @@ export interface MarketplacePackage {
   kind: 'solution' | 'plugin'
   name: string
   summary: string
+  /** The catalog's longer description, which Browse's filter matches; empty when it has none.
+   *  Optional on the client only, so an answer from a Host that predates it still reads. */
+  description?: string
   version: string
   /** What it needs, each a sentence for a person: the full lines, under a card's Details. */
   needs: string[]

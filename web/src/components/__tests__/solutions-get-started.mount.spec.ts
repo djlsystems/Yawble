@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 //
-// SOLUTIONS > GET STARTED: the package catalog the Host read (`GET /api/marketplace`), one tile per
+// MARKETPLACE > BROWSE (the tab once called Get started; its id still is): the package catalog the
+// Host read (`GET /api/marketplace`), one tile per
 // package - name, summary, kind, version, what it needs in a few short plain lines (the Host's full
 // sentences under Details, closed by default), and Installed / Update available -
 // with Refresh (`POST /api/marketplace/refresh`). Get fetches the package (`POST
@@ -111,7 +112,7 @@ const detailLines = (id: string) => [...tile(id).querySelectorAll('[data-package
 const HostProviders = ['google', 'microsoft', 'custom', 'imap'];
 const ProviderId = new RegExp(`\\b(${HostProviders.join('|')})\\b`);
 
-describe('Solutions > Get started', () => {
+describe('Marketplace > Browse', () => {
   it('lists each package with its name, summary, kind, version, needs and whether it is installed', async () => {
     serve(catalogRoute(read([JobTracker, Mail, WhoAmI])));
 

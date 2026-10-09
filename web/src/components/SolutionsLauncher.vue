@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { solutionsInstalled } from '../api/client';
-import type { InstalledSolution, MarketplacePackage, SolutionCheck, SolutionStateKind } from '../api/types';
+import type { InstalledSolution, MarketplaceCatalog, MarketplacePackage, SolutionCheck, SolutionStateKind } from '../api/types';
+import { updateFor } from '../lib/marketplace';
+import { fetchIntoDocuments } from '../lib/marketplaceFetch';
 import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
 import { localInstants } from '../lib/localTime';
 import DialogTabs from './DialogTabs.vue';
@@ -12,10 +14,12 @@ import PluginInstallDialog from './PluginInstallDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
 
 /**
- * THE SOLUTIONS LAUNCHER: one tile per team installed from a solution package - its name and
+ * MARKETPLACE (the component and its route keep the old name, the launcher): three tabs.
+ *
+ * INSTALLED: one tile per team installed from a solution package - its name and
  * version, its team, its status line and a state badge - with Open (the package's primary site, in
  * a new tab, only when it has one), Details (everything the row says, read-only) and Manage (the
- * control panel). The tiles are the shared grid (`os-tiles` / `os-tile`, css/tiles.scss), as
+ * control panel, where it is paused, updated and uninstalled). The tiles are the shared grid (`os-tiles` / `os-tile`, css/tiles.scss), as
  * Plugins and Agents lay theirs out, and the filter above them is the shared box: words, a team and
  * a state, narrowing what is SHOWN only.
  *
@@ -23,21 +27,28 @@ import SolutionWizard from './SolutionWizard.vue';
  * reason are interpolated, never bound as HTML, so a status value that looks like markup reads as
  * the characters it is.
  *
- * With nothing installed it says how solutions arrive: a package a team built, whose Review and
- * install link appears in that team's Activity feed and on its backlog item - or install from a
- * folder, which is offered here as well, through the install dialog and the wizard Admin -> Plugins
- * opens (`InstallFromFolderDialog`) - or Get started, the published packages.
+ * AN UPDATE IS OFFERED WHERE IT IS INSTALLED: a tile whose package the catalog lists at a newer
+ * version says so and offers Update, which fetches that version as Get does and opens the wizard on
+ * it for that team - "Update an existing team", the wizard's own update path. Nothing is installed
+ * until the person presses Install there.
  *
- * GET STARTED, the second tab, lists the published package catalog (`GetStartedTab`). Its Get hands
- * back the folder the Host fetched the package into, and this opens on it exactly what Install from
- * a folder opens: the wizard for a solution, the plugin install dialog Admin -> Plugins opens for a
- * plugin. Nothing is installed until the person presses Install there.
+ * With nothing installed it says how solutions arrive: a package a team built, whose Review and
+ * install link appears in that team's Activity feed and on its backlog item - or Browse, the
+ * published packages - or Advanced, Install from a folder.
+ *
+ * BROWSE lists the published package catalog (`GetStartedTab`). Its Get hands back the folder the
+ * Host fetched the package into, and this opens on it exactly what Install from a folder opens: the
+ * wizard for a solution, the plugin install dialog Admin -> Plugins opens for a plugin. It stays
+ * mounted while another tab shows, so its one read of the catalog also tells Installed what is newer.
+ *
+ * ADVANCED holds Install from a folder, through the install dialog and the wizard Admin -> Plugins
+ * opens (`InstallFromFolderDialog`).
  */
 const open = defineModel<boolean>({ required: true });
 
 const emit = defineEmits<{ manage: [team: string] }>();
 
-const tab = ref<'installed' | 'get-started'>('installed');
+const tab = ref<'get-started' | 'installed' | 'advanced'>('installed');
 
 const rows = ref<InstalledSolution[]>([]);
 const loading = ref(false);
@@ -75,25 +86,46 @@ const detailsRow = ref<InstalledSolution | null>(null);
 // --- Install from a folder: the wizard, as Admin -> Plugins opens it ------------------------------
 
 const installOpen = ref(false);
-const wizard = ref<{ open: boolean; folder: string; check: SolutionCheck | null }>({ open: false, folder: '', check: null });
+// `team`: the team an Update opened it for, so it starts on that team's update; '' for none.
+const wizard = ref<{ open: boolean; folder: string; check: SolutionCheck | null; team: string }>({ open: false, folder: '', check: null, team: '' });
 
 function install(folder: string) {
   installOpen.value = false;
-  wizard.value = { open: true, folder, check: null };
+  wizard.value = { open: true, folder, check: null, team: '' };
 }
 
-// --- Get started: a fetched package opens what Install from a folder opens -------------------------
+// --- Installed: an Update where the catalog lists a newer version ---------------------------------
+
+const catalog = ref<MarketplaceCatalog | null>(null);
+const updating = ref('');
+const updateRefused = ref<{ team: string; text: string } | null>(null);
+
+async function update(row: InstalledSolution, pkg: MarketplacePackage) {
+  if (updating.value) return;
+
+  updating.value = row.team;
+  updateRefused.value = null;
+  try {
+    const fetched = await fetchIntoDocuments(pkg);
+    if (fetched.ok) wizard.value = { open: true, folder: fetched.folder, check: null, team: row.team };
+    else updateRefused.value = { team: row.team, text: fetched.text };
+  } finally {
+    updating.value = '';
+  }
+}
+
+// --- Browse: a fetched package opens what Install from a folder opens ------------------------------
 
 const pluginInstall = ref<{ open: boolean; folder: string }>({ open: false, folder: '' });
 
 function fetched(pkg: MarketplacePackage, folder: string) {
-  if (pkg.kind === 'solution') wizard.value = { open: true, folder, check: null };
+  if (pkg.kind === 'solution') wizard.value = { open: true, folder, check: null, team: '' };
   else pluginInstall.value = { open: true, folder };
 }
 
 /** The plugin install found a solution.json: the wizard installs it instead, with that check. */
 function pluginWasASolution(folder: string, check: SolutionCheck) {
-  wizard.value = { open: true, folder, check };
+  wizard.value = { open: true, folder, check, team: '' };
 }
 
 // A finished install adds a tile: read the list again when the wizard closes.
@@ -106,32 +138,39 @@ watch(() => wizard.value.open, (showing, was) => {
   <q-dialog v-model="open" no-route-dismiss>
     <q-card class="os-dialog-xl" data-solutions-launcher>
       <q-card-section class="row items-center q-pb-none">
-        <div class="os-dialog-title">Solutions</div>
+        <div class="os-dialog-title">Marketplace</div>
         <q-space />
-        <q-btn
-          v-if="tab === 'installed'"
-          flat
-          dense
-          no-caps
-          icon="create_new_folder"
-          label="Install from a folder"
-          data-install-from-folder
-          @click="installOpen = true"
-        />
         <q-btn v-if="tab === 'installed'" flat dense no-caps icon="refresh" label="Refresh" :loading="loading" @click="load" />
         <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
       </q-card-section>
 
       <DialogTabs v-model="tab" class="q-px-md" data-solutions-tabs>
+        <q-tab name="get-started" label="Browse" data-solutions-tab="get-started" />
         <q-tab name="installed" label="Installed" data-solutions-tab="installed" />
-        <q-tab name="get-started" label="Get started" data-solutions-tab="get-started" />
+        <q-tab name="advanced" label="Advanced" data-solutions-tab="advanced" />
       </DialogTabs>
 
-      <q-card-section v-if="tab === 'get-started'">
-        <GetStartedTab @get="fetched" />
+      <q-card-section v-show="tab === 'get-started'">
+        <GetStartedTab @get="fetched" @read="(read: MarketplaceCatalog) => (catalog = read)" />
       </q-card-section>
 
-      <q-card-section v-else>
+      <q-card-section v-if="tab === 'advanced'" data-solutions-advanced>
+        <div class="os-body os-text-muted q-mb-md">
+          Install a package that is already inside this instance: a folder holding its <code>solution.json</code>.
+        </div>
+        <q-btn
+          unelevated
+          dense
+          no-caps
+          color="primary"
+          icon="create_new_folder"
+          label="Install from a folder"
+          data-install-from-folder
+          @click="installOpen = true"
+        />
+      </q-card-section>
+
+      <q-card-section v-if="tab === 'installed'">
         <div v-if="error" class="os-body text-negative" data-launcher-problem>
           Could not list the solutions: {{ error }}
         </div>
@@ -148,8 +187,8 @@ watch(() => wizard.value.open, (showing, was) => {
               <strong>Activity feed</strong> and its <strong>backlog item</strong> say it is ready, with a
               <strong>Review and install</strong> link that opens the install wizard here.
             </li>
-            <li><strong>Install from a folder</strong> that holds a <code>solution.json</code>, with the button above.</li>
-            <li><strong>Get started</strong>, the tab above, lists the packages published for this product: Get one and its install opens here.</li>
+            <li><strong>Install from a folder</strong> that holds a <code>solution.json</code>, on the <strong>Advanced</strong> tab above.</li>
+            <li><strong>Browse</strong>, the tab above, lists the packages published for this product: Get one and its install opens here.</li>
           </ul>
         </div>
 
@@ -224,6 +263,12 @@ watch(() => wizard.value.open, (showing, was) => {
                 </q-badge>
               </div>
               <div v-if="row.status" class="os-tile-line solution-tile-status" data-tile-status>{{ localInstants(row.status) }}</div>
+              <div v-if="updateFor(row, catalog)" class="os-tile-line text-warning" data-tile-update-available>
+                Update available: {{ updateFor(row, catalog)?.version }}
+              </div>
+              <div v-if="updateRefused?.team === row.team" class="os-tile-line text-negative solution-tile-status" role="alert" data-tile-update-refused>
+                {{ updateRefused.text }}
+              </div>
 
               <div class="solution-tile-actions">
                 <!-- A REAL LINK, in a new tab: the site is the solution's app. Shown only when the
@@ -254,6 +299,19 @@ watch(() => wizard.value.open, (showing, was) => {
                 >
                   <q-tooltip>Details: its package, folder, who installed it and its plugins</q-tooltip>
                 </q-btn>
+                <q-btn
+                  v-if="updateFor(row, catalog)"
+                  flat
+                  dense
+                  no-caps
+                  icon="upgrade"
+                  label="Update"
+                  :aria-label="`Update ${row.name} to ${updateFor(row, catalog)?.version}`"
+                  :loading="updating === row.team"
+                  :disable="updating !== '' && updating !== row.team"
+                  data-tile-update
+                  @click="update(row, updateFor(row, catalog)!)"
+                />
                 <q-btn
                   unelevated
                   dense
@@ -332,7 +390,7 @@ watch(() => wizard.value.open, (showing, was) => {
 
   <PluginInstallDialog v-model="pluginInstall.open" :folder="pluginInstall.folder" @solution="pluginWasASolution" />
 
-  <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :check="wizard.check" />
+  <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :check="wizard.check" :team="wizard.team" />
 </template>
 
 <style scoped>

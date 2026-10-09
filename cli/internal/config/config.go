@@ -31,7 +31,7 @@ type Config struct {
 	// GitHubAsked records that the first `up` asked whether teams will use GitHub, so it asks
 	// once. Not a `config set` key: `yawble github` asks again whenever a person wants.
 	GitHubAsked bool `toml:"githubAsked,omitempty" json:"-"`
-	// MarketplaceCatalog is the address of the package catalog the Host reads for Get started.
+	// MarketplaceCatalog is the address of the package catalog the Host reads for Marketplace > Browse.
 	// nil is not chosen, which is DefaultMarketplaceCatalog; an empty value turns the catalog off.
 	MarketplaceCatalog *string `toml:"marketplaceCatalog,omitempty" json:"marketplaceCatalog"`
 }
@@ -45,9 +45,9 @@ const FileName = "config.toml"
 // number and 8080 is what the Host listens on inside the container.
 const DefaultPort = 8080
 
-// DefaultMarketplaceCatalog is where the published package catalog is, unless the config names
+// DefaultMarketplaceCatalog is where the published package catalog is - yawble.ai's - unless the config names
 // another address or none.
-const DefaultMarketplaceCatalog = "https://github.com/djlsystems/Yawble-packages/releases/latest/download/catalog.json"
+const DefaultMarketplaceCatalog = "https://yawble.ai/api/marketplace/catalog.json"
 
 func Path(dir string) string { return filepath.Join(dir, FileName) }
 

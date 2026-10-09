@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"github.com/djlsystems/yawble/cli/internal/cli"
+	"github.com/djlsystems/yawble/cli/internal/config"
 )
 
-// `up` tells the Host where the package catalog is published, so Solutions > Get started can list
-// it. The config's marketplaceCatalog replaces the address, and an empty value passes none: the
-// Host then says the catalog is not checked.
-const publishedCatalog = "https://github.com/djlsystems/Yawble-packages/releases/latest/download/catalog.json"
+// `up` tells the Host where the package catalog is published - yawble.ai's - so Marketplace > Browse
+// can list it. The config's marketplaceCatalog replaces the address, and an empty value
+// passes none: the Host then says the catalog is not checked.
+const publishedCatalog = "https://yawble.ai/api/marketplace/catalog.json"
 
 func controlRun(t *testing.T, saved string) string {
 	t.Helper()
@@ -31,6 +32,12 @@ func controlRun(t *testing.T, saved string) string {
 func TestUpPassesThePublishedCatalogByDefault(t *testing.T) {
 	if got := controlRun(t, ""); !strings.Contains(got, " -e HARNESS_MARKETPLACE_CATALOG="+publishedCatalog+" ") {
 		t.Errorf("control run %q lacks the published catalog", got)
+	}
+}
+
+func TestThePublishedCatalogIsYawbleAis(t *testing.T) {
+	if config.DefaultMarketplaceCatalog != publishedCatalog {
+		t.Errorf("the published catalog is %q, not yawble.ai's %q", config.DefaultMarketplaceCatalog, publishedCatalog)
 	}
 }
 

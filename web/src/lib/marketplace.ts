@@ -1,9 +1,11 @@
-import type { CatalogNeeds, MarketplaceCatalog, MarketplacePackage } from '../api/types';
+import type { CatalogNeeds, InstalledSolution, MarketplaceCatalog, MarketplacePackage } from '../api/types';
+import { filterWords, matchesWords } from './filterWords';
+import { compareVersions } from './solutions';
 
 /**
- * THE WORDS OF SOLUTIONS > GET STARTED, kept out of the component so each can be read and tested on
- * its own: what a package is, whether this instance has it, why the catalog was not read, and where
- * a fetched package landed.
+ * THE WORDS OF MARKETPLACE > BROWSE, kept out of the component so each can be read and tested on
+ * its own: what a package is, whether this instance has it, why the catalog was not read, where a
+ * fetched package landed, which cards the filter keeps, and which installed team has an update.
  */
 
 /** A package's kind as a person reads it. */
@@ -21,6 +23,29 @@ export function installedWords(pkg: MarketplacePackage): string {
   return pkg.updateAvailable
     ? `Installed${version}${on} · Update available: ${pkg.version}`
     : `Installed${version}${on}`;
+}
+
+/**
+ * BROWSE'S FILTER: every word of `text` found, case-insensitively, in the package's name, summary,
+ * description, or the words for what it needs - the card's short lines and the Host's full
+ * sentences under Details. No words keeps every card.
+ */
+export function packageMatches(pkg: MarketplacePackage, text: string): boolean {
+  return matchesWords(filterWords(text), pkg.name, pkg.summary, pkg.description, ...plainNeeds(pkg.catalogNeeds), ...pkg.needs);
+}
+
+/** A filter that kept no card, as a sentence naming what was typed. */
+export function noneMatchWords(text: string): string {
+  return `No package in the catalog matches “${text.trim()}”.`;
+}
+
+/**
+ * The catalog's entry for an installed team when it lists a NEWER version than the team's, so
+ * Installed can say so and offer Update; null when it lists none, the same or an older one.
+ */
+export function updateFor(row: Pick<InstalledSolution, 'id' | 'version'>, catalog: MarketplaceCatalog | null): MarketplacePackage | null {
+  const listed = catalog?.checked ? catalog.packages.find((pkg) => pkg.kind === 'solution' && pkg.id === row.id) : undefined;
+  return listed && compareVersions(listed.version, row.version) > 0 ? listed : null;
 }
 
 /** A catalog the Host has not read, as a sentence that says why. Empty when it was read. */

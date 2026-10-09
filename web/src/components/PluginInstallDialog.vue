@@ -6,8 +6,8 @@ import { isNotAPackage } from '../lib/solutions';
 import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
 
 /**
- * INSTALL A PLUGIN FROM A FOLDER: the install dialog Admin > Plugins opens, and Solutions > Get
- * started opens on a plugin it fetched (`folder` fills Folder; the person still presses Install). It
+ * INSTALL A PLUGIN FROM A FOLDER: the install dialog Admin > Plugins opens, and Marketplace > Browse
+ * opens on a plugin it fetched (`folder` fills Folder; the person still presses Install). It
  * shows the Host's verdict, which refuses an existing version unless Replace is ticked.
  *
  * A folder holding solution.json is a solution package: `solution` hands it, with its check, to the
@@ -78,7 +78,7 @@ const verdictText = computed(() => {
 </script>
 
 <template>
-  <!-- A built plugin already inside the instance, through the dialog Solutions shares. The Host's
+  <!-- A built plugin already inside the instance, through the dialog Marketplace shares. The Host's
        verdict is shown as it gave it; a refusal names why, and nothing was written. -->
   <InstallFromFolderDialog
     v-model="open"

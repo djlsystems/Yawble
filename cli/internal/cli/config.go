@@ -18,7 +18,7 @@ func newConfigCommand(deps Deps) *cobra.Command {
 		Long: "config reads and changes yawble's own settings. memory and cpus are each worker's: every " +
 			"worker container gets them, and control gets its own fixed allowance beside them. workers " +
 			"is how many worker containers run (yawble workers <n> changes it and applies it at once). marketplaceCatalog is the address of the " +
-			"package catalog the Host lists under Solutions > Get started; set it empty to turn the catalog off.",
+			"package catalog the Host lists under Marketplace > Browse; set it empty to turn the catalog off.",
 	}
 	var asJSON bool
 	get := &cobra.Command{

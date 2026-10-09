@@ -126,6 +126,9 @@ describe('the first-run guide', () => {
     expect(text).toContain('Sign in there');
     expect(text).toContain('ask the Concierge for a team');
     expect(text).toContain('New Team');
+    // A ready-made team is the ribbon's Marketplace, by the name the ribbon shows.
+    expect(text).toContain('get a ready-made one from Marketplace');
+    expect(text).not.toContain('Solutions');
     // No buttons of its own: the Concierge button below it and the ribbon's New Team are the way in.
     expect(document.body.querySelector('[data-test="first-run-guide-new-team"]')).toBeNull();
     expect(document.body.querySelector('[data-test="first-run-guide-concierge"]')).toBeNull();
