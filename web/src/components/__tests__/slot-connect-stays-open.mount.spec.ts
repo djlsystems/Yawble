@@ -145,7 +145,7 @@ async function typeInSlotConnect() {
   await settle();
   bodyFind('[data-mailbox-preset="gmail"]')!.click();
   await settle();
-  await type('Email address', 'me@gmail.com');
+  await type('Email address', 'me@example.com');
   await type('App password', 'abcd efgh');
 }
 
@@ -156,7 +156,7 @@ async function routeChanges() {
 
 function expectStillTyping() {
   expect(bodyFind('[data-guided-connect]')).not.toBeNull();
-  expect(field('Email address').value).toBe('me@gmail.com');
+  expect(field('Email address').value).toBe('me@example.com');
   expect(field('App password').value).toBe('abcd efgh');
 }
 

@@ -64,7 +64,7 @@ async function typing() {
   await settle();
   bodyFind('[data-mailbox-preset="gmail"]')!.click();
   await settle();
-  await type('Email address', 'me@gmail.com');
+  await type('Email address', 'me@example.com');
   await type('App password', 'abcd efgh');
   return wrapper;
 }
@@ -83,7 +83,7 @@ describe('Add connection, while a person types', () => {
     await settle();
 
     expect(bodyFind('[data-guided-connect]')).not.toBeNull();
-    expect(field('Email address').value).toBe('me@gmail.com');
+    expect(field('Email address').value).toBe('me@example.com');
     expect(field('App password').value).toBe('abcd efgh');
 
     wrapper.unmount();
@@ -97,7 +97,7 @@ describe('Add connection, while a person types', () => {
 
     expect(bodyFind('[data-guided-connect]')).not.toBeNull();
     expect(bodyFind('[data-connections-dialog]')).not.toBeNull();
-    expect(field('Email address').value).toBe('me@gmail.com');
+    expect(field('Email address').value).toBe('me@example.com');
     expect(field('App password').value).toBe('abcd efgh');
 
     wrapper.unmount();

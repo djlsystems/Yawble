@@ -62,8 +62,8 @@ function mailbox(connection: Partial<Connection> & Pick<Connection, 'id'>): Conn
     providerKind: 'imap',
     kind: 'imap',
     name: 'Work mail',
-    account: 'me@gmail.com',
-    username: 'me@gmail.com',
+    account: 'me@example.com',
+    username: 'me@example.com',
     imap: { host: 'imap.gmail.com', port: 993, security: 'TLS' },
     smtp: { host: 'smtp.gmail.com', port: 465, security: 'TLS' },
     preset: 'gmail',
@@ -157,7 +157,7 @@ describe('Add connection, a mailbox with an app password', () => {
 
     await choosePreset('gmail');
     expect(isDisabled('Save')).toBe(true);
-    await type('Email address', 'me@gmail.com');
+    await type('Email address', 'me@example.com');
     await type('App password', appPassword);
     await type('Name (optional)', 'Work mail');
     listConnections.mockResolvedValue([saved]);
@@ -167,7 +167,7 @@ describe('Add connection, a mailbox with an app password', () => {
     expect(addMailbox).toHaveBeenCalledWith({
       preset: 'gmail',
       name: 'Work mail',
-      account: 'me@gmail.com',
+      account: 'me@example.com',
       username: null,
       password: appPassword,
       imap: { host: 'imap.gmail.com', port: 993, security: 'TLS' },
@@ -186,7 +186,7 @@ describe('Add connection, a mailbox with an app password', () => {
     const wrapper = await openAdd();
 
     await choosePreset('gmail');
-    await type('Email address', 'me@gmail.com');
+    await type('Email address', 'me@example.com');
     await type('App password', 'wrong password');
     button('Save').click();
     await settle();
@@ -206,7 +206,7 @@ describe('Add connection, a mailbox with an app password', () => {
     await choosePreset('gmail');
     expect(field('App password').type).toBe('password');
     expect(field('App password').value).toBe('');
-    await type('Email address', 'me@gmail.com');
+    await type('Email address', 'me@example.com');
     await type('App password', appPassword);
     listConnections.mockResolvedValue([saved]);
     button('Save').click();
@@ -298,7 +298,7 @@ describe('A password that is not app-password shaped', () => {
     const wrapper = await openAdd();
 
     await choosePreset('gmail');
-    await type('Email address', 'me@gmail.com');
+    await type('Email address', 'me@example.com');
     await type('App password', ordinary);
 
     expect(warning()).not.toBeNull();

@@ -99,14 +99,14 @@ describe('Username, the server login', () => {
     const wrapper = await open('icloud');
 
     await openAdvanced();
-    await type('Email address', 'someone@icloud.com');
+    await type('Email address', 'someone@example.com');
     await type('App password', 'abcd-efgh-ijkl-mnop');
     await type('Username', 'someone');
     await (wrapper.vm as unknown as { save: () => Promise<void> }).save();
     await settle();
 
     expect(addMailbox).toHaveBeenCalledTimes(1);
-    expect(addMailbox.mock.calls[0]?.[0]).toMatchObject({ preset: 'icloud', account: 'someone@icloud.com', username: 'someone' });
+    expect(addMailbox.mock.calls[0]?.[0]).toMatchObject({ preset: 'icloud', account: 'someone@example.com', username: 'someone' });
 
     wrapper.unmount();
   });
