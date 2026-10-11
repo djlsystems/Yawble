@@ -710,17 +710,28 @@ public sealed record PluginConnectionSlot(
     /// <summary>Whether a connection of <paramref name="providerId"/> may be bound here.</summary>
     public bool Admits(string providerId) => Providers.Any(p => ConnectionProviders.Admits(p, providerId));
 
-    /// <summary>"needs a Google or Microsoft connection", as the Plugins screen says it.</summary>
+    /// <summary>"needs a Google or Microsoft connection", as the Plugins screen says it; a slot whose
+    /// Microsoft scopes span several APIs names each ("... for Microsoft Graph, Azure management and
+    /// Azure SQL").</summary>
     public string Summary
     {
         get
         {
             var names = Providers.Select(ConnectionProviders.Display).ToList();
-            var joined = names.Count <= 1 ? string.Concat(names)
-                : string.Join(", ", names.Take(names.Count - 1)) + " or " + names[^1];
-            return (Required ? "needs" : "may use") + $" a {joined} connection";
+            var apis = MicrosoftApiNames;
+            return (Required ? "needs" : "may use") + $" a {Joined(names, "or")} connection"
+                + (apis.Count > 1 ? $" for {Joined(apis, "and")}" : "");
         }
     }
+
+    /// <summary>The Microsoft APIs this slot needs a token for, by name; none when it does not admit Microsoft.</summary>
+    public IReadOnlyList<MicrosoftApi> MicrosoftApis =>
+        Admits(ConnectionProviders.Microsoft) ? Host.MicrosoftApis.Tokens(ScopesFor(ConnectionProviders.Microsoft)) : [];
+
+    private IReadOnlyList<string> MicrosoftApiNames => [.. MicrosoftApis.Select(a => a.Name)];
+
+    private static string Joined(IReadOnlyList<string> names, string last) =>
+        names.Count <= 1 ? string.Concat(names) : string.Join(", ", names.Take(names.Count - 1)) + $" {last} " + names[^1];
 
     public static (PluginConnectionSlot? Slot, string? Refusal) Parse(string name, JsonElement element)
     {

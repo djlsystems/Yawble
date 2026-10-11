@@ -85,6 +85,29 @@ public sealed class HttpOAuthEndpointsTests
         Assert.Equal(error, answer.Error);
     }
 
+    [Fact]
+    public async Task A_refresh_for_one_api_names_its_scopes_and_one_for_the_sign_in_names_none()
+    {
+        var wire = new Wire("""{"access_token":"at-stub","expires_in":3600}""");
+        var endpoints = new HttpOAuthEndpoints(new HttpClient(wire));
+
+        await endpoints.RefreshAsync(Microsoft(), null, "rt-old", Ct, ["https://database.windows.net/user_impersonation", "offline_access"]);
+        await endpoints.RefreshAsync(Microsoft(), null, "rt-old", Ct);
+
+        Assert.Equal("https://database.windows.net/user_impersonation offline_access", wire.Sent[0].Form["scope"]);
+        Assert.Null(wire.Sent[1].Form["scope"]);
+    }
+
+    [Fact]
+    public async Task A_refused_refresh_carries_microsofts_suberror()
+    {
+        var wire = new Wire("""{"error":"invalid_grant","error_description":"AADSTS65001: not consented.","suberror":"consent_required"}""", HttpStatusCode.BadRequest);
+        var answer = await new HttpOAuthEndpoints(new HttpClient(wire)).RefreshAsync(Microsoft(), null, "rt-old", Ct, ["https://vault.azure.net/user_impersonation"]);
+
+        Assert.True(answer.Refused);
+        Assert.Equal("consent_required", answer.Suberror);
+    }
+
     private sealed class Wire(string body, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
     {
         public readonly List<(string Url, System.Collections.Specialized.NameValueCollection Form)> Sent = [];

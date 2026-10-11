@@ -58,6 +58,11 @@ public static class ConnectionNeeds
         ["email"] = "See your email address",
         ["profile"] = "See your name and profile picture",
         ["offline_access"] = "Stay connected when you are not using it",
+        ["https://management.azure.com/user_impersonation"] = "Manage your Azure resources as you",
+        ["https://database.windows.net/user_impersonation"] = "Use your Azure SQL databases as you",
+        ["https://storage.azure.com/user_impersonation"] = "Read and change your Azure Storage data as you",
+        ["https://vault.azure.net/user_impersonation"] = "Use your Key Vault keys, secrets and certificates as you",
+        ["https://api.loganalytics.io/Data.Read"] = "Read your Log Analytics data",
     };
 
     private static readonly Dictionary<string, string> GraphWords = new(StringComparer.OrdinalIgnoreCase)
@@ -171,17 +176,29 @@ public static class ConnectionNeeds
         return null;
     }
 
-    /// <summary>What <c>GET /api/connections/needs</c> answers.</summary>
+    /// <summary>What <c>GET /api/connections/needs</c> answers. For Microsoft it also answers
+    /// <c>microsoftApis</c>: the merged scopes grouped by the API each is for, in first-asked order.</summary>
     public static object View(string provider, IReadOnlyList<SlotNeed> needs)
     {
         var scopes = Merge(needs);
-
-        return new
+        var view = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            provider,
-            needs = needs.Select(n => new { plugin = n.Plugin, slot = n.Slot, description = n.Description, scopes = n.Scopes }),
-            scopes = scopes.Select(s => new { scope = s.Scope, words = s.Words, plugins = s.Plugins }),
-            apis = Apis(provider, scopes.Select(s => s.Scope)).Select(a => new { api = a.Api, link = a.Link }),
+            ["provider"] = provider,
+            ["needs"] = needs.Select(n => new { plugin = n.Plugin, slot = n.Slot, description = n.Description, scopes = n.Scopes }),
+            ["scopes"] = scopes.Select(s => new { scope = s.Scope, words = s.Words, plugins = s.Plugins }),
+            ["apis"] = Apis(provider, scopes.Select(s => s.Scope)).Select(a => new { api = a.Api, link = a.Link }),
         };
+
+        if (provider == ConnectionProviders.Microsoft)
+        {
+            view["microsoftApis"] = MicrosoftApis.Group(scopes.Select(s => s.Scope)).Select(api => new
+            {
+                api = api.Api,
+                name = api.Name,
+                scopes = api.Scopes.Select(scope => scopes.First(s => s.Scope == scope)).Select(s => new { scope = s.Scope, words = s.Words, plugins = s.Plugins }),
+            });
+        }
+
+        return view;
     }
 }

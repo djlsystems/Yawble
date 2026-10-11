@@ -1820,7 +1820,7 @@ public sealed class ConnectionsTests : IAsyncLifetime
             }
         }
 
-        public async Task<OAuthTokenAnswer> RefreshAsync(OAuthProvider provider, string? clientSecret, string refreshToken, CancellationToken ct)
+        public async Task<OAuthTokenAnswer> RefreshAsync(OAuthProvider provider, string? clientSecret, string refreshToken, CancellationToken ct, IReadOnlyList<string>? scopes = null)
         {
             if (RefreshDelay > TimeSpan.Zero) await Task.Delay(RefreshDelay, ct);
 

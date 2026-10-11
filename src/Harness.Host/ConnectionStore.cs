@@ -335,6 +335,28 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// A redemption for one of a connection's further APIs: a ROTATED refresh token when the provider
+    /// issued one, committed before the caller hands any token out, and when it was refreshed. The
+    /// API's access token is not stored: the Host holds it in memory.
+    /// </summary>
+    public async Task StoreRotatedRefreshAsync(string id, string? refreshToken, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            UPDATE connections SET
+                refresh_token_protected = COALESCE($refresh, refresh_token_protected),
+                refreshed_at = $now
+            WHERE id = $id
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$now", Now());
+        command.Parameters.AddWithValue("$refresh", refreshToken is { Length: > 0 } refresh ? _protector.Protect(refresh) : DBNull.Value);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     /// <summary>The provider refused a refresh: the connection needs a person, and says why.</summary>
     public async Task MarkNeedsReconnectAsync(string id, string reason, TriggerAudit audit, CancellationToken ct = default)
     {

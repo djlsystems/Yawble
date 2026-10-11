@@ -3051,8 +3051,10 @@ export interface ConnectionSlot {
   /** Provider (or `custom`) -> the scopes the slot needs from a connection of it. */
   scopes: Record<string, string[]>
   required: boolean
-  /** The Host's own words: "needs a Google or Microsoft connection". */
+  /** The Host's own words: "needs a Google or Microsoft connection", naming each Microsoft API when there are several. */
   summary: string
+  /** Each Microsoft API the slot needs a token for, with its scopes; null when it does not admit Microsoft. */
+  microsoftApis?: { api: string; name: string; scopes: string[] }[] | null
 }
 
 /** `google`, `microsoft`, or `custom` for any provider a person defined. */
@@ -3113,6 +3115,12 @@ export interface ConnectionNeeds {
   /** `words` null: the Host has no wording, and the scope is shown as itself. */
   scopes: { scope: string; words: string | null; plugins: string[] }[]
   apis: { api: string; link: string }[]
+  /**
+   * Microsoft only: the same scopes grouped by the API each is for (`https://management.azure.com/`,
+   * named "Azure management"), in first-asked order. A Microsoft token is for one API, so the Host
+   * redeems one per API from the one sign-in. Absent for Google and custom providers.
+   */
+  microsoftApis?: { api: string; name: string; scopes: { scope: string; words: string | null; plugins: string[] }[] }[]
 }
 
 /**

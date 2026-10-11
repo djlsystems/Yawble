@@ -185,7 +185,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         if (connectionRefusal is not null) return MemberResult.NotRun(connectionRefusal);
 
         // THE REDACTION SET: every bound secret AND every access token and app password this run is handed.
-        IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.Select(g => g.Secret)];
+        IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.SelectMany(g => g.Secrets)];
 
         var siteFiles = await SiteFilesAsync(invocation.Member, ct);
         var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles);
@@ -410,14 +410,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                         ["imap"] = new JsonObject { ["host"] = mailbox.Imap.Host, ["port"] = mailbox.Imap.Port, ["security"] = mailbox.Imap.Security },
                         ["smtp"] = new JsonObject { ["host"] = mailbox.Smtp.Host, ["port"] = mailbox.Smtp.Port, ["security"] = mailbox.Smtp.Security },
                     }
-                    : new JsonObject
-                    {
-                        ["provider"] = g.Value.Provider,
-                        ["account"] = g.Value.Account,
-                        ["accessToken"] = g.Value.AccessToken,
-                        ["expiresAt"] = g.Value.ExpiresAt?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
-                        ["scopes"] = new JsonArray([.. g.Value.Scopes.Select(scope => (JsonNode?)JsonValue.Create(scope))]),
-                    })))),
+                    : Grant(g.Value))))),
 
             // EACH OF THE MEMBER'S OWN TEAM'S SITES' FILES FOLDER (see SiteFilesAsync); [] for none.
             // Cloned: the request is built twice when reads are measured, and a node has one parent.
@@ -429,6 +422,36 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         };
 
         return document.ToJsonString() + "\n";
+    }
+
+    /// <summary>One OAuth slot as stdin carries it. A Microsoft slot also carries <c>tokens</c>, last:
+    /// API to that API's own fresh token, the first of them being <c>accessToken</c>.</summary>
+    private static JsonObject Grant(ConnectionGrant grant)
+    {
+        var slot = new JsonObject
+        {
+            ["provider"] = grant.Provider,
+            ["account"] = grant.Account,
+            ["accessToken"] = grant.AccessToken,
+            ["expiresAt"] = Expiry(grant.ExpiresAt),
+            ["scopes"] = Scopes(grant.Scopes),
+        };
+
+        if (grant.Tokens is { } tokens)
+        {
+            slot["tokens"] = new JsonObject(tokens.Select(t => KeyValuePair.Create(t.Api, (JsonNode?)new JsonObject
+            {
+                ["accessToken"] = t.AccessToken,
+                ["expiresAt"] = Expiry(t.ExpiresAt),
+                ["scopes"] = Scopes(t.Scopes),
+            })));
+        }
+
+        return slot;
+
+        static string? Expiry(DateTimeOffset? at) => at?.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+
+        static JsonArray Scopes(IReadOnlyList<string> scopes) => new([.. scopes.Select(scope => (JsonNode?)JsonValue.Create(scope))]);
     }
 
     /// <summary>
@@ -766,8 +789,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 return (grants, $"This Host holds no connections, so slot `{slot}` could not be given its account.");
             }
 
-            if (await connections.Store.GetAsync(connectionId, ct) is { } record
-                && Connections.ScopeRefusal(slot, declared, record, retry: null) is { } scopeRefusal)
+            var record = await connections.Store.GetAsync(connectionId, ct);
+            if (record is not null && Connections.ScopeRefusal(slot, declared, record, retry: null) is { } scopeRefusal)
             {
                 return (grants, scopeRefusal.Error);
             }
@@ -777,7 +800,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
             try
             {
-                (grant, refusal) = await connections.GrantAsync(connectionId, slot, ct);
+                (grant, refusal) = await connections.GrantAsync(connectionId, slot, ct, record?.Provider is { } provider && declared.ScopesFor(provider) is { Count: > 0 } asked ? asked : null);
             }
             catch (RefreshNotStoredException exception)
             {
