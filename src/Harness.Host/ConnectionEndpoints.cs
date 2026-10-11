@@ -33,6 +33,8 @@ public static class ConnectionEndpoints
             .WithDescription(
                 "Google and Microsoft (built in, configured or not), then every custom provider: its "
                 + "endpoints, its client ID, `clientSecretSet` (the secret itself is never answered), "
+                + "`clientSource` (`saved` for a person's client, `default` for Microsoft's while the instance's "
+                + "public client is in use, whose ID is not answered, or null with none), "
                 + "`configured`, `revokes`, `defaultScopes`, one line of `help`, and a built-in's setup "
                 + "`guide`: `{ steps: [{ id, title, text, link, copy: [{ label, value }] }] }`, in order. A "
                 + "`link` may hold `{projectId}`, the person's Google project id or empty. The client step "

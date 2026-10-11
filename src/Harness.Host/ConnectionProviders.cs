@@ -5,6 +5,10 @@ namespace Harness.Host;
 /// set, and what the build knows about it. <c>google</c> and <c>microsoft</c> are built in; anything
 /// else that speaks OAuth 2.0 authorization code + PKCE is <c>custom-&lt;id&gt;</c>.
 ///
+/// <see cref="ClientSource"/> says where the client is from: <c>saved</c> by a person, <c>default</c> (the
+/// Microsoft public client the instance was started with, used while no Microsoft client is saved), or
+/// null while there is none.
+///
 /// The client SECRET is not here: <see cref="ConnectionStore.ClientSecretAsync"/> is the one read of
 /// it, made only where the Host talks to the provider. Nothing that answers a route holds it.
 /// </summary>
@@ -22,7 +26,8 @@ public sealed record OAuthProvider(
     IReadOnlyList<string> DefaultScopes,
     IReadOnlyDictionary<string, string> AuthorizeParameters,
     string Help,
-    string? DeviceAuthorizationUrl = null)
+    string? DeviceAuthorizationUrl = null,
+    string? ClientSource = null)
 {
     public bool Configured => !string.IsNullOrWhiteSpace(ClientId)
         && !string.IsNullOrWhiteSpace(AuthorizeUrl) && !string.IsNullOrWhiteSpace(TokenUrl);
@@ -36,7 +41,9 @@ public sealed record OAuthProvider(
         id = Id,
         kind = Kind,
         name = Name,
-        clientId = ClientId,
+        // The default client's ID is the instance's, not a person's: the forms that edit a client never see it.
+        clientId = ClientSource == ConnectionProviders.ClientSourceDefault ? null : ClientId,
+        clientSource = ClientSource,
         clientSecretSet = ClientSecretSet,
         configured = Configured,
         tenant = Kind == ConnectionProviders.Microsoft ? Tenant ?? ConnectionProviders.MicrosoftDefaultTenant : null,
@@ -78,6 +85,11 @@ public static class ConnectionProviders
 
     public const string MicrosoftDefaultTenant = "common";
 
+    /// <summary>Where a provider's client is from, as <c>clientSource</c> answers it.</summary>
+    public const string ClientSourceSaved = "saved";
+
+    public const string ClientSourceDefault = "default";
+
     /// <summary>Who can sign in to a Microsoft public client, as the guided setup asks it: personal and
     /// any work account (<c>common</c>), work accounts only (<c>organizations</c>), or one tenant.</summary>
     public const string AudienceCommon = "common";
@@ -95,6 +107,25 @@ public static class ConnectionProviders
         _ when Guid.TryParse(tenant, out _) => AudienceTenant,
         _ => null,
     };
+
+    /// <summary>
+    /// What a person reads when Microsoft refuses a sign-in because the account's organisation lets only
+    /// an admin approve the app: one sentence, with no error code.
+    /// </summary>
+    public const string MicrosoftAdminApproval =
+        "An admin of that organisation approves the app before its accounts can connect, so ask one to approve it and then sign in again.";
+
+    /// <summary>The Entra codes and OAuth errors that mean an admin of the organisation has to approve
+    /// the app first.</summary>
+    private static readonly string[] AdminApprovalMarks =
+        ["AADSTS65001", "AADSTS90094", "AADSTS90095", "AADSTS900941", "AADSTS90099", "admin_consent_required", "consent_required"];
+
+    /// <summary>Whether Microsoft's refusal (<paramref name="error"/>, <paramref name="description"/>)
+    /// is an organisation that needs an admin's approval for the app.</summary>
+    public static bool NeedsAdminApproval(string? error, string? description) =>
+        AdminApprovalMarks.Any(mark =>
+            (error?.Contains(mark, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (description?.Contains(mark, StringComparison.OrdinalIgnoreCase) ?? false));
 
     /// <summary>A GUID as Entra writes one: 8-4-4-4-12 hex digits.</summary>
     public static bool IsGuid(string? text) => Guid.TryParseExact(text?.Trim(), "D", out _);
@@ -171,8 +202,12 @@ public static class ConnectionProviders
         _ => id,
     };
 
-    /// <summary>The provider as the Host uses it: the build's endpoints under what a person stored.</summary>
-    public static OAuthProvider Resolve(string id, StoredProvider? stored)
+    /// <summary>
+    /// The provider as the Host uses it: the build's endpoints under what a person stored. With no
+    /// Microsoft client saved, <paramref name="microsoftDefaultClient"/> (the instance's, or null) is
+    /// Microsoft's client: a public one, audience <c>common</c>, signed in with a code, with no secret.
+    /// </summary>
+    public static OAuthProvider Resolve(string id, StoredProvider? stored, string? microsoftDefaultClient = null)
     {
         switch (id)
         {
@@ -192,13 +227,17 @@ public static class ConnectionProviders
                     },
                     "Create a \"Desktop app\" OAuth client for the CLI flow (it accepts http://127.0.0.1 on any port), "
                     + "or a \"Web application\" client with the redirect URI shown here registered. Publish the "
-                    + "consent screen \"In production\" or its refresh tokens expire after 7 days.");
+                    + "consent screen \"In production\" or its refresh tokens expire after 7 days.",
+                    ClientSource: string.IsNullOrWhiteSpace(stored?.ClientId) ? null : ClientSourceSaved);
 
             case Microsoft:
-                var tenant = string.IsNullOrWhiteSpace(stored?.Tenant) ? MicrosoftDefaultTenant : stored!.Tenant!;
+                var saved = !string.IsNullOrWhiteSpace(stored?.ClientId);
+                var usesDefault = !saved && !string.IsNullOrWhiteSpace(microsoftDefaultClient);
+                var tenant = usesDefault || string.IsNullOrWhiteSpace(stored?.Tenant) ? MicrosoftDefaultTenant : stored!.Tenant!;
                 var authority = $"https://login.microsoftonline.com/{Uri.EscapeDataString(tenant)}/oauth2/v2.0";
                 return new OAuthProvider(
-                    Microsoft, Microsoft, "Microsoft", stored?.ClientId, stored?.ClientSecretSet == true, tenant,
+                    Microsoft, Microsoft, "Microsoft",
+                    usesDefault ? microsoftDefaultClient!.Trim() : stored?.ClientId, !usesDefault && stored?.ClientSecretSet == true, tenant,
                     authority + "/authorize",
                     authority + "/token",
                     "https://graph.microsoft.com/oidc/userinfo",
@@ -209,7 +248,8 @@ public static class ConnectionProviders
                     "Register an app in Microsoft Entra ID with public client flows allowed, and paste its Application "
                     + "(client) ID: you sign in with a code, and no secret or redirect URI is needed. Under Advanced, a "
                     + "\"Web\" app with a client secret and the redirect URIs shown here works as before.",
-                    authority + "/devicecode");
+                    authority + "/devicecode",
+                    saved ? ClientSourceSaved : usesDefault ? ClientSourceDefault : null);
 
             default:
                 return new OAuthProvider(
@@ -219,7 +259,8 @@ public static class ConnectionProviders
                     stored?.DefaultScopes ?? [],
                     new Dictionary<string, string>(StringComparer.Ordinal),
                     "Any OAuth 2.0 provider that supports the authorization code grant with PKCE. Register the "
-                    + "redirect URI shown here with it.");
+                    + "redirect URI shown here with it.",
+                    ClientSource: string.IsNullOrWhiteSpace(stored?.ClientId) ? null : ClientSourceSaved);
         }
     }
 

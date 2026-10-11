@@ -101,8 +101,20 @@ public sealed record ConnectionActor(string Id, string? Email)
 /// </summary>
 public sealed class Connections(
     ConnectionStore store, IOAuthEndpoints endpoints, TimeProvider clock, IUserStore? users = null,
-    Func<TimeSpan, CancellationToken, Task>? delay = null, IMailLogin? mail = null) : IDisposable
+    Func<TimeSpan, CancellationToken, Task>? delay = null, IMailLogin? mail = null, string? microsoftClientId = null) : IDisposable
 {
+    /// <summary>
+    /// THE INSTANCE'S MICROSOFT CLIENT: a public client's Application (client) ID, named by whoever
+    /// starts the Host (the operator CLI passes its published app's), used while no Microsoft client is
+    /// saved. The Host names no ID of its own; with none, or one not shaped like a GUID, Microsoft is not
+    /// set up until a person saves a client.
+    /// </summary>
+    public const string MicrosoftClientSetting = "Connections:MicrosoftClientId";
+
+    public const string MicrosoftClientVariable = "HARNESS_MICROSOFT_CLIENT_ID";
+
+    private readonly string? _microsoftClient = ConnectionProviders.IsGuid(microsoftClientId) ? microsoftClientId!.Trim() : null;
+
     /// <summary>How long a mailbox's last good login is trusted before a run logs in again.</summary>
     public static readonly TimeSpan MailboxRecheck = TimeSpan.FromMinutes(10);
 
@@ -137,7 +149,7 @@ public sealed class Connections(
 
         return
         [
-            .. ConnectionProviders.BuiltIns.Select(id => ConnectionProviders.Resolve(id, stored.GetValueOrDefault(id))),
+            .. ConnectionProviders.BuiltIns.Select(id => ConnectionProviders.Resolve(id, stored.GetValueOrDefault(id), _microsoftClient)),
             .. stored.Values.Where(p => ConnectionProviders.IsCustomId(p.Id)).OrderBy(p => p.Id, StringComparer.Ordinal)
                 .Select(p => ConnectionProviders.Resolve(p.Id, p)),
         ];
@@ -151,8 +163,13 @@ public sealed class Connections(
         var stored = await store.ProviderAsync(id, ct);
         if (stored is null && !ConnectionProviders.IsBuiltIn(id)) return null;
 
-        return ConnectionProviders.Resolve(id, stored);
+        return ConnectionProviders.Resolve(id, stored, _microsoftClient);
     }
+
+    /// <summary>The client secret sent to <paramref name="provider"/>: the saved one, and never one for the
+    /// instance's default client, which is public.</summary>
+    private async Task<string?> ClientSecretAsync(OAuthProvider provider, CancellationToken ct) =>
+        provider.ClientSource == ConnectionProviders.ClientSourceDefault ? null : await store.ClientSecretAsync(provider.Id, ct);
 
     /// <summary>Sets a provider's client (and a custom provider's endpoints), or says which field is wrong.</summary>
     public async Task<(OAuthProvider? Provider, string? Error)> SaveProviderAsync(
@@ -288,6 +305,12 @@ public sealed class Connections(
         var (provider, reconnecting, scopes, error) = await PrepareAsync(request, ct);
         if (error is not null) return (null, error);
 
+        // The instance's default client is public and registers no redirect URI: it signs in with a code.
+        if (provider!.ClientSource == ConnectionProviders.ClientSourceDefault)
+        {
+            return (null, $"{provider.Name} signs in with a code on this Host: start it with `flow: \"{DeviceFlow}\"`.");
+        }
+
         var (redirectUri, loopback, redirectError) = Redirect(request.RedirectUri, origin);
         if (redirectError is not null) return (null, redirectError);
 
@@ -412,7 +435,7 @@ public sealed class Connections(
             ? ConnectionActor.Operator
             : new ConnectionActor(flow.UserId, users is null ? null : (await users.FindByIdAsync(flow.UserId, ct))?.Email));
 
-        var answer = await endpoints.ExchangeCodeAsync(provider, await store.ClientSecretAsync(provider.Id, ct), code, flow.RedirectUri, flow.CodeVerifier, ct);
+        var answer = await endpoints.ExchangeCodeAsync(provider, await ClientSecretAsync(provider, ct), code, flow.RedirectUri, flow.CodeVerifier, ct);
         if (!answer.Ok) return (null, false, $"{provider.Name} refused the sign-in: {answer.Reason}.");
 
         return await FinishAsync(provider, answer, flow.UserId, flow.Scopes, flow.Name, flow.ReconnectId, who, now, ct);
@@ -541,6 +564,11 @@ public sealed class Connections(
                 provider, [.. scopes!.Where(s => ConnectionProviders.IdentityScopes.Contains(s) || MicrosoftApis.ApiOf(s) == first)], ct);
         }
 
+        if (!answer.Ok && provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NeedsAdminApproval(answer.Error, answer.ErrorDescription))
+        {
+            return (null, ConnectionProviders.MicrosoftAdminApproval);
+        }
+
         if (!answer.Ok) return (null, $"{provider.Name} did not start the sign-in: {answer.Reason}.");
 
         var now = clock.GetUtcNow();
@@ -587,7 +615,7 @@ public sealed class Connections(
 
         try
         {
-            var secret = await store.ClientSecretAsync(provider.Id, ct);
+            var secret = await ClientSecretAsync(provider, ct);
 
             while (true)
             {
@@ -608,6 +636,12 @@ public sealed class Connections(
 
                     if (refusal is not null) flow.Settle(Refused, refusal);
                     else flow.Settle(Done, $"{(reconnected ? "Reconnected" : "Connected")} {connection!.Named}.", connection.Id);
+                    return;
+                }
+
+                if (provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NeedsAdminApproval(answer.Error, answer.ErrorDescription))
+                {
+                    flow.Settle(Refused, ConnectionProviders.MicrosoftAdminApproval);
                     return;
                 }
 
@@ -755,7 +789,7 @@ public sealed class Connections(
                 return (null, $"Connection {connection.Named} could not be refreshed: its provider '{connection.Provider}' has no OAuth client on this Host. Set it in {Where}.");
             }
 
-            var answer = await endpoints.RefreshAsync(provider, await store.ClientSecretAsync(provider.Id, ct), tokens.RefreshToken, ct);
+            var answer = await endpoints.RefreshAsync(provider, await ClientSecretAsync(provider, ct), tokens.RefreshToken, ct);
 
             if (!answer.Ok)
             {
@@ -836,7 +870,7 @@ public sealed class Connections(
                 }
 
                 provider = found;
-                secret = await store.ClientSecretAsync(provider.Id, ct);
+                secret = await ClientSecretAsync(provider, ct);
             }
 
             IReadOnlyList<string> apiScopes = [.. (granted.GetValueOrDefault(api.Api) ?? api.Scopes).Where(s => !ConnectionProviders.IdentityScopes.Contains(s))];

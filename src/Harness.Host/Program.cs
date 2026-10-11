@@ -658,7 +658,11 @@ builder.Services.AddSingleton<IOAuthEndpoints>(sp => new HttpOAuthEndpoints(
 builder.Services.AddSingleton<IMailLogin>(new SocketMailLogin());
 builder.Services.AddSingleton(sp => new Connections(
     sp.GetRequiredService<ConnectionStore>(), sp.GetRequiredService<IOAuthEndpoints>(), sp.GetRequiredService<TimeProvider>(),
-    sp.GetRequiredService<IUserStore>(), mail: sp.GetRequiredService<IMailLogin>()));
+    sp.GetRequiredService<IUserStore>(), mail: sp.GetRequiredService<IMailLogin>(),
+    // THE INSTANCE'S MICROSOFT CLIENT: the public client the operator CLI names (Connections:MicrosoftClientId,
+    // or HARNESS_MICROSOFT_CLIENT_ID), used while no Microsoft client is saved; with none, Microsoft
+    // waits for a person's own app.
+    microsoftClientId: builder.Configuration[Connections.MicrosoftClientSetting] ?? builder.Configuration[Connections.MicrosoftClientVariable]));
 builder.Services.AddSingleton(sp => new ConnectRequests(
     sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
     sp.GetRequiredService<TeamRegistry>()));
