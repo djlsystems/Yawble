@@ -74,11 +74,13 @@ type applied struct {
 	KeyHash    string `json:"keyHash"`
 	// Catalog is omitted when none is passed, so a label from before it reads the same.
 	Catalog string `json:"marketplaceCatalog,omitempty"`
+	// MicrosoftClient is omitted when none is passed, so a label from before it reads the same.
+	MicrosoftClient string `json:"microsoftClientId,omitempty"`
 }
 
 // controlApplied is control's label for the settings now: its own fixed allowance, not a worker's.
 func controlApplied(s Settings) applied {
-	return applied{RoleControl, s.Port, ControlMemory, ControlCPUs, s.MaxRunning, s.Image, s.EnvFileHash, s.KeyHash, s.MarketplaceCatalog}
+	return applied{RoleControl, s.Port, ControlMemory, ControlCPUs, s.MaxRunning, s.Image, s.EnvFileHash, s.KeyHash, s.MarketplaceCatalog, s.MicrosoftClientID}
 }
 
 // PreSplit says whether control's label is from before control and workers: a yawble label with
@@ -130,6 +132,9 @@ func Changes(label string, s Settings) []string {
 	}
 	if was.Catalog != now.Catalog {
 		out = append(out, fmt.Sprintf("marketplaceCatalog %q -> %q", was.Catalog, now.Catalog))
+	}
+	if was.MicrosoftClient != now.MicrosoftClient {
+		out = append(out, fmt.Sprintf("microsoftClientId %q -> %q", was.MicrosoftClient, now.MicrosoftClient))
 	}
 	return out
 }
@@ -297,6 +302,11 @@ func controlSpec(s Settings) engine.RunSpec {
 	// none the Host says the catalog is not checked.
 	if s.MarketplaceCatalog != "" {
 		env["HARNESS_MARKETPLACE_CATALOG"] = s.MarketplaceCatalog
+	}
+	// HARNESS_MICROSOFT_CLIENT_ID is the public Microsoft app the Host signs in through while no Microsoft
+	// client is saved; with none, Microsoft waits for a person's own app.
+	if s.MicrosoftClientID != "" {
+		env["HARNESS_MICROSOFT_CLIENT_ID"] = s.MicrosoftClientID
 	}
 	return engine.RunSpec{
 		Name: ContainerName, Pod: PodName, Image: s.Image,

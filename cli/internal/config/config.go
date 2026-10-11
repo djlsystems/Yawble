@@ -34,10 +34,14 @@ type Config struct {
 	// MarketplaceCatalog is the address of the package catalog the Host reads for Marketplace > Browse.
 	// nil is not chosen, which is DefaultMarketplaceCatalog; an empty value turns the catalog off.
 	MarketplaceCatalog *string `toml:"marketplaceCatalog,omitempty" json:"marketplaceCatalog"`
+	// MicrosoftClientID is the Application (client) ID of the public Microsoft app the Host signs in
+	// through while no Microsoft client is saved. nil is not chosen, which is DefaultMicrosoftClientID;
+	// an empty value turns it off.
+	MicrosoftClientID *string `toml:"microsoftClientId,omitempty" json:"microsoftClientId"`
 }
 
 // Keys are the names `config get` and `config set` accept, in the order they are listed.
-var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image", "workers", "workerImage", "marketplaceCatalog"}
+var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image", "workers", "workerImage", "marketplaceCatalog", "microsoftClientId"}
 
 const FileName = "config.toml"
 
@@ -48,6 +52,14 @@ const DefaultPort = 8080
 // DefaultMarketplaceCatalog is where the published package catalog is - yawble.ai's - unless the config names
 // another address or none.
 const DefaultMarketplaceCatalog = "https://yawble.ai/api/marketplace/catalog.json"
+
+// DefaultMicrosoftClientID is the published Microsoft app's Application (client) ID: a multi-tenant
+// public client that signs in with a code. Empty while the app is not registered, so `up` passes none.
+const DefaultMicrosoftClientID = ""
+
+// MicrosoftClientDefault is what an unset microsoftClientId reads: DefaultMicrosoftClientID. A variable
+// only so tests drive `up` with a default that is not empty.
+var MicrosoftClientDefault = DefaultMicrosoftClientID
 
 func Path(dir string) string { return filepath.Join(dir, FileName) }
 
@@ -65,6 +77,8 @@ var envNames = map[string]string{
 	"workerImage": "YAWBLE_WORKER_IMAGE",
 	// Only an address: an empty variable is not set, so the file is where the catalog is turned off.
 	"marketplaceCatalog": "YAWBLE_MARKETPLACE_CATALOG",
+	// The same: the file is where the default client is turned off.
+	"microsoftClientId": "YAWBLE_MICROSOFT_CLIENT_ID",
 }
 
 // WorkerCount is the number of workers the config asks for: 1 when none was chosen.
@@ -82,6 +96,15 @@ func (c Config) Catalog() string {
 		return DefaultMarketplaceCatalog
 	}
 	return *c.MarketplaceCatalog
+}
+
+// MicrosoftClient is the Microsoft client ID `up` passes to the Host: the default when none was chosen,
+// and "" when the config turned it off.
+func (c Config) MicrosoftClient() string {
+	if c.MicrosoftClientID == nil {
+		return MicrosoftClientDefault
+	}
+	return *c.MicrosoftClientID
 }
 
 // Load reads the file if it exists, then applies YAWBLE_* overrides. A missing file is the zero
@@ -163,6 +186,8 @@ func (c Config) Get(key string) (string, error) {
 		return c.WorkerImage, nil
 	case "marketplaceCatalog":
 		return c.Catalog(), nil
+	case "microsoftClientId":
+		return c.MicrosoftClient(), nil
 	}
 	return "", unknownKey(key)
 }
@@ -170,6 +195,9 @@ func (c Config) Get(key string) (string, error) {
 // The unit is required. Podman reads a bare number as BYTES, so "12" would start a container
 // with a 12-byte memory limit; nobody means that.
 var memoryShape = regexp.MustCompile(`^[0-9]+[kmgKMG]$`)
+
+// guidShape is an Application (client) ID as Microsoft Entra writes one.
+var guidShape = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // Set validates and assigns. The error names the key and the shape it accepts, because it is
 // printed to a person who typed the value.
@@ -225,6 +253,11 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("marketplaceCatalog must be the address of a catalog.json like %s (or empty to turn the catalog off), not %q", DefaultMarketplaceCatalog, value)
 		}
 		c.MarketplaceCatalog = &value
+	case "microsoftClientId":
+		if value != "" && !guidShape.MatchString(value) {
+			return fmt.Errorf("microsoftClientId must be an Application (client) ID like 00000000-0000-0000-0000-000000000000 (or empty to turn the default Microsoft app off), not %q", value)
+		}
+		c.MicrosoftClientID = &value
 	default:
 		return unknownKey(key)
 	}
@@ -251,6 +284,9 @@ func (c *Config) validate() error {
 	}
 	if c.MarketplaceCatalog != nil {
 		checks = append(checks, struct{ key, value string }{"marketplaceCatalog", *c.MarketplaceCatalog})
+	}
+	if c.MicrosoftClientID != nil {
+		checks = append(checks, struct{ key, value string }{"microsoftClientId", *c.MicrosoftClientID})
 	}
 	for _, check := range checks {
 		if err := probe.Set(check.key, check.value); err != nil {

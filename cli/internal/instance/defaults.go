@@ -42,6 +42,8 @@ type Settings struct {
 	RunsShown int
 	// MarketplaceCatalog is the package catalog's address control is given; "" passes none.
 	MarketplaceCatalog string
+	// MicrosoftClientID is the Microsoft client ID control is given; "" passes none.
+	MicrosoftClientID string
 }
 
 // EnvFiles are the env files every instance container is given, in order: the env file, then
@@ -85,7 +87,7 @@ const (
 // because a number that looks measured and was not is the thing this product refuses to do.
 func Defaults(c config.Config, m Machine, pinned string) (Settings, []string) {
 	var notes []string
-	s := Settings{Port: config.DefaultPort, Memory: c.Memory, CPUs: c.CPUs, MaxRunning: c.MaxRunning, Image: c.Image, Workers: c.WorkerCount(), WorkerImage: c.WorkerImage, MarketplaceCatalog: c.Catalog()}
+	s := Settings{Port: config.DefaultPort, Memory: c.Memory, CPUs: c.CPUs, MaxRunning: c.MaxRunning, Image: c.Image, Workers: c.WorkerCount(), WorkerImage: c.WorkerImage, MarketplaceCatalog: c.Catalog(), MicrosoftClientID: c.MicrosoftClient()}
 	if c.Port != 0 {
 		s.Port = c.Port
 	}

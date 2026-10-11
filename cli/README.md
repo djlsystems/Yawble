@@ -125,6 +125,7 @@ The engine is the one configured, else the one installed (asked when both are); 
 | `workers` | how many worker containers run (default 1); `yawble workers <n>` sets and applies it |
 | `workerImage` | the worker image; by default derived from `image` |
 | `marketplaceCatalog` | the package catalog the Host lists under **Marketplace** > Browse; default `https://yawble.ai/api/marketplace/catalog.json`, empty turns the catalog off |
+| `microsoftClientId` | the Application (client) ID of the public Microsoft app Add connection signs in through when no Microsoft app of your own is set up, passed to the Host as `HARNESS_MICROSOFT_CLIENT_ID`; default the published Yawble app's (`config.DefaultMicrosoftClientID`, empty in a build that names none, which passes nothing), empty turns it off |
 
 `YAWBLE_*` environment variables (`YAWBLE_ENGINE`, `YAWBLE_PORT`, `YAWBLE_MEMORY`, `YAWBLE_CPUS`, `YAWBLE_MAX_RUNNING`, `YAWBLE_IMAGE`, `YAWBLE_WORKERS`, `YAWBLE_WORKER_IMAGE`, `YAWBLE_MARKETPLACE_CATALOG`) override the file.
 
