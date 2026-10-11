@@ -79,7 +79,11 @@ public static class TeamActivity
                 + "team that has never run answers `\"none\"` and no members. With both, that period "
                 + "(`\"requested\"`), at most one year.\n\n"
                 + "`members`: the Manager first, then the team's members in board order, then any "
-                + "member with runs in the period who has since been removed, with `current: false`.");
+                + "member with runs in the period who has since been removed, with `current: false`.\n\n"
+                + "When a person has started the team's activity view (`PUT /api/teams/{team}/activity-from`), "
+                + "`activityFrom` (`at`, `by`) says when and who, and nothing before it is read: the default "
+                + "window starts at the root of the earliest workflow at or after it, and a workflow rooted "
+                + "before it, or a run that began before it, is drawn from it.");
     }
 
     /// <summary>The sentence a period is refused with, or null for one this read answers.</summary>
@@ -101,9 +105,10 @@ public static class TeamActivity
         // every named member's floor to the log head, and the spans must outlive it. The creation
         // instant is turned into the log position it fell at, and every ledger row and log row read
         // here is above that, so a team re-created under the same name never shows the runs of the
-        // team it replaced: their runs ended before it existed.
-        var created = await store.CreatedAtAsync(team, ct);
-        var floor = created is { } at ? await log.LastSeqBeforeAsync(at, ct) : 0;
+        // team it replaced: their runs ended before it existed. A person's activity-from, when it
+        // is later, is the floor instead (`TeamActivityFrom`): nothing below it is read.
+        var scope = await TeamActivityFrom.ScopeAsync(team, store, log, ct);
+        var floor = scope.Floor;
 
         string window;
         DateTimeOffset start;
@@ -119,10 +124,11 @@ public static class TeamActivity
             // the newest row of any of them. Never the clock: while nothing happens the end stays.
             if (await log.WorkflowStretchForTeamAsync(team, floor, ct) is not { } stretch)
             {
-                return new TeamActivityAnswer(null, null, now, "none", []);
+                return new TeamActivityAnswer(null, null, now, "none", [], scope.From);
             }
 
-            (window, start, end) = ("workflows", stretch.From, stretch.To);
+            // A workflow rooted before the activity-from is drawn from it.
+            (window, start, end) = ("workflows", scope.WindowStart(stretch), stretch.To);
         }
 
         // THE CURRENT MEMBERS, the Manager first and the rest as the board lists them.
@@ -135,8 +141,8 @@ public static class TeamActivity
         var runs = await ledger.ReadTeamRunsAsync(team, floor, start, end, [.. current.Select(m => m.Id.Name)], ct);
 
         // THE HOLDS, by the same scope in time: a hold that began before the team was created was its
-        // predecessor's under the same name.
-        var holds = await holdLedger.ReadTeamAsync(team, created ?? DateTimeOffset.MinValue, start, end, ct);
+        // predecessor's under the same name, and one before the activity-from is not shown.
+        var holds = await holdLedger.ReadTeamAsync(team, scope.Since ?? DateTimeOffset.MinValue, start, end, ct);
 
         var members = new List<TeamActivityMember>();
 
@@ -166,7 +172,7 @@ public static class TeamActivity
             members.Add(new TeamActivityMember(name, mine[^1].MemberKind, IsManager(name), false, spans));
         }
 
-        return new TeamActivityAnswer(start, end, now, window, members);
+        return new TeamActivityAnswer(start, end, now, window, members, scope.From);
     }
 
     /// <summary>A member's run in progress, from the log: its latest <c>started</c> row with no
@@ -358,13 +364,15 @@ public static class TeamActivity
     private static bool IsManager(string name) => Same(name, TeamRegistry.DefaultManagerName);
 }
 
-/// <summary>The answer of <c>GET /api/teams/{team}/activity</c>; see <see cref="TeamActivity"/>.</summary>
+/// <summary>The answer of <c>GET /api/teams/{team}/activity</c>; see <see cref="TeamActivity"/>.
+/// <see cref="ActivityFrom"/> is where a person started the team's activity view, absent for none.</summary>
 public sealed record TeamActivityAnswer(
     DateTimeOffset? From,
     DateTimeOffset? To,
     DateTimeOffset ServerNow,
     string Window,
-    IReadOnlyList<TeamActivityMember> Members);
+    IReadOnlyList<TeamActivityMember> Members,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ActivityFrom? ActivityFrom = null);
 
 /// <summary>One member's lane: <see cref="Current"/> is false for a member since removed.</summary>
 public sealed record TeamActivityMember(
