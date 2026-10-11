@@ -299,6 +299,17 @@ public interface ITeamStore
     /// leaves alone and a delete takes with the row - or null for no such team.</summary>
     Task<DateTimeOffset?> CreatedAtAsync(string team, CancellationToken ct = default);
 
+    /// <summary>Where <paramref name="team"/>'s activity view begins and who said so
+    /// (<c>activity_from</c>, <c>activity_from_by</c>), or null for none or no such team.</summary>
+    Task<ActivityFrom?> ActivityFromAsync(string team, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sets (<paramref name="from"/> non-null) or clears (null) where this team's activity view
+    /// begins. The <paramref name="audit"/> row is appended to `tenant_events` in the same
+    /// transaction: both land or neither does. REQUIRED, for the reason <see cref="SetEnvAsync"/> gives.
+    /// </summary>
+    Task SetActivityFromAsync(string team, ActivityFrom? from, TriggerAudit audit, CancellationToken ct = default);
+
     Task<IReadOnlyList<PersistedMember>> MembersAsync(CancellationToken ct = default);
 
     /// <summary>Removes a team and, through the foreign key's ON DELETE CASCADE, every one of its
@@ -362,3 +373,9 @@ public interface ITeamStore
     /// </summary>
     Task SetRepoPullRequestAsync(string team, string repo, RepoPullRequest? pullRequest, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Where a team's activity view begins: the instant a person chose (<see cref="At"/>, UTC) and that
+/// person's email (<see cref="By"/>). Only the team activity and token-runs reads take it.
+/// </summary>
+public sealed record ActivityFrom(DateTimeOffset At, string By);

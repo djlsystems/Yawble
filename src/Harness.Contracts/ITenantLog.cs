@@ -64,6 +64,14 @@ public static class TenantActions
     /// transaction as the change.</summary>
     public const string TeamUnarchived = "team.unarchived";
 
+    /// <summary>A person started a team's activity view at an instant. Written in the same
+    /// transaction as the change; when it cannot be written nothing changes.</summary>
+    public const string TeamActivityFromSet = "team.activity-from-set";
+
+    /// <summary>A person cleared where a team's activity view begins. Written in the same
+    /// transaction as the change.</summary>
+    public const string TeamActivityFromCleared = "team.activity-from-cleared";
+
     /// <summary>A person changed what this team may spend on ONE workflow.</summary>
     public const string TeamBudgetChanged = "team.budgetChanged";
 

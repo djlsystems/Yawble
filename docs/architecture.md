@@ -51,6 +51,10 @@ The product name, Yawble, lives in the web app's presentation layer
   database (`messages.db`), one control process. Workers open neither the database nor the key
   ring; `all` is the single-process form, for tests and development.
 - Schema changes are append-only steps per store; a shipped step is never edited.
+- A team's activity view begins at its creation, or later where a person starts it from now
+  (`PUT /api/teams/{team}/activity-from`). That instant narrows the team's activity chart and its
+  token runs and nothing else: no ledger, hold or log row is changed, spend, caps and outcomes read
+  every row, and clearing it shows all of the team's history again.
 - The Host takes a daily `VACUUM INTO` copy of the database and keeps seven. See
   [ops/backups-logs-and-versions.md](ops/backups-logs-and-versions.md).
 

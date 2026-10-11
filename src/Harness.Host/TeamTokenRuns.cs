@@ -57,7 +57,11 @@ public static class TeamTokenRuns
                 + "of the team's earliest workflow to the latest activity of any of them, never to the "
                 + "clock - the Activity tile's own window. A team with no workflow answers `\"none\"` "
                 + "and no `from` or `to`. With both, the runs that ended in that period "
-                + "(`\"requested\"`), at most one year.");
+                + "(`\"requested\"`), at most one year.\n\n"
+                + "When a person has started the team's activity view (`PUT /api/teams/{team}/activity-from`), "
+                + "`activityFrom` (`at`, `by`) says when and who, and only runs that ended after it are "
+                + "listed; the default window starts at the root of the earliest workflow at or after it, "
+                + "or at it when a workflow was rooted before it.");
     }
 
     public static async Task<TeamTokenRunsAnswer> ReadAsync(
@@ -65,8 +69,9 @@ public static class TeamTokenRuns
         TeamRegistry teams, ITeamStore store, IMessageLog log, IUsageLedger ledger,
         DateTimeOffset now, CancellationToken ct)
     {
-        var created = await store.CreatedAtAsync(team, ct);
-        var floor = created is { } at ? await log.LastSeqBeforeAsync(at, ct) : 0;
+        // A person's activity-from, when later than the team's creation, is the floor instead.
+        var scope = await TeamActivityFrom.ScopeAsync(team, store, log, ct);
+        var floor = scope.Floor;
 
         // THE ACTIVITY TILE'S WINDOW when none is asked for: the team's earliest workflow root to
         // the latest activity of any of its workflows, never the clock. The runs are every run since
@@ -74,7 +79,7 @@ public static class TeamTokenRuns
         var (window, start, end) = from is { } f && to is { } t
             ? ("requested", (DateTimeOffset?)f, (DateTimeOffset?)t)
             : await log.WorkflowStretchForTeamAsync(team, floor, ct) is { } stretch
-                ? ("workflows", stretch.From, stretch.To)
+                ? ("workflows", scope.WindowStart(stretch), stretch.To)
                 : ("none", null, null);
 
         var runs = await ledger.ReadTeamRunsEndedAsync(team, floor, from, to, ct);
@@ -90,18 +95,20 @@ public static class TeamTokenRuns
             run.Measured ? run.TokensCachedIn : null,
             run.Measured ? run.TokensCacheCreation : null,
             run.Measured ? run.TokensOut : null,
-            run.Measured ? run.TokensCombined : null))]);
+            run.Measured ? run.TokensCombined : null))], scope.From);
     }
 }
 
 /// <summary>The answer of <c>GET /api/teams/{team}/tokens/runs</c>; see <see cref="TeamTokenRuns"/>.
-/// <see cref="From"/> and <see cref="To"/> are null for a team with no workflow.</summary>
+/// <see cref="From"/> and <see cref="To"/> are null for a team with no workflow; <see cref="ActivityFrom"/>
+/// is where a person started the team's activity view, absent for none.</summary>
 public sealed record TeamTokenRunsAnswer(
     DateTimeOffset? From,
     DateTimeOffset? To,
     DateTimeOffset ServerNow,
     string Window,
-    IReadOnlyList<TeamTokenRun> Runs);
+    IReadOnlyList<TeamTokenRun> Runs,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ActivityFrom? ActivityFrom = null);
 
 /// <summary>One finished run at its end. A figure the run did not report is absent, never 0.</summary>
 public sealed record TeamTokenRun(

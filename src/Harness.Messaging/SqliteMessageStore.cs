@@ -1699,7 +1699,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // them, so no seq-to-time ordering is assumed.
         stretch.CommandText =
             """
-            SELECT MIN(occurred_at), MAX(occurred_at)
+            SELECT MIN(occurred_at), MAX(occurred_at), MIN(correlation_id)
             FROM messages
             WHERE seq > $since
               AND correlation_id IN (
@@ -1717,7 +1717,12 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         await using var reader = await stretch.ExecuteReaderAsync(ct);
 
         return await reader.ReadAsync(ct) && !reader.IsDBNull(0)
-            ? new TeamWorkflowStretch(MessageRows.ReadStamp(reader.GetString(0)), MessageRows.ReadStamp(reader.GetString(1)))
+            ? new TeamWorkflowStretch(
+                MessageRows.ReadStamp(reader.GetString(0)),
+                MessageRows.ReadStamp(reader.GetString(1)),
+                // A correlation IS its root's seq, so the lowest one at or below the floor is a
+                // workflow rooted before it, whether or not its root row is still on the log.
+                reader.GetInt64(2) <= sinceSeq)
             : null;
     }
 
