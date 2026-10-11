@@ -227,6 +227,17 @@ public static class TenantActions
     /// <summary>An agent CLI's issued credential was cleared. Detail: the command.</summary>
     public const string AgentCredentialCleared = "agents.credential-cleared";
 
+    /// <summary>A person set a plugin key (a logical key such as ACME_STORAGE_KEY) from the screen
+    /// where none was stored. Detail: the key - never the value or any part of it.</summary>
+    public const string SecretSet = "secrets.set";
+
+    /// <summary>A person replaced a stored plugin key. Detail as for a set.</summary>
+    public const string SecretReplaced = "secrets.replaced";
+
+    /// <summary>A person cleared a stored plugin key; a run then reads the Host's environment for
+    /// it. Detail: the key.</summary>
+    public const string SecretCleared = "secrets.cleared";
+
     /// <summary>A custom skill was created, changed or deleted. Built-ins are never written.</summary>
     public const string SkillCreated = "skill.created";
     public const string SkillChanged = "skill.changed";

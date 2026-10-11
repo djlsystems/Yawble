@@ -108,8 +108,10 @@ or `secrets`.
 
 A package binds its plugin members' secrets by **logical key name**, exactly as a person binds them
 in the member's settings ([plugins.md](plugins.md#configuration-and-secrets)). The value never travels with a package:
-the operator sets it on the Host with `yawble secret set <KEY>` (it prompts for the value) and
-restarts the Host with `yawble up`, and the plugin receives it on stdin at each run.
+a person sets it from the screen, in the member's settings, and the member's next run reads it with
+no restart; or the operator sets it on the Host with `yawble secret set <KEY>` (it prompts for the
+value) and restarts the Host with `yawble up`. The plugin receives it on stdin at each run, the
+value set from the screen first ([plugins.md](plugins.md#configuration-and-secrets)).
 
 ```json
 {
@@ -396,8 +398,8 @@ wizard's steps:
    preview's `kept` carries these, and `yawble solution install` shows them the same way.
    **Secrets** are listed here too, each by key name with whether the Host has it set (by name
    only, never the value), what the manifest says it is for, and either "set on this Host", "not
-   set: its source fails until it is set" with the exact way to set it (`yawble secret set <KEY>`,
-   then `yawble up`), or "not needed" when it belongs to a setting the person left off. Unset is not
+   set: its source fails until it is set" with the way to set it (its field in the member's
+   settings on the screen first; then `yawble secret set <KEY>` and `yawble up`), or "not needed" when it belongs to a setting the person left off. Unset is not
    a refusal. The preview's `secrets` carries these (in an update, as the update will leave them).
 4. **Install**: the steps below; on failure the wizard names the step and the reason. The result
    names each schedule's first run ("Scan for postings ran now", "Morning summary first runs at
@@ -460,7 +462,7 @@ installs, and person-only settings stay person-only):
 
 | Route | |
 |---|---|
-| `POST /api/solutions/preview` `{ folder, team? }` | What installing would do, writing nothing: `mode: install` with the team name and why it cannot be used, or `mode: update` with `from`, `to` and the diff. Both carry `secrets`: `{ member, field, key, description, required, when, set, needed, setWith }` per binding - `needed` is null while it waits on the person's answer to `when`'s setting, and `setWith` names the operator CLI's `secret set <KEY>` and `up` (the wizard and the CLI print the full commands). |
+| `POST /api/solutions/preview` `{ folder, team? }` | What installing would do, writing nothing: `mode: install` with the team name and why it cannot be used, or `mode: update` with `from`, `to` and the diff. Both carry `secrets`: `{ member, field, key, description, required, when, set, needed, setWith }` per binding - `needed` is null while it waits on the person's answer to `when`'s setting, and `setWith` names the key's field in the member's settings on the screen first and the operator CLI's `secret set <KEY>` and `up` second (the wizard and the CLI print the full commands). |
 | `POST /api/solutions/install` `{ folder, teamName?, agent?, localRepository?, settings?, connections? }` | The install. `settings` is `{ <member>: { <setting>: value } }`, `connections` `{ <member>: { <slot>: <connection id> } }`, both by the package's member names. `{ ok: true, team, teamName, id, version, missing, steps, secrets, unset, firstRuns }` (`unset`: the keys bound, needed and not set on the Host; `reinstalledFrom` on a reinstall), or `{ ok: false, step, stepNumber, title, reason, undone, notUndone, steps }`. `{ ok: false, refusals }` for a package that fails its check; 400 for a refused folder or answer (a connection lacking scopes its slot needs adds `reconnect: { connectionId, scopes }`); 409 for a taken name. |
 | `POST /api/solutions/update` `{ folder, team, settings?, connections? }` | The update, with `from` and `diff`. `settings` and `connections` answer for members the update adds. 404 for no such team; 409 for a team not installed from this package, or already on this version or a newer one. |
 | `POST /api/teams/{team}/solution/uninstall` `{ removePlugins? }` | [Uninstall](#uninstall). |

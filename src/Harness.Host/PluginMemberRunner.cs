@@ -699,7 +699,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
             if (requireSet && secrets?.TryGet(key) is null)
             {
-                return $"The secret `{key}` bound for `{name}` is not set on this Host. Set it with `secret set {key}` and restart the Host.";
+                return $"The secret `{key}` bound for `{name}` is not set on this Host. {SetIt(key)}";
             }
         }
 
@@ -730,7 +730,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             {
                 return (resolved, key is null
                     ? $"This member binds no key for the plugin's required secret `{name}`."
-                    : $"The secret `{key}` that this member binds for `{name}` is not set on this Host. Set it with `secret set {key}` and restart the Host.");
+                    : $"The secret `{key}` that this member binds for `{name}` is not set on this Host. {SetIt(key)}");
             }
         }
 
@@ -802,7 +802,12 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
     private static string ShortSecret(string key, string name) =>
         $"The secret `{key}` bound for `{name}` is shorter than {MinimumSecretLength} characters, so it "
-        + "could not be kept out of what this plugin writes. Set a longer value and restart the Host.";
+        + "could not be kept out of what this plugin writes. Set a longer value in the member's settings, "
+        + $"or with the operator CLI's `secret set {key}` and its `up`.";
+
+    /// <summary>How a person sets <paramref name="key"/>: the screen first, the operator CLI second.</summary>
+    private static string SetIt(string key) =>
+        $"Set it in the member's settings, or with the operator CLI's `secret set {key}` and its `up`.";
 
     private async Task OnLineAsync(
         ContainerId member, PluginManifest manifest, ArtifactLimits limits, string line, Gathered gathered,

@@ -597,7 +597,8 @@ func secretRows(needed map[string]any) []any {
 		return map[string]any{
 			"member": "Scout", "field": field, "key": key, "description": description, "required": false,
 			"when": when, "set": set, "needed": needed[key],
-			"setWith": "the operator CLI's `secret set " + key + "` (it prompts for the value), then its `up` to restart the Host",
+			"setWith": "its field in the member's settings on the screen (Set, Replace or Clear), read by the next run; " +
+				"or the operator CLI's `secret set " + key + "` (it prompts for the value), then its `up` to restart the Host",
 		}
 	}
 	return []any{
@@ -629,10 +630,10 @@ func TestSolutionInstallPrintsEachSecretByKeyAndTheKeysStillUnset(t *testing.T) 
 				"Secrets (bound by key name; values are set on the Host, never here):",
 				"  ADZUNA_APP_ID (Scout): set on this Host.",
 				"      Your Adzuna application id.",
-				"  USAJOBS_API_KEY (Scout): not set - its source fails until it is set. Set it with: yawble secret set USAJOBS_API_KEY (it prompts for the value), then yawble up to restart the Host.",
+				"  USAJOBS_API_KEY (Scout): not set - its source fails until it is set. Set it with: its field in the member's settings on the screen, read by the next run; or yawble secret set USAJOBS_API_KEY (it prompts for the value), then yawble up to restart the Host.",
 				"  THEMUSE_API_KEY (Scout): not needed - Scout's sources leaves themuse off.",
 				"These keys are still not set on the Host. Each one's source fails until it is set:",
-				"  USAJOBS_API_KEY - yawble secret set USAJOBS_API_KEY (it prompts for the value), then yawble up to restart the Host",
+				"  USAJOBS_API_KEY - its field in the member's settings on the screen, read by the next run; or yawble secret set USAJOBS_API_KEY (it prompts for the value), then yawble up to restart the Host",
 			)
 			// Printed twice: before the install (Your part) and in the result.
 			if n := strings.Count(out, "Secrets (bound by key name"); n != 2 {

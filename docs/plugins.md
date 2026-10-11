@@ -632,11 +632,33 @@ slot like any member's.
   It is checked against the manifest at hire and delivered in the request's `config`. It is never
   put in the environment.
 - **Secrets are logical keys.** A member stores `{"token": "ACME_STORAGE_KEY"}`, the key only. The
-  Host never writes the value to the database, the manifest or the plugin directory. Cloning a team
-  carries the member's configuration and its keys, never a value.
-- **Setting a secret.** The value is resolved at each run from the Host's own environment, which is
-  where `yawble secret set NAME` values already arrive: set it, then restart the Host.
-  - Keys starting `HARNESS_` and model-provider keys are refused.
+  Host never writes the value in plain text to the database, the manifest or the plugin directory.
+  Cloning a team carries the member's configuration and its keys, never a value.
+- **Setting a secret.** A person sets a key's value from the screen: the Add member dialog and the
+  member's settings show a write-only field per secret, with Set, Replace and Clear. The value is
+  stored in `plugin_secrets` (schema step `auth-025`) only as Data Protection ciphertext under
+  `<dataRoot>/keys`, as an issued agent credential is, and the member's next run reads it, with no
+  restart. The operator CLI is the second way: `yawble secret set NAME`, then `yawble up`, puts it in
+  the Host's environment.
+  - **Which value a run gets.** At each run the key is resolved from the stored value first, then
+    from the Host's environment. So a key set with the CLI keeps working, a key set from the screen
+    wins over it, and clearing the stored key falls back to the environment.
+  - **The routes**, each `HumansOnly` (a machine principal is refused 403):
+    - `GET /api/secrets/{key}` answers `{ key, set, refusal, setWith, setBy, setAt, source }`.
+      `source` is `stored` (with `setBy`, the person's email, and `setAt`), `environment` (with
+      `setBy` and `setAt` null) or null when the key is not set. `setWith` names the screen first
+      and the operator CLI second.
+    - `PUT /api/secrets/{key}` with `{ "value": "..." }` sets or replaces the stored key, with a
+      `secrets.set` or `secrets.replaced` tenant row; `DELETE /api/secrets/{key}` clears it, with a
+      `secrets.cleared` row, and clearing a key that is not stored writes nothing. Both answer as GET
+      does. The row names the key, never the value, and lands in the same transaction as the write:
+      when it cannot be written nothing changes, and the answer is 500 with `error`.
+    - A key a plugin may not be pointed at is refused 400 with `error` and `refusal`. So is a value
+      that is empty, holds a line break or a NUL, begins or ends with white space, or is under 4 or
+      over 8192 characters; the sentence never repeats the value.
+    - No answer, tenant row, log or file carries the value.
+  - Keys starting `HARNESS_` and model-provider keys are refused, from both sources, by the same
+    name rules (`EnvironmentSecretStore.Refusal`).
   - The value reaches the plugin only on stdin, never in argv or the environment.
   - **Redaction is a net, not a guarantee.** Every text the plugin writes - its result output and
     error, its stderr, the text of each `progress`, `blocked`, `needsDecision` and `handback`
@@ -687,9 +709,10 @@ slot like any member's.
 - **Worked example.** An Azure Storage plugin would declare `config.account`, `config.container`
   and `secrets.accountKey`. Its member would store
   `{"config": {"account": "acme", "container": "invoices"}, "secrets": {"accountKey": "ACME_STORAGE_KEY"}}`.
-  The operator runs `yawble secret set ACME_STORAGE_KEY`.
-- **The store.** Only the resolver (`ISecretStore`) knows where values live; a plugin and a
-  binding name keys only.
+  A person sets `ACME_STORAGE_KEY` in the member's settings, or the operator runs
+  `yawble secret set ACME_STORAGE_KEY` and `yawble up`.
+- **The store.** Only the resolver (`ISecretStore`, which is `PluginSecretStore`) knows where values
+  live; a plugin and a binding name keys only.
 
 ### Changing a plugin member's settings after hire
 
@@ -704,9 +727,10 @@ their default. Each connection slot is a picker listing the connections of the p
 allows; a connection lacking a scope the slot asks for is refused with a sentence that offers
 Reconnect. A required slot left unbound says, in grey, that the member's runs are blocked until a
 connection is chosen there; it is not a refusal, because the picker and Connect are right beside it.
-At hire, Add member also says under each secret's key whether the Host has that key set and, when
-not, the commands that set it, from `GET /api/secrets/{key}` (`{ key, set, refusal, setWith }`, a
-person's; asked by name, the value is never read into an answer).
+At hire, Add member also says under each secret's key whether the Host has that key set, by whom
+and when, and which source holds it, with the field that sets it from the screen and then the
+operator CLI's commands, from `GET /api/secrets/{key}` (`{ key, set, refusal, setWith, setBy, setAt,
+source }`, a person's; asked by name, the value is never read into an answer).
 
 - `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the stored
   `config`, `secrets` as logical keys (never a value), the manifest's `fields` and `secretFields`,
@@ -793,9 +817,9 @@ A person hires a plugin through `POST /api/teams/{team}/containers` with `agent:
   with a reason that names the key and no value. That includes `PATH`, `HOSTNAME` or any other
   variable the Host happens to carry, a key set on the Host that no person has bound here, and one
   bound only on another team. So the first member that uses a new key is hired by a person. Being
-  "set on the Host" is not enough on its own: the secret store is the Host's whole environment,
-  and the Host cannot see which names `secret set` wrote, because that list lives in the
-  operator's env file outside the container. A person's binding is a deliberate choice for this
+  "set on the Host" is not enough on its own: the secret store falls back to the Host's whole
+  environment, and the Host cannot see which names `secret set` wrote, because that list lives in
+  the operator's env file outside the container. A person's binding is a deliberate choice for this
   team. A Manager cannot grow the set, and firing the last member that bound a key removes the key
   from it. Pinned by `PluginManagerHiringTests.A_manager_binds_only_keys_a_person_has_bound_on_its_team`.
 - Its own team only: the route's `{team}` is checked against the Manager's credential.
