@@ -386,6 +386,17 @@ const words: Record<string, Words> = {
     did: 'unarchived team',
     detail: (d) => sentence([`unarchived${get(d, 'viaConcierge') === true ? ' through the Concierge' : ''}`, 'still paused until resumed']),
   },
+  'team.activity-from-set': {
+    did: 'started activity view',
+    detail: (d) => {
+      const from = objectOf(get(d, 'activityFrom'));
+      return sentence([`activity shown from ${text(from, 'at') ?? 'now'}`, text(from, 'by') && `set by ${text(from, 'by')}`]);
+    },
+  },
+  'team.activity-from-cleared': {
+    did: 'showed all activity history',
+    detail: () => 'Activity shown from the beginning of history.',
+  },
   'team.budgetChanged': {
     did: 'changed workflow budget',
     detail: (d) => {

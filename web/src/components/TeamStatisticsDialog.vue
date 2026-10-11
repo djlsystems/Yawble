@@ -11,7 +11,7 @@ import { useAppearanceStore } from '../stores/appearance';
 import { textPx } from '../lib/appearance';
 import type { ContainerSnapshot, TeamActivity } from '../api/types';
 import { asTeamId } from '../api/types';
-import { getTeamActivity } from '../api/client';
+import { getTeamActivity, setActivityFrom } from '../api/client';
 import {
   ActivityStates,
   activityLanes,
@@ -39,7 +39,11 @@ const props = defineProps<{
   containers: ContainerSnapshot[];
 }>();
 
-const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>();
+const emit = defineEmits<{
+  'update:modelValue': [value: boolean];
+  /** Where the team's activity view begins was set or cleared: the tile reads its window again. */
+  'activity-from': [];
+}>();
 
 const open = computed({
   get: () => props.modelValue,
@@ -101,8 +105,9 @@ const colours = computed(() => {
 const pointerAt = ref<number | null>(null);
 
 /**
- * THE TILE'S OWN WINDOW, READ ON OPENING AND NOTHING ELSE: from the team's earliest workflow root to
- * the latest activity of any workflow. The board moving underneath never re-reads.
+ * THE TILE'S OWN WINDOW, READ ON OPENING AND WHEN ITS START IS SET OR CLEARED: from the team's
+ * earliest workflow root (or where a person said its activity begins) to the latest activity of any
+ * workflow. The board moving underneath never re-reads.
  */
 let readSeq = 0;
 
@@ -125,9 +130,42 @@ async function read() {
   }
 }
 
+/**
+ * WHERE THE TEAM'S ACTIVITY VIEW BEGINS. "Start activity from now" asks first, in place: the Dialog
+ * plugin is absent (see `quasar.config.ts`). Setting or clearing it reads the window again.
+ */
+const confirmingFrom = ref(false);
+const sendingFrom = ref(false);
+const fromError = ref('');
+
 watch(() => props.modelValue, (isOpen) => {
+  confirmingFrom.value = false;
+  fromError.value = '';
   if (isOpen) void read();
 }, { immediate: true });
+
+const activityFrom = computed(() => activity.value?.activityFrom ?? null);
+
+const activityFromWords = computed(() =>
+  activityFrom.value
+    ? `Activity shown from ${localTime(Date.parse(activityFrom.value.at), { date: true })}, set by ${activityFrom.value.by}`
+    : '');
+
+async function sendActivityFrom(from: 'now' | null) {
+  sendingFrom.value = true;
+  fromError.value = '';
+
+  try {
+    await setActivityFrom(asTeamId(props.teamId), from);
+    confirmingFrom.value = false;
+    emit('activity-from');
+    await read();
+  } catch (cause) {
+    fromError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    sendingFrom.value = false;
+  }
+}
 
 /** The window's end as the server gave it: open spans are drawn to here, never to the clock. */
 const periodTo = computed(() => (activity.value ? windowEnd(activity.value) : 0));
@@ -355,7 +393,50 @@ const chartHeight = computed(() => `${LanesTop + lanesHeight.value + 32}px`);
         />
       </q-card-section>
 
+      <q-card-section v-if="activityFrom" class="q-pt-none stats-activity-from">
+        <span class="text-caption" data-activity-from>{{ activityFromWords }}</span>
+        <q-btn
+          flat
+          dense
+          no-caps
+          size="sm"
+          label="Show all history"
+          class="q-ml-sm"
+          data-activity-from-clear
+          :loading="sendingFrom"
+          @click="sendActivityFrom(null)"
+        />
+      </q-card-section>
+
+      <q-card-section v-if="confirmingFrom" class="q-pt-none" data-activity-from-confirm>
+        <p class="os-body q-mb-sm">
+          The chart and the token chart will begin now; nothing is deleted, spend, caps and outcomes are
+          unchanged, and Show all history brings it back.
+        </p>
+        <q-btn
+          unelevated
+          no-caps
+          color="primary"
+          label="Start from now"
+          data-activity-from-confirm-yes
+          :loading="sendingFrom"
+          @click="sendActivityFrom('now')"
+        />
+        <q-btn flat no-caps label="Cancel" class="q-ml-sm" @click="confirmingFrom = false" />
+      </q-card-section>
+
+      <q-card-section v-if="fromError" class="q-pt-none text-negative" data-activity-from-error>{{ fromError }}</q-card-section>
+
       <q-card-actions align="right">
+        <q-btn
+          v-if="activity && !confirmingFrom"
+          flat
+          no-caps
+          label="Start activity from now"
+          data-activity-from-start
+          @click="confirmingFrom = true"
+        />
+        <q-space />
         <q-btn flat no-caps label="Done" class="stats-done" @click="open = false" />
       </q-card-actions>
     </q-card>

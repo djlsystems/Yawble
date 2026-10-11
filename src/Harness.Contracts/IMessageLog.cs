@@ -227,7 +227,9 @@ public interface IMessageLog
     /// <para>
     /// Every row of each correlation counts, not only the team's own, exactly as a workflow's
     /// timing reads its root and its last activity. Never the clock: nothing here moves while
-    /// nothing happens.
+    /// nothing happens. Only rows above the floor are read, so a workflow rooted at or below it
+    /// starts at its first row above it, and the answer says one was
+    /// (<see cref="TeamWorkflowStretch.RootedBeforeFloor"/>).
     /// </para>
     /// </summary>
     Task<TeamWorkflowStretch?> WorkflowStretchForTeamAsync(

@@ -610,5 +610,15 @@ public static class AuthSchema
             """
             ALTER TABLE users ADD COLUMN appearance TEXT NULL;
             """),
+
+        // WHERE A TEAM'S ACTIVITY VIEW BEGINS: `activity_from` is the instant a person chose, in UTC;
+        // NULL is none, which every team from before the step is. `activity_from_by` is that person's
+        // email. Only the team activity and token-runs reads take it; no ledger or log row moves.
+        new MigrationStep(
+            "auth-024",
+            """
+            ALTER TABLE teams ADD COLUMN activity_from TEXT NULL;
+            ALTER TABLE teams ADD COLUMN activity_from_by TEXT NULL;
+            """),
     ];
 }

@@ -379,6 +379,39 @@ public sealed class SqliteTeamStore : ITeamStore
             : null;
     }
 
+    public async Task<ActivityFrom?> ActivityFromAsync(string team, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText = "SELECT activity_from, activity_from_by FROM teams WHERE id = $id COLLATE NOCASE";
+        command.Parameters.AddWithValue("$id", team);
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        return await reader.ReadAsync(ct) && !reader.IsDBNull(0)
+            ? new ActivityFrom(
+                DateTimeOffset.Parse(reader.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                reader.IsDBNull(1) ? "" : reader.GetString(1))
+            : null;
+    }
+
+    /// <summary>Narrow: the two activity-from columns only. See
+    /// <see cref="ITeamStore.SetActivityFromAsync"/>.</summary>
+    public Task SetActivityFromAsync(string team, ActivityFrom? from, TriggerAudit audit, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText =
+                    "UPDATE teams SET activity_from = $at, activity_from_by = $by WHERE id = $id COLLATE NOCASE";
+                command.Parameters.AddWithValue("$id", team);
+                command.Parameters.AddWithValue(
+                    "$at", from is { } set ? set.At.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) : DBNull.Value);
+                command.Parameters.AddWithValue("$by", (object?)from?.By ?? DBNull.Value);
+            },
+            audit,
+            ct);
+
     public async Task<IReadOnlyList<PersistedTeam>> TeamsAsync(CancellationToken ct = default)
     {
         await using var connection = Open();

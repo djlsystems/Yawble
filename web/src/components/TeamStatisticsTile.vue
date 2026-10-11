@@ -376,6 +376,7 @@ function onTileClick() {
       v-model="statisticsOpen"
       :team-id="teamId"
       :containers="containers"
+      @activity-from="read"
     />
   </div>
 </template>

@@ -364,8 +364,9 @@ public sealed record TeamRollupRow(
 }
 
 /// <summary>From the earliest row of a team's workflows to the newest; see
-/// <see cref="IMessageLog.WorkflowStretchForTeamAsync"/>.</summary>
-public sealed record TeamWorkflowStretch(DateTimeOffset From, DateTimeOffset To);
+/// <see cref="IMessageLog.WorkflowStretchForTeamAsync"/>. <see cref="RootedBeforeFloor"/> is true
+/// when one of them was rooted at or below the floor the stretch was read above.</summary>
+public sealed record TeamWorkflowStretch(DateTimeOffset From, DateTimeOffset To, bool RootedBeforeFloor = false);
 
 /// <summary>
 /// EVERY WORKFLOW A TEAM HAS RUN SINCE ITS FLOOR, open and closed alike, and one duration over the

@@ -6,7 +6,7 @@ Start with the [README](../README.md) to install and start Yawble. These pages c
 
 | Doc | What it covers |
 |---|---|
-| [triggers.md](triggers.md) | Triggers and what they cost: the measured cost line, waking the Manager, the daily token cap, and why polling belongs to plugins. |
+| [triggers.md](triggers.md) | Triggers and what they cost: the measured cost line, waking the Manager, the daily token cap, why polling belongs to plugins, and where a scheduled team's activity view begins. |
 | [ops/folder-change-triggers.md](ops/folder-change-triggers.md) | Folder-change triggers: watching the team's documents or a mounted share. |
 | [local-repositories.md](local-repositories.md) | Local repositories: git repositories kept only on the instance, `local:<name>`, creating and deleting them, and getting the code out with `yawble repo`. |
 | [connections.md](connections.md) | Connections: the accounts (Google, Microsoft, a mailbox with an app password, custom OAuth) the Host holds for plugins, setting each one up, the web and `yawble connect` flows, and binding a connection to a member. |
