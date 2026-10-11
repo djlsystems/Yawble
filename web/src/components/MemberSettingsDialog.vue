@@ -2,7 +2,7 @@
 import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember } from '../api/client';
+import { getMember, getPluginSettings, getSecretKey, listCatalog, savePluginSettings, updateMember } from '../api/client';
 import {
   agentsForMode,
   isManagerContainer,
@@ -456,6 +456,7 @@ async function submit() {
             :shape="pluginShape"
             :plugin="pluginId"
             :bind-slot="bindPluginSlot"
+            :check-key="getSecretKey"
           />
           <div v-else-if="pluginProblem" class="text-negative text-caption">{{ pluginProblem }}</div>
           <div v-else class="text-caption os-text-muted">Reading its settings…</div>

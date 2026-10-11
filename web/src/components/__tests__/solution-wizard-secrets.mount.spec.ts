@@ -2,8 +2,9 @@
 //
 // THE SOLUTION WIZARD: THE SECRETS A PACKAGE BINDS. "Your part" lists each by its key name with
 // whether the Host has it set - never a value - what it is for, and, when unset, that its source
-// fails until it is set and the exact way to set it. A secret for a source the person leaves off is
-// not needed, and follows the person's choice. The result lists the keys still unset.
+// fails until it is set and the ways to set it: its write-only value field here first, the CLI
+// second. A secret for a source the person leaves off is not needed, and follows the person's
+// choice. The result lists the keys still unset, each with the same field.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import type { VueWrapper } from '@vue/test-utils';
@@ -11,11 +12,22 @@ import { QSelect } from 'quasar';
 
 import SolutionWizard from '../SolutionWizard.vue';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
-import { button, settle } from '../../test/formProbe';
+import { button, field, settle, type } from '../../test/formProbe';
+import { localTime } from '../../lib/localTime';
 import { productCli } from '../../presentation/product';
 import { Folder, fakeHost, hostSecrets, reply, steps, wizardRoutes, type Call } from '../../test/solutionFixtures';
 
 let calls: Call[] = [];
+
+const Value = 'usajobs-0123456789abcdef';
+const SetAt = '2026-10-11T09:30:00Z';
+
+/** `PUT /api/secrets/{key}`: the key's state now, set from the screen - never its value. */
+const keyWrites = (call: Call) => {
+  const key = /^\/api\/secrets\/([A-Z_]+)$/.exec(call.url)?.[1];
+  if (!key || call.method !== 'PUT') return undefined;
+  return reply(200, { key, set: true, refusal: null, setWith: '', setBy: 'dana@example.com', setAt: SetAt, source: 'stored' });
+};
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -39,6 +51,7 @@ beforeEach(() => {
                 })
               : undefined,
           (call) => (call.url === '/api/teams/job-tracker/solution' ? reply(200, { team: 'job-tracker', missing: [] }) : undefined),
+          keyWrites,
           ...wizardRoutes({ secrets: hostSecrets() }),
         ],
         calls,
@@ -117,5 +130,56 @@ describe('Solution wizard - secrets', () => {
     expect(row.textContent).toContain(`${productCli} secret set USAJOBS_API_KEY (it prompts for the value), then ${productCli} up to restart the Host`);
     expect(bodyFind('[data-unset-secret="ADZUNA_APP_ID"]')).toBeNull();
     expect(bodyFind('[data-unset-secret="THEMUSE_API_KEY"]')).toBeNull();
+  });
+
+  it("offers each needed key's write-only field before the CLI, and a key set there reads as set by whom and when", async () => {
+    await yourPart();
+
+    const unset = secret('USAJOBS_API_KEY');
+    const words = unset.querySelector('[data-secret-sentence]')!.textContent!;
+    expect(words.indexOf('type its value in the field here and press Set')).toBeGreaterThan(-1);
+    expect(words.indexOf('type its value in the field here and press Set')).toBeLessThan(words.indexOf(`${productCli} secret set USAJOBS_API_KEY`));
+    expect(unset.querySelector('[data-secret-value="USAJOBS_API_KEY"]')).not.toBeNull();
+    expect(secret('ADZUNA_APP_ID').querySelector('[data-secret-value="ADZUNA_APP_ID"]')).not.toBeNull();
+    expect(secret('THEMUSE_API_KEY').querySelector('[data-secret-value]')).toBeNull();
+
+    const box = field('Value for USAJOBS_API_KEY') as HTMLInputElement;
+    expect(box.getAttribute('type')).toBe('password');
+    expect(box.value).toBe('');
+
+    await type('Value for USAJOBS_API_KEY', Value);
+    button('Set').click();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'PUT' && call.url === '/api/secrets/USAJOBS_API_KEY').map((call) => call.body)).toEqual([{ value: Value }]);
+    expect(secret('USAJOBS_API_KEY').dataset.secretState).toBe('set');
+    expect(secret('USAJOBS_API_KEY').querySelector('[data-secret-sentence]')!.textContent).toBe(
+      `Set by dana@example.com on ${localTime(Date.parse(SetAt), { date: true })}.`,
+    );
+    expect((field('Value for USAJOBS_API_KEY') as HTMLInputElement).value).toBe('');
+    expect(document.body.textContent).not.toContain(Value);
+  });
+
+  it("the result's unset list offers each key's field, and a key set there says so", async () => {
+    await yourPart();
+    button('Next').click();
+    await settle();
+    button('Install').click();
+    await settle();
+    await settle();
+
+    const row = () => bodyFind('[data-unset-secret="USAJOBS_API_KEY"]')!;
+    expect(row().querySelector('[data-secret-value="USAJOBS_API_KEY"]')).not.toBeNull();
+    expect(row().textContent).toContain('To set it, type its value in the field here and press Set, or run');
+
+    await type('Value for USAJOBS_API_KEY', Value);
+    button('Set').click();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'PUT' && call.url === '/api/secrets/USAJOBS_API_KEY')).toHaveLength(1);
+    expect(row().dataset.unsetSecretNow).toBe('set');
+    expect(row().textContent).toContain(`Set by dana@example.com on ${localTime(Date.parse(SetAt), { date: true })}.`);
+    expect(row().textContent).not.toContain('secret set');
+    expect(document.body.textContent).not.toContain(Value);
   });
 });

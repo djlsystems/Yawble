@@ -241,8 +241,8 @@ Content-Type: application/json
 - **Add member.** The dialog offers each installed plugin (from `GET /api/plugins`) after the Agent
   presets. Choosing one shows its manifest's `config` fields as inputs, prefilled with their
   defaults, and each of its `secrets` by name: what a person types there is the logical key, never a
-  value. The hire goes through the route above. An empty optional field or an unnamed optional
-  secret is left out of the request.
+  value. Under each key is that key's write-only value field (see below). The hire goes through the
+  route above. An empty optional field or an unnamed optional secret is left out of the request.
 - **Member card.** A `kind: plugin` card shows no live view, no tokens and no spend. It names the
   plugin instead of an Agent and words its failures without provider or spend terms. Its history
   button lists its earlier runs, and each run opens to what it reported.
@@ -704,9 +704,16 @@ their default. Each connection slot is a picker listing the connections of the p
 allows; a connection lacking a scope the slot asks for is refused with a sentence that offers
 Reconnect. A required slot left unbound says, in grey, that the member's runs are blocked until a
 connection is chosen there; it is not a refusal, because the picker and Connect are right beside it.
-At hire, Add member also says under each secret's key whether the Host has that key set and, when
-not, the commands that set it, from `GET /api/secrets/{key}` (`{ key, set, refusal, setWith }`, a
-person's; asked by name, the value is never read into an answer).
+Add member and Member settings both say under each secret's key whether the Host has that key set -
+"Set by <person> on <time>" for a key set from the screen, "Set in this Host's environment" for one
+the CLI set - or, when not, the ways to set it, the screen first and the CLI second. This comes from
+`GET /api/secrets/{key}` (`{ key, set, refusal, setWith, setBy, setAt, source }`, a person's; asked
+by name, the value is never read into an answer). Under it is the key's write-only value field: a
+password box that starts empty, with **Set** (**Replace** once the key is set) and, for a key set
+from the screen, **Clear**. Set and Replace send the value with `PUT /api/secrets/{key}`, Clear
+sends `DELETE`; the box is emptied as the write is sent, and the Host's answer is what the form then
+says. A key name the Host refuses offers no field. Setting a key is not a settings change: nothing
+else is saved.
 
 - `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the stored
   `config`, `secrets` as logical keys (never a value), the manifest's `fields` and `secretFields`,

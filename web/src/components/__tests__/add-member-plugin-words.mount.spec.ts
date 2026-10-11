@@ -52,12 +52,15 @@ const sampleWhoami: InstalledPlugin = hostPlugin({
 
 const props = { team: 'alpha' as TeamId, teamName: 'Alpha', memberAgents: ['claude'] };
 
-/** The Host's answer for a key: ECHO_TOKEN is set, every other key is not. */
+/** The Host's answer for a key: ECHO_TOKEN is set in its environment, every other key is not set. */
 const keyState = (key: string): SecretKeyState => ({
   key,
   set: key === 'ECHO_TOKEN',
   refusal: null,
-  setWith: `the operator CLI's \`secret set ${key}\` (it prompts for the value), then its \`up\` to restart the Host`,
+  setWith: `the field on the screen, or the operator CLI's \`secret set ${key}\` (it prompts for the value), then its \`up\` to restart the Host`,
+  setBy: null,
+  setAt: null,
+  source: key === 'ECHO_TOKEN' ? 'environment' : null,
 });
 
 beforeEach(() => {
@@ -131,7 +134,7 @@ describe('Add member, hiring a plugin: what each line says', () => {
 
     expect(getSecretKey).toHaveBeenCalledWith('ECHO_TOKEN');
     expect(bodyFind('[data-secret-field="token"]')?.getAttribute('data-secret-key-state')).toBe('set');
-    expect(bodyFind('[data-secret-field="token"]')?.textContent?.trim()).toBe('Set on this Host.');
+    expect(bodyFind('[data-secret-field="token"]')?.textContent?.trim()).toBe("Set in this Host's environment.");
 
     await type('Secret token: key name', 'ECHO_OTHER');
     await afterTyping();
@@ -139,6 +142,8 @@ describe('Add member, hiring a plugin: what each line says', () => {
     const unset = bodyFind('[data-secret-field="token"]');
     expect(unset?.getAttribute('data-secret-key-state')).toBe('unset');
     expect(unset?.textContent).toContain('Not set on this Host');
+    // The screen first, the CLI second.
+    expect(unset?.textContent).toContain('To set it, type its value in the field here and press Set, or run');
     expect(unset?.textContent).toContain(`${productCli} secret set ECHO_OTHER`);
     expect(unset?.textContent).toContain(`${productCli} up`);
     // Asked by name only: the form sends the key and nothing else.

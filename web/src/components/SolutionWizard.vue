@@ -5,6 +5,7 @@ import ConnectionPicker from './ConnectionPicker.vue';
 import SetupSteps from './SetupSteps.vue';
 import SolutionPlanReview from './SolutionPlanReview.vue';
 import SlotReconnect from './SlotReconnect.vue';
+import SecretKeyField from './SecretKeyField.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   checkSolution,
@@ -27,6 +28,7 @@ import {
   type ConnectionProvider,
   type ConnectionSlot,
   type InstalledSolution,
+  type SecretKeyState,
   type SolutionCheck,
   type SolutionConnectionOption,
   type SolutionDiff,
@@ -44,6 +46,7 @@ import {
 } from '../api/types';
 import { firstProblem, teamLabel } from '../lib/rules';
 import { named, providerName } from '../lib/connections';
+import { secretKeySetWords } from '../lib/pluginSettings';
 import { refusedReconnect } from '../lib/slotBinding';
 import {
   SolutionStepTitles,
@@ -90,7 +93,9 @@ import { useConsoleStore } from '../stores/console';
  *    changed value as it was beside what it becomes, and lists what goes.
  * 3. **Your part**: what only a person provides - person-only settings, connections, documents -
  *    and the secrets the package binds, by key name: set on the Host, not set (its source fails
- *    until it is, and how to set it), or not needed for a source left off. Never a value.
+ *    until it is, and how to set it), or not needed for a source left off. Each needed key offers
+ *    its write-only value field (`SecretKeyField`) first and the CLI's `secret set` second, as the
+ *    result's list of keys still unset does. Never a value.
  *    Skipping a required one is allowed; the team then shows as blocked, naming it, until provided.
  * 4. **Install**: nothing is written before the person presses Install. A failed step is named by
  *    its number and title, and the Host undid everything. After a success the chosen documents are
@@ -591,10 +596,28 @@ function secretSettingValue(secret: SolutionSecret): unknown {
   return keptEntry ? keptEntry.value : values.value[key];
 }
 
+/**
+ * EACH KEY AS THE HOST ANSWERED A WRITE FROM ITS FIELD HERE, by key: it outranks what the preview
+ * said, so a key set in this wizard reads as set - by whom and when - with no new preview.
+ */
+const writtenKeys = ref<Record<string, SecretKeyState>>({});
+
+function keyWritten(state: SecretKeyState) {
+  writtenKeys.value = { ...writtenKeys.value, [state.key]: state };
+}
+
+/** What a key's field starts from: the Host's answer to a write here, else the preview's word. */
+function keyFieldState(key: string, set: boolean): SecretKeyState {
+  return writtenKeys.value[key] ?? { key, set, refusal: null, setWith: '', setBy: null, setAt: null, source: null };
+}
+
 const secretRows = computed(() =>
   secrets.value.map((secret) => {
-    const state = secretState(secret, secretNeeded(secret, secretSettingValue(secret)));
-    return { secret, state, sentence: secretSentence(secret, state) };
+    const written = writtenKeys.value[secret.key];
+    const current = written ? { ...secret, set: written.set } : secret;
+    const state = secretState(current, secretNeeded(current, secretSettingValue(current)));
+    const sentence = state === 'set' && written ? secretKeySetWords(written) : secretSentence(current, state);
+    return { secret: current, state, sentence };
   }),
 );
 
@@ -694,12 +717,16 @@ const missingProblem = ref('');
 
 const succeeded = computed(() => (result.value && result.value.ok ? result.value : null));
 
-/** The keys the result says are still to set, each with the way to set it. */
+/** The keys the result says are still to set, each with the way to set it - and, once set from its
+ *  field here, what the Host says of it now. */
 const unsetSecrets = computed(() => {
   const done = succeeded.value;
   if (!done) return [];
   const unset = done.unset ?? [];
-  return unset.map((key) => ({ key, setWith: secretSetWith(key) }));
+  return unset.map((key) => {
+    const written = writtenKeys.value[key];
+    return { key, setWith: secretSetWith(key), now: written?.set ? secretKeySetWords(written) : null };
+  });
 });
 /** Each schedule's first run, as the result names it: ran now, or when it first runs. */
 const firstRuns = computed(() =>
@@ -1151,7 +1178,8 @@ function next() {
             <section v-if="secretRows.length > 0" data-secrets>
               <div class="solution-heading">Secrets</div>
               <div class="text-caption os-text-muted q-mb-xs">
-                The install binds each by its key name. Values are set on the Host by its operator, never here.
+                The install binds each by its key name. A value typed in a key's field goes to the Host
+                and is never shown again.
               </div>
               <div
                 v-for="row in secretRows"
@@ -1167,6 +1195,11 @@ function next() {
                 <span v-else class="os-text-muted"> · not needed</span>
                 <div class="text-caption os-text-muted">{{ row.secret.description }}</div>
                 <div class="text-caption" data-secret-sentence>{{ row.sentence }}</div>
+                <SecretKeyField
+                  v-if="row.state !== 'not-needed'"
+                  :state="keyFieldState(row.secret.key, row.secret.set)"
+                  @changed="keyWritten"
+                />
               </div>
             </section>
 
@@ -1245,8 +1278,15 @@ function next() {
 
               <div v-if="unsetSecrets.length > 0" class="q-mt-sm" data-unset-secrets>
                 <div>These keys are still not set on the Host. Each one's source fails until it is set:</div>
-                <div v-for="secret in unsetSecrets" :key="secret.key" :data-unset-secret="secret.key">
-                  <span class="mono">{{ secret.key }}</span> - {{ secret.setWith }}.
+                <div
+                  v-for="secret in unsetSecrets"
+                  :key="secret.key"
+                  class="q-mb-xs"
+                  :data-unset-secret="secret.key"
+                  :data-unset-secret-now="secret.now ? 'set' : undefined"
+                >
+                  <span class="mono">{{ secret.key }}</span> - {{ secret.now ?? `To set it, ${secret.setWith}.` }}
+                  <SecretKeyField :state="keyFieldState(secret.key, false)" @changed="keyWritten" />
                 </div>
               </div>
             </template>

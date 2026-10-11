@@ -19,6 +19,7 @@ import {
 } from '../lib/pluginSettings';
 import ChipListInput from './ChipListInput.vue';
 import ConnectionPicker from './ConnectionPicker.vue';
+import SecretKeyField from './SecretKeyField.vue';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, GENERATED FROM ITS MANIFEST. The one editor Add member (a hire) and
@@ -31,9 +32,11 @@ import ConnectionPicker from './ConnectionPicker.vue';
  * plugin accepts. Each field says its default, whether it is required and whether only a person may
  * set it, and can be put back to its default. A number field with manifest bounds says them in its
  * hint and shows a value outside them as out of range - typed, or already stored - and the dialogs
- * hold Save until it is fixed, as they do for a missing required field (`outOfRange`). Secrets are KEY NAMES, the logical key set with
- * `secret set`, never a value: no route carries one. Given `checkKey`, each key typed says whether
- * the Host has it set and, when not, how to set it. Connection slots are one picker each
+ * hold Save until it is fixed, as they do for a missing required field (`outOfRange`). Secrets are KEY NAMES, the logical key a
+ * member is bound to, never a value: the settings carry none. Given `checkKey`, each key typed says
+ * whether the Host has it set - by whom and when, or from its environment - and offers the key's
+ * write-only value field (`SecretKeyField`: Set, Replace, Clear) before the CLI's `secret set`; a
+ * write there refreshes what is said. Connection slots are one picker each
  * (`ConnectionPicker`), storing a connection's id, never a token.
  *
  * The "as JSON" view is read-only, and it is exactly `settingsBody` - what will be stored - for
@@ -106,6 +109,11 @@ function checkKeys() {
   }, 250);
 }
 
+/** A write from a key's value field: the Host's answer is the key's state now. */
+function keyChanged(state: SecretKeyState) {
+  keyStates.value = { ...keyStates.value, [state.key]: state };
+}
+
 function keyState(field: string | number): SecretKeyState | null {
   const key = (secrets.value[field] ?? '').trim();
   return key === '' ? null : keyStates.value[key] ?? null;
@@ -162,7 +170,8 @@ function text(name: string): string {
 }
 
 function secretHint(description: string | null | undefined, required: boolean) {
-  return `${description ? description + ' ' : ''}The name of a key set with secret set, never its value.${required ? '' : ' Optional.'}`;
+  const where = props.checkKey ? 'the value is set in the field under it' : 'the value is set with secret set';
+  return `${description ? description + ' ' : ''}The name of the key, never its value: ${where}.${required ? '' : ' Optional.'}`;
 }
 </script>
 
@@ -278,6 +287,7 @@ function secretHint(description: string | null | undefined, required: boolean) {
       >
         {{ secretKeySentence(keyState(key)!, secret.required) }}
       </div>
+      <SecretKeyField v-if="keyState(key)" :state="keyState(key)!" @changed="keyChanged" />
     </template>
 
     <!-- CONNECTION SLOTS: one picker each, listing connections of an allowed provider. The member

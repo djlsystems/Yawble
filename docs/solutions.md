@@ -396,9 +396,12 @@ wizard's steps:
    preview's `kept` carries these, and `yawble solution install` shows them the same way.
    **Secrets** are listed here too, each by key name with whether the Host has it set (by name
    only, never the value), what the manifest says it is for, and either "set on this Host", "not
-   set: its source fails until it is set" with the exact way to set it (`yawble secret set <KEY>`,
-   then `yawble up`), or "not needed" when it belongs to a setting the person left off. Unset is not
-   a refusal. The preview's `secrets` carries these (in an update, as the update will leave them).
+   set: its source fails until it is set" with the ways to set it - its value field here first,
+   then `yawble secret set <KEY>` and `yawble up` - or "not needed" when it belongs to a setting the
+   person left off. Each needed key has its write-only value field (Set, or Replace once set, as in
+   [Add member](plugins.md#changing-a-plugin-members-settings-after-hire)); a key set there says who set it and when. Unset is not a refusal. The
+   preview's `secrets` carries these (in an update, as the update will leave them). The result's
+   list of keys still unset offers the same field beside each key.
 4. **Install**: the steps below; on failure the wizard names the step and the reason. The result
    names each schedule's first run ("Scan for postings ran now", "Morning summary first runs at
    8:00 AM"), and lists the keys still unset, each with the way to set it. The answer's `firstRuns`
