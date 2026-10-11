@@ -1,0 +1,1305 @@
+<script setup lang="ts">
+import FieldHelp from './FieldHelp.vue';
+import ChipListInput from './ChipListInput.vue';
+import ConnectionPicker from './ConnectionPicker.vue';
+import SetupSteps from './SetupSteps.vue';
+import SolutionPlanReview from './SolutionPlanReview.vue';
+import SlotReconnect from './SlotReconnect.vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import {
+  checkSolution,
+  getMember,
+  installSolution,
+  listConnectionProviders,
+  listConnections,
+  previewSolution,
+  solutionPanel,
+  solutionsInstalled,
+  teamSolution,
+  updateSolution,
+} from '../api/client';
+import { uploadDocument } from '../api/documents';
+import {
+  asDocumentsFolderKey,
+  asMemberId,
+  asTeamId,
+  type Connection,
+  type ConnectionProvider,
+  type ConnectionSlot,
+  type InstalledSolution,
+  type SolutionCheck,
+  type SolutionConnectionOption,
+  type SolutionDiff,
+  type SolutionDiffSection,
+  type SolutionInstallResult,
+  type SolutionKept,
+  type SolutionMissing,
+  type SolutionPersonSetting,
+  type SolutionPlan,
+  type SolutionPlanTrigger,
+  type SolutionPreview,
+  type SolutionRefusal,
+  type SolutionSecret,
+  type SolutionStep,
+} from '../api/types';
+import { firstProblem, teamLabel } from '../lib/rules';
+import { named, providerName } from '../lib/connections';
+import { refusedReconnect } from '../lib/slotBinding';
+import {
+  SolutionStepTitles,
+  diffMark,
+  failureSentence,
+  isBlank,
+  keptValueWords,
+  liveAsPlanTrigger,
+  memberChanges,
+  missingLine,
+  refusalLine,
+  firstRunLine,
+  secretNeeded,
+  secretSetWith,
+  secretSentence,
+  secretState,
+  settingDefaultWords,
+  settingInputKind,
+  settingKey,
+  settingStartValue,
+  settingsBody,
+  slotKey,
+  triggerChanges,
+  updateCandidates,
+  type ValueChange,
+} from '../lib/solutions';
+import { clockWords, sameZone, browserZone, zoneWords } from '../lib/scheduleWords';
+import { boundsHint, boundsProblem } from '../lib/numberBounds';
+import { useConsoleStore } from '../stores/console';
+
+/**
+ * INSTALL A SOLUTION PACKAGE: a whole team from one folder, in four steps a person walks through.
+ *
+ * 1. **Team**: a new team (its name, editable, checked here and by the Host's preview; a local
+ *    repository or not), or an update of a team installed from an earlier version of this package.
+ *    Opened from a team's own panel, that team's update is chosen to start with.
+ *    A team that kept an uninstalled install of this package is offered for a REINSTALL: the install
+ *    goes over it, its kept sites come back with their data, and the person's earlier answers that
+ *    still apply are prefilled in Your part, each asked again.
+ * 2. **Review**: everything the install makes, WHOLE. Every member's instructions and every
+ *    trigger's instruction become prompts, so none is shortened; each trigger says what fires it
+ *    (a schedule in words, in the reader's own zone, the raw cron under Advanced), whom it wakes,
+ *    how the Manager is woken and its daily cap. An update marks what is new or changed, shows each
+ *    changed value as it was beside what it becomes, and lists what goes.
+ * 3. **Your part**: what only a person provides - person-only settings, connections, documents -
+ *    and the secrets the package binds, by key name: set on the Host, not set (its source fails
+ *    until it is, and how to set it), or not needed for a source left off. Never a value.
+ *    Skipping a required one is allowed; the team then shows as blocked, naming it, until provided.
+ * 4. **Install**: nothing is written before the person presses Install. A failed step is named by
+ *    its number and title, and the Host undid everything. After a success the chosen documents are
+ *    uploaded and what is still missing is read back.
+ *
+ * NEVER INSTALLS BY ITSELF: the deep link opens this filled in, and only the Install button sends.
+ *
+ * A PACKAGE WITH A `setup` BLOCK is set up by the guided wizard instead (`SetupSteps`): one plain
+ * question per screen, the same install request at the end. Not when the wizard was opened for a
+ * team (Update, from the panel or the launcher): an update keeps these steps and their diff, a
+ * builder's view.
+ */
+const props = defineProps<{
+  /** The package folder, an absolute path inside the instance. */
+  folder: string;
+  /** `link` for the deep link: the Host then refuses a folder outside documents and team folders. */
+  from?: 'link';
+  /** A check the opener already made (Install from a folder), so it is not asked twice. */
+  check?: SolutionCheck | null;
+  /**
+   * The team the wizard was opened for (a solution's own panel, Update from a folder): its update
+   * is chosen at the start when the package can update it. Left out, nothing is chosen for you.
+   */
+  team?: string;
+}>();
+
+const emit = defineEmits<{ opened: [team: string] }>();
+
+const open = defineModel<boolean>({ required: true });
+
+const board = useConsoleStore();
+
+type Step = 'team' | 'review' | 'inputs' | 'install';
+const stepOrder: Step[] = ['team', 'review', 'inputs', 'install'];
+const stepTitles: Record<Step, string> = { team: 'Team', review: 'Review', inputs: 'Your part', install: 'Install' };
+
+const step = ref<Step>('team');
+const stepNumber = computed(() => stepOrder.indexOf(step.value) + 1);
+
+// --- The check ----------------------------------------------------------------------------------
+
+const checking = ref(false);
+/** The Host's sentence for a refused folder (a 400), or a failure to ask. Nothing else happens. */
+const folderRefusal = ref('');
+const checked = ref<SolutionCheck | null>(null);
+const refusals = computed<SolutionRefusal[]>(() => (checked.value && !checked.value.ok ? checked.value.refusals : []));
+const checkPlan = computed<SolutionPlan | null>(() => (checked.value?.ok ? checked.value.plan : null));
+
+const installed = ref<InstalledSolution[]>([]);
+
+/** The package has a `setup` block and this is an install: the guided wizard asks, one screen at a time. */
+const guided = ref(false);
+/** The guided wizard is setting up: the dialog holds until it answers. */
+const setupBusy = ref(false);
+
+function guidedOpened(team: string) {
+  open.value = false;
+  emit('opened', team);
+}
+
+function reset() {
+  step.value = 'team';
+  checking.value = false;
+  folderRefusal.value = '';
+  checked.value = null;
+  installed.value = [];
+  mode.value = 'install';
+  teamName.value = '';
+  localRepository.value = true;
+  updateTeam.value = '';
+  prefilledFor = '';
+  teamNow.value = null;
+  preview.value = null;
+  previewProblem.value = '';
+  values.value = {};
+  bindings.value = {};
+  connectedHere.value = [];
+  files.value = {};
+  result.value = null;
+  installError.value = '';
+  installReconnect.value = null;
+  retryNote.value = '';
+  uploads.value = [];
+  missing.value = null;
+  missingProblem.value = '';
+  guided.value = false;
+  setupBusy.value = false;
+}
+
+async function start() {
+  reset();
+  checking.value = true;
+
+  try {
+    checked.value = props.check ?? (await checkSolution(props.folder, props.from));
+  } catch (cause) {
+    folderRefusal.value = cause instanceof Error ? cause.message : String(cause);
+    return;
+  } finally {
+    checking.value = false;
+  }
+
+  const plan = checkPlan.value;
+  if (!plan) return;
+
+  if (plan.setup && !props.team) {
+    guided.value = true;
+    return;
+  }
+
+  teamName.value = plan.team.name;
+  seedValues(plan);
+  void loadSlots(plan);
+
+  try {
+    installed.value = await solutionsInstalled();
+  } catch {
+    // Without the list there is nothing to update; a new team is still offered.
+    installed.value = [];
+  }
+
+  // OPENED FOR A TEAM, its update is chosen when this package can update it. Opened anywhere else,
+  // the one team this package can update is chosen: a team already runs it, and a second install
+  // under its name would only be refused. Otherwise (several, or none) it starts on a new team.
+  const forTeam = props.team
+    ? candidates.value.find((candidate) => candidate.installed.team === props.team)
+    : soleCandidate.value;
+  if (forTeam?.selectable) await chooseUpdateTeam(forTeam.installed.team);
+  else await previewName();
+}
+
+watch(open, (showing) => {
+  if (showing) void start();
+});
+
+// --- Team ---------------------------------------------------------------------------------------
+
+const mode = ref<'install' | 'update'>('install');
+const teamName = ref('');
+const localRepository = ref(true);
+const updateTeam = ref('');
+
+const preview = ref<SolutionPreview | null>(null);
+const previewing = ref(false);
+const previewProblem = ref('');
+
+const okPreview = computed(() => (preview.value && preview.value.ok ? preview.value : null));
+const installPreview = computed(() => (okPreview.value?.mode === 'install' ? okPreview.value : null));
+const updatePreview = computed(() => (okPreview.value?.mode === 'update' ? okPreview.value : null));
+
+const nameProblem = computed(() => firstProblem([teamLabel], teamName.value));
+/** The Host's reason the name cannot be used, for the name it was asked about. */
+const nameRefusal = computed(() =>
+  mode.value === 'install' && installPreview.value && installPreview.value.teamName === teamName.value.trim()
+    ? installPreview.value.nameRefusal
+    : null,
+);
+
+/** The kept team the name names, which the install goes over; null for a new team. */
+const reinstall = computed(() =>
+  installPreview.value && installPreview.value.teamName === teamName.value.trim() ? (installPreview.value.reinstall ?? null) : null,
+);
+
+/** Teams that kept an uninstalled install of this package, offered for a reinstall. */
+const reinstallable = computed(() => installPreview.value?.reinstallable ?? []);
+
+function chooseReinstall(name: string) {
+  mode.value = 'install';
+  teamName.value = name;
+  void previewName();
+}
+
+// THE PERSON'S EARLIER ANSWERS start each input they still apply to, once per kept team; each is
+// still asked, and the person may change it.
+let prefilledFor = '';
+
+watch(installPreview, (answer) => {
+  if (!answer?.reinstall || !answer.previous || prefilledFor === answer.reinstall.team) return;
+  prefilledFor = answer.reinstall.team;
+  const asked = new Set((answer.plan.personSettings ?? []).map(settingKey));
+  const nextValues = { ...values.value };
+  for (const entry of answer.previous.settings) {
+    if (asked.has(settingKey(entry))) nextValues[settingKey(entry)] = entry.value;
+  }
+  values.value = nextValues;
+  const nextBindings = { ...bindings.value };
+  for (const entry of answer.previous.connections) nextBindings[slotKey(entry)] = entry.connection;
+  bindings.value = nextBindings;
+});
+
+/** Whether a setting starts from the person's answer to the earlier install. */
+const previousSetting = (setting: SolutionPersonSetting) =>
+  !!reinstall.value && !!installPreview.value?.previous?.settings.some((entry) => settingKey(entry) === settingKey(setting));
+
+const candidates = computed(() =>
+  checkPlan.value ? updateCandidates(installed.value, checkPlan.value.package.id, checkPlan.value.package.version) : [],
+);
+
+/** The one team this package could update, shown as the update choice itself; null for none or several. */
+const soleCandidate = computed(() => (candidates.value.length === 1 ? candidates.value[0]! : null));
+
+/** "Update Twilio from 1.1.0 to 1.2.0", or just "Update Twilio" when it cannot be. */
+function updateLabel(candidate: (typeof candidates.value)[number]) {
+  const name = candidate.installed.teamName;
+  return candidate.selectable ? `Update ${name} from ${candidate.installed.version} to ${checkPlan.value!.package.version}` : `Update ${name}`;
+}
+
+/** Whether a team runs an older copy of this package, so a new team is not the likely choice. */
+const anUpdateIsOffered = computed(() => candidates.value.some((candidate) => candidate.selectable));
+
+/** Each preview asked; only the latest one's answer is kept, so a slow answer cannot overwrite a newer one. */
+let previewSeq = 0;
+
+async function runPreview(team: string | undefined) {
+  const seq = ++previewSeq;
+  previewing.value = true;
+  previewProblem.value = '';
+
+  try {
+    const answer = await previewSolution(props.folder, team);
+    if (seq !== previewSeq) return;
+    preview.value = answer;
+    if (!answer.ok) {
+      previewProblem.value =
+        answer.error ?? (answer.refusals?.length ? answer.refusals.map(refusalLine).join(' ') : 'The Host refused the preview.');
+    }
+  } catch (cause) {
+    if (seq !== previewSeq) return;
+    preview.value = null;
+    previewProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    if (seq === previewSeq) previewing.value = false;
+  }
+}
+
+/** Asks about the new-team name; only while that is the choice in force. */
+async function previewName() {
+  if (!checkPlan.value || mode.value !== 'install' || nameProblem.value) return;
+  await runPreview(teamName.value.trim());
+}
+
+let nameTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** A changed name is re-previewed after a short pause, so each keystroke does not ask the Host. */
+watch(teamName, () => {
+  if (nameTimer) clearTimeout(nameTimer);
+  if (!checkPlan.value || mode.value !== 'install') return;
+  nameTimer = setTimeout(() => {
+    nameTimer = null;
+    void previewName();
+  }, 400);
+});
+
+function cancelNamePause() {
+  if (nameTimer) clearTimeout(nameTimer);
+  nameTimer = null;
+}
+
+onBeforeUnmount(cancelNamePause);
+
+async function chooseMode(next: 'install' | 'update') {
+  cancelNamePause();
+  mode.value = next;
+  preview.value = null;
+  previewProblem.value = '';
+  if (next === 'install') await previewName();
+  else if (updateTeam.value) await runPreview(updateTeam.value);
+}
+
+async function chooseUpdateTeam(team: string) {
+  cancelNamePause();
+  updateTeam.value = team;
+  mode.value = 'update';
+  preview.value = null;
+  await runPreview(team);
+}
+
+const teamReady = computed(() => {
+  if (!checkPlan.value || previewing.value) return false;
+  if (mode.value === 'install') return !nameProblem.value && !!installPreview.value && !nameRefusal.value;
+  return !!updatePreview.value && updatePreview.value.team === updateTeam.value;
+});
+
+/** Next is offered while the name is legal and the Host has not refused it; Next itself re-asks. */
+const teamCanAdvance = computed(() => {
+  if (!checkPlan.value || previewing.value) return false;
+  if (mode.value === 'install') return !nameProblem.value && !nameRefusal.value && !previewProblem.value;
+  return !!updatePreview.value && updatePreview.value.team === updateTeam.value;
+});
+
+/** Next from Team asks the Host again about the name as it stands, so a debounce cannot be skipped. */
+async function nextFromTeam() {
+  if (mode.value === 'install') {
+    cancelNamePause();
+    if (nameProblem.value) return;
+    if (!installPreview.value || installPreview.value.teamName !== teamName.value.trim()) await previewName();
+  }
+  if (teamReady.value) step.value = 'review';
+}
+
+// --- Review -------------------------------------------------------------------------------------
+
+/** The plan to review: the preview's (which knows the team), else the check's. */
+const plan = computed<SolutionPlan | null>(() => okPreview.value?.plan ?? checkPlan.value);
+const diff = computed<SolutionDiff | null>(() => updatePreview.value?.diff ?? null);
+
+function mark(section: keyof SolutionDiff, name: string) {
+  return diffMark(diff.value?.[section] as SolutionDiffSection | undefined, name);
+}
+
+// WHAT AN UPDATE CHANGES, OLD AND NEW SIDE BY SIDE: the team's triggers and agent members as they
+// are now, read from its panel (and each changed agent member's own instructions), so a changed
+// item shows what it was beside what it becomes. Without them only the new values are shown.
+interface TeamNow {
+  team: string;
+  triggers: Record<string, SolutionPlanTrigger>;
+  instructions: Record<string, string | null>;
+}
+
+const teamNow = ref<TeamNow | null>(null);
+
+watch(updatePreview, async (answer) => {
+  if (!answer || teamNow.value?.team === answer.team) return;
+  const team = answer.team;
+  try {
+    const panel = await solutionPanel(team);
+    const packageName = (member: string) => panel.members.find((entry) => entry.member === member)?.packageName ?? member;
+    const changedMembers = answer.diff.members.changed;
+    const instructions: Record<string, string | null> = {};
+    await Promise.all(
+      panel.members
+        .filter((member) => member.kind === 'agent' && changedMembers.includes(member.packageName))
+        .map(async (member) => {
+          try {
+            instructions[member.packageName] = (await getMember(asTeamId(team), asMemberId(member.member))).systemPrompt ?? null;
+          } catch {
+            // This member's old instructions are not shown; the rest are.
+          }
+        }),
+    );
+    if (updatePreview.value?.team !== team) return;
+    teamNow.value = {
+      team,
+      triggers: Object.fromEntries(panel.triggers.map((trigger) => [trigger.packageName, liveAsPlanTrigger(trigger, packageName(trigger.container))])),
+      instructions,
+    };
+  } catch {
+    // The review still shows what the update makes; only the old values are missing.
+  }
+});
+
+function triggerWas(trigger: SolutionPlanTrigger): ValueChange[] {
+  const was = mark('triggers', trigger.name) === 'changed' ? teamNow.value?.triggers[trigger.name] : undefined;
+  return was ? triggerChanges(was, trigger) : [];
+}
+
+function memberWas(member: SolutionPlan['members'][number]): ValueChange[] {
+  const now = teamNow.value;
+  if (!now || mark('members', member.name) !== 'changed' || !(member.name in now.instructions)) return [];
+  return memberChanges(now.instructions[member.name], member.instructions);
+}
+
+// --- Your part ----------------------------------------------------------------------------------
+
+const values = ref<Record<string, unknown>>({});
+const bindings = ref<Record<string, string>>({});
+const files = ref<Record<string, File | null>>({});
+
+function seedValues(from: SolutionPlan) {
+  values.value = Object.fromEntries(from.personSettings.map((setting) => [settingKey(setting), settingStartValue(setting)]));
+}
+
+function setValue(setting: SolutionPersonSetting, value: unknown) {
+  values.value = { ...values.value, [settingKey(setting)]: value };
+}
+
+function listOf(setting: SolutionPersonSetting): string[] {
+  const value = values.value[settingKey(setting)];
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
+// WHAT AN UPDATE KEEPS is shown, not asked again: the Host never changes a kept member's settings
+// or bindings, and a document already in its folder does not leave the team blocked.
+const kept = computed<SolutionKept | null>(() => updatePreview.value?.kept ?? null);
+
+const keptSetting = (setting: SolutionPersonSetting) =>
+  kept.value?.settings.find((entry) => settingKey(entry) === settingKey(setting));
+
+const keptConnection = (input: { member: string; slot: string }) =>
+  kept.value?.connections.find((entry) => slotKey(entry) === slotKey(input));
+
+const keptFiles = (folder: string) => kept.value?.documents.find((entry) => entry.folder === folder)?.files ?? [];
+
+/** The settings still asked for: an update's kept members are not asked again. */
+const askedSettings = computed(() => (plan.value?.personSettings ?? []).filter((setting) => !keptSetting(setting)));
+
+function connectionWords(id: string | null): string {
+  if (!id) return 'not connected';
+  return connectionOptions.value.find((option) => option.value === id)?.label ?? id;
+}
+
+// EACH CONNECTION INPUT IS A CONNECTION PICKER, for the slot as the plan's personConnections name it
+// - a bundled plugin is not installed before the install, so only the package knows its slots. It
+// offers Connect for the slot, and says before the install when the chosen connection lacks a scope
+// the slot needs, with Reconnect for exactly those scopes (in another tab: the wizard stays). A
+// connection made or reconnected here is chosen in that picker; the install binds it, as it binds
+// one chosen there.
+//
+// The preview lists the connections without their scopes, so they are read whole from the
+// connections list; when that cannot be read, the pickers offer the preview's list and leave the
+// scope check to the Host's install.
+const providers = ref<ConnectionProvider[]>([]);
+const listedConnections = ref<Connection[] | null>(null);
+const connectedHere = ref<Connection[]>([]);
+
+async function loadSlots(from: SolutionPlan) {
+  listedConnections.value = null;
+  if (from.inputs.connections.length === 0) return;
+  await Promise.all([
+    listConnectionProviders()
+      .then((read) => (providers.value = read))
+      // Without them there is no Connect; the pickers are as they were.
+      .catch(() => undefined),
+    listConnections()
+      .then((read) => (listedConnections.value = read))
+      .catch(() => undefined),
+  ]);
+}
+
+/** A connection as the preview names it, where the connections list could not be read. */
+function fromOption(option: SolutionConnectionOption): Connection {
+  return {
+    ...option,
+    providerKind: option.provider === 'google' || option.provider === 'microsoft' ? option.provider : 'custom',
+    scopes: [],
+    connectedAt: '',
+    refreshedAt: null,
+    status: option.status === 'ok' ? 'ok' : 'needs-reconnect',
+    statusReason: null,
+    usedBy: [],
+  };
+}
+
+/** Every connection a picker can offer: one made or reconnected here wins over its listed self. */
+const wizardConnections = computed<Connection[]>(() => {
+  const here = new Map(connectedHere.value.map((connection) => [connection.id, connection]));
+  const listed = new Map((listedConnections.value ?? []).map((connection) => [connection.id, connection]));
+  const offered = (okPreview.value?.connections ?? []).map(
+    (option) => here.get(option.id) ?? listed.get(option.id) ?? fromOption(option),
+  );
+  return [...offered, ...connectedHere.value.filter((made) => !offered.some((listed) => listed.id === made.id))];
+});
+
+/** The slot a connection input is for: the plan's, else one taking any connection. */
+function slotSpec(input: { member: string; slot: string; description: string; required: boolean }): ConnectionSlot {
+  const named = plan.value?.personConnections.find((entry) => slotKey(entry) === slotKey(input));
+  return {
+    description: input.description,
+    providers: named?.providers ?? [...new Set([...wizardConnections.value.map((connection) => connection.provider), 'custom'])],
+    // Scopes are checked only against connections read whole.
+    scopes: named && listedConnections.value ? named.scopes : {},
+    required: input.required,
+    summary: '',
+  };
+}
+
+/** The plugin declaring a connection input's slot, for Connect: null when the plan does not say. */
+function slotPlugin(input: { member: string; slot: string }): { id: string; name: string } | null {
+  const named = plan.value?.personConnections.find((entry) => slotKey(entry) === slotKey(input));
+  if (!named?.plugin || providers.value.length === 0) return null;
+  return { id: named.plugin, name: plan.value?.plugins.find((plugin) => plugin.id === named.plugin)?.name ?? named.plugin };
+}
+
+function rememberConnection(connection: Connection) {
+  connectedHere.value = [...connectedHere.value.filter((made) => made.id !== connection.id), connection];
+}
+
+function connectedFor(input: { member: string; slot: string }, connection: Connection) {
+  rememberConnection(connection);
+  bindings.value = { ...bindings.value, [slotKey(input)]: connection.id };
+}
+
+const connectionOptions = computed(() =>
+  wizardConnections.value.map((connection) => ({
+    value: connection.id,
+    label: `${connection.name} - ${connection.account} (${connection.provider})${connection.status === 'ok' ? '' : `, ${connection.status}`}`,
+  })),
+);
+
+// SECRETS, BY KEY NAME: whether each is needed follows the setting it depends on as the person
+// chooses it here (or as the update keeps it).
+const secrets = computed<SolutionSecret[]>(() => okPreview.value?.secrets ?? []);
+
+function secretSettingValue(secret: SolutionSecret): unknown {
+  if (!secret.when) return undefined;
+  const key = settingKey({ member: secret.member, setting: secret.when.setting });
+  const keptEntry = kept.value?.settings.find((entry) => settingKey(entry) === key);
+  return keptEntry ? keptEntry.value : values.value[key];
+}
+
+const secretRows = computed(() =>
+  secrets.value.map((secret) => {
+    const state = secretState(secret, secretNeeded(secret, secretSettingValue(secret)));
+    return { secret, state, sentence: secretSentence(secret, state) };
+  }),
+);
+
+/**
+ * NUMBER SETTINGS OUTSIDE THEIR BOUNDS, by setting key, with the sentence shown under each. Unlike a
+ * skipped required setting - which installs and leaves the team blocked - an out-of-range value is
+ * one the Host refuses, so it is held here, before Install: Next stays off until it is fixed.
+ */
+const settingProblems = computed<Record<string, string>>(() => {
+  const problems: Record<string, string> = {};
+  for (const setting of askedSettings.value) {
+    if (settingInputKind(setting) !== 'number') continue;
+    const problem = boundsProblem(setting.setting, setting, values.value[settingKey(setting)]);
+    if (problem !== null) problems[settingKey(setting)] = problem;
+  }
+  return problems;
+});
+
+const settingsInRange = computed(() => Object.keys(settingProblems.value).length === 0);
+
+/** A number setting's bounds for its hint, or undefined when it has none. */
+const settingHint = (setting: SolutionPersonSetting) =>
+  settingInputKind(setting) === 'number' ? (boundsHint(setting) ?? undefined) : undefined;
+
+/** What only the person provides and was left out, by name, for the blocked sentence. */
+const skippedRequired = computed<string[]>(() => {
+  const current = plan.value;
+  if (!current) return [];
+  return [
+    ...askedSettings.value
+      .filter((setting) => setting.required && isBlank(values.value[settingKey(setting)]))
+      .map((setting) => `the ${setting.member} setting ${setting.setting}`),
+    ...current.inputs.connections
+      .filter((input) => input.required && (keptConnection(input) ? !keptConnection(input)!.connection : !bindings.value[slotKey(input)]))
+      .map((input) => `the ${input.member} connection ${input.slot}`),
+    ...current.inputs.documents
+      .filter((input) => input.required && !files.value[input.folder] && keptFiles(input.folder).length === 0)
+      .map((input) => `a document in ${input.folder}/`),
+  ];
+});
+
+const nothingToProvide = computed(() => {
+  const current = plan.value;
+  return (
+    !!current &&
+    current.personSettings.length === 0 &&
+    current.inputs.connections.length === 0 &&
+    current.inputs.documents.length === 0 &&
+    secrets.value.length === 0
+  );
+});
+
+function connectionsBody(): Record<string, Record<string, string>> {
+  const body: Record<string, Record<string, string>> = {};
+  for (const input of plan.value?.inputs.connections ?? []) {
+    if (keptConnection(input)) continue;
+    const id = bindings.value[slotKey(input)];
+    if (id) (body[input.member] ??= {})[input.slot] = id;
+  }
+  return body;
+}
+
+// --- Install ------------------------------------------------------------------------------------
+
+const installing = ref(false);
+const result = ref<SolutionInstallResult | null>(null);
+const installError = ref('');
+/** A refusal for missing scopes: the connection to reconnect and the scopes to ask for. */
+const installReconnect = ref<{ connectionId: string; scopes: string[] } | null>(null);
+const retryNote = ref('');
+
+function installProviderName(connectionId: string): string {
+  const connection = wizardConnections.value.find((candidate) => candidate.id === connectionId);
+  return connection ? providerName(connection.provider, providers.value) : 'the provider';
+}
+
+/** Reconnected from the refusal: with every scope granted, the refusal goes and Install is pressed again. */
+function installReconnected(connection: Connection, lacking: string[]) {
+  rememberConnection(connection);
+  if (lacking.length > 0) return;
+  installError.value = '';
+  installReconnect.value = null;
+  retryNote.value = `Reconnected ${named(connection)}. Press Install again.`;
+}
+
+interface Upload {
+  folder: string;
+  file: string;
+  ok: boolean;
+  problem: string;
+}
+
+const uploads = ref<Upload[]>([]);
+const uploading = ref(false);
+const missing = ref<SolutionMissing[] | null>(null);
+const missingProblem = ref('');
+
+const succeeded = computed(() => (result.value && result.value.ok ? result.value : null));
+
+/** The keys the result says are still to set, each with the way to set it. */
+const unsetSecrets = computed(() => {
+  const done = succeeded.value;
+  if (!done) return [];
+  const unset = done.unset ?? [];
+  return unset.map((key) => ({ key, setWith: secretSetWith(key) }));
+});
+/** Each schedule's first run, as the result names it: ran now, or when it first runs. */
+const firstRuns = computed(() =>
+  (succeeded.value?.firstRuns ?? []).map((run) => ({ trigger: run.trigger, ranNow: run.ranNow, line: firstRunLine(run) + theirClock(run) })),
+);
+
+/** A first run kept in another zone also says that zone's clock, as Review's words do. */
+function theirClock(run: { trigger: string; ranNow: boolean; at?: string | null }): string {
+  const zone = plan.value?.triggers.find((trigger) => trigger.name === run.trigger)?.timezone;
+  if (run.ranNow || !run.at || !zone || sameZone(zone, browserZone())) return '';
+  const at = Date.parse(run.at);
+  return Number.isNaN(at) ? '' : ` (${clockWords(at, zone)} ${zoneWords(zone)})`;
+}
+const failedStep = computed(() => (result.value && !result.value.ok && 'step' in result.value ? result.value : null));
+const failedCheck = computed(() => (result.value && !result.value.ok && 'refusals' in result.value ? result.value : null));
+
+/** The steps an install goes through, in order, for the progress list before the Host answers. */
+const plannedSteps: SolutionStep[] = Object.entries(SolutionStepTitles).map(([name, title], index) => ({
+  step: name,
+  number: index + 1,
+  title,
+  done: false,
+}));
+
+const shownSteps = computed<SolutionStep[]>(() => {
+  const answered = result.value && 'steps' in result.value ? result.value.steps : null;
+  return answered && answered.length > 0 ? answered : plannedSteps;
+});
+
+const installLine = computed(() => {
+  const current = plan.value;
+  if (!current) return '';
+  if (updatePreview.value) {
+    return `Update ${updatePreview.value.teamName} from ${updatePreview.value.from} to ${updatePreview.value.to}.`;
+  }
+  if (reinstall.value) {
+    return `Reinstall ${current.package.name} ${current.package.version} onto the team ${reinstall.value.teamName}, bringing back its kept sites with their data.`;
+  }
+  return `Install ${current.package.name} ${current.package.version} as the team ${teamName.value.trim()}.`;
+});
+
+async function install() {
+  if (installing.value || succeeded.value || !plan.value || !settingsInRange.value) return;
+
+  installing.value = true;
+  result.value = null;
+  installError.value = '';
+  installReconnect.value = null;
+  retryNote.value = '';
+
+  const settings = settingsBody(askedSettings.value, values.value);
+  const connections = connectionsBody();
+
+  try {
+    result.value =
+      updatePreview.value
+        ? await updateSolution({ folder: props.folder, team: updatePreview.value.team, settings, connections })
+        : await installSolution({
+            folder: props.folder,
+            teamName: teamName.value.trim(),
+            localRepository: localRepository.value,
+            settings,
+            connections,
+          });
+  } catch (cause) {
+    // A 409 (the name was taken meanwhile) or a 400 (the folder refused): the Host's sentence.
+    installError.value = cause instanceof Error ? cause.message : String(cause);
+    // Refused for missing scopes: the Host names the connection and the scopes to ask for.
+    installReconnect.value = refusedReconnect(cause);
+  } finally {
+    installing.value = false;
+  }
+
+  const done = succeeded.value as SolutionInstallResult | null;
+  if (done && done.ok) await afterInstall(done.team, done.missing);
+}
+
+/** Uploads each chosen document into its input's folder, then reads back what is still missing. */
+async function afterInstall(team: string, answered: SolutionMissing[]) {
+  missing.value = answered;
+  uploading.value = true;
+
+  for (const input of plan.value?.inputs.documents ?? []) {
+    const file = files.value[input.folder];
+    if (!file) continue;
+    try {
+      // The live team's documents folder is addressed by the team's identifier.
+      await uploadDocument(asDocumentsFolderKey(team), file, input.folder);
+      uploads.value = [...uploads.value, { folder: input.folder, file: file.name, ok: true, problem: '' }];
+    } catch (cause) {
+      uploads.value = [
+        ...uploads.value,
+        { folder: input.folder, file: file.name, ok: false, problem: cause instanceof Error ? cause.message : String(cause) },
+      ];
+    }
+  }
+
+  uploading.value = false;
+
+  try {
+    const record = await teamSolution(team);
+    if (record) missing.value = record.missing;
+  } catch (cause) {
+    missingProblem.value = `What is still missing could not be read: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+}
+
+async function openTeam() {
+  const team = succeeded.value?.team;
+  if (!team) return;
+  await board.refreshForTeamCreated(team);
+  board.setActiveTeam(asTeamId(team));
+  board.showBoard();
+  open.value = false;
+  emit('opened', team);
+}
+
+// --- Moving between steps -----------------------------------------------------------------------
+
+const canGoBack = computed(() => step.value !== 'team' && !installing.value && !succeeded.value);
+
+function back() {
+  const index = stepOrder.indexOf(step.value);
+  if (index > 0) step.value = stepOrder[index - 1]!;
+}
+
+function next() {
+  if (step.value === 'team') void nextFromTeam();
+  else if (step.value === 'review') step.value = 'inputs';
+  else if (step.value === 'inputs' && settingsInRange.value) step.value = 'install';
+}
+</script>
+
+<template>
+  <!-- A link's own query changing is the page's to handle (it reopens on the new folder), not a
+       route change that dismisses the wizard. -->
+  <q-dialog v-model="open" :persistent="installing || setupBusy" :no-route-dismiss="from === 'link'">
+    <q-card v-if="guided && checkPlan" class="os-dialog-md">
+      <SetupSteps
+        :plan="checkPlan"
+        :folder="folder"
+        @busy="(busy: boolean) => (setupBusy = busy)"
+        @close="open = false"
+        @opened="guidedOpened"
+      />
+    </q-card>
+    <q-card v-else class="os-dialog-lg solution-wizard" data-solution-wizard>
+      <q-card-section class="row items-center q-pb-none">
+        <div>
+          <div class="os-dialog-title">Install a solution</div>
+          <div class="text-caption os-text-muted mono" data-folder>{{ folder }}</div>
+        </div>
+        <q-space />
+        <q-btn v-close-popup flat round dense icon="close" aria-label="Close" :disable="installing" />
+      </q-card-section>
+
+      <q-card-section class="q-py-xs">
+        <div class="row q-gutter-x-md text-caption" data-steps>
+          <span
+            v-for="(name, index) in stepOrder"
+            :key="name"
+            :class="name === step ? 'text-weight-bold' : 'os-text-muted'"
+            :data-step-tab="name"
+          >{{ index + 1 }}. {{ stepTitles[name] }}</span>
+        </div>
+      </q-card-section>
+
+      <q-card-section class="solution-body">
+        <div v-if="checking" class="os-text-muted">Checking the package…</div>
+
+        <!-- A REFUSED FOLDER: the Host's sentence and nothing else. -->
+        <q-banner v-else-if="folderRefusal" dense class="os-bg-tint-error text-negative" data-folder-refusal>
+          <template #avatar><q-icon name="error" /></template>
+          {{ folderRefusal }}
+        </q-banner>
+
+        <!-- A PACKAGE THAT FAILS ITS CHECK: every refusal at once, each "file field: reason". -->
+        <div v-else-if="refusals.length > 0" data-refusals>
+          <div class="text-negative q-mb-sm">This package cannot be installed. Change these and check it again:</div>
+          <ul class="q-my-none">
+            <li v-for="(refusal, index) in refusals" :key="index" data-refusal>{{ refusalLine(refusal) }}</li>
+          </ul>
+        </div>
+
+        <template v-else-if="plan">
+          <!-- 1. TEAM ------------------------------------------------------------------------- -->
+          <div v-if="step === 'team'" data-step="team">
+            <div class="text-subtitle1">{{ plan.package.name }} {{ plan.package.version }}</div>
+            <div class="os-text-muted q-mb-md">{{ plan.package.description }}</div>
+
+            <!-- ONE CHOICE A LINE: a radio is inline, so each sits in a block of its own, or the two
+                 share a line whenever the new team's fields are hidden. -->
+            <template v-if="soleCandidate">
+              <div :data-update-team="soleCandidate.installed.team" :data-selectable="soleCandidate.selectable">
+                <q-radio
+                  :model-value="mode"
+                  val="update"
+                  :disable="!soleCandidate.selectable"
+                  :label="updateLabel(soleCandidate)"
+                  data-mode-update
+                  @update:model-value="chooseUpdateTeam(soleCandidate.installed.team)"
+                />
+                <div v-if="!soleCandidate.selectable" class="text-caption os-text-muted q-pl-lg" data-update-reason>
+                  Cannot be updated to {{ plan.package.version }}: {{ soleCandidate.installed.teamName }} is {{ soleCandidate.reason }}.
+                </div>
+                <div v-else class="text-caption os-text-muted q-pl-lg" data-update-keeps>
+                  Updates the team in place: your settings, connections, documents and the data on its pages are kept, and the
+                  next step shows what changes.
+                </div>
+              </div>
+            </template>
+
+            <div :class="{ 'q-mt-md': !!soleCandidate }">
+              <q-radio
+                :model-value="mode"
+                val="install"
+                label="Install as a new team"
+                data-mode-install
+                @update:model-value="chooseMode('install')"
+              />
+            </div>
+
+            <div v-if="mode === 'install'" class="q-pl-lg q-mt-sm q-gutter-sm">
+              <q-input
+                v-model="teamName"
+                outlined
+                dense
+                label="Team name"
+                maxlength="200"
+                :error="!!nameProblem || !!nameRefusal"
+                :error-message="nameProblem ?? nameRefusal ?? ''"
+                data-team-name
+              />
+              <div v-if="anUpdateIsOffered" class="text-caption os-text-muted" data-new-team-alongside>
+                A second, separate team, alongside the one already running this package. To keep that team's settings, update it
+                instead.
+              </div>
+              <div v-if="reinstall" class="q-mt-sm" data-reinstall-line>
+                Reinstalls onto the team {{ reinstall.teamName }}, which kept {{ plan.package.name }} {{ reinstall.from }} when it was
+                uninstalled: its sites come back with their data, its members and triggers are made again, and your earlier
+                answers are filled in for you to check.
+              </div>
+              <template v-else>
+                <q-checkbox
+                  v-model="localRepository"
+                  dense
+                  label="Create a local repository for this team"
+                  data-local-repository
+                />
+                <div class="text-caption os-text-muted">
+                  The team gets a local repository named after it, as a new team does. Untick for none.
+                </div>
+              </template>
+              <div v-if="reinstallable.length > 0 && !reinstall" class="q-mt-sm" data-reinstall-candidates>
+                <div class="text-caption os-text-muted">
+                  These teams kept an earlier install of this package, its sites offline with their data:
+                </div>
+                <q-btn
+                  v-for="kept in reinstallable"
+                  :key="kept.team"
+                  flat
+                  dense
+                  no-caps
+                  color="primary"
+                  :label="`Reinstall onto ${kept.teamName} (had ${kept.version})`"
+                  :data-reinstall-team="kept.team"
+                  @click="chooseReinstall(kept.teamName)"
+                />
+              </div>
+            </div>
+
+            <template v-if="candidates.length > 1">
+              <div class="q-mt-md">
+                <q-radio
+                  :model-value="mode"
+                  val="update"
+                  label="Update an existing team"
+                  data-mode-update
+                  @update:model-value="chooseMode('update')"
+                />
+              </div>
+              <div class="q-pl-lg" data-update-candidates>
+                <div
+                  v-for="candidate in candidates"
+                  :key="candidate.installed.team"
+                  :data-update-team="candidate.installed.team"
+                  :data-selectable="candidate.selectable"
+                >
+                  <q-radio
+                    :model-value="mode === 'update' ? updateTeam : ''"
+                    :val="candidate.installed.team"
+                    :disable="!candidate.selectable"
+                    :label="`${candidate.installed.teamName}: ${candidate.installed.version} to ${plan.package.version}`"
+                    @update:model-value="chooseUpdateTeam(candidate.installed.team)"
+                  />
+                  <span v-if="!candidate.selectable" class="text-caption os-text-muted q-ml-sm" data-update-reason>
+                    Cannot be updated to {{ plan.package.version }}: {{ candidate.installed.teamName }} is {{ candidate.reason }}.
+                  </span>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="previewing" class="os-text-muted q-mt-sm">Asking the Host…</div>
+            <div v-if="previewProblem" class="text-negative q-mt-sm" data-preview-problem>{{ previewProblem }}</div>
+          </div>
+
+          <!-- 2. REVIEW ------------------------------------------------------------------------ -->
+          <div v-else-if="step === 'review'" data-step="review">
+            <div class="text-subtitle1">{{ plan.package.name }} {{ plan.package.version }}</div>
+            <div class="q-mb-sm">{{ plan.package.description }}</div>
+            <div v-if="updatePreview" class="text-weight-medium q-mb-sm" data-version-line>
+              {{ updatePreview.teamName }}: {{ updatePreview.from }} -> {{ updatePreview.to }}
+            </div>
+            <div v-else-if="reinstall" class="q-mb-sm" data-reinstall-team-line>
+              Reinstall onto {{ reinstall.teamName }}, which had {{ reinstall.from }}: its kept sites come back with their data.
+            </div>
+            <div v-else class="q-mb-sm" data-new-team-line>A new team: {{ teamName.trim() }}</div>
+
+            <SolutionPlanReview :plan="plan" :diff="diff" :member-was="memberWas" :trigger-was="triggerWas" />
+          </div>
+
+          <!-- 3. YOUR PART --------------------------------------------------------------------- -->
+          <div v-else-if="step === 'inputs'" data-step="inputs" class="q-gutter-md">
+            <div v-if="nothingToProvide" class="os-text-muted">This package needs nothing from you.</div>
+
+            <section v-if="plan.personSettings.length > 0" data-person-settings>
+              <div class="solution-heading">Settings</div>
+              <div
+                v-for="setting in plan.personSettings"
+                :key="settingKey(setting)"
+                class="q-mb-sm"
+                :data-person-setting="settingKey(setting)"
+              >
+                <div v-if="keptSetting(setting)" data-kept-setting>
+                  <span class="text-weight-medium">{{ setting.member }}: {{ setting.setting }}</span>
+                  · kept: <span class="mono">{{ keptValueWords(keptSetting(setting)!.value) }}</span>
+                  <div class="text-caption os-text-muted">
+                    {{ setting.description }} The update keeps this; change it in the member's settings.
+                  </div>
+                </div>
+                <template v-else>
+                <div v-if="settingInputKind(setting) === 'toggle'" class="row items-center no-wrap q-gutter-x-xs">
+                  <q-toggle
+                    :model-value="values[settingKey(setting)] === true"
+                    dense
+                    :label="`${setting.member}: ${setting.setting}`"
+                    @update:model-value="(value: boolean) => setValue(setting, value)"
+                  />
+                  <FieldHelp :text="setting.description" />
+                </div>
+                <q-select
+                  v-else-if="settingInputKind(setting) === 'choice'"
+                  :model-value="values[settingKey(setting)]"
+                  :options="setting.choices ?? []"
+                  outlined
+                  dense
+                  clearable
+                  :label="`${setting.member}: ${setting.setting}`"
+                  @update:model-value="(value: unknown) => setValue(setting, value ?? '')"
+                >
+                  <template #append><FieldHelp :text="setting.description" /></template>
+                </q-select>
+                <!-- A LIST - chosen from a fixed set, or free text added through its dialog - is the
+                     product's one list input, as a member's plugin settings are. -->
+                <ChipListInput
+                  v-else-if="settingInputKind(setting) === 'choices' || settingInputKind(setting) === 'list'"
+                  :model-value="listOf(setting)"
+                  :options="settingInputKind(setting) === 'choices' ? setting.choices ?? [] : null"
+                  :label="`${setting.member}: ${setting.setting}`"
+                  :hint="setting.description"
+                  :data-list-setting="settingKey(setting)"
+                  @update:model-value="(value: string[]) => setValue(setting, value)"
+                />
+                <q-input
+                  v-else
+                  :model-value="values[settingKey(setting)] as string | number | null"
+                  :type="settingInputKind(setting) === 'number' ? 'number' : 'text'"
+                  outlined
+                  dense
+                  :label="`${setting.member}: ${setting.setting}`"
+                  :error="settingProblems[settingKey(setting)] ? true : undefined"
+                  :error-message="settingProblems[settingKey(setting)] ?? ''"
+                  :data-out-of-range="settingProblems[settingKey(setting)] ? '' : undefined"
+                  @update:model-value="(value: string | number | null) => setValue(setting, settingInputKind(setting) === 'number' && value !== '' && value !== null ? Number(value) : value)"
+                >
+                  <template #append><FieldHelp :text="[setting.description, settingHint(setting)].filter((part) => part).join(' ')" /></template>
+                </q-input>
+                <div class="text-caption os-text-muted">
+                  <template v-if="settingDefaultWords(setting) !== null">Default: {{ settingDefaultWords(setting) }}.</template>
+                  {{ setting.required ? 'Required.' : 'Optional.' }}
+                  <template v-if="previousSetting(setting)"><span data-previous-setting> Filled in with your answer before.</span></template>
+                </div>
+                </template>
+              </div>
+            </section>
+
+            <section v-if="plan.inputs.connections.length > 0" data-connections>
+              <div class="solution-heading">Connections</div>
+              <div v-for="input in plan.inputs.connections" :key="slotKey(input)" class="q-mb-sm" :data-connection-input="slotKey(input)">
+                <div v-if="keptConnection(input)" data-kept-connection>
+                  <span class="text-weight-medium">Connection for {{ input.member }}: {{ input.slot }}</span>
+                  · kept: {{ connectionWords(keptConnection(input)!.connection) }}
+                  <div class="text-caption os-text-muted">
+                    {{ input.description }} The update keeps this; change it in the member's settings.
+                  </div>
+                </div>
+                <ConnectionPicker
+                  v-else
+                  :model-value="bindings[slotKey(input)] ?? ''"
+                  :slot-name="input.slot"
+                  :spec="slotSpec(input)"
+                  :connections="wizardConnections"
+                  :providers="providers"
+                  :plugin="slotPlugin(input)?.id"
+                  :plugin-name="slotPlugin(input)?.name"
+                  :label="`Connection for ${input.member}: ${input.slot}`"
+                  :hint="`${input.description} ${input.required ? 'Required.' : 'Optional.'}`"
+                  reconnect-in-tab
+                  @update:model-value="(value: string) => (bindings = { ...bindings, [slotKey(input)]: value })"
+                  @connected="(connection: Connection) => connectedFor(input, connection)"
+                />
+              </div>
+            </section>
+
+            <section v-if="plan.inputs.documents.length > 0" data-documents>
+              <div class="solution-heading">Documents</div>
+              <div v-for="input in plan.inputs.documents" :key="input.folder" class="q-mb-sm" :data-document-input="input.folder">
+                <q-file
+                  :model-value="files[input.folder] ?? null"
+                  outlined
+                  dense
+                  clearable
+                  :label="`Upload to ${input.folder}/`"
+                  @update:model-value="(file: File | null) => (files = { ...files, [input.folder]: file })"
+                >
+                  <template #prepend><q-icon name="upload_file" /></template>
+                </q-file>
+                <div class="text-caption os-text-muted">
+                  <span class="mono">{{ input.folder }}/</span> · {{ input.description }}
+                  <span v-if="input.required" class="text-weight-medium" data-required> · required</span>
+                </div>
+                <div v-if="keptFiles(input.folder).length > 0" class="text-caption" data-kept-files>
+                  Already in {{ input.folder }}/: {{ keptFiles(input.folder).join(', ') }}. The update keeps them; upload
+                  only to add another.
+                </div>
+              </div>
+            </section>
+
+            <section v-if="secretRows.length > 0" data-secrets>
+              <div class="solution-heading">Secrets</div>
+              <div class="text-caption os-text-muted q-mb-xs">
+                The install binds each by its key name. Values are set on the Host by its operator, never here.
+              </div>
+              <div
+                v-for="row in secretRows"
+                :key="`${row.secret.member}/${row.secret.field}`"
+                class="q-mb-sm"
+                :data-secret="row.secret.key"
+                :data-secret-state="row.state"
+              >
+                <span class="text-weight-medium mono">{{ row.secret.key }}</span>
+                <span class="os-text-muted"> · {{ row.secret.member }}</span>
+                <span v-if="row.state === 'set'" class="text-positive"> · set</span>
+                <span v-else-if="row.state === 'unset'" class="text-warning"> · not set</span>
+                <span v-else class="os-text-muted"> · not needed</span>
+                <div class="text-caption os-text-muted">{{ row.secret.description }}</div>
+                <div class="text-caption" data-secret-sentence>{{ row.sentence }}</div>
+              </div>
+            </section>
+
+            <q-banner v-if="skippedRequired.length > 0" dense class="os-bg-tint-warn" data-skipped-required>
+              <template #avatar><q-icon name="warning" /></template>
+              You can install without {{ skippedRequired.join(', ') }}. Until it is provided, the team
+              will show as blocked, waiting for {{ skippedRequired.length === 1 ? 'it' : 'them' }}.
+            </q-banner>
+          </div>
+
+          <!-- 4. INSTALL ----------------------------------------------------------------------- -->
+          <div v-else-if="step === 'install'" data-step="install">
+            <div class="q-mb-md" data-install-line>{{ installLine }}</div>
+
+            <div v-if="installing" class="row items-center q-gutter-sm q-mb-sm" data-installing>
+              <q-spinner size="1.2em" />
+              <span>{{ updatePreview ? 'Updating' : 'Installing' }}… this can take a minute.</span>
+            </div>
+
+            <q-banner v-if="failedStep" dense class="os-bg-tint-error text-negative q-mb-sm" data-install-failure>
+              <template #avatar><q-icon name="error" /></template>
+              {{ failureSentence(failedStep.step, failedStep.stepNumber, failedStep.reason, failedStep.steps) }}
+            </q-banner>
+
+            <div v-if="failedCheck" class="text-negative q-mb-sm" data-install-refusals>
+              The package failed its check, and nothing was installed:
+              <ul class="q-my-none">
+                <li v-for="(refusal, index) in failedCheck.refusals" :key="index">{{ refusalLine(refusal) }}</li>
+              </ul>
+            </div>
+
+            <q-banner v-if="installError" dense class="os-bg-tint-error text-negative q-mb-sm" data-install-error>
+              <template #avatar><q-icon name="error" /></template>
+              {{ installError }}
+              <SlotReconnect
+                v-if="installReconnect"
+                :connection-id="installReconnect.connectionId"
+                :scopes="installReconnect.scopes"
+                :provider-name="installProviderName(installReconnect.connectionId)"
+                @reconnected="installReconnected"
+              />
+            </q-banner>
+            <div v-if="retryNote" class="q-mb-sm" data-install-retry>{{ retryNote }}</div>
+
+            <ol v-if="installing || result" class="q-my-sm" data-install-steps>
+              <li v-for="item in shownSteps" :key="item.step" :data-install-step="item.step" :data-done="item.done">
+                {{ item.title }}
+                <span v-if="item.done" class="text-positive"> - done</span>
+                <span v-else-if="failedStep && failedStep.step === item.step" class="text-negative"> - failed, undone</span>
+              </li>
+            </ol>
+
+            <template v-if="succeeded">
+              <div class="text-positive q-mb-sm" data-install-success>
+                {{ updatePreview ? 'Updated' : 'Installed' }} {{ succeeded.teamName }} ({{ succeeded.version }}).
+              </div>
+
+              <div v-if="uploading" class="os-text-muted">Uploading your documents…</div>
+              <div v-for="upload in uploads" :key="upload.folder + upload.file" :data-upload="upload.folder">
+                <span v-if="upload.ok">Uploaded {{ upload.file }} to {{ upload.folder }}/.</span>
+                <span v-else class="text-negative">{{ upload.file }} was not uploaded to {{ upload.folder }}/: {{ upload.problem }}</span>
+              </div>
+
+              <div v-if="missingProblem" class="text-negative" data-missing-problem>{{ missingProblem }}</div>
+              <div v-else-if="missing && missing.length > 0 && !uploading" class="q-mt-sm" data-still-missing>
+                <div>The team shows as blocked until these are provided:</div>
+                <div v-for="(item, index) in missing" :key="index" data-missing-item>{{ missingLine(item) }}</div>
+              </div>
+              <div v-else-if="missing && !uploading" class="q-mt-sm" data-nothing-missing>Nothing is missing: the team is ready.</div>
+
+              <div v-if="firstRuns.length > 0" class="q-mt-sm" data-first-runs>
+                <div v-for="run in firstRuns" :key="run.trigger" :data-first-run="run.trigger" :data-ran-now="run.ranNow">
+                  {{ run.line }}.
+                </div>
+              </div>
+
+              <div v-if="unsetSecrets.length > 0" class="q-mt-sm" data-unset-secrets>
+                <div>These keys are still not set on the Host. Each one's source fails until it is set:</div>
+                <div v-for="secret in unsetSecrets" :key="secret.key" :data-unset-secret="secret.key">
+                  <span class="mono">{{ secret.key }}</span> - {{ secret.setWith }}.
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </q-card-section>
+
+      <q-card-actions align="right">
+        <q-btn v-if="canGoBack && plan" flat no-caps label="Back" @click="back" />
+        <q-space />
+        <q-btn v-close-popup flat no-caps :label="succeeded ? 'Close' : 'Cancel'" :disable="installing" />
+        <q-btn
+          v-if="plan && step !== 'install'"
+          color="primary"
+          no-caps
+          label="Next"
+          :disable="(step === 'team' && !teamCanAdvance) || (step === 'inputs' && !settingsInRange)"
+          :loading="step === 'team' && previewing"
+          @click="next"
+        />
+        <q-btn
+          v-if="plan && step === 'install' && !succeeded"
+          color="primary"
+          no-caps
+          :label="updatePreview ? 'Update' : 'Install'"
+          :loading="installing"
+          :disable="installing"
+          data-install-button
+          @click="install"
+        />
+        <q-btn
+          v-if="succeeded && !uploading"
+          color="primary"
+          no-caps
+          label="Open the team"
+          data-open-team
+          @click="openTeam"
+        />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
+</template>
+
+<style scoped>
+.solution-body {
+  max-height: 65vh;
+  overflow-y: auto;
+  /* A package's text (a path, a URL, a long name) wraps rather than widening the dialog. */
+  overflow-wrap: anywhere;
+}
+
+.solution-heading {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+</style>

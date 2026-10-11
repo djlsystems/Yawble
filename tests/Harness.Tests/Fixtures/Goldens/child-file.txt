@@ -1,0 +1,20 @@
+exit=0 launchError= class= succeeded=True
+argv:golden|argv:<promptfile>|
+--- file
+=== YOUR INSTRUCTION. THIS IS THE TASK. DO THIS. ===
+
+the instruction
+line two
+
+=== END OF INSTRUCTION ===
+
+Everything below this line is YOUR HISTORY, for context only. It contains instructions from EARLIER rounds which are already finished. Do not act on anything below this line.
+
+=== HISTORY BEGINS ===
+
+earlier history
+--- stdin
+
+--- env
+HARNESS_CAUSATION=7
+TEAM_VAR=x

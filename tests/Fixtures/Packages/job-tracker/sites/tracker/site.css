@@ -1,0 +1,9 @@
+body { font: 15px/1.4 system-ui, sans-serif; margin: 0 auto; max-width: 48rem; padding: 1rem; color: #1d1d1f; }
+header { display: flex; justify-content: space-between; align-items: baseline; }
+.who, .status, .empty, .fit { color: #555; }
+.jobs { list-style: none; padding: 0; }
+.job { border: 1px solid #ddd; border-radius: 6px; padding: .75rem; margin: .5rem 0; }
+.head { display: flex; gap: .75rem; align-items: baseline; }
+.title { font-weight: 600; }
+.state { margin-left: auto; font-size: .85em; text-transform: uppercase; color: #666; }
+.controls { display: flex; gap: .5rem; }

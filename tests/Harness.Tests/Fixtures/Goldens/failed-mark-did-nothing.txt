@@ -1,0 +1,2 @@
+failed=This run made no call to `harness`, so the agent did not reach the platform and probably did not load its role skill. Check the member's branch for what was run.
+failureClass=agent-fault

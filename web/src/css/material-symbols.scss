@@ -1,0 +1,31 @@
+// THE ICON FONT, SERVED AS A SUBSET OF MATERIAL SYMBOLS OUTLINED - only the glyphs the app uses.
+// The full font is ~4 MB and took 8.7s over ngrok, with every icon hidden until it arrived; the
+// subset is ~100 KB. Regenerate it with `npm run icons:subset` after adding an icon: the list and
+// its reasons are in `scripts/icon-font.mjs`, and `icon-names.spec.ts` fails until you do.
+//
+// This replaces the `material-symbols-outlined` entry in `quasar.config.ts`'s `extras`, which
+// linked the full font. The class rule below is that entry's, unchanged.
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url('../assets/fonts/material-symbols-outlined-subset.woff2') format('woff2');
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'liga';
+}

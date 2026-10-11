@@ -1,0 +1,625 @@
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using Harness.Host;
+
+namespace Harness.Tests;
+
+/// <summary>
+/// THE RUN BOUNDARY, MADE STRUCTURAL. Only the runtime worker (<c>Harness.Worker</c>) starts a
+/// process, reads <c>/proc</c>, touches the cgroup filesystem or calls <c>setpriv</c> or
+/// <c>prlimit</c>; control reaches runs through the run protocol. This reads the COMPILED IL of every
+/// other assembly under <c>src/</c> and names each method that does one of those things, or calls a
+/// worker method that does, by its rule. What remains is an allow-list: each entry names its caller
+/// and why it stays for now, and an entry the scan no longer finds fails too, so the list only
+/// shrinks.
+///
+/// Lambdas, local functions and state machines count against the method that wrote them. A path
+/// passed as a defaulted parameter counts against the CALLER, because that is where the compiler
+/// loads the string.
+///
+/// What it cannot see: a path built at runtime (<c>"/pr" + "oc"</c>), reflection, <c>dynamic</c>, and
+/// interface, virtual or delegate dispatch - an interface call into a primitive is named at the
+/// implementation, not at its caller. It is a ratchet against ordinary code, not a sandbox.
+/// </summary>
+public sealed class WorkerArchitectureTests
+{
+    public const string StartsAProcess = "starts a process";
+    public const string ReadsProc = "reads /proc";
+    public const string TouchesACgroup = "touches a cgroup";
+    public const string CallsSetprivOrPrlimit = "calls setpriv or prlimit";
+    public const string SignalsAProcessGroup = "signals a process group";
+    public const string ReachesAWorkerLauncher = "reaches a worker launcher";
+    public const string ResolvesOnThePath = "resolves a command on the PATH";
+
+    /// <summary>Why an entry may stay: what control keeps for good, or what a later change moves.</summary>
+    private static readonly string[] Categories = ["git", "gh", "settings default"];
+
+    /// <summary>The only processes control starts itself: a person's and a team's git, and the GitHub CLI.</summary>
+    private static readonly string[] ControlStarts =
+    [
+        "GhContributor.RunAsync: " + StartsAProcess,
+        "GitRunner.ExecuteGitAsync: " + StartsAProcess,
+    ];
+
+    /// <summary>Every caller outside the worker that still does one of these things, and why.</summary>
+    private static readonly Dictionary<string, string> AllowList = new(StringComparer.Ordinal)
+    {
+        ["GitRunner.ExecuteGitAsync: " + StartsAProcess] =
+            "git: a person's and a team's git stays in control.",
+        ["GhContributor.RunAsync: " + StartsAProcess] =
+            "gh: the GitHub CLI for a person's contributions stays in control.",
+        ["TenantSettings..ctor: " + TouchesACgroup] =
+            "settings default: the run limit's default is derived from the container's cgroup limits, read only; a later change takes them from the worker's capacity sample.",
+    };
+
+    /// <summary>Why a PATH lookup outside the worker may stay.</summary>
+    private static readonly string[] PathCategories = ["the resolver", "gh", "plugin runtime", "all only"];
+
+    /// <summary>
+    /// EVERY PATH LOOKUP OUTSIDE THE WORKER, and why. An agent CLI is on a worker's PATH and never on
+    /// control's, so whether one is installed is the workers' answer (<c>WorkerInstalls</c>): a lookup
+    /// of an agent CLI here would answer from the wrong machine. Kept apart from <see cref="AllowList"/>,
+    /// whose process entries <see cref="Control_starts_no_process_but_git_and_gh"/> reads.
+    /// </summary>
+    private static readonly Dictionary<string, string> PathLookups = new(StringComparer.Ordinal)
+    {
+        ["PathSearch.Find: " + ResolvesOnThePath] =
+            "the resolver: the one walk of PATH; every caller of it is listed here.",
+        ["Program.Main: " + ResolvesOnThePath] =
+            "gh: whether the GitHub CLI is on control's PATH, where control runs it.",
+        ["RepoEndpoints.GetRepoStatusAsync: " + ResolvesOnThePath] =
+            "gh: whether the GitHub CLI is on control's PATH, where control runs it.",
+        ["PluginCatalog.OnPath: " + ResolvesOnThePath] =
+            "plugin runtime: a plugin manifest's required runtime, never an agent CLI.",
+        ["SolutionPlatform.ForDataRoot: " + ResolvesOnThePath] =
+            "plugin runtime: a solution package's required runtime, never an agent CLI.",
+        ["AgentInstallProbe.ResolvedPathOf: " + ResolvesOnThePath] =
+            "all only: control composes the probe over WorkerInstalls and never reaches it; pinned at runtime by "
+            + "AgentInstallControlRouteTests.In_control_the_answer_never_follows_controls_own_path_in_either_direction.",
+        ["WorkerListingRunner.Installed: " + ResolvesOnThePath] =
+            "all only: control composes it with pathIsTheWorkers false and never reaches the lookup.",
+    };
+
+    /// <summary>
+    /// The worker types control may compose and talk to: the protocol's in-process ends, and the
+    /// worker process's own entry, which the Host executable runs instead of control when started as a
+    /// worker - before control is composed.
+    /// </summary>
+    private static readonly HashSet<string> ProtocolSurface = new(StringComparer.Ordinal)
+    {
+        "InProcessWorker", "InProcessTransport", "WorkerHost", "WorkerProcess",
+    };
+
+    private static readonly Assembly Worker = typeof(ChildProcess).Assembly;
+
+    [Fact]
+    public void Nothing_outside_the_worker_starts_a_process_reads_proc_or_touches_a_cgroup()
+    {
+        var found = Violations(Scanned());
+        var unexpected = found.Where(v => !AllowList.ContainsKey(v)).ToList();
+
+        Assert.True(unexpected.Count == 0,
+            "Outside Harness.Worker, these start a process, read /proc, touch a cgroup, call setpriv or prlimit, "
+            + "or call a worker method that does. Move them behind the run protocol, or allow-list them with a reason:"
+            + Environment.NewLine + string.Join(Environment.NewLine, unexpected));
+    }
+
+    /// <summary>
+    /// THE CONTROL ROLE STARTS NOTHING BUT GIT AND GH. Every agent CLI, a person's terminal, a probe, a
+    /// listing, an update and a removal's agent pass run on a worker, reached through the run protocol -
+    /// in <c>all</c> too, through the in-process connection, since this scan cannot tell roles apart.
+    /// So outside the worker exactly two methods start a process, none signals one, calls setpriv or
+    /// prlimit, or calls a worker method that does; allow-listing another start fails here.
+    /// </summary>
+    [Fact]
+    public void Control_starts_no_process_but_git_and_gh()
+    {
+        string[] processRules = [StartsAProcess, SignalsAProcessGroup, CallsSetprivOrPrlimit, ReachesAWorkerLauncher];
+        var starts = Violations(Scanned())
+            .Where(v => processRules.Any(rule => v.EndsWith(": " + rule, StringComparison.Ordinal)))
+            .ToList();
+
+        Assert.Equal(ControlStarts, starts);
+        Assert.Equal(
+            ControlStarts,
+            AllowList.Keys.Where(key => processRules.Any(rule => key.EndsWith(": " + rule, StringComparison.Ordinal))).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Every_allow_list_entry_is_still_needed()
+    {
+        var found = Violations(Scanned()).ToHashSet(StringComparer.Ordinal);
+        var stale = AllowList.Keys.Where(key => !found.Contains(key)).ToList();
+
+        Assert.True(stale.Count == 0,
+            "These allow-list entries are no longer found by the scan; remove them:"
+            + Environment.NewLine + string.Join(Environment.NewLine, stale));
+    }
+
+    [Fact]
+    public void Every_allow_list_entry_says_why()
+    {
+        Assert.All(AllowList, entry =>
+        {
+            Assert.Contains(": ", entry.Key, StringComparison.Ordinal);
+            Assert.Contains(Categories, category => entry.Value.StartsWith(category + ":", StringComparison.Ordinal));
+            Assert.True(entry.Value.Length > entry.Value.IndexOf(':') + 10, $"{entry.Key} gives no reason");
+        });
+    }
+
+    /// <summary>
+    /// NO AGENT CLI IS LOOKED UP ON CONTROL'S PATH. Every PATH lookup outside the worker - a call to
+    /// <c>PathSearch.Find</c>, or a walk of <c>PATH</c> written by hand - is on <see cref="PathLookups"/>
+    /// with its reason. The scan cannot tell roles apart, so the "all only" entries are pinned at
+    /// runtime too.
+    /// </summary>
+    [Fact]
+    public void No_agent_cli_is_looked_up_on_the_path_outside_the_worker_but_where_listed()
+    {
+        var unexpected = PathLookupsIn(Scanned().SelectMany(IlScan.Methods)).Where(v => !PathLookups.ContainsKey(v)).ToList();
+
+        Assert.True(unexpected.Count == 0,
+            "Outside Harness.Worker, these look a command up on the PATH. An agent CLI's install is the workers' answer "
+            + "(WorkerInstalls); anything else is listed with its reason:"
+            + Environment.NewLine + string.Join(Environment.NewLine, unexpected));
+    }
+
+    [Fact]
+    public void Every_path_lookup_entry_is_still_needed()
+    {
+        var found = PathLookupsIn(Scanned().SelectMany(IlScan.Methods)).ToHashSet(StringComparer.Ordinal);
+        var stale = PathLookups.Keys.Where(key => !found.Contains(key)).ToList();
+
+        Assert.True(stale.Count == 0,
+            "These PATH lookup entries are no longer found by the scan; remove them:"
+            + Environment.NewLine + string.Join(Environment.NewLine, stale));
+    }
+
+    [Fact]
+    public void Every_path_lookup_entry_says_why()
+    {
+        Assert.All(PathLookups, entry =>
+        {
+            Assert.EndsWith(": " + ResolvesOnThePath, entry.Key, StringComparison.Ordinal);
+            Assert.Contains(PathCategories, category => entry.Value.StartsWith(category + ":", StringComparison.Ordinal));
+            Assert.True(entry.Value.Length > entry.Value.IndexOf(':') + 10, $"{entry.Key} gives no reason");
+        });
+    }
+
+    /// <summary>A planted lookup of an agent CLI, and a walk of PATH by hand, are each found and named.</summary>
+    [Theory]
+    [InlineData(nameof(PlantsAnAgentCliPathLookup))]
+    [InlineData(nameof(PlantsAHandRolledPathWalk))]
+    public void The_path_scan_catches_a_planted_lookup(string probe)
+    {
+        Assert.Equal([$"{nameof(WorkerArchitectureTests)}.{probe}: {ResolvesOnThePath}"], PathLookupsIn(Probes(probe)));
+        // And only by this rule: the process scan does not see it.
+        Assert.Empty(Violations(Probes(probe)));
+    }
+
+    [Fact]
+    public void The_path_scan_ignores_text_that_is_not_a_lookup()
+    {
+        Assert.Empty(PathLookupsIn(Probes(nameof(HoldsTextThatIsNotAPath), nameof(NamesPathWithoutReadingIt))));
+    }
+
+    /// <summary>
+    /// What the worker references beyond the framework, exactly: the run protocol, the PTY contract, and
+    /// the PTY package a person's terminal is spawned with. Anything else - in this repository or not -
+    /// fails, named. The framework is <c>System.*</c>, <c>Microsoft.*</c> (the logging abstractions the
+    /// worker logs through among them), <c>netstandard</c> and <c>mscorlib</c>.
+    /// </summary>
+    [Fact]
+    public void The_worker_references_only_the_contracts()
+    {
+        var beyond = Worker.GetReferencedAssemblies()
+            .Select(a => a.Name!)
+            .Where(name => !Framework(name))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(["Harness.Contracts", "Harness.Pty.Abstractions", "Porta.Pty"], beyond);
+    }
+
+    private static bool Framework(string name) =>
+        name.StartsWith("System", StringComparison.Ordinal) || name.StartsWith("Microsoft.", StringComparison.Ordinal)
+        || name is "netstandard" or "mscorlib";
+
+    [Fact]
+    public void Every_project_but_the_worker_is_scanned()
+    {
+        var projects = Directory.GetDirectories(Path.Combine(RepoRoot(), "src"))
+            .Where(d => Directory.GetFiles(d, "*.csproj").Length > 0)
+            .Select(Path.GetFileName)
+            .Where(name => name != Worker.GetName().Name)
+            .Order(StringComparer.Ordinal);
+
+        Assert.Equal(projects, Scanned().Select(a => a.GetName().Name).Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// THE SCAN CATCHES WHAT IT FORBIDS, AND NAMES THE RIGHT METHOD AND RULE: each probe yields
+    /// exactly one violation, its own.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(PlantsAProcessStart), StartsAProcess)]
+    [InlineData(nameof(PlantsAProcRead), ReadsProc)]
+    [InlineData(nameof(PlantsACgroupWrite), TouchesACgroup)]
+    [InlineData(nameof(PlantsAPrlimit), CallsSetprivOrPrlimit)]
+    [InlineData(nameof(PlantsALauncherCall), ReachesAWorkerLauncher)]
+    [InlineData(nameof(PlantsADefaultedProcRead), ReadsProc)]
+    [InlineData(nameof(kill), SignalsAProcessGroup)]
+    public void The_scan_catches_a_planted_violation(string probe, string rule)
+    {
+        var violations = Violations(Probes(probe));
+
+        Assert.Equal([$"{nameof(WorkerArchitectureTests)}.{probe}: {rule}"], violations);
+    }
+
+    /// <summary>
+    /// A WORKER NEVER READS THE STORE OR THE KEY RING: a run's credential is resolved by control and
+    /// arrives with its start. Neither the worker nor the contracts it references can load SQLite,
+    /// Data Protection or a control assembly, and no worker method names the key ring's folder or a
+    /// database file.
+    /// </summary>
+    [Fact]
+    public void The_worker_reads_neither_the_database_nor_the_key_ring()
+    {
+        var reachable = new[] { Worker, typeof(Harness.Contracts.RunCredential).Assembly };
+        var loads = reachable
+            .SelectMany(a => a.GetReferencedAssemblies())
+            .Select(a => a.Name!)
+            .Where(name => StoreAssemblies.Any(store => name.StartsWith(store, StringComparison.Ordinal)))
+            .ToList();
+
+        Assert.Empty(loads);
+        Assert.Empty(StoreReads(IlScan.Methods(Worker)));
+    }
+
+    /// <summary>
+    /// Only the worker writes an MCP config: control starts no agent, so nothing outside the worker
+    /// calls the writer or applies one. In the pod each container has its own /tmp, and in a worker
+    /// container its Host user is the one that ever writes /tmp/harness-mcp.
+    /// </summary>
+    [Fact]
+    public void Only_the_worker_writes_mcp_configs()
+    {
+        static List<string> Callers(IEnumerable<MethodBase> methods) =>
+        [.. methods
+            .Where(method => method.DeclaringType != typeof(McpLaunchConfig))
+            .Where(method => IlScan.Decode(method).Any(instruction => instruction.Method is { } target
+                && target.DeclaringType == typeof(McpLaunchConfig)
+                && target.Name is nameof(McpLaunchConfig.TryWrite) or nameof(McpLaunchConfig.Apply)))
+            .Select(IlScan.Owner)
+            .Distinct()];
+
+        Assert.Empty(Callers(Scanned().SelectMany(IlScan.Methods)));
+        // The scan finds the worker's own calls: it is not looking at nothing.
+        Assert.NotEmpty(Callers(IlScan.Methods(Worker)));
+    }
+
+    /// <summary>
+    /// The worker writes no entry the ownership map keeps for harness: the doctor's records, the
+    /// credential exchange, control's record of its workers. In a worker container its Host user is
+    /// not harness and cannot, so a writer moved into the worker would only show as a doctor that never
+    /// reads signed in. Neither the writers' types nor their file names are in the worker.
+    /// </summary>
+    [Fact]
+    public void The_worker_writes_no_host_entry()
+    {
+        var writers = new[]
+        {
+            typeof(AgentAuthRecord), typeof(AgentToolsRecord), typeof(AgentLaunchChecksRecord), typeof(WipRecord),
+            typeof(WorkersRecord), typeof(AgentCredentialRequests),
+        };
+        string[] names =
+        [
+            AgentAuthRecord.FileName, AgentToolsRecord.FileName, AgentLaunchChecksRecord.FileName, WipRecord.FileName,
+            WorkersRecord.FileName, AgentCredentialRequests.Folder,
+        ];
+
+        Assert.All(writers, type => Assert.NotEqual(Worker, type.Assembly));
+        var worker = IlScan.Methods(Worker).ToList();
+        Assert.DoesNotContain(worker, method => IlScan.Decode(method).Any(instruction =>
+            instruction.Method?.DeclaringType is { } type && writers.Contains(type)));
+        Assert.Empty(worker
+            .SelectMany(method => IlScan.Decode(method).Select(instruction => (method, instruction.String)))
+            .Where(found => found.String is { } text && names.Any(name => text.Contains(name, StringComparison.Ordinal)))
+            .Select(found => $"{IlScan.Owner(found.method)}: \"{found.String}\""));
+
+        // Control does write them: the scan names real writers.
+        Assert.Contains(Scanned().SelectMany(IlScan.Methods), method => IlScan.Decode(method).Any(instruction =>
+            instruction.Method is { Name: "Write" } target && target.DeclaringType == typeof(WorkersRecord)));
+    }
+
+    [Fact]
+    public void The_store_scan_catches_a_planted_key_ring_path_and_database_file()
+    {
+        Assert.Equal(
+            [$"{nameof(WorkerArchitectureTests)}.{nameof(PlantsADatabaseRead)}", $"{nameof(WorkerArchitectureTests)}.{nameof(PlantsAKeyRingRead)}"],
+            StoreReads(Probes(nameof(PlantsAKeyRingRead), nameof(PlantsADatabaseRead))));
+    }
+
+    /// <summary>A defaulted path is the caller's: the method that declares the default loads nothing.</summary>
+    [Fact]
+    public void A_defaulted_path_counts_against_its_caller_not_the_method_declaring_it()
+    {
+        Assert.Empty(Violations(Probes(nameof(ReadsDefault))));
+    }
+
+    [Fact]
+    public void The_scan_ignores_text_that_is_not_a_path()
+    {
+        Assert.Empty(Violations(Probes(nameof(HoldsTextThatIsNotAPath))));
+    }
+
+    /// <summary>
+    /// CONTROL CATCHES NO EXCEPTION TYPE THE WORKER DECLARES: a worker in another process cannot
+    /// throw into control, so a fault crosses as a <c>RunFault</c> with its type as text, and control
+    /// throws its own. A catch on a worker type would work in one process and silently never match
+    /// over a connection.
+    /// </summary>
+    [Fact]
+    public void Control_catches_no_exception_type_declared_by_the_worker()
+    {
+        var caught = WorkerCatches(Scanned().SelectMany(IlScan.Methods), Worker);
+
+        Assert.True(caught.Count == 0,
+            "Outside Harness.Worker, these catch an exception type the worker declares; read the run's fault from the protocol instead:"
+            + Environment.NewLine + string.Join(Environment.NewLine, caught));
+    }
+
+    [Fact]
+    public void The_catch_scan_catches_a_planted_catch()
+    {
+        // The probe's exception type stands in for a worker's: declared in the assembly the scan is told is the worker.
+        Assert.Equal(
+            [$"{nameof(WorkerArchitectureTests)}.{nameof(PlantsACatchOfAWorkerException)}: catches {nameof(PlantedWorkerException)}"],
+            WorkerCatches(Probes(nameof(PlantsACatchOfAWorkerException), nameof(PlantsACatchOfAnOrdinaryException)), typeof(PlantedWorkerException).Assembly));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The scan.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>What reads control's database or its key ring.</summary>
+    private static readonly string[] StoreAssemblies =
+    [
+        "Microsoft.Data.Sqlite", "SQLitePCLRaw", "Microsoft.AspNetCore.DataProtection", "Harness.Identity", "Harness.Host",
+    ];
+
+    /// <summary>Each method, by owner, that names the key ring's folder or a database file.</summary>
+    private static List<string> StoreReads(IEnumerable<MethodBase> methods) =>
+        [.. methods
+            .Where(method => IlScan.Decode(method).Any(instruction => instruction.String is { } text
+                && (text == "keys" || text.EndsWith("/keys", StringComparison.Ordinal)
+                    || text.Contains("/keys/", StringComparison.Ordinal) || text.EndsWith(".db", StringComparison.Ordinal))))
+            .Select(IlScan.Owner)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)];
+
+    /// <summary>Each <c>Owner: catches Type</c> whose catch clause names an exception type <paramref name="worker"/> declares.</summary>
+    private static List<string> WorkerCatches(IEnumerable<MethodBase> methods, Assembly worker) =>
+        [.. methods
+            .SelectMany(method => (method.GetMethodBody()?.ExceptionHandlingClauses ?? [])
+                .Where(clause => clause.Flags == ExceptionHandlingClauseOptions.Clause
+                    && clause.CatchType is { } type && type.Assembly == worker && typeof(Exception).IsAssignableFrom(type))
+                .Select(clause => $"{IlScan.Owner(method)}: catches {clause.CatchType!.Name}"))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)];
+
+    /// <summary>Every assembly built from <c>src/</c> except the worker.</summary>
+    private static IReadOnlyList<Assembly> Scanned() =>
+        [.. Directory.GetDirectories(Path.Combine(RepoRoot(), "src"))
+            .Where(d => Directory.GetFiles(d, "*.csproj").Length > 0)
+            .Select(Path.GetFileName)
+            .Where(name => name != Worker.GetName().Name)
+            .Select(name => Assembly.Load(new AssemblyName(name!)))];
+
+    private static IEnumerable<MethodBase> Probes(params string[] names) =>
+        names.Select(name => (MethodBase)typeof(WorkerArchitectureTests).GetMethod(
+            name, BindingFlags.NonPublic | BindingFlags.Static)!);
+
+    private static List<string> Violations(IEnumerable<Assembly> assemblies) =>
+        Violations(assemblies.SelectMany(IlScan.Methods));
+
+    /// <summary>Each <c>Owner: rule</c> the methods break, once, in order.</summary>
+    private static List<string> Violations(IEnumerable<MethodBase> methods)
+    {
+        var launchers = Launchers.Value;
+        var found = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var method in methods)
+        {
+            if (method.DeclaringType?.Assembly == Worker) continue;
+
+            var owner = IlScan.Owner(method);
+            if (IsKill(method)) found.Add($"{owner}: {SignalsAProcessGroup}");
+
+            foreach (var instruction in IlScan.Decode(method))
+            {
+                foreach (var rule in Rules(instruction)) found.Add($"{owner}: {rule}");
+
+                if (instruction.Method is { } target
+                    && target.DeclaringType?.Assembly == Worker
+                    && !ProtocolSurface.Contains(OuterType(target.DeclaringType).Name)
+                    && launchers.Contains(IlScan.Owner(target)))
+                {
+                    found.Add($"{owner}: {ReachesAWorkerLauncher}");
+                }
+            }
+        }
+
+        return [.. found];
+    }
+
+    /// <summary>
+    /// Each <c>Owner: resolves a command on the PATH</c>: a call to <c>PathSearch.Find</c>, or the string
+    /// <c>PATH</c> loaded straight into <c>Environment.GetEnvironmentVariable</c>.
+    /// </summary>
+    private static List<string> PathLookupsIn(IEnumerable<MethodBase> methods)
+    {
+        var found = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var method in methods)
+        {
+            if (method.DeclaringType?.Assembly == Worker) continue;
+
+            var instructions = IlScan.Decode(method).ToList();
+            for (var i = 0; i < instructions.Count; i++)
+            {
+                var lookup = instructions[i].Method is { Name: nameof(Harness.Pty.PathSearch.Find) } target
+                        && target.DeclaringType == typeof(Harness.Pty.PathSearch)
+                    || (instructions[i].String == "PATH" && i + 1 < instructions.Count
+                        && instructions[i + 1].Method is { Name: nameof(Environment.GetEnvironmentVariable) } read
+                        && read.DeclaringType == typeof(Environment));
+
+                if (lookup) found.Add($"{IlScan.Owner(method)}: {ResolvesOnThePath}");
+            }
+        }
+
+        return [.. found];
+    }
+
+    /// <summary>The primitives one instruction is.</summary>
+    private static IEnumerable<string> Rules(IlScan.Instruction instruction)
+    {
+        if (instruction.Method is { } target && StartsProcess(target)) yield return StartsAProcess;
+
+        if (instruction.String is not { } text) yield break;
+
+        if (text == "/proc" || text.StartsWith("/proc/", StringComparison.Ordinal)) yield return ReadsProc;
+
+        if (text == "/sys/fs/cgroup" || text.StartsWith("/sys/fs/cgroup/", StringComparison.Ordinal)
+            || text is "cgroup.procs" or "memory.max" or "cgroup.subtree_control" or "memory.oom.group")
+        {
+            yield return TouchesACgroup;
+        }
+
+        if (text is "setpriv" or "prlimit"
+            || text.EndsWith("/setpriv", StringComparison.Ordinal) || text.EndsWith("/prlimit", StringComparison.Ordinal))
+        {
+            yield return CallsSetprivOrPrlimit;
+        }
+    }
+
+    private static bool StartsProcess(MethodBase target) =>
+        (target.DeclaringType == typeof(Process) && (target.Name == nameof(Process.Start) || target is ConstructorInfo))
+        || (target.DeclaringType == typeof(ProcessStartInfo) && target is ConstructorInfo)
+        || (target.DeclaringType?.Name == "PtyProvider" && target.Name == "SpawnAsync");
+
+    private static bool IsKill(MethodBase method) =>
+        method.Attributes.HasFlag(MethodAttributes.PinvokeImpl)
+        && (method.GetCustomAttribute<DllImportAttribute>()?.EntryPoint ?? method.Name) == "kill";
+
+    private static Type OuterType(Type type)
+    {
+        while (type.IsNested) type = type.DeclaringType!;
+        return type;
+    }
+
+    /// <summary>
+    /// The worker's methods, by owner, that do one of these things themselves or call a worker method
+    /// that does, to a fixed point.
+    /// </summary>
+    private static readonly Lazy<HashSet<string>> Launchers = new(() =>
+    {
+        var calls = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var reaching = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var method in IlScan.Methods(Worker))
+        {
+            var owner = IlScan.Owner(method);
+            if (!calls.TryGetValue(owner, out var callees)) calls[owner] = callees = new(StringComparer.Ordinal);
+            if (IsKill(method)) reaching.Add(owner);
+
+            foreach (var instruction in IlScan.Decode(method))
+            {
+                if (Rules(instruction).Any()) reaching.Add(owner);
+                if (instruction.Method is { } target && target.DeclaringType?.Assembly == Worker) callees.Add(IlScan.Owner(target));
+            }
+        }
+
+        for (var changed = true; changed;)
+        {
+            changed = false;
+            foreach (var (owner, callees) in calls)
+            {
+                if (!reaching.Contains(owner) && callees.Overlaps(reaching)) changed = reaching.Add(owner) | changed;
+            }
+        }
+
+        return reaching;
+    });
+
+    private static string RepoRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "Harness.slnx"))) return directory.FullName;
+            directory = directory.Parent;
+        }
+
+        throw new InvalidOperationException("Could not find the repository root.");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Probes: never called, only scanned.
+    // ---------------------------------------------------------------------------------------------
+
+    private static void PlantsAProcessStart() => Process.Start("true")?.Dispose();
+
+    private static string PlantsAProcRead() => File.ReadAllText("/proc/self/status");
+
+    private static void PlantsACgroupWrite() => File.WriteAllText("/sys/fs/cgroup/x/memory.max", "1");
+
+    private static string[] PlantsAPrlimit() => ["/usr/bin/prlimit", "--data=1:1", "--"];
+
+    private static object? PlantsALauncherCall() => ChildProcess.StartInfo("true", "/", runAs: null);
+
+    private static string PlantsADefaultedProcRead() => ReadsDefault();
+
+    private static string ReadsDefault(string path = "/proc/self/stat") => File.ReadAllText(path);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int kill(int pid, int signal);
+
+    private static string PlantsAKeyRingRead() => File.ReadAllText(Path.Combine("/data", "keys", "key.xml"));
+
+    private static bool PlantsADatabaseRead() => File.Exists("/data/messages.db");
+
+    private static void PlantsACatchOfAWorkerException()
+    {
+        try
+        {
+            PlantsAProcRead();
+        }
+        catch (PlantedWorkerException)
+        {
+        }
+    }
+
+    private static void PlantsACatchOfAnOrdinaryException()
+    {
+        try
+        {
+            PlantsAProcRead();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private sealed class PlantedWorkerException : Exception;
+
+    private static string? PlantsAnAgentCliPathLookup() => Harness.Pty.PathSearch.Find("claude");
+
+    private static string? PlantsAHandRolledPathWalk() => Environment.GetEnvironmentVariable("PATH");
+
+    private static Dictionary<string, string> NamesPathWithoutReadingIt() => new() { ["PATH"] = "/usr/bin" };
+
+    private static string[] HoldsTextThatIsNotAPath() =>
+        ["/processes", "/proc-like", "see the process group in /proc, every 5 s", "prlimit is a command", "/sys/fs/cgroupish"];
+}

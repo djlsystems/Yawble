@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Tracker</title>
+  <link rel="stylesheet" href="site.css">
+  <script src="/sites/_sdk/site.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Job Tracker</h1>
+    <p class="who">Signed in as <span id="who">…</span></p>
+  </header>
+
+  <main>
+    <p id="status" class="status" role="status"></p>
+    <ul id="jobs" class="jobs"></ul>
+    <p id="empty" class="empty" hidden>No postings yet. The Scout looks every hour.</p>
+  </main>
+
+  <template id="job">
+    <li class="job">
+      <div class="head">
+        <span class="title"></span>
+        <span class="company"></span>
+        <span class="state"></span>
+      </div>
+      <p class="fit"></p>
+      <div class="controls">
+        <button type="button" class="apply">Apply</button>
+        <button type="button" class="skip">Not for me</button>
+      </div>
+    </li>
+  </template>
+</body>
+</html>

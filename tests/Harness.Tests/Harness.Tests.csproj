@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
+    <PackageReference Include="xunit.v3.mtp-v2" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- Real agent transcripts, redacted, that the live view renderers are tested against. -->
+  <ItemGroup>
+    <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Harness.Contracts\Harness.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Harness.Containers\Harness.Containers.csproj" />
+    <ProjectReference Include="..\..\src\Harness.Messaging\Harness.Messaging.csproj" />
+    <ProjectReference Include="..\..\src\Harness.Host\Harness.Host.csproj" />
+  </ItemGroup>
+
+  <!-- The test plugin member (tests/Fixtures/Packages/sample-echo), BUILT with the tests but not referenced by them: PluginMemberEndToEndTests
+       installs its output into a temporary data root and hires it, exactly as an operator would. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Fixtures\Packages\sample-echo\src\SampleEcho.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,51 @@
+// ---------------------------------------------------------------------------------------------
+// THE TYPE SCALE AND THE TOKEN UTILITIES a template reaches for by class.
+//
+// Colours are NOT defined here. Every rule below reads a `--os-*` token from `app.scss`, which is
+// the one file that decides what a colour is in each theme; this file only decides which token a
+// class means. It replaced Quasar's palette classes (`text-grey-7`, `bg-red-1` and friends), which
+// are fixed light-theme values and do not invert under `body--dark`.
+
+// MUTED INK. The de facto secondary text colour, 137 `text-grey-*` classes before it had a name.
+.os-text-muted {
+  color: var(--os-ink-muted);
+}
+
+// PALE GROUNDS for banners: an error, a warning, a note. One per meaning, each dark-aware.
+.os-bg-tint-ok {
+  background: var(--os-tint-ok);
+}
+
+.os-bg-tint-warn {
+  background: var(--os-tint-warn);
+}
+
+.os-bg-tint-error {
+  background: var(--os-tint-error);
+}
+
+.os-bg-tint-info {
+  background: var(--os-tint-info);
+}
+
+// A NEUTRAL BANNER - "nothing here yet", not a fault - on the chrome tone rather than a tint.
+.os-bg-quiet {
+  background: var(--os-chrome);
+}
+
+// DIALOG TITLES: Plex 600 at h5 size. Was `text-h6`, a 20px Roboto-weighted Material title that
+// sat on every dialog and made them all look like the scaffold.
+.os-dialog-title {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+// BODY COPY in a dialog or a panel: 13.5px, between the 13 and 14 the scale allows. Primary copy -
+// an explanation, an error, an empty state - uses this rather than `text-caption`, which would read
+// as a footnote; `text-caption` is kept for real captions (a field hint, a timestamp, a subtitle).
+.os-body {
+  font-size: 0.84375rem;
+  line-height: 1.35rem;
+}

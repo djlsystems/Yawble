@@ -1,0 +1,4 @@
+{"ts":"2026-09-26T17:09:59.350Z","type":"mcp_config_resolved","servers":[{"name":"harness","transport":"http","source":"local"}],"disabled":[]}
+{"ts":"2026-09-26T17:09:59.356Z","type":"mcp_server_starting","server_name":"harness","transport":"http"}
+{"ts":"2026-09-26T17:09:59.372Z","type":"mcp_server_connected","server_name":"harness","transport":"http","tool_count":19,"tools":["workflow_complete","team_list","hiring","team_create","progress","needs_decision","wip","skills_search","handback","backlog","tell","status","workflow_show","kanban","repo","team_current","skills_get","member","blocked"]}
+{"ts":"2026-09-26T17:09:59.373Z","type":"mcp_init_completed","total_servers":1,"succeeded":1,"failed":0,"auth_required":0,"total_tools":19,"is_reinit":false}

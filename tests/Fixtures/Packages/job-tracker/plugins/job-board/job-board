@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""The sample job board: a harness.member/1 plugin that never touches the network.
+
+It reads postings.json beside it, keeps the ids it has already reported in its workspace, and for
+each new posting whose title holds a keyword it writes the posting to the tracker site
+(`site.put`) and publishes `plugin.job-board.posting-found`. A run that found nothing new finishes
+quiet, so an hourly scan wakes nobody.
+"""
+import datetime
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SEEN = ".job-board-seen.json"
+
+
+def emit(record):
+    sys.stdout.write(json.dumps(record) + "\n")
+    sys.stdout.flush()
+
+
+def wanted(posting, config):
+    """The salary, hourly and age filters. The Host holds each number inside the bounds plugin.json
+    declares (salary and hourly at least 0, archiveAfterDays a whole number of at least 1), so none
+    of them can quietly drop every posting."""
+    salary = posting.get("salary") or {}
+    per = {"year": ("salaryMin", "salaryMax"), "hour": ("hourlyMin", "hourlyMax")}.get(salary.get("per"))
+    if per:
+        low, high = config.get(per[0]), config.get(per[1])
+        if low is not None and salary.get("max", low) < low:
+            return False
+        if high is not None and salary.get("min", high) > high:
+            return False
+
+    days = config.get("archiveAfterDays")
+    if days is not None and posting.get("posted"):
+        age = datetime.date.today() - datetime.date.fromisoformat(posting["posted"])
+        if age.days > days:
+            return False
+
+    return True
+
+
+def main():
+    request = json.load(sys.stdin)
+    config = request.get("config") or {}
+    keywords = [k.lower() for k in config.get("keywords") or []]
+    sources = config.get("sources") or []
+    workspace = request.get("workingDirectory") or "."
+
+    # THE REAL BOARDS: this stand-in never calls them. It says which ticked board has its keys and
+    # which does not - the secrets arrive on stdin, by field name, only when the Host has them set.
+    secrets = request.get("secrets") or {}
+    needs = {"adzuna": ["adzunaAppId", "adzunaAppKey"], "usajobs": ["usajobsApiKey", "usajobsUserAgent"],
+             "themuse": ["themuseApiKey"]}
+    unset = [board for board in sources if board in needs and not all(secrets.get(f) for f in needs[board])]
+    if unset:
+        emit({"t": "progress", "status": "Not read, their keys are not set on the Host: " + ", ".join(unset)})
+
+    if "sample" not in sources:
+        emit({"t": "result", "ok": True, "quiet": True,
+              "output": "No board is allowed yet: a person ticks the sources this member may read."})
+        return
+
+    with open(os.path.join(HERE, "postings.json"), encoding="utf-8") as handle:
+        postings = json.load(handle)
+
+    seen_path = os.path.join(workspace, SEEN)
+    try:
+        with open(seen_path, encoding="utf-8") as handle:
+            seen = set(json.load(handle))
+    except (OSError, ValueError):
+        seen = set()
+
+    found = []
+    for posting in postings:
+        title = posting["title"].lower()
+        if posting["id"] in seen or (keywords and not any(k in title for k in keywords)) or not wanted(posting, config):
+            continue
+        emit({"t": "site.put", "site": "tracker", "collection": "jobs", "id": posting["id"],
+              "doc": dict(posting, status="new")})
+        emit({"t": "publish", "type": "posting-found",
+              "payload": {k: posting[k] for k in ("id", "title", "company", "url")}})
+        seen.add(posting["id"])
+        found.append(posting["title"] + " at " + posting["company"])
+
+    with open(seen_path, "w", encoding="utf-8") as handle:
+        json.dump(sorted(seen), handle)
+
+    if found:
+        emit({"t": "result", "ok": True, "output": "New postings: " + "; ".join(found)})
+    else:
+        emit({"t": "result", "ok": True, "quiet": True, "output": "Nothing new."})
+
+
+if __name__ == "__main__":
+    main()

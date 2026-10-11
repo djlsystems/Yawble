@@ -1,0 +1,5 @@
+[
+  { "id": "acme-backend", "title": "Backend Engineer", "company": "Acme", "url": "https://jobs.example.com/acme-backend", "location": "Remote", "posted": "2026-09-01", "salary": { "min": 90000, "max": 120000, "per": "year" } },
+  { "id": "globex-web", "title": "Web Developer", "company": "Globex", "url": "https://jobs.example.com/globex-web", "location": "London", "salary": { "min": 40, "max": 60, "per": "hour" } },
+  { "id": "initech-pm", "title": "Product Manager", "company": "Initech", "url": "https://jobs.example.com/initech-pm", "location": "Leeds" }
+]

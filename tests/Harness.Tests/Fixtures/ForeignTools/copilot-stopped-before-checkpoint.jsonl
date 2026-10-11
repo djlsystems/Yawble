@@ -1,0 +1,4 @@
+{"type":"session.start","id":"58dd4620-f07a-460a-9465-44a7a4a28c7d","timestamp":"2026-09-30T00:57:40.848Z","parentId":null,"data":{"sessionId":"9ad689d1-4f79-426f-af55-014e609ec4d6","producer":"copilot-agent","copilotVersion":"1.0.88","context":{"cwd":"REDACTED"}}}
+{"type":"user.message","id":"e5fbb3f7-d7df-4bba-a0d8-332ed3aaec4f","timestamp":"2026-09-30T00:57:41.505Z","parentId":"808f6b09-1f81-4397-bac4-b6ddd8d7ed52","data":{"content":"REDACTED"}}
+{"type":"system.message","id":"ba77f49d-df8c-4947-81a3-bd2ba1393dbb","timestamp":"2026-09-30T00:57:41.507Z","parentId":"e5fbb3f7-d7df-4bba-a0d8-332ed3aaec4f","data":{"role":"system","content":"REDACTED"}}
+{"type":"tool.execution_start","id":"a2497c06-e2f7-49d3-af00-0e4c05a4e7b1","timestamp":"2026-09-30T00:57:43.354Z","parentId":"d93e95a3-ce86-41fc-91a9-311b86d4dc77","data":{"toolCallId":"call_Xp5oVj7TQkAFJXA1TU7XJD8l","toolName":"view","turnId":"0","arguments":{}}}

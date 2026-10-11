@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "job-board",
+  "name": "Job Board (sample)",
+  "description": "A stand-in job board: reads the postings bundled with it, never the network, and reports the ones that match.",
+  "version": "0.2.0",
+  "protocol": "harness.member/1",
+  "executable": {
+    "path": "job-board",
+    "args": []
+  },
+  "timeoutSeconds": 60,
+  "requires": [
+    "python3"
+  ],
+  "config": {
+    "salaryMin": { "type": "number", "min": 0, "setBy": "person", "description": "Lowest annual salary wanted. A posting whose stated annual range is wholly below it is skipped; one that states no annual salary is kept." },
+    "salaryMax": { "type": "number", "min": 0, "setBy": "person", "description": "Highest annual salary to look at. A posting whose stated annual range is wholly above it is skipped." },
+    "hourlyMin": { "type": "number", "min": 0, "setBy": "person", "description": "Lowest hourly rate wanted. A posting whose stated hourly range is wholly below it is skipped; one that states no hourly rate is kept." },
+    "hourlyMax": { "type": "number", "min": 0, "setBy": "person", "description": "Highest hourly rate to look at. A posting whose stated hourly range is wholly above it is skipped." },
+    "archiveAfterDays": { "type": "number", "min": 1, "integer": true, "setBy": "person", "description": "Skip a posting posted more than this many days ago. A posting with no posted date is kept. Unset keeps every posting." },
+    "keywords": {
+      "type": "list",
+      "description": "A posting matches when its title holds one of these words. Empty matches every posting.",
+      "default": []
+    },
+    "sources": {
+      "type": "list",
+      "enum": ["sample", "adzuna", "usajobs", "themuse"],
+      "default": [],
+      "setBy": "person",
+      "description": "The boards this member may read. Empty reads none. adzuna, usajobs and themuse each need their keys set on the Host."
+    }
+  },
+  "secrets": {
+    "adzunaAppId": { "description": "Your Adzuna application id, from developer.adzuna.com. Needed to read Adzuna.", "when": { "sources": "adzuna" } },
+    "adzunaAppKey": { "description": "Your Adzuna application key, from developer.adzuna.com. Needed to read Adzuna.", "when": { "sources": "adzuna" } },
+    "usajobsApiKey": { "description": "Your USAJOBS API key, from developer.usajobs.gov. Needed to read USAJOBS.", "when": { "sources": "usajobs" } },
+    "usajobsUserAgent": { "description": "The email address you registered the USAJOBS key with; USAJOBS asks for it on every request.", "when": { "sources": "usajobs" } },
+    "themuseApiKey": { "description": "Your The Muse API key, from themuse.com/developers. Needed to read The Muse.", "when": { "sources": "themuse" } }
+  },
+  "events": {
+    "publishes": [
+      {
+        "type": "posting-found",
+        "summary": "A posting matched the keywords for the first time. Once per new posting.",
+        "fields": [
+          {
+            "name": "id",
+            "kind": "string",
+            "summary": "The posting's id, and its document id in the tracker's jobs collection."
+          },
+          {
+            "name": "title",
+            "kind": "string",
+            "summary": "The job title."
+          },
+          {
+            "name": "company",
+            "kind": "string",
+            "summary": "The company."
+          },
+          {
+            "name": "url",
+            "kind": "string",
+            "summary": "Where the posting lives."
+          }
+        ]
+      }
+    ]
+  }
+}

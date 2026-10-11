@@ -1,0 +1,5 @@
+# LF everywhere: the install and release scripts are piped into sh, and Go source is LF by
+# convention. Overrides a Windows checkout's core.autocrlf.
+* text=auto eol=lf
+*.sh text eol=lf
+*.ps1 text eol=crlf

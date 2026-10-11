@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "sample-echo-go",
+  "name": "Sample Echo (Go)",
+  "description": "Deterministic test plugin written in Go: transforms each instruction's text (upper-case or reversed).",
+  "version": "0.1.0",
+  "protocol": "harness.member/1",
+  "executable": { "path": "bin/linux-x64/sample-echo-go", "args": [] },
+  "platforms": {
+    "linux-x64": "bin/linux-x64/sample-echo-go",
+    "linux-arm64": "bin/linux-arm64/sample-echo-go"
+  },
+  "timeoutSeconds": 60,
+  "config": {
+    "mode": {
+      "type": "string",
+      "enum": ["upper", "reverse"],
+      "default": "upper",
+      "description": "What to do to the text."
+    }
+  },
+  "secrets": {
+    "token": {
+      "description": "A demo credential. Only its length is ever reported, never the value.",
+      "required": false
+    }
+  },
+  "events": {
+    "publishes": [
+      {
+        "type": "done",
+        "summary": "Text was transformed. Published once per run that completes.",
+        "highVolume": false,
+        "fields": [
+          { "name": "length", "kind": "number", "summary": "The length of the transformed output." }
+        ]
+      }
+    ]
+  },
+  "skills": ["skills/sample-echo-go.md"]
+}

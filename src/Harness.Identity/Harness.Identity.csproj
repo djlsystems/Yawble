@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- SQLitePCLRaw.lib.e_sqlite3 is an explicit direct reference, not left transitive, so the pinned
+       patched version in Directory.Packages.props is the one that actually resolves here - see that
+       file's comment. Same reasoning as Harness.Messaging.csproj, the other consumer of
+       Microsoft.Data.Sqlite. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" />
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Harness.Contracts\Harness.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

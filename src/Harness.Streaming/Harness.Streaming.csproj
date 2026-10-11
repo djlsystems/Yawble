@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bounded transcript buffering and snapshot-and-subscribe fanout, shared by the product's runs
+       and terminals and by the greenfield's console. It exists as its own project because the race
+       it solves must be solved in exactly one place, and because a consumer wanting it should not
+       have to take Harness.Core's domain to get it. Zero references, deliberately. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>

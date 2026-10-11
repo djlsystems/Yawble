@@ -1,0 +1,210 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "run_terminal_command",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_file",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "search_replace",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_dir",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "grep",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "kill_command_or_subagent",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "todo_write",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "get_command_or_subagent_output",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "spawn_subagent",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "scheduler_create",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "scheduler_delete",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "scheduler_list",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "monitor",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "search_tool",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "use_tool",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "workflow",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "enter_plan_mode",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "exit_plan_mode",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "ask_user_question",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "send_feedback",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "web_fetch",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "image_gen",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "image_edit",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "image_to_video",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "reference_to_video",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "write",
+   "description": "REDACTED",
+   "parameters": {}
+  }
+ }
+]

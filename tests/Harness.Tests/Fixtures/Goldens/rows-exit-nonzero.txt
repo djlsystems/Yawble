@@ -1,0 +1,4 @@
+2 agentContainer.started source=alpha/dev cause=1 corr=1
+{"trigger":"agentContainer.instruction.alpha/dev"}
+3 agentContainer.failed source=alpha/dev cause=1 corr=1
+{"exitCode":3,"output":"it broke","outputLength":8,"transcript":"alpha/dev/1","launchError":null,"stoppedByPerson":false,"handedBack":false,"failureClass":"unknown","retryAfter":null,"tokensIn":null,"tokensOut":null,"tokensTotal":null,"tokensCachedIn":null,"tokensCacheCreation":null,"tokensReasoning":null,"tokensSource":null,"usageCountedOn":null}

@@ -1,0 +1,18 @@
+bin/
+obj/
+wwwroot/
+web/node_modules/
+web/dist/
+web/.quasar/
+data/
+*.user
+appsettings.Production.json
+.env
+TestResults/
+.vs/
+
+# Plan execution scratch (superpowers ledgers and briefs)
+.superpowers/
+
+# Per-test results of every suite run (scripts/test-history.ps1)
+.test-history/

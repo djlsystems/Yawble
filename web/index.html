@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <title><%= productName %></title>
+
+    <meta charset="utf-8">
+    <meta name="description" content="<%= productDescription %>">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="msapplication-tap-highlight" content="no">
+    <!--
+      Zoom is ALLOWED, departing from Quasar's default of user-scalable=no.
+
+      Blocking zoom is poor accessibility practice generally, and on a terminal specifically it
+      removes the only tool a person has for reading small monospace text on a small screen. The
+      app-like feel it buys is not worth that here.
+    -->
+    <!--
+      interactive-widget=resizes-content asks the browser to shrink the LAYOUT viewport when the
+      on-screen keyboard opens, rather than only the visual one. Where it is honoured, ordinary
+      fixed positioning and 100% heights simply work and the visualViewport bookkeeping in
+      ConsolePanel becomes belt-and-braces. Where it is not, that bookkeeping is the fix.
+    -->
+    <meta name="viewport" content="initial-scale=1, width=device-width, interactive-widget=resizes-content<% if (ctx.mode.cordova || ctx.mode.capacitor) { %>, viewport-fit=cover<% } %>">
+    <!--
+      connect-src is stated explicitly, including in PRODUCTION.
+
+      Quasar's default only sets it under ctx.dev, leaving production to fall back
+      to default-src 'self'. Whether 'self' permits a same-origin WebSocket is
+      browser-dependent, and this application is two sockets in a trench coat: the
+      PTY console at /api/.../console/ws and the SignalR hub at /hub/containers.
+      A silently blocked socket presents as a dead board and a console that will
+      not attach - a feature bug, not a policy one, which is the expensive kind to
+      diagnose.
+
+      ws:/wss: are scheme-wide rather than origin-scoped, which is broader than
+      ideal. Acceptable here because the Host binds to loopback and serves a
+      single local user; worth tightening if it is ever exposed.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;<% if (ctx.dev) { %> worker-src 'self' blob:;<% } %>"
+    />
+
+    <link rel="icon" type="image/png" sizes="128x128" href="icons/favicon-128x128.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="icons/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
+    <link rel="icon" type="image/ico" href="favicon.ico">
+  </head>
+  <body>
+    <!-- quasar:entry-point -->
+  </body>
+</html>

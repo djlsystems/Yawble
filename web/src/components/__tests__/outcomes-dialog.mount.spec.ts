@@ -1,0 +1,682 @@
+// @vitest-environment happy-dom
+//
+// OUTCOMES AS A DASHBOARD. The tabs; each outcome as a tile with the route's cost against its value,
+// its eight weeks of spend, its backlog by where it stands and a summary line - never a figure the
+// route did not send, "not set" for a cost with no rate, no efficiency for no time; the "Accounting
+// since" note; the always-shown No outcome assigned tile; the rate editor writing its three settings;
+// and an outcome opened: its money row, its backlog columns, its value edited, and the actions -
+// confirm, retire and reactivate send their routes, Merge into… shows the route's preview before it
+// merges, Reject is offered only with no links, and Move sends the link route.
+//
+// THE MOCK IS OF `api/outcomes` and the settings save: what the Host does is pinned server-side
+// (OutcomeTests, OutcomeDashboardTests).
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const api = vi.hoisted(() => ({
+  listOutcomes: vi.fn(),
+  getOutcome: vi.fn(),
+  createOutcome: vi.fn(),
+  editOutcome: vi.fn(),
+  transitionOutcome: vi.fn(),
+  previewMerge: vi.fn(),
+  mergeOutcome: vi.fn(),
+  rejectOutcome: vi.fn(),
+  linkWorkflowOutcome: vi.fn(),
+}));
+
+vi.mock('../../api/outcomes', () => api);
+
+const settingsApi = vi.hoisted(() => ({ saveTenantSettings: vi.fn() }));
+
+vi.mock('../../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/client')>()),
+  saveTenantSettings: settingsApi.saveTenantSettings,
+}));
+
+import OutcomesDialog from '../OutcomesDialog.vue';
+import type { Outcome, OutcomeDetail, OutcomeFigures, OutcomeList } from '../../api/outcomes';
+import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { button, settle, type } from '../../test/formProbe';
+import type { VueWrapper } from '@vue/test-utils';
+
+function figures(over: Partial<OutcomeFigures> = {}): OutcomeFigures {
+  return {
+    workflows: { open: 1, completed: 4, closed: 1, total: 6 },
+    agentSeconds: 3 * 3600 + 5 * 60,
+    waitingSeconds: 90,
+    elapsed: { medianSeconds: 45 * 60, longestSeconds: 2 * 3600, workflows: 5 },
+    tokens: { billable: 1_234_567, measuredRuns: 10, unmeasuredRuns: 2 },
+    runs: 12,
+    teams: [
+      { id: 'alpha', name: 'Alpha', deleted: false },
+      { id: 'gone', name: 'Old crew', deleted: true },
+    ],
+    lastWorkedAt: '2026-09-28T10:00:00Z',
+    backlog: { notStarted: 0, inProgress: 0, achieved: 0 },
+    blockedSeconds: 0,
+    efficiency: null,
+    weekly: [],
+    cost: { amount: null, currency: 'USD' },
+    ...over,
+  };
+}
+
+function outcome(id: string, name: string, status: Outcome['status'], over: Partial<Outcome> = {}): Outcome {
+  return {
+    id,
+    name,
+    description: `${name} described\nsecond line`,
+    status,
+    mergedInto: null,
+    source: 'person',
+    targetMetric: null,
+    targetUnit: null,
+    targetValue: null,
+    value: null,
+    createdBy: 'ada@example.com',
+    createdByKind: 'person',
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-01T00:00:00Z',
+    confirmedBy: null,
+    confirmedAt: null,
+    figures: figures(),
+    ...over,
+  };
+}
+
+const pipeline = outcome('o-1', 'Current job pipeline', 'active');
+const proposal = outcome('o-2', '<b>Faster</b> triage', 'proposed', {
+  createdByKind: 'member',
+  createdBy: 'ops/Manager',
+  figures: figures({ tokens: { billable: 0, measuredRuns: 0, unmeasuredRuns: 3 } }),
+});
+const retired = outcome('o-3', 'Old goal', 'retired');
+const merged = outcome('o-4', 'Duplicate goal', 'merged', { mergedInto: 'o-1' });
+/** A second live merge target, so a pick can change while the first pick's preview is in flight. */
+const secondTarget = outcome('o-5', 'Second target', 'active');
+
+function listing(over: Partial<OutcomeList> = {}): OutcomeList {
+  return {
+    ledgerStartedAt: '2026-08-15T00:00:00Z',
+    money: { currency: 'USD', agentHourlyRate: null, declaredCountsAs: 'achieved' },
+    outcomes: [pipeline, proposal, retired, merged],
+    noOutcome: {
+      name: 'No outcome assigned',
+      figures: figures({
+        workflows: { open: 0, completed: 7, closed: 0, total: 7 },
+        tokens: { billable: 5000, measuredRuns: 4, unmeasuredRuns: 1 },
+        teams: [{ id: 'beta', name: 'Beta', deleted: false }],
+      }),
+    },
+    ...over,
+  };
+}
+
+function detailOf(o: Outcome, links = 1): OutcomeDetail {
+  return {
+    outcome: o,
+    money: { currency: 'USD', agentHourlyRate: null, declaredCountsAs: 'achieved' },
+    backlogItems: [],
+    resolvedTo: null,
+    mergedFrom: [],
+    workflows: links
+      ? [
+          {
+            correlation: 4100,
+            team: { id: 'alpha', name: 'Alpha', deleted: false },
+            state: 'completed',
+            startedAt: '2026-09-20T09:00:00Z',
+            elapsedSeconds: 3600,
+            agentSeconds: 5400,
+            billableTokens: 20_000,
+            measuredRuns: 3,
+            unmeasuredRuns: 1,
+            how: 'dispatch',
+            setBy: 'ada@example.com',
+            setByKind: 'person',
+            setAt: '2026-09-20T09:00:00Z',
+          },
+        ]
+      : [],
+    history: links
+      ? [
+          {
+            id: 1,
+            correlation: 4100,
+            outcomeId: o.id,
+            teamId: 'alpha',
+            teamNameAtLink: 'Alpha',
+            outcomeNameAtLink: o.name,
+            setBy: 'ada@example.com',
+            setByKind: 'person',
+            setAt: '2026-09-20T09:00:00Z',
+            how: 'dispatch',
+          },
+        ]
+      : [],
+    events: [
+      { seq: 10, at: '2026-09-01T08:00:00Z', action: 'outcome.created', outcomeId: o.id, name: 'Job pipeline', from: null, by: 'ada@example.com', detail: null },
+      { seq: 11, at: '2026-09-02T08:00:00Z', action: 'outcome.renamed', outcomeId: o.id, name: o.name, from: 'Job pipeline', by: 'grace@example.com', detail: { name: o.name } },
+      { seq: 12, at: '2026-09-03T08:00:00Z', action: 'outcome.retired', outcomeId: o.id, name: o.name, from: null, by: 'grace@example.com', detail: null },
+      { seq: 13, at: '2026-09-04T08:00:00Z', action: 'outcome.reactivated', outcomeId: o.id, name: o.name, from: null, by: 'ada@example.com', detail: null },
+    ],
+    ledgerStartedAt: '2026-08-15T00:00:00Z',
+  };
+}
+
+beforeEach(() => {
+  for (const mock of Object.values(api)) mock.mockReset();
+  settingsApi.saveTenantSettings.mockReset();
+  api.listOutcomes.mockResolvedValue(listing());
+  api.getOutcome.mockImplementation(async (id: string) => {
+    const found = listing().outcomes.find((o) => o.id === id)!;
+    return detailOf(found);
+  });
+  api.editOutcome.mockResolvedValue(pipeline);
+  api.transitionOutcome.mockResolvedValue(pipeline);
+  api.mergeOutcome.mockResolvedValue(pipeline);
+  api.linkWorkflowOutcome.mockResolvedValue({});
+});
+
+afterEach(() => {
+  resetBody();
+});
+
+async function open(props: Record<string, unknown> = {}) {
+  const wrapper = await mountDialog(OutcomesDialog, props);
+  await settle();
+  return wrapper;
+}
+
+async function click(selector: string) {
+  (bodyFind(selector) as HTMLElement).click();
+  await settle();
+}
+
+/** Picks the option reading `option` in the q-select labelled `label`, as a person's choice does. */
+async function choose(wrapper: VueWrapper, label: string, option: string) {
+  const select = wrapper.findAllComponents({ name: 'QSelect' }).find((candidate) => candidate.props('label') === label);
+  if (!select) throw new Error(`No select labelled "${label}"`);
+  const offered = (select.props('options') as { label: string; value: unknown }[]).find((o) => o.label.includes(option));
+  if (!offered) throw new Error(`No option "${option}" in "${label}"`);
+  select.vm.$emit('update:modelValue', offered.value);
+  await settle();
+}
+
+const row = (id: string) => bodyFind(`[data-outcome-row="${id}"]`)?.textContent ?? '';
+
+describe('Manage Outcomes: tabs and figures', () => {
+  it('shows Active, Proposed (n) and Retired & merged, each with its outcomes', async () => {
+    await open();
+
+    expect(bodyFind('[data-outcome-tab="active"]')?.textContent).toContain('Active');
+    expect(bodyFind('[data-outcome-tab="proposed"]')?.textContent).toContain('Proposed (1)');
+    expect(bodyFind('[data-outcome-tab="ended"]')?.textContent).toContain('Retired & merged');
+
+    expect(row('o-1')).toContain('Current job pipeline');
+    expect(bodyFind('[data-outcome-row="o-2"]')).toBeNull();
+
+    await click('[data-outcome-tab="proposed"]');
+    expect(row('o-2')).toContain('<b>Faster</b> triage');
+    expect(bodyFind('[data-outcome-row="o-1"]')).toBeNull();
+
+    await click('[data-outcome-tab="ended"]');
+    expect(row('o-3')).toContain('Old goal');
+    expect(row('o-4')).toContain('into Current job pipeline');
+    expect(bodyFind('[data-no-outcome-row]')).toBeNull();
+  });
+
+  it('asks the route once for every status and lays each outcome out as a tile', async () => {
+    await open();
+
+    expect(api.listOutcomes).toHaveBeenCalledWith({ status: ['proposed', 'active', 'retired', 'merged'], from: null, to: null });
+    expect(bodyFind('[data-outcome-tiles]')).not.toBeNull();
+    expect(bodyFind('[data-outcome-row="o-1"]')?.classList.contains('os-tile')).toBe(true);
+    expect(document.body.querySelector('[data-outcomes-dialog] [data-outcome-tiles] table')).toBeNull();
+  });
+
+  it('shows the route\'s cost against the value, the backlog by where it stands and one summary line', async () => {
+    api.listOutcomes.mockResolvedValue(listing({
+      money: { currency: 'USD', agentHourlyRate: 90, declaredCountsAs: 'achieved' },
+      outcomes: [outcome('o-1', 'Current job pipeline', 'active', {
+        value: '20000',
+        figures: figures({
+          cost: { amount: 1240, currency: 'USD' },
+          backlog: { notStarted: 2, inProgress: 3, achieved: 5 },
+          efficiency: 0.78,
+          blockedSeconds: 600,
+        }),
+      })],
+    }));
+    await open();
+
+    const money = bodyFind('[data-outcome-row="o-1"] [data-outcome-tile-money]')?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(money).toContain('$1,240');
+    expect(money).toContain('of $20,000 budget');
+    expect(money).toContain('3.1 agent h');
+
+    const counts = (key: string) => bodyFind(`[data-outcome-row="o-1"] [data-outcome-bucket-count="${key}"]`)?.textContent?.trim();
+    expect([counts('notStarted'), counts('inProgress'), counts('achieved')]).toEqual(['2 not started', '3 in progress', '5 achieved']);
+
+    expect(bodyFind('[data-outcome-row="o-1"] [data-outcome-summary]')?.textContent)
+      .toBe('4 workflows completed · 1 active · 2 items pending · agents working 78% of the time');
+    expect(bodyFind('[data-outcome-rate]')?.textContent).toContain('Agent time at $90/h (USD)');
+    expect(row('o-1')).not.toContain('awaiting you');
+  });
+
+  it('reads a cost with no rate as not set, never $0, and gives no efficiency for no time', async () => {
+    await open();
+
+    const money = bodyFind('[data-outcome-row="o-1"] [data-outcome-tile-money]')?.textContent ?? '';
+    expect(money).toContain('not set');
+    expect(money).not.toContain('$0');
+    expect(bodyFind('[data-outcome-row="o-1"] [data-outcome-summary]')?.textContent).not.toContain('agents working');
+    expect(bodyFind('[data-outcome-rate]')?.textContent).toContain('No rate set for agent time (USD)');
+  });
+
+  it('draws eight weeks of spend, each bar with its week in words, and no backlog bar with no items', async () => {
+    const weekly = Array.from({ length: 8 }, (_, i) => ({
+      weekStart: new Date(Date.UTC(2026, 7, 10 + 7 * i)).toISOString(),
+      agentSeconds: i === 7 ? 7200 : 3600,
+      billable: 10,
+      measuredRuns: 1,
+      unmeasuredRuns: 0,
+      cost: null,
+    }));
+    api.listOutcomes.mockResolvedValue(listing({
+      outcomes: [outcome('o-1', 'Current job pipeline', 'active', { figures: figures({ weekly }) })],
+    }));
+    await open();
+
+    const bars = [...document.body.querySelectorAll('[data-outcome-row="o-1"] .outcome-week__bar')] as HTMLElement[];
+    expect(bars).toHaveLength(8);
+    expect(bars.at(-1)?.style.height).toBe('100%');
+    expect(bars[0]?.style.height).toBe('50%');
+    expect(bodyFind('[data-outcome-row="o-1"] [data-outcome-backlog-bar]')).toBeNull();
+    expect(row('o-1')).toContain('No backlog items yet.');
+  });
+
+  it('marks items awaiting a person only when a declared item counts as in progress', async () => {
+    api.listOutcomes.mockResolvedValue(listing({
+      money: { currency: 'USD', agentHourlyRate: null, declaredCountsAs: 'in-progress' },
+      outcomes: [outcome('o-1', 'Current job pipeline', 'active', {
+        figures: figures({ backlog: { notStarted: 0, inProgress: 2, achieved: 1 } }),
+      })],
+    }));
+    await open();
+
+    expect(row('o-1')).toContain('2 awaiting you');
+  });
+
+  it('shows every outcome again when the filter is cleared with its clear button', async () => {
+    const wrapper = await open();
+
+    await type('Filter', 'pipeline');
+    expect(bodyFind('[data-outcome-row="o-1"]')).not.toBeNull();
+    await type('Filter', 'nothing matches this');
+    expect(bodyFind('[data-outcome-row="o-1"]')).toBeNull();
+
+    // THE CLEAR BUTTON SENDS NULL, not an empty string.
+    const filter = wrapper.findAllComponents({ name: 'QInput' }).find((input) => input.props('label') === 'Filter')!;
+    filter.vm.$emit('update:modelValue', null);
+    await settle();
+
+    expect(bodyFind('[data-outcome-row="o-1"]')).not.toBeNull();
+  });
+
+  it('renders an outcome name as text, never as markup', async () => {
+    await open();
+    await click('[data-outcome-tab="proposed"]');
+
+    expect(bodyFind('[data-outcome-row="o-2"] b')).toBeNull();
+    expect(row('o-2')).toContain('<b>Faster</b>');
+  });
+
+  it('closes Active with the No outcome assigned tile and its own figures, even with no outcomes', async () => {
+    api.listOutcomes.mockResolvedValue(listing({ outcomes: [] }));
+    await open();
+
+    const none = bodyFind('[data-no-outcome-row]')?.textContent ?? '';
+    expect(none).toContain('No outcome assigned');
+    expect(none).toContain('7 workflows completed · 0 active');
+    expect(none).toContain('+ 1 unmeasured run');
+
+    const tiles = [...document.body.querySelectorAll('[data-outcome-tiles] > .os-tile')];
+    expect(tiles.at(-1)?.hasAttribute('data-no-outcome-row')).toBe(true);
+  });
+
+  it('saves the currency, the agent hourly rate and how a declared item counts through the settings', async () => {
+    settingsApi.saveTenantSettings.mockResolvedValue(undefined);
+    const wrapper = await open();
+
+    await click('[data-outcome-rate-change]');
+    await choose(wrapper, 'Currency', 'EUR');
+    await type('Per agent hour', '90');
+    await choose(wrapper, 'An item a Manager declared delivered counts as', 'In progress');
+    await click('[data-outcome-pricing-save]');
+
+    expect(settingsApi.saveTenantSettings).toHaveBeenCalledWith({
+      'outcomes.currency': 'eur',
+      'outcomes.agentHourlyRate': 90,
+      'outcomes.declaredCountsAs': 'in-progress',
+    });
+    expect(api.listOutcomes).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a rate that is not a whole number and saves nothing', async () => {
+    await open();
+
+    await click('[data-outcome-rate-change]');
+    await type('Per agent hour', 'ninety');
+    await click('[data-outcome-pricing-save]');
+
+    expect(bodyFind('[data-outcome-pricing-problem]')?.textContent).toContain('whole number');
+    expect(settingsApi.saveTenantSettings).not.toHaveBeenCalled();
+  });
+
+  it('says "Accounting since" when the period reaches before the ledger began, and not after it', async () => {
+    const wrapper = await open();
+    const note = bodyFind('[data-accounting-since]')?.textContent ?? '';
+    expect(note).toContain('Accounting since');
+    expect(note).toContain('runs deleted by a Reset before then are not included');
+
+    // A ledger that began before the last 30 days: that period does not reach before it.
+    api.listOutcomes.mockResolvedValue(listing({ ledgerStartedAt: '2020-01-01T00:00:00Z' }));
+    await choose(wrapper, 'Period', 'Last 30 days');
+    expect(api.listOutcomes).toHaveBeenLastCalledWith(expect.objectContaining({ from: expect.any(String), to: null }));
+    expect(bodyFind('[data-accounting-since]')).toBeNull();
+  });
+});
+
+describe('Manage Outcomes: an outcome opened', () => {
+  it('opens at the outcome it was given, with its value, its money, its backlog and its workflows', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => {
+      const found = listing().outcomes.find((o) => o.id === id)!;
+      const detail = detailOf({
+        ...found,
+        value: '20000',
+        figures: figures({ cost: { amount: 1240, currency: 'USD' }, efficiency: 0.5, blockedSeconds: 3600 }),
+      });
+      detail.money = { currency: 'USD', agentHourlyRate: 90, declaredCountsAs: 'achieved' };
+      detail.backlogItems = [
+        { id: 'B0ZA1', number: 129, title: 'Retry a failed clone', state: 'ready', archived: false, bucket: 'notStarted', team: null, teamName: null, workflow: null, dispatchedAt: null, landedAt: null },
+        { id: 'B0ZB2', number: 125, title: 'Undo a half-made team', state: 'ready', archived: false, bucket: 'inProgress', team: 'rescue', teamName: 'Rescue team', workflow: 9801, dispatchedAt: '2026-10-01T00:00:00Z', landedAt: null },
+        { id: 'B0ZC3', number: 47, title: 'Forgiving repositories', state: 'implemented', archived: true, bucket: 'achieved', team: 'repos', teamName: 'Repos team', workflow: 8000, dispatchedAt: '2026-09-01T00:00:00Z', landedAt: '2026-09-30T00:00:00Z' },
+      ];
+      return detail;
+    });
+    await open({ outcome: 'o-1' });
+
+    expect(api.getOutcome).toHaveBeenCalledWith('o-1');
+    expect(bodyFind('[data-outcome-detail]')?.getAttribute('data-outcome-id')).toBe('o-1');
+    expect(bodyFind('[data-outcome-title]')?.textContent).toBe('Current job pipeline');
+
+    expect(bodyFind('[data-outcome-value]')?.textContent).toContain('$20,000');
+    expect(bodyFind('[data-outcome-value]')?.textContent).toContain('Budget');
+    expect(bodyFind('[data-outcome-share]')?.textContent).toContain('Of its budget spent');
+    expect(bodyFind('[data-outcome-cost]')?.textContent).toContain('$1,240');
+    expect(bodyFind('[data-outcome-cost]')?.textContent).toContain('at $90/h');
+    expect(bodyFind('[data-outcome-share]')?.textContent).toContain('6%');
+    expect(bodyFind('[data-outcome-efficiency]')?.textContent).toContain('50%');
+    expect(bodyFind('[data-outcome-efficiency]')?.textContent).toContain('1h waiting on a person');
+
+    const column = (key: string) => bodyFind(`[data-outcome-bucket="${key}"]`)?.textContent ?? '';
+    expect(column('notStarted')).toContain('Not started (1)');
+    expect(column('notStarted')).toContain('Retry a failed clone');
+    expect(column('inProgress')).toContain('Rescue team · workflow 9801');
+    expect(column('achieved')).toContain('implemented · landed');
+
+    // THE SETTINGS, WORKFLOWS AND HISTORY ARE BUTTONS THAT OPEN DIALOGS, not sections of the page.
+    expect(bodyFind('[data-outcome-field="value"]')).toBeNull();
+    expect(bodyFind('[data-outcome-workflow="4100"]')).toBeNull();
+    expect(bodyFind('[data-outcome-workflows-open]')?.textContent).toContain('Workflows (1)');
+    expect(bodyFind('[data-outcome-history-open]')?.textContent).toContain('History (5)');
+
+    await click('[data-outcome-settings-open]');
+    expect(bodyFind('[data-outcome-settings] [data-outcome-field="value"]')).not.toBeNull();
+    expect(bodyText()).not.toContain('Target metric');
+
+    await click('[data-outcome-workflows-open]');
+    expect(bodyFind('[data-outcome-workflows] [data-outcome-workflow="4100"]')?.textContent).toContain('Alpha');
+    expect(bodyFind('[data-outcome-workflow="4100"]')?.textContent).toContain('+ 1 unmeasured run');
+
+    await click('[data-outcome-history-open]');
+    expect(bodyFind('[data-outcome-history-dialog] [data-outcome-history]')?.textContent).toContain('Workflow 4100 (Alpha) linked');
+  });
+
+  it('puts the settings button to the right of Retire', async () => {
+    await open({ outcome: 'o-1' });
+
+    const header = [...document.body.querySelectorAll('[data-outcome-action], [data-outcome-settings-open]')];
+    const retire = header.findIndex((b) => b.getAttribute('data-outcome-action') === 'retire');
+    const settings = header.findIndex((b) => b.hasAttribute('data-outcome-settings-open'));
+    expect(retire).toBeGreaterThanOrEqual(0);
+    expect(settings).toBe(retire + 1);
+  });
+
+  it('budgets an outcome from its settings dialog through the edit route, sending only the budget, and closes it', async () => {
+    await open({ outcome: 'o-1' });
+
+    await click('[data-outcome-settings-open]');
+    await type('Budget (USD)', '20000');
+    await click('[data-outcome-save]');
+
+    expect(api.editOutcome).toHaveBeenCalledWith('o-1', { value: '20000' });
+    expect(bodyFind('[data-outcome-settings]')).toBeNull();
+  });
+
+  it('keeps the settings dialog open with the route\'s refusal when a save is refused', async () => {
+    api.editOutcome.mockRejectedValue(new Error("An outcome's budget is an amount of the instance's currency, 0 or more, such as 20000 or 1250.50."));
+    await open({ outcome: 'o-1' });
+
+    await click('[data-outcome-settings-open]');
+    await type('Budget (USD)', 'lots');
+    await click('[data-outcome-save]');
+
+    expect(bodyFind('[data-outcome-settings-problem]')?.textContent).toContain("An outcome's budget is an amount");
+    expect(bodyFind('[data-outcome-settings]')).not.toBeNull();
+  });
+
+  it('reads a workflow\'s tokens from the route\'s counts: a measured 0 with one unmeasured run is "0 + 1 unmeasured run"', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => {
+      const detail = detailOf(listing().outcomes.find((o) => o.id === id)!);
+      detail.workflows = [
+        { ...detail.workflows[0]!, correlation: 4100, billableTokens: 0, measuredRuns: 1, unmeasuredRuns: 1 },
+        { ...detail.workflows[0]!, correlation: 4200, billableTokens: 0, measuredRuns: 0, unmeasuredRuns: 2 },
+      ];
+      return detail;
+    });
+    await open({ outcome: 'o-1' });
+    await click('[data-outcome-workflows-open]');
+
+    const tokens = (correlation: number) =>
+      (bodyFind(`[data-outcome-workflow="${correlation}"] [data-outcome-tokens]`)?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    expect(tokens(4100)).toBe('0 + 1 unmeasured run');
+    expect(tokens(4200)).toBe('not measured + 2 unmeasured runs');
+  });
+
+  it('shows a person\'s None in the history as the workflow set to no outcome', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => {
+      const detail = detailOf(listing().outcomes.find((o) => o.id === id)!);
+      detail.history.push({
+        ...detail.history[0]!, id: 2, outcomeId: null, isUnlink: true, outcomeNameAtLink: null,
+        how: 'person', setBy: 'grace@example.com', setAt: '2026-09-21T09:00:00Z',
+      });
+      return detail;
+    });
+    await open({ outcome: 'o-1' });
+    await click('[data-outcome-history-open]');
+
+    const lines = [...document.body.querySelectorAll('[data-outcome-history] li')].map((li) => li.textContent ?? '');
+    expect(lines.find((l) => l.includes('Workflow 4100 (Alpha) set to no outcome'))).toContain('by grace@example.com');
+  });
+
+  it('lists renames and status changes from the route, each with who and when', async () => {
+    await open({ outcome: 'o-1' });
+    await click('[data-outcome-history-open]');
+
+    const lines = [...document.body.querySelectorAll('[data-outcome-history] li')].map((li) => li.textContent ?? '');
+    const renamed = lines.find((l) => l.includes('Renamed from "Job pipeline" to "Current job pipeline"'));
+    expect(renamed).toContain('by grace@example.com');
+    expect(renamed).toContain(new Date('2026-09-02T08:00:00Z').toLocaleString());
+    const retired = lines.find((l) => l.includes('Retired'));
+    expect(retired).toContain('by grace@example.com');
+    expect(retired).toContain(new Date('2026-09-03T08:00:00Z').toLocaleString());
+    expect(lines.find((l) => l.includes('Reactivated'))).toContain('by ada@example.com');
+    // Oldest first, links among them by time.
+    expect(lines.findIndex((l) => l.includes('Retired'))).toBeLessThan(lines.findIndex((l) => l.includes('Workflow 4100')));
+  });
+
+  it('renames through the edit route, sending only what changed', async () => {
+    await open({ outcome: 'o-1' });
+
+    await click('[data-outcome-settings-open]');
+    await type('Name', 'Qualified job pipeline');
+
+    await click('[data-outcome-save]');
+    expect(api.editOutcome).toHaveBeenCalledWith('o-1', { name: 'Qualified job pipeline' });
+  });
+
+  it('confirms a proposal, retires an active outcome and reactivates a retired one through their routes', async () => {
+    await open({ outcome: 'o-2' });
+    await click('[data-outcome-action="confirm"]');
+    expect(api.transitionOutcome).toHaveBeenCalledWith('o-2', 'confirm');
+
+    resetBody();
+    await open({ outcome: 'o-1' });
+    expect(bodyFind('[data-outcome-action="confirm"]')).toBeNull();
+    await click('[data-outcome-action="retire"]');
+    expect(api.transitionOutcome).toHaveBeenCalledWith('o-1', 'retire');
+
+    resetBody();
+    await open({ outcome: 'o-3' });
+    expect(bodyFind('[data-outcome-action="retire"]')).toBeNull();
+    expect(bodyFind('[data-outcome-action="merge"]')).toBeNull();
+    await click('[data-outcome-action="reactivate"]');
+    expect(api.transitionOutcome).toHaveBeenCalledWith('o-3', 'reactivate');
+  });
+
+  it('offers Reject on a proposal only when no link names it', async () => {
+    await open({ outcome: 'o-2' });
+    expect(bodyFind('[data-outcome-action="reject"]')).toBeNull();
+
+    resetBody();
+    api.getOutcome.mockResolvedValue(detailOf(proposal, 0));
+    await open({ outcome: 'o-2' });
+    await click('[data-outcome-action="reject"]');
+    expect(api.rejectOutcome).toHaveBeenCalledWith('o-2');
+  });
+
+  it('does not offer Reject on a proposal another outcome was merged into, which the route refuses', async () => {
+    api.getOutcome.mockResolvedValue({ ...detailOf(proposal, 0), mergedFrom: [{ id: 'o-9', name: 'Merged earlier' }] });
+    await open({ outcome: 'o-2' });
+
+    expect(bodyFind('[data-outcome-action="confirm"]')).not.toBeNull();
+    expect(bodyFind('[data-outcome-action="reject"]')).toBeNull();
+  });
+
+  it('shows a merged outcome read-only, naming what it was merged into', async () => {
+    await open({ outcome: 'o-4' });
+
+    expect(bodyFind('[data-outcome-merged]')?.textContent).toContain('Merged into Current job pipeline');
+    expect(bodyFind('[data-outcome-save]')).toBeNull();
+    expect(document.body.querySelectorAll('[data-outcome-action]').length).toBe(0);
+    expect(bodyFind('[data-outcome-move]')).toBeNull();
+  });
+
+  it('shows the merge preview from the route before merging, and merges only on confirm', async () => {
+    api.previewMerge.mockResolvedValue({
+      preview: true,
+      from: { id: 'o-2', name: '<b>Faster</b> triage', status: 'proposed' },
+      into: { id: 'o-1', name: 'Current job pipeline', status: 'active' },
+      refusal: null,
+      moves: {
+        links: 12,
+        figures: figures({
+          workflows: { open: 0, completed: 12, closed: 0, total: 12 },
+          teams: [
+            { id: 'a', name: 'A', deleted: false },
+            { id: 'b', name: 'B', deleted: false },
+            { id: 'c', name: 'C', deleted: false },
+          ],
+          tokens: { billable: 1_200_000, measuredRuns: 20, unmeasuredRuns: 0 },
+          agentSeconds: 18 * 3600,
+        }),
+      },
+    });
+    const wrapper = await open({ outcome: 'o-2' });
+
+    await click('[data-outcome-action="merge"]');
+    expect(bodyFind('[data-outcome-merge-preview]')).toBeNull();
+    expect(button('Merge').closest('[disabled], .disabled')).not.toBeNull();
+
+    await choose(wrapper, 'Outcome', 'Current job pipeline');
+    expect(api.previewMerge).toHaveBeenCalledWith('o-2', 'o-1');
+    expect(api.mergeOutcome).not.toHaveBeenCalled();
+    expect(bodyFind('[data-outcome-merge-preview]')?.textContent).toBe(
+      '12 workflows, 3 teams, 1.2M tokens, 18h agent time move to Current job pipeline.',
+    );
+
+    await click('[data-outcome-merge-confirm]');
+    expect(api.mergeOutcome).toHaveBeenCalledWith('o-2', 'o-1');
+  });
+
+  it('shows and merges into the newer pick when the earlier pick\'s preview answers last', async () => {
+    api.listOutcomes.mockResolvedValue(listing({ outcomes: [pipeline, proposal, retired, merged, secondTarget] }));
+    const previewOf = (into: Outcome, links: number) => ({
+      preview: true,
+      from: { id: 'o-2', name: proposal.name, status: 'proposed' },
+      into: { id: into.id, name: into.name, status: into.status },
+      refusal: null,
+      moves: { links, figures: figures({ workflows: { open: 0, completed: links, closed: 0, total: links } }) },
+    });
+    // X's preview is held until the test releases it; Y's answers at once.
+    let releaseX!: (answer: unknown) => void;
+    api.previewMerge.mockImplementation((_from: string, into: string) =>
+      into === 'o-1' ? new Promise((resolve) => (releaseX = resolve)) : Promise.resolve(previewOf(secondTarget, 2)),
+    );
+    const wrapper = await open({ outcome: 'o-2' });
+    await click('[data-outcome-action="merge"]');
+
+    await choose(wrapper, 'Outcome', 'Current job pipeline');
+    expect(bodyFind('[data-outcome-merge-preview]')).toBeNull();
+    await choose(wrapper, 'Outcome', 'Second target');
+    expect(bodyFind('[data-outcome-merge-preview]')?.textContent).toContain('move to Second target.');
+
+    releaseX(previewOf(pipeline, 7));
+    await settle();
+
+    expect(api.previewMerge.mock.calls).toEqual([['o-2', 'o-1'], ['o-2', 'o-5']]);
+    const shown = bodyFind('[data-outcome-merge-preview]')?.textContent ?? '';
+    expect(shown).toContain('2 workflows');
+    expect(shown).toContain('move to Second target.');
+    expect(shown).not.toContain('Current job pipeline');
+
+    await click('[data-outcome-merge-confirm]');
+    expect(api.mergeOutcome).toHaveBeenCalledTimes(1);
+    expect(api.mergeOutcome).toHaveBeenCalledWith('o-2', 'o-5');
+  });
+
+  it('moves a workflow to another outcome through the link route', async () => {
+    const wrapper = await open({ outcome: 'o-1' });
+
+    await click('[data-outcome-workflows-open]');
+    await click('[data-outcome-move]');
+    await choose(wrapper, 'To outcome', 'Faster');
+    await click('[data-outcome-move-confirm]');
+
+    expect(api.linkWorkflowOutcome).toHaveBeenCalledWith('alpha', 4100, 'o-2');
+  });
+
+  it('creates a new outcome through the create route', async () => {
+    api.createOutcome.mockResolvedValue(pipeline);
+    await open();
+
+    await click('[data-outcome-new]');
+    await type('Name', 'Current job pipeline');
+    await click('[data-outcome-create-confirm]');
+
+    expect(api.createOutcome).toHaveBeenCalledWith({ name: 'Current job pipeline', description: '' });
+    expect(bodyText()).toContain('Current job pipeline');
+  });
+});

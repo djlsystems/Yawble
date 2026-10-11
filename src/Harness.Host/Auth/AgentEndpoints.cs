@@ -1,0 +1,719 @@
+using System.Security.Claims;
+using Harness.Contracts;
+
+namespace Harness.Host.Auth;
+
+/// <summary>
+/// The Agent catalog: what a person edits and what a machine principal needs a redacted slice of.
+///
+/// Modelled on UserEndpoints - same refusal envelope (<c>new { error = ... }</c>), same
+/// <c>.HumansOnly()</c> marker for the write side. Carries no <c>{team}</c> route value,
+/// so TeamGate's rule 1 passes both routes through untouched; the write is gated here instead, the
+/// same way UserEndpoints gates account administration.
+/// </summary>
+public static class AgentEndpoints
+{
+    private const string Area = "Agents";
+
+    /// <summary>What a catalog save carries: the custom presets. Built-ins come from the build.</summary>
+    internal sealed record CatalogSubmission(
+        [property: System.ComponentModel.Description(
+            "Every CUSTOM Agent this tenant has, in full. REPLACES that list rather than merging "
+            + "into it. A built-in preset may be sent back unchanged, and is ignored; one sent back "
+            + "changed is refused, because built-in presets change only with the product.")]
+        List<AgentDefinition>? Agents);
+
+    /// <summary>What setting an issued credential carries.</summary>
+    internal sealed record CredentialSubmission(
+        [property: System.ComponentModel.Description(
+            "`apiKey` or `token`, one the CLI's issued-credential declaration lists. May be left out "
+            + "when it lists only one.")]
+        string? Kind,
+        [property: System.ComponentModel.Description(
+            "The credential. Write-only: no answer, row, log or file ever carries it or any part of it.")]
+        string? Value);
+
+    private const string PeopleOnly =
+        "\n\n**A person's action.** `env` is where an outside Agent's key lives, so the full "
+        + "record - including every command line - is a credential surface.";
+
+    /// <summary>
+    /// The probe as a machine principal reads it: no command and no Host disk path. <c>measuredOn</c>
+    /// is the workers' answer in control - worker ids, booleans and times - and written only there,
+    /// so in <c>all</c> this is the shape it always was. <c>updating</c> is written only while the
+    /// platform's update holds the command.
+    /// </summary>
+    internal sealed record RedactedInstallation(
+        string Agent,
+        string? State,
+        bool Referenced,
+        string Message,
+        AgentInstall? Install,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<InstallMeasurement>? MeasuredOn,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        AgentUpdatingOn? Updating = null);
+
+    public static void Map(WebApplication app, string dataRoot)
+    {
+        app.MapGet("/api/agents", async (
+            HttpContext context, AgentCatalog catalog, ITeamStore teams,
+            AgentInstallProbe probe, CliVersionHistory history, CancellationToken ct) =>
+        {
+            if (PrincipalClaims.From(context.User) is not { } caller) return Results.Unauthorized();
+
+            // Two shapes from one route, deliberately. `env` is where an outside Agent's key lives,
+            // so the full record goes to a person only - but a redacted list must reach a machine
+            // principal too, because adding a member is gated by TEAM access and its dialog cannot
+            // offer a choice it may not read.
+            var referenced = await AgentReferences.OfAsync(teams, ct);
+            var installations = probe.ProbeAll(catalog.Definitions, referenced);
+
+            if (caller.Kind == PrincipalKind.User)
+            {
+                // THE PROBE RIDES THIS ROUTE - no new route and no new marker. Its results sit
+                // BESIDE the catalog rather than inside each definition, and that is not
+                // presentation: `PUT /api/agents` REPLACES the catalog wholesale from a body the
+                // Agents dialog composes out of what this handed it, so a field that looks like
+                // part of a definition is a field a save tries to write back into agents.json. This
+                // is a measurement of the machine, not configuration.
+                //
+                // The resolved path is disclosed here for the same reason `env` is: this is already
+                // a person's screen. The redacted arm below carries the probe WITHOUT
+                // `command` or `resolvedPath`.
+                // `tagsFromOperator` and `buildTags` ride beside each definition for the same reason:
+                // they are not fields of a preset, and a save that sends them back writes nothing.
+                var json = context.RequestServices
+                    .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
+                    .Value.SerializerOptions;
+
+                // EACH PRESET'S CLI VERSION, from the one record the doctor and the operator CLI's `agents` read
+                // (`cli-versions.jsonl`): what the newest line says and when it last changed. Beside
+                // the catalog for the reason `installations` is. People only, as the Diagnostics
+                // route's history is: it names the tooling every member runs on.
+                var starts = await history.ReadAsync(CliVersionHistory.MaxTake, ct);
+
+                return Results.Ok(new
+                {
+                    agents = catalog.Definitions.Select(a => WithTagSource(a, catalog, json)),
+                    installations,
+                    ignoredTagOverrides = catalog.IgnoredTagOverrides,
+                    cliVersions = catalog.Definitions
+                        .Where(a => a.Launch is not null)
+                        .Select(a => new
+                        {
+                            agent = a.Name,
+                            now = CliVersionHistory.Now(a.Launch!.FileName, starts),
+                        })
+                        .Select(v => new
+                        {
+                            v.agent,
+                            cli = v.now.Cli,
+                            version = v.now.Version,
+                            updatedAt = v.now.UpdatedAt,
+                            updatedBy = v.now.UpdatedBy,
+                            person = v.now.Person,
+                            since = v.now.Since,
+                        }),
+                });
+            }
+
+            // `name`, `mode`, `hidden` and `tags`, plus the probe without a Host disk path.
+            // `env` and a Prompt's TEXT stay off: those are the people-only fields.
+            return Results.Ok(new
+            {
+                agents = catalog.Definitions.Select(a => new
+                {
+                    a.Name, a.Mode, a.Hidden, a.Tags, a.BuiltIn,
+                    tagsFromOperator = catalog.TagsFromOperator(a.Name),
+                    buildTags = catalog.BuildTags(a.Name),
+                }),
+                installations = installations.Select(i => new RedactedInstallation(
+                    i.Agent, i.State, i.Referenced, i.Message, i.Install, i.MeasuredOn, i.Updating)),
+                ignoredTagOverrides = catalog.IgnoredTagOverrides,
+            });
+        })
+            .WithTags(Area)
+            .RequirePermit(Permits.Read)
+            .WithSummary("The Agent catalog")
+            .WithDescription(
+                "A person reads the whole definition, command lines and `env` included. A machine "
+                + "principal reads `name`, `mode`, `hidden`, `tags` and `builtIn`, plus "
+                + "`installations` without `command` or `resolvedPath` - enough to say what is "
+                + "ready without disclosing a Host disk path, a command line, or an outside "
+                + "Agent's credentials. `env` stays people-only.\n\n"
+                + "**`builtIn`** is true for a preset compiled into this build: it is listed "
+                + "read-only, and only a custom preset can be added, edited or deleted.\n\n"
+                + "**`tags`** of a built-in are the operator's when the tenant setting `agents.tags` "
+                + "names it: then `tagsFromOperator` is true, and `buildTags` holds the build's "
+                + "tags either way (null for a custom preset). `ignoredTagOverrides` lists the entries "
+                + "of `agents.tags` that name no built-in preset, which are ignored.\n\n"
+                + "**`installations` is one entry per preset**, "
+                + "saying whether the command it names resolves on this machine's PATH. It is "
+                + "answered ON DEMAND and cached only for a few seconds, because the recovery for "
+                + "'not installed' is to install it and look again - a result cached for the "
+                + "process lifetime would go on reporting a problem the person had just fixed.\n\n"
+                + "**RESOLUTION IS NOT EXECUTION.** No candidate binary is run: a name is resolved "
+                + "to a path and that is all. A command that resolves may still be broken, the "
+                + "wrong version, or unauthenticated, and `state` claims none of those. The PATH "
+                + "searched is the Host's, which is what launches every agent.\n\n"
+                + "`state` is null when the command resolves and `AgentNotInstalled` when it does "
+                + "not. It is a distinct fact from a member's `missingAgent`, which means the "
+                + "CATALOG has no such entry: that one is fixed here, this one is fixed in a "
+                + "terminal.\n\n"
+                + "**`cliVersions`** (a person only) is one entry per preset that launches a command: "
+                + "`cli` (the command), `version` (null when the record has none - never guessed), `updatedAt` "
+                + "(when that version first appeared after a different one; null when the kept record "
+                + "never saw it change, and `since` is then how far back the record reaches; null, with "
+                + "`updatedBy`, when the version is not known), `updatedBy` (`start` or `person`) and `person` (that person's email when recorded). "
+                + "Read from the Host's CLI version record, `cli-versions.jsonl`, which the operator CLI's `doctor` "
+                + "and `agents` read too.");
+
+        app.MapPut("/api/agents", async (
+            CatalogSubmission submitted, AgentCatalog catalog, ITeamStore teams,
+            EffectiveSubscriptions effective,
+            ITenantLog tenantLog, HttpContext context, CancellationToken ct) =>
+        {
+            var submittedAgents = submitted.Agents ?? [];
+
+            if (BuiltInRefusalFor(submittedAgents, catalog) is { } builtIn)
+            {
+                return Results.BadRequest(new { error = builtIn });
+            }
+
+            var custom = submittedAgents.Where(a => !AgentCatalogFile.IsBuiltIn(a.Name)).ToList();
+
+            if (ValidityRefusalFor(custom) is { } invalid)
+            {
+                return Results.BadRequest(new { error = invalid });
+            }
+
+            var agents = AgentCatalogFile.BuiltIns().Concat(custom).ToList();
+
+            if (AgentCredentials.DeclarationRefusal(agents) is { } undeclarable)
+            {
+                return Results.BadRequest(new { error = undeclarable });
+            }
+
+            if (await ReferenceRefusalFor(agents, teams, effective, ct) is { } orphaned)
+            {
+                return Results.BadRequest(new { error = orphaned });
+            }
+
+            // RECORDED BEFORE SAVED, and not swallowed the way TenantLogging swallows: agents.json
+            // cannot share the tenant log's transaction, so the row goes first and neither the file
+            // nor the live catalog changes when it cannot be written - the documents delete's order.
+            var row = TenantLogging.Row(
+                context, TenantActions.AgentsSaved, null, null,
+                new
+                {
+                    count = custom.Count,
+                    names = custom.Select(a => a.Name).ToArray(),
+                });
+
+            try
+            {
+                await tenantLog.WriteAsync(
+                    row.ActorId, row.ActorEmail, row.Action, row.Subject, row.SubjectName, row.Detail, ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return Results.Problem(
+                    "The save could not be recorded, so no Agent was changed.",
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            AgentCatalogFile.Save(dataRoot, custom);
+
+            catalog.Replace(agents);
+
+            return Results.NoContent();
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Replace the custom Agents")
+            .WithDescription(
+                "REPLACES every custom preset - not a per-row editor - so an operator sees exactly "
+                + "what will run rather than a diff against what was already there. Built-in presets "
+                + "are not stored and cannot be changed: one sent back unchanged is ignored, one sent "
+                + "back changed is refused with a sentence, and leaving one out removes nothing.\n\n"
+                + "400 for a changed built-in, an illegal or duplicated name, a preset with no launch, "
+                + "a launch with no executable or no arguments list, an `env` key beginning "
+                + "`HARNESS_` (reserved for the platform), or removing - or RE-MODING - a preset "
+                + "a member, a team's new members or a team's Concierge still names: those "
+                + "first two need a Headless preset and a team's Concierge needs an "
+                + "Interactive one, so changing a preset's mode breaks the reference exactly as "
+                + "deleting it would. 204 on success."
+                + PeopleOnly);
+
+        // THE PLATFORM UPDATES AN AGENT CLI ONLY HERE AND AT THE CONTAINER'S START. Every launch
+        // carries what turns the CLI's own updater off, so this is how a person brings one current
+        // without restarting: it waits for the runs of that CLI in flight, holds new ones (they
+        // wait, never fail), runs the preset's declared update and lets them go. ASKED, NOT AWAITED:
+        // the route answers at once and the gate keeps the update, so the row reads it back with GET.
+        // AN ISSUED CREDENTIAL PER COMMAND: set, replaced and cleared by a person only, each with its
+        // tenant row in the same transaction, and never answered back. See AgentCredentials.
+        app.MapGet("/api/agents/credentials", async (AgentCredentials credentials, CancellationToken ct) =>
+                Results.Ok(await credentials.ListAsync(ct)))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Each preset's credential source, and whether its command's issued credential is set")
+            .WithDescription(
+                "One entry per language-model preset: `agent`, `command` (the CLI it launches, which the "
+                + "credential is stored under), `sharedWith` (the other presets launching the same command, "
+                + "which use the same credential), `source` (`home` or `issued`, from the "
+                + "`agents.credentialSource` setting), `issuedCredential` (the preset's declaration - kinds "
+                + "and their variables, what an issued run displaces, which wins over a home login, the CLI "
+                + "version measured - or null) and `set`, `setBy`, `setAt` for the command's credential. "
+                + "Never the value or any part of it.");
+
+        app.MapPut("/api/agents/{name}/credential", async (
+            [System.ComponentModel.Description("A preset, or a command a preset launches. A preset's credential is its command's.")]
+            string name,
+            CredentialSubmission body, AgentCredentials credentials, HttpContext context, CancellationToken ct) =>
+            {
+                var (status, answer) = await credentials.SetAsync(name, body.Kind, body.Value, Actor(context), ct);
+                return Results.Json(answer, statusCode: status);
+            })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Set or replace the credential issued to a CLI")
+            .WithDescription(
+                "Stores the credential for the command `name` launches (or names), Data Protection "
+                + "ciphertext, with an `agents.credential-set` or `agents.credential-replaced` tenant row in "
+                + "the same transaction. Every preset of that command whose source is `issued` uses it from its "
+                + "next run. 200 `{ command, set, setBy, setAt }`. 400 when nothing launching it declares an "
+                + "issued credential, the kind is not declared, or the value is empty, multi-line or a form the "
+                + "CLI refuses; 404 for a name that is neither a preset nor a command; 500, with nothing "
+                + "stored, when the tenant row cannot be written. No answer carries the value.");
+
+        app.MapDelete("/api/agents/{name}/credential", async (
+            [System.ComponentModel.Description("A preset, or a command a preset launches.")]
+            string name,
+            AgentCredentials credentials, HttpContext context, CancellationToken ct) =>
+            {
+                var (status, answer) = await credentials.ClearAsync(name, Actor(context), ct);
+                return Results.Json(answer, statusCode: status);
+            })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Clear the credential issued to a CLI")
+            .WithDescription(
+                "Removes the command's credential with an `agents.credential-cleared` tenant row in the same "
+                + "transaction. A member run of a preset still set to `issued` then does not start. 200 "
+                + "`{ command, set: false, setBy: null, setAt: null }`, also when nothing was set (no row is "
+                + "written then); 400 and 404 as for PUT; 500, with nothing cleared, when the row cannot be written.");
+
+        app.MapPost("/api/agents/{name}/update", (
+            [System.ComponentModel.Description("The preset whose CLI to update. Presets that launch "
+                + "the same command share one install, so updating one updates them all.")]
+            string name,
+            AgentCliUpdater updater, ITenantLog tenantLog, HttpContext context) =>
+        {
+            var person = context.User.FindFirstValue(ClaimTypes.Email);
+            var actorId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            // The row is written when the update has run, as the person who asked; the request has
+            // long been answered by then.
+            async Task RecordAsync(AgentUpdateState final)
+            {
+                if (final.Result is not { } result) return;
+
+                try
+                {
+                    await tenantLog.WriteAsync(
+                        actorId, person, TenantActions.AgentUpdated, result.Agent, result.Agent,
+                        System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            command = result.Command,
+                            updated = result.Updated,
+                            exitCode = result.ExitCode,
+                            versionBefore = result.VersionBefore,
+                            versionAfter = result.VersionAfter,
+                        }),
+                        CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    // The update happened; only its row is missing, and the state still says what it came to.
+                }
+            }
+
+            if (updater.Request(name, person, RecordAsync) is not { } asked)
+            {
+                return Results.NotFound(new { error = $"No Agent '{name}'." });
+            }
+
+            return Results.Accepted($"/api/agents/{Uri.EscapeDataString(name)}/update", asked.State);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Ask for an update of an Agent's CLI")
+            .WithDescription(
+                "Asks for the preset's declared `updates.update` command, run as the user agents run as, "
+                + "and ANSWERS AT ONCE, 202 with the update's state as `GET` gives it. The update WAITS "
+                + "in the gate until no run of that command is in flight, and from the moment it is "
+                + "asked new launches of that command wait for it - held, never failed - so no run "
+                + "finds its program half-replaced. Closing the screen does not cancel it.\n\n"
+                + "`phase` is `waiting` (with `running`, and `inFlight` naming each run's team and "
+                + "member), `updating`, then `done` with `result`: the versions before and after, also "
+                + "recorded in the CLI version history with the person who asked, and `cliVersion`, the "
+                + "CLI's entry as `GET /api/agents` gives it once that line is written. Asked again "
+                + "while one waits or runs, it answers that one. A preset that declares no update "
+                + "command answers `done` at once with `updated` false and a sentence. 404 for an "
+                + "unknown preset."
+                + PeopleOnly);
+
+        app.MapGet("/api/agents/{name}/update", (string name, AgentCliUpdater updater, AgentUpdateGate gate) =>
+            updater.CommandOf(name) is { } command
+                ? Results.Ok(gate.StateOf(command))
+                : Results.NotFound(new { error = $"No Agent '{name}'." }))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Read the state of an Agent's CLI update")
+            .WithDescription(
+                "What the gate says about the update of this preset's command, read from it and never "
+                + "estimated: `none`, `waiting` (with the runs in flight it waits for by team and "
+                + "member, and the launches it holds in `held`), `updating`, or the last one's outcome "
+                + "(`done`, `cancelled` or `failed`). Kept until the Host restarts, so a screen closed "
+                + "and opened again reads the same. 404 for an unknown preset."
+                + PeopleOnly);
+
+        app.MapDelete("/api/agents/{name}/update", async (
+            string name, AgentCliUpdater updater, AgentUpdateGate gate, ITenantLog tenantLog,
+            HttpContext context, CancellationToken ct) =>
+        {
+            if (updater.CommandOf(name) is not { } command)
+            {
+                return Results.NotFound(new { error = $"No Agent '{name}'." });
+            }
+
+            var person = context.User.FindFirstValue(ClaimTypes.Email);
+            var (cancelled, running) = gate.Cancel(command, person);
+
+            if (running)
+            {
+                return Results.Conflict(new
+                {
+                    error = $"The {command} update is already running, so it cannot be cancelled; it finishes on its own.",
+                });
+            }
+
+            if (cancelled is null)
+            {
+                return Results.NotFound(new { error = $"No {command} update is waiting." });
+            }
+
+            var row = TenantLogging.Row(
+                context, TenantActions.AgentUpdateCancelled, cancelled.Agent, cancelled.Agent,
+                new { command, held = cancelled.Held.Count });
+
+            try
+            {
+                await tenantLog.WriteAsync(
+                    row.ActorId, row.ActorEmail, row.Action, row.Subject, row.SubjectName, row.Detail, ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // The update is cancelled and its launches released; only its row is missing.
+            }
+
+            return Results.Ok(cancelled);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Cancel a waiting update of an Agent's CLI")
+            .WithDescription(
+                "Cancels this preset's command's update while it still WAITS for runs in flight: nothing "
+                + "is run, and the launches it held go ahead. Answers the `cancelled` state. 409 with a "
+                + "sentence once its command is running - a running update cannot be cancelled - and "
+                + "404 when no update of it waits."
+                + PeopleOnly);
+
+        app.MapGet("/api/agents/updates", (AgentUpdateGate gate) => Results.Ok(gate.States()))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Every Agent CLI update the gate holds")
+            .WithDescription(
+                "One state per command with an update asked for, an outcome kept, or a launch held, as "
+                + "`GET /api/agents/{name}/update` gives it. The board reads `held` to mark a card whose "
+                + "launch waits for an update."
+                + PeopleOnly);
+    }
+
+    /// <summary>
+    /// A built-in preset sent back changed. Unchanged is fine - a client may send the whole list
+    /// it was given - and compared as the file would store it, because a launch's lists compare by
+    /// reference.
+    /// </summary>
+    /// <para>
+    /// Its tags may be the build's or the operator's (<c>agents.tags</c>) - the list this
+    /// was handed shows the operator's - and are compared apart from the rest, so a changed tag
+    /// is told where tags are changed and anything else is the built-in refusal sentence.
+    /// </para>
+    private static CredentialActor Actor(HttpContext context) => new(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+        context.User.FindFirstValue(ClaimTypes.Email) ?? "unknown");
+
+    private static string? BuiltInRefusalFor(IReadOnlyList<AgentDefinition> submitted, AgentCatalog catalog)
+    {
+        foreach (var agent in submitted)
+        {
+            var builtIn = AgentCatalogFile.BuiltIns().FirstOrDefault(
+                b => string.Equals(b.Name, agent.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (builtIn is null) continue;
+
+            if (System.Text.Json.JsonSerializer.Serialize(agent with { Name = builtIn.Name, Tags = null }, AgentCatalogFile.JsonOptions)
+                != System.Text.Json.JsonSerializer.Serialize(builtIn with { Tags = null }, AgentCatalogFile.JsonOptions))
+            {
+                return $"'{builtIn.Name}' is a built-in preset. Built-in presets change only with the "
+                    + "product, so it cannot be edited here; add a custom preset under another name.";
+            }
+
+            var current = catalog.Definition(builtIn.Name)?.Tags ?? [];
+            if (!SameTags(agent.Tags, builtIn.Tags) && !SameTags(agent.Tags, current))
+            {
+                return $"'{builtIn.Name}' is a built-in preset, and its tags are changed through the "
+                    + $"{TenantSettings.AgentTagsName} setting rather than by saving the catalog.";
+            }
+        }
+
+        return null;
+    }
+
+    private static bool SameTags(IReadOnlyList<string>? a, IReadOnlyList<string>? b) =>
+        (a ?? []).SequenceEqual(b ?? [], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A definition as the person's arm sends it, with where its tags came from.</summary>
+    private static System.Text.Json.Nodes.JsonNode? WithTagSource(
+        AgentDefinition agent, AgentCatalog catalog, System.Text.Json.JsonSerializerOptions json)
+    {
+        var node = System.Text.Json.JsonSerializer.SerializeToNode(agent, json);
+
+        if (node is System.Text.Json.Nodes.JsonObject entry)
+        {
+            entry["tagsFromOperator"] = catalog.TagsFromOperator(agent.Name);
+            entry["buildTags"] = System.Text.Json.JsonSerializer.SerializeToNode(catalog.BuildTags(agent.Name), json);
+        }
+
+        return node;
+    }
+
+    private static string? ValidityRefusalFor(IReadOnlyList<AgentDefinition> catalog)
+    {
+
+        foreach (var agent in catalog)
+        {
+            // The same allowlist container names use: an Agent name reaches this file, a database
+            // column and a command line.
+            if (!ContainerId.IsLegalName(agent.Name))
+            {
+                return $"'{agent.Name}' is not a legal Agent name.";
+            }
+
+            // A `Launch` is required now - a preset with neither kind is impossible by shape - but
+            // System.Text.Json does not enforce a non-nullable reference-type constructor parameter
+            // at runtime, so a hand-edited file or a raw API call omitting `launch` still deserialises
+            // to null here rather than throwing.
+            if (agent.Launch is null)
+            {
+                return $"'{agent.Name}' has no launch, so nothing could ever launch it.";
+            }
+
+            // A launch that is PRESENT but half-built. Reachable from a hand-edited agents.json and
+            // from a raw API call - the dialog cannot produce either - and it must be caught here,
+            // because ProcessAgentRunner iterates Arguments to fill ArgumentList OUTSIDE its try
+            // block, so a null list escapes as a container.failed reading "Object reference not set
+            // to an instance of an object" with nothing naming the Agent that caused it.
+            if (RefusalForLaunch(agent.Name, agent.Launch) is { } launchReason)
+            {
+                return launchReason;
+            }
+
+            // The Host reads this file for a person, so it stays under the agent's home and
+            // in a format something renders.
+            if (agent.LiveView is { } view && LiveView.Refusal(view) is { } liveReason)
+            {
+                return $"'{agent.Name}' cannot be saved: {liveReason}.";
+            }
+
+            foreach (var key in agent.Env?.Keys ?? [])
+            {
+                // REFUSED, not dropped. Silently ignoring it looks like it worked, and what it
+                // would have done is hand a container another principal's credential.
+                if (key.StartsWith("HARNESS_", StringComparison.OrdinalIgnoreCase))
+                {
+                    return $"'{agent.Name}' sets {key}. HARNESS_ variables belong to the "
+                        + "platform and are injected last; a definition cannot set them.";
+                }
+            }
+        }
+
+        var byName = catalog
+            .DistinctBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
+
+        if (byName.Count != catalog.Count)
+        {
+            return "Two Agents share a name. Names are compared without regard to case, because "
+                + "that is how a stored member's Agent is looked up.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// What this catalog would ORPHAN, or null: a member's Agent, a team's allowed Agents for new
+    /// members, and the Concierge's Agent. See <see cref="ValidityRefusalFor"/> for why these are not one method.
+    /// </summary>
+    private static async Task<string?> ReferenceRefusalFor(
+        IReadOnlyList<AgentDefinition> catalog,
+        ITeamStore teams, EffectiveSubscriptions effective, CancellationToken ct)
+    {
+        // Rebuilt here rather than handed over: this method is called on its own by the PUT, right
+        // after the validity half has already proven there are no duplicates.
+        var byName = catalog
+            .DistinctBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
+
+        // BOTH references: a team stores which Agent its Concierge runs, so a wholesale replace
+        // could strip an Agent from under a team's Concierge while every member check passed.
+        //
+        // Each reference is checked against the LAUNCH KIND IT NEEDS rather than against the set of
+        // names, because narrowing an Agent breaks a reference exactly as removing it does. A check
+        // on names alone would let unchecking "Interactive command" on `claude` answer 204, and
+        // every team's Concierge would then paint "'claude' has no interactive command".
+        // The headless half is worse for being delayed: a live container keeps running off its own
+        // per-container entry, which nothing here rewrites, and only breaks after the next restart.
+        var withConsoles = await teams.TeamsAsync(ct);
+        var labels = withConsoles.ToDictionary(
+            t => t.Id, t => t.Name ?? t.Id, StringComparer.OrdinalIgnoreCase);
+
+        // A PLUGIN MEMBER RUNS NO AGENT: its `plugin:<id>` is never a catalog name, so no catalog can
+        // leave it without a command, and checking it would refuse every save on an instance with one.
+        var members = await teams.MembersAsync(ct);
+        var orphanedMember = members.FirstOrDefault(
+            m => !MemberRef.IsPlugin(m.Agent) && byName.GetValueOrDefault(m.Agent) is not { Mode: AgentMode.Headless });
+
+        if (orphanedMember is { } member)
+        {
+            // By the names a person reads, on both halves: the stored Label is what the board and
+            // the member list show, and a qualified `Alpha/Manager` is an identity rather than a
+            // label, and showing one here would be wrong.
+            var team = labels.GetValueOrDefault(member.Team, member.Team);
+
+            // NAME THE WAY OUT, and note what the way out is: point that member at another Agent
+            // from its own settings, then send this again. A refusal that denies the one
+            // escape hatch that exists is worse than a terse one: it does not merely fail to help,
+            // it talks the reader out of the thing that would have worked.
+            return $"'{member.Agent}' is what {member.Label ?? member.Name} in {team} runs, and "
+                + "this catalog leaves it with no headless command. Either send it back with its "
+                + "command, or point that member at another Agent from its settings first and then "
+                + "remove this one.";
+        }
+
+        var concierge = await teams.ConciergeSettingsAsync(ct);
+
+        var orphanedHiringAgent = withConsoles
+            .SelectMany(team =>
+            {
+                var allowlist = team.MemberAgents ?? [];
+
+                return allowlist.Select(agent => new { Team = team, Agent = agent });
+            })
+            .FirstOrDefault(entry =>
+                byName.GetValueOrDefault(entry.Agent) is not { Mode: AgentMode.Headless });
+
+        if (orphanedHiringAgent is { } hiringAgentRef)
+        {
+            // NAME THE WAY OUT, the same rule the five refusals around it follow: this one is fixed
+            // under Dynamic members, beside the Prompt whose refusal says the same thing.
+            return $"'{hiringAgentRef.Agent}' is in the allowed Agent list for new members of "
+                + $"{hiringAgentRef.Team.Name ?? hiringAgentRef.Team.Id}, and this catalog leaves it with no "
+                + "headless command. Either send it back with its command, or choose another Agent "
+                + "under Dynamic members in that team's settings first and then remove this one.";
+        }
+
+        // NULL is nobody having chosen, which references no preset at all.
+        if (concierge.Agent is { } conciergeAgent
+            && byName.GetValueOrDefault(conciergeAgent) is not { Mode: AgentMode.Interactive })
+        {
+            return $"'{conciergeAgent}' is still the Concierge, and this catalog leaves it with no "
+                + "interactive command. Either send it back with its interactive command, or point "
+                + "the Concierge at another one first and then remove this.";
+        }
+
+        // THERE WERE TWO MORE REFERENCES HERE - a tenant agent's Agent and a tenant agent's
+        // Prompt. They went with `tenant_agents` itself, and nothing is left unchecked by their
+        // going: a tenant agent that meant anything is an ordinary team's Manager now, whose Agent
+        // and Prompt are exactly the first two references this method already refuses to orphan.
+
+        // THE NINTH CHECK. Flipping a preset to `languageModel: true` strands every high-volume
+        // subscription its members hold - no error, no log line, and the runaway is back.
+        //
+        // It sits WITH the other eight rather than in its own pass, for the reason the hiring Agent
+        // check sits beside the hiring Prompt check: two halves of one question checked in two
+        // places is how one stays undefended. The REVERSE direction - a language model becoming a
+        // program - is never refused here: it takes a subscription away from nothing, and a preset
+        // narrowing FROM headless-with-no-command TO a runnable one is never the shape this method
+        // refuses.
+        foreach (var holder in members)
+        {
+            if (!byName.TryGetValue(holder.Agent, out var preset)) continue;
+            if (preset.Launch is not { LanguageModel: true }) continue;
+
+            // EFFECTIVE SUBSCRIPTIONS, NOT ONLY `holder.Subscribes`. An event trigger contributes a
+            // subscription of its own - see `EffectiveSubscriptions` - so a member holding
+            // `container.progress` only through a trigger was flippable to `languageModel: true`
+            // with nothing refusing it if this loop read the base set alone, because it could not
+            // see what the trigger adds.
+            var holds = await effective.EffectiveTypesAsync(
+                new ContainerId(holder.Team, holder.Name), holder.Subscribes, ct);
+
+            foreach (var type in holds)
+            {
+                if (EventCatalog.IsHighVolume(type))
+                {
+                    var team = labels.GetValueOrDefault(holder.Team, holder.Team);
+
+                    return $"'{holder.Agent}' cannot become a language model: "
+                        + $"{holder.Label ?? holder.Name} in {team} subscribes to '{type}', which "
+                        + "is high-volume. Remove that subscription first.";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>A launch that is present but unusable, or null when it is good.</summary>
+    private static string? RefusalForLaunch(string agent, AgentLaunch launch)
+    {
+        if (string.IsNullOrWhiteSpace(launch.FileName))
+        {
+            return $"'{agent}' has a launch with no executable to run.";
+        }
+
+        // fileName must be a NAME, never a rooted path. The operator whose CLI cannot go on PATH
+        // uses a shim that is on PATH. A slash makes it a path; backslash and colon are refused
+        // too, so a catalog entry carrying a drive-letter path is refused rather than looked up.
+        if (launch.FileName.IndexOfAny(['\\', '/', ':']) >= 0)
+        {
+            return $"'{agent}' has a rooted file name {launch.FileName}. The executable must be a "
+                + "name on PATH, not a rooted path. Add a shim on PATH if the executable is somewhere "
+                + "else.";
+        }
+
+        // Null rather than empty. `"launch": { "fileName": "claude" }` deserialises to exactly
+        // this, and an Agent that takes no arguments is a real thing - so the fix is an empty list,
+        // not removing the field.
+        if (launch.Arguments is null)
+        {
+            return $"'{agent}' has a launch with no arguments list. Send an empty list rather "
+                + "than omitting it.";
+        }
+
+        return null;
+    }
+}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Triage</title>
+  <link rel="stylesheet" href="site.css">
+  <!-- The platform's helper script: site.data, site.action, site.whoami. No build step. -->
+  <script src="/sites/_sdk/site.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Triage</h1>
+    <p class="who">Signed in as <span id="who">…</span></p>
+  </header>
+
+  <main>
+    <p id="status" class="status" role="status"></p>
+
+    <section>
+      <h2>Open <span id="open-count" class="count"></span></h2>
+      <ul id="open" class="items"></ul>
+      <p id="open-empty" class="empty" hidden>Nothing to triage.</p>
+    </section>
+
+    <section>
+      <h2>Done <span id="done-count" class="count"></span></h2>
+      <ul id="done" class="items"></ul>
+    </section>
+  </main>
+
+  <template id="item">
+    <li class="item">
+      <div class="head">
+        <span class="title"></span>
+        <span class="assignee"></span>
+      </div>
+      <p class="detail"></p>
+      <p class="meta"></p>
+      <div class="controls">
+        <button type="button" class="done">Done</button>
+        <input type="text" class="assign-to" placeholder="Assign to…" maxlength="80">
+        <button type="button" class="assign">Assign</button>
+        <span class="pending"></span>
+      </div>
+    </li>
+  </template>
+</body>
+</html>

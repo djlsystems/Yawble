@@ -1,0 +1,4 @@
+2 agentContainer.started source=alpha/dev cause=1 corr=1
+{"trigger":"agentContainer.instruction.alpha/dev"}
+3 agentContainer.completed source=alpha/dev cause=1 corr=1
+{"exitCode":0,"output":"all done","outputLength":8,"transcript":"alpha/dev/1","launchError":null,"stoppedByPerson":false,"handedBack":false,"failureClass":null,"retryAfter":null,"tokensIn":1200,"tokensOut":340,"tokensTotal":null,"tokensCachedIn":1000,"tokensCacheCreation":7,"tokensReasoning":5,"tokensSource":"claude-json","usageCountedOn":null,"agentTranscript":"/home/agent/.claude/projects/x/1.jsonl","agentTranscriptFormat":"claude-jsonl"}

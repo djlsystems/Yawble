@@ -1,0 +1,290 @@
+{
+  "ok": true,
+  "mode": "update",
+  "team": "job-tracker",
+  "teamName": "Job Tracker",
+  "from": "1.0.0",
+  "to": "1.1.0",
+  "plan": {
+    "package": {
+      "id": "job-tracker",
+      "name": "Job Tracker",
+      "version": "1.1.0",
+      "description": "Finds job postings that match your keywords, tracks them on a page, and drafts a cover letter from your resume when you press Apply.",
+      "folder": "/data/plugins/.solutions/n1/job-tracker",
+      "readme": true
+    },
+    "team": {
+      "name": "Job Tracker",
+      "instructions": "This team runs a job search for one person. The postings live on the tracker site, collection `jobs`. The person's reference resume is in the Resume folder of the team's documents. Never apply anywhere yourself: drafts go to the Drafts folder of the team's documents for the person to send."
+    },
+    "members": [
+      {
+        "name": "Coordinator",
+        "kind": "agent",
+        "role": "manager",
+        "preset": null,
+        "instructions": "You coordinate the job search. Each weekday morning you read the tracker and tell the person, in one short note, what is new and what is waiting on them.",
+        "pluginId": null,
+        "pluginVersion": null,
+        "settings": {}
+      },
+      {
+        "name": "Scout",
+        "kind": "plugin",
+        "role": "member",
+        "preset": null,
+        "instructions": "",
+        "pluginId": "job-board",
+        "pluginVersion": "0.2.0",
+        "settings": {
+          "keywords": [
+            "engineer",
+            "developer"
+          ]
+        }
+      },
+      {
+        "name": "Writer",
+        "kind": "agent",
+        "role": "member",
+        "preset": null,
+        "instructions": "You write cover letters. Read the person's resume from the Resume folder, read the posting from the tracker, and start from the draft {solution}/make-cover-letter.py makes. Keep it to one page.",
+        "pluginId": null,
+        "pluginVersion": null,
+        "settings": {}
+      }
+    ],
+    "plugins": [
+      {
+        "id": "job-board",
+        "name": "Job Board (sample)",
+        "version": "0.2.0",
+        "description": "A stand-in job board: reads the postings bundled with it, never the network, and reports the ones that match.",
+        "folder": "plugins/job-board",
+        "events": [
+          "plugin.job-board.posting-found"
+        ]
+      }
+    ],
+    "triggers": [
+      {
+        "name": "Scan for postings",
+        "kind": "schedule",
+        "platformKind": "Every",
+        "member": "Scout",
+        "instruction": "scan",
+        "wakeManager": "never",
+        "dailyTokenCap": null,
+        "idleOnly": true,
+        "schedule": "every 3600 seconds",
+        "cron": null,
+        "timezone": null,
+        "everySeconds": 3600,
+        "eventType": null,
+        "filter": null,
+        "folderPath": null,
+        "folderGlob": null
+      },
+      {
+        "name": "Apply pressed",
+        "kind": "event",
+        "platformKind": "Event",
+        "member": "Writer",
+        "instruction": "{event.by} pressed Apply on {event.payload}. Run `python3 {solution}/make-cover-letter.py` with that posting's JSON and the resume's path to get a first draft, then finish the letter and save it as Drafts/<job id>.md in the team's documents. Set the posting's status to `drafted` on the tracker and hand back naming the file.",
+        "wakeManager": "onHandbackOrFailure",
+        "dailyTokenCap": 400000,
+        "idleOnly": true,
+        "schedule": null,
+        "cron": null,
+        "timezone": null,
+        "everySeconds": null,
+        "eventType": "site.action",
+        "filter": "siteAction eq tracker/apply",
+        "folderPath": null,
+        "folderGlob": null
+      },
+      {
+        "name": "Resume changed",
+        "kind": "folder",
+        "platformKind": "FolderChange",
+        "member": "Writer",
+        "instruction": "The resume in Resume/ changed ({event.changed}). Re-read it and refresh the `fit` note on every open posting in the tracker.",
+        "wakeManager": "onHandbackOrFailure",
+        "dailyTokenCap": 300000,
+        "idleOnly": true,
+        "schedule": null,
+        "cron": null,
+        "timezone": null,
+        "everySeconds": null,
+        "eventType": null,
+        "filter": null,
+        "folderPath": "Resume",
+        "folderGlob": "*"
+      },
+      {
+        "name": "Morning summary",
+        "kind": "schedule",
+        "platformKind": "Cron",
+        "member": "Coordinator",
+        "instruction": "Read the tracker site's jobs collection. Tell the person, in five lines at most, which postings are new since yesterday and which drafts are waiting to be sent.",
+        "wakeManager": "never",
+        "dailyTokenCap": 100000,
+        "idleOnly": true,
+        "schedule": "cron 0 0 8 * * 1-5 (Europe/London)",
+        "cron": "0 0 8 * * 1-5",
+        "timezone": "Europe/London",
+        "everySeconds": null,
+        "eventType": null,
+        "filter": null,
+        "folderPath": null,
+        "folderGlob": null
+      },
+      {
+        "name": "Weekly digest",
+        "kind": "schedule",
+        "platformKind": "Cron",
+        "member": "Coordinator",
+        "instruction": "Summarise the week's postings and drafts for the person in ten lines at most.",
+        "wakeManager": "never",
+        "dailyTokenCap": 100000,
+        "idleOnly": true,
+        "schedule": "cron 0 0 17 * * 5 (Europe/London)",
+        "cron": "0 0 17 * * 5",
+        "timezone": "Europe/London",
+        "everySeconds": null,
+        "eventType": null,
+        "filter": null,
+        "folderPath": null,
+        "folderGlob": null
+      }
+    ],
+    "skills": [
+      {
+        "name": "job-search-playbook",
+        "description": "Use when working the Job Tracker team's search - how postings move on the tracker and what a draft letter must hold.",
+        "roles": [
+          "manager",
+          "member"
+        ],
+        "file": "skills/job-search-playbook.md",
+        "body": "# Job search playbook\n\nThe tracker site's `jobs` collection is the one list of postings. Each document is a posting as the\nScout found it, plus what the team has added:\n\n| Field | Set by | Meaning |\n|---|---|---|\n| `status` | Scout, Writer, the page | `new`, `applying` (the person pressed Apply), `drafted`, `sent`, `skipped` |\n| `fit` | Writer | Two lines on how well the resume fits the posting. |\n| `draft` | Writer | The path of the draft letter in the team's documents, once written. |\n\n## A draft letter\n\n- One page, addressed to the company by name.\n- Opens with the role and where the person saw it.\n- Three short paragraphs: why this role, the two resume items that fit it best, and a close.\n- Saved as `Drafts/<job id>.md` in the team's documents. Nobody on the team sends it: the person does.\n\n## What never happens\n\n- No member applies, emails or posts anywhere. The page's Apply button asks for a draft, nothing more.\n- No member edits the resume. If it looks out of date, say so to the Coordinator.\n"
+      }
+    ],
+    "sites": [
+      {
+        "name": "tracker",
+        "folder": "sites/tracker",
+        "files": [
+          "app.js",
+          "index.html",
+          "site.css"
+        ]
+      }
+    ],
+    "tools": {
+      "folder": "tools",
+      "installedAs": "solution",
+      "files": [
+        "make-cover-letter.py"
+      ]
+    },
+    "inputs": {
+      "settings": [
+        {
+          "member": "Scout",
+          "setting": "sources",
+          "description": "Which job boards the Scout may read. It reads only the boards you tick.",
+          "required": false
+        }
+      ],
+      "connections": [
+        {
+          "member": "Scout",
+          "slot": "board",
+          "description": "The job board account the Scout signs in with.",
+          "required": false
+        }
+      ],
+      "documents": [
+        {
+          "folder": "Resume",
+          "description": "Your reference resume, .docx or PDF. The Writer starts every letter from it.",
+          "required": true
+        }
+      ]
+    },
+    "personSettings": [
+      {
+        "member": "Scout",
+        "setting": "sources",
+        "description": "Which job boards the Scout may read. It reads only the boards you tick.",
+        "required": false,
+        "type": "list",
+        "default": [],
+        "choices": [
+          "sample"
+        ]
+      }
+    ],
+    "ignored": []
+  },
+  "diff": {
+    "members": {
+      "added": [],
+      "changed": [
+        "Scout"
+      ],
+      "removed": []
+    },
+    "triggers": {
+      "added": [
+        "Weekly digest"
+      ],
+      "changed": [],
+      "removed": [
+        "New posting"
+      ]
+    },
+    "skills": {
+      "added": [],
+      "changed": [
+        "job-search-playbook"
+      ],
+      "removed": []
+    },
+    "sites": {
+      "added": [],
+      "changed": [],
+      "removed": []
+    },
+    "tools": {
+      "added": [],
+      "changed": [],
+      "removed": []
+    },
+    "plugins": {
+      "added": [],
+      "changed": [
+        "job-board 0.1.0 -> 0.2.0"
+      ],
+      "removed": []
+    }
+  },
+  "connections": [
+    {
+      "id": "c-7f3a",
+      "name": "Work Google",
+      "provider": "google",
+      "account": "ann@example.com",
+      "status": "connected"
+    },
+    {
+      "id": "c-91be",
+      "name": "Job board",
+      "provider": "custom",
+      "account": "ann",
+      "status": "connected"
+    }
+  ]
+}

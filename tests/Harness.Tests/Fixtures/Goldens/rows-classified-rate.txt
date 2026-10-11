@@ -1,0 +1,4 @@
+2 agentContainer.started source=alpha/dev cause=1 corr=1
+{"trigger":"agentContainer.instruction.alpha/dev"}
+3 agentContainer.failed source=alpha/dev cause=1 corr=1
+{"exitCode":1,"output":"429 slow down","outputLength":13,"transcript":"alpha/dev/1","launchError":null,"stoppedByPerson":false,"handedBack":false,"failureClass":"rate","retryAfter":"2030-01-02T03:04:05.0000000\u002B00:00","tokensIn":10,"tokensOut":0,"tokensTotal":null,"tokensCachedIn":null,"tokensCacheCreation":null,"tokensReasoning":null,"tokensSource":"claude-json","usageCountedOn":null}
