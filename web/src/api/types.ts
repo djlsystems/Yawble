@@ -3070,6 +3070,11 @@ export interface ConnectionProvider {
   kind: ConnectionProviderKind
   name: string
   clientId: string | null
+  /**
+   * Where its client is from: `saved` by a person, `default` for Microsoft while the instance's own
+   * public app is in use (its ID is not answered), null with none.
+   */
+  clientSource?: 'default' | 'saved' | null
   clientSecretSet: boolean
   /** Its client is set up (and, for a custom one, its URLs): Connect is possible. */
   configured: boolean

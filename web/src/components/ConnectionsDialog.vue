@@ -759,14 +759,14 @@ async function removeProvider(provider: ConnectionProvider) {
                   :color="provider.configured ? 'positive' : 'grey-7'"
                   :outline="!provider.configured"
                 >
-                  <span data-client-state>{{ provider.configured ? 'Client set up' : 'Client not set up' }}</span>
+                  <span data-client-state>{{ provider.clientSource === 'default' ? 'This instance\'s app' : provider.configured ? 'Client set up' : 'Client not set up' }}</span>
                 </q-badge>
               </div>
               <div class="conn-tile-line mono os-text-muted">{{ provider.id }}</div>
 
               <dl class="conn-facts q-mt-xs">
                 <dt>Client ID</dt>
-                <dd class="mono" data-client-id>{{ provider.clientId ?? 'not set' }}</dd>
+                <dd class="mono" data-client-id>{{ provider.clientId ?? (provider.clientSource === 'default' ? 'this instance\'s app, until you set one' : 'not set') }}</dd>
                 <dt>Client secret</dt>
                 <dd data-client-secret>{{ provider.clientSecretSet ? 'set' : 'not set' }}</dd>
                 <dt>Connections</dt>

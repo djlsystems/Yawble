@@ -36,6 +36,7 @@ import {
   microsoftIdProblem,
   named,
   redirectUriWarning,
+  refusalWords,
   rememberGuidedConnect,
 } from '../lib/connections';
 import { productCli } from '../presentation/product';
@@ -54,7 +55,8 @@ import MailboxForm from './MailboxForm.vue';
  *    checklist, with deep links (into the person's project, once they name it), values to copy and
  *    a Done tick per step. Its last step takes the client ID (and, for Google, the secret) and saves
  *    them. Microsoft's first step also asks who can sign in; its client is a public one, with no
- *    secret at all.
+ *    secret at all. While the instance's DEFAULT MICROSOFT APP is in use (`clientSource: 'default'`),
+ *    Microsoft goes straight to Sign in, and this step is under ADVANCED… there, for an app of one's own.
  * 3. SIGN IN - for Google, the existing web flow with the ticked scopes: the browser leaves for the
  *    provider and comes back to the Console, which opens this dialog again at `result`, the account
  *    and an optional name for it. For Microsoft, sign-in with a code: the Host asks Microsoft for
@@ -67,6 +69,9 @@ import MailboxForm from './MailboxForm.vue';
  * service step when the slot takes one provider. Google's sign-in then opens in a new tab, so the
  * form the slot is in is still there when it comes back; `connected` says which connection the
  * sign-in made, and the opener binds it.
+ *
+ * A REFUSAL BECAUSE AN ORGANISATION LETS ONLY AN ADMIN APPROVE THE APP reads as one sentence saying an
+ * admin of that organisation approves it, never as Microsoft's error code alone (`refusalWords`).
  *
  * A SIGN-IN WITH A CODE STILL WAITING at the Host is picked back up on open: closing the dialog, or
  * reloading the page, does not lose the code the person may be typing at Microsoft.
@@ -132,6 +137,9 @@ const setUpNow = ref(false);
 
 const provider = computed(() => props.providers.find((candidate) => candidate.id === providerId.value) ?? null);
 const needsSetUp = computed(() => provider.value !== null && !provider.value.configured && !setUpNow.value);
+
+/** The instance's own Microsoft app is what signs in: no app of one's own to set up first. */
+const usesDefault = computed(() => provider.value?.clientSource === 'default' && !setUpNow.value);
 
 /** Each opening, so an answer read for an earlier one is dropped. */
 let opening = 0;
@@ -361,7 +369,12 @@ async function next() {
     step.value = 'signin';
     return;
   }
+  await openSetup();
+}
 
+/** Set up the app: from Next when there is no client, or from Sign in's Advanced… for an app of one's own. */
+async function openSetup() {
+  problem.value = '';
   // The guide is read again for what is ticked: its APIs and data access are those scopes' own.
   // With nothing ticked, the provider's default scopes stand for "nothing more".
   const chosen = provider.value!;
@@ -506,6 +519,7 @@ let readTimer: ReturnType<typeof setTimeout> | null = null;
 let clock: ReturnType<typeof setInterval> | null = null;
 
 const deviceState = computed(() => deviceRead.value?.state ?? 'waiting');
+const deviceSentence = computed(() => refusalWords(deviceRead.value?.sentence));
 const deviceLeft = computed(() => (device.value ? countdown(device.value.expiresAt, now.value) : ''));
 
 function stopDevice() {
@@ -532,7 +546,7 @@ async function startDevice() {
     clock = setInterval(() => (now.value = Date.now()), 1000);
     readTimer = setTimeout(readFlow, flowReadEvery);
   } catch (cause) {
-    problem.value = cause instanceof Error ? cause.message : String(cause);
+    problem.value = refusalWords(cause instanceof Error ? cause.message : String(cause));
   } finally {
     leaving.value = false;
   }
@@ -647,7 +661,7 @@ const returnedConnection = computed(() => {
   if (!returned || !('id' in returned) || !returned.id) return null;
   return props.connections.find((connection) => connection.id === returned.id) ?? null;
 });
-const refusal = computed(() => tabRefusal.value ?? (props.returned && 'refused' in props.returned ? props.returned.refused : null));
+const refusal = computed(() => refusalWords(tabRefusal.value ?? (props.returned && 'refused' in props.returned ? props.returned.refused : null)));
 
 async function finish() {
   const connection = returnedConnection.value;
@@ -680,10 +694,13 @@ const typed = computed(
 
 const stepLabels = computed(() => [
   { id: 'service', label: 'Service' },
-  {
-    id: 'setup',
-    label: provider.value && provider.value.configured && !setUpNow.value ? 'Set up the app (already set up)' : 'Set up the app',
-  },
+  // With the instance's own app, setting one up is under Advanced…, not a step of its own.
+  ...(usesDefault.value && step.value !== 'setup'
+    ? []
+    : [{
+        id: 'setup',
+        label: provider.value && provider.value.configured && !setUpNow.value && !usesDefault.value ? 'Set up the app (already set up)' : 'Set up the app',
+      }]),
   { id: 'signin', label: 'Sign in' },
 ]);
 </script>
@@ -840,7 +857,11 @@ const stepLabels = computed(() => [
 
       <!-- 2. SET UP THE APP -->
       <q-card-section v-else-if="step === 'setup' && provider" data-connect-step="setup" class="q-gutter-y-sm">
-        <div>
+        <div v-if="usesDefault" data-setup-own>
+          {{ provider.name }} signs in through this instance's app until you save one of your own here. Work
+          down the list in another tab; tick each step as you finish it.
+        </div>
+        <div v-else>
           {{ provider.name }} needs an app of your own to sign in through. Work down the list in another
           tab; tick each step as you finish it.
         </div>
@@ -985,6 +1006,19 @@ const stepLabels = computed(() => [
               ? 'Only the account\'s name and email address are asked for.'
               : `${chosenScopes.length === 1 ? 'One thing is' : `${chosenScopes.length} things are`} asked for besides the account's name and email address.` }}
           </div>
+          <div v-if="usesDefault" data-signin-advanced>
+            <q-btn
+              flat
+              dense
+              no-caps
+              size="sm"
+              label="Advanced…"
+              :loading="guideLoading"
+              data-connect-own-app
+              @click="openSetup"
+            />
+            <span class="text-caption os-text-muted">Set up the app: sign in through an app of your own instead.</span>
+          </div>
         </template>
         <div v-else :data-device-state="deviceState">
           <template v-if="deviceState === 'waiting'">
@@ -1005,7 +1039,7 @@ const stepLabels = computed(() => [
               <span>Waiting for you to sign in…</span>
             </div>
           </template>
-          <div v-else class="text-negative" data-device-sentence>{{ deviceRead?.sentence }}</div>
+          <div v-else class="text-negative" data-device-sentence>{{ deviceSentence }}</div>
         </div>
       </q-card-section>
 
@@ -1078,7 +1112,7 @@ const stepLabels = computed(() => [
           />
         </template>
         <template v-else-if="step === 'setup'">
-          <q-btn flat no-caps label="Back" @click="step = 'service'" />
+          <q-btn flat no-caps label="Back" @click="step = usesDefault ? 'signin' : 'service'" />
         </template>
         <template v-else-if="step === 'mailbox'">
           <q-btn v-if="mailboxSaved" v-close-popup color="primary" no-caps label="Finish" />

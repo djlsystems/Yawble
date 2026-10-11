@@ -24,8 +24,18 @@ credential ever leaves the Host.
 | `microsoft` | Built in: the Microsoft identity platform, PKCE, or a sign-in with a code (device flow) for a public client; the tenant follows who can sign in (`common` by default). | the `offline_access` scope | The ID token's `preferred_username` |
 | `custom` | Anything else that speaks OAuth 2.0 authorization code with PKCE: you give the authorization URL, token URL, an optional userinfo URL and default scopes. | whatever the service needs, in its scopes | userinfo, when given |
 
-Each provider needs its **client** - a client ID and a client secret you register at the provider -
-entered once, in the Connections dialog (**Set up client**). The secret is stored encrypted with the
+Microsoft needs no client of your own when the instance has a **default Microsoft client**: the
+public, multi-tenant app the operator CLI names on the control container (`HARNESS_MICROSOFT_CLIENT_ID`,
+from `yawble config get microsoftClientId`; the Host names no ID of its own). While no Microsoft client
+is saved, Microsoft is that app: audience `common`, a sign-in with a code, and no secret on any
+request. A client a person saves wins over it. With no variable (or an empty one), Microsoft is not set
+up until a person saves a client. `GET /api/connections/providers` answers `clientSource`: `default`
+while the instance's app is in use (its `clientId` is not answered), `saved` for a person's client,
+null with none. The browser sign-in is refused for the default app, which registers no redirect URI;
+it signs in with a code.
+
+Every other provider needs its **client** - a client ID and a client secret you register at the
+provider - entered once, in the Connections dialog (**Set up client**). The secret is stored encrypted with the
 instance's Data Protection keys (`<dataRoot>/keys`); it is never in plain text, never in the
 environment, and never returned by any route: the dialog shows only that it is **set**. Changing it
 means typing a new one.
@@ -53,7 +63,9 @@ Google (through Advanced…) and Microsoft (the Outlook tile) then go in three s
    When a Microsoft connection's scopes span several APIs, the lines are grouped under each API's
    name (Azure management, Azure SQL, Azure Storage, Key Vault, Log Analytics, Microsoft Graph),
    from the read's `microsoftApis`; one sign-in asks for every ticked line.
-2. **Set up the app** - only when the provider's client is not set up yet: the provider's setup
+2. **Set up the app** - only when the provider's client is not set up yet (for Microsoft with the
+   default client in use, the dialog goes straight to **Sign in**, and **Set up the app** is under
+   **Advanced…** on that step, for an app of your own): the provider's setup
    guide as a checklist, with links into the provider's console and buttons to copy each value (the
    redirect URI, the scopes, the APIs). It says first that this is a one-time setup and roughly how
    long it takes (Google about 20 to 30 minutes, Microsoft about 10), that the tick boxes only mark
@@ -112,7 +124,11 @@ or a tunnel.
    and every refresh send no `client_secret`. A `clientSecret` with `audience` is refused.
 
 The **Sign in** step then shows a code and a link: open the link, enter the code, approve. The dialog
-moves on by itself.
+moves on by itself. When the account's organisation lets only an admin approve the app, Microsoft's
+refusal is shown as one sentence - an admin of that organisation approves the app, then you sign in
+again - never as an error code alone (`ConnectionProviders.MicrosoftAdminApproval`; the Host words the
+refusals carrying `AADSTS65001`, `AADSTS90094`, `AADSTS90095`, `AADSTS900941`, `AADSTS90099`,
+`admin_consent_required` or `consent_required`, and the dialog words them alike whatever reaches it).
 
 The redirect app with a client secret is under **Advanced** (the `tenant` field and the
 secret); the long form is under [Registering a Microsoft client](#registering-a-microsoft-client).

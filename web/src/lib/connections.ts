@@ -357,6 +357,27 @@ export function microsoftIdProblem(value: string, what: 'Application (client) ID
   return `The ${what} is a GUID, such as 00000000-0000-0000-0000-000000000000. Copy it from the app's Overview page in Entra, not the app's name.`;
 }
 
+/**
+ * What a person reads when Microsoft refuses a sign-in because the account's organisation lets only an
+ * admin approve the app: one sentence, with no error code. The Host's `MicrosoftAdminApproval`, word for word.
+ */
+export const AdminApprovalSentence =
+  'An admin of that organisation approves the app before its accounts can connect, so ask one to approve it and then sign in again.';
+
+/** The Entra codes and OAuth errors that mean an admin of the organisation approves the app first. */
+const adminApprovalMarks = /AADSTS(65001|90094|90095|900941|90099)\b|admin_consent_required|consent_required/i;
+
+/**
+ * A refusal as a person reads it: the admin-approval sentence when Microsoft's answer is that one,
+ * whatever words or code it came in, and the text itself otherwise.
+ */
+export function refusalWords(text: string): string;
+export function refusalWords(text: string | null | undefined): string | null;
+export function refusalWords(text: string | null | undefined): string | null {
+  if (text == null) return null;
+  return adminApprovalMarks.test(text) ? AdminApprovalSentence : text;
+}
+
 /** "14:59": what is left of a sign-in code's life, in minutes and seconds, never below 0:00. */
 export function countdown(expiresAt: string, now: number): string {
   const left = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - now) / 1000));
