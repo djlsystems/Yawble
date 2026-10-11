@@ -3649,13 +3649,21 @@ export interface SolutionSecret {
   setWith: string
 }
 
-/** `GET /api/secrets/{key}`: whether the Host has a key set, by name. `refusal` names a key no
- *  plugin may be bound to, which is never `set`. */
+/** Where the key a member's run resolves comes from: one set from the screen (`stored`, which wins),
+ *  else the Host's environment, else none. */
+export type SecretKeySource = 'stored' | 'environment'
+
+/** `GET /api/secrets/{key}`, and the answer to setting or clearing one: whether the Host has a key
+ *  set, by name, never its value. `refusal` names a key no plugin may be bound to, which is never
+ *  `set`. `setBy` and `setAt` are the person and time a stored key was set, null otherwise. */
 export interface SecretKeyState {
   key: string
   set: boolean
   refusal: string | null
   setWith: string
+  setBy: string | null
+  setAt: string | null
+  source: SecretKeySource | null
 }
 
 /** `POST /api/solutions/preview`: what installing or updating would do. Writes nothing. */

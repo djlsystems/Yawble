@@ -1470,6 +1470,22 @@ export const removePlugin = (id: string, version?: string | null) =>
  */
 export const getSecretKey = (key: string) => json<SecretKeyState>(`/api/secrets/${encodeURIComponent(key)}`)
 
+/**
+ * Sets or replaces a secret KEY's value on this Host, stored from the screen; the next run of a
+ * member bound to it gets it, with no restart. Answers the key's state - never its value. A refused
+ * name throws its refusal. A person's.
+ */
+export const setSecretKey = (key: string, value: string) =>
+  json<SecretKeyState>(`/api/secrets/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ value }),
+  })
+
+/** Clears the key stored from the screen; one in the Host's environment still holds. A person's. */
+export const clearSecretKey = (key: string) =>
+  json<SecretKeyState>(`/api/secrets/${encodeURIComponent(key)}`, { method: 'DELETE' })
+
 const pluginSettingsPath = (team: string, member: string) =>
   `/api/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(member)}/plugin-settings`
 

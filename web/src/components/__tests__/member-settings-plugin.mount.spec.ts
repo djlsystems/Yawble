@@ -10,9 +10,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-const { getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember } = vi.hoisted(() => ({
+const { getMember, getPluginSettings, getSecretKey, listCatalog, savePluginSettings, updateMember } = vi.hoisted(() => ({
   getMember: vi.fn(),
   getPluginSettings: vi.fn(),
+  getSecretKey: vi.fn(),
   listCatalog: vi.fn(),
   savePluginSettings: vi.fn(),
   updateMember: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMember,
   getPluginSettings,
+  getSecretKey,
   listCatalog,
   savePluginSettings,
   updateMember,
@@ -80,10 +82,11 @@ const echo = {
 } as unknown as ContainerSnapshot;
 
 beforeEach(() => {
-  for (const mock of [getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember]) mock.mockReset();
+  for (const mock of [getMember, getPluginSettings, getSecretKey, listCatalog, savePluginSettings, updateMember]) mock.mockReset();
 
   listCatalog.mockResolvedValue({ agents: [{ name: 'claude', mode: 'Headless' }] });
   getPluginSettings.mockResolvedValue(structuredClone(stored));
+  getSecretKey.mockImplementation(async (key: string) => ({ key, set: true, refusal: null, setWith: '', setBy: null, setAt: null, source: 'environment' }));
   savePluginSettings.mockResolvedValue(undefined);
   updateMember.mockResolvedValue({ ...echo });
 });

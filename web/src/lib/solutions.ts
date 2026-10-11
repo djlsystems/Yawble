@@ -285,13 +285,16 @@ export function secretSentence(secret: SolutionSecret, state: SecretState): stri
     return `Not needed: ${why}.`;
   }
   if (state === 'set') return 'Set on this Host.';
-  return `Not set on this Host. That is not a problem for the install, but its source fails until it is set. Set it with: ${secretSetWith(secret.key)}.`;
+  return `Not set on this Host. That is not a problem for the install, but its source fails until it is set. To set it, ${secretSetWith(secret.key)}.`;
 }
 
-/** The exact commands that set a key, under the operator CLI's own name: it prompts for the value, and
- * the Host reads it when it restarts. */
+/**
+ * The ways to set a key, the screen first: its write-only field here, which the next run reads with
+ * no restart; or the operator CLI under its own name, which prompts for the value and the Host reads
+ * when it restarts.
+ */
 export function secretSetWith(key: string): string {
-  return `${productCli} secret set ${key} (it prompts for the value), then ${productCli} up to restart the Host`;
+  return `type its value in the field here and press Set, or run ${productCli} secret set ${key} (it prompts for the value), then ${productCli} up to restart the Host`;
 }
 
 /** A first run's time as a person reads it: "8:51 PM" today, "Thu 8:00 AM" on another day. */

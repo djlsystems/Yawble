@@ -8,6 +8,7 @@ import type {
 } from '../api/types';
 import { bindingsBody } from './connections';
 import { boundsHint, boundsProblem } from './numberBounds';
+import { localTime, wireInstant } from './localTime';
 import { secretSetWith } from './solutions';
 
 /**
@@ -101,9 +102,22 @@ export function initialSecrets(
  */
 export function secretKeySentence(state: SecretKeyState, required: boolean): string {
   if (state.refusal) return state.refusal;
-  if (state.set) return 'Set on this Host.';
+  if (state.set) return secretKeySetWords(state);
   const meaning = required ? 'the hire is refused until it is' : 'the plugin runs without it until it is';
-  return `Not set on this Host: ${meaning}. Set it with: ${secretSetWith(state.key)}.`;
+  return `Not set on this Host: ${meaning}. To set it, ${secretSetWith(state.key)}.`;
+}
+
+/**
+ * Where a set key comes from: set from the screen, by whom and when; or the Host's environment (the
+ * CLI's `secret set`), which a key set here overrides. Never its value - the Host sends none.
+ */
+export function secretKeySetWords(state: SecretKeyState): string {
+  if (state.source === 'environment') return "Set in this Host's environment.";
+  if (state.source === 'stored' && state.setBy) {
+    const at = state.setAt ? wireInstant(state.setAt) : NaN;
+    return Number.isNaN(at) ? `Set by ${state.setBy}.` : `Set by ${state.setBy} on ${localTime(at, { date: true })}.`;
+  }
+  return 'Set on this Host.';
 }
 
 /** A number box's text as the number it names, or null when it names none. */
