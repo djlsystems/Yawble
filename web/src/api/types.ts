@@ -1510,6 +1510,18 @@ export interface TeamActivity {
   serverNow: string
   window: ActivityWindow
   members: ActivityMember[]
+  /** Where a person said the team's activity view begins; `from` already starts there. */
+  activityFrom?: ActivityFrom | null
+}
+
+/**
+ * WHERE A TEAM'S ACTIVITY VIEW BEGINS, as a person set it with "Start activity from now": the
+ * instant (UTC) and the person's email. The activity and token-run reads start their windows here;
+ * nothing else reads it.
+ */
+export interface ActivityFrom {
+  at: string
+  by: string
 }
 
 /**
@@ -1525,6 +1537,8 @@ export interface TeamTokenRuns {
   serverNow: string
   window: 'workflows' | 'requested' | 'none'
   runs: TeamTokenRun[]
+  /** Where a person said the team's activity view begins; `from` already starts there. */
+  activityFrom?: ActivityFrom | null
 }
 
 /**
