@@ -312,7 +312,7 @@ describe('the Teams list', () => {
 
     /**
      * A TEAM WHOSE ACTIVITY VIEW A PERSON STARTED LATER: the Host answers its narrowed window, and
-     * the shared span follows it - a team running on schedules since long ago no longer stretches
+     * the shared span follows it, so a team running on schedules since long ago does not stretch
      * every other chart back to its install.
      */
     it('follows a team\'s window as the Host answers it, narrowed by where its activity view begins', async () => {
