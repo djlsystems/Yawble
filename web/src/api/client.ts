@@ -90,6 +90,7 @@ import type {
   TeamWasReset,
   RepositoryResetPreview,
   TeamWorkflowTiming,
+  ActivityFrom,
   TeamActivity,
   TeamTokenRuns,
   TeamWorkflows,
@@ -379,6 +380,18 @@ export const getTeamActivity = (team: TeamId, period?: { from: string; to: strin
     `/api/teams/${encodeURIComponent(team)}/activity`
       + (period ? `?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}` : ''),
   )
+
+/**
+ * "Start activity from now" (`'now'`, the Host's clock) and "Show all history" (`null`): where the
+ * team's activity and token charts begin. Nothing is deleted, and spend, caps and outcomes do not
+ * read it. A person only; the answer is the setting as it now stands.
+ */
+export const setActivityFrom = (team: TeamId, from: 'now' | null) =>
+  json<{ activityFrom: ActivityFrom | null }>(`/api/teams/${encodeURIComponent(team)}/activity-from`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ from }),
+  })
 
 /**
  * A team's runs and the tokens each used, at the time each ended, over its whole history since its

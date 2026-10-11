@@ -310,6 +310,67 @@ describe('the Teams list', () => {
       for (const id of ['alpha', 'beta', 'gamma']) expect(tileFor(view, id).props('range')).toEqual({ from: 100, to: 900 });
     });
 
+    /**
+     * A TEAM WHOSE ACTIVITY VIEW A PERSON STARTED LATER: the Host answers its narrowed window, and
+     * the shared span follows it - a team running on schedules since long ago no longer stretches
+     * every other chart back to its install.
+     */
+    it('follows a team\'s window as the Host answers it, narrowed by where its activity view begins', async () => {
+      const install = iso(-600);
+      let narrowed = false;
+
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        const scheduled = String(url) === '/api/teams/beta/activity';
+        const answer: TeamActivity = scheduled
+          ? {
+            ...activity,
+            from: narrowed ? iso(20) : install,
+            members: [{ ...activity.members[0]!, spans: [{ state: 'running', from: narrowed ? iso(20) : install, to: iso(30), workflow: 9 }] }],
+            ...(narrowed ? { activityFrom: { at: iso(20), by: 'ines@example.com' } } : {}),
+          }
+          : activity;
+
+        return String(url).endsWith('/activity')
+          ? new Response(JSON.stringify(answer), { status: 200, headers: { 'Content-Type': 'application/json' } })
+          : new Response('{}', { status: 404 });
+      }));
+      localStorage.setItem('harness.teamsActivityRelative', '1');
+
+      async function shared() {
+        setActivePinia(createPinia());
+        const board = useConsoleStore();
+        board.$patch({
+          teams: [
+            { id: 'alpha' as TeamId, name: 'Alpha', paused: false, containers: members },
+            { id: 'beta' as TeamId, name: 'Beta', paused: false, containers: members },
+          ],
+        } as never);
+        vi.spyOn(board, 'refresh').mockResolvedValue();
+        vi.spyOn(board, 'refreshRollupIfShowing').mockImplementation(() => {});
+
+        wrapper = mount(TeamsView, { attachTo: document.body });
+        await flushPromises();
+        await flushPromises();
+
+        const ranges = wrapper.findAllComponents(TeamStatisticsTile).map((tile) => tile.props('range'));
+        wrapper.unmount();
+        wrapper = undefined;
+        return ranges;
+      }
+
+      expect(await shared()).toEqual([
+        { from: Date.parse(install), to: Date.parse(iso(30)) },
+        { from: Date.parse(install), to: Date.parse(iso(30)) },
+      ]);
+
+      narrowed = true;
+
+      expect(await shared()).toEqual([
+        { from: Date.parse(iso(0)), to: Date.parse(iso(30)) },
+        { from: Date.parse(iso(0)), to: Date.parse(iso(30)) },
+      ]);
+    });
+
     it('is kept in this browser and read back on the next visit', async () => {
       const first = await mountView();
       await first.view.find('[data-activity-relative]').trigger('click');

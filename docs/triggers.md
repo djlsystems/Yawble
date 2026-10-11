@@ -71,3 +71,13 @@ The trigger routes return the same state read-only: `capReachedToday`, `cappedUn
 - **A team installed from a package that is waiting for a required input** (a document, a connection) skips every fire with the reason "waiting for …", naming the input, until it is provided.
 
 **Run now** in the Triggers dialog fires a schedule immediately, once, through the same checks: it is skipped for the same reasons, and it does not move the schedule's next fire.
+
+## Where a team's activity view begins
+
+A team that fires on a schedule starts a workflow every few minutes, so its Activity chart runs back to the first of them, and the Teams list's **Same time span** stretches every other team's chart to match. **Start activity from now** in the team's Activity dialog moves the start of its Activity chart and its token chart to the moment it is pressed. It asks first: the chart and the token chart begin now, nothing is deleted, spend, caps and outcomes are unchanged, and Show all history brings it back.
+
+- **With it set**, the dialog says **Activity shown from** the time, on the reader's own clock, **set by** the person's email, beside **Show all history**, which clears it and draws the team's whole history again.
+- **A workflow or run that began earlier and was still going** is drawn from the new start.
+- **Same time span** uses each team's window as the Host answers it, so it follows a team's new start.
+- **Nothing else reads it.** A workflow's spend and budget, a trigger's spend today and its daily cap, a member's recent cost, outcomes' figures and the ledger are the same with it set or cleared, and no row is deleted.
+- **Only a person sets or clears it**, with `PUT /api/teams/{team}/activity-from` and `{ "from": "now" }` or `{ "from": null }`. A cloned team starts without it.
