@@ -424,7 +424,8 @@ public static class PluginEndpoints
             advanced = c.Value.Advanced,
         });
 
-    /// <summary>Each connection slot, its scopes in the object form, and the Plugins screen's line.</summary>
+    /// <summary>Each connection slot, its scopes in the object form, the Plugins screen's line, and
+    /// for a slot admitting Microsoft each API it needs a token for.</summary>
     public static Dictionary<string, object> ConnectionFields(PluginManifest manifest) => manifest.Connections.ToDictionary(
         c => c.Key,
         c => (object)new
@@ -434,6 +435,10 @@ public static class PluginEndpoints
             scopes = c.Value.Scopes,
             required = c.Value.Required,
             summary = c.Value.Summary,
+            // Each Microsoft API the slot needs a token for, with its scopes; null when it does not admit Microsoft.
+            microsoftApis = c.Value.Admits(ConnectionProviders.Microsoft)
+                ? c.Value.MicrosoftApis.Select(a => new { api = a.Api, name = a.Name, scopes = a.Scopes })
+                : null,
         });
 
     private static Dictionary<string, object> SecretFields(PluginManifest manifest) => manifest.Secrets.ToDictionary(

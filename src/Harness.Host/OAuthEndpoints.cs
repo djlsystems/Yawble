@@ -16,9 +16,11 @@ public interface IOAuthEndpoints
     Task<OAuthTokenAnswer> ExchangeCodeAsync(
         OAuthProvider provider, string? clientSecret, string code, string redirectUri, string codeVerifier, CancellationToken ct);
 
-    /// <summary>The refresh token grant.</summary>
+    /// <summary>The refresh token grant. <paramref name="scopes"/>, when given, names the one API the
+    /// access token is for (Microsoft answers one API's token per request); null asks for what the
+    /// sign-in granted.</summary>
     Task<OAuthTokenAnswer> RefreshAsync(
-        OAuthProvider provider, string? clientSecret, string refreshToken, CancellationToken ct);
+        OAuthProvider provider, string? clientSecret, string refreshToken, CancellationToken ct, IReadOnlyList<string>? scopes = null);
 
     /// <summary>The provider's userinfo for <paramref name="accessToken"/>, or null when it has none or
     /// refuses.</summary>
@@ -66,7 +68,8 @@ public sealed record OAuthTokenAnswer(
     string? IdToken,
     string? Error,
     string? ErrorDescription,
-    bool Refused)
+    bool Refused,
+    string? Suberror = null)
 {
     public bool Ok => Error is null && !string.IsNullOrEmpty(AccessToken);
 
@@ -89,12 +92,19 @@ public sealed class HttpOAuthEndpoints(HttpClient http) : IOAuthEndpoints
             ["code_verifier"] = codeVerifier,
         }, ct);
 
-    public Task<OAuthTokenAnswer> RefreshAsync(OAuthProvider provider, string? clientSecret, string refreshToken, CancellationToken ct) =>
-        TokenAsync(provider, clientSecret, new Dictionary<string, string>
+    public Task<OAuthTokenAnswer> RefreshAsync(
+        OAuthProvider provider, string? clientSecret, string refreshToken, CancellationToken ct, IReadOnlyList<string>? scopes = null)
+    {
+        var form = new Dictionary<string, string>
         {
             ["grant_type"] = "refresh_token",
             ["refresh_token"] = refreshToken,
-        }, ct);
+        };
+
+        if (scopes is { Count: > 0 }) form["scope"] = string.Join(' ', scopes);
+
+        return TokenAsync(provider, clientSecret, form, ct);
+    }
 
     public Task<OAuthTokenAnswer> DeviceTokenAsync(OAuthProvider provider, string? clientSecret, string deviceCode, CancellationToken ct) =>
         TokenAsync(provider, clientSecret, new Dictionary<string, string>
@@ -149,7 +159,7 @@ public sealed class HttpOAuthEndpoints(HttpClient http) : IOAuthEndpoints
         {
             return new OAuthTokenAnswer(
                 null, null, null, null, null, error ?? $"HTTP {status}", Text(root, "error_description"),
-                Refused: error is not null && status is >= 400 and < 500);
+                Refused: error is not null && status is >= 400 and < 500, Suberror: Text(root, "suberror"));
         }
 
         return new OAuthTokenAnswer(

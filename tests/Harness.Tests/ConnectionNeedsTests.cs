@@ -333,7 +333,7 @@ public sealed class ConnectionNeedsTests : IAsyncLifetime
         public Task<OAuthTokenAnswer> ExchangeCodeAsync(OAuthProvider provider, string? clientSecret, string code, string redirectUri, string codeVerifier, CancellationToken ct) =>
             throw new InvalidOperationException("No provider is called in these tests.");
 
-        public Task<OAuthTokenAnswer> RefreshAsync(OAuthProvider provider, string? clientSecret, string refreshToken, CancellationToken ct) =>
+        public Task<OAuthTokenAnswer> RefreshAsync(OAuthProvider provider, string? clientSecret, string refreshToken, CancellationToken ct, IReadOnlyList<string>? scopes = null) =>
             throw new InvalidOperationException("No provider is called in these tests.");
 
         public Task<JsonElement?> UserInfoAsync(OAuthProvider provider, string accessToken, CancellationToken ct) =>

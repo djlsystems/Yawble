@@ -406,10 +406,71 @@ token, refreshes and rotates, and hands the plugin a fresh access token on each 
 - **Without `connections`** a run gets `"connections": {}`.
 - **A malformed slot** refuses the plugin with its reason on the Plugins screen, as other manifest
   faults do.
-- **The Plugins screen** shows each slot ("needs a Google or Microsoft connection").
+- **The Plugins screen** shows each slot ("needs a Google or Microsoft connection"); a slot whose
+  Microsoft scopes span several APIs names each ("needs a Microsoft connection for Azure management,
+  Azure SQL and Azure Storage"), and `/api/plugins` lists them per slot as `microsoftApis`
+  (`[{ api, name, scopes }]`, null for a slot that does not admit Microsoft).
 - **Binding.** A person picks a connection per slot when hiring the member and in Member settings.
   The member stores the connection's id, never a token. A Manager or Concierge hire may name a
   connection only when a person has already bound that same connection to a member of the same team.
+
+#### Several Microsoft APIs from one connection
+
+A Microsoft access token is for one API. A `microsoft` slot's `scopes` may name scopes of several
+APIs, and the plugin gets one fresh token per API, from one connection the person signed in to once:
+
+```json
+"connections": {
+  "azure": {
+    "description": "The Azure subscription to report on.",
+    "providers": ["microsoft"],
+    "scopes": {
+      "microsoft": [
+        "https://management.azure.com/user_impersonation",
+        "https://database.windows.net/user_impersonation",
+        "https://storage.azure.com/user_impersonation",
+        "offline_access"
+      ]
+    },
+    "required": true
+  }
+}
+```
+
+- **Which API.** A scope's API is the part before its last path segment:
+  `https://management.azure.com/user_impersonation` is API `https://management.azure.com/`, and
+  `https://database.windows.net//.default` is `https://database.windows.net/`. A bare scope
+  (`Mail.Read`, `openid`, `offline_access`) is Microsoft Graph's (`https://graph.microsoft.com/`).
+  The sign-in scopes `openid`, `email`, `profile` and `offline_access` go with every API's request,
+  so Graph gets a token of its own only when the slot names a Graph scope besides them, or names no
+  other API.
+- **Names.** The Host names Microsoft Graph, Azure management, Azure SQL, Azure Storage, Key Vault
+  and Log Analytics; any other API is named by its address.
+- **The sign-in.** The person signs in once. The sign-in asks for every API's scopes, so Microsoft
+  shows one consent for all of them. Microsoft's token endpoint answers one API's token per request,
+  so the Host redeems the connection's one refresh token for each API with that API's scopes (plus
+  `offline_access`). Where Microsoft refuses a sign-in with a code that names several APIs
+  (`invalid_scope`), the Host asks again naming only the first API's scopes; the other APIs are
+  then redeemed from the refresh token the same way, which succeeds when the account or an
+  administrator has consented to them for the app. The connection records every API's scopes it
+  asked for.
+- **Tokens.** Each API's token is redeemed when a run needs it and again when it is within 5
+  minutes of expiry, so each is refreshed on its own. Refreshes of one connection run one at a time,
+  so one at a time per connection and API. A rotated refresh token is stored after each redemption,
+  before the next one and before any token is handed out; a rotation the Host cannot store starts
+  no run. The refresh token is stored as ciphertext; each API's access token is held in the Host's
+  memory only, and a restart redeems it again.
+- **A connection with one API** is unchanged: its sign-in's own token, refreshed without naming
+  scopes.
+- **Failures.** An API the account cannot get a token for (no consent to it, a scope it does not
+  know, a sign-in rule for it) blocks the run with a sentence naming the connection, the API and
+  Admin → Connections; the connection stays `ok` for its other APIs. A refresh token Microsoft
+  refuses marks the connection `needs-reconnect` and blocks the run, as for any connection.
+- **Binding** checks every API's scopes; a missing one is named with its API ("`https://database.windows.net/user_impersonation` (Azure SQL)").
+- **Needs.** `GET /api/connections/needs?provider=microsoft` answers `microsoftApis` besides
+  `scopes`: `[{ api, name, scopes: [{ scope, words, plugins }] }]`, the merged scopes grouped by API
+  in first-asked order, each in words where the Host has them (null otherwise). Google's answer has
+  no `microsoftApis`.
 
 ### Reading site data: `reads`
 
@@ -474,7 +535,15 @@ name. The install checks the same before it writes.
   "secrets": { "token": "…resolved now…" },
   "connections": {
     "mail": { "provider": "google", "account": "person@example.com", "accessToken": "…fresh now…",
-              "expiresAt": "2026-09-28T21:05:00Z", "scopes": ["https://mail.google.com/"] }
+              "expiresAt": "2026-09-28T21:05:00Z", "scopes": ["https://mail.google.com/"] },
+    "azure": { "provider": "microsoft", "account": "ops@contoso.com", "accessToken": "…management's…",
+               "expiresAt": "2026-09-28T21:05:00Z", "scopes": ["openid", "email", "offline_access", "https://management.azure.com/user_impersonation", "https://database.windows.net/user_impersonation"],
+               "tokens": {
+                 "https://management.azure.com/": { "accessToken": "…fresh now…", "expiresAt": "2026-09-28T21:05:00Z",
+                                                    "scopes": ["https://management.azure.com/user_impersonation"] },
+                 "https://database.windows.net/": { "accessToken": "…fresh now…", "expiresAt": "2026-09-28T20:50:00Z",
+                                                    "scopes": ["https://database.windows.net/user_impersonation"] }
+               } }
   },
   "workingDirectory": "/data/teams/Mixed/workspaces/Echo",
   "worktrees": [],
@@ -501,7 +570,13 @@ name. The install checks the same before it writes.
   before the run when it would expire within 5 minutes, so a run always starts with at least that
   long. It is `{}` when the manifest declares no slot or the member has none bound; a plugin that ignores it
   is unaffected. The refresh
-  token and the client secret never reach a plugin. A slot bound to a **mailbox** (`imap`) holds
+  token and the client secret never reach a plugin. A **Microsoft** slot also carries `tokens`, its
+  last member: API → `{ accessToken, expiresAt, scopes }`, one entry per API the slot's scopes name
+  (see [Several Microsoft APIs](#several-microsoft-apis-from-one-connection)), in the slot's order.
+  `accessToken` and `expiresAt` are the first API's, and `scopes` is every scope the connection was
+  granted; a slot with one API has one entry, holding the same token, and its other members are
+  exactly as without `tokens`. Every token in `tokens` joins the run's redaction set. A Google or
+  custom slot has no `tokens`. A slot bound to a **mailbox** (`imap`) holds
   instead `{ "kind": "imap", "account", "username", "password", "imap": { "host", "port", "security" },
   "smtp": { "host", "port", "security" } }`, `security` being `TLS` or `STARTTLS`. The app password is
   on stdin only, never in the environment or argv, and is redacted from everything the plugin writes,
@@ -673,8 +748,8 @@ slot like any member's.
   service declares a `connections` slot (see [Connections](#connections-oauth-accounts)) and reads
   `connections.<slot>.accessToken` on stdin. It never asks the person for a token, never takes a
   refresh token as a secret, and never ships an "authorize" command of its own.
-  - The access token is added to the run's redaction set with the bound secrets, and every rule
-    above applies to it.
+  - The access token, and every token in a Microsoft slot's `tokens`, is added to the run's
+    redaction set with the bound secrets, and every rule above applies to it.
   - It is never put in argv or the environment, and the plugin must not write it to its workspace:
     the next run gets a new one.
   - **Long runs.** A token lives about an hour. A plugin whose run could outlast it (a long sync)

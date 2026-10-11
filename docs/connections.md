@@ -96,7 +96,12 @@ or a tunnel.
 2. **Allow public client flows** - under Authentication, set **Allow public client flows: Yes**.
 3. **API permissions** - add the delegated Microsoft Graph permissions the ticked scopes need, plus
    `offline_access`, each one copyable (`https://graph.microsoft.com/Mail.Read` is `Mail.Read`). In a
-   work or school tenant an admin may need to **grant consent** before anyone can sign in.
+   work or school tenant an admin may need to **grant consent** before anyone can sign in. A slot
+   naming other Microsoft APIs needs their delegated permissions too, under **APIs my organization
+   uses**: Azure Service Management `user_impersonation` (Azure management), Azure SQL Database
+   `user_impersonation`, Azure Storage `user_impersonation`, Azure Key Vault `user_impersonation`,
+   Log Analytics API `Data.Read`. One sign-in covers them all; see
+   [Several Microsoft APIs](plugins.md#several-microsoft-apis-from-one-connection).
 4. **Paste the Application (client) ID** - checked as a GUID before saving and again by the Host; for
    *only my organisation*, the Directory (tenant) ID too, also checked as a GUID. Saved with
    `PUT /api/connections/providers/microsoft` `{ clientId, audience: "common" | "organizations" |

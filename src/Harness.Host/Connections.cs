@@ -8,13 +8,27 @@ using Microsoft.AspNetCore.Http;
 namespace Harness.Host;
 
 /// <summary>What a run is handed for one slot: the fresh access token and what it is for, or for a
-/// mailbox its servers and app password.</summary>
+/// mailbox its servers and app password. A Microsoft slot also has <see cref="Tokens"/>: one fresh
+/// access token per API its scopes name, the first of them being <see cref="AccessToken"/>.</summary>
 public sealed record ConnectionGrant(
     string ConnectionId, string Provider, string Account, string AccessToken, DateTimeOffset? ExpiresAt, IReadOnlyList<string> Scopes,
-    MailboxGrant? Mailbox = null)
+    MailboxGrant? Mailbox = null, IReadOnlyList<ApiToken>? Tokens = null)
 {
-    /// <summary>The value the run's redaction set takes: the access token, or the app password.</summary>
-    public string Secret => Mailbox?.Password ?? AccessToken;
+    /// <summary>The values the run's redaction set takes: every access token, or the app password.</summary>
+    public IReadOnlyList<string> Secrets => Mailbox is { } mailbox
+        ? [mailbox.Password]
+        : [.. new[] { AccessToken }.Concat(Tokens?.Select(t => t.AccessToken) ?? []).Distinct(StringComparer.Ordinal)];
+}
+
+/// <summary>One Microsoft API's fresh access token, as a run is handed it. Its printed form leaves the
+/// token out.</summary>
+public sealed record ApiToken(string Api, string AccessToken, DateTimeOffset? ExpiresAt, IReadOnlyList<string> Scopes)
+{
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"Api = {Api}, ExpiresAt = {ExpiresAt}, Scopes = [{string.Join(' ', Scopes)}]");
+        return true;
+    }
 }
 
 /// <summary>A mailbox as a run is handed it. Its printed form leaves the password out.</summary>
@@ -104,6 +118,10 @@ public sealed class Connections(
     public const string Where = "Admin → Connections";
 
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _refreshing = new(StringComparer.Ordinal);
+
+    /// <summary>Each further Microsoft API's access token, per connection and API: in this Host's
+    /// memory only, never in a row or a file. A restart redeems it again from the refresh token.</summary>
+    private readonly ConcurrentDictionary<(string Connection, string Api), ApiToken> _apiTokens = new();
 
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? ((wait, ct) => Task.Delay(wait, clock, ct));
 
@@ -412,6 +430,15 @@ public sealed class Connections(
     {
         var account = await AccountAsync(provider, answer, ct);
         var granted = Granted(asked, answer);
+
+        if (provider.Kind == ConnectionProviders.Microsoft && MicrosoftApis.Several(asked))
+        {
+            // ONE TOKEN ANSWERS ONE API: the sign-in's token names only the first API's scopes. Every
+            // other API asked is redeemed from the refresh token at the run, which says so when the
+            // account cannot get it.
+            var answered = granted.Where(s => !ConnectionProviders.IdentityScopes.Contains(s)).Select(MicrosoftApis.ApiOf).ToHashSet(StringComparer.Ordinal);
+            granted = Union(granted, asked.Where(s => !answered.Contains(MicrosoftApis.ApiOf(s))));
+        }
         var tokens = new ConnectionTokens(answer.RefreshToken, answer.AccessToken, Expiry(now, answer.ExpiresIn));
 
         if (reconnectId is not null)
@@ -432,6 +459,7 @@ public sealed class Connections(
                 }
 
                 var scopes = Union(existing.Scopes, granted);
+                ForgetApis(existing.Id);
                 await store.ReconnectAsync(existing.Id, scopes, tokens, who.Row(
                     TenantActions.ConnectionReconnected, existing.Id, existing.Name,
                     new { connection = existing.Id, provider = provider.Id, account = existing.Account, scopes, wasNeedingReconnect = existing.Status == ConnectionRecord.NeedsReconnect }), ct);
@@ -503,6 +531,16 @@ public sealed class Connections(
         }
 
         var answer = await endpoints.DeviceAuthorizationAsync(provider, scopes!, ct);
+
+        if (!answer.Ok && provider.Kind == ConnectionProviders.Microsoft && MicrosoftApis.Several(scopes!) && SeveralApisRefused(answer))
+        {
+            // A SIGN-IN THAT MAY NAME ONE API ONLY: it asks for the first API's scopes, and the run
+            // redeems the refresh token for each other API.
+            var first = MicrosoftApis.Tokens(scopes!)[0].Api;
+            answer = await endpoints.DeviceAuthorizationAsync(
+                provider, [.. scopes!.Where(s => ConnectionProviders.IdentityScopes.Contains(s) || MicrosoftApis.ApiOf(s) == first)], ct);
+        }
+
         if (!answer.Ok) return (null, $"{provider.Name} did not start the sign-in: {answer.Reason}.");
 
         var now = clock.GetUtcNow();
@@ -674,9 +712,12 @@ public sealed class Connections(
     /// <summary>
     /// A fresh access token for <paramref name="connectionId"/>, or the sentence the run is blocked
     /// with. Serialised per connection: two members sharing it wait for one refresh, and the second
-    /// reads the token the first stored.
+    /// reads the token the first stored. <paramref name="scopes"/> are what the slot asks of the
+    /// connection: a Microsoft connection whose scopes span several APIs is handed one token per API
+    /// those scopes name (all of its own when null).
     /// </summary>
-    public async Task<(ConnectionGrant? Grant, string? Refusal)> GrantAsync(string connectionId, string slot, CancellationToken ct = default)
+    public async Task<(ConnectionGrant? Grant, string? Refusal)> GrantAsync(
+        string connectionId, string slot, CancellationToken ct = default, IReadOnlyList<string>? scopes = null)
     {
         var gate = Gate(connectionId);
         await gate.WaitAsync(ct);
@@ -693,12 +734,15 @@ public sealed class Connections(
 
             if (connection.Mailbox is { } mailbox) return await MailboxGrantAsync(connection, mailbox, ct);
 
+            var microsoft = connection.Provider == ConnectionProviders.Microsoft;
+            if (microsoft && MicrosoftApis.Several(connection.Scopes)) return await ApisGrantAsync(connection, scopes ?? connection.Scopes, ct);
+
             var tokens = await store.TokensAsync(connectionId, ct) ?? new ConnectionTokens(null, null, null);
             var now = clock.GetUtcNow();
 
             if (tokens.AccessToken is { } cached && (tokens.AccessExpiresAt is null || tokens.AccessExpiresAt > now + RefreshEarly))
             {
-                return (new ConnectionGrant(connection.Id, connection.Provider, connection.Account, cached, tokens.AccessExpiresAt, connection.Scopes), null);
+                return (OneApiGrant(connection, cached, tokens.AccessExpiresAt, microsoft), null);
             }
 
             if (tokens.RefreshToken is null)
@@ -733,7 +777,7 @@ public sealed class Connections(
                 throw new RefreshNotStoredException(exception);
             }
 
-            return (new ConnectionGrant(connection.Id, connection.Provider, connection.Account, answer.AccessToken!, refreshed.AccessExpiresAt, connection.Scopes), null);
+            return (OneApiGrant(connection, answer.AccessToken!, refreshed.AccessExpiresAt, microsoft), null);
         }
         finally
         {
@@ -741,14 +785,131 @@ public sealed class Connections(
         }
     }
 
+    /// <summary>A connection with one API: its stored token, and for Microsoft that token again as
+    /// the one entry of <see cref="ConnectionGrant.Tokens"/>.</summary>
+    private static ConnectionGrant OneApiGrant(ConnectionRecord connection, string accessToken, DateTimeOffset? expiresAt, bool microsoft) =>
+        new(connection.Id, connection.Provider, connection.Account, accessToken, expiresAt, connection.Scopes,
+            Tokens: microsoft ? [new ApiToken(MicrosoftApis.Tokens(connection.Scopes)[0].Api, accessToken, expiresAt, connection.Scopes)] : null);
+
+    /// <summary>
+    /// A MICROSOFT CONNECTION WITH SEVERAL APIS: one access token per API <paramref name="asked"/>
+    /// names, each redeemed from the one stored refresh token with that API's scopes and kept in
+    /// memory until 5 minutes before it expires, so each is refreshed on its own. A rotated refresh
+    /// token is stored after each redemption, before the next and before any token is handed out.
+    /// Called under the connection's gate.
+    ///
+    /// A refusal that is the API's (no consent to it, a scope it does not have, sign-in rules for it),
+    /// or any refusal once another API was redeemed with the same refresh token, blocks the run naming
+    /// the API and leaves the connection as it is; any other refusal is the refresh token's, and marks
+    /// the connection <c>needs-reconnect</c> as a single API's does.
+    /// </summary>
+    private async Task<(ConnectionGrant? Grant, string? Refusal)> ApisGrantAsync(
+        ConnectionRecord connection, IReadOnlyList<string> asked, CancellationToken ct)
+    {
+        var granted = MicrosoftApis.Group(connection.Scopes).ToDictionary(g => g.Api, g => g.Scopes, StringComparer.Ordinal);
+        var handed = new List<ApiToken>();
+        var redeemed = false;
+        OAuthProvider? provider = null;
+        string? secret = null;
+
+        foreach (var api in MicrosoftApis.Tokens(asked))
+        {
+            var now = clock.GetUtcNow();
+
+            if (_apiTokens.TryGetValue((connection.Id, api.Api), out var held) && (held.ExpiresAt is null || held.ExpiresAt > now + RefreshEarly))
+            {
+                handed.Add(held);
+                continue;
+            }
+
+            var tokens = await store.TokensAsync(connection.Id, ct);
+            if (tokens?.RefreshToken is null)
+            {
+                return (null, await MarkAsync(connection, "the provider issued no refresh token, so the access token cannot be renewed", ct));
+            }
+
+            if (provider is null)
+            {
+                if (await ProviderAsync(connection.Provider, ct) is not { Configured: true } found)
+                {
+                    return (null, $"Connection {connection.Named} could not be refreshed: its provider '{connection.Provider}' has no OAuth client on this Host. Set it in {Where}.");
+                }
+
+                provider = found;
+                secret = await store.ClientSecretAsync(provider.Id, ct);
+            }
+
+            IReadOnlyList<string> apiScopes = [.. (granted.GetValueOrDefault(api.Api) ?? api.Scopes).Where(s => !ConnectionProviders.IdentityScopes.Contains(s))];
+            var answer = await endpoints.RefreshAsync(provider, secret, tokens.RefreshToken, ct, [.. apiScopes, "offline_access"]);
+
+            if (!answer.Ok)
+            {
+                if (answer.Refused && (redeemed || IsApisOwnRefusal(answer))) return (null, ApiRefused(connection, api.Api, answer.Reason));
+                if (answer.Refused) return (null, await MarkAsync(connection, answer.Reason, ct));
+
+                // TRANSIENT: the provider was not reached. The connection is not the problem.
+                return (null, $"Connection {connection.Named} could not get a token for {MicrosoftApis.Named(api.Api)} just now ({answer.Reason}). The next run tries again.");
+            }
+
+            // STORED FIRST: a rotated refresh token is on disk before this API is redeemed again, the
+            // next API is redeemed, or any token leaves.
+            try
+            {
+                await store.StoreRotatedRefreshAsync(connection.Id, answer.RefreshToken, ct);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException exception)
+            {
+                throw new RefreshNotStoredException(exception);
+            }
+
+            var token = new ApiToken(api.Api, answer.AccessToken!, Expiry(now, answer.ExpiresIn), apiScopes);
+            _apiTokens[(connection.Id, api.Api)] = token;
+            handed.Add(token);
+            redeemed = true;
+        }
+
+        var first = handed[0];
+        return (new ConnectionGrant(connection.Id, connection.Provider, connection.Account, first.AccessToken, first.ExpiresAt, connection.Scopes, Tokens: handed), null);
+    }
+
+    /// <summary>Microsoft's answers that refuse one API and not the refresh token: no consent to it
+    /// (AADSTS65001, AADSTS65004), a scope or resource it does not know (AADSTS70011, AADSTS500011),
+    /// or a sign-in rule for it (multi-factor, Conditional Access).</summary>
+    private static bool IsApisOwnRefusal(OAuthTokenAnswer answer) =>
+        answer.Error is "invalid_scope" or "consent_required" or "interaction_required"
+        || answer.Suberror is "consent_required"
+        || ApiRefusalCodes.Any(code => answer.ErrorDescription?.Contains(code, StringComparison.Ordinal) == true);
+
+    private static readonly string[] ApiRefusalCodes = ["AADSTS65001", "AADSTS65004", "AADSTS70011", "AADSTS500011", "AADSTS50076", "AADSTS50079", "AADSTS53003"];
+
+    /// <summary>A device authorization Microsoft refused for naming more than one API.</summary>
+    private static bool SeveralApisRefused(DeviceAuthorizationAnswer answer) =>
+        answer.Error is "invalid_scope"
+        || new[] { "AADSTS28000", "AADSTS28003", "AADSTS70011" }.Any(code => answer.ErrorDescription?.Contains(code, StringComparison.Ordinal) == true);
+
+    public static string ApiRefused(ConnectionRecord connection, string api, string reason) =>
+        $"Connection {connection.Named} cannot get a token for {MicrosoftApis.Named(api)}: Microsoft refused it ({reason}). "
+        + $"Reconnect it from {Where} and consent to {MicrosoftApis.NameOf(api)}, or have an administrator consent to it for the app.";
+
+    /// <summary>Drops a connection's held API tokens: it was reconnected, marked or disconnected.</summary>
+    private void ForgetApis(string connectionId)
+    {
+        foreach (var key in _apiTokens.Keys.Where(k => k.Connection == connectionId)) _apiTokens.TryRemove(key, out _);
+    }
+
     /// <summary>One gate per connection: its refreshes and its reconnects, one at a time.</summary>
     private SemaphoreSlim Gate(string connectionId) => _refreshing.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
 
     /// <summary>A disconnected connection's gate is dropped, so the gates do not grow without end.</summary>
-    public void Forget(string connectionId) => _refreshing.TryRemove(connectionId, out _);
+    public void Forget(string connectionId)
+    {
+        _refreshing.TryRemove(connectionId, out _);
+        ForgetApis(connectionId);
+    }
 
     private async Task<string> MarkAsync(ConnectionRecord connection, string reason, CancellationToken ct)
     {
+        ForgetApis(connection.Id);
         await store.MarkNeedsReconnectAsync(connection.Id, reason, new TriggerAudit(
             null, null, TenantActions.ConnectionNeedsReconnect, connection.Id, connection.Name,
             JsonSerializer.Serialize(new { connection = connection.Id, provider = connection.Provider, account = connection.Account, reason })), ct);
@@ -994,13 +1155,17 @@ public sealed class Connections(
             return new BindingRefusal($"Slot `{slot}` takes a {joined} connection; {connection.Named} is a {ConnectionProviders.Display(connection.Provider)} connection.");
         }
 
-        var missing = declared.ScopesFor(connection.Provider).Where(s => !connection.Scopes.Contains(s, StringComparer.Ordinal)).ToList();
+        var asked = declared.ScopesFor(connection.Provider);
+        var missing = asked.Where(s => !connection.Scopes.Contains(s, StringComparer.Ordinal)).ToList();
+
+        // EVERY API'S SCOPES are checked; a slot spanning several Microsoft APIs names each one's.
+        var apis = connection.Provider == ConnectionProviders.Microsoft && MicrosoftApis.Several(asked);
 
         if (missing.Count > 0)
         {
             return new BindingRefusal(
                 $"Connection {connection.Named} was not granted the scope{(missing.Count == 1 ? "" : "s")} "
-                + string.Join(", ", missing.Select(s => $"`{s}`"))
+                + string.Join(", ", missing.Select(s => apis ? $"`{s}` ({MicrosoftApis.NameOf(MicrosoftApis.ApiOf(s))})" : $"`{s}`"))
                 + $" that slot `{slot}` needs. "
                 + (retry is null
                     ? $"Reconnect it from the member's settings, which asks for {(missing.Count == 1 ? "it" : "them")}."
