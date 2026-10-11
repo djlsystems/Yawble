@@ -234,30 +234,92 @@ public static class PluginEndpoints
                 + "member's next run. Answers as GET does.");
 
         // WHETHER A KEY IS SET, by its name only - what a solution's preview says of each secret it
-        // binds (`set`, `setWith`), for the key a person types at a hire. The value never leaves the
-        // store; a key a plugin may never be pointed at answers its refusal and no `set`.
+        // binds (`set`, `setWith`), for the key a person types at a hire - and who set it from the
+        // screen, when, and which source holds it. The value never leaves the store; a key a plugin
+        // may never be pointed at answers its refusal and no `set`.
         app.MapGet("/api/secrets/{key}", (
             [Description("The logical key, as in ACME_STORAGE_KEY.")] string key,
-            ISecretStore secrets) =>
-        {
-            var refusal = EnvironmentSecretStore.Refusal(key);
-            return Results.Ok(new
-            {
-                key,
-                set = refusal is null && secrets.TryGet(key) is not null,
-                refusal,
-                setWith = Solutions.SolutionSecret.SetWithFor(key),
-            });
-        })
+            PluginSecretStore secrets) => Results.Ok(SecretAnswer(key, secrets)))
             .WithTags(Area)
             .HumansOnly()
-            .WithSummary("Whether a secret key is set on this Host")
+            .WithSummary("Whether a secret key is set on this Host, by whom and from which source")
             .WithDescription(
-                "`{ key, set, refusal, setWith }` for one logical key: `set` is whether the Host has a value "
-                + "for it, asked by name - the value is never read into an answer. `refusal` is the sentence a "
-                + "binding of it is refused with (not a key's form, the platform's own, a model provider's "
-                + "credential), with `set` false; null otherwise. `setWith` is how an operator sets it, as a "
-                + "solution's preview says it.");
+                "`{ key, set, refusal, setWith, setBy, setAt, source }` for one logical key: `set` is whether "
+                + "the Host has a value for it, asked by name - the value is never read into an answer. "
+                + "`source` is `stored` (set from the screen; `setBy` and `setAt` say who and when), "
+                + "`environment` (the Host's environment, where the operator CLI's `secret set` arrives; "
+                + "`setBy` and `setAt` null) or null when not set. A stored key wins over the environment. "
+                + "`refusal` is the sentence a binding of it is refused with (not a key's form, the "
+                + "platform's own, a model provider's credential), with `set` false; null otherwise. "
+                + "`setWith` is how a person sets it: the screen first, the operator CLI second.");
+
+        // A KEY SET FROM THE SCREEN, by a person only: stored as Data Protection ciphertext with its
+        // tenant row in the same transaction, read by the next run of every member binding it.
+        app.MapPut("/api/secrets/{key}", async (
+            [Description("The logical key, as in ACME_STORAGE_KEY.")] string key,
+            SecretSubmission body, PluginSecretStore secrets, HttpContext context, CancellationToken ct) =>
+            {
+                if (EnvironmentSecretStore.Refusal(key) is { } refusal)
+                {
+                    return Results.Json(SecretAnswer(key, secrets, refusal), statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                if (PluginSecretStore.ValueRefusal(body.Value) is { } refused)
+                {
+                    return Results.Json(SecretAnswer(key, secrets, refused), statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                try
+                {
+                    await secrets.SetAsync(key, body.Value!, SecretActor(context), ct);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    return Results.Json(SecretAnswer(key, secrets, Unrecorded(key, exception)), statusCode: StatusCodes.Status500InternalServerError);
+                }
+
+                return Results.Ok(SecretAnswer(key, secrets));
+            })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Set or replace a secret key from the screen")
+            .WithDescription(
+                "Stores `{ \"value\": \"...\" }` for the logical key as Data Protection ciphertext, with a "
+                + "`secrets.set` or `secrets.replaced` tenant row naming the key (never the value) in the same "
+                + "transaction. Every plugin member binding the key reads it from its next run, with no restart; "
+                + "it wins over the Host's environment. Answers as GET does. 400 with `error` (and `refusal` for "
+                + "the key) for a key a plugin may not be pointed at, or a value that is empty, multi-line, padded "
+                + "with white space, under 4 or over 8192 characters; 500, with nothing stored, when the tenant "
+                + "row cannot be written. No answer carries the value.");
+
+        app.MapDelete("/api/secrets/{key}", async (
+            [Description("The logical key, as in ACME_STORAGE_KEY.")] string key,
+            PluginSecretStore secrets, HttpContext context, CancellationToken ct) =>
+            {
+                if (EnvironmentSecretStore.Refusal(key) is { } refusal)
+                {
+                    return Results.Json(SecretAnswer(key, secrets, refusal), statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                try
+                {
+                    await secrets.ClearAsync(key, SecretActor(context), ct);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    return Results.Json(SecretAnswer(key, secrets, Unrecorded(key, exception)), statusCode: StatusCodes.Status500InternalServerError);
+                }
+
+                return Results.Ok(SecretAnswer(key, secrets));
+            })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Clear a secret key set from the screen")
+            .WithDescription(
+                "Removes the stored key with a `secrets.cleared` tenant row in the same transaction; a run then "
+                + "reads the Host's environment for it, so the answer's `source` is `environment` when the Host "
+                + "has it there. Nothing stored answers the same and writes no row. Answers as GET does. 400 "
+                + "for a refused key; 500, with nothing cleared, when the row cannot be written.");
 
         app.MapPost("/api/plugins/rescan", async (
             PluginCatalog plugins, TeamRegistry teams, TenantLogging audit, HttpContext context, CancellationToken ct) =>
@@ -539,6 +601,34 @@ public static class PluginEndpoints
             return null;
         }
     }
+
+    /// <summary>The one shape every <c>/api/secrets/{key}</c> answer takes, with <c>error</c> when
+    /// <paramref name="error"/> is given. Never a value.</summary>
+    private static Dictionary<string, object?> SecretAnswer(string key, PluginSecretStore secrets, string? error = null)
+    {
+        var refusal = EnvironmentSecretStore.Refusal(key);
+        var status = refusal is null ? secrets.Status(key) : SecretStatus.NotSet;
+        var answer = new Dictionary<string, object?>
+        {
+            ["key"] = key,
+            ["set"] = status.Set,
+            ["refusal"] = refusal,
+            ["setWith"] = Solutions.SolutionSecret.SetWithFor(key),
+            ["setBy"] = status.SetBy,
+            ["setAt"] = status.SetAt,
+            ["source"] = status.Source,
+        };
+
+        if (error is not null) answer["error"] = error;
+        return answer;
+    }
+
+    private static string Unrecorded(string key, Exception exception) =>
+        $"`{key}` was not changed: its record could not be written ({exception.Message}).";
+
+    private static CredentialActor SecretActor(HttpContext context) => new(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+        context.User.FindFirstValue(ClaimTypes.Email) ?? "unknown");
 }
 
 /// <summary>Body of <c>POST /api/plugins/install</c>.</summary>
@@ -548,3 +638,6 @@ public sealed record InstallPlugin(string? Path, bool Replace = false);
 public sealed record PluginSettingsChange(
     Dictionary<string, JsonElement>? Config, Dictionary<string, string>? Secrets,
     Dictionary<string, string>? Connections = null);
+
+/// <summary>Body of <c>PUT /api/secrets/{key}</c>: the value, which no answer ever carries.</summary>
+public sealed record SecretSubmission(string? Value);

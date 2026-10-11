@@ -146,12 +146,13 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
 }
 
 /// <summary>
-/// SECRETS FROM THE HOST'S OWN ENVIRONMENT - where every `secret set NAME` value already arrives
-/// (the operator's 0600 env file, handed to the container at start). Nothing new for an operator:
-/// `secret set ACME_STORAGE_KEY`, restart, and bind `ACME_STORAGE_KEY` on the member.
+/// SECRETS FROM THE HOST'S OWN ENVIRONMENT - where every `secret set NAME` value arrives (the
+/// operator's 0600 env file, handed to the container at start): `secret set ACME_STORAGE_KEY`,
+/// restart, and bind `ACME_STORAGE_KEY` on the member. <see cref="PluginSecretStore"/> reads a key a
+/// person set from the screen first and this second.
 ///
 /// REFUSES WHAT A PLUGIN MUST NEVER BE POINTED AT: the platform's own `HARNESS_*` variables and
-/// every model provider's credential. A later encrypted store replaces this class and nothing else.
+/// every model provider's credential - for both sources, since the stored keys take the same names.
 /// </summary>
 public sealed class EnvironmentSecretStore : ISecretStore
 {

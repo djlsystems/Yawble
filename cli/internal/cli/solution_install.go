@@ -210,10 +210,12 @@ func (r secretRow) needed(value any) bool {
 	return false
 }
 
-// secretSetWith is the exact way to set key: this CLI prompts for the value, and the Host reads it
-// when it restarts.
+// secretSetWith is the exact way to set key: the screen first - its field in the member's settings,
+// read by the member's next run - and this CLI second, which prompts for the value for the Host to
+// read when it restarts.
 func secretSetWith(key string) string {
-	return "yawble secret set " + key + " (it prompts for the value), then yawble up to restart the Host"
+	return "its field in the member's settings on the screen, read by the next run; or yawble secret set " + key +
+		" (it prompts for the value), then yawble up to restart the Host"
 }
 
 // renderSecrets prints each secret by key name: set, not set (its source fails until it is, and

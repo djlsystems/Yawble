@@ -585,6 +585,12 @@ const words: Record<string, Words> = {
   'agents.credential-set': credential("set an agent's credential", 'set'),
   'agents.credential-replaced': credential("replaced an agent's credential", 'replaced'),
   'agents.credential-cleared': credential("cleared an agent's credential", 'cleared'),
+  'secrets.set': { did: 'set a plugin key', detail: (d) => sentence([`${text(d, 'key') ?? 'a key'} set from the screen`]) },
+  'secrets.replaced': { did: 'replaced a plugin key', detail: (d) => sentence([`${text(d, 'key') ?? 'a key'} replaced from the screen`]) },
+  'secrets.cleared': {
+    did: 'cleared a plugin key',
+    detail: (d) => sentence([`${text(d, 'key') ?? 'a key'} cleared`, "runs read the Host's environment for it"]),
+  },
   'agent.foreign-tools': {
     did: 'saw an agent call foreign tools',
     detail: (d) =>

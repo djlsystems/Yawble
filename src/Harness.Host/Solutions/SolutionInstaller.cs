@@ -124,11 +124,13 @@ public sealed record SolutionSecret(
     string Member, string Field, string Key, string Description, bool Required, SolutionPlanSecretWhen? When,
     bool Set, bool? Needed, string SetWith)
 {
-    /// <summary>How an operator sets <paramref name="key"/>: the operator CLI prompts for the value,
-    /// and the Host reads its environment when it starts. The web and the CLI print the command
-    /// itself under the product's name.</summary>
+    /// <summary>How a person sets <paramref name="key"/>: the screen first - its field in the member's
+    /// settings, stored and read by the member's next run - and the operator CLI second, which prompts
+    /// for the value for the Host to read from its environment when it starts. The web and the CLI
+    /// print the command itself under the product's name.</summary>
     public static string SetWithFor(string key) =>
-        $"the operator CLI's `secret set {key}` (it prompts for the value), then its `up` to restart the Host";
+        $"its field in the member's settings on the screen (Set, Replace or Clear), read by the next run; "
+        + $"or the operator CLI's `secret set {key}` (it prompts for the value), then its `up` to restart the Host";
 }
 
 public sealed record SolutionStepFailed(

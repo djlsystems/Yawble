@@ -603,9 +603,11 @@ builder.Services.AddSingleton(sp => new PluginRemover(
 var pluginEvents = EventCatalog.Register(pluginCatalog);
 
 // A PLUGIN MEMBER'S SETTINGS: configuration and secret BINDINGS in `team_member_config`, and the values
-// resolved by logical key from the Host's own environment at each run - where `secret set` values
-// already arrive. Swapping the resolver for an encrypted store later changes nothing else.
-builder.Services.AddSingleton<ISecretStore>(new EnvironmentSecretStore());
+// resolved by logical key at each run: a key a person set from the screen (`plugin_secrets`, Data
+// Protection ciphertext) first, then the Host's own environment, where `secret set` values arrive.
+builder.Services.AddSingleton(sp => new PluginSecretStore(
+    database, sp.GetRequiredService<IDataProtectionProvider>(), new EnvironmentSecretStore()));
+builder.Services.AddSingleton<ISecretStore>(sp => sp.GetRequiredService<PluginSecretStore>());
 builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlitePluginMemberSettings(database));
 
 // CONNECTIONS: OAuth accounts the Host holds for plugins (see Connections). The client secret and

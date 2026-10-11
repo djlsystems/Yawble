@@ -620,5 +620,21 @@ public static class AuthSchema
             ALTER TABLE teams ADD COLUMN activity_from TEXT NULL;
             ALTER TABLE teams ADD COLUMN activity_from_by TEXT NULL;
             """),
+
+        // A PLUGIN KEY A PERSON SET FROM THE SCREEN, one row per logical key (`ACME_STORAGE_KEY`).
+        // `value_protected` is Data Protection ciphertext under the instance's `<dataRoot>/keys`, as
+        // `agent_credentials` holds a credential; no column holds the value or any part of it.
+        // Beside `tenant_events`, so every set, replace and clear lands with its row in one
+        // transaction or not at all.
+        new MigrationStep(
+            "auth-025",
+            """
+            CREATE TABLE plugin_secrets (
+                key             TEXT PRIMARY KEY,
+                value_protected TEXT NOT NULL,
+                set_by          TEXT NOT NULL,
+                set_at          TEXT NOT NULL
+            );
+            """),
     ];
 }
