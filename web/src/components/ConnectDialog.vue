@@ -339,6 +339,17 @@ function toggle(which: 'unticked' | 'detailed' | 'done', key: string) {
   set.value = next;
 }
 
+/**
+ * The scope lines as the service step shows them: one group per Microsoft API, named, when the
+ * needs span several (each API's permissions under its own name); otherwise one unnamed group,
+ * the list as it always was.
+ */
+const scopeGroups = computed(() => {
+  const apis = needs.value?.microsoftApis ?? [];
+  if (apis.length > 1) return apis.map((api) => ({ api: api.api as string | null, name: api.name as string | null, lines: api.scopes }));
+  return [{ api: null, name: null, lines: needs.value?.scopes ?? [] }];
+});
+
 /** The scopes to ask for: every one the plugins want, less those unticked, in the Host's order. */
 const chosenScopes = computed(() => (needs.value?.scopes ?? []).map((line) => line.scope).filter((scope) => !unticked.value.has(scope)));
 
@@ -769,35 +780,41 @@ const stepLabels = computed(() => [
             </div>
             <template v-else>
               <div data-scopes-heading>{{ provider.name }} will allow the plugins to:</div>
-              <div
-                v-for="line in needs.scopes"
-                :key="line.scope"
-                class="connect-scope"
-                :data-connect-scope="line.scope"
-              >
-                <q-checkbox
-                  dense
-                  :model-value="!unticked.has(line.scope)"
-                  :aria-label="line.words ?? line.scope"
-                  @update:model-value="toggle('unticked', line.scope)"
-                />
-                <div class="connect-scope-text">
-                  <div data-scope-words :class="{ mono: line.words === null }">{{ line.words ?? line.scope }}</div>
-                  <div class="text-caption os-text-muted" data-scope-plugins>
-                    Wanted by {{ line.plugins.join(', ') }}
-                  </div>
-                  <q-btn
-                    v-if="line.words !== null"
-                    flat
+              <div v-for="group in scopeGroups" :key="group.api ?? ''" :data-connect-api="group.api ?? undefined">
+                <div v-if="group.name" class="text-subtitle2 q-mt-sm" data-connect-api-name>
+                  {{ group.name }}
+                  <span class="mono text-caption os-text-muted">{{ group.api }}</span>
+                </div>
+                <div
+                  v-for="line in group.lines"
+                  :key="line.scope"
+                  class="connect-scope"
+                  :data-connect-scope="line.scope"
+                >
+                  <q-checkbox
                     dense
-                    no-caps
-                    size="sm"
-                    class="connect-details"
-                    :label="detailed.has(line.scope) ? 'hide details' : 'details'"
-                    @click="toggle('detailed', line.scope)"
+                    :model-value="!unticked.has(line.scope)"
+                    :aria-label="line.words ?? line.scope"
+                    @update:model-value="toggle('unticked', line.scope)"
                   />
-                  <div v-if="line.words !== null && detailed.has(line.scope)" class="mono text-caption" data-scope-raw>
-                    {{ line.scope }}
+                  <div class="connect-scope-text">
+                    <div data-scope-words :class="{ mono: line.words === null }">{{ line.words ?? line.scope }}</div>
+                    <div class="text-caption os-text-muted" data-scope-plugins>
+                      Wanted by {{ line.plugins.join(', ') }}
+                    </div>
+                    <q-btn
+                      v-if="line.words !== null"
+                      flat
+                      dense
+                      no-caps
+                      size="sm"
+                      class="connect-details"
+                      :label="detailed.has(line.scope) ? 'hide details' : 'details'"
+                      @click="toggle('detailed', line.scope)"
+                    />
+                    <div v-if="line.words !== null && detailed.has(line.scope)" class="mono text-caption" data-scope-raw>
+                      {{ line.scope }}
+                    </div>
                   </div>
                 </div>
               </div>

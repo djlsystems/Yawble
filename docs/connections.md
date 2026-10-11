@@ -50,6 +50,9 @@ Google (through Advanced…) and Microsoft (the Outlook tile) then go in three s
    **details**, and a scope the Host has no words for reads as itself. Every line is ticked; untick
    any you do not want. Nothing is typed: the scopes come from the installed plugins' connection
    slots (`GET /api/connections/needs?provider=<id>`, or `&plugin=<id>&slot=<name>` for one slot).
+   When a Microsoft connection's scopes span several APIs, the lines are grouped under each API's
+   name (Azure management, Azure SQL, Azure Storage, Key Vault, Log Analytics, Microsoft Graph),
+   from the read's `microsoftApis`; one sign-in asks for every ticked line.
 2. **Set up the app** - only when the provider's client is not set up yet: the provider's setup
    guide as a checklist, with links into the provider's console and buttons to copy each value (the
    redirect URI, the scopes, the APIs). It says first that this is a one-time setup and roughly how
