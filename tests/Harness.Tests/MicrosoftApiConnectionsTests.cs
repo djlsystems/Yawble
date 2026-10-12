@@ -516,15 +516,18 @@ public sealed class MicrosoftApiConnectionsTests : IAsyncLifetime
         _microsoft.RefuseSeveralApisAtPoll = true;
 
         // The first code names every API's scopes, so the person consents to all of them at once.
+        // The poll starts with the flow and may already have asked for the second code by the time
+        // the start answers, so this reads the first code and leaves the count for after the wait.
         var flowId = await StartDeviceAsync(AzureScopes, name: "Estate");
-        var first = Assert.Single(_microsoft.DeviceStarts);
+        var first = _microsoft.Starts()[0];
         Assert.All(AzureScopes, s => Assert.Contains(s, first));
 
         // Its poll is refused for naming more than one resource: the same flow waits on a second code
         // naming the first API's scopes and the sign-in scopes only.
         var waiting = await FlowAsync(flowId, until: "waiting", userCode: "U2-WXYZ");
-        Assert.Equal(2, _microsoft.DeviceStarts.Count);
-        var second = _microsoft.DeviceStarts[1];
+        var starts = _microsoft.Starts();
+        Assert.Equal(2, starts.Count);
+        var second = starts[1];
         Assert.Contains(ManagementScope, second);
         Assert.DoesNotContain(SqlScope, second);
         Assert.DoesNotContain(StorageScope, second);
@@ -806,6 +809,12 @@ public sealed class MicrosoftApiConnectionsTests : IAsyncLifetime
         public readonly Channel<string> DeviceAnswers = Channel.CreateUnbounded<string>();
 
         private readonly Lock _lock = new();
+
+        /// <summary>The device authorizations asked so far, read under the lock the poll writes them under.</summary>
+        public IReadOnlyList<IReadOnlyList<string>> Starts()
+        {
+            lock (_lock) return [.. DeviceStarts];
+        }
 
         public Task<OAuthTokenAnswer> ExchangeCodeAsync(
             OAuthProvider provider, string? clientSecret, string code, string redirectUri, string codeVerifier, CancellationToken ct)
