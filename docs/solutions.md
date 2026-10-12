@@ -616,9 +616,9 @@ and the Manager so, and the Concierge hands the person the link on the address t
 ## The full example: Job Tracker
 
 Job Tracker is a team that finds job postings, tracks them on a page and drafts a cover letter when
-the person presses **Apply**. The package to install is on the marketplace, [yawble.ai](https://yawble.ai).
-This repository keeps a copy only as test data, `tests/Fixtures/Packages/job-tracker`: the package the
-solution tests check and install, never listed, built into an image or shipped.
+the person presses **Apply**. It is a worked example, not a published package: it lives in this
+repository as test data, `tests/Fixtures/Packages/job-tracker`, the package the solution tests check
+and install, never listed, built into an image or shipped.
 
 - **Coordinator** is the Manager. Each weekday at 08:00 London time it summarises the tracker.
 - **Scout** is the `job-board` plugin (a stand-in board that reads postings bundled with it, never the
@@ -864,7 +864,7 @@ $ yawble solution check ./job-tracker
 
 ### Version 1.1.0
 
-Job Tracker 1.1.0 is on the marketplace too. The tests make it from their test data:
+The tests make Job Tracker 1.1.0 from their test data:
 `tests/Fixtures/Packages/job-tracker-1.1.0.overlay` holds only what 1.1.0 changes, copied over a
 copy of `tests/Fixtures/Packages/job-tracker`. Against 1.0.0 it adds the member Reviewer and its Weekly review trigger, changes New posting (one
 more instruction sentence, a cap of 250,000), removes the Resume changed trigger, adds the team

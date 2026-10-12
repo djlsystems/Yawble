@@ -1042,7 +1042,6 @@ plugin declares none.
   loopback listener: the start request, the browser's round trip, a redirect with another state
   ignored, the provider's refusal, reconnect by name, the code never on a command line, `list`,
   `remove` refused naming the members, and a request no Host answers withdrawn.
-  The WhoAmI plugin on the marketplace has its own `go test` against a userinfo double.
   `PluginRescanRequestTests` shows a plugin installed after start is listed with no restart, and pins
   the report's refusals, its hired members and its `0600` mode. `PrepareVolumeTests` pins
   `/data/plugins` as `harness:agent 0750`, created when missing.

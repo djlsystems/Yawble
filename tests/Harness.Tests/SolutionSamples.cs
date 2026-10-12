@@ -6,7 +6,7 @@ namespace Harness.Tests;
 /// <summary>
 /// The Job Tracker test package in <c>tests/Fixtures/Packages/job-tracker</c>, copied somewhere a test
 /// may change it. <c>1.1.0</c> is the 1.0.0 folder with <c>tests/Fixtures/Packages/job-tracker-1.1.0.overlay</c>
-/// copied over it. It is test data: the package a person installs is on the marketplace.
+/// copied over it. It is test data, a worked example: no published package carries it.
 /// </summary>
 public static class SolutionSamples
 {
