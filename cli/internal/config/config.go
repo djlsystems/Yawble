@@ -54,8 +54,8 @@ const DefaultPort = 8080
 const DefaultMarketplaceCatalog = "https://yawble.ai/api/marketplace/catalog.json"
 
 // DefaultMicrosoftClientID is the published Microsoft app's Application (client) ID: a multi-tenant
-// public client that signs in with a code. Empty while the app is not registered, so `up` passes none.
-const DefaultMicrosoftClientID = ""
+// public client that signs in with a code, registered in the DJL Systems tenant as "Yawble".
+const DefaultMicrosoftClientID = "40149369-2b22-45de-a449-cbd7f4756377"
 
 // MicrosoftClientDefault is what an unset microsoftClientId reads: DefaultMicrosoftClientID. A variable
 // only so tests drive `up` with a default that is not empty.
