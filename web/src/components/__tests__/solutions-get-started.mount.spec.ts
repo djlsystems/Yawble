@@ -9,10 +9,11 @@
 // opens: the wizard for a solution, the plugin install dialog for a plugin. Nothing is installed by
 // Get. A catalog not checked, one the console cannot reach and a refused Get each read as a
 // sentence, and package text is text.
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SolutionsLauncher from '../SolutionsLauncher.vue';
 import type { MarketplaceCatalog, MarketplacePackage } from '../../api/types';
+import { resetFirstOpenRefresh } from '../../lib/marketplaceRefresh';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, field, settle } from '../../test/formProbe';
 import { fakeHost, reply, sent, wizardRoutes, type Call, type Route } from '../../test/solutionFixtures';
@@ -91,9 +92,13 @@ const catalogRoute = (answer: MarketplaceCatalog): Route => (call) =>
 const fetchRoute = (id: string, status: number, body: unknown): Route => (call) =>
   call.method === 'POST' && call.url === `/api/marketplace/${id}/fetch` ? reply(status, body) : undefined;
 
+// The first open's refresh is its own spec (marketplace-first-open): here the page load has had it.
+beforeEach(() => resetFirstOpenRefresh(true));
+
 afterEach(() => {
   vi.unstubAllGlobals();
   resetBody();
+  resetFirstOpenRefresh();
 });
 
 async function getStarted() {

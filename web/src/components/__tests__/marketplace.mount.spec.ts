@@ -22,6 +22,7 @@ import SolutionWizard from '../SolutionWizard.vue';
 import InstallFromFolderDialog from '../InstallFromFolderDialog.vue';
 import { Ribbon, SolutionsAction } from '../../lib/ribbon';
 import type { InstalledSolution, MarketplaceCatalog, MarketplacePackage } from '../../api/types';
+import { resetFirstOpenRefresh } from '../../lib/marketplaceRefresh';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, settle } from '../../test/formProbe';
 import { fakeHost, installedRow, reply, sent, updatePreview, wizardRoutes, type Call, type Route } from '../../test/solutionFixtures';
@@ -108,6 +109,9 @@ function serve(installed: InstalledSolution[], packages: MarketplacePackage[] = 
 }
 
 enableAutoUnmount(afterEach);
+
+// The first open's refresh is its own spec (marketplace-first-open): here the page load has had it.
+beforeEach(() => resetFirstOpenRefresh(true));
 
 afterEach(() => {
   vi.unstubAllGlobals();

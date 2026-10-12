@@ -4,6 +4,7 @@ import { getMarketplace, refreshMarketplace } from '../api/client';
 import type { MarketplaceCatalog, MarketplacePackage } from '../api/types';
 import { installedWords, kindWords, noneMatchWords, notCheckedWords, packageMatches, plainNeeds, unreachableWords } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
+import { claimFirstOpenRefresh } from '../lib/marketplaceRefresh';
 import { whenWords } from '../lib/solutionPanel';
 import FilterText from './FilterText.vue';
 
@@ -25,6 +26,11 @@ import FilterText from './FilterText.vue';
  * A catalog the Host has not read says so and why, never as an empty list; a catalog the console
  * cannot reach and a Get the Host refused each read as a sentence. EVERYTHING FROM THE CATALOG IS
  * TEXT: names, summaries and needs are interpolated, never bound as HTML.
+ *
+ * THE FIRST OPEN IN A PAGE LOAD READS THE CATALOG AGAIN: after the catalog the Host has, Browse
+ * refreshes once (`claimFirstOpenRefresh`), showing what it has with Refresh's loading indicator
+ * until the answer comes. A catalog not checked asks nothing more. A Refresh that fails keeps the
+ * catalog shown, with the sentence above it.
  */
 const emit = defineEmits<{ get: [pkg: MarketplacePackage, folder: string]; read: [catalog: MarketplaceCatalog] }>();
 
@@ -51,7 +57,10 @@ async function read(how: () => Promise<MarketplaceCatalog>) {
   }
 }
 
-onMounted(() => read(getMarketplace));
+onMounted(async () => {
+  await read(getMarketplace);
+  if (catalog.value?.checked && claimFirstOpenRefresh()) await read(refreshMarketplace);
+});
 
 function refresh() {
   refused.value = null;
@@ -83,9 +92,9 @@ async function get(pkg: MarketplacePackage) {
       <q-btn flat dense no-caps icon="refresh" label="Refresh" :loading="loading" data-catalog-refresh @click="refresh" />
     </div>
 
-    <div v-if="unreachable" class="os-body text-negative" role="alert" data-catalog-unreachable>{{ unreachable }}</div>
+    <div v-if="unreachable" class="os-body text-negative" :class="{ 'q-mb-md': catalog }" role="alert" data-catalog-unreachable>{{ unreachable }}</div>
 
-    <div v-else-if="catalog && !catalog.checked" class="os-body os-text-muted" data-catalog-not-checked>
+    <div v-if="catalog && !catalog.checked" class="os-body os-text-muted" data-catalog-not-checked>
       {{ notCheckedWords(catalog) }}
     </div>
 
