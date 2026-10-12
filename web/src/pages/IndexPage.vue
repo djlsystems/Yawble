@@ -20,6 +20,7 @@ import { useDisplayStore } from '../stores/display';
 import { useKanbanStore } from '../stores/kanban';
 import { useCapacityStore } from '../stores/capacity';
 import { useConsoleHistory } from '../composables/useConsoleHistory';
+import { useConsoleTitle } from '../composables/useConsoleTitle';
 import type { Team, TeamId } from '../api/types';
 import {
   StalledBadgeGrace,
@@ -51,6 +52,8 @@ const kanban = useKanbanStore();
 
 // Back and Forward move between the Teams table, a team's board and the Kanban.
 useConsoleHistory();
+// The tab names the view: Teams, Kanban or the team.
+useConsoleTitle();
 const capacity = useCapacityStore();
 const { hasTeams, error, signedOut, activeTeam, openTeams, connected, connectionEstablished } =
   storeToRefs(board);

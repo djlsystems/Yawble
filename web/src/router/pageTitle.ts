@@ -11,3 +11,18 @@ export function pageTitle(route: Pick<RouteLocationNormalized, 'matched'>): stri
     | undefined;
   return name ? `${productTitle} - ${name}` : productTitle;
 }
+
+/**
+ * The Console's page name, which its address alone does not say: the Teams table, the Kanban, or
+ * the team whose board is showing ("Console" while no team is).
+ */
+export function consolePageName(view: string, teamName: string | null | undefined): string {
+  if (view === 'teams') return 'Teams';
+  if (view === 'kanban') return 'Kanban';
+  return teamName || 'Console';
+}
+
+/** The tab title for a Console page name. */
+export function titleFor(name: string): string {
+  return `${productTitle} - ${name}`;
+}
