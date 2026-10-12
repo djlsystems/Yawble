@@ -70,8 +70,10 @@ public sealed record OpenDeviceFlow(string FlowId, string Provider, string UserC
 }
 
 /// <summary>A sign-in with a code as it stands: <c>waiting</c>, <c>done</c> (with the connection's
-/// id), <c>refused</c> or <c>expired</c>, and the sentence that says so.</summary>
-public sealed record DeviceFlowState(string State, string Sentence, string? ConnectionId);
+/// id), <c>refused</c> or <c>expired</c>, and the sentence that says so, with the code the person
+/// enters, where, and until when: a second code replaces the first in place. Never the device code.</summary>
+public sealed record DeviceFlowState(
+    string State, string Sentence, string? ConnectionId, string UserCode, string VerificationUri, DateTimeOffset ExpiresAt);
 
 /// <summary>Who acts: a person's id and email, or the operator at the engine.</summary>
 public sealed record ConnectionActor(string Id, string? Email)
@@ -555,13 +557,14 @@ public sealed class Connections(
 
         var answer = await endpoints.DeviceAuthorizationAsync(provider, scopes!, ct);
 
-        if (!answer.Ok && provider.Kind == ConnectionProviders.Microsoft && MicrosoftApis.Several(scopes!) && SeveralApisRefused(answer))
+        var codeScopes = scopes!;
+
+        if (!answer.Ok && provider.Kind == ConnectionProviders.Microsoft && MicrosoftApis.Several(scopes!) && SeveralApisRefused(answer.Error, answer.ErrorDescription))
         {
             // A SIGN-IN THAT MAY NAME ONE API ONLY: it asks for the first API's scopes, and the run
             // redeems the refresh token for each other API.
-            var first = MicrosoftApis.Tokens(scopes!)[0].Api;
-            answer = await endpoints.DeviceAuthorizationAsync(
-                provider, [.. scopes!.Where(s => ConnectionProviders.IdentityScopes.Contains(s) || MicrosoftApis.ApiOf(s) == first)], ct);
+            codeScopes = FirstApiScopes(scopes!);
+            answer = await endpoints.DeviceAuthorizationAsync(provider, codeScopes, ct);
         }
 
         if (!answer.Ok && provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NeedsAdminApproval(answer.Error, answer.ErrorDescription))
@@ -575,14 +578,14 @@ public sealed class Connections(
         Sweep(now);
 
         var flow = new DeviceSignIn(
-            Random(24), actor, provider.Id, scopes!, string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(), reconnecting?.Id,
-            answer.DeviceCode!, answer.UserCode!, answer.VerificationUri!,
-            answer.ExpiresIn is > 0 ? now.AddSeconds(answer.ExpiresIn.Value) : now + FlowLifetime);
+            Random(24), actor, provider.Id, scopes!, codeScopes, string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(), reconnecting?.Id,
+            answer.DeviceCode!, answer.UserCode!, answer.VerificationUri!, CodeExpiry(now, answer));
 
         _deviceFlows[flow.Id] = flow;
         _ = Task.Run(() => PollAsync(flow, provider, answer.Interval is > 0 ? TimeSpan.FromSeconds(answer.Interval.Value) : DefaultInterval));
 
-        return (new DeviceStart(flow.Id, flow.UserCode, flow.VerificationUri, flow.ExpiresAt), null);
+        var shown = flow.Read();
+        return (new DeviceStart(flow.Id, shown.UserCode, shown.VerificationUri, shown.ExpiresAt), null);
     }
 
     /// <summary>A sign-in with a code as its starter reads it, or null - for a flow that does not
@@ -601,8 +604,24 @@ public sealed class Connections(
         return [.. _deviceFlows.Values
             .Where(f => string.Equals(f.Actor.Id, actor.Id, StringComparison.Ordinal) && f.ExpiresAt > now && f.Read().State == Waiting)
             .OrderBy(f => f.ExpiresAt)
-            .Select(f => new OpenDeviceFlow(f.Id, f.Provider, f.UserCode, f.VerificationUri, f.ExpiresAt, Waiting))];
+            .Select(f => f.Open())
+            .OfType<OpenDeviceFlow>()];
     }
+
+    /// <summary>The first API's scopes and the sign-in scopes asked: what a Microsoft code that may
+    /// name one API only asks for.</summary>
+    private static IReadOnlyList<string> FirstApiScopes(IReadOnlyList<string> scopes)
+    {
+        var first = MicrosoftApis.Tokens(scopes)[0].Api;
+        return [.. scopes.Where(s => ConnectionProviders.IdentityScopes.Contains(s) || MicrosoftApis.ApiOf(s) == first)];
+    }
+
+    private static DateTimeOffset CodeExpiry(DateTimeOffset now, DeviceAuthorizationAnswer answer) =>
+        answer.ExpiresIn is > 0 ? now.AddSeconds(answer.ExpiresIn.Value) : now + FlowLifetime;
+
+    /// <summary>What a waiting flow says once Microsoft has asked for a second code.</summary>
+    public static string SecondCodeSentence(string provider, string verificationUri) =>
+        $"{provider} needs a second code to finish the sign-in. Enter the new code at {verificationUri}; it asks no new questions.";
 
     /// <summary>
     /// Polls at the provider's interval, 5 s more after each <c>slow_down</c>, until the person
@@ -643,6 +662,31 @@ public sealed class Connections(
                 {
                     flow.Settle(Refused, ConnectionProviders.MicrosoftAdminApproval);
                     return;
+                }
+
+                if (provider.Kind == ConnectionProviders.Microsoft && !flow.Renewed && MicrosoftApis.Several(flow.CodeScopes)
+                    && SeveralApisRefused(answer.Error, answer.ErrorDescription))
+                {
+                    // TWO CODES: Microsoft takes the consent to every API at the first code, then
+                    // refuses to redeem that code for more than one API. A second code naming the
+                    // first API's scopes only redeems; the consent is already recorded, so it asks
+                    // nothing new, and the run redeems the refresh token for each other API. The
+                    // flow keeps every scope asked. Never a third code.
+                    var codeScopes = FirstApiScopes(flow.CodeScopes);
+                    var second = await endpoints.DeviceAuthorizationAsync(provider, codeScopes, ct);
+
+                    if (!second.Ok)
+                    {
+                        flow.Settle(Refused, ConnectionProviders.NeedsAdminApproval(second.Error, second.ErrorDescription)
+                            ? ConnectionProviders.MicrosoftAdminApproval
+                            : $"{provider.Name} did not start the second code: {second.Reason}. Nothing was stored; try again.");
+                        return;
+                    }
+
+                    flow.Renew(codeScopes, second.DeviceCode!, second.UserCode!, second.VerificationUri!, CodeExpiry(clock.GetUtcNow(), second),
+                        SecondCodeSentence(provider.Name, second.VerificationUri!));
+                    if (second.Interval is > 0) interval = TimeSpan.FromSeconds(second.Interval.Value);
+                    continue;
                 }
 
                 switch (answer.Error)
@@ -697,14 +741,23 @@ public sealed class Connections(
         _stopping.Dispose();
     }
 
-    /// <summary>One sign-in with a code, in memory. The device code goes when the flow settles.</summary>
+    /// <summary>One sign-in with a code, in memory. The device code goes when the flow settles, or
+    /// when a second code replaces it. <see cref="Scopes"/> are every scope asked, which the
+    /// connection records; <see cref="CodeScopes"/> are what the current code named.</summary>
     private sealed class DeviceSignIn(
-        string id, ConnectionActor actor, string provider, IReadOnlyList<string> scopes, string? name, string? reconnectId,
-        string deviceCode, string userCode, string verificationUri, DateTimeOffset expiresAt)
+        string id, ConnectionActor actor, string provider, IReadOnlyList<string> scopes, IReadOnlyList<string> codeScopes,
+        string? name, string? reconnectId, string deviceCode, string userCode, string verificationUri, DateTimeOffset expiresAt)
     {
         private readonly Lock _lock = new();
 
-        private DeviceFlowState _state = new(Waiting, $"Waiting for you to enter the code at {verificationUri}.", null);
+        private DeviceFlowState _state = new(
+            Waiting, $"Waiting for you to enter the code at {verificationUri}.", null, userCode, verificationUri, expiresAt);
+
+        private IReadOnlyList<string> _codeScopes = codeScopes;
+
+        private string? _deviceCode = deviceCode;
+
+        private bool _renewed;
 
         public string Id => id;
 
@@ -712,26 +765,63 @@ public sealed class Connections(
 
         public string Provider => provider;
 
-        public string UserCode => userCode;
-
         public IReadOnlyList<string> Scopes => scopes;
 
         public string? Name => name;
 
         public string? ReconnectId => reconnectId;
 
-        public string VerificationUri => verificationUri;
+        public DateTimeOffset ExpiresAt
+        {
+            get { lock (_lock) return _state.ExpiresAt; }
+        }
 
-        public DateTimeOffset ExpiresAt => expiresAt;
+        public IReadOnlyList<string> CodeScopes
+        {
+            get { lock (_lock) return _codeScopes; }
+        }
 
-        public string? DeviceCode { get; private set; } = deviceCode;
+        /// <summary>Whether a second code has replaced the first; there is never a third.</summary>
+        public bool Renewed
+        {
+            get { lock (_lock) return _renewed; }
+        }
+
+        public string? DeviceCode
+        {
+            get { lock (_lock) return _deviceCode; }
+        }
+
+        /// <summary>The second code: the same flow, still waiting, on a new device code.</summary>
+        public void Renew(
+            IReadOnlyList<string> codeScopes, string deviceCode, string userCode, string verificationUri, DateTimeOffset expiresAt, string sentence)
+        {
+            lock (_lock)
+            {
+                _codeScopes = codeScopes;
+                _deviceCode = deviceCode;
+                _renewed = true;
+                _state = new DeviceFlowState(Waiting, sentence, null, userCode, verificationUri, expiresAt);
+            }
+        }
 
         public void Settle(string state, string sentence, string? connectionId = null)
         {
             lock (_lock)
             {
-                _state = new DeviceFlowState(state, sentence, connectionId);
-                DeviceCode = null;
+                _state = _state with { State = state, Sentence = sentence, ConnectionId = connectionId };
+                _deviceCode = null;
+            }
+        }
+
+        /// <summary>The flow as the open list shows it, while it waits.</summary>
+        public OpenDeviceFlow? Open()
+        {
+            lock (_lock)
+            {
+                return _state.State == Waiting
+                    ? new OpenDeviceFlow(id, provider, _state.UserCode, _state.VerificationUri, _state.ExpiresAt, Waiting)
+                    : null;
             }
         }
 
@@ -916,10 +1006,11 @@ public sealed class Connections(
 
     private static readonly string[] ApiRefusalCodes = ["AADSTS65001", "AADSTS65004", "AADSTS70011", "AADSTS500011", "AADSTS50076", "AADSTS50079", "AADSTS53003"];
 
-    /// <summary>A device authorization Microsoft refused for naming more than one API.</summary>
-    private static bool SeveralApisRefused(DeviceAuthorizationAnswer answer) =>
-        answer.Error is "invalid_scope"
-        || new[] { "AADSTS28000", "AADSTS28003", "AADSTS70011" }.Any(code => answer.ErrorDescription?.Contains(code, StringComparison.Ordinal) == true);
+    /// <summary>A device authorization, or a poll of its device code, Microsoft refused for naming
+    /// more than one API.</summary>
+    private static bool SeveralApisRefused(string? error, string? description) =>
+        error is "invalid_scope"
+        || new[] { "AADSTS28000", "AADSTS28003", "AADSTS70011" }.Any(code => description?.Contains(code, StringComparison.Ordinal) == true);
 
     public static string ApiRefused(ConnectionRecord connection, string api, string reason) =>
         $"Connection {connection.Named} cannot get a token for {MicrosoftApis.Named(api)}: Microsoft refused it ({reason}). "

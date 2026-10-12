@@ -3282,6 +3282,14 @@ export interface ConnectionOpenFlow {
 export interface ConnectionFlow {
   state: 'waiting' | 'done' | 'refused' | 'expired'
   sentence: string
+  /**
+   * The code to enter now, where, and until when. When Microsoft takes the consent to several APIs
+   * but needs a second code to finish, the flow stays `waiting` with the new code here and a
+   * `sentence` saying so.
+   */
+  userCode?: string
+  verificationUri?: string
+  expiresAt?: string
   /** When `done`: the connection it stored. */
   connection?: Connection | null
 }

@@ -376,6 +376,38 @@ describe("Microsoft's sign-in step", () => {
     wrapper.unmount();
   });
 
+  it('shows the second code and the sentence when the flow waits on a new code, and copies the new one', async () => {
+    const wrapper = await mountConnections();
+    await startSignIn();
+    expect(bodyFind('[data-device-notice]')).toBeNull();
+
+    const secondCode = 'FAKE-CODE-TWO';
+    const sentence = `Microsoft needs a second code to finish the sign-in. Enter the new code at ${verificationUri}; it asks no new questions.`;
+    getConnectionFlow.mockResolvedValue({
+      state: 'waiting',
+      sentence,
+      userCode: secondCode,
+      verificationUri,
+      expiresAt: '2026-10-04T10:20:03Z',
+    });
+    await advance(3_000);
+
+    expect(step()).toBe('signin');
+    expect(bodyFind('[data-device-state]')!.getAttribute('data-device-state')).toBe('waiting');
+    expect(bodyFind('[data-device-code]')!.textContent).toContain(secondCode);
+    expect(bodyFind('[data-device-notice]')!.textContent).toBe(sentence);
+    expect(bodyFind('[data-device-countdown]')!.textContent).toContain('20:00');
+    await click(bodyFind('button[aria-label="Copy the code"]'));
+    expect(copyText).toHaveBeenLastCalledWith(secondCode);
+
+    // Approved on the second code, it moves on as any sign-in does.
+    getConnectionFlow.mockResolvedValue({ state: 'done', sentence: 'Connected person@example.test.', connection: connected });
+    await advance(3_000);
+    expect(step()).toBe('result');
+
+    wrapper.unmount();
+  });
+
   it('moves on by itself when the flow reads done, to the account and an optional name', async () => {
     const wrapper = await mountConnections();
     await startSignIn();

@@ -508,7 +508,118 @@ public sealed class MicrosoftApiConnectionsTests : IAsyncLifetime
         Assert.Equal(3, grant!.Tokens!.Count);
     }
 
+    [Fact]
+    public async Task A_several_api_code_microsoft_will_not_redeem_finishes_on_a_second_code_naming_the_first_api_and_the_run_gets_a_token_per_api()
+    {
+        var (status, body) = await SendAsync(HttpMethod.Put, "/api/connections/providers/microsoft", new { clientId = MicrosoftClientId, audience = "common" });
+        Assert.True(status == HttpStatusCode.OK, body);
+        _microsoft.RefuseSeveralApisAtPoll = true;
+
+        // The first code names every API's scopes, so the person consents to all of them at once.
+        var flowId = await StartDeviceAsync(AzureScopes, name: "Estate");
+        var first = Assert.Single(_microsoft.DeviceStarts);
+        Assert.All(AzureScopes, s => Assert.Contains(s, first));
+
+        // Its poll is refused for naming more than one resource: the same flow waits on a second code
+        // naming the first API's scopes and the sign-in scopes only.
+        var waiting = await FlowAsync(flowId, until: "waiting", userCode: "U2-WXYZ");
+        Assert.Equal(2, _microsoft.DeviceStarts.Count);
+        var second = _microsoft.DeviceStarts[1];
+        Assert.Contains(ManagementScope, second);
+        Assert.DoesNotContain(SqlScope, second);
+        Assert.DoesNotContain(StorageScope, second);
+        Assert.All(first.Where(ConnectionProviders.IdentityScopes.Contains), s => Assert.Contains(s, second));
+        Assert.Equal("https://microsoft.com/devicelogin", waiting.GetProperty("verificationUri").GetString());
+        Assert.Equal(Connections.SecondCodeSentence("Microsoft", "https://microsoft.com/devicelogin"), waiting.GetProperty("sentence").GetString());
+        Assert.DoesNotContain("AADSTS", waiting.GetProperty("sentence").GetString());
+
+        // The open list shows the code to enter now.
+        var open = Assert.Single((await GetAsync("/api/connections/flows/open")).EnumerateArray());
+        Assert.Equal("U2-WXYZ", open.GetProperty("userCode").GetString());
+        Assert.Equal("waiting", open.GetProperty("state").GetString());
+
+        // Approved, it stores ONE connection with every API's scopes asked, with its tenant row.
+        _microsoft.DeviceAnswers.Writer.TryWrite("approve");
+        var done = await FlowAsync(flowId, until: "done");
+        var id = done.GetProperty("connection").GetProperty("id").GetString()!;
+        var connection = (await Services.GetRequiredService<ConnectionStore>().GetAsync(id, Ct))!;
+        Assert.Equal("Estate", connection.Name);
+        Assert.All(AzureScopes, s => Assert.Contains(s, connection.Scopes));
+        Assert.Single(await TenantActionsAsync(), a => a == TenantActions.ConnectionConnected);
+        Assert.Single((await GetAsync("/api/connections")).EnumerateArray());
+
+        // Never a third code; the first code was polled once.
+        Assert.Equal(2, _microsoft.DeviceStarts.Count);
+        var codes = _microsoft.DeviceCodes.Keys.ToList();
+        Assert.Equal(1, _microsoft.DevicePolls.Count(p => p == codes[0]));
+
+        // A bound plugin run gets a token per API, redeemed from the one refresh token.
+        await HireAsync("Azure", "azure", "azure", id);
+        Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Azure")).Type);
+        var tokens = LastRequest("azure")["connections"]!["azure"]!["tokens"]!.AsObject();
+        Assert.Equal([Management, Sql, Storage], tokens.Select(t => t.Key));
+        Assert.Equal(3, tokens.Select(t => (string?)t.Value!["accessToken"]).Distinct().Count());
+
+        // Neither device code reaches an answer, a row or a file.
+        await AssertNowhereAsync(codes);
+    }
+
+    [Fact]
+    public async Task A_second_code_microsoft_refuses_or_that_expires_ends_the_flow_and_stores_nothing()
+    {
+        var (status, body) = await SendAsync(HttpMethod.Put, "/api/connections/providers/microsoft", new { clientId = MicrosoftClientId, audience = "common" });
+        Assert.True(status == HttpStatusCode.OK, body);
+        _microsoft.RefuseSeveralApisAtPoll = true;
+
+        // The second code expires: the flow ends expired.
+        var expiring = await StartDeviceAsync(AzureScopes);
+        await FlowAsync(expiring, until: "waiting", userCode: "U2-WXYZ");
+        _microsoft.DeviceAnswers.Writer.TryWrite("expire");
+        var expired = await FlowAsync(expiring, until: "expired");
+        Assert.Contains("Nothing was stored", expired.GetProperty("sentence").GetString());
+        Assert.Equal(2, _microsoft.DeviceStarts.Count);
+
+        // The second authorization is refused: the flow ends refused, and no third is asked.
+        _microsoft.RefuseSecondCode = true;
+        _microsoft.DeviceStarts.Clear();
+        _microsoft.DeviceCodes.Clear();
+        var refusedFlow = await StartDeviceAsync(AzureScopes);
+        var refused = await FlowAsync(refusedFlow, until: "refused");
+        Assert.Contains("did not start the second code", refused.GetProperty("sentence").GetString());
+        Assert.Contains("Nothing was stored", refused.GetProperty("sentence").GetString());
+        Assert.Equal(2, _microsoft.DeviceStarts.Count);
+
+        Assert.Empty((await GetAsync("/api/connections")).EnumerateArray());
+        Assert.Empty((await GetAsync("/api/connections/flows/open")).EnumerateArray());
+        Assert.DoesNotContain(TenantActions.ConnectionConnected, await TenantActionsAsync());
+        Assert.Empty(await Services.GetRequiredService<ConnectionStore>().ListAsync(Ct));
+    }
+
     // ---- helpers ------------------------------------------------------------------------------------
+
+    /// <summary>None of <paramref name="secrets"/> in any answer the test read, nor in any file under
+    /// the data root.</summary>
+    private async Task AssertNowhereAsync(IReadOnlyList<string> secrets)
+    {
+        foreach (var secret in secrets)
+        {
+            Assert.DoesNotContain(_responses, r => r.Contains(secret, StringComparison.Ordinal));
+        }
+
+        SqliteConnection.ClearAllPools();
+        foreach (var file in Directory.EnumerateFiles(_dataRoot, "*", SearchOption.AllDirectories))
+        {
+            byte[] bytes;
+            try { bytes = await File.ReadAllBytesAsync(file, Ct); }
+            catch (IOException) { continue; }
+
+            var text = Encoding.Latin1.GetString(bytes);
+            foreach (var secret in secrets)
+            {
+                Assert.False(text.Contains(secret, StringComparison.Ordinal), $"{Path.GetRelativePath(_dataRoot, file)} holds a device code.");
+            }
+        }
+    }
 
     private async Task<string> StartDeviceAsync(IReadOnlyList<string> scopes, string? name = null)
     {
@@ -517,14 +628,15 @@ public sealed class MicrosoftApiConnectionsTests : IAsyncLifetime
         return JsonDocument.Parse(body).RootElement.GetProperty("flowId").GetString()!;
     }
 
-    private async Task<JsonElement> FlowAsync(string flowId, string until)
+    private async Task<JsonElement> FlowAsync(string flowId, string until, string? userCode = null)
     {
         var deadline = DateTime.UtcNow.AddSeconds(20);
 
         while (true)
         {
             var flow = await GetAsync($"/api/connections/flows/{flowId}");
-            if (flow.GetProperty("state").GetString() == until) return flow;
+            if (flow.GetProperty("state").GetString() == until
+                && (userCode is null || flow.GetProperty("userCode").GetString() == userCode)) return flow;
             if (DateTime.UtcNow > deadline) throw new TimeoutException($"The flow stayed {flow.GetProperty("state").GetString()}, not {until}.");
             await Task.Delay(20, Ct);
         }
@@ -664,7 +776,9 @@ public sealed class MicrosoftApiConnectionsTests : IAsyncLifetime
     /// their API, expiring per <see cref="ExpiresIn"/> (60 minutes otherwise), rotating the refresh
     /// token when asked, and refusing an API in <see cref="RefuseApi"/> or every refresh with
     /// <see cref="RefuseAll"/>. The device endpoint refuses scopes of several APIs when
-    /// <see cref="RefuseSeveralApisAtSignIn"/> is set.
+    /// <see cref="RefuseSeveralApisAtSignIn"/> is set; with <see cref="RefuseSeveralApisAtPoll"/> it
+    /// takes them and refuses to redeem that code (AADSTS28000), as a real tenant does, and with
+    /// <see cref="RefuseSecondCode"/> it refuses every authorization after the first.
     /// </summary>
     private sealed class FakeMicrosoft : IOAuthEndpoints
     {
@@ -683,6 +797,12 @@ public sealed class MicrosoftApiConnectionsTests : IAsyncLifetime
         public readonly List<string> Exchanges = [];
         public readonly List<(string RefreshToken, IReadOnlyList<string>? Scopes, string? Api)> Refreshes = [];
         public readonly List<IReadOnlyList<string>> DeviceStarts = [];
+        public bool RefuseSeveralApisAtPoll;
+        public bool RefuseSecondCode;
+
+        /// <summary>Every device code issued, with the scopes it named, and every poll's code.</summary>
+        public readonly Dictionary<string, IReadOnlyList<string>> DeviceCodes = new(StringComparer.Ordinal);
+        public readonly List<string> DevicePolls = [];
         public readonly Channel<string> DeviceAnswers = Channel.CreateUnbounded<string>();
 
         private readonly Lock _lock = new();
@@ -735,17 +855,40 @@ public sealed class MicrosoftApiConnectionsTests : IAsyncLifetime
                         "AADSTS70011: The provided value for the input parameter 'scope' is not valid."));
                 }
 
+                if (RefuseSecondCode && DeviceCodes.Count > 0)
+                {
+                    return Task.FromResult(new DeviceAuthorizationAnswer(null, null, null, null, null, "invalid_client",
+                        "AADSTS700016: Application was not found in the directory."));
+                }
+
+                var code = $"devicecode-{Guid.NewGuid():N}";
+                DeviceCodes[code] = scopes;
                 return Task.FromResult(new DeviceAuthorizationAnswer(
-                    $"devicecode-{Guid.NewGuid():N}", $"U{DeviceStarts.Count}-WXYZ", "https://microsoft.com/devicelogin", 900, 5, null, null));
+                    code, $"U{DeviceStarts.Count}-WXYZ", "https://microsoft.com/devicelogin", 900, 5, null, null));
             }
         }
 
         public async Task<OAuthTokenAnswer> DeviceTokenAsync(OAuthProvider provider, string? clientSecret, string deviceCode, CancellationToken ct)
         {
+            lock (_lock)
+            {
+                DevicePolls.Add(deviceCode);
+
+                // AS MEASURED ON A REAL TENANT: the consent to every API is taken at the code, and
+                // redeeming that code is refused for naming more than one resource.
+                if (RefuseSeveralApisAtPoll && DeviceCodes.TryGetValue(deviceCode, out var named) && MicrosoftApis.Several(named))
+                {
+                    return new OAuthTokenAnswer(null, null, null, null, null, "invalid_request",
+                        "AADSTS28000: Provided value for the input parameter scope is not valid because it contains more than one resource. Scope "
+                        + string.Join(' ', named) + " is not valid.", true);
+                }
+            }
+
             var answer = await DeviceAnswers.Reader.ReadAsync(ct);
 
             lock (_lock)
             {
+                if (answer == "expire") return new OAuthTokenAnswer(null, null, null, null, null, "expired_token", "AADSTS70020: The provided authorization code or refresh token has expired.", true);
                 if (answer != "approve") return new OAuthTokenAnswer(null, null, null, null, null, "authorization_pending", null, true);
 
                 var (access, refresh) = Issue(null, newRefresh: true);

@@ -514,6 +514,8 @@ const flowReadEvery = 3000;
 const device = ref<ConnectionDeviceStart | null>(null);
 const deviceRead = ref<ConnectionFlow | null>(null);
 const deviceConnection = ref<Connection | null>(null);
+/** The Host's sentence when the code shown was replaced by a second one while waiting. */
+const deviceNotice = ref('');
 const now = ref(Date.now());
 let readTimer: ReturnType<typeof setTimeout> | null = null;
 let clock: ReturnType<typeof setInterval> | null = null;
@@ -523,6 +525,7 @@ const deviceSentence = computed(() => refusalWords(deviceRead.value?.sentence));
 const deviceLeft = computed(() => (device.value ? countdown(device.value.expiresAt, now.value) : ''));
 
 function stopDevice() {
+  deviceNotice.value = '';
   if (readTimer !== null) clearTimeout(readTimer);
   if (clock !== null) clearInterval(clock);
   readTimer = null;
@@ -595,6 +598,11 @@ async function readFlow() {
   problem.value = '';
   deviceRead.value = read;
   if (read.state === 'waiting') {
+    // A SECOND CODE: the same flow, waiting on the code the Host now holds, with its sentence.
+    if (read.userCode && read.verificationUri && read.expiresAt && read.userCode !== flow.userCode) {
+      device.value = { flowId: flow.flowId, userCode: read.userCode, verificationUri: read.verificationUri, expiresAt: read.expiresAt };
+      deviceNotice.value = read.sentence;
+    }
     readTimer = setTimeout(readFlow, flowReadEvery);
     return;
   }
@@ -1022,6 +1030,7 @@ const stepLabels = computed(() => [
         </template>
         <div v-else :data-device-state="deviceState">
           <template v-if="deviceState === 'waiting'">
+            <div v-if="deviceNotice" class="q-mb-sm" data-device-notice>{{ deviceNotice }}</div>
             <div>
               Open
               <a :href="device.verificationUri" target="_blank" rel="noopener noreferrer" data-device-link>{{ device.verificationUri }}</a>

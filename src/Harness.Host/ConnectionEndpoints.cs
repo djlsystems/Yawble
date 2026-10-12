@@ -266,8 +266,10 @@ public static class ConnectionEndpoints
             .WithSummary("Read a sign-in with a code")
             .WithDescription(
                 "The starter's only: anyone else gets exactly what a missing flow gets (404). Answers "
-                + "`{ state: waiting|done|refused|expired, sentence, connection? }`, the connection only when "
-                + "`done`. Closing the dialog cancels nothing: reading again gives the same state.");
+                + "`{ state: waiting|done|refused|expired, sentence, userCode, verificationUri, expiresAt, connection? }`, "
+                + "the connection only when `done`. The code is the one to enter now: when Microsoft takes the consent "
+                + "to several APIs but needs a second code to finish, the flow stays `waiting` with the new code and a "
+                + "sentence saying so. Closing the dialog cancels nothing: reading again gives the same state.");
 
         app.MapGet(Connections.CallbackPath, async (
             [Description("The provider's authorization code.")] string? code,
@@ -396,8 +398,16 @@ public static class ConnectionEndpoints
         var connection = flow is { State: Connections.Done, ConnectionId: { } id } ? await connections.Store.GetAsync(id, ct) : null;
 
         return connection is null
-            ? new { state = flow.State, sentence = flow.Sentence }
-            : new { state = flow.State, sentence = flow.Sentence, connection = view((connection, await connections.Store.UsedByAsync(connection.Id, ct))) };
+            ? new { state = flow.State, sentence = flow.Sentence, userCode = flow.UserCode, verificationUri = flow.VerificationUri, expiresAt = flow.ExpiresAt }
+            : new
+            {
+                state = flow.State,
+                sentence = flow.Sentence,
+                userCode = flow.UserCode,
+                verificationUri = flow.VerificationUri,
+                expiresAt = flow.ExpiresAt,
+                connection = view((connection, await connections.Store.UsedByAsync(connection.Id, ct))),
+            };
     }
 
     /// <summary>The route's and the operator exchange's disconnect: (204, null), or a status and body.</summary>

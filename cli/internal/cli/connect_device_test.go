@@ -89,6 +89,42 @@ func TestConnectDevicePrintsTheCodeAndLinkWaitsAndOpensNoListener(t *testing.T) 
 	}
 }
 
+func TestConnectDevicePrintsTheSecondCodeAndTheSentenceWhenTheCodeChangesWhileItWaits(t *testing.T) {
+	sentence := "Microsoft needs a second code to finish the sign-in. Enter the new code at https://microsoft.example.test/devicelogin; it asks no new questions."
+	second := map[string]any{
+		"state": "waiting", "sentence": sentence, "userCode": "FAKE-CODE-TWO",
+		"verificationUri": "https://microsoft.example.test/devicelogin",
+		"expiresAt":       time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339),
+	}
+	h := deviceHost(t,
+		map[string]any{"state": "waiting", "sentence": "Waiting.", "userCode": "FAKE-CODE", "verificationUri": "https://microsoft.example.test/devicelogin"},
+		second,
+		second,
+		map[string]any{"state": "done", "sentence": "Connected person@example.test.", "connection": outlook},
+	)
+
+	code, out, errOut := run(t, stubbed(h), "connect", "microsoft", "--device", "--scopes", "Mail.Send")
+
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	first := strings.Index(out, "FAKE-CODE\n")
+	again := strings.Index(out, "FAKE-CODE-TWO")
+	if first < 0 || again < first {
+		t.Fatalf("the first code, then the second, are not printed in that order:\n%s", out)
+	}
+	if !strings.Contains(out, sentence) || strings.Index(out, sentence) > again {
+		t.Errorf("the Host's sentence is not printed before the second code:\n%s", out)
+	}
+	// Printed once, though the flow was read twice on it.
+	if n := strings.Count(out, "FAKE-CODE-TWO"); n != 1 {
+		t.Errorf("the second code was printed %d times:\n%s", n, out)
+	}
+	if !strings.Contains(out, "connected person@example.test") {
+		t.Errorf("output: %s", out)
+	}
+}
+
 func TestConnectDeviceEndsWithTheHostsSentenceWhenRefusedOrExpired(t *testing.T) {
 	for _, ending := range []map[string]any{
 		{"state": "refused", "sentence": "You did not allow the app to sign in. Nothing was connected."},

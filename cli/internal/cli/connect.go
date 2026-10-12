@@ -317,6 +317,18 @@ func connectDevice(ctx context.Context, out io.Writer, deps Deps, provider strin
 		}
 		switch read.Flow.State {
 		case "waiting":
+			// A SECOND CODE: the Host now waits on another code for the same sign-in; say so and
+			// print it, and wait until that code expires.
+			if f := read.Flow; f.UserCode != "" && f.VerificationURI != "" && f.UserCode != flow.UserCode {
+				flow.UserCode, flow.VerificationURI = f.UserCode, f.VerificationURI
+				if f.Sentence != "" {
+					fmt.Fprintln(out, f.Sentence)
+				}
+				fmt.Fprintf(out, "\nopen this address in any browser:\n\n  %s\n\nand enter the new code:\n\n  %s\n\n", f.VerificationURI, f.UserCode)
+				if expires, err := time.Parse(time.RFC3339, f.ExpiresAt); err == nil {
+					deadline = time.Now().Add(max(time.Until(expires), 0) + deviceGrace)
+				}
+			}
 			if time.Now().After(deadline) {
 				return errors.New("the code has expired and the Host has not said so; run the command again for a new code")
 			}
@@ -453,11 +465,16 @@ type connectStart struct {
 }
 
 // connectFlow is a read of a sign-in with a code: waiting, done (with the connection), refused or
-// expired, in the Host's sentence.
+// expired, in the Host's sentence, with the code to enter now.
 type connectFlow struct {
 	State      string      `json:"state"`
 	Sentence   string      `json:"sentence"`
 	Connection *connection `json:"connection"`
+	// The code to enter now, where, and until when: a second code for the same sign-in replaces
+	// the first here while the flow waits.
+	UserCode        string `json:"userCode"`
+	VerificationURI string `json:"verificationUri"`
+	ExpiresAt       string `json:"expiresAt"`
 }
 
 // connection is one entry of GET /api/connections. It never carries a token.

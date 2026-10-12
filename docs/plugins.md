@@ -449,11 +449,16 @@ APIs, and the plugin gets one fresh token per API, from one connection the perso
 - **The sign-in.** The person signs in once. The sign-in asks for every API's scopes, so Microsoft
   shows one consent for all of them. Microsoft's token endpoint answers one API's token per request,
   so the Host redeems the connection's one refresh token for each API with that API's scopes (plus
-  `offline_access`). Where Microsoft refuses a sign-in with a code that names several APIs
-  (`invalid_scope`), the Host asks again naming only the first API's scopes; the other APIs are
-  then redeemed from the refresh token the same way, which succeeds when the account or an
-  administrator has consented to them for the app. The connection records every API's scopes it
-  asked for.
+  `offline_access`). A sign-in with a code whose scopes span several APIs can take two codes:
+  Microsoft takes the first code, naming every API, and records the consent to all of them, but
+  refuses to finish it for more than one API. The Host then asks at once for a second code naming
+  the first API's scopes and the sign-in scopes, for the same sign-in: the Add connection dialog and
+  `yawble connect --device` show the new code with a sentence saying Microsoft needs a second code
+  and asks no new questions. A refused or expired second code ends the sign-in with nothing stored,
+  and there is never a third. Where Microsoft refuses to start a code naming several APIs at all,
+  the Host asks for the first API's at once, with one code. Either way the other APIs are redeemed
+  from the refresh token, which succeeds when the account or an administrator has consented to
+  them for the app, and the connection records every API's scopes it asked for.
 - **Tokens.** Each API's token is redeemed when a run needs it and again when it is within 5
   minutes of expiry, so each is refreshed on its own. Refreshes of one connection run one at a time,
   so one at a time per connection and API. A rotated refresh token is stored after each redemption,
