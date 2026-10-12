@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// MARKETPLACE, THE FIRST OPEN'S EDGES (B005N, tester's probes): the dialog closed while the first
+// MARKETPLACE, THE FIRST OPEN'S EDGES (the tester's probes): the dialog closed while the first
 // refresh is out and opened again; the catalog GET answering late, so the refresh must come after
 // it and win; Refresh pressed while the first refresh is out; a failed GET that leaves the first
 // refresh for a later open; and a failed manual Refresh that keeps the list.
