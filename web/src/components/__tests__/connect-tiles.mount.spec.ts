@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 //
 // ADD CONNECTION'S PROVIDER TILES: one mailbox screen for Admin, Connections and a slot's Connect.
-// Tiles Gmail, Outlook or Microsoft 365, iCloud, Yahoo and Other, each saying its way in; choosing one
-// shows that provider's hints. Gmail through a Google app of one's own sits behind Advanced…, whose
+// Tiles Gmail, Microsoft (Outlook, Microsoft 365, Azure), iCloud, Yahoo and Other, each saying its way
+// in; choosing one shows that provider's hints. Gmail through a Google app of one's own sits behind Advanced…, whose
 // setup says first that it is done once, roughly how long it takes, that the ticks are only progress
 // marks and that an existing project is fine, and warns before saving at an address Google refuses.
-// A slot's Connect offers the kinds the slot takes, a mailbox included.
+// A slot's Connect offers the kinds the slot takes, a mailbox included. Microsoft's sign-in from Admin
+// names the installed plugins whose permissions it asks for; from a slot it does not.
 //
 // THE MOCK IS OF `api/client`, in the shapes the Host serves, and of the one navigation the web
 // makes. No request leaves the test.
@@ -108,10 +109,10 @@ async function openAdd() {
 }
 
 describe('The provider tiles', () => {
-  it('are Gmail, Outlook or Microsoft 365, iCloud, Yahoo and Other, each saying its way in', async () => {
+  it('are Gmail, Microsoft (Outlook, Microsoft 365, Azure), iCloud, Yahoo and Other, each saying its way in', async () => {
     const wrapper = await openAdd();
 
-    expect(tileNames()).toEqual(['Gmail', 'Outlook or Microsoft 365', 'iCloud', 'Yahoo', 'Other']);
+    expect(tileNames()).toEqual(['Gmail', 'Microsoft (Outlook, Microsoft 365, Azure)', 'iCloud', 'Yahoo', 'Other']);
     const way = (id: string) => tile(id)!.querySelector('[data-tile-way]')!.textContent!.trim();
     expect(way('gmail')).toBe('App password');
     expect(way('outlook')).toBe('Sign in with a code');
@@ -401,6 +402,57 @@ describe("A slot's Connect", () => {
     expect(tileNames()).toEqual(['Gmail', 'iCloud', 'Yahoo', 'Other']);
     expect(bodyFind('[data-connect-advanced]')).not.toBeNull();
     expect(bodyText()).not.toContain('Outlook');
+
+    wrapper.unmount();
+  });
+});
+
+describe("Microsoft's sign-in says whose permissions it asks for", () => {
+  const azure = 'https://management.azure.com/user_impersonation';
+  const microsoftNeeds: ConnectionNeeds = {
+    provider: 'microsoft',
+    needs: [
+      { plugin: 'mail-helper', slot: 'mail', description: null, scopes: ['Mail.Read'] },
+      { plugin: 'azure-ops', slot: 'azure', description: null, scopes: ['Mail.Read', azure] },
+    ],
+    scopes: [
+      { scope: 'Mail.Read', words: 'Read your mail', plugins: ['Mail Helper', 'Azure Ops'] },
+      { scope: azure, words: 'Manage your Azure resources', plugins: ['Azure Ops'] },
+    ],
+    apis: [],
+  };
+
+  const sentence = () => bodyFind('[data-signin-plugins]')?.textContent?.trim() ?? null;
+
+  beforeEach(() => {
+    getConnectionNeeds.mockResolvedValue(microsoftNeeds);
+  });
+
+  it('from Admin, names the installed plugins once each, above the permissions', async () => {
+    const wrapper = await openAdd();
+    await click(tile('outlook'));
+    await click(button('Next'));
+
+    expect(step()).toBe('signin');
+    expect(sentence()).toBe('These permissions are what the installed plugins need: Mail Helper and Azure Ops.');
+
+    wrapper.unmount();
+  });
+
+  it("from a slot, adds nothing", async () => {
+    const wrapper = await mountDialog(SlotConnect, {
+      plugin: 'azure-ops',
+      slotName: 'azure',
+      spec: { description: null, providers: ['microsoft'], scopes: { microsoft: [azure] }, required: true, summary: 'needs Azure' },
+      providers: [googleBare, microsoft],
+      connections: [],
+    }, { attachTo: document.body });
+    await settle();
+    await click(button('Connect Microsoft'));
+
+    expect(step()).toBe('signin');
+    expect(sentence()).toBeNull();
+    expect(bodyText()).not.toContain('what the installed plugins need');
 
     wrapper.unmount();
   });

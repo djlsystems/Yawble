@@ -39,6 +39,7 @@ import {
   refusalWords,
   rememberGuidedConnect,
 } from '../lib/connections';
+import { listOf } from '../lib/agentInstall';
 import { productCli } from '../presentation/product';
 import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/providerReturn';
 import { mailboxHint, OutlookHint, setupTime } from '../lib/mailboxHints';
@@ -70,14 +71,21 @@ import MailboxForm from './MailboxForm.vue';
  * form the slot is in is still there when it comes back; `connected` says which connection the
  * sign-in made, and the opener binds it.
  *
+ * FROM ADMIN -> CONNECTIONS (no `need`), the sign-in asks for every installed plugin's permissions
+ * merged, so Microsoft's sign-in step says first that they are what the installed plugins need and
+ * names those plugins, read from the needs' scopes. From a slot it asks only for that slot's, and
+ * says nothing more.
+ *
  * A REFUSAL BECAUSE AN ORGANISATION LETS ONLY AN ADMIN APPROVE THE APP reads as one sentence saying an
  * admin of that organisation approves it, never as Microsoft's error code alone (`refusalWords`).
  *
  * A SIGN-IN WITH A CODE STILL WAITING at the Host is picked back up on open: closing the dialog, or
  * reloading the page, does not lose the code the person may be typing at Microsoft.
  *
- * THE SERVICE STEP IS PROVIDER TILES: Gmail, Outlook or Microsoft 365, iCloud, Yahoo and Other, each
- * saying its way in. Gmail, iCloud, Yahoo and Other are a MAILBOX WITH AN APP PASSWORD, from the Host's
+ * THE SERVICE STEP IS PROVIDER TILES: Gmail, Microsoft (Outlook, Microsoft 365, Azure), iCloud, Yahoo
+ * and Other, each saying its way in. Microsoft's tile names every Microsoft service, since its one
+ * sign-in serves Azure's scopes as well as mail; the guided setup's mailbox button keeps "Outlook or
+ * Microsoft 365", being asked for a mailbox. Gmail, iCloud, Yahoo and Other are a MAILBOX WITH AN APP PASSWORD, from the Host's
  * presets: they open `MailboxForm`, with that provider's hints, which logs in before it saves and
  * shows the login's one sentence. No app, no sign-in elsewhere. Outlook is Microsoft's sign-in with a
  * code. Gmail through a Google app of one's own sits behind ADVANCED…; where no mailbox is on offer -
@@ -259,7 +267,7 @@ const tiles = computed<Tile[]>(() => {
   const gmail = mailboxTiles.value.find((preset) => preset.id === 'gmail');
   if (gmail) list.push({ id: 'gmail', name: gmail.name, wayIn: mailboxHint('gmail').wayIn, preset: 'gmail' });
   else if (offers('google')) list.push({ id: 'google', name: 'Google', wayIn: 'A Google app of your own', service: 'google' });
-  if (offers('microsoft')) list.push({ id: 'outlook', name: 'Outlook or Microsoft 365', wayIn: OutlookHint.wayIn, service: 'microsoft' });
+  if (offers('microsoft')) list.push({ id: 'outlook', name: 'Microsoft (Outlook, Microsoft 365, Azure)', wayIn: OutlookHint.wayIn, service: 'microsoft' });
   for (const preset of mailboxTiles.value) {
     if (preset.id !== 'gmail') list.push({ id: preset.id, name: preset.name, wayIn: mailboxHint(preset.id).wayIn, preset: preset.id });
   }
@@ -357,6 +365,9 @@ const scopeGroups = computed(() => {
   if (apis.length > 1) return apis.map((api) => ({ api: api.api as string | null, name: api.name as string | null, lines: api.scopes }));
   return [{ api: null, name: null, lines: needs.value?.scopes ?? [] }];
 });
+
+/** From Admin, the installed plugins whose permissions the sign-in asks for, each once; empty from a slot. */
+const askingPlugins = computed(() => (props.need ? [] : [...new Set((needs.value?.scopes ?? []).flatMap((line) => line.plugins))]));
 
 /** The scopes to ask for: every one the plugins want, less those unticked, in the Host's order. */
 const chosenScopes = computed(() => (needs.value?.scopes ?? []).map((line) => line.scope).filter((scope) => !unticked.value.has(scope)));
@@ -1007,6 +1018,9 @@ const stepLabels = computed(() => [
       <!-- 3. SIGN IN WITH A CODE -->
       <q-card-section v-else-if="step === 'signin' && provider && isMicrosoft" data-connect-step="signin" class="q-gutter-y-sm">
         <template v-if="device === null">
+          <div v-if="askingPlugins.length > 0" data-signin-plugins>
+            These permissions are what the installed plugins need: {{ listOf(askingPlugins) }}.
+          </div>
           <div>
             {{ provider.name }} gives you a code to enter on its own sign-in page, in another tab. Nothing
             has to come back to this address, so it works however you reached this page.
