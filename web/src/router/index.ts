@@ -8,6 +8,7 @@ import {
 
 import routes from './routes';
 import { sessionGuard } from './guard';
+import { pageTitle } from './pageTitle';
 import { landProviderReturn } from '../lib/connections';
 
 /*
@@ -40,6 +41,9 @@ export default defineRouter((/* { store, ssrContext } */) => {
 
   // The sign-in gate, which remembers a signed-out visitor's route across sign-in: see guard.ts.
   Router.beforeEach(sessionGuard);
+
+  // The browser tab names the page: see pageTitle.ts.
+  if (!import.meta.env.QUASAR_SERVER) Router.afterEach((to) => { document.title = pageTitle(to); });
 
   return Router;
 });

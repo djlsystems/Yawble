@@ -6,7 +6,8 @@ import type { RouteRecordRaw } from 'vue-router';
  * banner over data it was refused. `/board` redirects here so an old bookmark still lands.
  *
  * `publicRoute` in the meta is what the guard reads. Marking it here rather than listing paths in
- * the guard keeps the two from drifting when a route is added.
+ * the guard keeps the two from drifting when a route is added. `title` in the meta is the page's name
+ * in the browser tab (see pageTitle.ts).
  */
 /**
  * THE CONSOLE, ONE COPY UNDER EVERY CONSOLE ADDRESS. `/console`, the install link and the Solutions
@@ -22,19 +23,20 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/pages/LandingPage.vue'),
-    meta: { publicRoute: true },
+    meta: { publicRoute: true, title: 'Sign in' },
   },
 
   // The same door, for anyone holding an old bookmark.
   {
     path: '/login',
     component: () => import('@/pages/LandingPage.vue'),
-    meta: { publicRoute: true },
+    meta: { publicRoute: true, title: 'Sign in' },
   },
 
   {
     path: '/console',
     component: () => import('@/layouts/MainLayout.vue'),
+    meta: { title: 'Console' },
     children: [{ path: '', component: Console }],
   },
 
@@ -44,6 +46,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/solutions/install',
     component: () => import('@/layouts/MainLayout.vue'),
+    meta: { title: 'Install a solution' },
     children: [{ path: '', components: { default: Console, overlay: () => import('@/pages/SolutionInstallPage.vue') } }],
   },
 
@@ -54,6 +57,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/solutions',
     component: () => import('@/layouts/MainLayout.vue'),
+    meta: { title: 'Marketplace' },
     children: [
       { path: '', components: { default: Console, overlay: () => import('@/pages/SolutionsPage.vue') } },
       { path: ':team', components: { default: Console, overlay: () => import('@/pages/SolutionsPage.vue') } },
@@ -69,7 +73,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/:catchAll(.*)*',
     component: () => import('@/pages/ErrorNotFound.vue'),
-    meta: { publicRoute: true },
+    meta: { publicRoute: true, title: 'Page not found' },
   },
 ];
 
