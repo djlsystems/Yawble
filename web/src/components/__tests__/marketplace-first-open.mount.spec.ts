@@ -15,7 +15,7 @@ import type { InstalledSolution, MarketplaceCatalog, MarketplacePackage } from '
 import { resetFirstOpenRefresh } from '../../lib/marketplaceRefresh';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { settle } from '../../test/formProbe';
-import { fakeHost, installedRow, reply, sent, wizardRoutes, type Call, type Route } from '../../test/solutionFixtures';
+import { fakeHost, installedRow, reply, sent, wizardRoutes, type Call } from '../../test/solutionFixtures';
 
 function pkg(fields: Partial<MarketplacePackage> & Pick<MarketplacePackage, 'id' | 'name'>): MarketplacePackage {
   return {
@@ -54,8 +54,8 @@ function serve(held: MarketplaceCatalog, refreshed: () => Response, options: { h
     [
       (call) => (call.method === 'GET' && call.url === '/api/marketplace' ? reply(200, held) : undefined),
       (call) => (call.method === 'POST' && call.url === '/api/marketplace/refresh' ? refreshed() : undefined),
-      ...wizardRoutes({ installed: options.installed }),
-    ] as Route[],
+      ...wizardRoutes({ installed: options.installed ?? [] }),
+    ],
     calls,
   );
   vi.stubGlobal(
