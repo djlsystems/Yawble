@@ -277,8 +277,8 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
-    /// B005M: the plugin skill names `secretKeys` and how a plugin words an unset key - the member's
-    /// settings screen first, `yawble secret set <KEY>` second.
+    /// The plugin skill names `secretKeys` and how a plugin words an unset key - the member's
+    /// settings screen first, the operator CLI's `secret set KEY` second.
     /// </summary>
     [Fact]
     public void The_plugin_skill_names_secret_keys_and_words_an_unset_key_screen_first()
@@ -287,8 +287,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
 
         Assert.Contains("Each run's request also carries `secretKeys`", plugins, StringComparison.Ordinal);
         Assert.Contains("A key name is not a secret and is not redacted", plugins, StringComparison.Ordinal);
-        var screen = plugins.IndexOf("in this member's settings, or with `yawble secret set TWILIO_ACCOUNT_SID_SHOP`", StringComparison.Ordinal);
-        Assert.True(screen >= 0);
+        Assert.Contains("in this member's settings, or with the operator CLI's `secret set TWILIO_ACCOUNT_SID_SHOP`", plugins, StringComparison.Ordinal);
     }
 
     /// <summary>

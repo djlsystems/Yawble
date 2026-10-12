@@ -304,7 +304,7 @@ public sealed class PluginMemberRunnerTests : IDisposable
         Assert.DoesNotContain(value, await File.ReadAllTextAsync(Path.Combine(_dataRoot, "argv.txt"), Ct), StringComparison.Ordinal);
     }
 
-    /// <summary>B005M: each bound secret field's logical key NAME rides on stdin as <c>secretKeys</c>,
+    /// <summary>each bound secret field's logical key NAME rides on stdin as <c>secretKeys</c>,
     /// beside <c>secrets</c>: a set key's name beside its value, an unset key's name with no value,
     /// and an unbound field (or a binding the manifest does not declare) not at all.</summary>
     [Fact]
@@ -327,7 +327,7 @@ public sealed class PluginMemberRunnerTests : IDisposable
         Assert.Equal("""{"token":"s3cr3t-value-9f2"}""", request["secrets"]!.ToJsonString());
     }
 
-    /// <summary>B005M golden: with <c>secretKeys</c> taken out, stdin is byte for byte what it was before
+    /// <summary>Golden: with <c>secretKeys</c> taken out, stdin is byte for byte what it was before
     /// the member was added - every field a plugin already reads is unchanged.</summary>
     [Fact]
     public async Task The_request_is_otherwise_byte_identical_to_the_one_before_secret_keys()
@@ -365,7 +365,7 @@ public sealed class PluginMemberRunnerTests : IDisposable
         static int CountOf(string text, string part) => (text.Length - text.Replace(part, "", StringComparison.Ordinal).Length) / part.Length;
     }
 
-    /// <summary>B005M: a value is only ever beside the field, and so the key name, it was bound to -
+    /// <summary>a value is only ever beside the field, and so the key name, it was bound to -
     /// with two keys, one key bound to two fields, and the names never carrying a value.</summary>
     [Fact]
     public async Task No_secret_value_appears_beside_a_key_name_it_was_not_bound_to()
@@ -396,7 +396,7 @@ public sealed class PluginMemberRunnerTests : IDisposable
         Assert.DoesNotContain("value", keys.ToJsonString(), StringComparison.Ordinal);
     }
 
-    /// <summary>B005M: key names go on stdin unredacted, so a key whose VALUE is the name of a key the
+    /// <summary>key names go on stdin unredacted, so a key whose VALUE is the name of a key the
     /// member binds is refused at binding and, should it be set so later, before launch.</summary>
     [Fact]
     public async Task A_key_whose_value_is_a_bound_key_name_is_refused_at_binding_and_before_launch()

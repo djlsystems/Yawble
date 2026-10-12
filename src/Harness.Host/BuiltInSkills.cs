@@ -1289,8 +1289,8 @@ public static class BuiltInSkills
             `secrets` is a bound key with no value. A key name is not a secret and is not redacted, so a
             plugin can name the key when it needs one: point to the member's settings screen first and
             the operator CLI second, as in "Set TWILIO_ACCOUNT_SID_SHOP in this member's settings, or
-            with `yawble secret set TWILIO_ACCOUNT_SID_SHOP`." Name the key from `secretKeys`, never a
-            guess, and never write a value beside it.
+            with the operator CLI's `secret set TWILIO_ACCOUNT_SID_SHOP` and its `up`." Name the key
+            from `secretKeys`, never a guess, and never write a value beside it.
 
             A person can change a plugin member's settings and secret bindings after hire, in the
             member's settings; the change is checked exactly as a hire is and takes effect on the
