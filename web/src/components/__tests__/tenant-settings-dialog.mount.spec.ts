@@ -854,3 +854,66 @@ describe('Reset to default', () => {
     expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'kanban.wipLimits': null });
   });
 });
+
+/**
+ * Whether members' CLIs may sign their commits as their own is a person's choice: a toggle on the
+ * System tab, off unless a person turns it on, with its one sentence and never the key, sent as the
+ * word the server reads.
+ */
+describe('AI attribution on members’ commits', () => {
+  const Label = 'AI attribution on members’ commits';
+
+  function withAttribution(value: 'off' | 'on') {
+    const body = settings();
+    body.settings.push(setting('agents.commitAttribution', value, {
+      default: 'off',
+      defaultSource: 'builtIn',
+      ...(value === 'on' ? { source: 'row' as const } : {}),
+    }));
+    return body;
+  }
+
+  const toggle = (wrapper: VueWrapper) =>
+    wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === Label);
+
+  it('shows it off on the System tab with its one sentence and never the key', async () => {
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(withAttribution('off')));
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'system');
+
+    expect(toggle(wrapper)).toBeDefined();
+    expect(toggle(wrapper)!.props('modelValue')).toBe(false);
+    expect(textAndHelp()).toContain(
+      'Lets the CLIs of agent members sign the commits and pull requests they write as their own; while it is off, members’ commits and pull requests carry no AI co-author trailer and no “generated with” line.',
+    );
+    expect(textAndHelp()).not.toContain('agents.commitAttribution');
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it('sends the word on when a person turns it on', async () => {
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(withAttribution('off')));
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'system');
+
+    toggle(wrapper)!.vm.$emit('update:modelValue', true);
+    await flushPromises();
+    saveButton().click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'agents.commitAttribution': 'on' });
+  });
+
+  it('shows it on when the server says on, and sends the word off when a person turns it off', async () => {
+    api.getTenantSettings.mockResolvedValue(normaliseTenantSettings(withAttribution('on')));
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'system');
+
+    expect(toggle(wrapper)!.props('modelValue')).toBe(true);
+    toggle(wrapper)!.vm.$emit('update:modelValue', false);
+    await flushPromises();
+    saveButton().click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'agents.commitAttribution': 'off' });
+  });
+});

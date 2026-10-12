@@ -38,6 +38,7 @@ export const AgentTags = 'agents.tags'
 export const AgentCredentialSources = 'agents.credentialSource'
 export const ConciergeMayMerge = 'concierge.mayMerge'
 export const ConciergeMayArchive = 'concierge.mayArchive'
+export const AgentsCommitAttribution = 'agents.commitAttribution'
 export const UpdatesCheck = 'updates.check'
 export const MarketplaceCheck = 'marketplace.check'
 
@@ -48,6 +49,10 @@ export const ConciergeMayMergeSentence =
 /** This sentence is put in front of a person, word for word: what the setting allows, and that it is off unless turned on. */
 export const ConciergeMayArchiveSentence =
   'Lets the Concierge archive and unarchive a quiet team when you ask it to in the terminal; it is off unless a person turns it on.'
+
+/** This sentence is put in front of a person, word for word: what the setting does, and what off means. */
+export const AgentsCommitAttributionSentence =
+  'Lets the CLIs of agent members sign the commits and pull requests they write as their own; while it is off, members’ commits and pull requests carry no AI co-author trailer and no “generated with” line.'
 
 /** This sentence is put in front of a person, word for word. */
 export const SystemPackagesRestartSentence = 'Adding one costs a restart, not an image rebuild.'
@@ -173,6 +178,13 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     kind: 'toggle',
     label: 'Read the package catalog',
     hint: 'Reads the published package catalog about twice a day, so Marketplace > Browse can list what may be added and whether each is installed or has an update. Nothing is fetched or installed by itself.',
+  },
+  {
+    name: AgentsCommitAttribution,
+    tab: 'system',
+    kind: 'toggle',
+    label: 'AI attribution on members’ commits',
+    hint: AgentsCommitAttributionSentence,
   },
   {
     name: SystemPackages,

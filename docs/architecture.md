@@ -172,6 +172,18 @@ MCP servers, plugins, skills, memory and instruction files).
   list holds every set measured here; a model not yet measured may be offered a file tool the
   list lacks, and the per-run check names it. Grok's subagent sessions add
   `wait_commands_or_subagents`. Claude's are pinned by `--tools` whatever the model.
+- **A member's commits carry no AI attribution unless a person turns it on.** The setting
+  `agents.commitAttribution` (Admin > Settings > System, off by default) decides whether a member's
+  CLI may add its own co-author trailer or "generated with" line to the commits and pull requests
+  it writes. While it is off, each headless preset's `attribution` declaration is applied to a
+  member's launch: arguments beside the isolation arguments, variables after the preset's and the
+  team's env, with notes saying what was measured on the CLI in the image. Claude is passed
+  `--settings {"attribution":{"commit":"","pr":""}}`, which outranks a checkout's own
+  `.claude/settings.json`. Codex adds its trailer only for an account that enables commit
+  attribution and has no launch switch for it; Grok adds none; Copilot adds `Co-authored-by:
+  Copilot` and turns it off only through `includeCoAuthoredBy: false` in a settings file, which no
+  launch switch reaches, so a Copilot member's commits may still carry it. The Concierge launches
+  as its preset says. The platform's own commits carry no trailer whatever the setting.
 - **Checked before a run, too.** At start and after every catalog save, the Host asks each
   installed CLI what it would load, with the CLI's own listing and no model call (`claude mcp list`
   and `plugin list`; `codex mcp list`, `features list` and `debug prompt-input`; `grok inspect`;

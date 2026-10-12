@@ -686,8 +686,10 @@ foreach (var agent in loadedCatalog)
     }
 }
 
-// The operator's tags for a built-in are read through the setting on every use.
-var agentCatalog = new AgentCatalog(loadedCatalog, () => tenantSettings.AgentTags);
+// The operator's tags for a built-in, and whether a member's CLI may sign its commits, are read
+// through their settings on every use.
+var agentCatalog = new AgentCatalog(
+    loadedCatalog, () => tenantSettings.AgentTags, () => tenantSettings.AgentsCommitAttribution);
 builder.Services.AddSingleton(agentCatalog);
 
 // ISSUED AGENT CREDENTIALS: one per CLI command, Data Protection ciphertext beside tenant_events

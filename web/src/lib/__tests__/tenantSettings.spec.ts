@@ -54,6 +54,7 @@ describe('the Admission field', () => {
   it('names every setting, system packages included, and no label or hint shows a key', () => {
     const names = TenantSettingFields.map((field) => field.name).sort();
     expect(names).toEqual([
+      'agents.commitAttribution',
       'causation.depthLimit',
       'concierge.idleTimeout',
       'concierge.mayArchive',
@@ -319,6 +320,23 @@ describe('concierge.mayMerge', () => {
       expect(typeof sent['concierge.mayMerge']).toBe('string');
       expect(ToggleWords).toContain(sent['concierge.mayMerge']);
     }
+  });
+});
+
+describe('agents.commitAttribution', () => {
+  it('is a toggle on the System tab whose hint says what it does and that off means no AI attribution', () => {
+    const field = TenantSettingFields.find((entry) => entry.name === 'agents.commitAttribution')!;
+
+    expect(field.tab).toBe('system');
+    expect(field.kind).toBe('toggle');
+    expect(field.hint).toContain('sign the commits and pull requests they write');
+    expect(field.hint).toContain('while it is off, members’ commits and pull requests carry no AI co-author trailer and no “generated with” line.');
+  });
+
+  it('goes as the word on or off and is unchanged when put back', () => {
+    const stored = [setting('agents.commitAttribution', 'off')];
+    expect(changedSettings(stored, { 'agents.commitAttribution': 'off' }, {})).toEqual({});
+    expect(changedSettings(stored, { 'agents.commitAttribution': 'on' }, {})).toEqual({ 'agents.commitAttribution': 'on' });
   });
 });
 

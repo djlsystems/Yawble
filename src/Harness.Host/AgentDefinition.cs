@@ -203,7 +203,16 @@ public sealed record AgentDefinition(
         + "`outputPerMinute` from `GET /api/concierge` after fifteen minutes; set the floor above the "
         + "most it printed in a minute. Null means not measured: the session uses the platform's "
         + "default floor, shown as `default`, never as measured. Ignored for a Headless preset.")]
-    IdleOutputFloor? IdleOutput = null)
+    IdleOutputFloor? IdleOutput = null,
+
+    [property: Description(
+        "What keeps this CLI from adding its own co-author trailer or \"generated with\" line to a "
+        + "member's commits and pull requests: arguments placed with the isolation arguments and "
+        + "variables set after the preset's and the team's env, with notes saying what was measured. "
+        + "Applied to a headless launch only, and only while the setting `agents.commitAttribution` "
+        + "is off, which it is unless a person turns it on; the Concierge launches as its preset says. "
+        + "Null means nothing is declared, and the launch is the same whatever the setting.")]
+    AgentAttribution? Attribution = null)
 {
     /// <summary>Whether this preset is compiled into the build. Computed from the name, never
     /// stored: a file cannot make a custom preset built-in, or a built-in custom.</summary>

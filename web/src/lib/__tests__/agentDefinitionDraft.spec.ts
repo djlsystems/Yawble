@@ -191,4 +191,27 @@ describe('rebuildAgentDefinition', () => {
 
     expect(rebuilt.updates).toEqual(updates)
   })
+
+  it('carries a preset\'s commit-attribution declaration through an edit unchanged', () => {
+    const attribution = { arguments: ['--settings', '{"attribution":{"commit":"","pr":""}}'], notes: ['measured'] }
+
+    const rebuilt = rebuildAgentDefinition({
+      name: 'mine',
+      mode: 'Headless',
+      fileName: 'claude',
+      args: '-p',
+      systemPromptArguments: '',
+      instructionsFile: '',
+      usageFormat: '',
+      env: '',
+      timeout: '',
+      tags: '',
+      installUrl: '',
+      installHint: '',
+      languageModel: true,
+      attribution,
+    })
+
+    expect(rebuilt.attribution).toEqual(attribution)
+  })
 })

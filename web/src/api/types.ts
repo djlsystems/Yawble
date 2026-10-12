@@ -1793,6 +1793,19 @@ export interface Agent {
    * runs to update it when a person asks. Carried through an edit for `isolation`'s reason.
    */
   updates?: AgentUpdates | null
+
+  /**
+   * What keeps this CLI from signing a member's commits and pull requests, applied while
+   * `agents.commitAttribution` is off. Carried through an edit for `isolation`'s reason.
+   */
+  attribution?: AgentAttribution | null
+}
+
+/** A preset's commit-attribution declaration. See `AgentAttribution` in the Host. */
+export interface AgentAttribution {
+  arguments?: string[] | null
+  env?: Record<string, string> | null
+  notes?: string[] | null
 }
 
 /** A preset's update declaration. See `AgentUpdates` in the Host. */

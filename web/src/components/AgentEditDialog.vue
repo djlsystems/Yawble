@@ -272,6 +272,7 @@ function submit() {
       installHint: installHint.value,
       isolation: source.value?.isolation ?? null,
       updates: source.value?.updates ?? null,
+      attribution: source.value?.attribution ?? null,
     }),
   );
 }

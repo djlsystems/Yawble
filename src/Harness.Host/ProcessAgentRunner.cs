@@ -341,8 +341,9 @@ public sealed record AgentCommand(
     string? InstructionsFile = null,
     string? UsageFormat = null,
     bool LanguageModel = true,
-    // A member's isolation variables (AgentIsolation.Env), set LAST at the spawn site so no preset
-    // or team env can switch isolation back on. Null for the Concierge and an undeclared preset.
+    // A member's isolation variables (AgentIsolation.Env, and AgentAttribution.Env while commit
+    // attribution is off), set LAST at the spawn site so no preset or team env can switch either
+    // back on. Null for the Concierge and an undeclared preset.
     IReadOnlyDictionary<string, string>? IsolationEnvironment = null,
     // What turns the CLI's own updater off (AgentUpdates.Env), set LAST at every spawn site, the
     // Concierge's included, so no preset or team env can turn self-update back on.
@@ -354,7 +355,8 @@ public sealed record AgentCommand(
 /// </summary>
 public sealed class AgentCatalog(
     IReadOnlyList<AgentDefinition> definitions,
-    Func<IReadOnlyDictionary<string, IReadOnlyList<string>>>? tagOverrides = null)
+    Func<IReadOnlyDictionary<string, IReadOnlyList<string>>>? tagOverrides = null,
+    Func<bool>? commitAttribution = null)
 {
     // The definitions and NOTHING ELSE - in particular no per-container map of resolved commands.
     // Every reader can resolve the answer from a member's own agent name, and a second store of
@@ -371,6 +373,12 @@ public sealed class AgentCatalog(
     // Only a built-in is overridden: a custom preset carries its own tags in agents.json.
     private readonly Func<IReadOnlyDictionary<string, IReadOnlyList<string>>> _tagOverrides =
         tagOverrides ?? (() => new Dictionary<string, IReadOnlyList<string>>());
+
+    // WHETHER A MEMBER'S CLI MAY SIGN ITS COMMITS, the tenant setting `agents.commitAttribution`.
+    // A delegate, asked at every launch and never captured, so a change reaches the next run with
+    // no restart. With none handed in (a catalog built for a test), nothing is switched off and the
+    // launch is exactly the preset's: the Host always hands the setting in.
+    private readonly Func<bool> _commitAttribution = commitAttribution ?? (() => true);
 
     /// <summary>Every preset, built-in and custom, a built-in carrying the operator's tags when
     /// it has them: what the Agents screen renders.</summary>
@@ -447,11 +455,17 @@ public sealed class AgentCatalog(
         // ONLY THE HEADLESS COMMAND IS ISOLATED. A member gets the platform's tools and its CLI's
         // own; the Concierge is the person's session and launches exactly as it always has.
         // THE UPDATE-OFF ON EVERY LAUNCH, member and Concierge alike: the install is shared.
-        return AgentUpdates.Apply(
-            mode == AgentMode.Headless
-                ? AgentIsolationPolicy.Apply(launch.ToCommand(), definition.Isolation)
-                : launch.ToCommand(),
-            definition.Updates);
+        if (mode != AgentMode.Headless) return AgentUpdates.Apply(launch.ToCommand(), definition.Updates);
+
+        // A MEMBER'S COMMITS CARRY NO AI ATTRIBUTION unless a person turned it on: the preset's
+        // attribution-off goes with its isolation, arguments beside the isolation arguments and
+        // variables in the isolation environment the spawn site sets last.
+        var attribution = _commitAttribution() ? null : definition.Attribution;
+        var command = AgentAttribution.ApplyArguments(launch.ToCommand(), attribution);
+        command = AgentIsolationPolicy.Apply(command, definition.Isolation);
+        command = AgentAttribution.ApplyEnvironment(command, attribution);
+
+        return AgentUpdates.Apply(command, definition.Updates);
     }
 
     /// <summary>

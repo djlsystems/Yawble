@@ -294,6 +294,60 @@ public static class AgentCatalogFile
             new Dictionary<string, string> { ["GROK_DISABLE_AUTOUPDATER"] = "1" },
             Update: ["grok", "update"]);
 
+        // WHAT KEEPS EACH CLI FROM SIGNING A MEMBER'S COMMITS, applied while the setting
+        // agents.commitAttribution is off (the default). Measured on the CLIs in the image (claude
+        // 2.1.296, codex-cli 0.162.1, grok 1.0.50, copilot 1.0.95), never read from documentation.
+        //
+        // - claude: its system prompt tells the model to end a commit with `Co-Authored-By: <model>
+        //   <noreply@anthropic.com>` and a pull request with "Generated with Claude Code". Measured
+        //   with `-p` in a scratch HOME against a local listener that refused every request (no model
+        //   reached), with the member's own `--setting-sources project,local`: the request carried
+        //   both lines; with `--settings {"attribution":{"commit":"","pr":""}}` it carried neither,
+        //   also when the checkout's .claude/settings.json set them, because flag settings outrank
+        //   project and local ones.
+        // - codex: adds its `<git_attribution>` instruction (`Co-authored-by: Codex
+        //   <noreply@openai.com>`) only when the signed-in account enables commit attribution; every
+        //   rollout on the measuring instance recorded `git_attribution: false`. No launch switch for
+        //   it was found: `commit_attribution` is not a key it reads, and `codex_git_commit` is a
+        //   removed feature.
+        // - grok: none of the 55 system prompts its sessions recorded asks for a trailer, and the
+        //   binary holds no co-author text.
+        // - copilot: its system prompt carries `<git_commit_trailer>` (`Co-authored-by: Copilot
+        //   <223556219+Copilot@users.noreply.github.com>`), switched off only by `includeCoAuthoredBy:
+        //   false` in a settings file - the user's under COPILOT_HOME or the repository's
+        //   .github/copilot - with no argument or variable for it, so no launch switch reaches it.
+        var claudeAttribution = new AgentAttribution(
+            ["--settings", """{"attribution":{"commit":"","pr":""}}"""],
+            Notes:
+            [
+                "claude 2.1.296 tells the model to end a commit with a Co-Authored-By trailer and a pull "
+                    + "request with a \"Generated with Claude Code\" line; `--settings` with an empty "
+                    + "`attribution.commit` and `attribution.pr` removes both from what it sends, measured "
+                    + "against a local listener with no model reached, and outranks a checkout's own "
+                    + ".claude/settings.json.",
+            ]);
+
+        var codexAttribution = new AgentAttribution(Notes:
+        [
+            "codex-cli 0.162.1 adds a Co-authored-by trailer instruction only when the signed-in account "
+                + "enables commit attribution, and every run measured here recorded it off; no launch switch "
+                + "for it was found, so nothing is declared.",
+        ]);
+
+        var grokAttribution = new AgentAttribution(Notes:
+        [
+            "grok 1.0.50 asks for no co-author trailer or \"generated with\" line: none of the system "
+                + "prompts its sessions recorded holds one, so nothing is declared.",
+        ]);
+
+        var copilotAttribution = new AgentAttribution(Notes:
+        [
+            "copilot 1.0.95 tells the model to add a Co-authored-by: Copilot trailer to commits, and only "
+                + "`includeCoAuthoredBy: false` in a settings file (the user's under COPILOT_HOME, or the "
+                + "repository's .github/copilot) turns it off; it has no argument or variable for it, so no "
+                + "launch switch reaches it and a member's commits may still carry it.",
+        ]);
+
         // THE FOLDERS EACH CLI KEEPS PER WORKING DIRECTORY in the shared agent home, which a team
         // deletion removes for the deleted team's own workspaces. Claude keeps its session
         // transcripts under `projects` and a cache under `~/.cache/claude-cli-nodejs`, both named
@@ -420,7 +474,8 @@ public static class AgentCatalogFile
                 Updates: claudeUpdates,
                 SessionFolders: claudeSessionFolders,
                 LaunchCheck: versionCheck,
-                IssuedCredential: claudeCredential),
+                IssuedCredential: claudeCredential,
+                Attribution: claudeAttribution),
 
             // The three other coding CLIs, verified against their own --help rather than from
             // documentation, which disagreed with the binaries in several places.
@@ -490,7 +545,8 @@ public static class AgentCatalogFile
                 Isolation: codexIsolation,
                 Updates: codexUpdates,
                 LaunchCheck: versionCheck,
-                IssuedCredential: new IssuedCredential(codexKinds, codexDisplaces, IssuedCredential.CredentialWins, "0.160.0", codexHome)),
+                IssuedCredential: new IssuedCredential(codexKinds, codexDisplaces, IssuedCredential.CredentialWins, "0.160.0", codexHome),
+                Attribution: codexAttribution),
 
             new AgentDefinition(
                 "copilot",
@@ -635,7 +691,8 @@ public static class AgentCatalogFile
                 Isolation: copilotIsolation,
                 Updates: copilotUpdates,
                 LaunchCheck: versionCheck,
-                IssuedCredential: copilotCredential),
+                IssuedCredential: copilotCredential,
+                Attribution: copilotAttribution),
 
             new AgentDefinition(
                 "grok",
@@ -701,7 +758,8 @@ public static class AgentCatalogFile
                 Updates: grokUpdates,
                 SessionFolders: grokSessionFolders,
                 LaunchCheck: versionCheck,
-                IssuedCredential: grokCredential),
+                IssuedCredential: grokCredential,
+                Attribution: grokAttribution),
 
             new AgentDefinition(
                 "echo",

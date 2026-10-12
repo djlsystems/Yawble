@@ -85,6 +85,7 @@ public sealed class TenantSettings
     public const string SystemPackagesName = "system.packages";
     public const string AgentTagsName = "agents.tags";
     public const string AgentCredentialSourceName = "agents.credentialSource";
+    public const string AgentsCommitAttributionName = "agents.commitAttribution";
     public const string OutcomesRequireForCompletionName = "outcomes.requireForCompletion";
     public const string OutcomesCurrencyName = "outcomes.currency";
     public const string OutcomesAgentHourlyRateName = "outcomes.agentHourlyRate";
@@ -277,6 +278,11 @@ public sealed class TenantSettings
             new(ConciergeMayArchiveName, TenantSettingKind.Choice, "off", null,
                 "Lets the Concierge archive and unarchive a quiet team when you ask it to in the terminal, "
                 + "as Archive and Unarchive on the Teams screen do, and it is off unless a person turns it on.",
+                Choices: ["off", "on"]),
+            new(AgentsCommitAttributionName, TenantSettingKind.Choice, "off", null,
+                "Lets agent members' CLIs sign the commits and pull requests they write as their own, and "
+                + "while it is off (the default) a member's commits and pull requests carry no AI co-author "
+                + "trailer and no \"generated with\" line from its CLI, from the next run.",
                 Choices: ["off", "on"]),
             new(LeasesHeavyHoldersName, TenantSettingKind.Integer, "1", "Leases:Heavy:Holders",
                 "How many runs may hold the `heavy` lease at once, across all teams. An agent takes it "
@@ -580,6 +586,11 @@ public sealed class TenantSettings
     /// <summary><c>concierge.mayArchive</c>: whether the Concierge may archive and unarchive a team.
     /// Read through a delegate by <see cref="ConciergeArchiveGate"/>, never captured.</summary>
     public bool ConciergeMayArchive => Current(ConciergeMayArchiveName) == "on";
+
+    /// <summary><c>agents.commitAttribution</c>: whether a member's CLI may add its own co-author
+    /// trailer or "generated with" line to commits and pull requests. Read through a delegate by
+    /// <see cref="AgentCatalog"/> at every member launch, never captured.</summary>
+    public bool AgentsCommitAttribution => Current(AgentsCommitAttributionName) == "on";
 
     /// <summary><c>updates.check</c>: whether the release check reads the release list. Read through
     /// a delegate by <see cref="ReleaseCheck"/>, never captured.</summary>
