@@ -277,6 +277,21 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
+    /// B005M: the plugin skill names `secretKeys` and how a plugin words an unset key - the member's
+    /// settings screen first, `yawble secret set <KEY>` second.
+    /// </summary>
+    [Fact]
+    public void The_plugin_skill_names_secret_keys_and_words_an_unset_key_screen_first()
+    {
+        var plugins = System.Text.RegularExpressions.Regex.Replace(BuiltInSkills.Find("authoring-plugins")!.Body, @"\s+", " ");
+
+        Assert.Contains("Each run's request also carries `secretKeys`", plugins, StringComparison.Ordinal);
+        Assert.Contains("A key name is not a secret and is not redacted", plugins, StringComparison.Ordinal);
+        var screen = plugins.IndexOf("in this member's settings, or with `yawble secret set TWILIO_ACCOUNT_SID_SHOP`", StringComparison.Ordinal);
+        Assert.True(screen >= 0);
+    }
+
+    /// <summary>
     /// A site's files folder is taught where an agent writes a site's files and where a plugin learns
     /// it: the folder, the relative path in the data, the helper's link, and never a secret there.
     /// </summary>

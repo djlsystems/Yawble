@@ -304,6 +304,126 @@ public sealed class PluginMemberRunnerTests : IDisposable
         Assert.DoesNotContain(value, await File.ReadAllTextAsync(Path.Combine(_dataRoot, "argv.txt"), Ct), StringComparison.Ordinal);
     }
 
+    /// <summary>B005M: each bound secret field's logical key NAME rides on stdin as <c>secretKeys</c>,
+    /// beside <c>secrets</c>: a set key's name beside its value, an unset key's name with no value,
+    /// and an unbound field (or a binding the manifest does not declare) not at all.</summary>
+    [Fact]
+    public async Task A_run_is_told_each_bound_secret_fields_key_name_and_an_unset_keys_name_with_no_value()
+    {
+        var settings = new Settings(new PluginMemberSettings(
+            new Dictionary<string, JsonElement>(),
+            new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN", ["backup"] = "FIXTURE_BACKUP_UNSET", ["ghost"] = "FIXTURE_GHOST" }));
+
+        var (bed, _, row) = await RunAsync(
+            """cat > stdin.json; echo '{"t":"result","ok":true,"output":"read"}'""",
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":true},"backup":{"required":false},"spare":{"required":false}}"""),
+            settings: settings,
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "s3cr3t-value-9f2", ["FIXTURE_GHOST"] = "ghost-value-77aa" }));
+        await using var _ = bed;
+
+        Assert.Equal(MessageTypes.Completed, row.Type);
+        var request = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(_dataRoot, "stdin.json"), Ct))!;
+        Assert.Equal("""{"token":"FIXTURE_TOKEN","backup":"FIXTURE_BACKUP_UNSET"}""", request["secretKeys"]!.ToJsonString());
+        Assert.Equal("""{"token":"s3cr3t-value-9f2"}""", request["secrets"]!.ToJsonString());
+    }
+
+    /// <summary>B005M golden: with <c>secretKeys</c> taken out, stdin is byte for byte what it was before
+    /// the member was added - every field a plugin already reads is unchanged.</summary>
+    [Fact]
+    public async Task The_request_is_otherwise_byte_identical_to_the_one_before_secret_keys()
+    {
+        var settings = new Settings(new PluginMemberSettings(
+            new Dictionary<string, JsonElement>(),
+            new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN", ["backup"] = "FIXTURE_BACKUP_UNSET" }));
+
+        var (bed, _, _) = await RunAsync(
+            """cat > stdin.json; echo '{"t":"result","ok":true,"output":"read"}'""",
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"token":{"required":true},"backup":{"required":false}}"""),
+            settings: settings,
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "s3cr3t-value-9f2" }));
+        await using var _ = bed;
+
+        var stdin = await File.ReadAllTextAsync(Path.Combine(_dataRoot, "stdin.json"), Ct);
+        const string added = ""","secretKeys":{"token":"FIXTURE_TOKEN","backup":"FIXTURE_BACKUP_UNSET"}""";
+        Assert.Equal(1, CountOf(stdin, added));
+
+        var request = JsonNode.Parse(stdin)!;
+        var seq = (long)request["causation"]!;
+        var correlation = request["correlation"]!.ToJsonString();
+        var golden =
+            "{\"protocol\":\"harness.member/1\",\"plugin\":{\"id\":\"fixture\",\"version\":\"0.1.0\"},"
+            + "\"member\":{\"id\":\"alpha/plug\",\"team\":\"alpha\",\"name\":\"plug\"},"
+            + $"\"causation\":{seq},\"correlation\":{correlation},"
+            + $"\"work\":[{{\"seq\":{seq},\"type\":\"{MessageTypes.InstructionFor(Plug)}\",\"source\":\"alpha/manager\",\"correlation\":{correlation},"
+            + "\"payload\":{\"instruction\":\"hello\"},\"instruction\":\"hello\"}],"
+            + "\"config\":{},\"secrets\":{\"token\":\"s3cr3t-value-9f2\"},"
+            + $"\"workingDirectory\":{JsonSerializer.Serialize(_dataRoot)},\"worktrees\":[],"
+            + "\"connections\":{},\"siteFiles\":[],\"sites\":[]}\n";
+
+        Assert.Equal(golden, stdin.Replace(added, "", StringComparison.Ordinal));
+
+        static int CountOf(string text, string part) => (text.Length - text.Replace(part, "", StringComparison.Ordinal).Length) / part.Length;
+    }
+
+    /// <summary>B005M: a value is only ever beside the field, and so the key name, it was bound to -
+    /// with two keys, one key bound to two fields, and the names never carrying a value.</summary>
+    [Fact]
+    public async Task No_secret_value_appears_beside_a_key_name_it_was_not_bound_to()
+    {
+        var values = new Dictionary<string, string> { ["KEY_ALPHA"] = "alpha-value-1a2b", ["KEY_BETA"] = "beta-value-3c4d" };
+        var settings = new Settings(new PluginMemberSettings(
+            new Dictionary<string, JsonElement>(),
+            new Dictionary<string, string> { ["first"] = "KEY_BETA", ["second"] = "KEY_ALPHA", ["third"] = "KEY_BETA" }));
+
+        var (bed, _, _) = await RunAsync(
+            """cat > stdin.json; echo '{"t":"result","ok":true,"output":"read"}'""",
+            manifest: m => m["secrets"] = JsonNode.Parse("""{"first":{"required":true},"second":{"required":true},"third":{"required":false}}"""),
+            settings: settings,
+            secrets: new Secrets(values));
+        await using var _ = bed;
+
+        var request = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(_dataRoot, "stdin.json"), Ct))!;
+        var keys = request["secretKeys"]!.AsObject();
+        var secrets = request["secrets"]!.AsObject();
+
+        Assert.Equal(["first", "second", "third"], keys.Select(k => k.Key));
+        foreach (var (field, key) in keys)
+        {
+            Assert.Equal(values[(string)key!], (string?)secrets[field]);
+            Assert.DoesNotContain((string)key!, values.Values);
+        }
+
+        Assert.DoesNotContain("value", keys.ToJsonString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>B005M: key names go on stdin unredacted, so a key whose VALUE is the name of a key the
+    /// member binds is refused at binding and, should it be set so later, before launch.</summary>
+    [Fact]
+    public async Task A_key_whose_value_is_a_bound_key_name_is_refused_at_binding_and_before_launch()
+    {
+        var values = new Dictionary<string, string> { ["KEY_ALPHA"] = "KEY_BETA", ["KEY_BETA"] = "beta-value-3c4d" };
+        var bindings = new Dictionary<string, string> { ["first"] = "KEY_ALPHA", ["second"] = "KEY_BETA" };
+        const string declared = """{"first":{"required":true},"second":{"required":true}}""";
+
+        PluginInstall.Write(_dataRoot, "fixture", manifest: PluginInstall.Manifest("fixture", edit: m => m["secrets"] = JsonNode.Parse(declared)));
+        var catalog = new PluginCatalog(PluginInstall.PluginsRoot(_dataRoot));
+        catalog.Rescan();
+
+        var refusal = PluginMemberRunner.SettingsRefusal(
+            catalog.For("fixture")!.Manifest, new PluginMemberSettings(new Dictionary<string, JsonElement>(), bindings), new Secrets(values));
+        Assert.StartsWith("The secret `KEY_ALPHA` bound for `first` has a value that is the name of a key", refusal);
+
+        var (bed, member, _) = await RunAsync(
+            "touch ran.txt; cat >/dev/null",
+            manifest: m => m["secrets"] = JsonNode.Parse(declared),
+            settings: new Settings(new PluginMemberSettings(new Dictionary<string, JsonElement>(), bindings)),
+            secrets: new Secrets(values));
+        await using var _ = bed;
+
+        Assert.Contains("The secret `KEY_ALPHA` bound for `first` has a value that is the name of a key", member.Snapshot().Failed);
+        Assert.False(File.Exists(Path.Combine(_dataRoot, "ran.txt")));
+    }
+
     /// <summary>D1: a bound secret written into a REPORT record - not only
     /// the result - must not reach the ledger, the snapshot or the Manager it wakes.</summary>
     [Theory]

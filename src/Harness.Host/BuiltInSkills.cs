@@ -1283,6 +1283,15 @@ public static class BuiltInSkills
             redacts bound values from what a plugin writes, but that is a net, not a guarantee: the
             plugin must never write a secret out.
 
+            Each run's request also carries `secretKeys`: every secret field the member binds, mapped
+            to the logical key NAME it is bound to (`{"accountSid": "TWILIO_ACCOUNT_SID_SHOP"}`), set
+            or not. `secrets` holds only the values that are set, so a field in `secretKeys` and not in
+            `secrets` is a bound key with no value. A key name is not a secret and is not redacted, so a
+            plugin can name the key when it needs one: point to the member's settings screen first and
+            the operator CLI second, as in "Set TWILIO_ACCOUNT_SID_SHOP in this member's settings, or
+            with `yawble secret set TWILIO_ACCOUNT_SID_SHOP`." Name the key from `secretKeys`, never a
+            guess, and never write a value beside it.
+
             A person can change a plugin member's settings and secret bindings after hire, in the
             member's settings; the change is checked exactly as a hire is and takes effect on the
             member's next run. A Manager cannot change them after hire: to run a plugin with other

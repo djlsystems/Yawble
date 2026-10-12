@@ -538,6 +538,7 @@ name. The install checks the same before it writes.
   ],
   "config": { "mode": "reverse" },
   "secrets": { "token": "…resolved now…" },
+  "secretKeys": { "token": "SAMPLE_ECHO_TOKEN", "backup": "SAMPLE_ECHO_BACKUP" },
   "connections": {
     "mail": { "provider": "google", "account": "person@example.com", "accessToken": "…fresh now…",
               "expiresAt": "2026-09-28T21:05:00Z", "scopes": ["https://mail.google.com/"] },
@@ -570,6 +571,17 @@ name. The install checks the same before it writes.
   run.
 - **`config`** is the manifest's defaults with this member's own values on top.
 - **`secrets`** holds only the secrets this member binds, resolved at the moment the run starts.
+- **`secretKeys`** maps every secret field this member binds to the logical key NAME it is bound
+  to, whether that key is set or not; `{}` when it binds none. A field in `secretKeys` and not in
+  `secrets` is a bound key with no value on this Host (above, `backup` is bound to
+  `SAMPLE_ECHO_BACKUP`, which is not set). A field the member does not bind is in neither. It is
+  additive: every other member of the request is byte for byte what it was before, and a plugin
+  that ignores it is unchanged. A key name is not a secret and is not redacted. Each name comes from
+  the same binding as the value beside it in `secrets`, so a value is never beside a name it was not
+  bound to; and a binding whose key's VALUE is the name of a key the member binds is refused, at
+  hire, in the member's settings, and before every run, because that value would ride on stdin
+  unredacted. How a plugin words a key that is not set is under
+  [Configuration and secrets](#configuration-and-secrets).
 - **`connections`** holds one entry per slot this member has bound: the provider, the account name,
   a fresh access token, when it expires and the scopes it was granted. The Host refreshes the token
   before the run when it would expire within 5 minutes, so a run always starts with at least that
@@ -771,6 +783,17 @@ slot like any member's.
   - A bound value shorter than 4 characters cannot be redacted without mangling the text around
     it, so it is refused: at hire if it is already set, and on every run
     (`A_secret_too_short_to_redact_is_refused_before_launch`).
+- **Naming a key that is not set.** A plugin that needs a key with no value says which key, by the
+  name in `secretKeys`, and how to set it: the member's settings screen first, the operator CLI
+  second - "Set `TWILIO_ACCOUNT_SID_SHOP` in this member's settings, or with
+  `yawble secret set TWILIO_ACCOUNT_SID_SHOP` and `yawble up`." It names the key it was given, never
+  a guess and never a field name standing in for it, and never writes a value beside it. (A
+  `required` secret whose key is not set never reaches the plugin: the Host refuses the run in the
+  same words.) Pinned by
+  `PluginMemberRunnerTests.A_run_is_told_each_bound_secret_fields_key_name_and_an_unset_keys_name_with_no_value`,
+  `PluginMemberRunnerTests.The_request_is_otherwise_byte_identical_to_the_one_before_secret_keys`,
+  `PluginMemberRunnerTests.No_secret_value_appears_beside_a_key_name_it_was_not_bound_to` and
+  `PluginMemberRunnerTests.A_key_whose_value_is_a_bound_key_name_is_refused_at_binding_and_before_launch`.
 - **OAuth is a connection, never a secret.** A plugin that needs a person's account at an OAuth
   service declares a `connections` slot (see [Connections](#connections-oauth-accounts)) and reads
   `connections.<slot>.accessToken` on stdin. It never asks the person for a token, never takes a

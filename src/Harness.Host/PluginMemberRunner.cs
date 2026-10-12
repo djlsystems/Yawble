@@ -178,7 +178,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         var (config, configRefusal) = EffectiveConfig(manifest, bound);
         if (configRefusal is not null) return MemberResult.NotRun(configRefusal);
 
-        var (resolvedSecrets, secretRefusal) = ResolveSecrets(manifest, bound);
+        var (resolvedSecrets, secretKeys, secretRefusal) = ResolveSecrets(manifest, bound);
         if (secretRefusal is not null) return MemberResult.NotRun(secretRefusal);
 
         var (grants, connectionRefusal) = await GrantConnectionsAsync(manifest, bound, ct);
@@ -188,7 +188,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.SelectMany(g => g.Secrets)];
 
         var siteFiles = await SiteFilesAsync(invocation.Member, ct);
-        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles);
+        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles, secretKeys);
 
         StartRun Start(string stdin) => new(
             RunId.For(invocation.Member),
@@ -220,7 +220,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         if (manifest.Reads.Count > 0)
         {
             var (read, delivery) = await ReadSitesAsync(invocation.Member, manifest, FramedBytes(Start(request)), ct);
-            request = Request(invocation, manifest, config, resolvedSecrets, grants, read, siteFiles);
+            request = Request(invocation, manifest, config, resolvedSecrets, grants, read, siteFiles, secretKeys);
 
             foreach (var row in (string?[])[delivery.CutRow, delivery.MissingRow])
             {
@@ -337,7 +337,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         MemberInvocation invocation, PluginManifest manifest,
         IReadOnlyDictionary<string, JsonNode?> config, IReadOnlyDictionary<string, string> resolvedSecrets,
         IReadOnlyDictionary<string, ConnectionGrant>? grants = null, JsonArray? sites = null,
-        JsonArray? siteFiles = null)
+        JsonArray? siteFiles = null, IReadOnlyDictionary<string, string>? secretKeys = null)
     {
         var work = new JsonArray();
 
@@ -394,6 +394,10 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             ["work"] = work,
             ["config"] = new JsonObject(config.Select(c => KeyValuePair.Create(c.Key, c.Value?.DeepClone()))),
             ["secrets"] = new JsonObject(resolvedSecrets.Select(s => KeyValuePair.Create(s.Key, (JsonNode?)JsonValue.Create(s.Value)))),
+
+            // EACH BOUND SECRET FIELD'S LOGICAL KEY NAME - a name, never a value, and not redacted -
+            // set or not, so a plugin can say which key to set. Additive: `secrets` is unchanged.
+            ["secretKeys"] = new JsonObject((secretKeys ?? new Dictionary<string, string>()).Select(k => KeyValuePair.Create(k.Key, (JsonNode?)JsonValue.Create(k.Value)))),
             ["workingDirectory"] = invocation.WorkingDirectory,
             ["worktrees"] = worktrees,
 
@@ -713,6 +717,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             }
         }
 
+        if (KeyNamedByAValue(settings.Secrets, secrets) is { } named) return named;
+
         foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required))
         {
             if (!settings.Secrets.TryGetValue(name, out var key))
@@ -729,20 +735,27 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         return null;
     }
 
-    /// <summary>Each bound secret resolved by its logical key NOW, never earlier and never stored.</summary>
-    private (IReadOnlyDictionary<string, string> Secrets, string? Refusal) ResolveSecrets(
+    /// <summary>
+    /// Each bound secret resolved by its logical key NOW, never earlier and never stored, and each
+    /// declared field's bound key NAME, set or not. Both come from the one binding per field, so a
+    /// value is only ever beside the field, and so the name, it was bound to.
+    /// </summary>
+    private (IReadOnlyDictionary<string, string> Secrets, IReadOnlyDictionary<string, string> Keys, string? Refusal) ResolveSecrets(
         PluginManifest manifest, PluginMemberSettings bound)
     {
         var resolved = new Dictionary<string, string>(StringComparer.Ordinal);
+        var keys = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var (name, secret) in manifest.Secrets)
         {
             var key = bound.Secrets.GetValueOrDefault(name);
             var value = key is null || secrets is null ? null : secrets.TryGet(key);
 
+            if (key is not null) keys[name] = key;
+
             if (value is { Length: < MinimumSecretLength })
             {
-                return (resolved, ShortSecret(key!, name));
+                return (resolved, keys, ShortSecret(key!, name));
             }
 
             if (value is not null)
@@ -751,13 +764,40 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             }
             else if (secret.Required)
             {
-                return (resolved, key is null
+                return (resolved, keys, key is null
                     ? $"This member binds no key for the plugin's required secret `{name}`."
                     : $"The secret `{key}` that this member binds for `{name}` is not set on this Host. {SetIt(key)}");
             }
         }
 
-        return (resolved, null);
+        // A KEY NAME THAT IS A BOUND VALUE is refused here as at binding: the names go on stdin unredacted.
+        if (KeyNamedByAValue(keys, secrets) is { } named) return (resolved, keys, named);
+
+        return (resolved, keys, null);
+    }
+
+    /// <summary>
+    /// Why the bindings cannot stand because one key's NAME is the value of a key bound beside it
+    /// (its own or another's), or null. Key names go on stdin unredacted as <c>secretKeys</c>, so a
+    /// name that is a value would put that value beside a field it was not bound to. The sentence
+    /// names the key whose value it is, never the value.
+    /// </summary>
+    private static string? KeyNamedByAValue(IReadOnlyDictionary<string, string> bindings, ISecretStore? secrets)
+    {
+        if (secrets is null) return null;
+
+        var names = bindings.Values.ToHashSet(StringComparer.Ordinal);
+
+        foreach (var (name, key) in bindings)
+        {
+            if (secrets.TryGet(key) is { } value && names.Contains(value))
+            {
+                return $"The secret `{key}` bound for `{name}` has a value that is the name of a key this member binds, "
+                    + $"and key names are not secret. Set a real value for `{key}`. {SetIt(key)}";
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
