@@ -44,6 +44,7 @@ import { productCli } from '../presentation/product';
 import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/providerReturn';
 import { mailboxHint, OutlookHint, setupTime } from '../lib/mailboxHints';
 import MailboxForm from './MailboxForm.vue';
+import { letGoSignIns } from '../lib/letGoSignIns';
 
 /**
  * ADD CONNECTION: connecting an account for a person who has never registered an OAuth app.
@@ -205,6 +206,7 @@ async function begin(seq: number) {
     (flow) =>
       flow.state === 'waiting'
       && new Date(flow.expiresAt).getTime() > Date.now()
+      && !letGoSignIns.has(flow.flowId)
       && services.value.some((service) => service.id === flow.provider)
       && props.providers.some((candidate) => candidate.id === flow.provider),
   );
@@ -531,6 +533,8 @@ const deviceRead = ref<ConnectionFlow | null>(null);
 const deviceConnection = ref<Connection | null>(null);
 /** The Host's sentence when the code shown was replaced by a second one while waiting. */
 const deviceNotice = ref('');
+/** The waiting sign-in shown is one picked back up as the dialog opened, not one just started. */
+const resumed = ref(false);
 const now = ref(Date.now());
 let readTimer: ReturnType<typeof setTimeout> | null = null;
 let clock: ReturnType<typeof setInterval> | null = null;
@@ -557,6 +561,7 @@ async function startDevice() {
   stopDevice();
   leaving.value = true;
   problem.value = '';
+  resumed.value = false;
   try {
     device.value = await startDeviceConnection({ provider: chosen.id, scopes: chosenScopes.value, flow: 'device' });
     deviceRead.value = null;
@@ -576,6 +581,7 @@ function resumeDevice(flow: ConnectionOpenFlow) {
   providerId.value = flow.provider;
   device.value = { flowId: flow.flowId, userCode: flow.userCode, verificationUri: flow.verificationUri, expiresAt: flow.expiresAt };
   deviceRead.value = null;
+  resumed.value = true;
   step.value = 'signin';
   now.value = Date.now();
   clock = setInterval(() => (now.value = Date.now()), 1000);
@@ -583,8 +589,13 @@ function resumeDevice(flow: ConnectionOpenFlow) {
   readTimer = setTimeout(readFlow, 0);
 }
 
-/** Back to the service: the code shown is left to expire at the Host. */
+/**
+ * Back to the service: the code shown is left to expire at the Host, and a waiting one is let go of,
+ * so opening Add connection again starts at the service rather than on this code.
+ */
 function back() {
+  if (device.value && deviceState.value === 'waiting') letGoSignIns.add(device.value.flowId);
+  resumed.value = false;
   stopDevice();
   stopWaiting();
   tabUrl.value = null;
@@ -1049,6 +1060,10 @@ const stepLabels = computed(() => [
         </template>
         <div v-else :data-device-state="deviceState">
           <template v-if="deviceState === 'waiting'">
+            <div v-if="resumed" class="q-mb-sm" data-device-resumed>
+              This is the {{ provider?.name ?? 'sign-in' }} sign-in you started earlier, still waiting for you.
+              Back lets it go and starts again.
+            </div>
             <div v-if="deviceNotice" class="q-mb-sm" data-device-notice>{{ deviceNotice }}</div>
             <div>
               Open

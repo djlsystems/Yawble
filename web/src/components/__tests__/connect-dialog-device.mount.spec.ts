@@ -68,6 +68,7 @@ import type { ConnectionGuide, ConnectionNeeds } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostConnection, hostProvider } from '../../test/pluginFixtures';
 import { button, field, isDisabled, settle, type } from '../../test/formProbe';
+import { letGoSignIns } from '../../lib/letGoSignIns';
 
 const mailSend = 'https://graph.microsoft.com/Mail.Send';
 
@@ -135,6 +136,7 @@ const started = (userCode = fakeCode) => ({
 const connected = hostConnection({ id: 'conn-ms', provider: 'microsoft', name: 'person@example.test', account: 'person@example.test' });
 
 beforeEach(() => {
+  letGoSignIns.clear();
   for (const mock of [
     listConnections,
     listConnectionProviders,
@@ -505,6 +507,39 @@ describe("Microsoft's sign-in step", () => {
     await advance(3_000);
     expect(getConnectionFlow.mock.calls.length).toBeGreaterThan(reads);
     expect(step()).toBe('result');
+
+    wrapper.unmount();
+  });
+
+  it('says a sign-in picked back up was started earlier, and Back lets it go so the dialog opens on the service', async () => {
+    const wrapper = await mountConnections();
+    pinClock();
+    listOpenConnectionFlows.mockResolvedValue([
+      { flowId: 'flow-1', provider: 'microsoft', userCode: fakeCode, verificationUri, expiresAt: '2026-10-04T10:15:00Z', state: 'waiting' },
+    ]);
+    await click(button('Add connection'));
+
+    expect(step()).toBe('signin');
+    expect(bodyFind('[data-device-resumed]')!.textContent).toContain('started earlier');
+
+    await click(button('Back'));
+    expect(step()).toBe('service');
+    await click(bodyFind('[data-guided-connect] button[aria-label="Close"]'));
+
+    // The Host still lists it as waiting; it is not picked up again.
+    await click(button('Add connection'));
+    expect(step()).toBe('service');
+    expect(bodyFind('[data-device-resumed]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('says nothing of an earlier sign-in for one just started', async () => {
+    const wrapper = await mountConnections();
+    await startSignIn();
+
+    expect(bodyFind('[data-device-code]')).not.toBeNull();
+    expect(bodyFind('[data-device-resumed]')).toBeNull();
 
     wrapper.unmount();
   });
