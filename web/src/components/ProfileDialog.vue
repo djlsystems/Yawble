@@ -374,9 +374,21 @@ function copyCredential() {
 
         <!-- API keys --------------------------------------------------------------------- -->
         <q-tab-panel name="keys">
-          <div class="text-caption os-text-muted q-mb-sm">
-          A key acts as you, reaching whatever you reach at the time it is used. It carries no
-          account administration.
+          <div class="os-body os-text-muted q-mb-sm" data-keys-about>
+          <p class="q-mb-xs">
+            An API key lets a script or another program use this instance as you. The program sends
+            the key in the <code>X-Api-Key</code> header of each request, and it reaches what you
+            can reach at that moment: teams and their members, the backlog, documents and sites.
+          </p>
+          <p class="q-mb-xs">
+            A key cannot do what only a person signed in may do: installing, deleting or archiving
+            a team, changing settings or connections, or making and revoking keys.
+          </p>
+          <p class="q-mb-none">
+            Give each key the name of the program or machine that uses it, so you know which one to
+            revoke. A key is shown once, when you make it. Revoke a key you no longer use; an admin
+            can also revoke any key under Admin, Keys.
+          </p>
         </div>
 
         <!--
@@ -468,6 +480,6 @@ function copyCredential() {
    with however many you hold. Without a floor the card jumps as you move between tabs, which
    moves the tab bar out from under the pointer. */
 .profile-panels {
-  --os-tab-panels-height: 21rem;
+  --os-tab-panels-height: 30rem;
 }
 </style>

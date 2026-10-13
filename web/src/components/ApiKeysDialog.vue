@@ -67,9 +67,14 @@ watch(open, (showing) => {
     <q-card class="keys-card os-dialog-lg">
       <q-card-section class="q-pb-none">
         <div class="os-dialog-title">API keys</div>
-        <div class="text-caption os-text-muted q-mt-xs">
-          Every key on this instance. Keys are minted by their owners, in their own profile — this
-          view can revoke, and nothing else.
+        <div class="os-body os-text-muted q-mt-xs" data-keys-about>
+          An API key lets a script or another program use this instance as the person who made it.
+          This list shows every person's keys, and here you can revoke one, for example when someone
+          leaves or a key may have been seen by someone else.
+        </div>
+        <div class="os-body os-text-muted q-mt-xs" data-keys-where>
+          Keys are made by their owners, never here: open your name at the top right, choose
+          <b>User profile</b>, then the <b>API keys</b> tab.
         </div>
       </q-card-section>
 
