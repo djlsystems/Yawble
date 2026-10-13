@@ -188,6 +188,9 @@ permitted. Two years after a version is published, that version is also availabl
 Apache License 2.0. This is fair source, not an OSI-approved open source license. Full terms:
 [LICENSE](LICENSE).
 
+The packages in the Marketplace ([djlsystems/Yawble-packages](https://github.com/djlsystems/Yawble-packages))
+are licensed separately, as open source under the Apache License 2.0.
+
 Yawble and the Yawble logo are trademarks of DJL Systems, Inc.
 
 Copyright (c) 2026 DJL Systems, Inc.
