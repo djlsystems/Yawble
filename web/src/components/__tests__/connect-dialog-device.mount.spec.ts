@@ -378,7 +378,7 @@ describe("Microsoft's sign-in step", () => {
     wrapper.unmount();
   });
 
-  it('shows the second code and the sentence when the flow waits on a new code, and copies the new one', async () => {
+  it('shows the second code, numbered, when the flow waits on a new code, and copies the new one', async () => {
     const wrapper = await mountConnections();
     await startSignIn();
     expect(bodyFind('[data-device-notice]')).toBeNull();
@@ -397,7 +397,10 @@ describe("Microsoft's sign-in step", () => {
     expect(step()).toBe('signin');
     expect(bodyFind('[data-device-state]')!.getAttribute('data-device-state')).toBe('waiting');
     expect(bodyFind('[data-device-code]')!.textContent).toContain(secondCode);
-    expect(bodyFind('[data-device-notice]')!.textContent).toBe(sentence);
+    // Numbered, and the first said done, in place of the Host's sentence.
+    expect(bodyFind('[data-first-code-done]')).not.toBeNull();
+    expect(bodyFind('[data-code-number]')!.textContent).toContain('Code 2 of 2');
+    expect(bodyFind('[data-device-notice]')).toBeNull();
     expect(bodyFind('[data-device-countdown]')!.textContent).toContain('20:00');
     await click(bodyFind('button[aria-label="Copy the code"]'));
     expect(copyText).toHaveBeenLastCalledWith(secondCode);

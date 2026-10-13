@@ -51,7 +51,7 @@ vi.mock('../../lib/clipboard', () => ({ copyText }));
 
 import ConnectionsDialog from '../ConnectionsDialog.vue';
 import type { ConnectionNeeds } from '../../api/types';
-import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
+import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostProvider } from '../../test/pluginFixtures';
 import { button, settle } from '../../test/formProbe';
 
@@ -232,6 +232,73 @@ describe('A Microsoft connection spanning several APIs', () => {
     expect(getConnectionNeeds).toHaveBeenCalledWith('google');
     expect(bodyFind('[data-connect-api-name]')).toBeNull();
     expect(bodyFind(`[data-connect-scope="${gmail}"]`)!.textContent).toContain('Read, change and send your Gmail');
+
+    wrapper.unmount();
+  });
+});
+
+describe('Two codes for a sign-in spanning several APIs', () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function readAgain() {
+    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it('says before the first code that there are two, numbers each, and says when the first is done', async () => {
+    const wrapper = await mountConnections();
+    await choose('microsoft');
+    await click(button('Next'));
+
+    const told = bodyFind('[data-two-codes]')!.textContent!;
+    expect(told).toContain('two short codes');
+    expect(told).toContain('come back to this');
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    button('Sign in with Microsoft')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodyFind('[data-code-number]')!.textContent).toBe('Code 1 of 2');
+    expect(bodyFind('[data-first-code-done]')).toBeNull();
+    expect(bodyText()).toContain('Waiting for the first code');
+
+    getConnectionFlow.mockResolvedValue({
+      state: 'waiting',
+      sentence: 'Microsoft needs a second code to finish the sign-in.',
+      userCode: 'FAKE-CODE-TWO',
+      verificationUri: 'https://microsoft.example.test/devicelogin',
+      expiresAt: '2099-01-01T00:20:00Z',
+    });
+    await readAgain();
+
+    expect(bodyFind('[data-first-code-done]')!.textContent).toContain('approved the permissions');
+    expect(bodyFind('[data-code-number]')!.textContent).toContain('Code 2 of 2');
+    expect(bodyFind('[data-device-code]')!.textContent).toContain('FAKE-CODE-TWO');
+    expect(bodyText()).toContain('Waiting for the second code');
+
+    wrapper.unmount();
+  });
+
+  it('says nothing of two codes when what is ticked names one API', async () => {
+    getConnectionNeeds.mockResolvedValue(oneApi);
+    const wrapper = await mountConnections();
+    await choose('microsoft');
+    await click(button('Next'));
+
+    expect(bodyFind('[data-two-codes]')).toBeNull();
+    await click(button('Sign in with Microsoft'));
+    expect(bodyFind('[data-code-number]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('says nothing of two codes once every API but one is unticked', async () => {
+    const wrapper = await mountConnections();
+    await choose('microsoft');
+    for (const api of [sql, storage, vault, logs, graph]) await click(group(api)!.querySelector('[role="checkbox"]'));
+    await click(button('Next'));
+
+    expect(bodyFind('[data-two-codes]')).toBeNull();
 
     wrapper.unmount();
   });

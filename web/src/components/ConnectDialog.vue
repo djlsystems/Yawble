@@ -378,6 +378,26 @@ const scopeGroups = computed(() => {
   return [{ api: null, name: null, lines: needs.value?.scopes ?? [] }];
 });
 
+/** The sign-in scopes, which go with every API's request and make no API of their own. */
+const signInScopes = new Set(['openid', 'email', 'profile', 'offline_access']);
+
+/**
+ * TWO CODES, SAID BEFORE THEY ARE ASKED FOR. Microsoft redeems a sign-in code for one API only, so a
+ * sign-in naming permissions of more than one API takes two codes: the first approves them all, the
+ * second (naming the first API) finishes it, and the Host then redeems its one refresh token for each
+ * API. Microsoft's own page says the window can be closed after the first, so a person who is not
+ * told comes back to a code they have not seen and a spinner. Counted from what is ticked.
+ */
+const twoCodes = computed(() => {
+  if (!isMicrosoft.value) return false;
+  const ticked = new Set(chosenScopes.value.filter((scope) => !signInScopes.has(scope)));
+  const apis = (needs.value?.microsoftApis ?? []).filter((api) => api.scopes.some((line) => ticked.has(line.scope)));
+  return apis.length > 1;
+});
+
+/** Which of the two codes is shown: 1 or 2, or null for a single code or a sign-in picked back up. */
+const codeNumber = ref<1 | 2 | null>(null);
+
 /** From Admin, the installed plugins whose permissions the sign-in asks for, each once; empty from a slot. */
 const askingPlugins = computed(() => (props.need ? [] : [...new Set((needs.value?.scopes ?? []).flatMap((line) => line.plugins))]));
 
@@ -546,6 +566,8 @@ const now = ref(Date.now());
 let readTimer: ReturnType<typeof setTimeout> | null = null;
 let clock: ReturnType<typeof setInterval> | null = null;
 
+const waitingWords = computed(() =>
+  codeNumber.value === 1 ? 'Waiting for the first code…' : codeNumber.value === 2 ? 'Waiting for the second code…' : 'Waiting for you to sign in…');
 const deviceState = computed(() => deviceRead.value?.state ?? 'waiting');
 const deviceSentence = computed(() => refusalWords(deviceRead.value?.sentence));
 const deviceLeft = computed(() => (device.value ? countdown(device.value.expiresAt, now.value) : ''));
@@ -570,6 +592,7 @@ async function startDevice() {
   problem.value = '';
   resumed.value = false;
   try {
+    codeNumber.value = twoCodes.value ? 1 : null;
     device.value = await startDeviceConnection({ provider: chosen.id, scopes: chosenScopes.value, flow: 'device' });
     deviceRead.value = null;
     now.value = Date.now();
@@ -589,6 +612,7 @@ function resumeDevice(flow: ConnectionOpenFlow) {
   device.value = { flowId: flow.flowId, userCode: flow.userCode, verificationUri: flow.verificationUri, expiresAt: flow.expiresAt };
   deviceRead.value = null;
   resumed.value = true;
+  codeNumber.value = null;
   step.value = 'signin';
   now.value = Date.now();
   clock = setInterval(() => (now.value = Date.now()), 1000);
@@ -635,6 +659,7 @@ async function readFlow() {
     if (read.userCode && read.verificationUri && read.expiresAt && read.userCode !== flow.userCode) {
       device.value = { flowId: flow.flowId, userCode: read.userCode, verificationUri: read.verificationUri, expiresAt: read.expiresAt };
       deviceNotice.value = read.sentence;
+      codeNumber.value = 2;
     }
     readTimer = setTimeout(readFlow, flowReadEvery);
     return;
@@ -1068,6 +1093,15 @@ const stepLabels = computed(() => [
               ? 'Only the account\'s name and email address are asked for.'
               : `${chosenScopes.length === 1 ? 'One thing is' : `${chosenScopes.length} things are`} asked for besides the account's name and email address.` }}
           </div>
+          <div v-if="twoCodes" class="connect-two-codes" data-two-codes>
+            <div class="text-weight-medium">This takes two short codes, one after the other.</div>
+            <ol class="q-my-xs">
+              <li>The first approves what the plugins need.</li>
+              <li>The second finishes signing in. It asks no new questions.</li>
+            </ol>
+            When {{ provider.name }} says you can close its page after the first code, come back to this
+            window: the second code will be here.
+          </div>
           <div v-if="usesDefault" data-signin-advanced>
             <q-btn
               flat
@@ -1088,7 +1122,15 @@ const stepLabels = computed(() => [
               This is the {{ provider?.name ?? 'sign-in' }} sign-in you started earlier, still waiting for you.
               Back lets it go and starts again.
             </div>
-            <div v-if="deviceNotice" class="q-mb-sm" data-device-notice>{{ deviceNotice }}</div>
+            <div v-if="codeNumber === 1" class="text-weight-medium" data-code-number="1">Code 1 of 2</div>
+            <template v-else-if="codeNumber === 2">
+              <div class="row items-center q-gutter-xs text-positive" data-first-code-done>
+                <q-icon name="check_circle" size="18px" />
+                <span>First code done: {{ provider.name }} approved the permissions.</span>
+              </div>
+              <div class="text-weight-medium" data-code-number="2">Code 2 of 2: one more code to finish</div>
+            </template>
+            <div v-else-if="deviceNotice" class="q-mb-sm" data-device-notice>{{ deviceNotice }}</div>
             <div>
               Open
               <a :href="device.verificationUri" target="_blank" rel="noopener noreferrer" data-device-link>{{ device.verificationUri }}</a>
@@ -1103,7 +1145,7 @@ const stepLabels = computed(() => [
             </div>
             <div class="row items-center q-gutter-sm q-mt-sm os-text-muted">
               <q-spinner size="16px" />
-              <span>Waiting for you to sign in…</span>
+              <span>{{ waitingWords }}</span>
             </div>
           </template>
           <div v-else class="text-negative" data-device-sentence>{{ deviceSentence }}</div>
@@ -1225,6 +1267,11 @@ const stepLabels = computed(() => [
 </template>
 
 <style scoped>
+.connect-two-codes {
+  border-left: 3px solid var(--q-primary);
+  padding: 0.25rem 0 0.25rem 0.75rem;
+}
+
 .connect-steps {
   display: flex;
   gap: 16px;
