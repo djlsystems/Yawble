@@ -179,9 +179,28 @@ describe('The provider tiles', () => {
     expect(links('[data-mailbox-hints]')).toEqual(['https://login.yahoo.com/account/security']);
     expect(bodyFind('[data-mailbox-hints]')!.textContent).toContain('Account security, choose Generate app password');
 
-    // Switching tile inside the form shows that tile's hints.
-    await click(bodyFind('[data-mailbox-form] [data-mailbox-preset="other"]'));
+    // Switching tile above the form shows that tile's hints.
+    await click(tile('other'));
     expect(bodyFind('[data-mailbox-hints]')!.textContent).toContain('server settings');
+
+    wrapper.unmount();
+  });
+
+  it('keeps one row of tiles over the mailbox form, Microsoft among them, and Microsoft chosen there signs in', async () => {
+    getConnectionNeeds.mockResolvedValue({ ...googleNeeds, provider: 'microsoft', scopes: [], needs: [] });
+    const wrapper = await openAdd();
+    await click(tile('gmail'));
+
+    expect(step()).toBe('mailbox');
+    expect(bodyFind('[data-mailbox-form] [data-mailbox-preset]')).toBeNull();
+    expect(tileNames()).toContain('Microsoft (Outlook, Microsoft 365, Azure)');
+    expect(tile('gmail')!.getAttribute('aria-pressed')).toBe('true');
+
+    await click(tile('outlook'));
+    expect(step()).toBe('service');
+    expect(getConnectionNeeds).toHaveBeenLastCalledWith('microsoft');
+    expect(tile('outlook')!.getAttribute('aria-pressed')).toBe('true');
+    expect(bodyFind('[data-tile-hints="outlook"]')).not.toBeNull();
 
     wrapper.unmount();
   });
@@ -201,7 +220,8 @@ describe('Advanced…, Gmail through a Google app of your own', () => {
     const wrapper = await openAdd();
 
     expect(tile('google')).toBeNull();
-    expect(button('Advanced…')).toBeDefined();
+    // Named for what it is, so it never reads as Microsoft's own Advanced… under the Microsoft tile.
+    expect(bodyFind('[data-connect-advanced]')!.textContent!.trim()).toBe('Gmail through a Google app of your own…');
 
     wrapper.unmount();
   });

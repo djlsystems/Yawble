@@ -38,7 +38,12 @@ const props = withDefaults(defineProps<{
    * the person, and what is typed stays when they are hidden.
    */
   servers?: boolean;
-}>(), { advanced: false, servers: true });
+  /**
+   * Whether the form shows its own row of mailbox tiles. Add connection shows its own tiles above
+   * the form instead, Microsoft's among them, so there is one row to choose from (`false` there).
+   */
+  chooser?: boolean;
+}>(), { advanced: false, servers: true, chooser: true });
 const emit = defineEmits<{
   /** Gmail through a Google app of one's own, instead. */
   advanced: [];
@@ -137,7 +142,7 @@ defineExpose({ save, ready, busy, connected, typed, presetId });
 
 <template>
   <div class="q-gutter-y-sm" data-mailbox-form>
-    <div class="row q-gutter-sm">
+    <div v-if="chooser" class="row q-gutter-sm">
       <q-btn
         v-for="tile in presets"
         :key="tile.id"
@@ -161,7 +166,7 @@ defineExpose({ save, ready, busy, connected, typed, presetId });
         </ol>
         <div v-if="hint.cannot && advanced" data-mailbox-cannot>
           {{ hint.cannot }}
-          <q-btn flat dense no-caps size="sm" label="Advanced…" data-mailbox-advanced @click="emit('advanced')" />
+          <q-btn flat dense no-caps size="sm" label="Gmail through a Google app of your own…" data-mailbox-advanced @click="emit('advanced')" />
         </div>
       </div>
 

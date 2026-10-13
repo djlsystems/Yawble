@@ -287,7 +287,11 @@ const advancedChosen = computed(() => advanced.value && providerId.value === 'go
 
 function chooseTile(tile: Tile) {
   if (tile.preset) chooseMailbox(tile.preset);
-  else if (tile.service) void choose(tile.service);
+  else if (tile.service) {
+    // From the mailbox form too: a service tile goes back to the service step, where it signs in.
+    step.value = 'service';
+    void choose(tile.service);
+  }
 }
 
 /** From Gmail's hints, for who cannot make an app password. */
@@ -745,8 +749,8 @@ const stepLabels = computed(() => [
         </ol>
       </q-card-section>
 
-      <!-- 1. SERVICE -->
-      <q-card-section v-if="step === 'service'" data-connect-step="service" class="q-gutter-y-md">
+      <!-- 1. SERVICE, and a mailbox chosen there: one row of tiles above both, Microsoft's among them -->
+      <q-card-section v-if="step === 'service' || step === 'mailbox'" :data-connect-step="step" class="q-gutter-y-md">
         <div>Which account do you want to connect?</div>
         <div class="connect-tiles" data-provider-tiles>
           <q-btn
@@ -761,6 +765,7 @@ const stepLabels = computed(() => [
             :data-provider-tile="tile.id"
             :data-mailbox-preset="tile.preset"
             :data-connect-service="tile.service"
+            :disable="step === 'mailbox' && mailboxSaved"
             @click="chooseTile(tile)"
           >
             <div class="column items-start">
@@ -769,109 +774,109 @@ const stepLabels = computed(() => [
             </div>
           </q-btn>
         </div>
-        <div v-if="advanced">
-          <q-btn
-            v-if="advancedChosen"
-            no-caps
-            align="left"
-            class="connect-tile"
-            color="primary"
-            aria-pressed="true"
-            data-connect-service="google"
-            data-advanced-choice
-            @click="choose('google')"
-          >
-            <div class="column items-start">
-              <div class="text-weight-medium" data-tile-name>{{ provider?.name ?? 'Google' }} account</div>
-              <div class="text-caption" data-tile-way>Sign in with {{ provider?.name ?? 'Google' }}</div>
-            </div>
-          </q-btn>
-          <q-btn
-            v-else
-            flat
-            dense
-            no-caps
-            size="sm"
-            label="Advanced…"
-            data-connect-service="google"
-            data-connect-advanced
-            @click="choose('google')"
-          />
-        </div>
-
-        <ul v-if="providerId === 'microsoft'" class="connect-hints text-caption" data-tile-hints="outlook">
-          <li v-for="(item, index) in OutlookHint.steps" :key="index">{{ item.text }}</li>
-        </ul>
-        <div v-else-if="providerId === 'google'" class="text-caption" data-tile-hints="google">
-          Gmail and the other Google services, signed in through a Google app you set up once in the Google
-          Cloud console.
-        </div>
-
-        <template v-if="provider">
-          <div v-if="needsLoading" class="os-text-muted">Reading what the plugins need…</div>
-          <template v-else-if="needs">
-            <div v-if="needs.scopes.length === 0" class="os-text-muted" data-no-needs>
-              No installed plugin asks anything of {{ provider.name }} yet. Signing in asks only for
-              the account's name and email address.
-            </div>
-            <template v-else>
-              <div data-scopes-heading>{{ provider.name }} will allow the plugins to:</div>
-              <div v-for="group in scopeGroups" :key="group.api ?? ''" :data-connect-api="group.api ?? undefined">
-                <div v-if="group.name" class="text-subtitle2 q-mt-sm" data-connect-api-name>
-                  {{ group.name }}
-                  <span class="mono text-caption os-text-muted">{{ group.api }}</span>
-                </div>
-                <div
-                  v-for="line in group.lines"
-                  :key="line.scope"
-                  class="connect-scope"
-                  :data-connect-scope="line.scope"
-                >
-                  <q-checkbox
-                    dense
-                    :model-value="!unticked.has(line.scope)"
-                    :aria-label="line.words ?? line.scope"
-                    @update:model-value="toggle('unticked', line.scope)"
-                  />
-                  <div class="connect-scope-text">
-                    <div data-scope-words :class="{ mono: line.words === null }">{{ line.words ?? line.scope }}</div>
-                    <div class="text-caption os-text-muted" data-scope-plugins>
-                      Wanted by {{ line.plugins.join(', ') }}
-                    </div>
-                    <q-btn
-                      v-if="line.words !== null"
-                      flat
-                      dense
-                      no-caps
-                      size="sm"
-                      class="connect-details"
-                      :label="detailed.has(line.scope) ? 'hide details' : 'details'"
-                      @click="toggle('detailed', line.scope)"
-                    />
-                    <div v-if="line.words !== null && detailed.has(line.scope)" class="mono text-caption" data-scope-raw>
-                      {{ line.scope }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="text-caption os-text-muted">
-                Untick anything you do not want to allow. A plugin that needs it will say so when it runs.
-              </div>
-            </template>
-          </template>
-        </template>
-      </q-card-section>
-
-      <!-- A MAILBOX WITH AN APP PASSWORD -->
-      <q-card-section v-else-if="step === 'mailbox'" data-connect-step="mailbox">
         <MailboxForm
+          v-if="step === 'mailbox'"
           ref="mailboxForm"
           :presets="presets"
           :preset="mailboxPreset"
           :advanced="advanced"
+          :chooser="false"
           @saved="mailboxConnected"
           @advanced="chooseAdvanced"
         />
+        <template v-else>
+          <div v-if="advanced">
+            <q-btn
+              v-if="advancedChosen"
+              no-caps
+              align="left"
+              class="connect-tile"
+              color="primary"
+              aria-pressed="true"
+              data-connect-service="google"
+              data-advanced-choice
+              @click="choose('google')"
+            >
+              <div class="column items-start">
+                <div class="text-weight-medium" data-tile-name>{{ provider?.name ?? 'Google' }} account</div>
+                <div class="text-caption" data-tile-way>Sign in with {{ provider?.name ?? 'Google' }}</div>
+              </div>
+            </q-btn>
+            <q-btn
+              v-else
+              flat
+              dense
+              no-caps
+              size="sm"
+              label="Gmail through a Google app of your own…"
+              data-connect-service="google"
+              data-connect-advanced
+              @click="choose('google')"
+            />
+          </div>
+
+          <ul v-if="providerId === 'microsoft'" class="connect-hints text-caption" data-tile-hints="outlook">
+            <li v-for="(item, index) in OutlookHint.steps" :key="index">{{ item.text }}</li>
+          </ul>
+          <div v-else-if="providerId === 'google'" class="text-caption" data-tile-hints="google">
+            Gmail and the other Google services, signed in through a Google app you set up once in the Google
+            Cloud console.
+          </div>
+
+          <template v-if="provider">
+            <div v-if="needsLoading" class="os-text-muted">Reading what the plugins need…</div>
+            <template v-else-if="needs">
+              <div v-if="needs.scopes.length === 0" class="os-text-muted" data-no-needs>
+                No installed plugin asks anything of {{ provider.name }} yet. Signing in asks only for
+                the account's name and email address.
+              </div>
+              <template v-else>
+                <div data-scopes-heading>{{ provider.name }} will allow the plugins to:</div>
+                <div v-for="group in scopeGroups" :key="group.api ?? ''" :data-connect-api="group.api ?? undefined">
+                  <div v-if="group.name" class="text-subtitle2 q-mt-sm" data-connect-api-name>
+                    {{ group.name }}
+                    <span class="mono text-caption os-text-muted">{{ group.api }}</span>
+                  </div>
+                  <div
+                    v-for="line in group.lines"
+                    :key="line.scope"
+                    class="connect-scope"
+                    :data-connect-scope="line.scope"
+                  >
+                    <q-checkbox
+                      dense
+                      :model-value="!unticked.has(line.scope)"
+                      :aria-label="line.words ?? line.scope"
+                      @update:model-value="toggle('unticked', line.scope)"
+                    />
+                    <div class="connect-scope-text">
+                      <div data-scope-words :class="{ mono: line.words === null }">{{ line.words ?? line.scope }}</div>
+                      <div class="text-caption os-text-muted" data-scope-plugins>
+                        Wanted by {{ line.plugins.join(', ') }}
+                      </div>
+                      <q-btn
+                        v-if="line.words !== null"
+                        flat
+                        dense
+                        no-caps
+                        size="sm"
+                        class="connect-details"
+                        :label="detailed.has(line.scope) ? 'hide details' : 'details'"
+                        @click="toggle('detailed', line.scope)"
+                      />
+                      <div v-if="line.words !== null && detailed.has(line.scope)" class="mono text-caption" data-scope-raw>
+                        {{ line.scope }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="text-caption os-text-muted">
+                  Untick anything you do not want to allow. A plugin that needs it will say so when it runs.
+                </div>
+              </template>
+            </template>
+          </template>
+        </template>
       </q-card-section>
 
       <!-- 2. SET UP THE APP -->
