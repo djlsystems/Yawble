@@ -166,7 +166,7 @@ defineExpose({ save, ready, busy, connected, typed, presetId });
         </ol>
         <div v-if="hint.cannot && advanced" data-mailbox-cannot>
           {{ hint.cannot }}
-          <q-btn flat dense no-caps size="sm" label="Gmail through a Google app of your own…" data-mailbox-advanced @click="emit('advanced')" />
+          <q-btn flat dense no-caps size="sm" label="Set that up…" data-mailbox-advanced @click="emit('advanced')" />
         </div>
       </div>
 

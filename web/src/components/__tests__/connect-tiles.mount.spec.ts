@@ -221,7 +221,8 @@ describe('Advanced…, Gmail through a Google app of your own', () => {
 
     expect(tile('google')).toBeNull();
     // Named for what it is, so it never reads as Microsoft's own Advanced… under the Microsoft tile.
-    expect(bodyFind('[data-connect-advanced]')!.textContent!.trim()).toBe('Gmail through a Google app of your own…');
+    expect(bodyFind('[data-connect-advanced]')!.parentElement!.textContent).toContain('Gmail, but no app password?');
+    expect(bodyFind('[data-connect-advanced]')!.textContent!.trim()).toBe('Sign in through a Google app of your own…');
 
     wrapper.unmount();
   });
@@ -303,9 +304,14 @@ describe('What Advanced… chooses, and whose permissions are listed', () => {
     expect(pressed(tile('outlook'))).toBe('true');
     expect(heading()).toBe('Microsoft will allow the plugins to:');
 
-    // And Advanced… chosen again clears the tile.
+    // While Microsoft is chosen, Gmail's way in is not offered under it.
+    expect(bodyFind('[data-connect-advanced]')).toBeNull();
+
+    // And with a mailbox tile chosen and gone back from, it is offered again and clears the tile.
+    await click(tile('gmail'));
+    await click(button('Back'));
     await click(bodyFind('[data-connect-advanced]'));
-    expect(pressed(tile('outlook'))).toBe('false');
+    expect(pressed(tile('gmail'))).toBe('false');
     expect(pressed(chosen())).toBe('true');
 
     wrapper.unmount();

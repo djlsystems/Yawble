@@ -284,6 +284,12 @@ function isChosen(tile: Tile) {
   return tile.service ? providerId.value === tile.service : providerId.value === null && mailboxPreset.value === tile.preset;
 }
 
+/**
+ * Where Set up the app was opened from, so its Back returns there: the service step's own link
+ * under the Microsoft tile, or Sign in's Advanced….
+ */
+const setupFrom = ref<'service' | 'signin'>('service');
+
 /** Advanced…'s Google sign-in, chosen: there is no Google tile beside it to mark instead. */
 const advancedChosen = computed(() => advanced.value && providerId.value === 'google');
 
@@ -386,12 +392,13 @@ async function next() {
     step.value = 'signin';
     return;
   }
-  await openSetup();
+  await openSetup('service');
 }
 
 /** Set up the app: from Next when there is no client, or from Sign in's Advanced… for an app of one's own. */
-async function openSetup() {
+async function openSetup(from: 'service' | 'signin') {
   problem.value = '';
+  setupFrom.value = from;
   // The guide is read again for what is ticked: its APIs and data access are those scopes' own.
   // With nothing ticked, the provider's default scopes stand for "nothing more".
   const chosen = provider.value!;
@@ -796,7 +803,7 @@ const stepLabels = computed(() => [
           @advanced="chooseAdvanced"
         />
         <template v-else>
-          <div v-if="advanced">
+          <div v-if="advanced && providerId !== 'microsoft'">
             <q-btn
               v-if="advancedChosen"
               no-caps
@@ -813,22 +820,39 @@ const stepLabels = computed(() => [
                 <div class="text-caption" data-tile-way>Sign in with {{ provider?.name ?? 'Google' }}</div>
               </div>
             </q-btn>
-            <q-btn
-              v-else
-              flat
-              dense
-              no-caps
-              size="sm"
-              label="Gmail through a Google app of your own…"
-              data-connect-service="google"
-              data-connect-advanced
-              @click="choose('google')"
-            />
+            <div v-else class="text-caption os-text-muted">
+              Gmail, but no app password?
+              <q-btn
+                flat
+                dense
+                no-caps
+                size="sm"
+                label="Sign in through a Google app of your own…"
+                data-connect-service="google"
+                data-connect-advanced
+                @click="choose('google')"
+              />
+            </div>
           </div>
 
-          <ul v-if="providerId === 'microsoft'" class="connect-hints text-caption" data-tile-hints="outlook">
-            <li v-for="(item, index) in OutlookHint.steps" :key="index">{{ item.text }}</li>
-          </ul>
+          <template v-if="providerId === 'microsoft'">
+            <ul class="connect-hints text-caption" data-tile-hints="outlook">
+              <li v-for="(item, index) in OutlookHint.steps" :key="index">{{ item.text }}</li>
+            </ul>
+            <div v-if="usesDefault" class="text-caption os-text-muted" data-service-own-app>
+              To sign in to one organisation's directory only, or through an app you registered:
+              <q-btn
+                flat
+                dense
+                no-caps
+                size="sm"
+                label="Advanced…"
+                :loading="guideLoading"
+                data-connect-own-app-service
+                @click="openSetup('service')"
+              />
+            </div>
+          </template>
           <div v-else-if="providerId === 'google'" class="text-caption" data-tile-hints="google">
             Gmail and the other Google services, signed in through a Google app you set up once in the Google
             Cloud console.
@@ -1053,7 +1077,7 @@ const stepLabels = computed(() => [
               label="Advanced…"
               :loading="guideLoading"
               data-connect-own-app
-              @click="openSetup"
+              @click="openSetup('signin')"
             />
             <span class="text-caption os-text-muted">Set up the app: sign in through an app of your own instead.</span>
           </div>
@@ -1155,7 +1179,7 @@ const stepLabels = computed(() => [
           />
         </template>
         <template v-else-if="step === 'setup'">
-          <q-btn flat no-caps label="Back" @click="step = usesDefault ? 'signin' : 'service'" />
+          <q-btn flat no-caps label="Back" @click="step = usesDefault ? setupFrom : 'service'" />
         </template>
         <template v-else-if="step === 'mailbox'">
           <q-btn v-if="mailboxSaved" v-close-popup color="primary" no-caps label="Finish" />

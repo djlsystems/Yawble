@@ -165,6 +165,26 @@ describe("Microsoft with the instance's own app", () => {
     expect(bodyFind('[data-device-code]')!.textContent).toContain('FAKE-CODE');
   });
 
+  it('offers Set up the app under the Microsoft tile too, and its Back returns to the service', async () => {
+    await mountDialog(ConnectionsDialog, {});
+    await settle();
+    await click(button('Add connection'));
+    expect(bodyFind('[data-connect-own-app-service]')).toBeNull();
+
+    await click(bodyFind('[data-connect-service="microsoft"]'));
+    expect(bodyFind('[data-service-own-app]')!.textContent).toContain('one organisation');
+    // Gmail's own way in is not offered under the Microsoft tile.
+    expect(bodyFind('[data-connect-advanced]')).toBeNull();
+
+    await click(bodyFind('[data-connect-own-app-service]'));
+    expect(step()).toBe('setup');
+    expect(bodyFind('[data-setup-own]')).not.toBeNull();
+    expect(bodyFind('[data-guide-audience]')).not.toBeNull();
+
+    await click(button('Back'));
+    expect(step()).toBe('service');
+  });
+
   it('keeps Set up the app as its own step when there is no app at all', async () => {
     listConnectionProviders.mockResolvedValue([google, hostProvider({ id: 'microsoft', guide })]);
     await chooseMicrosoft();
