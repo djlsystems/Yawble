@@ -6564,41 +6564,8 @@ documents.MapPost("/upload-zip", async (
         return Results.NotFound(new { error = $"No team '{team}'." });
     }
 
-    if (!request.HasFormContentType) return Results.BadRequest(new { error = "Send a .zip file." });
-
-    var form = await request.ReadFormAsync(ct);
-    var file = form.Files.GetFile("file");
-
-    if (file is null || file.Length == 0 || !file.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-    {
-        return Results.BadRequest(new { error = "Send a .zip file." });
-    }
-
-    if (file.Length > TeamDocuments.MaximumUploadBytes)
-    {
-        return Results.BadRequest(new
-        {
-            error = $"That zip is larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB.",
-        });
-    }
-
-    await using var content = file.OpenReadStream();
-    System.IO.Compression.ZipArchive archive;
-
-    try
-    {
-        archive = new System.IO.Compression.ZipArchive(content, System.IO.Compression.ZipArchiveMode.Read);
-    }
-    catch (InvalidDataException)
-    {
-        return Results.BadRequest(new { error = "That file is not a zip that can be read." });
-    }
-
-    using (archive)
-    {
-        return await DocumentsAsync(() => UploadPackageAsync(
-            stored, form, () => TeamDocuments.ZipUpload(file.FileName, archive), "zip", docs, folders, audit, context, ct));
-    }
+    return await UploadZipFormAsync(request, (form, read) => DocumentsAsync(() => UploadPackageAsync(
+        stored, form, read, "zip", docs, folders, audit, context, ct)), ct);
 })
     .HumansOnly()
     // THE BODY LIMIT IS THE ZIP'S OWN, plus room for the form around it: one over it is refused
@@ -6619,6 +6586,45 @@ documents.MapPost("/upload-zip", async (
         + "the zip's limit is refused with 413 before it is read.\n\n"
         + PackageClashDescription
         + Describe.Documents);
+
+// AN UPLOAD INTO THE INSTANCE'S OWN DOCUMENTS, needing no team: a fresh instance has none, and a
+// package uploaded to install must still have somewhere to go. Always `Uploads/<zip name>` under the
+// documents root, as a catalog fetch is always `Marketplace/<id>-<version>`; the zip is checked whole
+// by the same `ZipUpload` as the team route, and the clash choices are the same.
+app.MapPost("/api/documents/upload-zip", (
+    HttpRequest request, TeamDocuments docs, TenantLogging audit, HttpContext context, CancellationToken ct) =>
+    UploadZipFormAsync(request, (form, read) => DocumentsAsync(() => UploadPackageIntoAsync(
+        form, read, InstancePlace(docs, ct),
+        skipped: path => new { skipped = true, path, absolutePath = docs.InstancePath(path) },
+        saved: async saved =>
+        {
+            // ONE ROW FOR THE UPLOAD, as the team route writes it, with no team: where it went, how
+            // many files and how big. Never the contents.
+            await audit.WriteAsync(
+                context, TenantActions.DocumentUploaded, saved.Path, saved.Name,
+                new
+                {
+                    team = (string?)null, path = saved.Path, size = saved.Size, files = saved.Files.Count, kind = "zip",
+                    onClash = OnClashOf(form),
+                },
+                ct);
+
+            return Results.Ok(new InstancePackageSaved(
+                saved.Path, saved.Name, saved.IsFolder, saved.Files, saved.Size, docs.InstancePath(saved.Path)));
+        })), ct))
+    .WithTags("Documents")
+    .HumansOnly()
+    // THE BODY LIMIT IS THE ZIP'S OWN, plus room for the form around it, as the team route's.
+    .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(TeamDocuments.MaximumUploadBytes + 1024 * 1024))
+    .WithSummary("Upload a .zip into the instance's documents and unpack it")
+    .WithDescription(
+        "The team route's .zip upload, needing no team: a multipart form with the zip in `file` and "
+        + $"an optional `onClash`. It is unpacked into `{TeamDocuments.UploadsFolder}/<zip name>` of the "
+        + "instance's documents root, by the same rules and refusals as "
+        + "`POST /api/teams/{team}/documents/upload-zip`; a link on the way, "
+        + $"`{TeamDocuments.UploadsFolder}` itself included, is 409 and nothing is written. The answer "
+        + "carries `absolutePath`, the folder as the install routes take it.\n\n"
+        + PackageClashDescription);
 
 documents.MapDelete("", async (
     [Description(Describe.Team)] string team,
@@ -8934,11 +8940,102 @@ static async Task<IResult> DocumentsAsync(Func<Task<IResult>> action)
 // answers 409 naming it, keep-both makes `name (copy)`, replace lets a file of that name give way and
 // refuses a folder (an upload writes no row before it acts, so it never removes a tree), skip writes
 // nothing. Without one, a folder of that name takes the files, as uploading each file would.
-static async Task<IResult> UploadPackageAsync(
+static Task<IResult> UploadPackageAsync(
     string stored, IFormCollection form, Func<PackageUpload> read, string kind, TeamDocuments docs, FolderWatch folders,
     TenantLogging audit, HttpContext context, CancellationToken ct)
 {
-    var onClash = form["onClash"].ToString() is { Length: > 0 } sent ? sent : null;
+    var place = new PackagePlace(
+        docs.RootFor(stored),
+        stored,
+        name => docs.UploadTarget(stored, form["path"], name),
+        (name, upload, replaceFile) => docs.SavePackageAsync(stored, form["path"], name, upload, replaceFile, ct));
+
+    return UploadPackageIntoAsync(
+        form, read, place,
+        skipped: path => new { skipped = true, path },
+        saved: async saved =>
+        {
+            var actor = context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown";
+
+            // ONE ANNOUNCEMENT PER FOLDER that got files, as a recursive delete announces.
+            foreach (var group in saved.Files.GroupBy(
+                file => Path.GetDirectoryName(file)?.Replace('\\', '/') ?? "", StringComparer.Ordinal))
+            {
+                await folders.AnnounceAsync(stored, group.Key, [.. group], actor, ct);
+            }
+
+            // ONE ROW FOR THE UPLOAD: where it went, how many files and how big. Never the contents.
+            await audit.WriteAsync(
+                context, TenantActions.DocumentUploaded, stored, saved.Path,
+                new { team = stored, path = saved.Path, size = saved.Size, files = saved.Files.Count, kind, onClash = OnClashOf(form) },
+                ct);
+
+            // A MISSING REQUIRED INPUT PROVIDED ends the team's wait now, as a single file's upload does.
+            await context.RequestServices.GetRequiredService<SolutionWait>().WaitingForAsync(stored, ct);
+
+            return Results.Ok(saved);
+        });
+}
+
+static string? OnClashOf(IFormCollection form) => form["onClash"].ToString() is { Length: > 0 } sent ? sent : null;
+
+// THE INSTANCE'S UPLOADS FOLDER as the place a package goes, for the zip route that needs no team.
+static PackagePlace InstancePlace(TeamDocuments docs, CancellationToken ct) => new(
+    docs.InstanceRoot,
+    TeamDocuments.UploadsFolder,
+    name => docs.InstanceUploadTarget(TeamDocuments.UploadsFolder, name),
+    (name, upload, replaceFile) => docs.SaveInstancePackageAsync(
+        TeamDocuments.UploadsFolder, name, upload, replaceFile,
+        TeamDocuments.MaximumUploadBytes, TeamDocuments.MaximumPackageBytes, ct));
+
+// A ZIP FROM A FORM, checked as every zip upload checks it before it is opened: a file named .zip,
+// not empty, not over the size, and one that reads as a zip. The archive is open while `upload` runs.
+static async Task<IResult> UploadZipFormAsync(
+    HttpRequest request, Func<IFormCollection, Func<PackageUpload>, Task<IResult>> upload, CancellationToken ct)
+{
+    if (!request.HasFormContentType) return Results.BadRequest(new { error = "Send a .zip file." });
+
+    var form = await request.ReadFormAsync(ct);
+    var file = form.Files.GetFile("file");
+
+    if (file is null || file.Length == 0 || !file.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(new { error = "Send a .zip file." });
+    }
+
+    if (file.Length > TeamDocuments.MaximumUploadBytes)
+    {
+        return Results.BadRequest(new
+        {
+            error = $"That zip is larger than {TeamDocuments.MaximumUploadBytes / (1024 * 1024)} MB.",
+        });
+    }
+
+    await using var content = file.OpenReadStream();
+    System.IO.Compression.ZipArchive archive;
+
+    try
+    {
+        archive = new System.IO.Compression.ZipArchive(content, System.IO.Compression.ZipArchiveMode.Read);
+    }
+    catch (InvalidDataException)
+    {
+        return Results.BadRequest(new { error = "That file is not a zip that can be read." });
+    }
+
+    using (archive)
+    {
+        return await upload(form, () => TeamDocuments.ZipUpload(file.FileName, archive));
+    }
+}
+
+// THE CLASH CHOICES for a package, wherever it goes. `skipped` is the answer to a skip; `saved` does
+// what follows a write (announcements, rows) and answers it.
+static async Task<IResult> UploadPackageIntoAsync(
+    IFormCollection form, Func<PackageUpload> read, PackagePlace place,
+    Func<string, object> skipped, Func<PackageSaved, Task<IResult>> saved)
+{
+    var onClash = OnClashOf(form);
 
     if (onClash is not (null or "ask" or TeamDocuments.KeepBoth or TeamDocuments.Replace or TeamDocuments.Skip))
     {
@@ -8950,10 +9047,9 @@ static async Task<IResult> UploadPackageAsync(
     var name = upload.Name;
     var replaceFile = false;
 
-    if (onClash is not null && docs.UploadTarget(stored, form["path"], name) is { } target
-        && (target.IsFile || target.IsFolder))
+    if (onClash is not null && place.Target(name) is var target && (target.IsFile || target.IsFolder))
     {
-        var where = Path.GetDirectoryName(target.Path)?.Replace('\\', '/') is { Length: > 0 } parent ? parent : stored;
+        var where = Path.GetDirectoryName(target.Path)?.Replace('\\', '/') is { Length: > 0 } parent ? parent : place.Where;
 
         switch (onClash)
         {
@@ -8966,39 +9062,20 @@ static async Task<IResult> UploadPackageAsync(
                     },
                     statusCode: StatusCodes.Status409Conflict);
             case TeamDocuments.Skip:
-                return Results.Ok(new { skipped = true, path = target.Path });
+                return Results.Ok(skipped(target.Path));
             case TeamDocuments.Replace when target.IsFolder:
                 return Results.Conflict(new { error = $"{target.Name} is a folder in {where}; an upload replaces only a file." });
             case TeamDocuments.Replace:
                 replaceFile = true;
                 break;
             case TeamDocuments.KeepBoth:
-                var directory = Path.GetDirectoryName(Path.Combine(docs.RootFor(stored), target.Path))!;
+                var directory = Path.GetDirectoryName(Path.Combine(place.Root, target.Path))!;
                 name = TeamDocuments.FreeName(target.Name, isFolder: true, free => Path.Exists(Path.Combine(directory, free)));
                 break;
         }
     }
 
-    var saved = await docs.SavePackageAsync(stored, form["path"], name, upload, replaceFile, ct);
-    var actor = context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown";
-
-    // ONE ANNOUNCEMENT PER FOLDER that got files, as a recursive delete announces.
-    foreach (var group in saved.Files.GroupBy(
-        file => Path.GetDirectoryName(file)?.Replace('\\', '/') ?? "", StringComparer.Ordinal))
-    {
-        await folders.AnnounceAsync(stored, group.Key, [.. group], actor, ct);
-    }
-
-    // ONE ROW FOR THE UPLOAD: where it went, how many files and how big. Never the contents.
-    await audit.WriteAsync(
-        context, TenantActions.DocumentUploaded, stored, saved.Path,
-        new { team = stored, path = saved.Path, size = saved.Size, files = saved.Files.Count, kind, onClash },
-        ct);
-
-    // A MISSING REQUIRED INPUT PROVIDED ends the team's wait now, as a single file's upload does.
-    await context.RequestServices.GetRequiredService<SolutionWait>().WaitingForAsync(stored, ct);
-
-    return Results.Ok(saved);
+    return await saved(await place.Save(name, upload, replaceFile));
 }
 
 // ISO-8601 UTC, `Z`-suffixed, as the member routes answer it.

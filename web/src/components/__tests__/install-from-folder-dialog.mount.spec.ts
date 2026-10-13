@@ -46,9 +46,9 @@ import InstallFromFolderDialog from '../InstallFromFolderDialog.vue';
 import SolutionsLauncher from '../SolutionsLauncher.vue';
 import PluginsDialog from '../PluginsDialog.vue';
 import type { DirectoryListing, HostEntry } from '../../api/types';
-import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { bodyFind, bodyText, helpTexts, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, field, isDisabled, settle } from '../../test/formProbe';
-import { documentsServer } from '../../test/documentsServer';
+import { aFolder, documentsServer } from '../../test/documentsServer';
 import { useConsoleStore } from '../../stores/console';
 import { asTeamId } from '../../api/types';
 import UploadPackageAction from '../UploadPackageAction.vue';
@@ -334,6 +334,127 @@ describe('Upload a package (.zip)', () => {
 
     await chooseZip('job-tracker.zip');
 
+    expect(field('Folder').value).toBe('/data/documents/alpha/job-tracker');
+
+    wrapper.unmount();
+  });
+});
+
+describe('Folder is a folder inside this instance', () => {
+  const refusal =
+    'That is a path on your computer. Give a folder inside this instance (it starts with /), or use Upload a package (.zip) to send it here.';
+
+  async function typeAndInstall(value: string) {
+    const wrapper = await mountDialog(InstallFromFolderDialog, {});
+    await settle();
+    (field('Folder') as HTMLInputElement).value = value;
+    field('Folder').dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    button('Install').click();
+    await settle();
+    return wrapper;
+  }
+
+  it("says so behind the field's info icon, before anything is sent", async () => {
+    const wrapper = await mountDialog(InstallFromFolderDialog, {});
+    await settle();
+
+    const help = helpTexts(bodyFind('[data-install-dialog]')!);
+    expect(help.some((text) => text.includes('A folder inside this instance') && text.includes('not a path on your computer'))).toBe(true);
+    expect(bodyFind('[data-install-dialog] .q-field__bottom')?.textContent ?? '').not.toContain('inside this instance');
+
+    wrapper.unmount();
+  });
+
+  it.each([
+    'Z:\\ClaudeWorkspace\\my-packages\\dist\\',
+    'Z:/ClaudeWorkspace/my-packages/dist',
+    '~/packages/azure-1.1.0',
+    'documents/Marketplace/azure-1.1.0',
+    '/data/documents\\Marketplace',
+  ])('refuses %s in place, and Install sends nothing', async (value) => {
+    const wrapper = await typeAndInstall(value);
+
+    expect(wrapper.emitted('install')).toBeUndefined();
+    expect(bodyFind('[data-install-dialog]')?.textContent).toContain(refusal);
+
+    wrapper.unmount();
+  });
+
+  it('sends a folder inside the instance, and an edit takes the refusal away', async () => {
+    const wrapper = await typeAndInstall('C:\\packages');
+    expect(bodyFind('[data-install-dialog]')?.textContent).toContain(refusal);
+
+    (field('Folder') as HTMLInputElement).value = '/data/documents/Marketplace/azure-1.1.0';
+    field('Folder').dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(bodyFind('[data-install-dialog]')?.textContent).not.toContain(refusal);
+
+    button('Install').click();
+    await settle();
+    expect(wrapper.emitted('install')).toEqual([['/data/documents/Marketplace/azure-1.1.0', false]]);
+
+    wrapper.unmount();
+  });
+});
+
+describe('Upload a package (.zip) with no team', () => {
+  /** The label of the option the Into picker holds. */
+  function chosenLabel(wrapper: Awaited<ReturnType<typeof mountDialog>>) {
+    const select = wrapper.findComponent(UploadPackageAction).findComponent({ name: 'QSelect' });
+    const options = select.props('options') as { value: string; label: string }[];
+    return options.find((option) => option.value === select.props('modelValue'))?.label;
+  }
+
+  async function chooseZip(name: string) {
+    const input = bodyFind('[data-upload-package-input]') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { value: [new File(['PK'], name)], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    await settle();
+    await settle();
+  }
+
+  it('is enabled, chooses this instance, uploads through the instance route and fills Folder with the answered path', async () => {
+    server = documentsServer({ folders: [] });
+    setActivePinia(createPinia());
+    const wrapper = await mountDialog(InstallFromFolderDialog, {}, { pinia: false });
+    await settle();
+
+    expect(isDisabled('Upload a package (.zip)')).toBe(false);
+    expect(chosenLabel(wrapper)).toBe('This instance (Documents › Uploads)');
+    expect(bodyFind('[data-upload-package-where]')?.textContent).toContain('in Documents › Uploads');
+    expect(bodyText()).not.toContain('Not in this instance yet');
+
+    await chooseZip('azure-1.1.0.zip');
+
+    expect(server.callsTo('upload-zip')).toEqual([]);
+    expect(server.callsTo('instance-upload-zip').map((call) => call.body)).toEqual([
+      { file: 'azure-1.1.0.zip', path: '', onClash: 'ask' },
+    ]);
+    expect(field('Folder').value).toBe('/data/documents/Uploads/azure-1.1.0');
+    expect(bodyFind('[data-upload-package-landed]')?.textContent).toContain('Unpacked into Documents › Uploads › azure-1.1.0');
+    expect(isDisabled('Install')).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it("with a team, still defaults to that team's Documents and offers this instance too", async () => {
+    server = documentsServer({ folders: [aFolder('alpha', 'Alpha')] });
+    setActivePinia(createPinia());
+    useConsoleStore().activeTeamId = asTeamId('alpha');
+    const wrapper = await mountDialog(InstallFromFolderDialog, {}, { pinia: false });
+    await settle();
+
+    expect(chosenLabel(wrapper)).toBe('Alpha');
+    expect(bodyFind('[data-upload-package-where]')?.textContent).toContain('top of Documents › Alpha');
+    const select = wrapper.findComponent(UploadPackageAction).findComponent({ name: 'QSelect' });
+    expect((select.props('options') as { label: string }[]).map((option) => option.label)).toEqual([
+      'This instance (Documents › Uploads)',
+      'Alpha',
+    ]);
+
+    await chooseZip('job-tracker.zip');
+    expect(server.callsTo('instance-upload-zip')).toEqual([]);
     expect(field('Folder').value).toBe('/data/documents/alpha/job-tracker');
 
     wrapper.unmount();

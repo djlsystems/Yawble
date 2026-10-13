@@ -466,13 +466,15 @@ export interface DocumentsPackageSaved {
   isFolder: true
   files: string[]
   size: number
+  /** The folder as the install routes take it; only the instance's own upload sends it. */
+  absolutePath?: string
 }
 
 /** What a folder or .zip upload answered. A refusal (an unsafe zip, a bad path) is thrown with
  *  the server's sentence. */
 export type DocumentsPackageAnswer =
   | { kind: 'saved'; saved: DocumentsPackageSaved }
-  | { kind: 'skipped'; path: string }
+  | { kind: 'skipped'; path: string; absolutePath?: string }
   | { kind: 'clash'; error: string; clashes: DocumentsClash[] }
 
 export interface TeamCloned {

@@ -349,12 +349,16 @@ Otherwise a package is installed from a folder inside the instance, so it goes i
 2. Open **Marketplace → Advanced → Install from a folder** (or **Admin → Plugins → Install from a folder**: the
    same dialog). **Browse…** opens in the teams' Documents; open the package's folder (the one
    holding `solution.json`) and press **Choose this folder**, then **Install**. The folder can also
-   be typed: any folder inside the instance's data root.
+   be typed: any folder inside the instance's data root, such as
+   `/data/documents/Marketplace/azure-1.1.0`. It is a path inside the instance, never one on your
+   computer: a drive letter, a backslash, `~` or a path not starting with `/` is refused in place
+   and nothing is sent.
 
 **Shortcut: Upload a package (.zip).** In that same install dialog, **Upload a package (.zip)** takes
 a `.zip` from your computer, puts it at the top of a team's folder in Documents - your active team's,
-or the one you pick next to the button; the line under it says where - unpacks it into a folder of
-the zip's name, and fills **Folder** with that folder, so the next press is **Install**. If a folder
+or the one you pick next to the button - or, with **This instance (Documents › Uploads)** picked
+(the choice when there is no team yet), into the instance's own `Documents/Uploads`; the line under
+it says where. It unpacks it into a folder of the zip's name, and fills **Folder** with that folder, so the next press is **Install**. If a folder
 of that name is already there you are asked Keep both, Replace or Skip, as any Documents upload asks
 (Skip fills **Folder** with the one already there). A zip holding a link, an absolute path or a `..`
 entry is refused whole, with the reason shown, and nothing is written.

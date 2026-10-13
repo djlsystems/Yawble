@@ -180,6 +180,18 @@ export const uploadDocumentZip = (
 }
 
 /**
+ * A .zip into the INSTANCE's own documents, needing no team: unpacked into `Uploads/<zip name>`
+ * under the documents root, by the team route's checks and clash choices. The answer carries
+ * `absolutePath`, the folder as the install routes take it.
+ */
+export const uploadInstanceZip = (zip: File, onClash: 'ask' | OnClash) => {
+  const form = new FormData()
+  form.append('file', zip)
+
+  return sendPackage('/api/documents/upload-zip', form, '', onClash, 'That zip is larger than 25 MB.')
+}
+
+/**
  * A 413 is the server's body limit refusing the request before the route reads it, so it carries
  * no sentence of the route's (a proxy in front may send an HTML page instead): it is thrown as
  * `tooLarge`, the route's own size sentence, never as a bare status.
@@ -195,9 +207,16 @@ async function sendPackage(
   form.append('onClash', onClash)
 
   try {
-    const answer = await json<DocumentsPackageSaved | { skipped: true; path: string }>(url, { method: 'POST', body: form })
+    const answer = await json<DocumentsPackageSaved | { skipped: true; path: string; absolutePath?: string }>(url, {
+      method: 'POST',
+      body: form,
+    })
 
-    if ('skipped' in answer && answer.skipped) return { kind: 'skipped', path: answer.path }
+    if ('skipped' in answer && answer.skipped) {
+      return answer.absolutePath === undefined
+        ? { kind: 'skipped', path: answer.path }
+        : { kind: 'skipped', path: answer.path, absolutePath: answer.absolutePath }
+    }
 
     return { kind: 'saved', saved: answer as DocumentsPackageSaved }
   } catch (failure) {

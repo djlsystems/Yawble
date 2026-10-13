@@ -3,6 +3,7 @@ import FieldHelp from './FieldHelp.vue';
 import { ref, watch } from 'vue';
 import HostPathPicker from './HostPathPicker.vue';
 import UploadPackageAction from './UploadPackageAction.vue';
+import { computerPathRefusal } from '../lib/instanceFolder';
 
 /**
  * INSTALL FROM A FOLDER: the one dialog Marketplace > Advanced and Admin > Plugins both open. A
@@ -26,8 +27,12 @@ import UploadPackageAction from './UploadPackageAction.vue';
  * installed); a screen without one is not shown a box that would do nothing.
  *
  * THE UPLOAD PLACE (`data-upload-package`, slot `upload`) holds Upload a package (.zip): the zip
- * goes into a team's Documents, is unpacked there, and the folder it made fills Folder - so both
- * screens get it, and Install is the next press.
+ * goes into a team's Documents or the instance's own (Documents › Uploads), is unpacked there, and
+ * the folder it made fills Folder - so both screens get it, and Install is the next press.
+ *
+ * FOLDER IS A PATH INSIDE THE INSTANCE, never one on the person's computer: a value that reads as
+ * one (a drive letter, a backslash, `~`, anything not starting with `/`) is refused in place, and
+ * Install sends nothing (`computerPathRefusal`).
  */
 const props = withDefaults(defineProps<{
   title?: string;
@@ -56,6 +61,16 @@ const emit = defineEmits<{ install: [folder: string, replace: boolean] }>();
 const folder = ref('');
 const replace = ref(false);
 const pickerOpen = ref(false);
+const refusal = ref('');
+
+const folderHelp =
+  'A folder inside this instance, such as /data/documents/Marketplace/azure-1.1.0 - not a path on your computer. '
+  + 'Browse picks one; Upload a package (.zip) puts one there.';
+
+// A refusal is about the value it was given: an edit takes it away.
+watch(folder, () => {
+  refusal.value = '';
+});
 
 // Every open starts empty, or on the folder it was opened for: the last folder is the last
 // install's, not this one's.
@@ -63,11 +78,19 @@ watch(open, (showing) => {
   if (!showing) return;
   folder.value = props.folder;
   replace.value = false;
+  refusal.value = '';
 });
 
 function install() {
   const path = folder.value.trim();
   if (!path || props.installing) return;
+
+  const refused = computerPathRefusal(path);
+  if (refused) {
+    refusal.value = refused;
+    return;
+  }
+
   emit('install', path, props.offerReplace && replace.value);
 }
 </script>
@@ -88,8 +111,14 @@ function install() {
           label="Folder"
           spellcheck="false"
           autocomplete="off"
+          :error="refusal !== ''"
+          :error-message="refusal"
+          data-install-folder
           @keyup.enter="install"
         >
+          <template #append>
+            <FieldHelp :text="folderHelp" />
+          </template>
           <template #after>
             <q-btn flat dense no-caps icon="folder_open" label="Browse…" @click="pickerOpen = true" />
           </template>

@@ -15,8 +15,32 @@ public sealed record PackageUpload(string Name, IReadOnlyList<PackageFile> Files
 /// <summary>Where a folder or zip upload landed and every file it wrote.</summary>
 public sealed record PackageSaved(string Path, string Name, bool IsFolder, IReadOnlyList<string> Files, long Size);
 
+/// <summary>
+/// Where a package upload into the INSTANCE's documents landed: <see cref="PackageSaved"/>, its
+/// <see cref="Path"/> relative to the documents root, and <see cref="AbsolutePath"/>, the same folder
+/// as the install routes take it.
+/// </summary>
+public sealed record InstancePackageSaved(
+    string Path, string Name, bool IsFolder, IReadOnlyList<string> Files, long Size, string AbsolutePath);
+
+/// <summary>
+/// Where a package upload goes: the root its paths are relative to, how a clash names the folder it
+/// lands in when it is the root itself, where a name would land, and the write.
+/// </summary>
+public sealed record PackagePlace(
+    string Root,
+    string Where,
+    Func<string, (string Path, string Name, bool IsFile, bool IsFolder)> Target,
+    Func<string, PackageUpload, bool, Task<PackageSaved>> Save);
+
 public sealed partial class TeamDocuments
 {
+    /// <summary>The folder of the instance's documents a package uploaded with no team goes into.</summary>
+    public const string UploadsFolder = "Uploads";
+
+    /// <summary>A path relative to the instance's documents root, as the install routes take it.</summary>
+    public string InstancePath(string relative) => Path.Combine(InstanceRoot, relative).Replace('\\', '/');
+
     /// <summary>The most files one folder or zip upload carries.</summary>
     public const int MaximumPackageFiles = 1000;
 
@@ -163,12 +187,32 @@ public sealed partial class TeamDocuments
     /// checks as <see cref="SavePackageAsync"/>, with the caller's own size bounds.
     /// </summary>
     public Task<PackageSaved> SaveInstancePackageAsync(
-        string folder, string name, PackageUpload upload, long fileLimit, long totalLimit, CancellationToken ct = default)
+        string folder, string name, PackageUpload upload, long fileLimit, long totalLimit, CancellationToken ct = default) =>
+        SaveInstancePackageAsync(folder, name, upload, replaceFile: false, fileLimit, totalLimit, ct);
+
+    /// <summary><see cref="SaveInstancePackageAsync(string, string, PackageUpload, long, long, CancellationToken)"/>,
+    /// letting a FILE of that name give way to the folder as <see cref="SavePackageAsync"/> does.</summary>
+    public Task<PackageSaved> SaveInstancePackageAsync(
+        string folder, string name, PackageUpload upload, bool replaceFile, long fileLimit, long totalLimit,
+        CancellationToken ct = default)
     {
-        var root = Path.GetFullPath(paths.TenantDocuments);
+        var root = InstanceRoot;
         Directory.CreateDirectory(root);
 
-        return SavePackageUnderAsync(root, folder, name, upload, replaceFile: false, fileLimit, totalLimit, ct);
+        return SavePackageUnderAsync(root, folder, name, upload, replaceFile, fileLimit, totalLimit, ct);
+    }
+
+    /// <summary>
+    /// Where a package named <paramref name="name"/> would land in <paramref name="folder"/> of the
+    /// INSTANCE's documents, without writing anything: its path relative to the instance root, and
+    /// whether a file or a folder is already there. The instance's <see cref="UploadTarget"/>.
+    /// </summary>
+    public (string Path, string Name, bool IsFile, bool IsFolder) InstanceUploadTarget(string folder, string name)
+    {
+        var root = InstanceRoot;
+        var target = ResolveUnder(root, Path.Combine(folder, name));
+
+        return (Relative(root, target), Path.GetFileName(target), File.Exists(target), Directory.Exists(target));
     }
 
     private async Task<PackageSaved> SavePackageUnderAsync(

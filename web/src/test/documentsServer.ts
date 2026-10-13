@@ -12,13 +12,15 @@ import { asDocumentsFolderKey, asTeamId, type DocumentEntry, type DocumentsFolde
  * The shapes are the 3.2 contract's: `GET /api/documents` answers `{ folders, root }`; a listing is
  * an array of entries; move, copy and rename answer `{ results }`, or 409 with `clashes` or
  * `results`; upload answers the entry, `{ skipped, path }`, or 409 with `clashes`; a folder or zip
- * upload answers the folder it made (`{ path, name, isFolder, files, size }`).
+ * upload answers the folder it made (`{ path, name, isFolder, files, size }`); the instance's own
+ * zip upload (`POST /api/documents/upload-zip`, route `instance-upload-zip`) answers it under
+ * `Uploads/` with `absolutePath` added.
  */
 
 export interface DocumentsCall {
   method: string;
   url: string;
-  route: 'root' | 'list' | 'move' | 'copy' | 'rename' | 'upload' | 'upload-folder' | 'upload-zip' | 'folders' | 'delete' | 'other';
+  route: 'root' | 'list' | 'move' | 'copy' | 'rename' | 'upload' | 'upload-folder' | 'upload-zip' | 'instance-upload-zip' | 'folders' | 'delete' | 'other';
   folder: string;
   query: URLSearchParams;
   /** The JSON body, or the multipart form's fields as an object. */
@@ -170,6 +172,14 @@ export function documentsServer(
         const files = call.route === 'upload-zip' ? [join(at, 'solution.json')] : relative.map((path) => join(fields.path, path));
         return { status: 200, body: { path: at, name, isFolder: true, files, size: 12 * files.length } };
       }
+      case 'instance-upload-zip': {
+        const name = String((call.body as { file: string }).file).replace(/\.zip$/i, '');
+        const at = `Uploads/${name}`;
+        return {
+          status: 200,
+          body: { path: at, name, isFolder: true, files: [`${at}/solution.json`], size: 12, absolutePath: `${root}/${at}` },
+        };
+      }
       case 'folders':
         return { status: 200, body: aDir((call.body as { path: string }).path, 0) };
       case 'delete':
@@ -187,6 +197,7 @@ export function documentsServer(
 
     let route: DocumentsCall['route'] = 'other';
     if (parsed.pathname === '/api/documents') route = 'root';
+    else if (parsed.pathname === '/api/documents/upload-zip' && method === 'POST') route = 'instance-upload-zip';
     else if (team) {
       const suffix = team[2] ?? '';
       if (suffix === '' && method === 'GET') route = 'list';
