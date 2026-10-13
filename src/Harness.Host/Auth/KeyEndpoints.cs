@@ -11,7 +11,9 @@ namespace Harness.Host.Auth;
 /// one side; the marker closes it from the other, because a key that could mint a key could mint
 /// itself a successor that outlives its own revocation.
 ///
-/// Another person's key is theirs alone: only its owner mints it and only its owner revokes it.
+/// Another person's key is theirs alone: only its owner mints it and revokes it one by one. A
+/// person may revoke every key of another account at once (POST /api/users/{id}/revoke-keys), for
+/// a key that may have been seen while its owner is away; deleting the account removes them too.
 /// Anybody who could mint a credential that acts as somebody else would hold an impersonation
 /// primitive with no trace distinguishing it from that person's own key.
 /// </summary>
@@ -125,7 +127,7 @@ public static class KeyEndpoints
                 "Your keys, newest first. There is no credential field on this shape - the value "
                 + "was shown once at mint and only its hash is kept. The 8-character `prefix` is "
                 + "what lets you tell one row from another.\n\n"
-                + "Yours only. Every key in the tenant is listed by `GET /api/admin/keys`.");
+                + "Yours only. `GET /api/users` counts each account's keys.");
 
         app.MapDelete("/api/keys/{id}", async (
             [Description(
@@ -177,56 +179,11 @@ public static class KeyEndpoints
             .WithDescription(
                 "Destroys the credential. It stops authenticating on the very next request - the "
                 + "API-key handler resolves the row on every call rather than trusting a ticket.\n\n"
-                + "**Owner only.** Another person's key is theirs to revoke; deleting that person "
-                + "removes their keys with them.\n\n"
+                + "**Owner only.** Another person's keys are revoked all at once with "
+                + "`POST /api/users/{id}/revoke-keys`, and deleting that person removes them too.\n\n"
                 + "404 for an id that is unknown, that belongs to somebody else, or that names a "
                 + "container or Concierge credential - all three answer identically, so "
                 + "the route cannot be used to discover which keys exist.");
-
-        app.MapGet("/api/admin/keys", async (
-            IPrincipalStore principals, IUserStore users, TeamRegistry teams,
-            CancellationToken ct) =>
-        {
-            // One pass over the accounts rather than a lookup per row: this is an administration
-            // screen rather than a hot path.
-            var accounts = (await users.ListAsync(ct)).ToDictionary(u => u.Id, StringComparer.Ordinal);
-
-            var rows = new List<object>();
-
-            foreach (var key in await principals.ListAllApiKeysAsync(ct))
-            {
-                accounts.TryGetValue(key.OwnerUserId, out var owner);
-
-                rows.Add(new
-                {
-                    key.Id,
-                    key.Label,
-                    key.Prefix,
-                    key.CreatedAt,
-                    key.LastUsedAt,
-
-                    // Denormalised deliberately, exactly as the tenant log denormalises an actor:
-                    // an owner who has been deleted cannot be joined to, and their keys are gone
-                    // with them anyway (owner_user_id cascades).
-                    Owner = new
-                    {
-                        Id = key.OwnerUserId,
-                        Email = owner?.Email,
-                    },
-                });
-            }
-
-            return Results.Ok(rows);
-        })
-            .WithTags(Area)
-            .HumansOnly()
-            .WithSummary("List every API key in the tenant")
-            .WithDescription(
-                "Every key, with its owner. A key reaches every team its owner does, which is "
-                + "every team that exists. Read-only: only a key's owner may revoke it.\n\n"
-                + "**API keys only.** Container and Concierge credentials are machinery "
-                + "with lifetimes tied to a container and a session, and a row somebody can revoke "
-                + "is a row somebody will revoke.");
     }
 
     /// <summary>

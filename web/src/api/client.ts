@@ -94,7 +94,6 @@ import type {
   TeamActivity,
   TeamTokenRuns,
   TeamWorkflows,
-  TenantApiKey,
   TenantLogPage,
   TeamRepoStatus,
   RepoActionResult,
@@ -1730,6 +1729,8 @@ export const logout = () =>
 export interface AdminUser {
   id: string
   email: string
+  /** How many API keys the account holds. */
+  apiKeys: number
 }
 
 export const listUsers = () => json<AdminUser[]>('/api/users')
@@ -1901,6 +1902,10 @@ export const deleteUser = async (id: string) => {
   await send(`/api/users/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+/** Revokes every API key of another account, leaving the account; answers how many went. */
+export const revokeUserKeys = (id: string) =>
+  json<{ revoked: number }>(`/api/users/${encodeURIComponent(id)}/revoke-keys`, { method: 'POST' })
+
 export const resetPassword = async (id: string, password: string) => {
   await send(`/api/users/${encodeURIComponent(id)}/password`, {
     method: 'POST',
@@ -1911,9 +1916,6 @@ export const resetPassword = async (id: string, password: string) => {
 
 /** Your own keys, newest first. */
 export const listKeys = () => json<ApiKey[]>('/api/keys')
-
-/** Every key in the tenant, with its owner. Human-only; a machine principal gets a 403. */
-export const listAllKeys = () => json<TenantApiKey[]>('/api/admin/keys')
 
 /**
  * The response carries the credential, and it is the only time it exists outside the caller's

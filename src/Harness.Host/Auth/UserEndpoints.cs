@@ -36,13 +36,19 @@ public static class UserEndpoints
 
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/users", async (IUserStore users, CancellationToken ct) =>
+        app.MapGet("/api/users", async (IUserStore users, IPrincipalStore principals, CancellationToken ct) =>
         {
+            // How many API keys each account holds, so the Users screen can offer to revoke them.
+            // API keys only: a Concierge credential is machinery, never counted or revoked here.
+            var keys = (await principals.ListAllApiKeysAsync(ct))
+                .GroupBy(k => k.OwnerUserId, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
             var result = new List<object>();
 
             foreach (var user in await users.ListAsync(ct))
             {
-                result.Add(new { user.Id, user.Email });
+                result.Add(new { user.Id, user.Email, apiKeys = keys.GetValueOrDefault(user.Id) });
             }
 
             return Results.Ok(result);
@@ -51,8 +57,41 @@ public static class UserEndpoints
             .HumansOnly()
             .WithSummary("List every account")
             .WithDescription(
-                "Every account on the tenant. Every account reaches every team; there is nothing per "
-                + "account to configure."
+                "Every account on the tenant, each with `apiKeys`, the number of API keys it holds. "
+                + "Every account reaches every team; there is nothing per account to configure."
+                + PeopleOnly);
+
+        app.MapPost("/api/users/{id}/revoke-keys", async (
+            [Description("The account's id, as returned by `GET /api/users`.")] string id,
+            IUserStore users, IPrincipalStore principals, TenantLogging audit,
+            HttpContext context, CancellationToken ct) =>
+        {
+            if (await users.FindByIdAsync(id, ct) is not { } target) return NoSuchUser();
+
+            // API keys only, listed by owner: the account and its Concierge credentials stay.
+            var keys = await principals.ListApiKeysForAsync(id, ct);
+
+            foreach (var key in keys)
+            {
+                await principals.RevokeAsync(key.Id, ct);
+
+                // One row per key, as the owner's own revoke writes it, naming whose it was.
+                await audit.WriteAsync(
+                    context, TenantActions.KeyRevoked, key.Id, key.Label,
+                    new { prefix = key.Prefix, owner = target.Email }, ct);
+            }
+
+            return Results.Ok(new { revoked = keys.Count });
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Revoke every API key of an account")
+            .WithDescription(
+                "Revokes every API key the account holds, leaving the account itself in place: "
+                + "for a key that may have been seen by someone else while its owner is away. "
+                + "Each key stops authenticating on its next request, and each revoke writes its "
+                + "own `key.revoked` row naming the owner. Answers `revoked`, the number of keys "
+                + "revoked; 404 for an unknown account."
                 + PeopleOnly);
 
         app.MapPost("/api/users", async (

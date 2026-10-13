@@ -21,7 +21,7 @@ public sealed class PermitTests(HostFixture host) : IClassFixture<HostFixture>
         { "GET", "/api/keys" },
         { "POST", "/api/keys" },
         { "DELETE", "/api/keys/some-key" },
-        { "GET", "/api/admin/keys" },
+        { "POST", "/api/users/someone/revoke-keys" },
         { "PUT", "/api/agents" },
         { "GET", "/api/skills" },
         { "GET", "/api/skills/member" },
@@ -33,7 +33,7 @@ public sealed class PermitTests(HostFixture host) : IClassFixture<HostFixture>
     // Reads only: a person's success is shown without the test administering anything.
     public static TheoryData<string> PersonReads => new()
     {
-        "/api/users", "/api/keys", "/api/admin/keys", "/api/skills", "/api/skills/member",
+        "/api/users", "/api/keys", "/api/skills", "/api/skills/member",
     };
 
     [Theory]

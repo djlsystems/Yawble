@@ -55,7 +55,13 @@ const removingId = ref<string | null>(null);
 /** The account a delete has been asked for but not yet confirmed. */
 const confirming = ref<AdminUser | null>(null);
 
-const rowBusy = computed(() => busy.value || formBusy.value || removingId.value !== null);
+/** The account whose keys are being revoked, and the one Revoke all their keys asks about. */
+const revokingId = ref<string | null>(null);
+const revokingKeysOf = ref<AdminUser | null>(null);
+
+const rowBusy = computed(
+  () => busy.value || formBusy.value || removingId.value !== null || revokingId.value !== null,
+);
 
 /**
  * The server refuses deleting the LAST account (see UserEndpoints.MapDelete's own guard) but has no
@@ -145,6 +151,23 @@ async function savePassword(password: string) {
   }
 }
 
+async function revokeKeys(user: AdminUser) {
+  if (revokingId.value !== null) return;
+
+  revokingId.value = user.id;
+  error.value = '';
+  revokingKeysOf.value = null;
+
+  try {
+    await api.revokeUserKeys(user.id);
+    await load();
+  } catch (failure) {
+    error.value = (failure as Error).message;
+  } finally {
+    revokingId.value = null;
+  }
+}
+
 async function remove(user: AdminUser) {
   // Guards a double-click, not a re-entrant call: without it a second DELETE lands after the row is
   // already gone, the server answers 404 "No such user.", and a delete that fully succeeded paints
@@ -174,9 +197,7 @@ async function remove(user: AdminUser) {
       <q-card-section class="q-pb-none row items-center">
         <div>
           <div class="os-dialog-title">Users</div>
-          <div class="text-caption os-text-muted">
-            Every account reaches every team. There is no per-team access list.
-          </div>
+          <div class="text-caption os-text-muted">Users on this instance.</div>
         </div>
         <q-space />
         <span class="row-btn-wrap">
@@ -196,7 +217,9 @@ async function remove(user: AdminUser) {
 
             <q-item-section>
               <q-item-label>{{ user.email }}</q-item-label>
-              <!-- No caption: nothing besides the email varies between rows. -->
+              <q-item-label v-if="user.apiKeys > 0" caption data-user-keys>
+                {{ user.apiKeys === 1 ? '1 API key' : `${user.apiKeys} API keys` }}
+              </q-item-label>
             </q-item-section>
 
             <q-item-section side>
@@ -216,6 +239,25 @@ async function remove(user: AdminUser) {
                     @click="openReset(user)"
                   />
                   <q-tooltip>Change this account's password.</q-tooltip>
+                </span>
+
+                <span class="row-btn-wrap">
+                  <q-btn
+                    flat
+                    dense
+                    round
+                    icon="block"
+                    aria-label="Revoke all their keys"
+                    :disable="rowBusy || user.apiKeys === 0"
+                    :loading="revokingId === user.id"
+                    data-revoke-keys
+                    @click="revokingKeysOf = user"
+                  />
+                  <q-tooltip v-if="user.apiKeys === 0">This account holds no API keys.</q-tooltip>
+                  <q-tooltip v-else>
+                    Revoke all this account's API keys, for example when one may have been seen by
+                    someone else. The account stays.
+                  </q-tooltip>
                 </span>
 
                 <span class="row-btn-wrap">
@@ -287,6 +329,30 @@ async function remove(user: AdminUser) {
   <!-- Its own `q-dialog` in this template rather than `$q.dialog()`: the Dialog PLUGIN is
        deliberately not registered, so that call would compile and fail at runtime. Deleting an
        account cannot be undone, and its button sits beside a harmless one - so it asks. -->
+  <q-dialog :model-value="revokingKeysOf !== null" @update:model-value="revokingKeysOf = null">
+    <q-card class="os-dialog-sm" data-revoke-keys-confirm>
+      <q-card-section class="os-dialog-title">
+        Revoke all API keys of {{ revokingKeysOf?.email }}?
+      </q-card-section>
+
+      <q-card-section class="q-pt-none os-text-muted">
+        Every program using one of these keys stops working at its next request. The account stays,
+        and its owner can make new keys under User profile, API keys. This cannot be undone.
+      </q-card-section>
+
+      <q-card-actions align="right">
+        <q-btn v-close-popup flat no-caps label="Cancel" />
+        <q-btn
+          unelevated
+          color="negative"
+          no-caps
+          :label="revokingKeysOf?.apiKeys === 1 ? 'Revoke 1 key' : `Revoke ${revokingKeysOf?.apiKeys} keys`"
+          @click="revokingKeysOf && revokeKeys(revokingKeysOf)"
+        />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
+
   <q-dialog :model-value="confirming !== null" @update:model-value="confirming = null">
     <q-card class="os-dialog-sm">
       <q-card-section class="os-dialog-title">Delete {{ confirming?.email }}?</q-card-section>

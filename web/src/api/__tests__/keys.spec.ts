@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mintKey, listKeys, listAllKeys, revokeKey } from '../client'
+import { mintKey, listKeys, revokeKey, revokeUserKeys } from '../client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -61,19 +61,21 @@ describe('api keys', () => {
     )
   })
 
-  it('reads your own keys and the tenant roster from different paths', async () => {
-    // A real Response's body can only be read once, so a fresh instance is built per call rather
-    // than reusing one across both `listKeys` and `listAllKeys`.
+  it('reads your own keys, and revokes every key of another account on its own path', async () => {
     const fetchMock = vi
       .fn()
-      .mockImplementation(() => Promise.resolve(new Response(JSON.stringify([]), { status: 200 })))
+      .mockImplementationOnce(() => Promise.resolve(new Response(JSON.stringify([]), { status: 200 })))
+      .mockImplementationOnce(() =>
+        Promise.resolve(new Response(JSON.stringify({ revoked: 2 }), { status: 200 })),
+      )
     vi.stubGlobal('fetch', fetchMock)
 
     await listKeys()
-    await listAllKeys()
+    expect(await revokeUserKeys('user/1')).toEqual({ revoked: 2 })
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/keys')
-    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/admin/keys')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/users/user%2F1/revoke-keys')
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: 'POST' }))
   })
 
   it('surfaces the server refusal rather than a bare status', async () => {

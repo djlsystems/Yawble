@@ -95,11 +95,6 @@ function submit() {
           :disable="props.busy"
         />
 
-        <div class="text-caption os-text-muted">
-          Every account reaches every team and can manage accounts and instance settings. There is
-          no per-team access list.
-        </div>
-
         <q-banner v-if="props.error" dense class="os-bg-tint-error text-negative">
           <template #avatar><q-icon name="error" /></template>
           {{ props.error }}

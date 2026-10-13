@@ -33,7 +33,6 @@ const stubs = {
   AgentsDialog: true,
   ResetTeamDialog: true,
   TenantLogDialog: true,
-  ApiKeysDialog: true,
   SkillsDialog: true,
   ConciergePanel: true,
   ConnectionsDialog: true,

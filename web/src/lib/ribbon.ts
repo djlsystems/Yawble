@@ -175,7 +175,6 @@ export const Ribbon: RibbonSpec = {
         { kind: 'button', action: 'admin-users', label: 'Users', icon: 'manage_accounts', size: 'large' },
         { kind: 'button', action: 'admin-agents', label: 'Agents', icon: 'smart_toy', size: 'large' },
         { kind: 'button', action: 'admin-skills', label: 'Skills', icon: 'psychology', size: 'large' },
-        { kind: 'button', action: 'admin-keys', label: 'Keys', icon: 'key', size: 'large' },
         { kind: 'button', action: 'admin-log', label: 'Log', icon: 'receipt_long', size: 'large' },
         // BESIDE Log AND NOT THE SAME THING. `Log` is what a PERSON did to the
         // instance; this is what the instance did when it went wrong, and no row here names an

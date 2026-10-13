@@ -386,8 +386,8 @@ function copyCredential() {
           </p>
           <p class="q-mb-none">
             Give each key the name of the program or machine that uses it, so you know which one to
-            revoke. A key is shown once, when you make it. Revoke a key you no longer use; an admin
-            can also revoke any key under Admin, Keys.
+            revoke. A key is shown once, when you make it. Revoke a key you no longer use. Anyone
+            signed in can also revoke all of a person's keys at once under Admin, Users.
           </p>
         </div>
 

@@ -302,15 +302,6 @@ export interface MintedKey {
   credential: string
 }
 
-/**
- * A roster row. There is no team list on it: every key reaches every team its owner does, and
- * every person reaches every team, so a list here would be right today and wrong the moment
- * somebody creates a team. There is no tier on the owner either; every person is an administrator.
- */
-export interface TenantApiKey extends ApiKey {
-  owner: { id: string; email: string | null }
-}
-
 /** What a team deletion actually removed. `failures` is the half worth rendering: a directory that
  *  could not be deleted usually means a file still held by a child that has not finished exiting,
  *  and the team is gone either way. */

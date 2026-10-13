@@ -27,7 +27,6 @@ import { productLogoFor, productTitle } from '../presentation/product';
 import BacklogDialog from '../components/BacklogDialog.vue';
 import TenantLogDialog from '../components/TenantLogDialog.vue';
 import DiagnosticsDialog from '../components/DiagnosticsDialog.vue';
-import ApiKeysDialog from '../components/ApiKeysDialog.vue';
 import SkillsDialog from '../components/SkillsDialog.vue';
 import PluginsDialog from '../components/PluginsDialog.vue';
 import LocalReposDialog from '../components/LocalReposDialog.vue';
@@ -189,7 +188,6 @@ const tenantLogOpen = ref(false);
 /** Admin → Diagnostics. Beside the tenant log on the ribbon and a different store: `Log` is what a
  *  person did to the instance, this is what the instance did when it went wrong. */
 const diagnosticsOpen = ref(false);
-const keysOpen = ref(false);
 const tenantSettingsOpen = ref(false);
 const conciergeOpen = ref(false);
 
@@ -321,7 +319,6 @@ function onRibbonAction(action: string) {
   else if (action === 'admin-users') usersOpen.value = true;
   else if (action === 'admin-agents') agentsOpen.value = true;
   else if (action === 'admin-skills') skillsOpen.value = true;
-  else if (action === 'admin-keys') keysOpen.value = true;
   else if (action === PluginsAction) pluginsOpen.value = true;
   else if (action === ConnectionsAction) {
     connectionNotice.value = null;
@@ -635,7 +632,6 @@ async function signOut() {
   <BacklogDialog v-model="backlogOpen" />
     <TenantLogDialog v-model="tenantLogOpen" />
     <DiagnosticsDialog v-model="diagnosticsOpen" />
-    <ApiKeysDialog v-model="keysOpen" />
   </q-layout>
 </template>
 
