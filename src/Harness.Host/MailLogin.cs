@@ -47,6 +47,11 @@ public sealed record MailPreset(string Id, string Name, MailServer? Imap, MailSe
 /// authentication - https://support.apple.com/en-us/102654.</item>
 /// <item>Yahoo: IMAP imap.mail.yahoo.com:993 SSL, SMTP smtp.mail.yahoo.com:465 SSL (or 587) -
 /// https://help.yahoo.com/kb/SLN4075.html; app passwords - https://help.yahoo.com/kb/SLN15241.html.</item>
+/// <item>Namecheap Private Email: IMAP mail.privateemail.com:993 SSL, SMTP mail.privateemail.com:465
+/// SSL (or 587 STARTTLS), the full address as the username -
+/// https://www.namecheap.com/support/knowledgebase/article.aspx/1179/2175/general-private-email-configuration-for-mail-clients-and-mobile-devices;
+/// app passwords, made in the Security Center, work for IMAP and SMTP -
+/// https://www.namecheap.com/support/knowledgebase/article.aspx/10816/2306/new-how-to-use-app-passwords-for-private-email/.</item>
 /// <item>Other: nothing filled in; the person types every field.</item>
 /// </list>
 /// </summary>
@@ -58,6 +63,8 @@ public static class MailPresets
 
     public const string Yahoo = "yahoo";
 
+    public const string PrivateEmail = "privateemail";
+
     public const string Other = "other";
 
     public static IReadOnlyList<MailPreset> All { get; } =
@@ -65,6 +72,7 @@ public static class MailPresets
         new(Gmail, "Gmail", new("imap.gmail.com", 993, MailServer.Tls), new("smtp.gmail.com", 465, MailServer.Tls)),
         new(ICloud, "iCloud", new("imap.mail.me.com", 993, MailServer.Tls), new("smtp.mail.me.com", 587, MailServer.StartTls)),
         new(Yahoo, "Yahoo", new("imap.mail.yahoo.com", 993, MailServer.Tls), new("smtp.mail.yahoo.com", 465, MailServer.Tls)),
+        new(PrivateEmail, "Namecheap Private Email", new("mail.privateemail.com", 993, MailServer.Tls), new("mail.privateemail.com", 465, MailServer.Tls)),
         new(Other, "Other", null, null),
     ];
 
@@ -73,7 +81,7 @@ public static class MailPresets
     /// <summary>Which provider a mailbox is at, for the sentence that says what to fix: its preset,
     /// else the preset whose IMAP server it uses, else none.</summary>
     public static string? ProviderOf(MailboxSettings settings) =>
-        settings.Preset is Gmail or ICloud or Yahoo ? settings.Preset
+        settings.Preset is Gmail or ICloud or Yahoo or PrivateEmail ? settings.Preset
         : All.FirstOrDefault(p => p.Imap is { } imap && string.Equals(imap.Host, settings.Imap.Host, StringComparison.OrdinalIgnoreCase))?.Id is { } id && id != Other ? id
         : null;
 }
@@ -145,6 +153,7 @@ public sealed partial class SocketMailLogin(RemoteCertificateValidationCallback?
         MailPresets.Gmail => "For Gmail, make an app password: it needs 2-Step Verification.",
         MailPresets.ICloud => "For iCloud, make an app-specific password: it needs two-factor authentication.",
         MailPresets.Yahoo => "For Yahoo, make an app password in Account security.",
+        MailPresets.PrivateEmail => "For Namecheap Private Email, make an app password in the Security Center, and use the full address as the username.",
         _ => "Check the username, and use an app password where the provider issues one.",
     };
 

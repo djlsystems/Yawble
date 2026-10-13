@@ -53,6 +53,7 @@ const presets: MailboxPreset[] = [
   { id: 'gmail', name: 'Gmail', imap: { host: 'imap.gmail.com', port: 993, security: 'TLS' }, smtp: { host: 'smtp.gmail.com', port: 465, security: 'TLS' } },
   { id: 'icloud', name: 'iCloud', imap: { host: 'imap.mail.me.com', port: 993, security: 'TLS' }, smtp: { host: 'smtp.mail.me.com', port: 587, security: 'STARTTLS' } },
   { id: 'yahoo', name: 'Yahoo', imap: { host: 'imap.mail.yahoo.com', port: 993, security: 'TLS' }, smtp: { host: 'smtp.mail.yahoo.com', port: 465, security: 'TLS' } },
+  { id: 'privateemail', name: 'Namecheap Private Email', imap: { host: 'mail.privateemail.com', port: 993, security: 'TLS' }, smtp: { host: 'mail.privateemail.com', port: 465, security: 'TLS' } },
   { id: 'other', name: 'Other', imap: null, smtp: null },
 ];
 
@@ -109,15 +110,16 @@ async function openAdd() {
 }
 
 describe('The provider tiles', () => {
-  it('are Gmail, Microsoft (Outlook, Microsoft 365, Azure), iCloud, Yahoo and Other, each saying its way in', async () => {
+  it('are Gmail, Microsoft (Outlook, Microsoft 365, Azure), iCloud, Yahoo, Namecheap Private Email and Other, each saying its way in', async () => {
     const wrapper = await openAdd();
 
-    expect(tileNames()).toEqual(['Gmail', 'Microsoft (Outlook, Microsoft 365, Azure)', 'iCloud', 'Yahoo', 'Other']);
+    expect(tileNames()).toEqual(['Gmail', 'Microsoft (Outlook, Microsoft 365, Azure)', 'iCloud', 'Yahoo', 'Namecheap Private Email', 'Other']);
     const way = (id: string) => tile(id)!.querySelector('[data-tile-way]')!.textContent!.trim();
     expect(way('gmail')).toBe('App password');
     expect(way('outlook')).toBe('Sign in with a code');
     expect(way('icloud')).toBe('App-specific password');
     expect(way('yahoo')).toBe('App password');
+    expect(way('privateemail')).toBe('App password');
     expect(way('other')).toBe('Server settings');
 
     wrapper.unmount();
@@ -182,6 +184,18 @@ describe('The provider tiles', () => {
     // Switching tile above the form shows that tile's hints.
     await click(tile('other'));
     expect(bodyFind('[data-mailbox-hints]')!.textContent).toContain('server settings');
+
+    wrapper.unmount();
+  });
+
+  it('Namecheap Private Email names the Security Center, its webmail and the full address as the username', async () => {
+    const wrapper = await openAdd();
+    await click(tile('privateemail'));
+
+    expect(links('[data-mailbox-hints]')).toEqual(['https://privateemail.com']);
+    const hints = bodyFind('[data-mailbox-hints]')!.textContent!;
+    expect(hints).toContain('Security Center, then App passwords');
+    expect(hints).toContain('The username is the full address');
 
     wrapper.unmount();
   });
@@ -351,14 +365,14 @@ describe('Advanced… chosen after a tile, and a heading the Host names', () => 
     expect(pressed(tile('gmail'))).toBe('true');
 
     await click(bodyFind('[data-connect-advanced]'));
-    expect(tilesPressed()).toEqual(['false', 'false', 'false', 'false', 'false']);
+    expect(tilesPressed()).toEqual(['false', 'false', 'false', 'false', 'false', 'false']);
     expect(pressed(bodyFind('[data-advanced-choice]'))).toBe('true');
 
     // And from the Gmail screen's own way to Advanced….
     await click(tile('gmail'));
     await click(bodyFind('[data-mailbox-advanced]'));
     expect(step()).toBe('service');
-    expect(tilesPressed()).toEqual(['false', 'false', 'false', 'false', 'false']);
+    expect(tilesPressed()).toEqual(['false', 'false', 'false', 'false', 'false', 'false']);
     expect(pressed(bodyFind('[data-advanced-choice]'))).toBe('true');
 
     wrapper.unmount();
@@ -414,7 +428,7 @@ describe("A slot's Connect", () => {
 
     await click(button('Connect a mailbox'));
     expect(step()).toBe('service');
-    expect(tileNames()).toEqual(['Gmail', 'iCloud', 'Yahoo', 'Other']);
+    expect(tileNames()).toEqual(['Gmail', 'iCloud', 'Yahoo', 'Namecheap Private Email', 'Other']);
     expect(bodyFind('[data-connect-advanced]')).toBeNull();
 
     wrapper.unmount();
@@ -425,7 +439,7 @@ describe("A slot's Connect", () => {
 
     await click(button('Connect Google or a mailbox'));
     expect(step()).toBe('service');
-    expect(tileNames()).toEqual(['Gmail', 'iCloud', 'Yahoo', 'Other']);
+    expect(tileNames()).toEqual(['Gmail', 'iCloud', 'Yahoo', 'Namecheap Private Email', 'Other']);
     expect(bodyFind('[data-connect-advanced]')).not.toBeNull();
     expect(bodyText()).not.toContain('Outlook');
 

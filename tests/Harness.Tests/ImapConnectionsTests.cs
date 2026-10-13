@@ -110,12 +110,12 @@ public sealed class ImapConnectionsTests : IAsyncLifetime
     // ---- presets ----------------------------------------------------------------------------------
 
     [Fact]
-    public async Task The_presets_are_gmail_icloud_yahoo_and_other_with_their_published_servers()
+    public async Task The_presets_are_gmail_icloud_yahoo_namecheap_private_email_and_other_with_their_published_servers()
     {
         var presets = (await GetAsync("/api/connections/imap/presets")).EnumerateArray().ToList();
 
-        Assert.Equal(["gmail", "icloud", "yahoo", "other"], presets.Select(p => p.GetProperty("id").GetString()));
-        Assert.Equal(["Gmail", "iCloud", "Yahoo", "Other"], presets.Select(p => p.GetProperty("name").GetString()));
+        Assert.Equal(["gmail", "icloud", "yahoo", "privateemail", "other"], presets.Select(p => p.GetProperty("id").GetString()));
+        Assert.Equal(["Gmail", "iCloud", "Yahoo", "Namecheap Private Email", "Other"], presets.Select(p => p.GetProperty("name").GetString()));
 
         static string Server(JsonElement preset, string which) =>
             preset.GetProperty(which) is { ValueKind: JsonValueKind.Object } s
@@ -127,6 +127,7 @@ public sealed class ImapConnectionsTests : IAsyncLifetime
                 "imap.gmail.com:993 TLS / smtp.gmail.com:465 TLS",
                 "imap.mail.me.com:993 TLS / smtp.mail.me.com:587 STARTTLS",
                 "imap.mail.yahoo.com:993 TLS / smtp.mail.yahoo.com:465 TLS",
+                "mail.privateemail.com:993 TLS / mail.privateemail.com:465 TLS",
                 "none / none",
             ],
             presets.Select(p => $"{Server(p, "imap")} / {Server(p, "smtp")}"));

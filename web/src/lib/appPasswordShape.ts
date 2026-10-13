@@ -15,6 +15,9 @@
  *   password but not what it looks like, so iCloud never warns.
  * - Yahoo: none. https://help.yahoo.com/kb/SLN15241.html says how to make an app password but not
  *   what it looks like, so Yahoo never warns.
+ * - Namecheap Private Email: 24 characters -
+ *   https://www.namecheap.com/support/knowledgebase/article.aspx/10816/2306/new-how-to-use-app-passwords-for-private-email/:
+ *   "six groups of four characters separated by five hyphens, for a total length of 29 characters".
  * - Other: never; a custom server's passwords have no known shape.
  */
 
@@ -32,6 +35,11 @@ const shapes: Record<string, AppPasswordShape> = {
     provider: 'Gmail',
     hint: 'For Gmail, make an app password: it needs 2-Step Verification.',
     fits: (bare) => bare.length === 16,
+  },
+  privateemail: {
+    provider: 'Namecheap Private Email',
+    hint: 'For Namecheap Private Email, make an app password in the Security Center, and use the full address as the username.',
+    fits: (bare) => bare.length === 24,
   },
 };
 

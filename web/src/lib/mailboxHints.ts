@@ -3,7 +3,7 @@
  * name, and the short steps shown beside the form once one is chosen. The servers stay the Host's
  * presets; only the words a person follows at their provider live here.
  *
- * Gmail, iCloud and Yahoo take an app password made at the provider; Outlook and Microsoft 365 take
+ * Gmail, iCloud, Yahoo and Namecheap Private Email take an app password made at the provider; Outlook and Microsoft 365 take
  * no password at all - Microsoft turned password sign-in off for them - so their tile signs in with a
  * code. Other is the server settings, typed.
  */
@@ -65,6 +65,17 @@ const hints: Record<string, MailboxHint> = {
         text: 'In Yahoo\'s Account security, choose Generate app password, and paste it into App password below.',
         link: { label: 'Open Account security', href: 'https://login.yahoo.com/account/security' },
       },
+    ],
+  },
+  privateemail: {
+    wayIn: 'App password',
+    steps: [
+      {
+        text: 'Sign in to Private Email webmail, open Settings, then Security Center, then App passwords, and create one.',
+        link: { label: 'Open Private Email webmail', href: 'https://privateemail.com' },
+      },
+      { text: 'Namecheap shows the password only once: paste it into App password below straight away.' },
+      { text: 'The username is the full address, such as support@example.com.' },
     ],
   },
   other: {
