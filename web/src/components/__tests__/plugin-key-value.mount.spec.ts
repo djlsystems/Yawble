@@ -166,7 +166,7 @@ describe('A plugin key set from Add member', () => {
     expect(said().getAttribute('data-secret-key-state')).toBe('set');
     expect(said().textContent?.trim()).toBe(`Set by dana@example.com on ${SetAtWords}.`);
     expect(valueBox('ECHO_TOKEN').value).toBe('');
-    expect(valueBox('ECHO_TOKEN').getAttribute('placeholder')).toBe('Type a new value to replace it');
+    expect(valueBox('ECHO_TOKEN').getAttribute('placeholder')).toBe('•••••••• saved, never shown: type a new value to replace it');
     expect(button('Clear')).toBeDefined();
 
     wrapper.unmount();

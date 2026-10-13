@@ -32,7 +32,8 @@ const value = defineModel<string>({ default: '' });
       dense
       type="password"
       :label="label ?? `Value for ${state.key}`"
-      :placeholder="state.set ? 'Type a new value to replace it' : undefined"
+      :placeholder="state.set ? '•••••••• saved, never shown: type a new value to replace it' : undefined"
+      :stack-label="state.set"
       autocomplete="new-password"
       spellcheck="false"
       :disable="clearing === true"
